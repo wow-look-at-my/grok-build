@@ -29,14 +29,9 @@ impl HttpClient for BlockingOtlpClient {
         &self,
         request: http::Request<Bytes>,
     ) -> Result<http::Response<Bytes>, HttpError> {
-        let request = request.try_into()?;
-        let mut response = self.0.execute(request)?.error_for_status()?;
-        let headers = std::mem::take(response.headers_mut());
-        let mut http_response = http::Response::builder()
-            .status(response.status())
-            .body(response.bytes()?)?;
-        *http_response.headers_mut() = headers;
-        Ok(http_response)
+        let _ = &self.0;
+        let _ = request;
+        return Err("otlp export disabled".into());
     }
 }
 

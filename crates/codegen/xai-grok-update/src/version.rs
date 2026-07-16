@@ -343,6 +343,9 @@ async fn fetch_gcs_channel_pointer(channel: &str, base_url: &str) -> Result<Stri
 /// written (e.g. auto-update should only cache after a successful install or
 /// when no update is needed).
 pub async fn fetch_latest_version(installer: &str, config: &UpdateConfig) -> Result<String> {
+    let _ = (installer, config);
+    anyhow::bail!("update checks disabled");
+    #[allow(unreachable_code)]
     match installer {
         "npm" => fetch_npm_version(&config.channel, config.npm_registry.as_deref()).await,
         "gh-release" => fetch_gh_release_version(&config.channel).await,
@@ -395,6 +398,9 @@ pub async fn write_version_cache(version: &str, stable_version: Option<&str>) {
 /// - `"internal"` — reads the channel pointer from the public GCS bucket.
 /// - `"gh-release"` — uses `gh release list` against GitHub Releases.
 pub async fn get_latest_version(installer: &str, config: &UpdateConfig) -> Result<String> {
+    let _ = (installer, config);
+    anyhow::bail!("update checks disabled");
+    #[allow(unreachable_code)]
     let version = fetch_latest_version(installer, config).await?;
     let stable_ptr = try_fetch_stable_pointer().await;
     write_version_cache(&version, stable_ptr.as_deref()).await;

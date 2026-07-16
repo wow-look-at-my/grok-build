@@ -140,6 +140,9 @@ pub fn init(cfg: Option<ExternalOtelConfig>) {
 }
 
 fn build_handle(cfg: ExternalOtelConfig) -> Option<Arc<ExternalTelemetry>> {
+    let _ = &cfg;
+    return None;
+    #[allow(unreachable_code)]
     // No-double-send invariant, enforced in code (not release discipline):
     // if the internal firehose resolved its endpoint/headers from
     // `OTEL_EXPORTER_OTLP_*` (the deprecated fallback), refuse to activate.

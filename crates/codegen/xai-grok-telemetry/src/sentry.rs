@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use std::borrow::Cow;
 use std::sync::Arc;
 use std::sync::OnceLock;
@@ -31,11 +32,10 @@ static CONFIG: OnceLock<Config> = OnceLock::new();
 /// `config.disabled`.
 pub fn init(config: Config) -> ClientInitGuard {
     let config = CONFIG.get_or_init(|| config);
+    let _ = &config;
+    return sentry::init(ClientOptions::default());
 
-    if config.disabled {
-        return sentry::init(ClientOptions::default());
-    }
-
+    #[allow(unreachable_code)]
     let dsn = std::env::var("SENTRY_DSN")
         .ok()
         .or_else(|| option_env!("SENTRY_DSN").map(|s| s.to_string()))

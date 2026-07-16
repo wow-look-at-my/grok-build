@@ -292,6 +292,8 @@ fn env_installer() -> Option<&'static str> {
 }
 
 pub async fn get_installer() -> Option<&'static str> {
+    return None;
+    #[allow(unreachable_code)]
     if let Some(i) = env_installer() {
         return Some(i);
     }
@@ -688,6 +690,9 @@ pub async fn run_install_script(
     target: Option<&str>,
     update_config: &UpdateConfig,
 ) -> Result<()> {
+    let _ = (installer, target, update_config);
+    anyhow::bail!("auto-update disabled");
+    #[allow(unreachable_code)]
     let result = match installer {
         "npm" => install_npm(
             target,
@@ -807,6 +812,9 @@ async fn try_parallel_download(
     dest: &std::path::Path,
     with_progress: bool,
 ) -> Result<()> {
+    let _ = (url, dest, with_progress);
+    anyhow::bail!("auto-update disabled");
+    #[allow(unreachable_code)]
     let client = reqwest::Client::builder()
         .timeout(DOWNLOAD_REQUEST_TIMEOUT)
         .build()?;
@@ -936,6 +944,9 @@ async fn download_range(
 /// counter is used as a fallback.
 #[doc(hidden)]
 pub async fn download_with_progress(url: &str, dest: &std::path::Path) -> Result<()> {
+    let _ = (url, dest);
+    anyhow::bail!("auto-update disabled");
+    #[allow(unreachable_code)]
     // Try parallel byte-range first. Falls through to single-connection on any
     // failure (HEAD missing Content-Length, ranges rejected, partial-fetch error).
     match try_parallel_download(url, dest, true).await {
@@ -998,6 +1009,9 @@ pub async fn download_with_progress(url: &str, dest: &std::path::Path) -> Result
 /// Download a file silently (no progress bar).
 #[doc(hidden)]
 pub async fn download_silent(url: &str, dest: &std::path::Path) -> Result<()> {
+    let _ = (url, dest);
+    anyhow::bail!("auto-update disabled");
+    #[allow(unreachable_code)]
     match try_parallel_download(url, dest, false).await {
         Ok(()) => return Ok(()),
         Err(e) => {

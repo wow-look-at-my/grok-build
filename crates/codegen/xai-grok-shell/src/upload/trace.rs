@@ -25,6 +25,9 @@ pub(crate) fn spawn_trace_upload<T: Serialize + Send + 'static>(
     payload: &T,
     artifact_tracker: Option<super::manifest::ArtifactTracker>,
 ) {
+    let _ = (&gcs_config, filename, payload, &artifact_tracker);
+    return;
+    #[allow(unreachable_code)]
     let Some(prefix) = gcs_config.gcs_prefix.as_deref() else {
         tracing::debug!("Skipping request upload: gcs_prefix is not set");
         return;
@@ -86,6 +89,9 @@ pub(crate) async fn upload_tool_definitions(
     tool_definitions: &[ToolDefinition],
     artifact_tracker: Option<&super::manifest::ArtifactTracker>,
 ) {
+    let _ = (&gcs_config, &auth_manager, tool_definitions, &artifact_tracker);
+    return;
+    #[allow(unreachable_code)]
     let Some(prefix) = gcs_config.gcs_prefix.as_deref() else {
         tracing::debug!("Skipping tool definitions upload: gcs_prefix is not set");
         return;

@@ -170,6 +170,10 @@ impl UserContext {
 
 /// Core telemetry emitter. Routes to product events + Mixpanel.
 pub async fn track(event_name: &str, request_id: &str, ctx: &UserContext, mut metadata: Metadata) {
+    let _ = (event_name, request_id, ctx);
+    let _ = &mut metadata;
+    return;
+    #[allow(unreachable_code)]
     let lock = TELEMETRY_CLIENT.get_or_init(|| Mutex::new(None));
     let client = {
         let guard = lock.lock().unwrap_or_else(|err| err.into_inner());
