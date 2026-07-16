@@ -1,6 +1,9 @@
-//! Integration test for the external OTEL stream against an in-process OTLP
-//! collector: wire payloads, delta temporality, gates-off canary absence at
-//! the wire layer, flush-on-shutdown ≤ 2 s, and post-shutdown silence.
+//! Integration test pinning the **build-baseline disabled contract** for the
+//! external OTEL stream. In this build `external::build_handle` returns `None`
+//! unconditionally, so a full double opt-in (standard `OTEL_*` env vars + the
+//! `GROK_EXTERNAL_OTEL` master switch) still *resolves* but never *activates*:
+//! `is_active()` stays false and the in-process OTLP collector must receive
+//! nothing — no logs, no metrics — even after an explicit flush.
 
 mod otlp_collector;
 
@@ -21,7 +24,7 @@ fn external_stream_end_to_end() {
             "GROK_EXTERNAL_OTEL" => Some("1".into()),
             "OTEL_LOGS_EXPORTER" | "OTEL_METRICS_EXPORTER" => Some("otlp".into()),
             "OTEL_EXPORTER_OTLP_ENDPOINT" => Some(endpoint.clone()),
-            // Keep intervals short so the test is fast; flush() forces anyway.
+            // Keep intervals short so any (erroneous) exporter would fire fast.
             "OTEL_METRIC_EXPORT_INTERVAL" => Some("200".into()),
             "OTEL_BLRP_SCHEDULE_DELAY" => Some("100".into()),
             _ => None,
@@ -36,13 +39,15 @@ fn external_stream_end_to_end() {
     };
 
     xai_grok_telemetry::external::init(Some(cfg));
-    assert!(xai_grok_telemetry::external::is_active());
-
-    // Emit through the same funnel production uses — with the product events client
-    // never initialized (TelemetryMode effectively Disabled) and no auth at
-    // all, pinning the Disabled half of the G7 independence matrix at the
-    // funnel level: the external sink fires anyway.
+    assert!(
+        !xai_grok_telemetry::external::is_active(),
+        "external OTLP stream is hard-disabled in the build baseline"
+    );
     assert!(!xai_grok_telemetry::is_enabled());
+
+    // Emit through the same funnel production uses. With the stream disabled
+    // every emission is a no-op — none of these (including the canaries) may
+    // reach the collector.
     xai_grok_telemetry::log_event(xai_grok_telemetry::events::SessionNew {
         session_id: "sess-int-1".into(),
         client_identifier: None,
@@ -73,7 +78,6 @@ fn external_stream_end_to_end() {
         screen_mode: None,
         prompt_text: Some(CANARY_PROMPT.into()),
     });
-    // Model-id canary for the metrics body (increment-time scrub).
     xai_grok_telemetry::log_event(xai_grok_telemetry::events::ModelResponseReceived {
         model_id: CANARY_MODEL.into(),
         duration_ms: 5,
@@ -86,148 +90,22 @@ fn external_stream_end_to_end() {
 
     xai_grok_telemetry::external::flush();
 
-    assert!(
-        col::wait_until(std::time::Duration::from_secs(10), || {
-            collected.logs_len() > 0 && collected.metrics_len() > 0
-        }),
-        "collector must receive both signals"
-    );
-
-    // ── Logs payload ────────────────────────────────────────────────────
-    let logs = col::decode_logs(&collected);
-    let mut event_names: Vec<String> = vec![];
-    let mut resource_service_name = None;
-    for req in &logs {
-        for rl in &req.resource_logs {
-            if let Some(resource) = &rl.resource {
-                for kv in &resource.attributes {
-                    if kv.key == "service.name"
-                        && let Some(v) = &kv.value
-                    {
-                        resource_service_name = Some(format!("{v:?}"));
-                    }
-                }
-            }
-            for sl in &rl.scope_logs {
-                assert_eq!(
-                    sl.scope.as_ref().map(|s| s.name.as_str()),
-                    Some("ai.xai.grok_code")
-                );
-                for record in &sl.log_records {
-                    event_names.push(record.event_name.clone());
-                }
-            }
-        }
-    }
-    assert!(
-        resource_service_name
-            .as_deref()
-            .is_some_and(|s| s.contains("grok-cli")),
-        "service.name=grok-cli is a wire commitment: {resource_service_name:?}"
-    );
-    for expected in [
-        "grok_code.session_start",
-        "grok_code.user_prompt",
-        "grok_code.api_request",
-    ] {
-        assert!(
-            event_names.iter().any(|n| n == expected),
-            "missing {expected} in {event_names:?}"
-        );
-    }
-    // session_start arrives exactly once per emission (no double-send from
-    // the funnel).
-    assert_eq!(
-        event_names
-            .iter()
-            .filter(|n| *n == "grok_code.session_start")
-            .count(),
-        1
-    );
-
-    // ── Metrics payload: names + Delta temporality + session.count == 1 ──
-    let metrics = col::decode_metrics(&collected);
-    let mut metric_names = vec![];
-    let mut session_count_total = 0u64;
-    for req in &metrics {
-        for rm in &req.resource_metrics {
-            for sm in &rm.scope_metrics {
-                for metric in &sm.metrics {
-                    metric_names.push(metric.name.clone());
-                    use opentelemetry_proto::tonic::metrics::v1::metric::Data;
-                    if let Some(Data::Sum(sum)) = &metric.data {
-                        assert_eq!(
-                            sum.aggregation_temporality,
-                            opentelemetry_proto::tonic::metrics::v1::AggregationTemporality::Delta
-                                as i32,
-                            "default temporality must be Delta (CC parity)"
-                        );
-                        if metric.name == "grok_code.session.count" {
-                            for dp in &sum.data_points {
-                                if let Some(
-                                    opentelemetry_proto::tonic::metrics::v1::number_data_point::Value::AsInt(v),
-                                ) = dp.value
-                                {
-                                    session_count_total += v as u64;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    assert!(
-        metric_names.iter().any(|n| n == "grok_code.session.count"),
-        "missing session.count in {metric_names:?}"
-    );
-    assert!(metric_names.iter().any(|n| n == "grok_code.token.usage"));
-    assert_eq!(
-        session_count_total, 1,
-        "session.count must increment exactly once per SessionNew"
-    );
-
-    // ── Canary absence at the HTTP layer (raw bytes, both signals) ──────
-    let raw_logs = collected.raw_logs();
-    let raw_metrics = collected.raw_metrics();
-    for (label, raw) in [("logs", &raw_logs), ("metrics", &raw_metrics)] {
-        let haystack = String::from_utf8_lossy(raw);
-        assert!(
-            !haystack.contains("CANARY"),
-            "canary reached the {label} wire: gates are off / scrub failed"
-        );
-        assert!(
-            !haystack.contains(CANARY_MCP),
-            "MCP server name reached the {label} wire"
-        );
-    }
-    // Prompt length exported, text not (already covered by the canary scan).
-
-    // ── Shutdown: ≤ 2 s + post-shutdown silence ─────────────────────────
-    let start = std::time::Instant::now();
-    xai_grok_telemetry::external::shutdown();
-    assert!(
-        start.elapsed() <= std::time::Duration::from_millis(2500),
-        "shutdown watchdog must bound exit at ~2s (took {:?})",
-        start.elapsed()
-    );
-    assert!(!xai_grok_telemetry::external::is_active());
-
-    let logs_before = collected.logs_len();
-    xai_grok_telemetry::log_event(xai_grok_telemetry::events::PromptSubmitted {
-        prompt_length: 1,
-        model_id: "grok-4".into(),
-        client_identifier: None,
-        screen_mode: None,
-        prompt_text: None,
-    });
-    std::thread::sleep(std::time::Duration::from_millis(400));
+    // Give any (erroneously constructed) exporter ample time to phone home.
+    std::thread::sleep(std::time::Duration::from_millis(600));
     assert_eq!(
         collected.logs_len(),
-        logs_before,
-        "no exports after shutdown"
+        0,
+        "disabled external stream must export no logs"
+    );
+    assert_eq!(
+        collected.metrics_len(),
+        0,
+        "disabled external stream must export no metrics"
     );
 
-    // Idempotent shutdown: second call is a no-op, not an error/panic.
+    // Shutdown is a no-op here, but must stay idempotent and leave the stream
+    // inactive.
+    xai_grok_telemetry::external::shutdown();
+    assert!(!xai_grok_telemetry::external::is_active());
     xai_grok_telemetry::external::shutdown();
 }
