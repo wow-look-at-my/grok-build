@@ -352,7 +352,12 @@ pub(crate) async fn enrich_git_metadata(ctx: &PromptTraceContext, metadata: &mut
 ///
 /// Uploads prompt metadata to cloud storage as JSON.
 /// Path format: {session_id}/turn_{N}/metadata.json
+#[allow(unreachable_code)]
 pub(crate) async fn upload_metadata(ctx: &PromptTraceContext, metadata: PromptMetadata) {
+    // Telemetry hard-disabled in this build: no trace-metadata egress.
+    let _ = (ctx, &metadata);
+    return;
+
     let mut metadata = metadata;
     enrich_git_metadata(ctx, &mut metadata).await;
     let metadata_json = match serde_json::to_vec_pretty(&metadata) {
@@ -399,6 +404,11 @@ pub(crate) async fn upload_subagent_metadata(
     upload_method: crate::session::repo_changes::UploadMethod,
     auth_manager: std::sync::Arc<crate::auth::AuthManager>,
 ) {
+    // Telemetry hard-disabled in this build: no subagent-metadata egress.
+    let _ = (metadata, bucket_url, &upload_method, &auth_manager);
+    return;
+
+    #[allow(unreachable_code)]
     let json = match serde_json::to_vec_pretty(metadata) {
         Ok(j) => j,
         Err(e) => {
@@ -588,6 +598,7 @@ pub(crate) async fn upload_plugin_state(
 use super::gcs::WithAuth as _;
 use xai_file_utils::gcs::upload_bytes;
 /// Uploads bytes to cloud storage, logging start/finish and tracing success or failure.
+#[allow(unreachable_code)]
 pub(crate) async fn upload_artifact_to_gcs(
     ctx: &PromptTraceContext,
     gcs_path: &str,
@@ -595,6 +606,10 @@ pub(crate) async fn upload_artifact_to_gcs(
     content_type: &str,
     artifact: &str,
 ) -> Option<String> {
+    // Telemetry hard-disabled in this build: no trace-artifact egress.
+    let _ = (ctx, gcs_path, content, content_type, artifact);
+    return None;
+
     let _upload_start = std::time::Instant::now();
     let config = ctx.gcs_config.with_auth(Some(ctx.auth_manager.clone()));
     match upload_bytes(&config, gcs_path, content, content_type).await {
@@ -634,6 +649,7 @@ pub(crate) async fn upload_artifact_to_gcs(
 /// manifest never races a queue it does not flush. `Defer` (blocking turn
 /// end) routes through the durable queue accept so the prompt response stays
 /// fast and a process exit cannot lose the artifact.
+#[allow(unreachable_code)]
 pub(crate) async fn upload_small_artifact(
     ctx: &PromptTraceContext,
     content: &[u8],
@@ -642,6 +658,10 @@ pub(crate) async fn upload_small_artifact(
     artifact_name: &str,
     wait: UploadWait,
 ) {
+    // Telemetry hard-disabled in this build: no trace-artifact egress.
+    let _ = (ctx, content, gcs_path, content_type, artifact_name, &wait);
+    return;
+
     match wait {
         UploadWait::Confirm => {
             let ok = upload_artifact_to_gcs(ctx, gcs_path, content, content_type, artifact_name)
@@ -741,11 +761,16 @@ pub(crate) struct TurnResultMetadata {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) end_prompt_mode: Option<String>,
 }
+#[allow(unreachable_code)]
 pub(crate) async fn upload_turn_result(
     ctx: &PromptTraceContext,
     result: &TurnResultMetadata,
     wait: UploadWait,
 ) {
+    // Telemetry hard-disabled in this build: no turn-result egress.
+    let _ = (ctx, result, &wait);
+    return;
+
     let json = match serde_json::to_vec_pretty(result) {
         Ok(json) => json,
         Err(e) => {

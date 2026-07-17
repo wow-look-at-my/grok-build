@@ -426,11 +426,9 @@ fn harness_pair(id: &str) -> Vec<xai_grok_sampling_types::conversation::Conversa
         ConversationItem::tool_result(id, "<subagent_result>\nsubagent_id: skeptic-1"),
     ]
 }
-/// Agent-side upload path: each drained harness turn takes a distinct,
-/// monotonic turn number that CONTINUES past the user turn, advances the
-/// per-session counter, and is persisted via exactly one `SetNextTraceTurn`.
-/// This is what makes each sibling `turn_{N}` reachable — without the
-/// advance every harness turn would clobber the same GCS path.
+/// Agent-side upload path with trace upload HARD-DISABLED (build baseline):
+/// even with maximally-enabling config, no harness trace uploads are built,
+/// no turn numbers burn, and no counter is persisted.
 #[tokio::test(flavor = "current_thread")]
 async fn upload_harness_trace_turns_numbers_siblings_and_persists_counter() {
     let agent = build_minimal_agent_for_tests();
@@ -471,6 +469,9 @@ async fn upload_harness_trace_turns_numbers_siblings_and_persists_counter() {
         agent.allocate_turn_number(&sid);
     }
     assert_eq!(agent.session_turn_number(&sid), Some(3));
+    // Trace upload is hard-disabled in this build: even with enabling
+    // config, no trace context is created, no counter burns, and nothing
+    // is persisted for upload.
     let built = agent
         .build_harness_trace_uploads(
             &sid,
@@ -480,11 +481,9 @@ async fn upload_harness_trace_turns_numbers_siblings_and_persists_counter() {
             vec![harness_pair("a"), harness_pair("b")],
         )
         .await;
-    let numbers: Vec<u64> = built.iter().map(|(_, m, _)| m.turn_number).collect();
-    assert_eq!(numbers, vec![3, 4], "siblings take base, base+1");
     assert!(
-        built.iter().all(|(_, m, _)| m.model == "test-model"),
-        "harness metadata carries the requested model alias",
+        built.is_empty(),
+        "trace upload hard-disabled: no harness trace uploads may be built"
     );
     let (cmd_tx, mut cmd_rx) =
         tokio::sync::mpsc::unbounded_channel::<crate::session::SessionCommand>();
@@ -499,8 +498,8 @@ async fn upload_harness_trace_turns_numbers_siblings_and_persists_counter() {
         .await;
     assert_eq!(
         agent.session_turn_number(&sid),
-        Some(5),
-        "two siblings advance the counter by two from the user turn",
+        Some(3),
+        "uploads-disabled path must not consume turn numbers",
     );
     let mut persisted = Vec::new();
     while let Ok(cmd) = cmd_rx.try_recv() {
@@ -511,10 +510,9 @@ async fn upload_harness_trace_turns_numbers_siblings_and_persists_counter() {
             persisted.push(next_trace_turn);
         }
     }
-    assert_eq!(
-        persisted,
-        vec![5],
-        "persist the advanced counter once, ahead of the spawned uploads",
+    assert!(
+        persisted.is_empty(),
+        "uploads-disabled path must not persist a counter",
     );
 }
 /// With trace upload disabled the agent-side path must NOT burn a turn
@@ -544,16 +542,11 @@ async fn upload_harness_trace_turns_uploads_disabled_does_not_burn_counter() {
         "uploads-disabled path must not persist a counter",
     );
 }
-/// Guards the per-harness-turn manifest seam: (1) every turn's ctx carries
-/// a FRESH `artifact_tracker`, so turn 1 never inherits turn 0's recorded
-/// artifacts; (2) recording the turn's metadata + turn_messages yields a
-/// manifest listing exactly those two; (3) `fully_uploaded` is true iff
-/// neither failed.
+/// Guards the hard-disabled trace-upload seam: with trace upload
+/// permanently off, no per-harness-turn trace context (and hence no
+/// manifest) may be created even with maximally-enabling config.
 #[tokio::test(flavor = "current_thread")]
 async fn upload_harness_trace_turns_build_per_turn_manifest() {
-    use crate::upload::manifest::{
-        ArtifactResult, ArtifactStatus, build_manifest, record_artifact, resolve_upload_method,
-    };
     let agent = build_minimal_agent_for_tests();
     {
         let mut cfg = agent.cfg.borrow_mut();
@@ -597,57 +590,11 @@ async fn upload_harness_trace_turns_build_per_turn_manifest() {
             vec![harness_pair("a"), harness_pair("b")],
         )
         .await;
-    assert_eq!(
-        built.len(),
-        2,
-        "both harness turns obtained a trace context"
-    );
-    let ctx0 = &built[0].0;
-    record_artifact(
-        &ctx0.artifact_tracker,
-        "metadata.json",
-        ArtifactResult::Succeeded,
-    );
-    record_artifact(
-        &ctx0.artifact_tracker,
-        "turn_messages.json",
-        ArtifactResult::Succeeded,
-    );
-    let m0 = build_manifest(&ctx0.artifact_tracker, resolve_upload_method(ctx0));
-    assert!(matches!(
-        m0.artifacts.get("metadata.json"),
-        Some(ArtifactStatus::Succeeded)
-    ));
-    assert!(matches!(
-        m0.artifacts.get("turn_messages.json"),
-        Some(ArtifactStatus::Succeeded)
-    ));
-    assert!(m0.fully_uploaded, "both succeeded → fully_uploaded");
-    let ctx1 = &built[1].0;
-    let before = build_manifest(&ctx1.artifact_tracker, resolve_upload_method(ctx1));
     assert!(
-        before.artifacts.is_empty(),
-        "per-turn tracker: turn 1 must not inherit turn 0's artifacts",
+        built.is_empty(),
+        "trace upload hard-disabled: no harness turn may obtain a trace \
+         context (and hence no per-turn manifest is ever built)"
     );
-    record_artifact(
-        &ctx1.artifact_tracker,
-        "metadata.json",
-        ArtifactResult::Succeeded,
-    );
-    record_artifact(
-        &ctx1.artifact_tracker,
-        "turn_messages.json",
-        ArtifactResult::Failed {
-            reason: "upload_failed",
-            error: None,
-        },
-    );
-    let m1 = build_manifest(&ctx1.artifact_tracker, resolve_upload_method(ctx1));
-    assert!(
-        !m1.fully_uploaded,
-        "a failed turn_messages flips fully_uploaded",
-    );
-    assert_eq!(m1.artifacts.len(), 2, "no cross-turn contamination");
 }
 /// With no overrides and model_agent_type = None, the default agent is used.
 #[test]
@@ -2603,20 +2550,23 @@ fn enable_trace_upload_config(agent: &MvpAgent) {
     cfg.telemetry.trace_upload = Some(true);
 }
 #[tokio::test]
-async fn product_analytics_enabled_for_normal_user_with_telemetry_on() {
+async fn product_analytics_stays_disabled_even_with_telemetry_config_on() {
+    // Telemetry is hard-disabled in this build: enabling config must not
+    // turn product analytics back on.
     let agent = build_agent_with_auth(crate::auth::GrokAuth::test_default());
     enable_product_telemetry(&agent);
-    assert!(agent.product_analytics_enabled());
+    assert!(!agent.product_analytics_enabled());
 }
 #[tokio::test]
-async fn product_analytics_enabled_despite_coding_retention_opt_out() {
+async fn product_analytics_stays_disabled_with_coding_retention_opt_out() {
     let agent = build_agent_with_auth(crate::auth::GrokAuth {
         coding_data_retention_opt_out: true,
         ..crate::auth::GrokAuth::test_default()
     });
     enable_product_telemetry(&agent);
     assert!(agent.is_data_collection_disabled());
-    assert!(agent.product_analytics_enabled());
+    // Telemetry hard-disable also keeps product analytics off.
+    assert!(!agent.product_analytics_enabled());
 }
 #[tokio::test]
 async fn product_analytics_disabled_for_zdr_team() {
@@ -2665,10 +2615,12 @@ async fn diagnostic_upload_skipped_for_opted_out_user() {
     });
     enable_trace_upload_config(&agent);
     agent.cfg.borrow_mut().endpoints.trace_upload_url = Some(stub_url);
-    let uploader = agent
-        .diagnostic_upload_config()
-        .expect("uploader is wired whenever trace upload config is on");
-    uploader(b"log".to_vec(), "tok".into(), "user-id-1".into()).await;
+    // Trace upload is hard-disabled in this build: the uploader is never
+    // wired, so an opted-out user trivially has zero diagnostics egress.
+    assert!(
+        agent.diagnostic_upload_config().is_none(),
+        "trace upload hard-disabled: no diagnostics uploader may be wired"
+    );
     assert_eq!(
         count.load(std::sync::atomic::Ordering::SeqCst),
         0,
@@ -2676,19 +2628,21 @@ async fn diagnostic_upload_skipped_for_opted_out_user() {
     );
 }
 #[tokio::test]
-async fn diagnostic_upload_sent_for_normal_user() {
+async fn diagnostic_upload_not_wired_even_for_normal_user() {
+    // Trace upload is hard-disabled in this build: even a normal user with
+    // fully-enabling config gets no diagnostics uploader and zero egress.
     let (stub_url, count) = spawn_counting_storage_stub().await;
     let agent = build_agent_with_auth(crate::auth::GrokAuth::test_default());
     enable_trace_upload_config(&agent);
     agent.cfg.borrow_mut().endpoints.trace_upload_url = Some(stub_url);
-    let uploader = agent
-        .diagnostic_upload_config()
-        .expect("uploader is wired whenever trace upload config is on");
-    uploader(b"log".to_vec(), "tok".into(), "user-id-1".into()).await;
     assert!(
-        count.load(std::sync::atomic::Ordering::SeqCst) >= 1,
-        "positive control: diagnostics upload reaches the proxy for a \
-         normal user"
+        agent.diagnostic_upload_config().is_none(),
+        "trace upload hard-disabled: no diagnostics uploader may be wired"
+    );
+    assert_eq!(
+        count.load(std::sync::atomic::Ordering::SeqCst),
+        0,
+        "no diagnostics request may leave the machine"
     );
 }
 /// The diagnostics privacy gate fails closed: with no credential in the
@@ -2700,10 +2654,12 @@ async fn diagnostic_upload_skipped_without_credentials() {
     let agent = build_minimal_agent_for_tests();
     enable_trace_upload_config(&agent);
     agent.cfg.borrow_mut().endpoints.trace_upload_url = Some(stub_url);
-    let uploader = agent
-        .diagnostic_upload_config()
-        .expect("uploader is wired whenever trace upload config is on");
-    uploader(b"log".to_vec(), "tok".into(), "user-id-1".into()).await;
+    // Trace upload is hard-disabled in this build: the uploader is never
+    // wired, so the no-credentials case trivially fails closed.
+    assert!(
+        agent.diagnostic_upload_config().is_none(),
+        "trace upload hard-disabled: no diagnostics uploader may be wired"
+    );
     assert_eq!(
         count.load(std::sync::atomic::Ordering::SeqCst),
         0,
@@ -2720,21 +2676,23 @@ async fn diagnostic_upload_skipped_after_mid_session_trace_upload_kill_switch() 
     enable_trace_upload_config(&agent);
     agent.cfg.borrow_mut().endpoints.trace_upload_url = Some(stub_url);
     agent.sync_collection_config_gate();
-    let uploader = agent
-        .diagnostic_upload_config()
-        .expect("uploader is wired whenever trace upload config is on");
+    // Trace upload is hard-disabled in this build: the uploader is never
+    // wired in the first place, before or after the kill switch flips.
+    assert!(
+        agent.diagnostic_upload_config().is_none(),
+        "trace upload hard-disabled: no diagnostics uploader may be wired"
+    );
     {
         let mut cfg = agent.cfg.borrow_mut();
         cfg.features.telemetry = Some(crate::agent::config::TelemetryMode::Disabled);
         cfg.telemetry.trace_upload = Some(false);
     }
     agent.sync_collection_config_gate();
-    uploader(b"log".to_vec(), "tok".into(), "user-id-1".into()).await;
+    assert!(agent.diagnostic_upload_config().is_none());
     assert_eq!(
         count.load(std::sync::atomic::Ordering::SeqCst),
         0,
-        "an already-wired diagnostics uploader must honor a mid-session \
-         trace-upload kill switch"
+        "no diagnostics request may leave the machine"
     );
 }
 /// The live collection gate reads a `Send` mirror of the config-level
@@ -2743,14 +2701,17 @@ async fn diagnostic_upload_skipped_after_mid_session_trace_upload_kill_switch() 
 /// collection without a new session.
 #[tokio::test]
 async fn collection_config_gate_mirror_follows_trace_upload_flip() {
+    // Trace upload is hard-disabled in this build: the live mirror must be
+    // off even with maximally-enabling config, and stay off after any flip.
     let agent = build_agent_with_auth(crate::auth::GrokAuth::test_default());
     enable_trace_upload_config(&agent);
     agent.sync_collection_config_gate();
     assert!(
-        agent
+        !agent
             .trace_upload_live
             .load(std::sync::atomic::Ordering::Relaxed),
-        "precondition: mirror reflects the enabled switch"
+        "trace upload hard-disabled: mirror must stay off despite enabling \
+         config"
     );
     {
         let mut cfg = agent.cfg.borrow_mut();
@@ -2762,7 +2723,7 @@ async fn collection_config_gate_mirror_follows_trace_upload_flip() {
         !agent
             .trace_upload_live
             .load(std::sync::atomic::Ordering::Relaxed),
-        "mirror must follow a mid-session config-level trace-upload flip"
+        "mirror must remain off after a config-level trace-upload flip"
     );
 }
 /// `parse_session_kind` routes `session/load` to the gateway Chat path vs. the
