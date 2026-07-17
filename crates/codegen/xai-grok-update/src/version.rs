@@ -787,4 +787,41 @@ mod tests {
         let cfg = UpdateConfig::from_environment(&GrokBuildEnvironment::Production);
         assert_eq!(cfg.channel, "stable");
     }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // Hard-disable pins: version checks must bail before any network I/O.
+    // Reverting the stubs makes these fail (a real fetch against the
+    // production endpoints would either succeed or fail with a different
+    // error message).
+    // ──────────────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn fetch_latest_version_is_disabled_for_every_installer() {
+        use xai_grok_shell::env::GrokBuildEnvironment;
+        let cfg = UpdateConfig::from_environment(&GrokBuildEnvironment::Production);
+        for installer in ["npm", "gh-release", "internal"] {
+            let err = fetch_latest_version(installer, &cfg)
+                .await
+                .expect_err("update checks must be disabled");
+            assert!(
+                err.to_string().contains("update checks disabled"),
+                "installer {installer}: unexpected error: {err:#}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn get_latest_version_is_disabled_for_every_installer() {
+        use xai_grok_shell::env::GrokBuildEnvironment;
+        let cfg = UpdateConfig::from_environment(&GrokBuildEnvironment::Production);
+        for installer in ["npm", "gh-release", "internal"] {
+            let err = get_latest_version(installer, &cfg)
+                .await
+                .expect_err("update checks must be disabled");
+            assert!(
+                err.to_string().contains("update checks disabled"),
+                "installer {installer}: unexpected error: {err:#}"
+            );
+        }
+    }
 }

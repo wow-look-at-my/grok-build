@@ -124,6 +124,59 @@ impl Mixpanel {
 mod tests {
     use super::*;
 
+    /// Client whose every request would fail: all traffic is routed through a
+    /// proxy at an unroutable address. If [`Mixpanel::track`] or
+    /// [`Mixpanel::engage`] ever egress again, the send fails and the `Ok`
+    /// assertions below fail with it.
+    fn unroutable_client() -> Mixpanel {
+        let client = reqwest::Client::builder()
+            .proxy(reqwest::Proxy::all("http://127.0.0.1:9").unwrap())
+            .timeout(std::time::Duration::from_secs(2))
+            .build()
+            .unwrap();
+        Mixpanel::with_client("test-token", client)
+    }
+
+    /// Drive `fut` with a no-op waker and require it to complete on the very
+    /// first poll. The disabled stubs return before touching the network, so
+    /// they resolve synchronously; a reverted stub would return `Pending`
+    /// (or fail on the unroutable proxy), failing the test either way.
+    fn poll_once<F: std::future::Future>(fut: F) -> F::Output {
+        let mut fut = std::pin::pin!(fut);
+        let waker = std::task::Waker::noop();
+        let mut cx = std::task::Context::from_waker(waker);
+        match fut.as_mut().poll(&mut cx) {
+            std::task::Poll::Ready(out) => out,
+            std::task::Poll::Pending => {
+                panic!(
+                    "future did not complete immediately — telemetry stub may have been reverted"
+                )
+            }
+        }
+    }
+
+    /// Pins the hard-disable: `track` must return `Ok(())` immediately,
+    /// without any network I/O.
+    #[test]
+    fn track_is_disabled_no_network() {
+        let mp = unroutable_client();
+        let mut props = HashMap::new();
+        props.insert("distinct_id".into(), serde_json::json!("user-1"));
+        let result = poll_once(mp.track("pinning_event", Some(props)));
+        result.expect("disabled track must be Ok without network");
+    }
+
+    /// Pins the hard-disable: `engage` must return `Ok(())` immediately,
+    /// without any network I/O.
+    #[test]
+    fn engage_is_disabled_no_network() {
+        let mp = unroutable_client();
+        let mut set = HashMap::new();
+        set.insert("plan".into(), serde_json::json!("test"));
+        let result = poll_once(mp.engage("user-1", set));
+        result.expect("disabled engage must be Ok without network");
+    }
+
     /// Project token is deliberately Bearer-shaped: it would be redacted
     /// if `prepare_properties` ran the scrubber after token injection.
     /// The `error` value catches the inverse regression: if the scrub

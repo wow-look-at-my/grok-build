@@ -15,35 +15,80 @@ on:
 
 permissions:
   contents: read
-  id-token: write   # GitHub OIDC -> buildhost, so no static secret is required
+
+# Serialize publishes per ref so two concurrent runs can't race each other
+# repointing `latest`. Never cancel a publish mid-flight.
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
 
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: "0"
-  PROTOC: /usr/bin/protoc
   BUILDHOST_SERVER: ${{ github.event.inputs.server || 'https://pazer.build' }}
   BUILDHOST_PROJECT: grok-build
 
 jobs:
-  build-release:
-    name: Build release binary
+  test:
+    name: Build & test (gate)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - name: Install protoc
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Install protoc (pinned v29.3)
         run: |
-          sudo apt-get update
-          sudo apt-get install -y protobuf-compiler
+          # Same release artifact + sha256 the repo's dotslash launcher
+          # (bin/protoc) pins for linux-x86_64. bin/protoc is the source of
+          # truth; update both together when bumping protoc.
+          curl -fsSL -o "$RUNNER_TEMP/protoc.zip" \
+            https://github.com/protocolbuffers/protobuf/releases/download/v29.3/protoc-29.3-linux-x86_64.zip
+          echo "3e866620c5be27664f3d2fa2d656b5f3e09b5152b42f1bedbf427b333e90021a  $RUNNER_TEMP/protoc.zip" | sha256sum -c -
+          unzip -q -o "$RUNNER_TEMP/protoc.zip" -d "$RUNNER_TEMP/protoc"
+          echo "PROTOC=$RUNNER_TEMP/protoc/bin/protoc" >> "$GITHUB_ENV"
+          "$RUNNER_TEMP/protoc/bin/protoc" --version
       - name: Install Rust toolchain (pinned by rust-toolchain.toml)
         run: rustup show
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Build grok binary
+        run: cargo build --locked -p xai-grok-pager-bin
+      - name: Smoke-test the binary
+        run: ./target/debug/xai-grok-pager --version
+      - name: Test (core + telemetry-disabled crates)
+        run: cargo test --locked -p xai-grok-config -p xai-grok-telemetry -p xai-mixpanel
+
+      # Unit tests only (--lib): they pin the auto-update hard-disable stubs.
+      # The crate's integration suites (test_network, test_downgrade_matrix,
+      # test_install_internal, ...) still exercise the disabled updater
+      # end-to-end and fail against the stubs, so they are not run here.
+      - name: Test (auto-update disable pins)
+        run: cargo test --locked -p xai-grok-update --lib
+
+  build-release:
+    name: Build release binary
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Install protoc (pinned v29.3)
+        run: |
+          # Same release artifact + sha256 the repo's dotslash launcher
+          # (bin/protoc) pins for linux-x86_64. bin/protoc is the source of
+          # truth; update both together when bumping protoc.
+          curl -fsSL -o "$RUNNER_TEMP/protoc.zip" \
+            https://github.com/protocolbuffers/protobuf/releases/download/v29.3/protoc-29.3-linux-x86_64.zip
+          echo "3e866620c5be27664f3d2fa2d656b5f3e09b5152b42f1bedbf427b333e90021a  $RUNNER_TEMP/protoc.zip" | sha256sum -c -
+          unzip -q -o "$RUNNER_TEMP/protoc.zip" -d "$RUNNER_TEMP/protoc"
+          echo "PROTOC=$RUNNER_TEMP/protoc/bin/protoc" >> "$GITHUB_ENV"
+          "$RUNNER_TEMP/protoc/bin/protoc" --version
+      - name: Install Rust toolchain (pinned by rust-toolchain.toml)
+        run: rustup show
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Build release binary
-        run: cargo build --release -p xai-grok-pager-bin
+        run: cargo build --locked --release -p xai-grok-pager-bin
       - name: Stage artifact
         run: |
           mkdir -p dist
           cp target/release/xai-grok-pager dist/grok-linux-amd64
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: grok-linux-amd64
           path: dist/grok-linux-amd64
@@ -54,25 +99,33 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write
+      id-token: write # GitHub OIDC -> buildhost; only this job talks to buildhost
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: grok-linux-amd64
           path: dist
+      # The buildhost actions authenticate via GitHub OIDC (they mint an ID
+      # token whenever no `token` input is set). Do not pass a `token` input
+      # here: OIDC is what lets buildhost learn the repo's default branch and
+      # keep `latest` correct. secrets.BUILDHOST_TOKEN remains available as a
+      # break-glass manual option (set `token: ${{ secrets.BUILDHOST_TOKEN }}`
+      # on each step) if OIDC is ever unavailable.
       - name: Create release
         id: rel
-        uses: wow-look-at-my/buildhost/.github/actions/buildhost-create-release@master
+        uses: wow-look-at-my/buildhost/.github/actions/buildhost-create-release@dbb62f004ddf871a116d110e92230e08b5b0995e # master
         with:
           server: ${{ env.BUILDHOST_SERVER }}
-          token: ${{ secrets.BUILDHOST_TOKEN }}
           project: ${{ env.BUILDHOST_PROJECT }}
           version: ${{ github.event.inputs.version }}
+          # On tag pushes github.ref_name is the TAG (e.g. v1.2.3), which
+          # buildhost would treat as a branch name that `latest` never tracks
+          # and retention pins forever. Tags cut from main belong to main.
+          git_branch: ${{ github.ref_type == 'tag' && 'main' || github.ref_name }}
       - name: Upload binary
-        uses: wow-look-at-my/buildhost/.github/actions/buildhost-upload-artifact@master
+        uses: wow-look-at-my/buildhost/.github/actions/buildhost-upload-artifact@dbb62f004ddf871a116d110e92230e08b5b0995e # master
         with:
           server: ${{ env.BUILDHOST_SERVER }}
-          token: ${{ secrets.BUILDHOST_TOKEN }}
           project: ${{ env.BUILDHOST_PROJECT }}
           version: ${{ steps.rel.outputs.version }}
           os: linux
@@ -80,9 +133,8 @@ jobs:
           path: dist/grok-linux-amd64
           kind: binary
       - name: Publish release
-        uses: wow-look-at-my/buildhost/.github/actions/buildhost-publish-release@master
+        uses: wow-look-at-my/buildhost/.github/actions/buildhost-publish-release@dbb62f004ddf871a116d110e92230e08b5b0995e # master
         with:
           server: ${{ env.BUILDHOST_SERVER }}
-          token: ${{ secrets.BUILDHOST_TOKEN }}
           project: ${{ env.BUILDHOST_PROJECT }}
           version: ${{ steps.rel.outputs.version }}
