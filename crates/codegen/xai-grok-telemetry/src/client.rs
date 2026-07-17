@@ -260,6 +260,9 @@ pub async fn track(event_name: &str, request_id: &str, ctx: &UserContext, mut me
 
 /// Sync the user's Mixpanel profile once per init. Fire-and-forget.
 pub fn sync_profile() {
+    // Telemetry is hard-disabled: never spawn the mixpanel.engage profile sync.
+    return;
+    #[allow(unreachable_code)]
     let lock = TELEMETRY_CLIENT.get_or_init(|| Mutex::new(None));
     let client = {
         let guard = lock.lock().unwrap_or_else(|err| err.into_inner());

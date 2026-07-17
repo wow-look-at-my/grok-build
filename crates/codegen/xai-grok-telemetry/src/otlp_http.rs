@@ -69,4 +69,26 @@ mod tests {
         build_blocking_client(std::time::Duration::from_secs(5))
             .expect("client with embedded webpki roots must build on any host");
     }
+
+    /// Pins the hard-disable in `send_bytes`: every OTLP export attempt must
+    /// fail with the "otlp export disabled" error before any network I/O.
+    /// If the stub is reverted, the request to the unroutable loopback port
+    /// yields a connection error with a different message, failing the
+    /// assertion.
+    #[test]
+    fn send_bytes_returns_disabled_error() {
+        let client =
+            build_blocking_client(std::time::Duration::from_secs(1)).expect("client builds");
+        let request = http::Request::builder()
+            .method("POST")
+            .uri("http://127.0.0.1:9/v1/traces")
+            .body(Bytes::new())
+            .expect("request builds");
+        let err = futures_executor::block_on(client.send_bytes(request))
+            .expect_err("OTLP export must be disabled");
+        assert!(
+            err.to_string().contains("otlp export disabled"),
+            "unexpected error: {err}"
+        );
+    }
 }

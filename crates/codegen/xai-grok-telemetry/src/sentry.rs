@@ -100,8 +100,17 @@ impl sentry::TransportFactory for NoopTransportFactory {
 /// Transport that silently drops every envelope.
 struct NoopTransport;
 
+/// Counts envelopes swallowed by [`NoopTransport`], so tests can prove that
+/// captured events reach the no-op transport (and therefore nothing else).
+#[cfg(test)]
+static NOOP_ENVELOPES_DROPPED: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+
 impl sentry::Transport for NoopTransport {
-    fn send_envelope(&self, _envelope: sentry::Envelope) {}
+    fn send_envelope(&self, _envelope: sentry::Envelope) {
+        #[cfg(test)]
+        NOOP_ENVELOPES_DROPPED.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -299,6 +308,54 @@ mod tests {
             home_dir: Some("/Users/alice".to_string()),
             usernames: vec!["alice".to_owned()],
         }
+    }
+
+    /// Pins the hard-disable in [`init`]: even with `SENTRY_DSN` in the
+    /// environment (the exact re-arm vector the stub guards against —
+    /// sentry's `apply_defaults()` reads it when `dsn.is_none()` and would
+    /// install a real reqwest transport), every captured envelope must land
+    /// in [`NoopTransport`] and nowhere else. Reverting the stub breaks this
+    /// test: a real transport would be created and the counter would not
+    /// move. No other test in this binary touches `SENTRY_DSN`, so the env
+    /// mutation cannot race a concurrent reader of the same variable.
+    #[test]
+    fn init_with_dsn_env_routes_envelopes_to_noop_transport() {
+        use std::sync::atomic::Ordering;
+
+        // Syntactically valid DSN; the host is never contacted because the
+        // transport is pinned to the no-op factory.
+        unsafe {
+            std::env::set_var(
+                "SENTRY_DSN",
+                "https://0123456789abcdef@o0.ingest.sentry.invalid/1",
+            )
+        };
+
+        let guard = init(Config {
+            client: "test-client",
+            client_version: "0.0.0",
+            release: "test-release@0.0.0",
+            disabled: false,
+        });
+        assert!(
+            guard.is_enabled(),
+            "client must be enabled (DSN picked up from env) for the capture below to exercise the transport"
+        );
+
+        let before = NOOP_ENVELOPES_DROPPED.load(Ordering::SeqCst);
+        sentry::capture_message(
+            "pinning test: envelopes must hit the noop transport",
+            sentry::Level::Error,
+        );
+        flush_on_shutdown();
+        let after = NOOP_ENVELOPES_DROPPED.load(Ordering::SeqCst);
+
+        unsafe { std::env::remove_var("SENTRY_DSN") };
+
+        assert!(
+            after > before,
+            "captured event never reached NoopTransport — a real transport may have been created (before={before}, after={after})"
+        );
     }
 
     /// `aliceapp.log` case guards against a refactor to naive `str::replace`.

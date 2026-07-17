@@ -8,39 +8,53 @@ on:
 permissions:
   contents: read
 
+# Cancel superseded runs on branches/PRs, but let every main run finish so
+# rapid merges can't leave main commits with no completed CI.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: "0"
-  PROTOC: /usr/bin/protoc
 
 jobs:
   build-test:
     name: Build & test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - name: Install protoc
+      - name: Install protoc (pinned v29.3)
         run: |
-          sudo apt-get update
-          sudo apt-get install -y protobuf-compiler
-          protoc --version
+          # Same release artifact + sha256 the repo's dotslash launcher
+          # (bin/protoc) pins for linux-x86_64. bin/protoc is the source of
+          # truth; update both together when bumping protoc.
+          curl -fsSL -o "$RUNNER_TEMP/protoc.zip" \
+            https://github.com/protocolbuffers/protobuf/releases/download/v29.3/protoc-29.3-linux-x86_64.zip
+          echo "3e866620c5be27664f3d2fa2d656b5f3e09b5152b42f1bedbf427b333e90021a  $RUNNER_TEMP/protoc.zip" | sha256sum -c -
+          unzip -q -o "$RUNNER_TEMP/protoc.zip" -d "$RUNNER_TEMP/protoc"
+          echo "PROTOC=$RUNNER_TEMP/protoc/bin/protoc" >> "$GITHUB_ENV"
+          "$RUNNER_TEMP/protoc/bin/protoc" --version
 
       - name: Install Rust toolchain (pinned by rust-toolchain.toml)
         run: rustup show
 
       - name: Cache cargo build
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
 
       - name: Build grok binary
-        run: cargo build -p xai-grok-pager-bin
+        run: cargo build --locked -p xai-grok-pager-bin
 
       - name: Smoke-test the binary
         run: ./target/debug/xai-grok-pager --version
 
       - name: Test (core + telemetry-disabled crates)
-        run: cargo test -p xai-grok-config -p xai-grok-telemetry -p xai-mixpanel
+        run: cargo test --locked -p xai-grok-config -p xai-grok-telemetry -p xai-mixpanel
+
+      # Unit tests only (--lib): they pin the auto-update hard-disable stubs.
+      # The crate's integration suites (test_network, test_downgrade_matrix,
+      # test_install_internal, ...) still exercise the disabled updater
+      # end-to-end and fail against the stubs, so they are not run here.
+      - name: Test (auto-update disable pins)
+        run: cargo test --locked -p xai-grok-update --lib

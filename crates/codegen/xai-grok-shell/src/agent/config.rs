@@ -8178,6 +8178,36 @@ reasoning_effort = "low"
     }
     #[test]
     #[serial]
+    fn resolve_telemetry_mode_hard_disabled_despite_env_config_and_remote() {
+        // Telemetry is hard-disabled: env, explicit config, a requirements
+        // pin, and remote settings must all be ignored.
+        unsafe { std::env::set_var("GROK_TELEMETRY_ENABLED", "true") };
+        let mut cfg = Config::default();
+        cfg.features.telemetry = Some(TelemetryMode::Enabled);
+        cfg.remote_settings = Some(crate::util::config::RemoteSettings {
+            telemetry_enabled: Some(true),
+            ..Default::default()
+        });
+        let r = cfg.resolve_telemetry_mode();
+        unsafe { std::env::remove_var("GROK_TELEMETRY_ENABLED") };
+        assert!(
+            r.value.is_disabled(),
+            "env + config + remote must not re-enable telemetry"
+        );
+        assert_eq!(r.source, ConfigSource::Default);
+        assert!(!cfg.is_telemetry_enabled());
+
+        cfg.requirements.telemetry.pin(
+            TelemetryMode::Enabled,
+            crate::config::RequirementSource::Unknown,
+        );
+        assert!(
+            cfg.resolve_telemetry_mode().value.is_disabled(),
+            "requirement pin must not re-enable telemetry"
+        );
+    }
+    #[test]
+    #[serial]
     fn resolve_trace_upload_stays_off_even_when_telemetry_on() {
         // Trace upload is hard-disabled regardless of telemetry mode.
         unsafe { std::env::remove_var("GROK_TELEMETRY_ENABLED") };
