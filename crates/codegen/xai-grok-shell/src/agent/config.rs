@@ -2058,6 +2058,8 @@ impl Config {
         self.resolve_two_pass_compaction().value
     }
     pub(crate) fn resolve_telemetry_mode(&self) -> Resolved<TelemetryMode> {
+        return Resolved::new(TelemetryMode::Disabled, ConfigSource::Default);
+        #[allow(unreachable_code)]
         if let Some(mode) = self.requirements.telemetry.pinned() {
             return Resolved::new(mode, ConfigSource::Requirement);
         }

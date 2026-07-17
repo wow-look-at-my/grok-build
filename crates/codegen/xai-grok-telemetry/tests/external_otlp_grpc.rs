@@ -1,7 +1,9 @@
-//! gRPC transport coverage for the external OTEL stream. This mirrors the
-//! primary HTTP/protobuf wire test in `external_otlp.rs`, but must live in its
-//! own integration-test binary because the external telemetry registry is a
-//! process-global `OnceLock`.
+//! gRPC-transport coverage of the **build-baseline disabled contract** for the
+//! external OTEL stream. Mirrors `external_otlp.rs` but points a valid gRPC
+//! double opt-in at a live collector: because `external::build_handle` returns
+//! `None` in this build, the stream never activates and the gRPC collector must
+//! receive nothing. Lives in its own integration-test binary because the
+//! external telemetry registry is a process-global `OnceLock`.
 
 mod otlp_collector;
 
@@ -37,8 +39,13 @@ fn external_stream_grpc_end_to_end() {
     };
 
     xai_grok_telemetry::external::init(Some(cfg));
-    assert!(xai_grok_telemetry::external::is_active());
+    assert!(
+        !xai_grok_telemetry::external::is_active(),
+        "external OTLP stream is hard-disabled in the build baseline (gRPC)"
+    );
 
+    // Emit through the real funnel; with the stream inert every emission is a
+    // no-op and nothing may reach the gRPC collector.
     xai_grok_telemetry::log_event(xai_grok_telemetry::events::SessionNew {
         session_id: "sess-grpc-1".into(),
         client_identifier: None,
@@ -80,48 +87,20 @@ fn external_stream_grpc_end_to_end() {
     });
 
     xai_grok_telemetry::external::flush();
-    assert!(
-        col::wait_until(std::time::Duration::from_secs(10), || {
-            collected.logs_len() > 0 && collected.metrics_len() > 0
-        }),
-        "gRPC collector must receive both signals"
-    );
 
-    let event_names = col::event_names(&collected);
-    for expected in [
-        "grok_code.session_start",
-        "grok_code.user_prompt",
-        "grok_code.api_request",
-    ] {
-        assert!(
-            event_names.iter().any(|n| n == expected),
-            "missing {expected} in {event_names:?}"
-        );
-    }
-
-    let metrics = col::metric_points(&collected);
-    assert!(
-        metrics.iter().any(|p| p.name == "grok_code.session.count"),
-        "missing session.count in {metrics:?}"
+    // Give any (erroneous) gRPC exporter ample time to phone home.
+    std::thread::sleep(std::time::Duration::from_millis(600));
+    assert_eq!(
+        collected.logs_len(),
+        0,
+        "disabled external stream must export no logs over gRPC"
     );
-    assert!(
-        metrics.iter().any(|p| p.name == "grok_code.token.usage"),
-        "missing token.usage in {metrics:?}"
-    );
-    for point in metrics {
-        assert_eq!(
-            point.temporality,
-            col::TEMPORALITY_DELTA,
-            "default temporality must be Delta over gRPC"
-        );
-    }
-
-    let raw = collected.raw_text();
-    assert!(!raw.contains("CANARY"), "canary reached the gRPC wire");
-    assert!(
-        !raw.contains(CANARY_MCP),
-        "MCP server name reached the gRPC wire"
+    assert_eq!(
+        collected.metrics_len(),
+        0,
+        "disabled external stream must export no metrics over gRPC"
     );
 
     xai_grok_telemetry::external::shutdown();
+    assert!(!xai_grok_telemetry::external::is_active());
 }

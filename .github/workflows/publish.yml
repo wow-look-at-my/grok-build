@@ -1,0 +1,88 @@
+name: Publish to buildhost
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      server:
+        description: buildhost server URL
+        default: https://pazer.build
+      version:
+        description: Release version (blank = auto-versioned)
+        default: ""
+
+permissions:
+  contents: read
+  id-token: write   # GitHub OIDC -> buildhost, so no static secret is required
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  PROTOC: /usr/bin/protoc
+  BUILDHOST_SERVER: ${{ github.event.inputs.server || 'https://pazer.build' }}
+  BUILDHOST_PROJECT: grok-build
+
+jobs:
+  build-release:
+    name: Build release binary
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install protoc
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler
+      - name: Install Rust toolchain (pinned by rust-toolchain.toml)
+        run: rustup show
+      - uses: Swatinem/rust-cache@v2
+      - name: Build release binary
+        run: cargo build --release -p xai-grok-pager-bin
+      - name: Stage artifact
+        run: |
+          mkdir -p dist
+          cp target/release/xai-grok-pager dist/grok-linux-amd64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: grok-linux-amd64
+          path: dist/grok-linux-amd64
+
+  publish:
+    name: Publish to buildhost
+    needs: build-release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: grok-linux-amd64
+          path: dist
+      - name: Create release
+        id: rel
+        uses: wow-look-at-my/buildhost/.github/actions/buildhost-create-release@master
+        with:
+          server: ${{ env.BUILDHOST_SERVER }}
+          token: ${{ secrets.BUILDHOST_TOKEN }}
+          project: ${{ env.BUILDHOST_PROJECT }}
+          version: ${{ github.event.inputs.version }}
+      - name: Upload binary
+        uses: wow-look-at-my/buildhost/.github/actions/buildhost-upload-artifact@master
+        with:
+          server: ${{ env.BUILDHOST_SERVER }}
+          token: ${{ secrets.BUILDHOST_TOKEN }}
+          project: ${{ env.BUILDHOST_PROJECT }}
+          version: ${{ steps.rel.outputs.version }}
+          os: linux
+          arch: amd64
+          path: dist/grok-linux-amd64
+          kind: binary
+      - name: Publish release
+        uses: wow-look-at-my/buildhost/.github/actions/buildhost-publish-release@master
+        with:
+          server: ${{ env.BUILDHOST_SERVER }}
+          token: ${{ secrets.BUILDHOST_TOKEN }}
+          project: ${{ env.BUILDHOST_PROJECT }}
+          version: ${{ steps.rel.outputs.version }}
