@@ -584,25 +584,11 @@ async fn upload_pair(
         return false;
     };
 
-    let gcs_config = TraceExportConfig {
-        bucket_url: handles.bucket_url.clone(),
-        service_account_key: None,
-        prefix_dir: None,
-        gcs_prefix: None,
-        absolute_paths: false,
-        archive_name_override: None,
-        upload_method: handles.upload_method.clone(),
-    };
-    let config = gcs_config.with_auth(Some(Arc::clone(&handles.auth_manager)));
-
-    if let Err(e) = xai_file_utils::gcs::upload_file(&config, heap_object, heap_path, heap_ct).await
-    {
-        return log_upload_result(heap_object, file_size, false, Some(&e.to_string()));
-    }
-    match xai_file_utils::gcs::upload_file(&config, meta_object, meta_path, meta_ct).await {
-        Ok(_) => log_upload_result(heap_object, file_size, true, None),
-        Err(e) => log_upload_result(heap_object, file_size, false, Some(&e.to_string())),
-    }
+    // Telemetry hard-disabled in this build: local heap profiling still runs,
+    // but the GCS upload egress is neutralized. The in-process test hook above
+    // is kept for unit tests; the real network upload never happens.
+    let _ = (handles, heap_path, heap_ct, meta_object, meta_path, meta_ct);
+    log_upload_result(heap_object, file_size, false, Some("telemetry_disabled"))
 }
 
 struct PrivateTempDir {

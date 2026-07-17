@@ -2082,6 +2082,12 @@ impl Config {
         Resolved::new(TelemetryMode::Disabled, ConfigSource::Default)
     }
     pub(crate) fn resolve_trace_upload(&self) -> Resolved<bool> {
+        // Trace upload is hard-disabled in this build: no env var
+        // (GROK_TELEMETRY_TRACE_UPLOAD), config key, requirement pin, or
+        // remote feature flag may re-enable it.
+        return Resolved::new(false, ConfigSource::Default);
+
+        #[allow(unreachable_code)]
         let mode = self.resolve_telemetry_mode();
         let ff = if mode.value.is_disabled() {
             None
@@ -8122,7 +8128,9 @@ reasoning_effort = "low"
     }
     #[test]
     #[serial]
-    fn resolve_trace_upload_explicit_config_wins_over_telemetry_off() {
+    fn resolve_trace_upload_explicit_config_cannot_reenable() {
+        // Trace upload is hard-disabled: neither explicit config nor a
+        // requirements pin may force it back on.
         unsafe { std::env::remove_var("GROK_TELEMETRY_ENABLED") };
         unsafe { std::env::remove_var("GROK_TELEMETRY_TRACE_UPLOAD") };
         let mut cfg = Config::default();
@@ -8130,15 +8138,18 @@ reasoning_effort = "low"
         cfg.telemetry.trace_upload = Some(true);
         let r = cfg.resolve_trace_upload();
         assert!(
-            r.value,
-            "explicit trace_upload config wins over telemetry off"
+            !r.value,
+            "explicit trace_upload config must not re-enable uploads"
         );
-        assert_eq!(r.source, ConfigSource::Config);
+        assert_eq!(r.source, ConfigSource::Default);
         cfg.telemetry.trace_upload = None;
         cfg.requirements
             .trace_upload
             .pin(true, crate::config::RequirementSource::Unknown);
-        assert!(cfg.resolve_trace_upload().value);
+        assert!(
+            !cfg.resolve_trace_upload().value,
+            "requirement pin must not re-enable uploads"
+        );
     }
     #[test]
     #[serial]
@@ -8157,15 +8168,18 @@ reasoning_effort = "low"
         assert_eq!(d["telemetry_mode"], serde_json::json!("false"));
         assert_eq!(d["in_remote_trace_upload_enabled"], serde_json::json!(true));
         assert_eq!(d["has_remote_settings"], serde_json::json!(true));
+        // Hard-disable: even explicit config cannot flip the decision; the
+        // raw input is still reported for debugging.
         cfg.telemetry.trace_upload = Some(true);
         let d = cfg.trace_upload_decision_debug();
-        assert_eq!(d["trace_upload"], serde_json::json!(true));
-        assert_eq!(d["trace_upload_source"], serde_json::json!("config"));
+        assert_eq!(d["trace_upload"], serde_json::json!(false));
+        assert_eq!(d["trace_upload_source"], serde_json::json!("default"));
         assert_eq!(d["in_cfg_telemetry_trace_upload"], serde_json::json!(true));
     }
     #[test]
     #[serial]
-    fn resolve_trace_upload_honors_config_when_telemetry_on() {
+    fn resolve_trace_upload_stays_off_even_when_telemetry_on() {
+        // Trace upload is hard-disabled regardless of telemetry mode.
         unsafe { std::env::remove_var("GROK_TELEMETRY_ENABLED") };
         unsafe { std::env::remove_var("GROK_TELEMETRY_TRACE_UPLOAD") };
         let mut cfg = Config::default();
@@ -8173,10 +8187,13 @@ reasoning_effort = "low"
         cfg.telemetry.trace_upload = Some(false);
         let r = cfg.resolve_trace_upload();
         assert!(!r.value);
-        assert_eq!(r.source, ConfigSource::Config);
+        assert_eq!(r.source, ConfigSource::Default);
         cfg.telemetry.trace_upload = None;
         let r = cfg.resolve_trace_upload();
-        assert!(r.value, "defaults on when telemetry fully enabled");
+        assert!(
+            !r.value,
+            "stays off even when telemetry mode is fully enabled"
+        );
     }
     #[test]
     #[serial]
