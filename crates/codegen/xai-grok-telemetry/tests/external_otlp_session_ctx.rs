@@ -1,8 +1,9 @@
-//! Wire test for ambient-context injection: when events are emitted inside a
-//! `with_session_ctx` scope, the external records must carry `session.id`,
-//! `turn_number`, `prompt.id`, and a monotonic `event.sequence` — and
-//! `prompt.id` must appear on events ONLY, never on metrics (unbounded
-//! cardinality). Complements the other wire tests, which emit outside any ctx.
+//! Wire test pinning the **build-baseline disabled contract** under ambient
+//! session context. Events emitted inside a `with_session_ctx` scope would,
+//! on a live stream, carry `session.id` / `turn_number` / `prompt.id` /
+//! `event.sequence`. Because `external::build_handle` returns `None` in this
+//! build, the stream never activates: emissions inside the ctx are no-ops and
+//! the in-process OTLP collector receives nothing.
 
 mod otlp_collector;
 
@@ -34,11 +35,13 @@ fn ambient_ctx_injects_session_turn_and_prompt_id() {
         app_entrypoint: "cli".into(),
     };
     external::init(Some(cfg));
-    assert!(external::is_active());
+    assert!(
+        !external::is_active(),
+        "external OTLP stream is hard-disabled in the build baseline (session ctx)"
+    );
 
     // Emit inside a session ctx (turn_number = 3) so the ambient snapshot is
-    // populated. `log_event` is synchronous and runs within the task-local
-    // scope of `with_session_ctx`.
+    // populated. With the stream disabled these emissions are no-ops.
     let ctx = xai_grok_telemetry::TelemetryCtx::new(
         "sess-ctx".to_owned(),
         Arc::new(tokio::sync::Mutex::new(3usize)),
@@ -67,56 +70,20 @@ fn ambient_ctx_injects_session_turn_and_prompt_id() {
     }));
 
     external::flush();
-    assert!(
-        col::wait_until(std::time::Duration::from_secs(10), || {
-            !collected.logs.lock().unwrap().is_empty()
-                && !collected.metrics.lock().unwrap().is_empty()
-        }),
-        "collector must receive both signals"
-    );
 
-    // ── Event carries session.id, turn_number, prompt.id, event.sequence ──
-    let prompt = col::find_event(&collected, "grok_code.user_prompt").expect("user_prompt present");
+    // Give any (erroneous) exporter ample time to phone home.
+    std::thread::sleep(std::time::Duration::from_millis(600));
     assert_eq!(
-        prompt.attrs.get("session.id").and_then(|v| v.as_str()),
-        Some("sess-ctx"),
-        "ambient session.id injected onto events"
+        collected.logs_len(),
+        0,
+        "disabled external stream must export no logs from a session ctx"
     );
     assert_eq!(
-        prompt.attrs.get("turn_number").and_then(|v| v.as_i64()),
-        Some(3),
-        "ambient turn_number injected onto events"
+        collected.metrics_len(),
+        0,
+        "disabled external stream must export no metrics from a session ctx"
     );
-    let prompt_id = prompt
-        .attrs
-        .get("prompt.id")
-        .and_then(|v| v.as_str())
-        .expect("prompt.id injected onto events");
-    assert!(!prompt_id.is_empty(), "prompt.id must be a real uuid");
-    assert!(
-        prompt.attrs.contains_key("event.sequence"),
-        "event.sequence injected onto every event"
-    );
-
-    // ── prompt.id / turn_number NEVER on metrics ────────────────────────
-    let tokens = col::find_metric(&collected, "grok_code.token.usage");
-    assert!(!tokens.is_empty(), "token.usage must export");
-    for p in &tokens {
-        assert!(
-            !p.attrs.contains_key("prompt.id"),
-            "prompt.id must never reach metrics"
-        );
-        assert!(
-            !p.attrs.contains_key("turn_number"),
-            "turn_number must never reach metrics"
-        );
-        // session.id DOES flow to metrics from the ambient ctx (cardinality
-        // opt-in, default on).
-        assert_eq!(
-            p.attrs.get("session.id").and_then(|v| v.as_str()),
-            Some("sess-ctx")
-        );
-    }
 
     external::shutdown();
+    assert!(!external::is_active());
 }

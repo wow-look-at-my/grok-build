@@ -62,6 +62,10 @@ impl Mixpanel {
         event: &str,
         properties: Option<HashMap<String, serde_json::Value>>,
     ) -> Result<(), Error> {
+        let _ = &self.client;
+        let _ = (event, &properties);
+        return Ok(());
+        #[allow(unreachable_code)]
         let props = self.prepare_properties(properties.unwrap_or_default());
 
         let payload = serde_json::json!([{
@@ -89,6 +93,9 @@ impl Mixpanel {
         distinct_id: &str,
         set: HashMap<String, serde_json::Value>,
     ) -> Result<(), Error> {
+        let _ = (self, distinct_id, &set);
+        return Ok(());
+        #[allow(unreachable_code)]
         let mut scrubbed = set;
         for v in scrubbed.values_mut() {
             xai_grok_secrets::redact_json_string_values(v);
