@@ -2371,6 +2371,33 @@ async fn refresh_deployment_config() {
 mod tests {
     use super::*;
 
+    /// Hard-disable pin: every download entry point must bail before any
+    /// network or filesystem I/O. Reverting a stub makes this fail — a real
+    /// attempt against the unroutable loopback port errors with a different
+    /// message (and would try to create the destination file).
+    #[tokio::test]
+    async fn downloads_are_disabled() {
+        let dest = std::path::Path::new("/nonexistent-grok-test/never-written");
+        let url = "http://127.0.0.1:9/artifact";
+        for (name, result) in [
+            (
+                "try_parallel_download",
+                try_parallel_download(url, dest, false).await,
+            ),
+            (
+                "download_with_progress",
+                download_with_progress(url, dest).await,
+            ),
+            ("download_silent", download_silent(url, dest).await),
+        ] {
+            let err = result.expect_err("downloads must be disabled");
+            assert!(
+                err.to_string().contains("auto-update disabled"),
+                "{name}: unexpected error: {err:#}"
+            );
+        }
+    }
+
     #[test]
     fn test_tmp_download_path_is_unique_per_version_and_per_attempt() {
         // The old `with_extension("tmp")` collapsed every 0.1.x versioned
