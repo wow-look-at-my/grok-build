@@ -122,6 +122,12 @@ jobs:
           # buildhost would treat as a branch name that `latest` never tracks
           # and retention pins forever. Tags cut from main belong to main.
           git_branch: ${{ github.ref_type == 'tag' && 'main' || github.ref_name }}
+          # Declare main as the project's default branch so the apex `latest`
+          # on buildhost resolves releases from main (the server seeds
+          # `master` and can only learn the real default branch from GitHub
+          # when it can reach the repo). Unknown inputs to composite actions
+          # only warn, so this is safe even before the action supports it.
+          default_branch: main
       - name: Upload binary
         uses: wow-look-at-my/buildhost/.github/actions/buildhost-upload-artifact@dbb62f004ddf871a116d110e92230e08b5b0995e # master
         with:
