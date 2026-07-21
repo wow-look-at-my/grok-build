@@ -860,7 +860,7 @@ pub(crate) async fn run(
         );
         app.active_announcements = xai_grok_announcements::filter_expired(announcements);
         if !app.active_announcements.is_empty() {
-            use rand::Rng;
+            use rand::RngExt;
             let idx = rand::rng().random_range(0..app.active_announcements.len());
             app.announcement = app.active_announcements.get(idx).cloned();
         }

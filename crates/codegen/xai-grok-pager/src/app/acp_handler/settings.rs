@@ -447,7 +447,7 @@ pub(super) fn pick_random_announcement(
     if announcements.is_empty() {
         return None;
     }
-    use rand::Rng;
+    use rand::RngExt;
     let idx = rand::rng().random_range(0..announcements.len());
     announcements.get(idx).cloned()
 }
