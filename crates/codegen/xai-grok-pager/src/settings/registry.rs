@@ -142,6 +142,8 @@ pub enum StringValidator {
     /// Validated against the live model catalog at commit time.
     /// Empty input is accepted as a "clear-default" sentinel.
     KnownModel,
+    /// Empty, or an absolute HTTP(S) URL without a query or fragment.
+    HttpUrlOrEmpty,
     /// No constraint (any UTF-8 accepted).
     Any,
 }
@@ -279,6 +281,69 @@ pub struct PagerLocalSnapshot {
     /// language actually in effect when `[ui].voice_stt_language` is unset but
     /// an explicit `[voice].language` applies.
     pub voice_stt_language: String,
+    /// User-managed OpenAI-compatible endpoint profile.
+    pub openai_compatible: OpenAiCompatibleSnapshot,
+}
+
+/// Pager mirror of `[openai_compatible]` plus the secret's presence bit.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpenAiCompatibleSnapshot {
+    pub enabled: bool,
+    pub base_url: String,
+    pub model: String,
+    pub api_backend: String,
+    pub context_window: u64,
+    pub make_default: bool,
+    pub api_key_configured: bool,
+}
+
+impl Default for OpenAiCompatibleSnapshot {
+    fn default() -> Self {
+        let profile = xai_grok_shell::agent::config::OpenAiCompatibleConfig::default();
+        Self {
+            enabled: profile.enabled,
+            base_url: profile.base_url,
+            model: profile.model,
+            api_backend: "chat_completions".to_owned(),
+            context_window: profile.context_window,
+            make_default: profile.make_default,
+            api_key_configured: false,
+        }
+    }
+}
+
+impl OpenAiCompatibleSnapshot {
+    pub fn from_effective_config(root: Option<&toml::Value>) -> Self {
+        let profile = root
+            .and_then(|root| root.get("openai_compatible"))
+            .and_then(|value| {
+                value
+                    .clone()
+                    .try_into::<xai_grok_shell::agent::config::OpenAiCompatibleConfig>()
+                    .ok()
+            })
+            .unwrap_or_default();
+        let api_backend = match profile.api_backend {
+            xai_grok_shell::sampling::ApiBackend::Responses => "responses",
+            _ => "chat_completions",
+        };
+        let api_key_configured = std::env::var("OPENAI_API_KEY")
+            .ok()
+            .is_some_and(|value| !value.trim().is_empty())
+            || xai_grok_shell::auth::read_openai_compatible_api_key(
+                &xai_grok_shell::util::grok_home::grok_home(),
+            )
+            .is_some_and(|value| !value.trim().is_empty());
+        Self {
+            enabled: profile.enabled,
+            base_url: profile.base_url,
+            model: profile.model,
+            api_backend: api_backend.to_owned(),
+            context_window: profile.context_window,
+            make_default: profile.make_default,
+            api_key_configured,
+        }
+    }
 }
 
 impl Default for PagerLocalSnapshot {
@@ -302,6 +367,7 @@ impl Default for PagerLocalSnapshot {
             auto_mode_gate: false,
             ask_user_question_timeout_enabled: None,
             voice_stt_language: xai_grok_voice::STT_LANGUAGE_DEFAULT.to_string(),
+            openai_compatible: OpenAiCompatibleSnapshot::default(),
         }
     }
 }
@@ -637,6 +703,34 @@ pub fn current_value_for(
         // None (no catalog yet) → empty string.
         "default_model" => Some(SettingValue::String(
             pager.current_model_name.clone().unwrap_or_default(),
+        )),
+        "openai_compatible.enabled" => Some(SettingValue::Bool(pager.openai_compatible.enabled)),
+        "openai_compatible.base_url" => Some(SettingValue::String(
+            pager.openai_compatible.base_url.clone(),
+        )),
+        "openai_compatible.model" => {
+            Some(SettingValue::String(pager.openai_compatible.model.clone()))
+        }
+        "openai_compatible.api_backend" => Some(SettingValue::Enum(
+            if pager.openai_compatible.api_backend == "responses" {
+                "responses"
+            } else {
+                "chat_completions"
+            },
+        )),
+        "openai_compatible.context_window" => Some(SettingValue::Int(
+            i64::try_from(pager.openai_compatible.context_window).unwrap_or(i64::MAX),
+        )),
+        "openai_compatible.make_default" => {
+            Some(SettingValue::Bool(pager.openai_compatible.make_default))
+        }
+        "openai_compatible.api_key" => Some(SettingValue::String(
+            if pager.openai_compatible.api_key_configured {
+                "Configured"
+            } else {
+                "Not configured"
+            }
+            .to_owned(),
         )),
         // max_thoughts_width: `u16` widened to `i64`.
         "max_thoughts_width" => Some(SettingValue::Int(ui.max_thoughts_width as i64)),
@@ -1089,6 +1183,30 @@ mod tests {
                         "UiConfig::default().fork_secondary_model must equal \
                          models::default_model() — drift here breaks the empty-fold contract",
                     );
+                }
+                ("openai_compatible.enabled", SettingKind::Bool { default }) => {
+                    assert_eq!(*default, OpenAiCompatibleSnapshot::default().enabled);
+                }
+                ("openai_compatible.base_url", SettingKind::String { default, .. }) => {
+                    assert_eq!(*default, OpenAiCompatibleSnapshot::default().base_url);
+                }
+                ("openai_compatible.model", SettingKind::String { default, .. }) => {
+                    assert_eq!(*default, OpenAiCompatibleSnapshot::default().model);
+                }
+                ("openai_compatible.api_backend", SettingKind::Enum { default, .. }) => {
+                    assert_eq!(*default, OpenAiCompatibleSnapshot::default().api_backend);
+                }
+                ("openai_compatible.context_window", SettingKind::Int { default, .. }) => {
+                    assert_eq!(
+                        *default,
+                        OpenAiCompatibleSnapshot::default().context_window as i64
+                    );
+                }
+                ("openai_compatible.make_default", SettingKind::Bool { default }) => {
+                    assert_eq!(*default, OpenAiCompatibleSnapshot::default().make_default);
+                }
+                ("openai_compatible.api_key", SettingKind::String { default, .. }) => {
+                    assert_eq!(*default, "");
                 }
 
                 _ => panic!(

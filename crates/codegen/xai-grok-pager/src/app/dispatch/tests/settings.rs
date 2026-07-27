@@ -1,5 +1,59 @@
 //! Tests for settings setters, toggles, resets, and rollback.
 use super::*;
+
+#[test]
+fn compatible_endpoint_cannot_enable_until_routable() {
+    use crate::settings::SettingValue;
+
+    let mut app = test_app_with_agent();
+    assert!(dispatch(Action::SetOpenAiCompatibleEnabled(true), &mut app).is_empty());
+    assert!(!app.openai_compatible.enabled);
+
+    app.openai_compatible.base_url = "http://localhost:11434/v1".to_owned();
+    app.openai_compatible.model = "llama3.3".to_owned();
+    let effects = dispatch(Action::SetOpenAiCompatibleEnabled(true), &mut app);
+    assert!(app.openai_compatible.enabled);
+    assert!(matches!(
+        effects.as_slice(),
+        [Effect::PersistSetting {
+            key: "openai_compatible.enabled",
+            value: SettingValue::Bool(true),
+            rollback_value: SettingValue::Bool(false),
+        }]
+    ));
+}
+
+#[test]
+fn compatible_api_key_never_enters_effect_debug_output_and_rolls_back_presence() {
+    let mut app = test_app_with_agent();
+    let effects = dispatch(
+        Action::SetOpenAiCompatibleApiKey(crate::app::actions::SecretString::new(
+            "never-print-this-key".to_owned(),
+        )),
+        &mut app,
+    );
+    assert!(app.openai_compatible.api_key_configured);
+    assert!(matches!(
+        effects.as_slice(),
+        [Effect::PersistOpenAiCompatibleApiKey {
+            rollback_configured: false,
+            ..
+        }]
+    ));
+    assert!(!format!("{effects:?}").contains("never-print-this-key"));
+
+    let rollback_effects = dispatch(
+        Action::TaskComplete(TaskResult::SettingPersistFailed {
+            key: "openai_compatible.api_key",
+            rollback_value: crate::settings::SettingValue::Bool(false),
+            error: "synthetic write failure".to_owned(),
+        }),
+        &mut app,
+    );
+    assert!(rollback_effects.is_empty());
+    assert!(!app.openai_compatible.api_key_configured);
+}
+
 /// `Action::ToggleVimMode` flips the active agent's `vim_mode` field,
 /// updates the in-process pager cache so future agents pick it up
 /// via `load_vim_mode`, emits `Effect::PersistSetting` so the new
