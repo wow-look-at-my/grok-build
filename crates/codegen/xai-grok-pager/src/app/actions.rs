@@ -10,6 +10,27 @@ use super::agent::AgentId;
 use crate::scrollback::entry::EntryId;
 use agent_client_protocol as acp;
 use xai_grok_shell::sampling::types::ReasoningEffort;
+
+/// Secret input carried through the action/effect pipeline without exposing
+/// its contents through derived debug output.
+#[derive(Clone, PartialEq, Eq)]
+pub struct SecretString(String);
+
+impl SecretString {
+    pub fn new(value: String) -> Self {
+        Self(value)
+    }
+
+    pub fn expose_secret(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Debug for SecretString {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("SecretString([REDACTED])")
+    }
+}
 /// Typed error for model switch failures. Replaces the raw `String` in
 /// `TaskResult::SwitchModelComplete` so dispatch can match on the variant
 /// instead of parsing strings.
@@ -575,6 +596,15 @@ pub enum Action {
     /// Clear the persisted fork-secondary model — restores to built-in
     /// default. Active agent keeps its value; next fork uses the default.
     ClearForkSecondaryModel,
+    /// Configure the user-managed OpenAI-compatible endpoint.
+    SetOpenAiCompatibleEnabled(bool),
+    SetOpenAiCompatibleBaseUrl(String),
+    SetOpenAiCompatibleModel(String),
+    SetOpenAiCompatibleApiBackend(String),
+    SetOpenAiCompatibleContextWindow(i64),
+    SetOpenAiCompatibleMakeDefault(bool),
+    /// The payload's `Debug` representation is always redacted.
+    SetOpenAiCompatibleApiKey(SecretString),
     /// Commit the `show_tips` preference. Persisted to `[cli].show_tips`.
     /// Restart-required — tips are resolved once at startup.
     SetShowTips(bool),
@@ -1609,6 +1639,12 @@ pub enum Effect {
         key: crate::settings::SettingKey,
         value: crate::settings::SettingValue,
         rollback_value: crate::settings::SettingValue,
+    },
+    /// Persist the compatible endpoint key to auth.json without ever placing
+    /// its bytes in a generic `SettingValue` or debug output.
+    PersistOpenAiCompatibleApiKey {
+        secret: SecretString,
+        rollback_configured: bool,
     },
     /// Send structured prompt blocks to the agent.
     /// Used for skill injection where the prompt consists of
@@ -2869,6 +2905,15 @@ pub enum TaskResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn secret_string_debug_is_redacted() {
+        let secret = SecretString::new("never-print-this-key".to_owned());
+        let debug = format!("{secret:?}");
+        assert!(!debug.contains("never-print-this-key"));
+        assert!(debug.contains("[REDACTED]"));
+    }
+
     /// `as_canonical` must return the wire strings that the settings
     /// picker and dispatcher pattern-match against.
     #[test]

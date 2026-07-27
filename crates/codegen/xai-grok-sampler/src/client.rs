@@ -506,7 +506,6 @@ impl SamplingClient {
                 AuthScheme::XApiKey => {
                     let header_value = HeaderValue::from_str(api_key).map_err(|_| {
                         tracing::debug!(
-                            api_key = %api_key,
                             "Invalid api_key: cannot be converted to a valid HTTP header"
                         );
                         SamplingError::Auth(
@@ -520,7 +519,6 @@ impl SamplingClient {
                     let bearer = format!("Bearer {}", api_key);
                     let header_value = HeaderValue::from_str(&bearer).map_err(|_| {
                         tracing::debug!(
-                            api_key = %api_key,
                             "Invalid api_key: cannot be converted to a valid HTTP Authorization header"
                         );
                         SamplingError::Auth(
@@ -530,6 +528,7 @@ impl SamplingClient {
                     })?;
                     headers.insert(AUTHORIZATION, header_value);
                 }
+                AuthScheme::None => {}
             }
         }
 
@@ -678,31 +677,23 @@ impl SamplingClient {
                         }
                     }
                 }
+                AuthScheme::None => {
+                    headers.remove(AUTHORIZATION);
+                    headers.remove(HeaderName::from_static("x-api-key"));
+                }
             }
         }
-        {
-            let auth_prefix = headers
-                .get(AUTHORIZATION)
-                .and_then(|v| v.to_str().ok())
-                .map(|s| s.chars().take(20).collect::<String>());
-            let x_api_key_prefix = headers
-                .get(HeaderName::from_static("x-api-key"))
-                .and_then(|v| v.to_str().ok())
-                .map(|s| s.chars().take(12).collect::<String>());
-            tracing::info!(
-                target: crate::sampling_log::TARGET,
-                event = "client_post",
-                base_url = %self.base_url,
-                model = %self.defaults.model,
-                api_backend = ?self.defaults.api_backend,
-                auth_scheme = ?self.defaults.auth_scheme,
-                has_bearer_resolver = self.bearer_resolver.is_some(),
-                has_authorization_header = headers.get(AUTHORIZATION).is_some(),
-                has_x_api_key_header = headers.get(HeaderName::from_static("x-api-key")).is_some(),
-                auth_header_prefix = auth_prefix.as_deref().unwrap_or("none"),
-                x_api_key_prefix = x_api_key_prefix.as_deref().unwrap_or("none"),
-            );
-        }
+        tracing::info!(
+            target: crate::sampling_log::TARGET,
+            event = "client_post",
+            base_url = %self.base_url,
+            model = %self.defaults.model,
+            api_backend = ?self.defaults.api_backend,
+            auth_scheme = ?self.defaults.auth_scheme,
+            has_bearer_resolver = self.bearer_resolver.is_some(),
+            has_authorization_header = headers.get(AUTHORIZATION).is_some(),
+            has_x_api_key_header = headers.get(HeaderName::from_static("x-api-key")).is_some(),
+        );
         if let Some(injector) = &self.header_injector {
             injector.inject(&mut headers);
         }
@@ -713,6 +704,9 @@ impl SamplingClient {
     /// authoritative (including `None` ⇒ nothing was sent). Without a resolver,
     /// fall back to construction-time default headers.
     fn current_sent_bearer_prefix(&self) -> Option<String> {
+        if self.defaults.auth_scheme == AuthScheme::None {
+            return None;
+        }
         if self.bearer_resolver.is_some() {
             return self
                 .bearer_resolver
@@ -741,6 +735,7 @@ impl SamplingClient {
                 .and_then(|v| v.to_str().ok())
                 .and_then(|s| s.strip_prefix("Bearer "))
                 .map(|s| s.to_string()),
+            AuthScheme::None => None,
         };
         raw.map(|mut s| {
             // Truncate in-place so we never materialize a heap-resident
@@ -778,6 +773,7 @@ impl SamplingClient {
         let auth_type = match (&self.defaults.auth_scheme, &auth_prefix) {
             (AuthScheme::XApiKey, Some(_)) => "x-api-key",
             (AuthScheme::Bearer, Some(_)) => "bearer",
+            (AuthScheme::None, _) => "none",
             (_, None) => "none",
         };
         crate::sampling_log::AuthInfo {
@@ -2281,6 +2277,28 @@ mod tests {
                 .get(HeaderName::from_static("x-api-key"))
                 .is_none()
         );
+    }
+
+    #[test]
+    fn no_auth_ignores_configured_key_and_live_bearer() {
+        let cfg = SamplerConfig {
+            api_key: Some("must-not-be-sent".to_string()),
+            auth_scheme: AuthScheme::None,
+            bearer_resolver: Some(std::sync::Arc::new(StaticBearerResolver(
+                "also-must-not-be-sent",
+            ))),
+            ..minimal_config()
+        };
+        let client = SamplingClient::new(cfg).expect("client should build");
+        let request = client
+            .post("https://example.test/v1/chat/completions")
+            .build()
+            .expect("request should build");
+
+        assert!(request.headers().get(AUTHORIZATION).is_none());
+        assert!(request.headers().get("x-api-key").is_none());
+        assert_eq!(client.auth_info().auth_type, "none");
+        assert!(client.auth_info().auth_prefix.is_none());
     }
 
     // Regression: a past change dropped User-Agent from sampling requests.

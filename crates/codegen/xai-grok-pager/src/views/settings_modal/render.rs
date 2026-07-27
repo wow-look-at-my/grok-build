@@ -1596,7 +1596,24 @@ pub(super) fn render_editing_value(
         unreachable!("editor renderer requires String or Int state");
     };
     let setting_key = *setting_key;
-    let buffer = editor.text();
+    let buffer_owned = editor.text();
+    let cursor_byte = editor.cursor_byte();
+    // API keys remain editable but are never painted into the terminal
+    // buffer. Use one ASCII mask cell per Unicode scalar so cursor math stays
+    // byte-safe.
+    let masked_buffer;
+    let effective_cursor_byte;
+    let buffer = if setting_key == "openai_compatible.api_key" {
+        masked_buffer = "*".repeat(buffer_owned.chars().count());
+        effective_cursor_byte = buffer_owned[..cursor_byte.min(buffer_owned.len())]
+            .chars()
+            .count();
+        masked_buffer.as_str()
+    } else {
+        effective_cursor_byte = cursor_byte;
+        buffer_owned
+    };
+    let cursor_byte = effective_cursor_byte;
     let validation_error = validation_error.as_deref();
     let Some(meta) = state.registry.find(setting_key) else {
         return;
@@ -1653,6 +1670,7 @@ pub(super) fn render_editing_value(
                 StringValidator::KnownModel => "<empty — use shell default>",
                 StringValidator::NonEmptyToken => "<type a value>",
                 StringValidator::Any => "<type a value>",
+                StringValidator::HttpUrlOrEmpty => "<http://host/v1>",
             },
             _ => "",
         };
