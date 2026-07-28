@@ -5548,6 +5548,12 @@ pub fn to_acp_model_info(
                     "agentType".to_string(),
                     serde_json::Value::String(info.agent_type.clone()),
                 );
+                if key.starts_with(crate::codex_provider::MODEL_ID_PREFIX) {
+                    map.insert(
+                        "provider".to_string(),
+                        serde_json::Value::String("codex".to_string()),
+                    );
+                }
                 if info.supports_reasoning_effort {
                     map.insert(
                         "supportsReasoningEffort".to_string(),

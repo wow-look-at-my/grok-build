@@ -278,6 +278,23 @@ impl acp::Agent for MvpAgent {
                 None,
             );
         }
+        match crate::codex_provider::discover_existing_models().await {
+            Ok(Some(models)) => {
+                let count = models.len();
+                self.models_manager.set_codex_models(models);
+                tracing::info!(count, "Codex provider restored from existing sign-in");
+            }
+            Ok(None) => {
+                self.models_manager.clear_codex_models();
+                tracing::debug!("Codex provider is signed out");
+            }
+            Err(error) => {
+                // Codex is an optional additive provider. A missing CLI or
+                // temporarily unavailable app-server must not block Grok/xAI
+                // startup or discard an already-loaded in-memory catalog.
+                tracing::debug!(%error, "Codex provider discovery unavailable");
+            }
+        }
         let disable_api_key_auth = self
             .cfg
             .borrow()
@@ -405,7 +422,8 @@ impl acp::Agent for MvpAgent {
             has_auth_provider_command: has_auth_provider,
             preferred_method,
         });
-        let auth_methods = built.methods;
+        let mut auth_methods = built.methods;
+        auth_methods.push(crate::codex_provider::auth_method());
         xai_grok_telemetry::unified_log::info(
             "auth: initialize() built auth_methods for ACP response",
             None,
@@ -558,7 +576,9 @@ impl acp::Agent for MvpAgent {
             None,
             Some(serde_json::json!({"method": arguments.method_id.0.as_ref()})),
         );
-        if let Some(preferred) = self.cfg.borrow().grok_com_config.preferred_method {
+        if arguments.method_id.0.as_ref() != crate::codex_provider::AUTH_METHOD_ID
+            && let Some(preferred) = self.cfg.borrow().grok_com_config.preferred_method
+        {
             let kind = auth_method::AuthMethodKind::from_id(&arguments.method_id);
             let allowed = match preferred {
                 crate::auth::PreferredAuthMethod::ApiKey => kind.is_api_key(),
@@ -583,6 +603,34 @@ impl acp::Agent for MvpAgent {
             }
         }
         match arguments.method_id.0.as_ref() {
+            crate::codex_provider::AUTH_METHOD_ID => {
+                let (url_tx, url_rx) = tokio::sync::oneshot::channel();
+                *self.auth_code_tx.borrow_mut() = None;
+                *self.auth_url_rx.borrow_mut() = Some(url_rx);
+                let result = crate::codex_provider::login(url_tx).await;
+                *self.auth_url_rx.borrow_mut() = None;
+                let models = result.map_err(|error| {
+                    emit_login_span(
+                        false,
+                        crate::codex_provider::AUTH_METHOD_ID,
+                        None,
+                        Some("login_flow_failed"),
+                    );
+                    let mut err = acp::Error::auth_required();
+                    err.message = error.to_string();
+                    err
+                })?;
+                let count = models.len();
+                self.models_manager.set_codex_models(models);
+                emit_login_span(
+                    true,
+                    crate::codex_provider::AUTH_METHOD_ID,
+                    None,
+                    None,
+                );
+                tracing::info!(count, "Codex provider signed in and models added");
+                Ok(Default::default())
+            }
             auth_method::XAI_API_KEY_METHOD_ID => {
                 if self.cfg.borrow().grok_com_config.api_key_auth_disabled() {
                     emit_login_span(false, "api_key", None, Some("disabled_by_admin"));
