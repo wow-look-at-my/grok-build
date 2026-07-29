@@ -1200,70 +1200,16 @@ impl ToolServer {
     /// Fire-and-forget `traces.donate`: `Ok` = queued; rejects surface
     /// only in server metrics. `otlp_request_b64` is a base64
     /// `ExportTraceServiceRequest` with a server-allowlisted `service.name`.
-    pub async fn donate_traces(&self, otlp_request_b64: &str) -> Result<(), ClientError> {
-        /// Borrowed wire shape so retried payloads are never cloned.
-        #[derive(serde::Serialize)]
-        struct ParamsRef<'a> {
-            otlp_request: &'a str,
-        }
-        let session = self
-            .inner()
-            .active_sessions
-            .lock()
-            .first()
-            .cloned()
-            .ok_or_else(|| {
-                ClientError::InvalidConfig(
-                    "donate_traces requires at least one bound session".to_owned(),
-                )
-            })?;
-        let connection = self.inner().borrow.connection();
-        let notification = xai_tool_protocol::JsonRpcNotification {
-            jsonrpc: JsonRpcVersion,
-            session_id: Some(session),
-            seq: None,
-            method: Method::TracesDonate.as_wire_str().to_owned(),
-            params: ParamsRef {
-                otlp_request: otlp_request_b64,
-            },
-        };
-        let text = serde_json::to_string(&notification).map_err(ClientError::from)?;
-        connection.send_outbound(text).await
+    pub async fn donate_traces(&self, _otlp_request_b64: &str) -> Result<(), ClientError> {
+        Ok(())
     }
 
     /// Fire-and-forget `logs.donate`: `Ok` = queued; rejects surface
     /// only in server metrics. `otlp_request_b64` is a base64
     /// `ExportLogsServiceRequest` with a server-allowlisted `service.name`.
     /// Requires a bound session (mirrors [`Self::donate_traces`]).
-    pub async fn donate_logs(&self, otlp_request_b64: &str) -> Result<(), ClientError> {
-        /// Borrowed wire shape so retried payloads are never cloned.
-        #[derive(serde::Serialize)]
-        struct ParamsRef<'a> {
-            otlp_request: &'a str,
-        }
-        let session = self
-            .inner()
-            .active_sessions
-            .lock()
-            .first()
-            .cloned()
-            .ok_or_else(|| {
-                ClientError::InvalidConfig(
-                    "donate_logs requires at least one bound session".to_owned(),
-                )
-            })?;
-        let connection = self.inner().borrow.connection();
-        let notification = xai_tool_protocol::JsonRpcNotification {
-            jsonrpc: JsonRpcVersion,
-            session_id: Some(session),
-            seq: None,
-            method: Method::LogsDonate.as_wire_str().to_owned(),
-            params: ParamsRef {
-                otlp_request: otlp_request_b64,
-            },
-        };
-        let text = serde_json::to_string(&notification).map_err(ClientError::from)?;
-        connection.send_outbound(text).await
+    pub async fn donate_logs(&self, _otlp_request_b64: &str) -> Result<(), ClientError> {
+        Ok(())
     }
 
     /// Fire-and-forget `metrics.donate`: `Ok` = queued; rejects surface
@@ -1271,24 +1217,8 @@ impl ToolServer {
     /// `ExportMetricsServiceRequest` with a server-allowlisted `service.name`.
     /// Unlike [`Self::donate_logs`], metrics are process-aggregate, so
     /// this does **not** require a bound session.
-    pub async fn donate_metrics(&self, otlp_request_b64: &str) -> Result<(), ClientError> {
-        /// Borrowed wire shape so retried payloads are never cloned.
-        #[derive(serde::Serialize)]
-        struct ParamsRef<'a> {
-            otlp_request: &'a str,
-        }
-        let connection = self.inner().borrow.connection();
-        let notification = xai_tool_protocol::JsonRpcNotification {
-            jsonrpc: JsonRpcVersion,
-            session_id: None,
-            seq: None,
-            method: Method::MetricsDonate.as_wire_str().to_owned(),
-            params: ParamsRef {
-                otlp_request: otlp_request_b64,
-            },
-        };
-        let text = serde_json::to_string(&notification).map_err(ClientError::from)?;
-        connection.send_outbound(text).await
+    pub async fn donate_metrics(&self, _otlp_request_b64: &str) -> Result<(), ClientError> {
+        Ok(())
     }
 
     /// Drive the inbound loop until either the connection actor
