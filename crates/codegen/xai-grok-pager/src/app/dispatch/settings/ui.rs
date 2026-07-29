@@ -7,12 +7,16 @@ use super::setters::{
     set_default_selected_permission_inner, set_display_refresh_auto_cadence_inner,
     set_fork_secondary_model_inner, set_group_tool_verbs_inner, set_hunk_tracker_mode_inner,
     set_invert_scroll_inner, set_keep_text_selection_inner, set_max_thoughts_width_inner,
-    set_multiline_mode, set_prompt_suggestions_inner, set_remember_tool_approvals_inner,
-    set_render_mermaid_inner, set_respect_manual_folds_inner, set_screen_mode_inner,
-    set_scroll_lines_inner, set_scroll_mode_inner, set_scroll_speed_inner,
-    set_show_thinking_blocks_inner, set_show_tips_inner, set_simple_mode_inner, set_theme_inner,
-    set_timeline_inner, set_timestamps, set_timestamps_inner, set_vim_mode_inner,
-    set_voice_capture_mode_inner, set_voice_stt_language_inner,
+    set_multiline_mode, set_openai_compatible_api_backend_inner,
+    set_openai_compatible_api_key_configured_inner, set_openai_compatible_base_url_inner,
+    set_openai_compatible_context_window_inner, set_openai_compatible_enabled_inner,
+    set_openai_compatible_make_default_inner, set_openai_compatible_model_inner,
+    set_prompt_suggestions_inner, set_remember_tool_approvals_inner, set_render_mermaid_inner,
+    set_respect_manual_folds_inner, set_screen_mode_inner, set_scroll_lines_inner,
+    set_scroll_mode_inner, set_scroll_speed_inner, set_show_thinking_blocks_inner,
+    set_show_tips_inner, set_simple_mode_inner, set_theme_inner, set_timeline_inner,
+    set_timestamps, set_timestamps_inner, set_vim_mode_inner, set_voice_capture_mode_inner,
+    set_voice_stt_language_inner,
 };
 use crate::app::actions::{Action, Effect};
 use crate::app::app_view::{ActiveView, AppView};
@@ -52,6 +56,7 @@ pub(crate) fn refresh_open_settings_modals(app: &mut AppView) {
     let auto_mode_gate_from_app = app.auto_mode_gate;
     let ask_user_question_timeout_enabled_from_app = app.ask_user_question_timeout_enabled;
     let voice_stt_language_from_app = app.voice_config.language.clone();
+    let openai_compatible_from_app = app.openai_compatible.clone();
     for agent in app.agents.values_mut() {
         // Walk both `Settings` and `ResetSettingsConfirm` — the
         // confirm dialog embeds settings state that must stay fresh
@@ -89,6 +94,7 @@ pub(crate) fn refresh_open_settings_modals(app: &mut AppView) {
                 auto_mode_gate: auto_mode_gate_from_app,
                 ask_user_question_timeout_enabled: ask_user_question_timeout_enabled_from_app,
                 voice_stt_language: voice_stt_language_from_app.clone(),
+                openai_compatible: openai_compatible_from_app.clone(),
             };
         }
     }
@@ -159,6 +165,7 @@ pub(in crate::app::dispatch) fn dispatch_open_settings(app: &mut AppView) -> Vec
     let auto_mode_gate_from_app = app.auto_mode_gate;
     let ask_user_question_timeout_enabled_from_app = app.ask_user_question_timeout_enabled;
     let voice_stt_language_from_app = app.voice_config.language.clone();
+    let openai_compatible_from_app = app.openai_compatible.clone();
 
     let Some(agent) = app.agents.get_mut(&id) else {
         return vec![];
@@ -202,6 +209,7 @@ pub(in crate::app::dispatch) fn dispatch_open_settings(app: &mut AppView) -> Vec
         auto_mode_gate: auto_mode_gate_from_app,
         ask_user_question_timeout_enabled: ask_user_question_timeout_enabled_from_app,
         voice_stt_language: voice_stt_language_from_app,
+        openai_compatible: openai_compatible_from_app,
     };
     let state = Box::new(SettingsModalState::new(
         registry,
@@ -672,6 +680,7 @@ pub(crate) fn build_pager_snapshot(app: &AppView) -> crate::settings::PagerLocal
         auto_mode_gate: app.auto_mode_gate,
         ask_user_question_timeout_enabled: app.ask_user_question_timeout_enabled,
         voice_stt_language: app.voice_config.language.clone(),
+        openai_compatible: app.openai_compatible.clone(),
     }
 }
 
@@ -796,6 +805,29 @@ pub(in crate::app::dispatch) fn action_for_reset(
                 );
                 None
             }
+        }
+        ("openai_compatible.enabled", SettingValue::Bool(value)) => {
+            Some(Action::SetOpenAiCompatibleEnabled(*value))
+        }
+        ("openai_compatible.base_url", SettingValue::String(value)) => {
+            Some(Action::SetOpenAiCompatibleBaseUrl(value.clone()))
+        }
+        ("openai_compatible.model", SettingValue::String(value)) => {
+            Some(Action::SetOpenAiCompatibleModel(value.clone()))
+        }
+        ("openai_compatible.api_backend", SettingValue::Enum(value)) => {
+            Some(Action::SetOpenAiCompatibleApiBackend((*value).to_owned()))
+        }
+        ("openai_compatible.context_window", SettingValue::Int(value)) => {
+            Some(Action::SetOpenAiCompatibleContextWindow(*value))
+        }
+        ("openai_compatible.make_default", SettingValue::Bool(value)) => {
+            Some(Action::SetOpenAiCompatibleMakeDefault(*value))
+        }
+        ("openai_compatible.api_key", SettingValue::String(_)) => {
+            Some(Action::SetOpenAiCompatibleApiKey(
+                crate::app::actions::SecretString::new(String::new()),
+            ))
         }
         // max_thoughts_width: direct round-trip.
         ("max_thoughts_width", SettingValue::Int(i)) => Some(Action::SetMaxThoughtsWidth(*i)),
@@ -1115,6 +1147,30 @@ pub(in crate::app::dispatch) fn apply_setting_rollback(
                 s.clone()
             };
             set_fork_secondary_model_inner(app, restored);
+        }
+        ("openai_compatible.enabled", SettingValue::Bool(value)) => {
+            set_openai_compatible_enabled_inner(app, *value)
+        }
+        ("openai_compatible.base_url", SettingValue::String(value)) => {
+            set_openai_compatible_base_url_inner(app, value.clone())
+        }
+        ("openai_compatible.model", SettingValue::String(value)) => {
+            set_openai_compatible_model_inner(app, value.clone())
+        }
+        ("openai_compatible.api_backend", SettingValue::Enum(value)) => {
+            set_openai_compatible_api_backend_inner(app, value)
+        }
+        ("openai_compatible.context_window", SettingValue::Int(value)) => {
+            set_openai_compatible_context_window_inner(
+                app,
+                u64::try_from(*value).unwrap_or_default(),
+            )
+        }
+        ("openai_compatible.make_default", SettingValue::Bool(value)) => {
+            set_openai_compatible_make_default_inner(app, *value)
+        }
+        ("openai_compatible.api_key", SettingValue::Bool(value)) => {
+            set_openai_compatible_api_key_configured_inner(app, *value)
         }
 
         _ => {

@@ -46,6 +46,8 @@ pub fn default_agent_type() -> String {
 pub const CLI_CHAT_PROXY_BASE_URL_DEFAULT: &str = "https://cli-chat-proxy.grok.com/v1";
 /// Default base URL for the public xAI API.
 pub const XAI_API_BASE_URL_DEFAULT: &str = "https://api.x.ai/v1";
+/// Stable catalog key for the endpoint configured through the TUI.
+pub const OPENAI_COMPATIBLE_MODEL_ID: &str = "openai-compatible";
 /// Default base URL for the asset server (profile images, etc.).
 pub const ASSET_SERVER_URL_DEFAULT: &str = "https://assets.grok.com";
 /// One or more environment variable names that may hold a model API key.
@@ -572,6 +574,123 @@ impl Default for EndpointsConfig {
             management_api_key: None,
             gcs_service_account_key: None,
         }
+    }
+}
+
+/// A single user-managed OpenAI-compatible inference endpoint.
+///
+/// The API key is deliberately not part of this structure. It is read from
+/// `OPENAI_API_KEY`, or from the dedicated owner-only scope in `auth.json`.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct OpenAiCompatibleConfig {
+    pub enabled: bool,
+    pub base_url: String,
+    pub model: String,
+    pub api_backend: ApiBackend,
+    pub context_window: u64,
+    pub make_default: bool,
+}
+
+impl Default for OpenAiCompatibleConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            base_url: String::new(),
+            model: String::new(),
+            api_backend: ApiBackend::ChatCompletions,
+            context_window: 200_000,
+            make_default: true,
+        }
+    }
+}
+
+impl OpenAiCompatibleConfig {
+    /// Validate the profile fields that are needed to route a request.
+    pub fn validation_error(&self) -> Option<String> {
+        let base_url = self.base_url.trim();
+        let parsed = url::Url::parse(base_url).ok();
+        if base_url.is_empty()
+            || parsed
+                .as_ref()
+                .is_none_or(|url| !matches!(url.scheme(), "http" | "https"))
+        {
+            return Some("base URL must be an absolute http:// or https:// URL".to_owned());
+        }
+        if parsed
+            .as_ref()
+            .is_some_and(|url| url.query().is_some() || url.fragment().is_some())
+        {
+            return Some("base URL cannot contain a query string or fragment".to_owned());
+        }
+        if self.model.trim().is_empty() {
+            return Some("model name cannot be empty".to_owned());
+        }
+        if self.context_window == 0 {
+            return Some("context window must be greater than zero".to_owned());
+        }
+        None
+    }
+
+    fn resolved_api_key(&self) -> Option<String> {
+        std::env::var("OPENAI_API_KEY")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .or_else(|| {
+                crate::auth::read_openai_compatible_api_key(&crate::util::grok_home::grok_home())
+                    .filter(|value| !value.trim().is_empty())
+            })
+    }
+
+    fn to_model_entry(&self) -> Option<ModelEntry> {
+        if !self.enabled {
+            return None;
+        }
+        if let Some(error) = self.validation_error() {
+            tracing::warn!(%error, "ignoring invalid [openai_compatible] configuration");
+            return None;
+        }
+        let api_key = self.resolved_api_key();
+        let entry = ModelEntryConfig {
+            id: Some(OPENAI_COMPATIBLE_MODEL_ID.to_owned()),
+            model: self.model.trim().to_owned(),
+            base_url: self.base_url.trim().trim_end_matches('/').to_owned(),
+            api_base_url: None,
+            name: Some(format!("OpenAI-compatible ({})", self.model.trim())),
+            description: Some("User-configured OpenAI-compatible endpoint".to_owned()),
+            context_window: NonZeroU64::new(self.context_window)
+                .expect("validated context window is non-zero"),
+            auto_compact_threshold_percent: None,
+            system_prompt_label: None,
+            temperature: None,
+            top_p: None,
+            max_completion_tokens: None,
+            api_backend: self.api_backend.clone(),
+            auth_scheme: Some(if api_key.is_some() {
+                AuthScheme::Bearer
+            } else {
+                AuthScheme::None
+            }),
+            agent_type: default_agent_type(),
+            inference_idle_timeout_secs: None,
+            max_retries: None,
+            api_key,
+            env_key: None,
+            extra_headers: IndexMap::new(),
+            use_concise: false,
+            hidden: false,
+            supported_in_api: true,
+            reasoning_effort: None,
+            supports_reasoning_effort: false,
+            reasoning_efforts: Vec::new(),
+            supports_backend_search: false,
+            compactions_remaining: None,
+            compaction_at_tokens: None,
+            show_model_fingerprint: false,
+            stream_tool_calls: None,
+            laziness_detector: LazinessDetectorPerModelConfig::default(),
+        };
+        Some(ModelEntry::from_config_entry(&entry))
     }
 }
 pub use xai_grok_config_types::{BoolFlag, ConfigSource, LazinessDetectorPerModelConfig, Resolved};
@@ -1294,6 +1413,9 @@ pub struct Config {
     pub toolset: ShellToolsetConfig,
     #[serde(default)]
     pub endpoints: EndpointsConfig,
+    /// Optional endpoint profile managed by `/settings`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub openai_compatible: Option<OpenAiCompatibleConfig>,
     #[serde(default)]
     pub telemetry: TelemetryConfig,
     /// Session behavior configuration.
@@ -1713,6 +1835,7 @@ impl Default for Config {
             ui: UiConfig::default(),
             toolset: ShellToolsetConfig::default(),
             endpoints,
+            openai_compatible: None,
             telemetry: TelemetryConfig::default(),
             session: SessionConfig::default(),
             agent: AgentSelectionConfig::default(),
@@ -1883,6 +2006,11 @@ impl Config {
         config.image_description_model = model_overrides.image_description;
         config.prompt_suggest_model_pin = model_overrides.prompt_suggestion;
         config.apply_env_overrides();
+        if config.openai_compatible.as_ref().is_some_and(|profile| {
+            profile.enabled && profile.make_default && profile.validation_error().is_none()
+        }) {
+            config.models.default = Some(OPENAI_COMPATIBLE_MODEL_ID.to_owned());
+        }
         Ok(config)
     }
     /// Populate `#[serde(skip)]` subagent fields from `SubagentsConfig::resolve()`.
@@ -3183,6 +3311,13 @@ pub fn resolve_model_list(
         }
         resolved = prefetched;
     }
+    if let Some(entry) = cfg
+        .openai_compatible
+        .as_ref()
+        .and_then(OpenAiCompatibleConfig::to_model_entry)
+    {
+        resolved.insert(OPENAI_COMPATIBLE_MODEL_ID.to_owned(), entry);
+    }
     for (key, model_override) in &cfg.config_models {
         let had_base = resolved.contains_key(key);
         let base = resolved.shift_remove(key);
@@ -3931,11 +4066,16 @@ impl ModelEntry {
     fn own_credential(&self) -> Option<String> {
         first_own_credential(self.api_key.as_deref(), self.env_key.as_ref())
     }
-    /// `true` when the model has a non-empty `api_key` or an `env_key` that
-    /// resolves to a non-empty value.
+    /// `true` when the model is self-contained for authentication: it has a
+    /// non-empty `api_key`, an `env_key` that resolves to a non-empty value,
+    /// or it explicitly opts out of authentication.
+    ///
+    /// Treating `AuthScheme::None` as self-contained prevents a signed-in
+    /// session credential (and its live resolver) from being inherited by a
+    /// local unauthenticated endpoint.
     /// Probes `std::env::var` at call time — result is not stable across env changes.
     pub fn has_own_credentials(&self) -> bool {
-        self.own_credential().is_some()
+        self.info.auth_scheme == AuthScheme::None || self.own_credential().is_some()
     }
 }
 impl std::ops::Deref for ModelEntry {
@@ -4313,6 +4453,14 @@ pub(crate) fn first_own_credential(
 /// When `env_key` lists multiple names, the first set non-empty value is used.
 pub fn resolve_credentials(model: &ModelEntry, session_key: Option<&str>) -> ResolvedCredentials {
     let info = model.info();
+    if info.auth_scheme == AuthScheme::None {
+        return ResolvedCredentials {
+            api_key: None,
+            base_url: info.base_url.clone(),
+            auth_type: xai_chat_state::AuthType::ApiKey,
+            auth_scheme: AuthScheme::None,
+        };
+    }
     let (api_key, base_url, auth_type) = if let Some(key) = model.own_credential() {
         (
             Some(key),
@@ -4839,6 +4987,12 @@ pub fn to_acp_model_info(
                     "agentType".to_string(),
                     serde_json::Value::String(info.agent_type.clone()),
                 );
+                if key.starts_with(crate::codex_provider::MODEL_ID_PREFIX) {
+                    map.insert(
+                        "provider".to_string(),
+                        serde_json::Value::String("codex".to_string()),
+                    );
+                }
                 if info.supports_reasoning_effort {
                     map.insert(
                         "supportsReasoningEffort".to_string(),
@@ -5927,6 +6081,14 @@ reasoning_effort = "low"
             None,
         );
         assert!(config_model.has_own_credentials());
+
+        let mut no_auth =
+            test_model_entry("local-model", "http://localhost:11434/v1", None, None, None);
+        no_auth.info.auth_scheme = AuthScheme::None;
+        assert!(
+            no_auth.has_own_credentials(),
+            "an explicitly unauthenticated model must not inherit session credentials"
+        );
     }
     /// The `ConfigUnavailable → Unknown` arm matters for safety: a transient
     /// config failure must not read as a definite `NotByok`, which would drive
@@ -5956,6 +6118,13 @@ reasoning_effort = "low"
         assert_eq!(
             byok_from_lookup(&ModelLookup::Loaded(Some(&session))),
             ModelByok::NotByok,
+        );
+        let mut no_auth = test_model_entry("m", "http://localhost:11434/v1", None, None, None);
+        no_auth.info.auth_scheme = AuthScheme::None;
+        assert_eq!(
+            byok_from_lookup(&ModelLookup::Loaded(Some(&no_auth))),
+            ModelByok::Byok,
+            "no-auth models must keep the session-token resolver disabled",
         );
     }
     #[test]
@@ -11330,5 +11499,80 @@ default = "grok-4.5"
         let r = resolve_mcp_recursive_config_watch(None, None, None, None, Some(false));
         assert!(!r.value);
         assert_eq!(r.source, ConfigSource::Remote);
+    }
+
+    #[test]
+    fn openai_compatible_profile_parses_and_becomes_default() {
+        let raw: toml::Value = toml::from_str(
+            r#"
+            [openai_compatible]
+            enabled = true
+            base_url = "http://localhost:11434/v1"
+            model = "llama3.3"
+            api_backend = "responses"
+            context_window = 131072
+            make_default = true
+            "#,
+        )
+        .unwrap();
+        let cfg = Config::new_from_toml_cfg(&raw).unwrap();
+        let profile = cfg.openai_compatible.as_ref().expect("profile");
+        assert!(profile.enabled);
+        assert_eq!(profile.base_url, "http://localhost:11434/v1");
+        assert_eq!(profile.model, "llama3.3");
+        assert_eq!(profile.api_backend, ApiBackend::Responses);
+        assert_eq!(profile.context_window, 131_072);
+        assert_eq!(
+            cfg.models.default.as_deref(),
+            Some(OPENAI_COMPATIBLE_MODEL_ID)
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn openai_compatible_profile_adds_routable_catalog_entry() {
+        let _key = EnvGuard::set("OPENAI_API_KEY", "compat-test-key");
+        let mut cfg = Config::default();
+        cfg.openai_compatible = Some(OpenAiCompatibleConfig {
+            enabled: true,
+            base_url: "https://example.test/openai/v1/".to_owned(),
+            model: "example-model".to_owned(),
+            api_backend: ApiBackend::ChatCompletions,
+            context_window: 64_000,
+            make_default: false,
+        });
+        let models = resolve_model_list(&cfg, None);
+        let entry = models
+            .get(OPENAI_COMPATIBLE_MODEL_ID)
+            .expect("compatible model must be injected");
+        assert_eq!(entry.info.model, "example-model");
+        assert_eq!(entry.info.base_url, "https://example.test/openai/v1");
+        assert_eq!(entry.info.context_window.get(), 64_000);
+        assert_eq!(entry.info.auth_scheme, AuthScheme::Bearer);
+        assert_eq!(entry.api_key.as_deref(), Some("compat-test-key"));
+    }
+
+    #[test]
+    fn no_auth_scheme_never_forwards_session_or_model_credentials() {
+        let mut entry = ModelEntry::fallback("local-model", &EndpointsConfig::default());
+        entry.info.base_url = "http://localhost:1234/v1".to_owned();
+        entry.info.auth_scheme = AuthScheme::None;
+        entry.api_key = Some("must-not-be-used".to_owned());
+        let resolved = resolve_credentials(&entry, Some("first-party-session-token"));
+        assert_eq!(resolved.auth_scheme, AuthScheme::None);
+        assert_eq!(resolved.api_key, None);
+        assert_eq!(resolved.base_url, "http://localhost:1234/v1");
+    }
+
+    #[test]
+    fn invalid_openai_compatible_profile_is_not_injected() {
+        let mut cfg = Config::default();
+        cfg.openai_compatible = Some(OpenAiCompatibleConfig {
+            enabled: true,
+            base_url: "not a URL".to_owned(),
+            model: "model".to_owned(),
+            ..Default::default()
+        });
+        assert!(!resolve_model_list(&cfg, None).contains_key(OPENAI_COMPATIBLE_MODEL_ID));
     }
 }
