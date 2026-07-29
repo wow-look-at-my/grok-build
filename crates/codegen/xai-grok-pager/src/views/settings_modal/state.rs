@@ -72,7 +72,7 @@ pub enum RowEntry {
 }
 
 /// Mode state for the modal.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub enum SettingsModalMode {
     Browse,
     /// `/` was pressed; chars filter the visible rows.
@@ -103,51 +103,6 @@ pub enum SettingsModalMode {
         cursor_byte: usize,
         validation_error: Option<String>,
     },
-}
-
-impl std::fmt::Debug for SettingsModalMode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Browse => f.write_str("Browse"),
-            Self::FilterFocused => f.write_str("FilterFocused"),
-            Self::PickingEnum {
-                key,
-                choices_idx,
-                original_value,
-                supports_preview,
-            } => f
-                .debug_struct("PickingEnum")
-                .field("key", key)
-                .field("choices_idx", choices_idx)
-                .field("original_value", original_value)
-                .field("supports_preview", supports_preview)
-                .finish(),
-            Self::PickingGroup { key, child_idx } => f
-                .debug_struct("PickingGroup")
-                .field("key", key)
-                .field("child_idx", child_idx)
-                .finish(),
-            Self::EditingValue {
-                key,
-                buffer,
-                cursor_byte,
-                validation_error,
-            } => f
-                .debug_struct("EditingValue")
-                .field("key", key)
-                .field(
-                    "buffer",
-                    if *key == "openai_compatible.api_key" {
-                        &"[REDACTED]" as &dyn std::fmt::Debug
-                    } else {
-                        buffer as &dyn std::fmt::Debug
-                    },
-                )
-                .field("cursor_byte", cursor_byte)
-                .field("validation_error", validation_error)
-                .finish(),
-        }
-    }
 }
 
 /// Settings modal state. Boxed inside `ActiveModal::Settings` to
@@ -545,9 +500,6 @@ impl SettingsModalState {
             return false;
         };
         let buffer = match (&meta.kind, self.value_for(key)) {
-            // The row displays only a presence bit. Never seed the editor with
-            // that label (or with the stored secret).
-            (SettingKind::String { .. }, _) if key == "openai_compatible.api_key" => String::new(),
             (SettingKind::String { .. }, Some(SettingValue::String(s))) => s,
             (SettingKind::Int { .. }, Some(SettingValue::Int(i))) => i.to_string(),
             // Fallback for registry skew — seed from default.
@@ -738,8 +690,6 @@ pub(super) fn action_for_bool(key: SettingKey, new: bool) -> Option<Action> {
         "show_tips" => Some(Action::SetShowTips(new)),
         "auto_update" => Some(Action::SetAutoUpdate(new)),
         "display_refresh_auto_cadence" => Some(Action::SetDisplayRefreshAutoCadence(new)),
-        "openai_compatible.enabled" => Some(Action::SetOpenAiCompatibleEnabled(new)),
-        "openai_compatible.make_default" => Some(Action::SetOpenAiCompatibleMakeDefault(new)),
         _ => None,
     }
 }
@@ -816,9 +766,6 @@ pub(super) fn action_for_enum_commit(key: SettingKey, choice: &'static str) -> O
         "default_selected_permission" => {
             Some(Action::SetDefaultSelectedPermission(choice.to_string()))
         }
-        "openai_compatible.api_backend" => {
-            Some(Action::SetOpenAiCompatibleApiBackend(choice.to_string()))
-        }
         _ => None,
     }
 }
@@ -850,11 +797,6 @@ pub(super) fn action_for_string(
                     .map(Action::SetForkSecondaryModel)
             }
         }
-        "openai_compatible.base_url" => Some(Action::SetOpenAiCompatibleBaseUrl(value)),
-        "openai_compatible.model" => Some(Action::SetOpenAiCompatibleModel(value)),
-        "openai_compatible.api_key" => Some(Action::SetOpenAiCompatibleApiKey(
-            crate::app::actions::SecretString::new(value),
-        )),
 
         _ => {
             let _ = value;
@@ -870,7 +812,6 @@ pub(super) fn action_for_int(key: SettingKey, value: i64) -> Option<Action> {
         "max_thoughts_width" => Some(Action::SetMaxThoughtsWidth(value)),
         "scroll_speed" => Some(Action::SetScrollSpeed(value)),
         "scroll_lines" => Some(Action::SetScrollLines(value)),
-        "openai_compatible.context_window" => Some(Action::SetOpenAiCompatibleContextWindow(value)),
         _ => None,
     }
 }
@@ -909,24 +850,6 @@ pub(super) fn validate_string(
                 None
             } else {
                 Some(format!("Unknown model: \"{buffer}\""))
-            }
-        }
-        StringValidator::HttpUrlOrEmpty => {
-            if buffer.is_empty() {
-                return None;
-            }
-            match url::Url::parse(buffer) {
-                Ok(url)
-                    if matches!(url.scheme(), "http" | "https")
-                        && url.query().is_none()
-                        && url.fragment().is_none() =>
-                {
-                    None
-                }
-                _ => Some(
-                    "Use an absolute http:// or https:// URL without a query or fragment"
-                        .to_owned(),
-                ),
             }
         }
     }

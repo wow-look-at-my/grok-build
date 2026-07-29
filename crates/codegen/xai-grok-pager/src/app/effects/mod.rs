@@ -1878,39 +1878,6 @@ pub(crate) fn execute(
                     }
                 });
         }
-        Effect::PersistOpenAiCompatibleApiKey {
-            secret,
-            rollback_configured,
-        } => {
-            tasks.spawn(async move {
-                let configured = !secret.expose_secret().trim().is_empty()
-                    || std::env::var("OPENAI_API_KEY")
-                        .ok()
-                        .is_some_and(|value| !value.trim().is_empty());
-                match xai_grok_shell::util::config::set_openai_compatible_api_key(
-                    secret.expose_secret().to_owned(),
-                )
-                .await
-                {
-                    Ok(()) => TaskResult::SettingPersisted {
-                        key: "openai_compatible.api_key",
-                        value: crate::settings::SettingValue::String(
-                            if configured {
-                                "Configured"
-                            } else {
-                                "Not configured"
-                            }
-                            .to_owned(),
-                        ),
-                    },
-                    Err(error) => TaskResult::SettingPersistFailed {
-                        key: "openai_compatible.api_key",
-                        rollback_value: crate::settings::SettingValue::Bool(rollback_configured),
-                        error: error.to_string(),
-                    },
-                }
-            });
-        }
         Effect::Authenticate {
             request_seq,
             method_id,

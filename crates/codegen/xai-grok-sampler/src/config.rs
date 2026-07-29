@@ -21,12 +21,6 @@ pub enum AuthScheme {
     #[default]
     Bearer,
     XApiKey,
-    /// Do not attach authentication headers.
-    ///
-    /// This is useful for local OpenAI-compatible servers and, importantly,
-    /// prevents a live first-party session credential from being forwarded to
-    /// an unrelated endpoint.
-    None,
 }
 
 /// All knobs that control a single sampling request.

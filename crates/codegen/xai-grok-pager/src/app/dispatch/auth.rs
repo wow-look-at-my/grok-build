@@ -1,7 +1,5 @@
 //! Login, logout, account switching, and auth-code submission dispatchers.
 
-use agent_client_protocol as acp;
-
 use super::ctx::{restore_auth_return_view, show_welcome};
 use super::queue::maybe_drain_queue;
 use super::router::dispatch;
@@ -190,31 +188,7 @@ pub(super) fn dispatch_login(app: &mut AppView) -> Vec<Effect> {
         };
         return vec![];
     };
-    let mode = app.auth_start_mode;
-    start_login(app, method_id, mode)
-}
 
-/// Start the additive Codex login flow without changing the primary xAI auth
-/// method selected for normal `/login`, re-auth, billing, or logout behavior.
-pub(super) fn dispatch_login_codex(app: &mut AppView) -> Vec<Effect> {
-    let Some(method) = app
-        .auth_methods
-        .iter()
-        .find(|method| method.id().0.as_ref() == xai_grok_shell::CODEX_AUTH_METHOD_ID)
-    else {
-        app.auth_state = AuthState::Pending {
-            error: Some(
-                "Codex sign-in is unavailable; update Grok Build and try again".to_string(),
-            ),
-        };
-        return vec![];
-    };
-    let method_id = method.id().clone();
-    app.login_label = Some(method.name().to_string());
-    start_login(app, method_id, AuthMode::Pending)
-}
-
-fn start_login(app: &mut AppView, method_id: acp::AuthMethodId, mode: AuthMode) -> Vec<Effect> {
     // Surface the auth UI when triggered from inside a session. `show_welcome`
     // resets ephemeral state here, covering the AuthComplete / cancel-login
     // fallbacks too (`auth_return_view` is only ever set here).
@@ -230,7 +204,7 @@ fn start_login(app: &mut AppView, method_id: acp::AuthMethodId, mode: AuthMode) 
         request_seq,
         handle: None,
         auth_url: None,
-        mode,
+        mode: app.auth_start_mode,
     };
 
     vec![

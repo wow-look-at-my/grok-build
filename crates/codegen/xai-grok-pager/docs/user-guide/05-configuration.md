@@ -259,30 +259,6 @@ client_id = "0oa1b2c3d4e5f6g7h8i9"
 
 Add custom model endpoints to use alternative providers or self-hosted models.
 
-For a single OpenAI-compatible endpoint, the easiest path is `/settings` →
-**Models**. Configure the **Compatible endpoint** fields, enable the endpoint,
-and start a new session. The settings pane writes the equivalent configuration:
-
-```toml
-[openai_compatible]
-enabled = true
-base_url = "http://localhost:11434/v1"
-model = "llama3.3"
-api_backend = "chat_completions"      # "chat_completions" or "responses"
-context_window = 131072
-make_default = true
-```
-
-The base URL must include any provider-specific prefix such as `/v1`; Grok
-appends `/chat/completions` or `/responses`. The API key entered in the
-settings pane is stored separately in `~/.grok/auth.json`, never in
-`config.toml`. `OPENAI_API_KEY` takes precedence over that stored key. If
-neither is set, Grok sends no authentication header, which supports local
-servers without leaking a signed-in xAI session credential.
-
-Use manual model entries when you need multiple custom endpoints or advanced
-per-model settings:
-
 ```toml
 [model.my-model]
 model = "model-id"                    # model identifier sent to API
@@ -755,7 +731,6 @@ Key environment variables. See the README for the complete list.
 | Variable | Description |
 |----------|-------------|
 | `XAI_API_KEY` | API key from console.x.ai |
-| `OPENAI_API_KEY` | API key for the configured `[openai_compatible]` endpoint; overrides its stored TUI key |
 | `GROK_AUTH_PROVIDER_COMMAND` | External auth binary path |
 | `GROK_AUTH_PROVIDER_LABEL` | Display name on TUI login screen |
 | `GROK_AUTH_TOKEN_TTL` | Token lifetime in seconds |
