@@ -67,7 +67,10 @@ fn external_stream_gates_on_end_to_end() {
         team_id: Some("team-7".into()),
         deployment_id: Some("deploy-eu".into()),
     });
-    assert!(!external::is_active(), "set_identity must not activate a disabled stream");
+    assert!(
+        !external::is_active(),
+        "set_identity must not activate a disabled stream"
+    );
     assert!(!xai_grok_telemetry::is_enabled());
 
     xai_grok_telemetry::log_event(xai_grok_telemetry::events::SessionHarness {
