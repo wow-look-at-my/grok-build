@@ -871,54 +871,6 @@ pub(crate) async fn persist_setting(
                 .await
                 .map_err(|e| e.to_string())
         }
-        "openai_compatible.enabled" => {
-            let SettingValue::Bool(value) = value else {
-                return Err(kind_mismatch(key, "Bool", &value));
-            };
-            xai_grok_shell::util::config::set_openai_compatible_enabled(value)
-                .await
-                .map_err(|e| e.to_string())
-        }
-        "openai_compatible.base_url" => {
-            let SettingValue::String(value) = value else {
-                return Err(kind_mismatch(key, "String", &value));
-            };
-            xai_grok_shell::util::config::set_openai_compatible_base_url(value)
-                .await
-                .map_err(|e| e.to_string())
-        }
-        "openai_compatible.model" => {
-            let SettingValue::String(value) = value else {
-                return Err(kind_mismatch(key, "String", &value));
-            };
-            xai_grok_shell::util::config::set_openai_compatible_model(value)
-                .await
-                .map_err(|e| e.to_string())
-        }
-        "openai_compatible.api_backend" => {
-            let SettingValue::Enum(value) = value else {
-                return Err(kind_mismatch(key, "Enum", &value));
-            };
-            xai_grok_shell::util::config::set_openai_compatible_api_backend(value.to_owned())
-                .await
-                .map_err(|e| e.to_string())
-        }
-        "openai_compatible.context_window" => {
-            let SettingValue::Int(value) = value else {
-                return Err(kind_mismatch(key, "Int", &value));
-            };
-            xai_grok_shell::util::config::set_openai_compatible_context_window(value)
-                .await
-                .map_err(|e| e.to_string())
-        }
-        "openai_compatible.make_default" => {
-            let SettingValue::Bool(value) = value else {
-                return Err(kind_mismatch(key, "Bool", &value));
-            };
-            xai_grok_shell::util::config::set_openai_compatible_make_default(value)
-                .await
-                .map_err(|e| e.to_string())
-        }
         "scroll_speed" => {
             let SettingValue::Int(i) = value else {
                 return Err(kind_mismatch("scroll_speed", "Int", &value));

@@ -1,63 +1,6 @@
 use super::persist::update_config;
 use anyhow::Result;
 
-fn openai_compatible_mut(
-    cfg: &mut super::Config,
-) -> &mut crate::agent::config::OpenAiCompatibleConfig {
-    cfg.openai_compatible
-        .get_or_insert_with(crate::agent::config::OpenAiCompatibleConfig::default)
-}
-
-/// Persist whether the user-managed OpenAI-compatible endpoint is active.
-pub async fn set_openai_compatible_enabled(value: bool) -> Result<()> {
-    update_config(|cfg| openai_compatible_mut(cfg).enabled = value).await
-}
-
-/// Persist the API root; protocol paths are appended by the sampler.
-pub async fn set_openai_compatible_base_url(value: String) -> Result<()> {
-    update_config(|cfg| openai_compatible_mut(cfg).base_url = value.trim().to_owned()).await
-}
-
-/// Persist the routing model slug sent to the compatible server.
-pub async fn set_openai_compatible_model(value: String) -> Result<()> {
-    update_config(|cfg| openai_compatible_mut(cfg).model = value.trim().to_owned()).await
-}
-
-/// Persist the compatible wire protocol.
-pub async fn set_openai_compatible_api_backend(value: String) -> Result<()> {
-    let backend = match value.as_str() {
-        "chat_completions" => crate::sampling::ApiBackend::ChatCompletions,
-        "responses" => crate::sampling::ApiBackend::Responses,
-        other => anyhow::bail!("unsupported OpenAI-compatible API backend: {other}"),
-    };
-    update_config(|cfg| openai_compatible_mut(cfg).api_backend = backend).await
-}
-
-/// Persist the token context window used for compaction decisions.
-pub async fn set_openai_compatible_context_window(value: i64) -> Result<()> {
-    let value = u64::try_from(value)
-        .ok()
-        .filter(|value| *value > 0)
-        .ok_or_else(|| anyhow::anyhow!("context window must be greater than zero"))?;
-    update_config(|cfg| openai_compatible_mut(cfg).context_window = value).await
-}
-
-/// Persist whether this profile should become the default model.
-pub async fn set_openai_compatible_make_default(value: bool) -> Result<()> {
-    update_config(|cfg| openai_compatible_mut(cfg).make_default = value).await
-}
-
-/// Store or clear the endpoint key in auth.json, never config.toml.
-pub async fn set_openai_compatible_api_key(value: String) -> Result<()> {
-    let grok_home = crate::util::grok_home::grok_home();
-    if value.trim().is_empty() {
-        crate::auth::clear_openai_compatible_api_key(&grok_home)?;
-    } else {
-        crate::auth::store_openai_compatible_api_key(&grok_home, value.trim())?;
-    }
-    Ok(())
-}
-
 // ---------------------------------------------------------------------------
 // Settings helpers — typed disk-write wrappers for each setting.
 // All route through `update_config` → `merge_section` → `save_config`.

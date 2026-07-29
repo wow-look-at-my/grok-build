@@ -105,9 +105,6 @@ pub struct ModelsManager {
 
 struct Inner {
     prefetched: RwLock<Option<IndexMap<String, ModelEntry>>>,
-    /// Additive provider catalogs that must survive xAI auth refreshes,
-    /// config rebuilds, and xAI logout. Entries are provider-qualified.
-    codex_models: RwLock<IndexMap<String, ModelEntry>>,
     models: RwLock<IndexMap<String, ModelEntry>>,
     current_model_id: RwLock<acp::ModelId>,
     current_reasoning_effort: RwLock<Option<ReasoningEffort>>,
@@ -179,7 +176,6 @@ impl ModelsManager {
         Self {
             inner: Arc::new(Inner {
                 prefetched: RwLock::new(prefetched),
-                codex_models: RwLock::new(IndexMap::new()),
                 models: RwLock::new(models),
                 current_model_id: RwLock::new(current_model_id),
                 current_reasoning_effort: RwLock::new(current_reasoning_effort),
@@ -287,11 +283,7 @@ impl ModelsManager {
             return;
         }
         let prefetched = self.inner.prefetched.read().clone();
-        let new_catalog = merge_codex_catalog(
-            &new_config,
-            resolve_model_catalog(&new_config, prefetched),
-            &self.inner.codex_models.read(),
-        );
+        let new_catalog = resolve_model_catalog(&new_config, prefetched);
         let has_real_catalog = *self.inner.has_fetched_real_catalog.read();
         if has_real_catalog && let Err(e) = validate_selectable(&new_config, &new_catalog) {
             tracing::error!(error = %e, "ignoring config reload: allowed_models excludes all models");
@@ -444,21 +436,6 @@ impl ModelsManager {
         self.inner.models.write().insert(id.into(), entry);
     }
 
-    /// Replace the additive Codex catalog and notify every connected model
-    /// selector. xAI models remain untouched, so signing into a second
-    /// provider expands the picker rather than replacing it.
-    pub fn set_codex_models(&self, models: IndexMap<String, ModelEntry>) {
-        *self.inner.codex_models.write() = models;
-        let cfg = self.inner.cfg.read().clone();
-        self.rebuild(&cfg, self.inner.prefetched.read().clone());
-        self.reselect_current_model_if_missing(&cfg);
-        self.notify_models_updated();
-    }
-
-    pub fn clear_codex_models(&self) {
-        self.set_codex_models(IndexMap::new());
-    }
-
     pub fn current_reasoning_effort(&self) -> Option<ReasoningEffort> {
         *self.inner.current_reasoning_effort.read()
     }
@@ -579,9 +556,7 @@ impl ModelsManager {
     // ── Mutations ───────────────────────────────────────────────────
 
     fn rebuild(&self, cfg: &config::Config, prefetched: Option<IndexMap<String, ModelEntry>>) {
-        let base = resolve_model_catalog(cfg, prefetched);
-        *self.inner.models.write() =
-            merge_codex_catalog(cfg, base, &self.inner.codex_models.read());
+        *self.inner.models.write() = resolve_model_catalog(cfg, prefetched);
     }
 
     /// Refresh models when the etag changes.
@@ -625,8 +600,6 @@ impl ModelsManager {
             && fetch_auth == ModelFetchAuth::Session
         {
             self.clear();
-            self.reselect_current_model_if_missing(&config);
-            self.notify_models_updated();
             return;
         }
 
@@ -945,9 +918,7 @@ impl ModelsManager {
     /// Wipe in-memory state so a previous identity's catalog doesn't leak.
     fn clear(&self) {
         *self.inner.prefetched.write() = None;
-        let cfg = self.inner.cfg.read().clone();
-        *self.inner.models.write() =
-            merge_codex_catalog(&cfg, IndexMap::new(), &self.inner.codex_models.read());
+        *self.inner.models.write() = IndexMap::new();
         *self.inner.etag.write() = None;
         *self.inner.has_fetched_real_catalog.write() = false;
         self.inner
@@ -1165,20 +1136,16 @@ impl ModelsManager {
         self.inner.allowlist_excludes_all.load(Ordering::Relaxed)
     }
 
-    /// Re-pick the default if `current_model_id` is gone from the catalog, is
-    /// no longer `user_selectable`, or is not visible for the current auth
-    /// shape. This keeps the picker and sampler aligned when an additive
-    /// provider is the only signed-in provider.
+    /// Re-pick the default if `current_model_id` is gone from the catalog *or*
+    /// is no longer `user_selectable` (e.g. a config reload narrowed
+    /// `allowed_models`), so UI and sampling don't disagree on the active model.
     fn reselect_current_model_if_missing(&self, config: &config::Config) {
         let current = self.inner.current_model_id.read().clone();
-        let is_session_auth = self.is_session_auth();
         let needs_reselection = {
             let models = self.inner.models.read();
             match models.get(current.0.as_ref()) {
                 None => true,
-                Some(entry) => {
-                    !entry.info.user_selectable || !entry.info.visible_for_auth(is_session_auth)
-                }
+                Some(entry) => !entry.info.user_selectable,
             }
         };
         if !needs_reselection {
@@ -1929,69 +1896,6 @@ pub fn resolve_model_catalog(
     catalog
 }
 
-/// Add a provider-qualified Codex catalog to the resolved xAI/custom catalog.
-///
-/// Provider entries are deliberately kept outside `prefetched`: xAI auth
-/// refreshes and cache reloads may replace that catalog wholesale, while an
-/// independent Codex sign-in must remain available. User model filters still
-/// apply uniformly to both providers.
-fn merge_codex_catalog(
-    cfg: &config::Config,
-    mut catalog: IndexMap<String, ModelEntry>,
-    codex_models: &IndexMap<String, ModelEntry>,
-) -> IndexMap<String, ModelEntry> {
-    let mut additive = codex_models.clone();
-
-    if let Ok(Some(disabled)) = ModelGlobSet::compile(cfg.models.disabled_models.as_ref()) {
-        additive.retain(|key, entry| !disabled.matches(key, &entry.model));
-    }
-
-    match ModelGlobSet::compile(cfg.models.allowed_models.as_ref()) {
-        Ok(None) => {
-            for entry in additive.values_mut() {
-                entry.info.user_selectable = true;
-            }
-        }
-        Ok(Some(allowed)) => {
-            for (key, entry) in additive.iter_mut() {
-                entry.info.user_selectable = allowed.matches(key, &entry.model);
-            }
-        }
-        Err(_) => {
-            for entry in additive.values_mut() {
-                entry.info.user_selectable = false;
-            }
-        }
-    }
-
-    if let Ok(Some(hidden)) = ModelGlobSet::compile(cfg.models.hidden_models.as_ref()) {
-        for (key, entry) in additive.iter_mut() {
-            if hidden.matches(key, &entry.model) {
-                entry.info.hidden = true;
-            }
-        }
-    }
-
-    if let Some(effort) = cfg.models.default_reasoning_effort
-        && let Some(default_id) = cfg.models.default.as_deref()
-        && let Some(entry) = additive.get_mut(default_id)
-        && entry.info.supports_reasoning_effort
-    {
-        entry.info.reasoning_effort = Some(effort);
-    }
-
-    if let Some(effort) = cfg.reasoning_effort_override {
-        for entry in additive.values_mut() {
-            if model_offers_reasoning_effort(&entry.info, effort) {
-                entry.info.reasoning_effort = Some(effort);
-            }
-        }
-    }
-
-    catalog.extend(additive);
-    catalog
-}
-
 /// Whether `effort` is a value this model will accept on the wire.
 ///
 /// Uses the server `reasoning_efforts` menu when present; otherwise the
@@ -2589,61 +2493,6 @@ mod tests {
         ids.iter()
             .map(|id| (id.to_string(), make_model_entry(id)))
             .collect()
-    }
-
-    #[test]
-    fn additive_codex_catalog_survives_xai_catalog_clear() {
-        let mgr = test_manager();
-        let cfg = config::Config::default();
-        mgr.apply_refresh_result(&cfg, Some(make_prefetched(&["grok-build"])), None);
-
-        let mut codex = IndexMap::new();
-        codex.insert("codex/gpt-test".to_string(), make_model_entry("gpt-test"));
-        mgr.set_codex_models(codex);
-
-        let combined = mgr.models();
-        assert!(combined.contains_key("grok-build"));
-        assert!(combined.contains_key("codex/gpt-test"));
-
-        mgr.clear();
-        let after_xai_clear = mgr.models();
-        assert!(!after_xai_clear.contains_key("grok-build"));
-        assert!(after_xai_clear.contains_key("codex/gpt-test"));
-    }
-
-    #[test]
-    fn additive_provider_becomes_current_when_primary_model_is_not_auth_visible() {
-        let mgr = test_manager();
-        let cfg = config::Config::default();
-        let mut primary = make_model_entry("grok-build");
-        primary.info.supported_in_api = false;
-        let mut prefetched = IndexMap::new();
-        prefetched.insert("grok-build".to_string(), primary);
-        mgr.apply_refresh_result(&cfg, Some(prefetched), None);
-        assert_eq!(mgr.current_model_id().0.as_ref(), "grok-build");
-
-        let mut codex = IndexMap::new();
-        codex.insert("codex/gpt-test".to_string(), make_model_entry("gpt-test"));
-        mgr.set_codex_models(codex);
-
-        assert_eq!(mgr.current_model_id().0.as_ref(), "codex/gpt-test");
-    }
-
-    #[test]
-    fn model_filters_apply_to_every_provider_in_combined_catalog() {
-        let cfg = config_from_toml(
-            r#"
-            [models]
-            allowed_models = ["codex/*"]
-            "#,
-        );
-        let base = resolve_model_catalog(&cfg, Some(make_prefetched(&["grok-build"])));
-        let mut codex = IndexMap::new();
-        codex.insert("codex/gpt-test".to_string(), make_model_entry("gpt-test"));
-
-        let combined = merge_codex_catalog(&cfg, base, &codex);
-        assert!(!combined["grok-build"].info.user_selectable);
-        assert!(combined["codex/gpt-test"].info.user_selectable);
     }
 
     // ── auth-change refresh: has_fetched_real_catalog flag ─────────────

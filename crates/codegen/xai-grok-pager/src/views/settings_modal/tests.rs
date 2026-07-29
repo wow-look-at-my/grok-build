@@ -25,40 +25,6 @@ fn make_state() -> SettingsModalState {
     )
 }
 
-#[test]
-fn api_key_editor_debug_is_redacted() {
-    let mode = SettingsModalMode::EditingValue {
-        key: "openai_compatible.api_key",
-        buffer: "never-print-this-key".to_owned(),
-        cursor_byte: 20,
-        validation_error: None,
-    };
-    let debug = format!("{mode:?}");
-    assert!(!debug.contains("never-print-this-key"));
-    assert!(debug.contains("[REDACTED]"));
-}
-
-#[test]
-fn api_key_editor_renders_mask_instead_of_secret() {
-    let mut state = make_state();
-    state.mode = SettingsModalMode::EditingValue {
-        key: "openai_compatible.api_key",
-        buffer: "super-secret".to_owned(),
-        cursor_byte: "super-secret".len(),
-        validation_error: None,
-    };
-    let area = Rect::new(0, 0, 80, 16);
-    let mut buffer = Buffer::empty(area);
-    render_editing_value(&mut buffer, area, &mut state, &Theme::current());
-    let rendered = (area.y..area.y + area.height)
-        .map(|y| buf_row_text(&buffer, y, area.x, area.width))
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    assert!(!rendered.contains("super-secret"));
-    assert!(rendered.contains("************"));
-}
-
 /// The contextual-hints group renders as a single top-level row (children
 /// hidden); Enter opens the sub-sheet, Space there toggles the focused
 /// child via the typed action, and Esc returns to Browse.

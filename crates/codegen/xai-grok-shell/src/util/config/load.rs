@@ -94,9 +94,6 @@ pub fn load_config_from_toml(root: &TomlValue) -> Config {
         models: section(table, "models"),
         ui: section(table, "ui"),
         harness: section(table, "harness"),
-        openai_compatible: table
-            .get("openai_compatible")
-            .and_then(|value| value.clone().try_into().ok()),
         skills: section(table, "skills"),
         compat: section(table, "compat"),
         management_api_key,
