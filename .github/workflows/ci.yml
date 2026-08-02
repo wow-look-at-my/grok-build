@@ -111,20 +111,16 @@ jobs:
           name: grok-${{ matrix.target_os }}-${{ matrix.target_arch }}
           path: dist/grok-${{ matrix.target_os }}-${{ matrix.target_arch }}
 
-  publish:
-    name: Publish to buildhost
+  publish-create:
+    name: Create buildhost release
     needs: build-release
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write # GitHub OIDC -> buildhost; only this job talks to buildhost
+      id-token: write # GitHub OIDC -> buildhost; only these jobs talk to buildhost
+    outputs:
+      version: ${{ steps.rel.outputs.version }}
     steps:
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          pattern: grok-*
-          path: dist
-          merge-multiple: true
-
       # The buildhost actions authenticate via GitHub OIDC (they mint an ID
       # token whenever no `token` input is set). Do not pass a `token` input
       # here: OIDC is what lets buildhost learn the repo's default branch and
@@ -138,31 +134,48 @@ jobs:
           server: ${{ env.BUILDHOST_SERVER }}
           project: ${{ env.BUILDHOST_PROJECT }}
 
-      - name: Upload linux/amd64 binary
+  publish-upload:
+    name: Upload ${{ matrix.target_os }}/${{ matrix.target_arch }} binary
+    needs: publish-create
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      matrix:
+        include:
+          - target_os: linux
+            target_arch: amd64
+          - target_os: darwin
+            target_arch: arm64
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: grok-${{ matrix.target_os }}-${{ matrix.target_arch }}
+          path: dist
+
+      - name: Upload binary
         uses: wow-look-at-my/buildhost/.github/actions/buildhost-upload-artifact@master
         with:
           server: ${{ env.BUILDHOST_SERVER }}
           project: ${{ env.BUILDHOST_PROJECT }}
-          version: ${{ steps.rel.outputs.version }}
-          os: linux
-          arch: amd64
-          path: dist/grok-linux-amd64
+          version: ${{ needs.publish-create.outputs.version }}
+          os: ${{ matrix.target_os }}
+          arch: ${{ matrix.target_arch }}
+          path: dist/grok-${{ matrix.target_os }}-${{ matrix.target_arch }}
           kind: binary
 
-      - name: Upload macos/arm64 binary
-        uses: wow-look-at-my/buildhost/.github/actions/buildhost-upload-artifact@master
-        with:
-          server: ${{ env.BUILDHOST_SERVER }}
-          project: ${{ env.BUILDHOST_PROJECT }}
-          version: ${{ steps.rel.outputs.version }}
-          os: darwin
-          arch: arm64
-          path: dist/grok-darwin-arm64
-          kind: binary
-
+  publish-finalize:
+    name: Publish buildhost release
+    needs: [publish-create, publish-upload]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
       - name: Publish release
         uses: wow-look-at-my/buildhost/.github/actions/buildhost-publish-release@master
         with:
           server: ${{ env.BUILDHOST_SERVER }}
           project: ${{ env.BUILDHOST_PROJECT }}
-          version: ${{ steps.rel.outputs.version }}
+          version: ${{ needs.publish-create.outputs.version }}
