@@ -121,12 +121,6 @@ jobs:
     outputs:
       version: ${{ steps.rel.outputs.version }}
     steps:
-      # The buildhost actions authenticate via GitHub OIDC (they mint an ID
-      # token whenever no `token` input is set). Do not pass a `token` input
-      # here: OIDC is what lets buildhost learn the repo's default branch and
-      # keep `latest` correct. secrets.BUILDHOST_TOKEN remains available as a
-      # break-glass manual option (set `token: ${{ secrets.BUILDHOST_TOKEN }}`
-      # on each step) if OIDC is ever unavailable.
       - name: Create release
         id: rel
         uses: wow-look-at-my/buildhost/.github/actions/buildhost-create-release@master
