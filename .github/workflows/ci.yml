@@ -165,6 +165,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
+      artifact-metadata: write # buildhost-publish-release records what it stored on the org's linked artifacts page
     steps:
       - name: Publish release
         uses: wow-look-at-my/buildhost/.github/actions/buildhost-publish-release@master
