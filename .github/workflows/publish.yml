@@ -4,14 +4,6 @@ on:
   push:
     branches: [master]
     tags: ["v*"]
-  workflow_dispatch:
-    inputs:
-      server:
-        description: buildhost server URL
-        default: https://pazer.build
-      version:
-        description: Release version (blank = auto-versioned)
-        default: ""
 
 permissions:
   contents: read
@@ -25,7 +17,7 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: "0"
-  BUILDHOST_SERVER: ${{ github.event.inputs.server || 'https://pazer.build' }}
+  BUILDHOST_SERVER: https://pazer.build
   BUILDHOST_PROJECT: grok-build
 
 jobs:
@@ -152,7 +144,6 @@ jobs:
         with:
           server: ${{ env.BUILDHOST_SERVER }}
           project: ${{ env.BUILDHOST_PROJECT }}
-          version: ${{ github.event.inputs.version }}
           # On tag pushes github.ref_name is the TAG (e.g. v1.2.3), which
           # buildhost would treat as a branch name that `latest` never tracks
           # and retention pins forever. Tags cut from master belong to master.
