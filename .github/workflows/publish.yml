@@ -3,7 +3,6 @@ name: Publish to buildhost
 on:
   push:
     branches: [master]
-    tags: ["v*"]
 
 permissions:
   contents: read
@@ -54,20 +53,34 @@ jobs:
       - name: Test (auto-update disable pins)
         run: cargo test --locked -p xai-grok-update --lib
 
-  build-release-linux-amd64:
-    name: Build release binary (linux/amd64)
+  build-release:
+    name: Build release binary (${{ matrix.target_os }}/${{ matrix.target_arch }})
     needs: test
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            target_os: linux
+            target_arch: amd64
+            protoc_url: https://github.com/protocolbuffers/protobuf/releases/download/v29.3/protoc-29.3-linux-x86_64.zip
+            protoc_sha256: 3e866620c5be27664f3d2fa2d656b5f3e09b5152b42f1bedbf427b333e90021a
+            checksum_cmd: sha256sum -c -
+          - runner: macos-14
+            target_os: darwin
+            target_arch: arm64
+            protoc_url: https://github.com/protocolbuffers/protobuf/releases/download/v29.3/protoc-29.3-osx-aarch_64.zip
+            protoc_sha256: 2b8a3403cd097f95f3ba656e14b76c732b6b26d7f183330b11e36ef2bc028765
+            checksum_cmd: shasum -a 256 -c -
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Install protoc (pinned v29.3)
         run: |
           # Same release artifact + sha256 the repo's dotslash launcher
-          # (bin/protoc) pins for linux-x86_64. bin/protoc is the source of
+          # (bin/protoc) pins for this platform. bin/protoc is the source of
           # truth; update both together when bumping protoc.
-          curl -fsSL -o "$RUNNER_TEMP/protoc.zip" \
-            https://github.com/protocolbuffers/protobuf/releases/download/v29.3/protoc-29.3-linux-x86_64.zip
-          echo "3e866620c5be27664f3d2fa2d656b5f3e09b5152b42f1bedbf427b333e90021a  $RUNNER_TEMP/protoc.zip" | sha256sum -c -
+          curl -fsSL -o "$RUNNER_TEMP/protoc.zip" "${{ matrix.protoc_url }}"
+          echo "${{ matrix.protoc_sha256 }}  $RUNNER_TEMP/protoc.zip" | ${{ matrix.checksum_cmd }}
           unzip -q -o "$RUNNER_TEMP/protoc.zip" -d "$RUNNER_TEMP/protoc"
           echo "PROTOC=$RUNNER_TEMP/protoc/bin/protoc" >> "$GITHUB_ENV"
           "$RUNNER_TEMP/protoc/bin/protoc" --version
@@ -79,46 +92,15 @@ jobs:
       - name: Stage artifact
         run: |
           mkdir -p dist
-          cp target/release/xai-grok-pager dist/grok-linux-amd64
+          cp target/release/xai-grok-pager "dist/grok-${{ matrix.target_os }}-${{ matrix.target_arch }}"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: grok-linux-amd64
-          path: dist/grok-linux-amd64
-
-  build-release-macos-arm64:
-    name: Build release binary (macos/arm64)
-    needs: test
-    runs-on: macos-14
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-      - name: Install protoc (pinned v29.3)
-        run: |
-          # Same release artifact + sha256 the repo's dotslash launcher
-          # (bin/protoc) pins for macos-aarch64. bin/protoc is the source of
-          # truth; update both together when bumping protoc.
-          curl -fsSL -o "$RUNNER_TEMP/protoc.zip" \
-            https://github.com/protocolbuffers/protobuf/releases/download/v29.3/protoc-29.3-osx-aarch_64.zip
-          echo "2b8a3403cd097f95f3ba656e14b76c732b6b26d7f183330b11e36ef2bc028765  $RUNNER_TEMP/protoc.zip" | shasum -a 256 -c -
-          unzip -q -o "$RUNNER_TEMP/protoc.zip" -d "$RUNNER_TEMP/protoc"
-          echo "PROTOC=$RUNNER_TEMP/protoc/bin/protoc" >> "$GITHUB_ENV"
-          "$RUNNER_TEMP/protoc/bin/protoc" --version
-      - name: Install Rust toolchain (pinned by rust-toolchain.toml)
-        run: rustup show
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-      - name: Build release binary
-        run: cargo build --locked --release -p xai-grok-pager-bin
-      - name: Stage artifact
-        run: |
-          mkdir -p dist
-          cp target/release/xai-grok-pager dist/grok-darwin-arm64
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: grok-darwin-arm64
-          path: dist/grok-darwin-arm64
+          name: grok-${{ matrix.target_os }}-${{ matrix.target_arch }}
+          path: dist/grok-${{ matrix.target_os }}-${{ matrix.target_arch }}
 
   publish:
     name: Publish to buildhost
-    needs: [build-release-linux-amd64, build-release-macos-arm64]
+    needs: build-release
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -126,12 +108,9 @@ jobs:
     steps:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          name: grok-linux-amd64
+          pattern: grok-*
           path: dist
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: grok-darwin-arm64
-          path: dist
+          merge-multiple: true
       # The buildhost actions authenticate via GitHub OIDC (they mint an ID
       # token whenever no `token` input is set). Do not pass a `token` input
       # here: OIDC is what lets buildhost learn the repo's default branch and
@@ -144,10 +123,6 @@ jobs:
         with:
           server: ${{ env.BUILDHOST_SERVER }}
           project: ${{ env.BUILDHOST_PROJECT }}
-          # On tag pushes github.ref_name is the TAG (e.g. v1.2.3), which
-          # buildhost would treat as a branch name that `latest` never tracks
-          # and retention pins forever. Tags cut from master belong to master.
-          git_branch: ${{ github.ref_type == 'tag' && 'master' || github.ref_name }}
       - name: Upload linux/amd64 binary
         uses: wow-look-at-my/buildhost/.github/actions/buildhost-upload-artifact@master
         with:
