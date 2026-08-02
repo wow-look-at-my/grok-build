@@ -3,12 +3,11 @@ name: CI
 on:
   push:
     branches: ["**"]
-  pull_request:
 
 permissions:
   contents: read
 
-# Cancel superseded runs on branches/PRs, but let every master run finish so
+# Cancel superseded runs on branches, but let every master run finish so
 # rapid merges can't leave master commits with no completed CI, and so a
 # publish already in flight is never cancelled mid-upload.
 concurrency:
@@ -139,10 +138,6 @@ jobs:
         with:
           server: ${{ env.BUILDHOST_SERVER }}
           project: ${{ env.BUILDHOST_PROJECT }}
-          # github.ref_name is the PR merge ref (e.g. "12/merge") on
-          # pull_request events; head_ref carries the real branch name there
-          # and is empty on push, where ref_name is already correct.
-          git_branch: ${{ github.head_ref || github.ref_name }}
 
       - name: Upload linux/amd64 binary
         uses: wow-look-at-my/buildhost/.github/actions/buildhost-upload-artifact@master
