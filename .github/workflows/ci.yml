@@ -116,7 +116,6 @@ jobs:
   publish:
     name: Publish to buildhost
     needs: build-release
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -140,6 +139,10 @@ jobs:
         with:
           server: ${{ env.BUILDHOST_SERVER }}
           project: ${{ env.BUILDHOST_PROJECT }}
+          # github.ref_name is the PR merge ref (e.g. "12/merge") on
+          # pull_request events; head_ref carries the real branch name there
+          # and is empty on push, where ref_name is already correct.
+          git_branch: ${{ github.head_ref || github.ref_name }}
 
       - name: Upload linux/amd64 binary
         uses: wow-look-at-my/buildhost/.github/actions/buildhost-upload-artifact@master
