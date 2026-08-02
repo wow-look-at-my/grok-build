@@ -62,7 +62,6 @@ jobs:
 
   build-release:
     name: Build release binary (${{ matrix.target_os }}/${{ matrix.target_arch }})
-    needs: build-test
     runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
@@ -113,7 +112,7 @@ jobs:
 
   publish-create:
     name: Create buildhost release
-    needs: build-release
+    needs: [build-test, build-release]
     runs-on: ubuntu-latest
     permissions:
       contents: read
