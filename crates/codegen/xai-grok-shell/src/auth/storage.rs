@@ -3,7 +3,9 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use super::model::{API_KEY_SCOPE, AuthMode, AuthStore, GrokAuth, lookup_auth};
+use super::model::{
+    API_KEY_SCOPE, AuthMode, AuthStore, GrokAuth, OPENAI_COMPATIBLE_API_KEY_SCOPE, lookup_auth,
+};
 
 /// RAII guard for an exclusive advisory lock on `auth.json.lock`.
 /// The lock is released when the inner `File` is dropped (closing the FD).
@@ -404,9 +406,13 @@ pub fn read_token_by_scope(grok_home: &Path, scope: &str) -> anyhow::Result<Stri
 
 /// Read the API key from the `xai::api_key` scope in auth.json.
 pub fn read_api_key(grok_home: &Path) -> Option<String> {
+    read_api_key_at_scope(grok_home, API_KEY_SCOPE)
+}
+
+fn read_api_key_at_scope(grok_home: &Path, scope: &str) -> Option<String> {
     let path = grok_home.join("auth.json");
     let map = read_auth_json(&path).ok()?;
-    map.get(API_KEY_SCOPE).map(|a| a.key.clone())
+    map.get(scope).map(|a| a.key.clone())
 }
 
 /// Store a plain API key in auth.json under the `xai::api_key` scope.
@@ -414,10 +420,14 @@ pub fn read_api_key(grok_home: &Path) -> Option<String> {
 /// Uses the corrupt-recovery reader so a malformed auth.json (e.g. from a
 /// previous crash) can be healed when the user sets an API key.
 pub fn store_api_key(grok_home: &Path, api_key: &str) -> std::io::Result<()> {
+    store_api_key_at_scope(grok_home, API_KEY_SCOPE, api_key)
+}
+
+fn store_api_key_at_scope(grok_home: &Path, scope: &str, api_key: &str) -> std::io::Result<()> {
     let path = grok_home.join("auth.json");
     let mut map = read_auth_json_or_empty_recovering_corrupt(&path)?;
     map.insert(
-        API_KEY_SCOPE.to_owned(),
+        scope.to_owned(),
         GrokAuth {
             key: api_key.to_owned(),
             auth_mode: AuthMode::ApiKey,
@@ -429,9 +439,13 @@ pub fn store_api_key(grok_home: &Path, api_key: &str) -> std::io::Result<()> {
 
 /// Remove the `xai::api_key` scope from auth.json.
 pub fn clear_api_key(grok_home: &Path) -> std::io::Result<()> {
+    clear_api_key_at_scope(grok_home, API_KEY_SCOPE)
+}
+
+fn clear_api_key_at_scope(grok_home: &Path, scope: &str) -> std::io::Result<()> {
     let path = grok_home.join("auth.json");
     if let Ok(mut map) = read_auth_json(&path) {
-        map.remove(API_KEY_SCOPE);
+        map.remove(scope);
         if map.is_empty() {
             let _ = std::fs::remove_file(&path);
         } else {
@@ -439,6 +453,21 @@ pub fn clear_api_key(grok_home: &Path) -> std::io::Result<()> {
         }
     }
     Ok(())
+}
+
+/// Read the API key for the user-configured OpenAI-compatible endpoint.
+pub fn read_openai_compatible_api_key(grok_home: &Path) -> Option<String> {
+    read_api_key_at_scope(grok_home, OPENAI_COMPATIBLE_API_KEY_SCOPE)
+}
+
+/// Store the OpenAI-compatible endpoint key without placing it in config.toml.
+pub fn store_openai_compatible_api_key(grok_home: &Path, api_key: &str) -> std::io::Result<()> {
+    store_api_key_at_scope(grok_home, OPENAI_COMPATIBLE_API_KEY_SCOPE, api_key)
+}
+
+/// Remove the OpenAI-compatible endpoint key while preserving other auth scopes.
+pub fn clear_openai_compatible_api_key(grok_home: &Path) -> std::io::Result<()> {
+    clear_api_key_at_scope(grok_home, OPENAI_COMPATIBLE_API_KEY_SCOPE)
 }
 
 #[cfg(test)]
@@ -639,5 +668,20 @@ mod write_fallback_tests {
         let _ = write_auth_json_in_place_with(&path, &sample_store(), fake_truncate_then_fail);
         let mode = std::fs::metadata(&path).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o600, "restored file must stay 0o600");
+    }
+
+    #[test]
+    fn openai_compatible_key_roundtrips_without_clobbering_xai_key() {
+        let dir = tempfile::tempdir().unwrap();
+        store_api_key(dir.path(), "xai-key").unwrap();
+        store_openai_compatible_api_key(dir.path(), "compatible-key").unwrap();
+        assert_eq!(read_api_key(dir.path()).as_deref(), Some("xai-key"));
+        assert_eq!(
+            read_openai_compatible_api_key(dir.path()).as_deref(),
+            Some("compatible-key")
+        );
+        clear_openai_compatible_api_key(dir.path()).unwrap();
+        assert_eq!(read_api_key(dir.path()).as_deref(), Some("xai-key"));
+        assert_eq!(read_openai_compatible_api_key(dir.path()), None);
     }
 }

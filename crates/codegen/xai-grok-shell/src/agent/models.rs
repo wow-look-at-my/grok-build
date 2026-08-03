@@ -112,6 +112,11 @@ struct CatalogState {
 
 struct Inner {
     catalog: RwLock<CatalogState>,
+    /// Additive provider catalogs that must survive xAI auth refreshes,
+    /// config rebuilds, and xAI logout. Entries are provider-qualified.
+    /// Independent lock: its lifecycle doesn't follow the xAI catalog's
+    /// fetch/apply cycle that `catalog` guards.
+    codex_models: RwLock<IndexMap<String, ModelEntry>>,
     current_model_id: RwLock<acp::ModelId>,
     current_reasoning_effort: RwLock<Option<ReasoningEffort>>,
     // ── Owned context for self-contained refresh ────────────────
@@ -213,6 +218,7 @@ impl ModelsManagerBuilder {
                     models: self.models,
                     ..Default::default()
                 }),
+                codex_models: RwLock::new(IndexMap::new()),
                 current_model_id: RwLock::new(self.current_model_id),
                 current_reasoning_effort: RwLock::new(current_reasoning_effort),
                 auth_manager: self.auth_manager,
@@ -313,7 +319,11 @@ impl ModelsManager {
             return;
         }
         let prefetched = self.inner.catalog.read().prefetched.clone();
-        let new_catalog = resolve_model_catalog(&new_config, prefetched);
+        let new_catalog = merge_codex_catalog(
+            &new_config,
+            resolve_model_catalog(&new_config, prefetched),
+            &self.inner.codex_models.read(),
+        );
         let has_real_catalog = self.inner.catalog.read().has_fetched_real_catalog;
         if has_real_catalog && let Err(e) = validate_selectable(&new_config, &new_catalog) {
             tracing::error!(error = %e, "ignoring config reload: allowed_models excludes all models");
@@ -459,6 +469,22 @@ impl ModelsManager {
         self.inner.catalog.write().models.insert(id.into(), entry);
     }
 
+    /// Replace the additive Codex catalog and notify every connected model
+    /// selector. xAI models remain untouched, so signing into a second
+    /// provider expands the picker rather than replacing it.
+    pub fn set_codex_models(&self, models: IndexMap<String, ModelEntry>) {
+        *self.inner.codex_models.write() = models;
+        let cfg = self.inner.cfg.read().clone();
+        let prefetched = self.inner.catalog.read().prefetched.clone();
+        self.rebuild(&cfg, prefetched);
+        self.reselect_current_model_if_missing(&cfg);
+        self.notify_models_updated();
+    }
+
+    pub fn clear_codex_models(&self) {
+        self.set_codex_models(IndexMap::new());
+    }
+
     pub fn current_reasoning_effort(&self) -> Option<ReasoningEffort> {
         *self.inner.current_reasoning_effort.read()
     }
@@ -567,7 +593,9 @@ impl ModelsManager {
     // ── Mutations ───────────────────────────────────────────────────
 
     fn rebuild(&self, cfg: &config::Config, prefetched: Option<IndexMap<String, ModelEntry>>) {
-        self.inner.catalog.write().models = resolve_model_catalog(cfg, prefetched);
+        let base = resolve_model_catalog(cfg, prefetched);
+        self.inner.catalog.write().models =
+            merge_codex_catalog(cfg, base, &self.inner.codex_models.read());
     }
 
     /// Refresh models when the etag changes.
@@ -600,6 +628,8 @@ impl ModelsManager {
             && fetch_auth == ModelFetchAuth::Session
         {
             self.clear();
+            self.reselect_current_model_if_missing(&config);
+            self.notify_models_updated();
             return;
         }
 
@@ -849,7 +879,12 @@ impl ModelsManager {
 
     /// Wipe in-memory state so a previous identity's catalog doesn't leak.
     fn clear(&self) {
-        *self.inner.catalog.write() = CatalogState::default();
+        let cfg = self.inner.cfg.read().clone();
+        let models = merge_codex_catalog(&cfg, IndexMap::new(), &self.inner.codex_models.read());
+        *self.inner.catalog.write() = CatalogState {
+            models,
+            ..Default::default()
+        };
         // A new identity starts fresh: drop the prior user's pick so its
         // first catalog reselects that identity's default.
         self.inner
@@ -1118,15 +1153,21 @@ impl ModelsManager {
         self.inner.catalog.read().allowlist_excludes_all
     }
 
-    /// Re-pick the default if `current_model_id` is gone from the catalog *or*
+    /// Re-pick the default if `current_model_id` is gone from the catalog, is
+    /// no longer `user_selectable`, or is not visible for the current auth
+    /// shape. This keeps the picker and sampler aligned when an additive
+    /// provider is the only signed-in provider.
     fn reselect_current_model_if_missing(&self, config: &config::Config) {
         let current = self.inner.current_model_id.read().clone();
+        let is_session_auth = self.is_session_auth();
         let needs_reselection = {
             let cat = self.inner.catalog.read();
             let models = &cat.models;
             match models.get(current.0.as_ref()) {
                 None => true,
-                Some(entry) => !entry.info.user_selectable,
+                Some(entry) => {
+                    !entry.info.user_selectable || !entry.info.visible_for_auth(is_session_auth)
+                }
             }
         };
         if !needs_reselection {
