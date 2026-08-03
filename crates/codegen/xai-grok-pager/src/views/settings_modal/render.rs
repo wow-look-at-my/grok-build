@@ -1597,23 +1597,24 @@ pub(super) fn render_editing_value(
     };
     let setting_key = *setting_key;
     let buffer_owned = editor.text();
-    let cursor_byte = editor.cursor_byte();
     // API keys remain editable but are never painted into the terminal
     // buffer. Use one ASCII mask cell per Unicode scalar so cursor math stays
-    // byte-safe.
+    // byte-safe; the viewport below is then computed against the mask's own
+    // byte layout, never the real secret's (which can diverge on multi-byte
+    // UTF-8 input).
+    let is_masked_secret = setting_key == "openai_compatible.api_key";
     let masked_buffer;
-    let effective_cursor_byte;
-    let buffer = if setting_key == "openai_compatible.api_key" {
+    let masked_cursor_byte;
+    let buffer = if is_masked_secret {
         masked_buffer = "*".repeat(buffer_owned.chars().count());
-        effective_cursor_byte = buffer_owned[..cursor_byte.min(buffer_owned.len())]
+        masked_cursor_byte = buffer_owned[..editor.cursor_byte().min(buffer_owned.len())]
             .chars()
             .count();
         masked_buffer.as_str()
     } else {
-        effective_cursor_byte = cursor_byte;
+        masked_cursor_byte = 0;
         buffer_owned
     };
-    let cursor_byte = effective_cursor_byte;
     let validation_error = validation_error.as_deref();
     let Some(meta) = state.registry.find(setting_key) else {
         return;
@@ -1699,7 +1700,14 @@ pub(super) fn render_editing_value(
             1,
         );
     } else {
-        let viewport = editor.viewport(buffer_room);
+        let viewport = if is_masked_secret {
+            let mut masked_edit_buffer =
+                xai_ratatui_textarea::EditBuffer::from_text(buffer.to_owned());
+            let _ = masked_edit_buffer.set_cursor_byte(masked_cursor_byte);
+            masked_edit_buffer.single_line_viewport(buffer_room)
+        } else {
+            editor.viewport(buffer_room)
+        };
         let visible = &buffer[viewport.visible_byte_range];
         let visible_width = (visible.width() as u16).min(buffer_room as u16);
         buf.set_span(

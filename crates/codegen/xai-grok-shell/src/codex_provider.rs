@@ -437,6 +437,7 @@ fn model_entry(key: String, model: CodexModel) -> ModelEntry {
         // every HTTP request.
         api_key: Some(MANAGED_BEARER_PLACEHOLDER.to_string()),
         env_key: None,
+        auth_provider: None,
         api_base_url: None,
     }
 }

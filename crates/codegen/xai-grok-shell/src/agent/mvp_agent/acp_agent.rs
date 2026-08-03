@@ -605,10 +605,14 @@ impl acp::Agent for MvpAgent {
         match arguments.method_id.0.as_ref() {
             crate::codex_provider::AUTH_METHOD_ID => {
                 let (url_tx, url_rx) = tokio::sync::oneshot::channel();
-                *self.auth_code_tx.borrow_mut() = None;
-                *self.auth_url_rx.borrow_mut() = Some(url_rx);
+                let (code_tx, _code_rx) = tokio::sync::mpsc::channel(1);
+                let (_cancel, _guard) = self.interactive_auth.begin(
+                    Some(crate::auth::single_flight::AttemptChannels::new(
+                        code_tx, url_rx,
+                    )),
+                    None,
+                );
                 let result = crate::codex_provider::login(url_tx).await;
-                *self.auth_url_rx.borrow_mut() = None;
                 let models = result.map_err(|error| {
                     emit_login_span(
                         false,

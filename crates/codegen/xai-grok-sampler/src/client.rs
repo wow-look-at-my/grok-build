@@ -676,10 +676,8 @@ impl SamplingClient {
                             headers.insert(AUTHORIZATION, v);
                         }
                     }
-                }
-                AuthScheme::None => {
-                    headers.remove(AUTHORIZATION);
-                    headers.remove(HeaderName::from_static("x-api-key"));
+                    // Already stripped above; a fresh bearer never gets attached.
+                    AuthScheme::None => {}
                 }
             }
         }

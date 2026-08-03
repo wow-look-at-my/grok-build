@@ -1044,6 +1044,13 @@ fn every_setting_has_action_for_reset_arm() {
             if meta.key == "default_model" {
                 continue;
             }
+            // openai_compatible.api_key: current_value_for reports a
+            // "Configured"/"Not configured" presence label, never the raw
+            // registered default (""), so the round-trip re-read below can
+            // never match it — same asymmetry as default_model above.
+            if meta.key == "openai_compatible.api_key" {
+                continue;
+            }
             let mut app = test_app_with_agent();
             move_setting_away_from_default(&mut app, meta.key);
             let _ = dispatch(action.unwrap(), &mut app);
@@ -1537,6 +1544,40 @@ fn move_setting_away_from_default(app: &mut AppView, key: crate::settings::Setti
         "default_selected_permission" => {
             let _ = dispatch(
                 Action::SetDefaultSelectedPermission("allow_once".to_string()),
+                app,
+            );
+        }
+        // Direct mutation bypasses the base_url/model routability gate on
+        // `set_openai_compatible_enabled`, matching the `default_model` arm.
+        "openai_compatible.enabled" => {
+            app.openai_compatible.enabled = true;
+        }
+        "openai_compatible.base_url" => {
+            let _ = dispatch(
+                Action::SetOpenAiCompatibleBaseUrl("http://localhost:11434/v1".to_owned()),
+                app,
+            );
+        }
+        "openai_compatible.model" => {
+            let _ = dispatch(Action::SetOpenAiCompatibleModel("llama3.3".to_owned()), app);
+        }
+        "openai_compatible.api_backend" => {
+            let _ = dispatch(
+                Action::SetOpenAiCompatibleApiBackend("responses".to_owned()),
+                app,
+            );
+        }
+        "openai_compatible.context_window" => {
+            let _ = dispatch(Action::SetOpenAiCompatibleContextWindow(131_072), app);
+        }
+        "openai_compatible.make_default" => {
+            let _ = dispatch(Action::SetOpenAiCompatibleMakeDefault(false), app);
+        }
+        "openai_compatible.api_key" => {
+            let _ = dispatch(
+                Action::SetOpenAiCompatibleApiKey(crate::app::actions::SecretString::new(
+                    "test-key".to_owned(),
+                )),
                 app,
             );
         }
