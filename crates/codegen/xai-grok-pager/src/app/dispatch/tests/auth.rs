@@ -455,6 +455,33 @@ fn pre_fix_compact_start_without_hold_cannot_stash_for_reauth() {
     );
 }
 
+#[test]
+fn codex_login_uses_additive_method_without_replacing_primary_login() {
+    let mut app = test_app_with_agent();
+    let primary = acp::AuthMethodId::new("grok.com");
+    app.login_method_id = Some(primary.clone());
+    app.auth_methods
+        .push(acp::AuthMethod::Agent(acp::AuthMethodAgent::new(
+            acp::AuthMethodId::new(xai_grok_shell::CODEX_AUTH_METHOD_ID),
+            "Codex (ChatGPT)".to_string(),
+        )));
+
+    let effects = dispatch(Action::LoginCodex, &mut app);
+
+    assert_eq!(app.login_method_id, Some(primary));
+    assert_eq!(app.active_view, ActiveView::Welcome);
+    assert!(effects.iter().any(|effect| matches!(
+        effect,
+        Effect::Authenticate { method_id, .. }
+            if method_id.0.as_ref() == xai_grok_shell::CODEX_AUTH_METHOD_ID
+    )));
+    assert!(
+        effects
+            .iter()
+            .any(|effect| matches!(effect, Effect::PollAuthUrl { .. }))
+    );
+}
+
 /// A second auth-failed turn with no rewindable prompt
 /// (`in_flight_prompt == None`) must not clobber the stash from an
 /// earlier 401.
