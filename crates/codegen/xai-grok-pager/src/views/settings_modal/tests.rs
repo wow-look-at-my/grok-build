@@ -28,10 +28,12 @@ fn make_state() -> SettingsModalState {
 
 #[test]
 fn api_key_editor_debug_is_redacted() {
-    let mode = SettingsModalMode::EditingValue {
+    let mut editor = LineEditor::default();
+    editor.set_text("never-print-this-key");
+    let mode = SettingsMode::EditingString {
         key: "openai_compatible.api_key",
-        buffer: "never-print-this-key".to_owned(),
-        cursor_byte: 20,
+        editor,
+        validator: StringValidator::Any,
         validation_error: None,
     };
     let debug = format!("{mode:?}");
@@ -42,12 +44,15 @@ fn api_key_editor_debug_is_redacted() {
 #[test]
 fn api_key_editor_renders_mask_instead_of_secret() {
     let mut state = make_state();
-    state.mode = SettingsModalMode::EditingValue {
-        key: "openai_compatible.api_key",
-        buffer: "super-secret".to_owned(),
-        cursor_byte: "super-secret".len(),
-        validation_error: None,
-    };
+    let mut editor = LineEditor::default();
+    editor.set_text("super-secret");
+    let _ = editor.set_cursor_byte("super-secret".len());
+    state.transition_to_editing_string(
+        "openai_compatible.api_key",
+        editor,
+        StringValidator::Any,
+        None,
+    );
     let area = Rect::new(0, 0, 80, 16);
     let mut buffer = Buffer::empty(area);
     render_editing_value(&mut buffer, area, &mut state, &Theme::current());
