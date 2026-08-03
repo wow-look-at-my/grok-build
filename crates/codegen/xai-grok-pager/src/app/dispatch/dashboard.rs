@@ -1405,6 +1405,7 @@ pub(super) fn dispatch_dashboard_dispatch_slash(app: &mut AppView, text: String)
                 ask_user_question_timeout_enabled: ask_user_question_timeout_enabled_from_app,
                 voice_stt_language: voice_stt_language_from_app,
                 scheduler_background_loops: scheduler_background_loops_seed,
+                openai_compatible: app.openai_compatible.clone(),
             },
         };
         command.run(&mut ctx, invocation.args)

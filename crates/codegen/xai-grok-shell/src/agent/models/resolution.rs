@@ -189,7 +189,7 @@ impl ModelGlobSet {
             .map_err(|e| vec![e.to_string()])
     }
 
-    fn matches(&self, key: &str, model: &str) -> bool {
+    pub(crate) fn matches(&self, key: &str, model: &str) -> bool {
         self.0.is_match(key) || self.0.is_match(model)
     }
 }
@@ -257,7 +257,7 @@ pub fn resolve_model_catalog(
 }
 
 /// Whether `effort` is a value this model will accept on the wire.
-fn model_offers_reasoning_effort(info: &config::ModelInfo, effort: ReasoningEffort) -> bool {
+pub(crate) fn model_offers_reasoning_effort(info: &config::ModelInfo, effort: ReasoningEffort) -> bool {
     if !info.supports_reasoning_effort {
         return false;
     }

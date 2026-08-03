@@ -50,5 +50,7 @@ pub(crate) use model::{
 };
 pub(crate) use refresh::DiagnosticUploader;
 pub use storage::{
-    clear_api_key, read_api_key, read_auth_json, read_token_by_scope, store_api_key,
+    clear_api_key, clear_openai_compatible_api_key, read_api_key, read_auth_json,
+    read_openai_compatible_api_key, read_token_by_scope, store_api_key,
+    store_openai_compatible_api_key,
 };

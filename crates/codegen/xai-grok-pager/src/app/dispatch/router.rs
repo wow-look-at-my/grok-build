@@ -1,7 +1,7 @@
 //! Top-level action router: maps actions and action results to handlers.
 use super::auth::{
-    dispatch_cancel_login, dispatch_login, dispatch_logout, dispatch_submit_auth_code,
-    dispatch_switch_account,
+    dispatch_cancel_login, dispatch_login, dispatch_login_codex, dispatch_logout,
+    dispatch_submit_auth_code, dispatch_switch_account,
 };
 use super::billing::dispatch_open_supergrok_url;
 use super::ctx::{
@@ -82,6 +82,9 @@ use super::settings::setters::{
     set_default_model, set_default_selected_permission, set_display_refresh_auto_cadence,
     set_fork_secondary_model, set_group_tool_verbs, set_hunk_tracker_mode, set_invert_scroll,
     set_keep_text_selection, set_max_thoughts_width, set_multiline_mode, set_page_flip_on_send,
+    set_openai_compatible_api_backend, set_openai_compatible_api_key,
+    set_openai_compatible_base_url, set_openai_compatible_context_window,
+    set_openai_compatible_enabled, set_openai_compatible_make_default, set_openai_compatible_model,
     set_prompt_suggestions, set_remember_tool_approvals, set_render_mermaid,
     set_respect_manual_folds, set_screen_mode, set_scroll_lines, set_scroll_mode, set_scroll_speed,
     set_show_thinking_blocks, set_show_tips, set_simple_mode, set_theme, set_timeline,
@@ -1003,6 +1006,13 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
         Action::SetMaxThoughtsWidth(v) => set_max_thoughts_width(app, v),
         Action::SetShowTips(v) => set_show_tips(app, v),
         Action::SetAutoUpdate(v) => set_auto_update(app, v),
+        Action::SetOpenAiCompatibleEnabled(v) => set_openai_compatible_enabled(app, v),
+        Action::SetOpenAiCompatibleBaseUrl(v) => set_openai_compatible_base_url(app, v),
+        Action::SetOpenAiCompatibleModel(v) => set_openai_compatible_model(app, v),
+        Action::SetOpenAiCompatibleApiBackend(v) => set_openai_compatible_api_backend(app, v),
+        Action::SetOpenAiCompatibleContextWindow(v) => set_openai_compatible_context_window(app, v),
+        Action::SetOpenAiCompatibleMakeDefault(v) => set_openai_compatible_make_default(app, v),
+        Action::SetOpenAiCompatibleApiKey(v) => set_openai_compatible_api_key(app, v),
         Action::SetDisplayRefreshAutoCadence(v) => set_display_refresh_auto_cadence(app, v),
         Action::PreviewTheme(v) => preview_theme(app, v),
         Action::PreviewAutoDarkTheme(v) => preview_auto_dark_theme(app, v),
@@ -1071,6 +1081,7 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
             vec![]
         }
         Action::Login => dispatch_login(app),
+        Action::LoginCodex => dispatch_login_codex(app),
         Action::CancelLogin => dispatch_cancel_login(app),
         Action::SubmitAuthCode(code) => dispatch_submit_auth_code(app, code),
         Action::CopyAuthUrl => {

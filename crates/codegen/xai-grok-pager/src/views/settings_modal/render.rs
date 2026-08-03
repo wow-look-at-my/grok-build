@@ -1596,7 +1596,14 @@ pub(super) fn render_editing_value(
         unreachable!("editor renderer requires String or Int state");
     };
     let setting_key = *setting_key;
-    let buffer = editor.text();
+    // Mask API keys in the terminal buffer (one ASCII '*' per Unicode scalar).
+    let masked_owned;
+    let buffer = if setting_key == "openai_compatible.api_key" {
+        masked_owned = "*".repeat(editor.text().chars().count());
+        masked_owned.as_str()
+    } else {
+        editor.text()
+    };
     let validation_error = validation_error.as_deref();
     let Some(meta) = state.registry.find(setting_key) else {
         return;
@@ -1653,6 +1660,7 @@ pub(super) fn render_editing_value(
                 StringValidator::KnownModel => "<empty — use shell default>",
                 StringValidator::NonEmptyToken => "<type a value>",
                 StringValidator::Any => "<type a value>",
+                StringValidator::HttpUrlOrEmpty => "<http://host/v1>",
             },
             _ => "",
         };
