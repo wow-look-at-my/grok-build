@@ -118,13 +118,21 @@ impl SessionActor {
             // `sweep_pending_inputs` exempts the running slot only when
             // `running_task` is armed; with no turn running every row is
             // eligible and the front would be stolen from the promoter.
-            let Some(running_mode) = state.running_prompt_id().and_then(|running| {
-                state
-                    .pending_inputs
-                    .iter()
-                    .find(|item| item.prompt_id == running)
-                    .map(|item| item.prompt_mode)
-            }) else {
+            let Some(running) = state.running_prompt_id().map(str::to_string) else {
+                return false;
+            };
+            // A row submitted under a different mode than the turn is running
+            // in would escape its gate if folded in.
+            let Some(running_mode) = state
+                .pending_inputs
+                .iter()
+                .find(|item| item.prompt_id == running)
+                .map(|item| item.prompt_mode)
+            else {
+                tracing::warn!(
+                    running_prompt_id = %running,
+                    "running turn is not at the queue front; delivering no follow-ups"
+                );
                 return false;
             };
             let holds = state.combine_edit_holds.clone();
@@ -159,6 +167,10 @@ impl SessionActor {
             harvested
         };
 
+        tracing::info!(
+            count = harvested.len(),
+            "delivering queued follow-up(s) into the running turn"
+        );
         for entry in harvested {
             xai_grok_telemetry::unified_log::info(
                 "shell.prompt.delivered_mid_turn",
@@ -177,7 +189,6 @@ impl SessionActor {
             self.broadcast_interjection(&entry.text, None);
             self.pending_interjections.push(entry);
         }
-        tracing::info!("delivering queued follow-up(s) into the running turn");
         true
     }
 
