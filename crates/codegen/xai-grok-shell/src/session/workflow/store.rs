@@ -12,6 +12,12 @@ use super::tracker::WorkflowRunState;
 
 pub(crate) const WORKFLOW_RUN_MANIFEST_VERSION: u8 = 4;
 pub(crate) const MAX_RESTORED_WORKFLOW_RUNS: usize = 128;
+/// Ceiling on directory entries examined while restoring runs. The whole
+/// directory is enumerated and name-sorted before the restore cap applies, so
+/// this bounds that scan; rejected entries (symlinks, cleared runs, unreadable
+/// manifests) are examined but never count against
+/// [`MAX_RESTORED_WORKFLOW_RUNS`].
+pub(crate) const MAX_SCANNED_WORKFLOW_ENTRIES: usize = 4096;
 pub(crate) const MAX_WORKFLOW_MANIFEST_BYTES: u64 = 512 * 1024;
 pub(crate) const MAX_WORKFLOW_ARGS_BYTES: u64 = 1024 * 1024;
 

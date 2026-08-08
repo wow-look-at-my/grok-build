@@ -2035,6 +2035,15 @@ impl SessionActor {
                     snapshot: Box::new(snapshot),
                 });
             }
+            // Ahead of the drain, and so ahead of a model request: a follow-up
+            // queued mid-turn reaches the model on the next request rather
+            // than after the turn it was aimed at. Skipped on the opening pass
+            // (`loop_index` is already 1 there) — the turn has produced nothing
+            // to steer yet, and a row queued in that window is picked up on the
+            // pass after it.
+            if loop_index > 1 {
+                self.harvest_queued_prompts_into_interjections().await;
+            }
             self.drain_pending_interjections().await;
             self.flush_pending_skill_reminders().await;
             self.inject_pending_monitor_events().await;

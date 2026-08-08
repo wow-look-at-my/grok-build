@@ -1195,6 +1195,7 @@ mod tests {
     /// / device-code): a wrong-team token is rejected and nothing is written.
     #[tokio::test]
     async fn external_provider_rejects_wrong_team_and_persists_nothing() {
+        crate::auth::ensure_crypto_provider();
         let dir = tempfile::tempdir().unwrap();
         let mgr = Arc::new(
             AuthManager::new(dir.path(), pinned_cfg("team-good"))
@@ -1221,6 +1222,7 @@ mod tests {
     /// A matching-team external token is accepted and persisted.
     #[tokio::test]
     async fn external_provider_accepts_matching_team() {
+        crate::auth::ensure_crypto_provider();
         let dir = tempfile::tempdir().unwrap();
         let jwt = team_jwt("team-good");
         let mgr = Arc::new(
@@ -1649,12 +1651,9 @@ mod tests {
         ));
     }
 
-    fn ensure_crypto_provider() {
-        let _ = jsonwebtoken::crypto::rust_crypto::DEFAULT_PROVIDER.install_default();
-    }
 
     fn team_jwt(principal_id: &str) -> String {
-        ensure_crypto_provider();
+        crate::auth::ensure_crypto_provider();
         jsonwebtoken::encode(
             &jsonwebtoken::Header::new(jsonwebtoken::Algorithm::HS256),
             &serde_json::json!({
@@ -1679,6 +1678,7 @@ mod tests {
     /// interactive login — it falls through to a fresh, compliant login.
     #[test]
     fn cached_cred_with_wrong_team_is_incompatible() {
+        crate::auth::ensure_crypto_provider();
         let auth = GrokAuth {
             key: team_jwt("team-wrong"),
             ..oidc_auth(XAI_OAUTH2_ISSUER)
@@ -1692,6 +1692,7 @@ mod tests {
     /// A cached session for the pinned team is reused normally.
     #[test]
     fn cached_cred_with_matching_team_is_compatible() {
+        crate::auth::ensure_crypto_provider();
         let auth = GrokAuth {
             key: team_jwt("team-good"),
             ..oidc_auth(XAI_OAUTH2_ISSUER)

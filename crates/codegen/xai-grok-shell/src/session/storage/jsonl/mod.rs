@@ -650,8 +650,8 @@ impl JsonlStorageAdapter {
         info: &Info,
     ) -> io::Result<Vec<crate::session::workflow::store::RestoredWorkflowRun>> {
         use crate::session::workflow::store::{
-            MAX_RESTORED_WORKFLOW_RUNS, MAX_WORKFLOW_ARGS_BYTES, MAX_WORKFLOW_MANIFEST_BYTES,
-            read_bounded_nofollow,
+            MAX_RESTORED_WORKFLOW_RUNS, MAX_SCANNED_WORKFLOW_ENTRIES, MAX_WORKFLOW_ARGS_BYTES,
+            MAX_WORKFLOW_MANIFEST_BYTES, read_bounded_nofollow,
         };
         let workflows_dir = self.workflows_dir(info);
         match std::fs::symlink_metadata(&workflows_dir) {
@@ -664,22 +664,22 @@ impl JsonlStorageAdapter {
             }
             Err(error) => return Err(error),
         };
+        // Sort before capping, and cap on runs actually restored. Capping raw
+        // `read_dir` output restored whichever subset the filesystem happened
+        // to yield first, and let an entry that is rejected anyway — a
+        // symlink, a cleared run, an unreadable manifest — evict a real run.
         let mut entries: Vec<_> = std::fs::read_dir(&workflows_dir)?
             .filter_map(Result::ok)
-            .take(MAX_RESTORED_WORKFLOW_RUNS.saturating_add(1))
+            .take(MAX_SCANNED_WORKFLOW_ENTRIES)
             .collect();
-        let entries_truncated = entries.len() > MAX_RESTORED_WORKFLOW_RUNS;
-        entries.truncate(MAX_RESTORED_WORKFLOW_RUNS);
         entries.sort_by_key(|entry| entry.file_name());
-        if entries_truncated {
-            tracing::warn!(
-                path = %workflows_dir.display(),
-                limit = MAX_RESTORED_WORKFLOW_RUNS,
-                "workflow restore run-count cap reached; ignoring remaining entries"
-            );
-        }
         let mut restored = Vec::new();
+        let mut over_cap = 0usize;
         for entry in entries {
+            if restored.len() >= MAX_RESTORED_WORKFLOW_RUNS {
+                over_cap += 1;
+                continue;
+            }
             let run_dir = entry.path();
             let Ok(run_meta) = std::fs::symlink_metadata(&run_dir) else {
                 continue;
@@ -754,6 +754,14 @@ impl JsonlStorageAdapter {
                 script,
                 args,
             });
+        }
+        if over_cap > 0 {
+            tracing::warn!(
+                path = %workflows_dir.display(),
+                limit = MAX_RESTORED_WORKFLOW_RUNS,
+                ignored = over_cap,
+                "workflow restore run-count cap reached; ignoring remaining entries"
+            );
         }
         Ok(restored)
     }
