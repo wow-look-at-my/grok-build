@@ -2035,6 +2035,10 @@ impl SessionActor {
                     snapshot: Box::new(snapshot),
                 });
             }
+            // Ahead of the drain, and so ahead of every model request in this
+            // turn: a follow-up queued mid-turn reaches the model on the next
+            // request rather than after the turn it was aimed at.
+            self.harvest_queued_prompts_into_interjections().await;
             self.drain_pending_interjections().await;
             self.flush_pending_skill_reminders().await;
             self.inject_pending_monitor_events().await;

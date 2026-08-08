@@ -438,3 +438,150 @@ async fn fallback_prompt_respects_active_plan_mode() {
         })
         .await;
 }
+
+/// A follow-up queued behind a running turn is harvested into the interjection
+/// buffer, so the next model request in that turn carries it. Its RPC resolves
+/// `RemovedFromQueue` (it never runs as its own turn) and the row leaves the
+/// shared queue.
+#[tokio::test]
+async fn harvest_delivers_queued_follow_up_into_the_running_turn() {
+    use crate::session::commands::{PromptCompletionKind, PromptTurnOk};
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (actor, _rx) = build_actor().await;
+            let (queued, mut queued_rx) = user_item_with_rx("p1", "A");
+            {
+                let mut state = actor.state.lock().await;
+                state.pending_inputs.push_back(user_item("running", "A"));
+                state.running_task = Some(running_task_stub("running"));
+                state.pending_inputs.push_back(queued);
+            }
+
+            assert!(actor.harvest_queued_prompts_into_interjections().await);
+
+            let state = actor.state.lock().await;
+            assert_eq!(
+                state
+                    .pending_inputs
+                    .iter()
+                    .map(|i| i.prompt_id.as_str())
+                    .collect::<Vec<_>>(),
+                vec!["running"],
+                "the running turn keeps its slot; the follow-up leaves the queue"
+            );
+            assert!(
+                actor.build_queue_wire(&state).is_empty(),
+                "the harvested row must disappear from the shared queue"
+            );
+            drop(state);
+
+            assert!(
+                actor.drain_pending_interjections().await,
+                "the harvested follow-up must be buffered for the next request"
+            );
+            let conversation = actor.chat_state_handle.get_conversation().await;
+            assert!(
+                matches!(conversation.last(), Some(ConversationItem::User(_))),
+                "the follow-up lands as its own user message, got: {:?}",
+                conversation.last()
+            );
+            let text = conversation.last().unwrap().text_content();
+            assert!(
+                text.contains("text for p1"),
+                "the model must see the follow-up text, got: {text}"
+            );
+
+            assert!(matches!(
+                queued_rx.try_recv(),
+                Ok(Ok(PromptTurnOk {
+                    completion_kind: PromptCompletionKind::RemovedFromQueue,
+                    ..
+                }))
+            ));
+        })
+        .await;
+}
+
+/// With no turn running there is nothing to deliver into: the front row is the
+/// one `maybe_start_running_task` is about to promote, and harvesting it would
+/// strand the user's message in a buffer only the turn loop drains.
+#[tokio::test]
+async fn harvest_is_a_noop_while_idle() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (actor, _rx) = build_actor().await;
+            {
+                let mut state = actor.state.lock().await;
+                state.pending_inputs.push_back(user_item("p1", "A"));
+            }
+
+            assert!(!actor.harvest_queued_prompts_into_interjections().await);
+
+            let state = actor.state.lock().await;
+            assert_eq!(
+                actor
+                    .build_queue_wire(&state)
+                    .iter()
+                    .map(|e| e.id.as_str())
+                    .collect::<Vec<_>>(),
+                vec!["p1"]
+            );
+            assert!(actor.pending_interjections.is_empty());
+        })
+        .await;
+}
+
+/// Rows that own their turn stay queued: a bash row is executed from its block
+/// meta rather than sent to the model, a send-now row is cancel-and-send, a
+/// synthetic wake is the system talking to itself, and a row under composer
+/// edit must not vanish mid-edit.
+#[tokio::test]
+async fn harvest_leaves_rows_that_own_their_turn_queued() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (actor, _rx) = build_actor().await;
+            {
+                let mut state = actor.state.lock().await;
+                state.pending_inputs.push_back(user_item("running", "A"));
+                state.running_task = Some(running_task_stub("running"));
+
+                let mut bash = user_item("bash1", "A");
+                bash.queue_meta.as_mut().unwrap().kind = "bash".to_string();
+                state.pending_inputs.push_back(bash);
+
+                let mut send_now = user_item("now1", "A");
+                send_now.send_now = true;
+                state.pending_inputs.push_back(send_now);
+
+                state.pending_inputs.push_back(
+                    input_with_origin_rx("wake1", crate::session::PromptOrigin::TaskCompleted {
+                        task_id: "t1".to_string(),
+                    })
+                    .0,
+                );
+
+                state.pending_inputs.push_back(user_item("edit1", "A"));
+                state.combine_edit_holds.insert("edit1".to_string());
+
+                state.pending_inputs.push_back(user_item("plain1", "A"));
+            }
+
+            assert!(actor.harvest_queued_prompts_into_interjections().await);
+
+            let state = actor.state.lock().await;
+            assert_eq!(
+                state
+                    .pending_inputs
+                    .iter()
+                    .map(|i| i.prompt_id.as_str())
+                    .collect::<Vec<_>>(),
+                vec!["running", "bash1", "now1", "wake1", "edit1"],
+                "only the plain user follow-up may be delivered mid-turn"
+            );
+        })
+        .await;
+}

@@ -464,8 +464,8 @@ pub enum Event {
 pub enum InterjectionSource {
     /// Direct `x.ai/interject` while a turn was running (Ctrl+Enter).
     Direct,
-    /// A queued (not-yet-running) prompt promoted into the running turn via
-    /// `InterjectQueuedPrompt` (queue "send now").
+    /// A queued (not-yet-running) prompt delivered into the running turn at
+    /// its next safe point instead of waiting for the turn to end.
     Queue,
 }
 

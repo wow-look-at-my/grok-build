@@ -98,6 +98,136 @@ impl SessionActor {
         tracing::info!("Converted stranded interjection into a queued prompt turn");
     }
 
+    /// Move eligible queued follow-ups into the interjection buffer so the
+    /// running turn picks them up at its next safe point.
+    ///
+    /// Without this a follow-up typed mid-turn sits in `pending_inputs` until
+    /// the whole turn ends, so a message aimed at work in flight arrives after
+    /// that work is finished. The turn loop calls this immediately before
+    /// `drain_pending_interjections`, which is immediately before each model
+    /// request — the earliest point the model can see the text without
+    /// cancelling anything.
+    ///
+    /// Returns whether anything moved. A harvested row never runs as its own
+    /// turn: its RPC resolves [`PromptCompletionKind::RemovedFromQueue`], the
+    /// same completion an explicit dequeue produces, and the drain injects its
+    /// text as a standalone user message.
+    pub(super) async fn harvest_queued_prompts_into_interjections(&self) -> bool {
+        let harvested = {
+            let mut state = self.state.lock().await;
+            // `sweep_pending_inputs` exempts the running slot only when
+            // `running_task` is armed; with no turn running every row is
+            // eligible and the front would be stolen from the promoter.
+            let Some(running_mode) = state.running_prompt_id().and_then(|running| {
+                state
+                    .pending_inputs
+                    .iter()
+                    .find(|item| item.prompt_id == running)
+                    .map(|item| item.prompt_mode)
+            }) else {
+                return false;
+            };
+            let holds = state.combine_edit_holds.clone();
+            let dropped = state.sweep_pending_inputs(|item| {
+                item.prompt_mode == running_mode
+                    && Self::deliverable_mid_turn(item, &holds)
+            });
+            if dropped.is_empty() {
+                return false;
+            }
+            let harvested: Vec<PendingInterjection> = dropped
+                .into_iter()
+                .map(|item| {
+                    let text = item
+                        .queue_meta
+                        .as_ref()
+                        .map(|meta| meta.text.clone())
+                        .unwrap_or_default();
+                    let attachments = item
+                        .prompt_blocks
+                        .iter()
+                        .filter_map(|block| match block {
+                            acp::ContentBlock::Image(img) => Some(img.clone()),
+                            _ => None,
+                        })
+                        .collect();
+                    Self::respond_removed_prompt(item.respond_to);
+                    PendingInterjection { text, attachments }
+                })
+                .collect();
+            self.broadcast_queue_changed(&state);
+            harvested
+        };
+
+        for entry in harvested {
+            xai_grok_telemetry::unified_log::info(
+                "shell.prompt.delivered_mid_turn",
+                Some(self.session_info.id.0.as_ref()),
+                Some(serde_json::json!({ "image_count": entry.attachments.len() })),
+            );
+            self.events
+                .emit(crate::session::events::Event::Interjected {
+                    source: crate::session::events::InterjectionSource::Queue,
+                    image_count: entry.attachments.len() as u32,
+                    redirect_kind: crate::session::events::RedirectKind::Interjection,
+                });
+            // Every attached pane renders the user block from this broadcast:
+            // the submitting client painted only a queue row, which the
+            // rebroadcast above just removed.
+            self.broadcast_interjection(&entry.text, None);
+            self.pending_interjections.push(entry);
+        }
+        tracing::info!("delivering queued follow-up(s) into the running turn");
+        true
+    }
+
+    /// Whether a queued row can be folded into another turn as user text.
+    ///
+    /// Everything excluded here keeps today's behaviour (it runs as its own
+    /// turn once the current one ends).
+    fn deliverable_mid_turn(
+        item: &InputItem,
+        holds: &std::collections::HashSet<String>,
+    ) -> bool {
+        // Auto-wake, nudges and drains are the system talking to itself; each
+        // is written to own a turn.
+        if item.origin.is_synthetic() || item.send_now {
+            return false;
+        }
+        // A row under composer edit must not vanish from under the editor.
+        if holds.contains(&item.prompt_id) {
+            return false;
+        }
+        // A bash row's command is executed from its block meta, never sent to
+        // the model; a verbatim row is defined by skipping the envelope this
+        // path adds; the rest bind a turn (schema, tool overrides, trace
+        // export) or hand a caller a turn-scoped channel.
+        let Some(meta) = &item.queue_meta else {
+            return false;
+        };
+        if meta.kind != "prompt"
+            || item.verbatim
+            || item.json_schema.is_some()
+            || item.tool_overrides_update.is_some()
+            || item.trace_gcs_config.is_some()
+            || item.task_wake_fallback.is_some()
+            || item.parsed_prompt_tx.is_some()
+            || item.persist_ack.is_some()
+        {
+            return false;
+        }
+        if meta.text.trim().is_empty() {
+            return false;
+        }
+        // Text and images are all the interjection pipeline carries.
+        item.prompt_blocks.iter().all(|block| {
+            matches!(
+                block,
+                acp::ContentBlock::Text(_) | acp::ContentBlock::Image(_)
+            )
+        })
+    }
+
     /// Flush interjections that missed the completed turn's final drain into
     /// queued prompt turns (front of the queue, original order). Returns
     /// whether anything was flushed; the caller kicks
