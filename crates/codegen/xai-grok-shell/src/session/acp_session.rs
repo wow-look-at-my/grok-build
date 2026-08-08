@@ -691,6 +691,11 @@ pub(crate) struct SessionActor {
     /// Pushed by `SessionCommand::Interject` handler, drained at safe
     /// points in `process_conversation_turn`. Internally synchronized.
     pub(crate) pending_interjections: InterjectionBuffer<acp::ImageContent>,
+    /// Prompt ids queued when the running turn was promoted. Those rows were
+    /// next in line before that turn existed, so mid-turn delivery
+    /// (`harvest_queued_prompts_into_interjections`) leaves them to run as
+    /// their own turns. Written by the promoter under the state lock.
+    pub(crate) queued_at_turn_start: std::cell::RefCell<std::collections::HashSet<String>>,
     /// Skill-announcement reminders that arrived while a turn was running,
     /// flushed at the same safe points as `pending_interjections` plus on
     /// cancel/idle. The flush also delivers the plan tracker's buffered

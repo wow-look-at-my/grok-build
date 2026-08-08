@@ -3180,16 +3180,11 @@ async fn enrich_auth_inline_unreachable_server_leaves_auth_unchanged() {
 // token the manager hands out (startup, sync reads, `auth()`), not just fresh
 // login. Each test fails on the pre-fix tree.
 
-/// `jsonwebtoken` needs a process-level CryptoProvider; tests that encode
-/// JWTs can't rely on another test having installed it first.
-fn ensure_crypto_provider() {
-    let _ = jsonwebtoken::crypto::rust_crypto::DEFAULT_PROVIDER.install_default();
-}
 
 /// A signed (HS256) access token carrying a `Team` principal, matching the
 /// shape `peek_access_token_principal` extracts in production.
 fn team_jwt(principal_id: &str) -> String {
-    ensure_crypto_provider();
+    crate::auth::ensure_crypto_provider();
     jsonwebtoken::encode(
         &jsonwebtoken::Header::new(jsonwebtoken::Algorithm::HS256),
         &serde_json::json!({
@@ -3205,7 +3200,7 @@ fn team_jwt(principal_id: &str) -> String {
 
 /// An access token carrying `principal_id` but NO `principal_type`.
 fn principal_id_only_jwt(principal_id: &str) -> String {
-    ensure_crypto_provider();
+    crate::auth::ensure_crypto_provider();
     jsonwebtoken::encode(
         &jsonwebtoken::Header::new(jsonwebtoken::Algorithm::HS256),
         &serde_json::json!({
@@ -3244,6 +3239,7 @@ fn oidc_session_for_team(principal_id: &str) -> GrokAuth {
 /// the pin was deployed) must be cleared at construction, not silently loaded.
 #[test]
 fn new_clears_wrong_team_token_loaded_from_disk() {
+    crate::auth::ensure_crypto_provider();
     let dir = tempfile::tempdir().unwrap();
     let cfg = pinned_cfg("team-good");
     let scope = cfg.auth_scope();
@@ -3267,6 +3263,7 @@ fn new_clears_wrong_team_token_loaded_from_disk() {
 /// A matching-team session on disk is loaded normally (no false positive).
 #[test]
 fn new_keeps_matching_team_token_loaded_from_disk() {
+    crate::auth::ensure_crypto_provider();
     let dir = tempfile::tempdir().unwrap();
     let cfg = pinned_cfg("team-good");
     let scope = cfg.auth_scope();
@@ -3285,6 +3282,7 @@ fn new_keeps_matching_team_token_loaded_from_disk() {
 /// `try_ensure_fresh_auth`) rejects and clears a wrong-team cached token.
 #[tokio::test]
 async fn auth_rejects_and_clears_wrong_team_cached_token() {
+    crate::auth::ensure_crypto_provider();
     let dir = tempfile::tempdir().unwrap();
     let mgr = Arc::new(AuthManager::new(dir.path(), pinned_cfg("team-good")));
     // hot_swap bypasses the pin (like a sibling adoption mid-session).
@@ -3306,6 +3304,7 @@ async fn auth_rejects_and_clears_wrong_team_cached_token() {
 /// A matching-team cached token flows through `auth()` unchanged.
 #[tokio::test]
 async fn auth_accepts_matching_team_cached_token() {
+    crate::auth::ensure_crypto_provider();
     let dir = tempfile::tempdir().unwrap();
     let mgr = Arc::new(AuthManager::new(dir.path(), pinned_cfg("team-good")));
     let tok = oidc_session_for_team("team-good");
@@ -3319,6 +3318,7 @@ async fn auth_accepts_matching_team_cached_token() {
 /// must not affect default deployments).
 #[tokio::test]
 async fn no_pin_accepts_any_team_cached_token() {
+    crate::auth::ensure_crypto_provider();
     let dir = tempfile::tempdir().unwrap();
     let mgr = Arc::new(AuthManager::new(dir.path(), GrokComConfig::default()));
     let tok = oidc_session_for_team("team-anything");
@@ -3332,6 +3332,7 @@ async fn no_pin_accepts_any_team_cached_token() {
 /// `auth()` (the wrapper gates refresh results, not just the cached fast path).
 #[tokio::test]
 async fn auth_rejects_token_refreshed_into_wrong_team() {
+    crate::auth::ensure_crypto_provider();
     struct WrongTeamRefresher {
         jwt: String,
     }
@@ -3371,6 +3372,7 @@ async fn auth_rejects_token_refreshed_into_wrong_team() {
 /// (relay reconnect) is cleared, not just hidden.
 #[test]
 fn force_reload_clears_wrong_team_token() {
+    crate::auth::ensure_crypto_provider();
     let dir = tempfile::tempdir().unwrap();
     let cfg = pinned_cfg("team-good");
     let scope = cfg.auth_scope();
@@ -3538,6 +3540,7 @@ fn force_reload_adopts_fresh_disk_token() {
 /// id alone: the pinned team is accepted, not falsely rejected.
 #[tokio::test]
 async fn pin_matches_principal_id_without_principal_type() {
+    crate::auth::ensure_crypto_provider();
     let dir = tempfile::tempdir().unwrap();
     let mgr = Arc::new(AuthManager::new(dir.path(), pinned_cfg("team-good")));
     mgr.hot_swap(GrokAuth {

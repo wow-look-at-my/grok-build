@@ -1623,6 +1623,12 @@ mod tests {
     fn gate_load_claude_env_returns_empty_when_marker_set() {
         let _g = MarkerGuard;
         refresh_marker_cache(true);
+        // Also set the env-var override so the workspace-resident marker
+        // reader (which can't see the shell-side cache) honours the gate.
+        // Without it this asserts nothing: the loader also returns empty when
+        // the machine simply has no `~/.claude` to read, so it passes on a
+        // clean host and fails on one that has the file.
+        unsafe { std::env::set_var("_GROK_CLAUDE_MARKER_OVERRIDE", "1") };
         let dir = tempfile::tempdir().unwrap();
         let env = xai_grok_workspace::permission::claude_settings::load_claude_env_with_project(
             dir.path(),
