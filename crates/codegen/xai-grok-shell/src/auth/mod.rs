@@ -18,6 +18,21 @@ pub(crate) mod single_flight;
 mod storage;
 mod token_output;
 pub(crate) mod token_type;
+/// Pin jsonwebtoken to this crate's declared provider before the first JWT
+/// operation in the process.
+///
+/// Auto-detection cannot be relied on here: `gcloud-storage` pulls
+/// `jsonwebtoken/aws_lc_rs` while this crate asks for `rust_crypto`, and
+/// cargo's feature unification leaves both on, which jsonwebtoken answers with
+/// a provider whose every operation panics. The process default latches on
+/// first use (`OnceLock::get_or_init`), so a test that reaches crypto without
+/// installing first poisons every other test in the process — call this before
+/// any JWT work. Production installs on the same grounds at login.
+#[cfg(test)]
+pub(crate) fn ensure_crypto_provider() {
+    let _ = jsonwebtoken::crypto::rust_crypto::DEFAULT_PROVIDER.install_default();
+}
+
 pub use auth_provider::{AuthProviderConfig, AuthProviderRef};
 pub(crate) use auth_provider::{
     PROVIDER_TIMEOUT_CEILING_SECS, PROVIDER_TOKEN_EXPIRY_SKEW_SECS, ProviderRefreshOutcome,

@@ -240,16 +240,26 @@ fn fake_standalone_facts_compose_through_shared_view() {
     );
     let report = collect_report_with(snapshot);
 
-    assert_eq!(report.issue_count(), 1);
+    // Ignore the voice finding: `collect_report_with` also probes the host's
+    // real microphone, so on a machine without audio it contributes an issue
+    // these fake facts never described. `issue_count()` and finding order both
+    // see it; the ids these facts produce do not.
+    let issue_ids: Vec<DiagnosticId> = report
+        .findings
+        .iter()
+        .filter(|finding| finding.disposition == FindingDisposition::Issue)
+        .map(|finding| finding.id)
+        .filter(|id| *id != crate::diagnostics::VOICE_NO_INPUT_DEVICE_ID)
+        .collect();
+    assert_eq!(
+        issue_ids,
+        vec![DiagnosticId::new("terminal", "tmux-clipboard")]
+    );
     assert!(
         report
             .findings
             .iter()
             .all(|finding| { finding.id != DiagnosticId::new("terminal", "control-mode") })
-    );
-    assert_eq!(
-        report.findings[0].id,
-        DiagnosticId::new("terminal", "tmux-clipboard")
     );
 }
 

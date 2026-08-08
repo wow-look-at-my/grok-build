@@ -6178,9 +6178,16 @@ pub(crate) mod tests {
             app.needs_animation(),
             "an open prompt history overlay must request animation ticks"
         );
+        // Drive `tick()` and check the count separately, on a wall-clock
+        // deadline. Requiring `tick()` to return true on the same iteration
+        // the results land is a race — it reports "needs redraw", so once the
+        // count is settled a later tick can return false forever — and a
+        // fixed 1000 x 1ms budget is not enough on a loaded machine.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
         let mut delivered = false;
-        for _ in 0..1000 {
-            if app.tick() && app.agents[&id].prompt.history_search.result_count() == 2 {
+        while std::time::Instant::now() < deadline {
+            app.tick();
+            if app.agents[&id].prompt.history_search.result_count() == 2 {
                 delivered = true;
                 break;
             }
