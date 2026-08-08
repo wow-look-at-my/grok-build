@@ -108,21 +108,18 @@ impl SessionActor {
     /// request — the earliest point the model can see the text without
     /// cancelling anything.
     ///
-    /// `queued_at_turn_start` holds the rows that were already waiting when the
-    /// turn began. Those were next in line before it existed — each is its own
-    /// task, not a note about this turn's work — so they are left to run as
-    /// their own turns.
+    /// Rows listed in [`SessionActor::queued_at_turn_start`] were next in line
+    /// before this turn existed — each is its own task, not a note about this
+    /// turn's work — so they are left to run as their own turns.
     ///
     /// Returns whether anything moved. A harvested row never runs as its own
     /// turn: its RPC resolves [`PromptCompletionKind::RemovedFromQueue`], the
     /// same completion an explicit dequeue produces, and the drain injects its
     /// text as a standalone user message.
-    pub(super) async fn harvest_queued_prompts_into_interjections(
-        &self,
-        queued_at_turn_start: &std::collections::HashSet<String>,
-    ) -> bool {
+    pub(super) async fn harvest_queued_prompts_into_interjections(&self) -> bool {
         let harvested = {
             let mut state = self.state.lock().await;
+            let queued_at_turn_start = self.queued_at_turn_start.borrow();
             // `sweep_pending_inputs` exempts the running slot only when
             // `running_task` is armed; with no turn running every row is
             // eligible and the front would be stolen from the promoter.

@@ -1622,6 +1622,7 @@ pub(crate) async fn spawn_session_actor(
         max_turns,
         max_retries: xai_grok_sampler::resolve_max_retries(max_retries),
         pending_interjections: InterjectionBuffer::new(),
+        queued_at_turn_start: Default::default(),
         pending_skill_reminders: Mutex::new(Vec::new()),
         idle_flush_timeout: memory_config
             .as_ref()

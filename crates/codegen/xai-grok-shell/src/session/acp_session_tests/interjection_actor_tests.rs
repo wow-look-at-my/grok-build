@@ -459,7 +459,7 @@ async fn harvest_delivers_queued_follow_up_into_the_running_turn() {
                 state.pending_inputs.push_back(queued);
             }
 
-            assert!(actor.harvest_queued_prompts_into_interjections(&Default::default()).await);
+            assert!(actor.harvest_queued_prompts_into_interjections().await);
 
             let state = actor.state.lock().await;
             assert_eq!(
@@ -518,7 +518,7 @@ async fn harvest_is_a_noop_while_idle() {
                 state.pending_inputs.push_back(user_item("p1", "A"));
             }
 
-            assert!(!actor.harvest_queued_prompts_into_interjections(&Default::default()).await);
+            assert!(!actor.harvest_queued_prompts_into_interjections().await);
 
             let state = actor.state.lock().await;
             assert_eq!(
@@ -570,7 +570,7 @@ async fn harvest_leaves_rows_that_own_their_turn_queued() {
                 state.pending_inputs.push_back(user_item("plain1", "A"));
             }
 
-            assert!(actor.harvest_queued_prompts_into_interjections(&Default::default()).await);
+            assert!(actor.harvest_queued_prompts_into_interjections().await);
 
             let state = actor.state.lock().await;
             assert_eq!(
@@ -602,14 +602,10 @@ async fn harvest_leaves_rows_queued_before_the_turn_started() {
                 state.pending_inputs.push_back(user_item("before", "A"));
                 state.pending_inputs.push_back(user_item("during", "A"));
             }
-            let at_turn_start: std::collections::HashSet<String> =
+            *actor.queued_at_turn_start.borrow_mut() =
                 ["running".to_string(), "before".to_string()].into();
 
-            assert!(
-                actor
-                    .harvest_queued_prompts_into_interjections(&at_turn_start)
-                    .await
-            );
+            assert!(actor.harvest_queued_prompts_into_interjections().await);
 
             let state = actor.state.lock().await;
             assert_eq!(

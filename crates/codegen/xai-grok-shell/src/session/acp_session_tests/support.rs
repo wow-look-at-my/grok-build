@@ -310,6 +310,7 @@ pub(crate) async fn create_test_actor_ex(
         max_retries: 3,
         max_turns: None,
         pending_interjections: InterjectionBuffer::new(),
+        queued_at_turn_start: Default::default(),
         pending_skill_reminders: Mutex::new(Vec::new()),
         idle_flush_timeout: None,
         dream_check_timeout: None,
