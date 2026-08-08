@@ -48,7 +48,11 @@ async fn ctrlc_with_queued_prompt_no_dup() {
         .expect("B visible as a queued row");
 
     harness.inject_keys(keys::CTRL_C).expect("Ctrl+C cancel A");
-    turn_a.release();
+    // The barrier is never released: the cancel is the only way A can end, so
+    // it cannot lose a race to A's own completion. Releasing here would —
+    // `inject_keys` writes to the PTY without waiting for the pager to read
+    // it, so A finishes on its own, B promotes, and the Ctrl+C lands on B
+    // instead, destroying the very prompt this case exists to protect.
 
     // Standard cancel (queued prompts skip the rewind): A is cancelled and B
     // promotes as the next turn. The "Turn cancelled by user" marker and the
