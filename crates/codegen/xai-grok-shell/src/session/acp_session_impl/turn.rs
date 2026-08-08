@@ -1959,6 +1959,17 @@ impl SessionActor {
         let mut metrics_drop_guard = TurnMetrics::new();
         let mut turn_tools_called: Vec<String> = Vec::new();
         let mut tool_turn_count: usize = 1;
+        // Rows already queued when this turn started were next in line before
+        // it existed, so each still runs as its own turn; only follow-ups that
+        // arrive mid-turn are delivered into it.
+        let queued_at_turn_start: std::collections::HashSet<String> = {
+            let state = self.state.lock().await;
+            state
+                .pending_inputs
+                .iter()
+                .map(|item| item.prompt_id.clone())
+                .collect()
+        };
         let mut loop_index: u32 = 0;
         let mut identical_tool_calls = IdenticalToolCallRun::default();
         let mut todo_gate_fires: u32 = 0;
@@ -2038,7 +2049,8 @@ impl SessionActor {
             // Ahead of the drain, and so ahead of every model request in this
             // turn: a follow-up queued mid-turn reaches the model on the next
             // request rather than after the turn it was aimed at.
-            self.harvest_queued_prompts_into_interjections().await;
+            self.harvest_queued_prompts_into_interjections(&queued_at_turn_start)
+                .await;
             self.drain_pending_interjections().await;
             self.flush_pending_skill_reminders().await;
             self.inject_pending_monitor_events().await;

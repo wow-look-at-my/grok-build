@@ -459,7 +459,7 @@ async fn harvest_delivers_queued_follow_up_into_the_running_turn() {
                 state.pending_inputs.push_back(queued);
             }
 
-            assert!(actor.harvest_queued_prompts_into_interjections().await);
+            assert!(actor.harvest_queued_prompts_into_interjections(&Default::default()).await);
 
             let state = actor.state.lock().await;
             assert_eq!(
@@ -518,7 +518,7 @@ async fn harvest_is_a_noop_while_idle() {
                 state.pending_inputs.push_back(user_item("p1", "A"));
             }
 
-            assert!(!actor.harvest_queued_prompts_into_interjections().await);
+            assert!(!actor.harvest_queued_prompts_into_interjections(&Default::default()).await);
 
             let state = actor.state.lock().await;
             assert_eq!(
@@ -570,7 +570,7 @@ async fn harvest_leaves_rows_that_own_their_turn_queued() {
                 state.pending_inputs.push_back(user_item("plain1", "A"));
             }
 
-            assert!(actor.harvest_queued_prompts_into_interjections().await);
+            assert!(actor.harvest_queued_prompts_into_interjections(&Default::default()).await);
 
             let state = actor.state.lock().await;
             assert_eq!(
@@ -581,6 +581,45 @@ async fn harvest_leaves_rows_that_own_their_turn_queued() {
                     .collect::<Vec<_>>(),
                 vec!["running", "bash1", "now1", "wake1", "edit1"],
                 "only the plain user follow-up may be delivered mid-turn"
+            );
+        })
+        .await;
+}
+
+/// A row already queued when the turn started was next in line before that
+/// turn existed, so it stays queued and runs as its own turn — only a
+/// follow-up that arrives mid-turn is delivered into it.
+#[tokio::test]
+async fn harvest_leaves_rows_queued_before_the_turn_started() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (actor, _rx) = build_actor().await;
+            {
+                let mut state = actor.state.lock().await;
+                state.pending_inputs.push_back(user_item("running", "A"));
+                state.running_task = Some(running_task_stub("running"));
+                state.pending_inputs.push_back(user_item("before", "A"));
+                state.pending_inputs.push_back(user_item("during", "A"));
+            }
+            let at_turn_start: std::collections::HashSet<String> =
+                ["running".to_string(), "before".to_string()].into();
+
+            assert!(
+                actor
+                    .harvest_queued_prompts_into_interjections(&at_turn_start)
+                    .await
+            );
+
+            let state = actor.state.lock().await;
+            assert_eq!(
+                state
+                    .pending_inputs
+                    .iter()
+                    .map(|i| i.prompt_id.as_str())
+                    .collect::<Vec<_>>(),
+                vec!["running", "before"],
+                "only the row queued during the turn may be delivered into it"
             );
         })
         .await;
