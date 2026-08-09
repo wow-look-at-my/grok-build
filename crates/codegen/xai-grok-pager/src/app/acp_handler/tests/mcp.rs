@@ -42,6 +42,7 @@
             let active = app.agents.get_mut(&AgentId(1)).unwrap();
             active.extensions_modal = Some(make_mcps_modal_with_servers(vec![
                 crate::views::mcps_modal::McpServerInfo {
+                    error: None,
                     name: "alpha".into(),
                     display_name: None,
                     status: McpServerDisplayStatus::Initializing,
@@ -515,6 +516,7 @@
             let active = app.agents.get_mut(&AgentId(1)).unwrap();
             active.extensions_modal = Some(make_mcps_modal_with_servers(vec![
                 crate::views::mcps_modal::McpServerInfo {
+                    error: None,
                     name: "beta".into(),
                     display_name: None,
                     status: crate::views::mcps_modal::McpServerDisplayStatus::Initializing,

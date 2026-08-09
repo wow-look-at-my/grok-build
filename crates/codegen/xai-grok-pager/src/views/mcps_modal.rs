@@ -158,6 +158,9 @@ pub struct McpsServerEntry {
 pub struct McpsServerSession {
     pub enabled: bool,
     pub status: Option<String>,
+    /// Why the server is unavailable, when the shell knows.
+    #[serde(default)]
+    pub error: Option<String>,
     #[serde(default)]
     pub tools: Vec<serde_json::Value>,
     #[serde(default)]
@@ -221,6 +224,10 @@ pub struct McpServerInfo {
     /// Plugin name parsed from `source_label` (`"plugin: …"`).
     pub plugin_name: Option<String>,
     pub is_managed_gateway: bool,
+    /// Why the server is unavailable. Shown on the row, because "unavailable"
+    /// on its own leaves an operator guessing at what a `command` that is not
+    /// installed did.
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -323,7 +330,17 @@ pub fn convert_list_response(resp: McpsListResponse) -> Vec<McpServerInfo> {
                 .as_ref()
                 .is_some_and(|session| session.setup_required)
                 || matches!(status, McpServerDisplayStatus::SetupRequired);
+            let error = matches!(status, McpServerDisplayStatus::Unavailable)
+                .then(|| {
+                    entry
+                        .session
+                        .as_ref()
+                        .and_then(|session| session.error.clone())
+                })
+                .flatten()
+                .filter(|reason| !reason.trim().is_empty());
             McpServerInfo {
+                error,
                 name: entry.name,
                 display_name: entry.display_name,
                 status,
@@ -402,6 +419,7 @@ mod tests {
 
     fn make_row(name: &str, status: McpServerDisplayStatus) -> McpServerInfo {
         McpServerInfo {
+            error: None,
             name: name.to_string(),
             display_name: None,
             status,
@@ -443,6 +461,7 @@ mod tests {
                 setup: None,
                 setup_values: None,
                 session: Some(McpsServerSession {
+                    error: None,
                     enabled: true,
                     status: Some("ready".into()),
                     tools: vec![],
@@ -548,6 +567,75 @@ mod tests {
         assert!(!is_removable(&server));
     }
 
+    /// A server whose command could not be started reports `unavailable` plus
+    /// the reason. Dropping the reason leaves the row saying only that the
+    /// server is not working, which is what sent an operator looking for a
+    /// hang that was really `uvx` not being installed.
+    #[test]
+    fn convert_list_response_keeps_the_reason_a_server_is_unavailable() {
+        let servers = convert_list_response(McpsListResponse {
+            servers: vec![McpsServerEntry {
+                name: "kagi".to_string(),
+                display_name: None,
+                source: Some("local".to_string()),
+                source_label: None,
+                config_type: None,
+                setup: None,
+                setup_values: None,
+                session: Some(McpsServerSession {
+                    enabled: true,
+                    status: Some("unavailable".into()),
+                    error: Some(
+                        "Failed to spawn MCP server 'kagi': No such file or directory (os error 2)"
+                            .into(),
+                    ),
+                    tools: vec![],
+                    auth_required: false,
+                    setup_required: false,
+                }),
+            }],
+        });
+
+        assert_eq!(servers[0].status, McpServerDisplayStatus::Unavailable);
+        assert_eq!(
+            servers[0].error.as_deref(),
+            Some("Failed to spawn MCP server 'kagi': No such file or directory (os error 2)"),
+        );
+    }
+
+    /// A reason only makes sense next to a status that means "not working". A
+    /// stale one on a ready row would report a healthy server as broken.
+    #[test]
+    fn convert_list_response_drops_a_reason_on_a_working_server() {
+        let mut ready = McpsListResponse {
+            servers: vec![McpsServerEntry {
+                name: "kagi".to_string(),
+                display_name: None,
+                source: Some("local".to_string()),
+                source_label: None,
+                config_type: None,
+                setup: None,
+                setup_values: None,
+                session: Some(McpsServerSession {
+                    enabled: true,
+                    status: Some("ready".into()),
+                    error: Some("stale".into()),
+                    tools: vec![],
+                    auth_required: false,
+                    setup_required: false,
+                }),
+            }],
+        };
+        assert_eq!(convert_list_response(ready.clone())[0].error, None);
+
+        // An empty string is not a reason either.
+        if let Some(session) = ready.servers[0].session.as_mut() {
+            session.status = Some("unavailable".into());
+            session.error = Some("   ".into());
+        }
+        assert_eq!(convert_list_response(ready)[0].error, None);
+    }
+
     #[test]
     fn convert_list_response_parses_plugin_name() {
         let server = server_from_wire("srv", Some("local"), Some("plugin: example"));
@@ -594,6 +682,7 @@ mod tests {
                 setup: None,
                 setup_values: None,
                 session: Some(McpsServerSession {
+                    error: None,
                     enabled: true,
                     status: Some("ready".to_string()),
                     tools: vec![],
@@ -637,6 +726,7 @@ mod tests {
                 }),
                 setup_values: None,
                 session: Some(McpsServerSession {
+                    error: None,
                     enabled: true,
                     status: Some("setuprequired".into()),
                     tools: vec![],
@@ -705,6 +795,7 @@ mod tests {
     #[test]
     fn patch_server_row_status_only_keeps_tools() {
         let mut servers = vec![McpServerInfo {
+            error: None,
             name: "alpha".into(),
             display_name: None,
             status: McpServerDisplayStatus::Ready,
