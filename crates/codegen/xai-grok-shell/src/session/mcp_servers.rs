@@ -63,6 +63,45 @@ pub fn build_config_resolved_event(
     xai_file_utils::events::Event::McpConfigResolved { servers, disabled }
 }
 
+/// Outcome of [`wait_until_mcp_init_settles`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum McpInitWait {
+    /// Every server finished; tools are registered.
+    Initialized,
+    /// Nothing is in flight, and it never completed — the caller owns starting
+    /// (or restarting) initialization.
+    NotInitializing,
+    /// The budget elapsed with initialization still in flight.
+    TimedOut,
+}
+
+/// Poll `mcp_state` until initialization settles, giving up after `budget`.
+///
+/// The budget is the point of this function. A server that keeps failing gets
+/// re-initialized, which puts the state back in flight, so a poll with no
+/// deadline never returns — and its caller is a prompt waiting to run.
+pub async fn wait_until_mcp_init_settles(
+    mcp_state: &tokio::sync::Mutex<inner::McpState>,
+    budget: std::time::Duration,
+) -> McpInitWait {
+    let deadline = tokio::time::Instant::now() + budget;
+    loop {
+        {
+            let state = mcp_state.lock().await;
+            if state.is_initialized() {
+                return McpInitWait::Initialized;
+            }
+            if !state.is_initializing() {
+                return McpInitWait::NotInitializing;
+            }
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return McpInitWait::TimedOut;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+}
+
 pub async fn start_mcp_server(
     mcp_server: acp::McpServer,
     cwd: Option<&Path>,
@@ -112,6 +151,73 @@ pub async fn build_pending_clients(
         .build_pending_acp_clients(&acp_overrides);
     results.extend(acp_clients.into_iter().map(Ok));
     results
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn stdio(name: &str) -> acp::McpServer {
+        acp::McpServer::Stdio(acp::McpServerStdio::new(
+            name,
+            std::path::PathBuf::from("uvx"),
+        ))
+    }
+
+    /// A server that never finishes handshaking must not hold a caller
+    /// forever. This is the failure an operator saw as a session that stopped
+    /// answering prompts entirely and only came back on restart.
+    #[tokio::test(start_paused = true)]
+    async fn a_wedged_init_gives_up_instead_of_waiting_forever() {
+        let mut state = inner::McpState::new(vec![stdio("kagi")]);
+        assert!(state.try_start_init());
+        state.mark_servers_initializing(["kagi".to_string()]);
+        let state = tokio::sync::Mutex::new(state);
+
+        let outcome = tokio::time::timeout(
+            std::time::Duration::from_secs(600),
+            wait_until_mcp_init_settles(&state, std::time::Duration::from_secs(30)),
+        )
+        .await
+        .expect("the wait must return on its own, not run until the test's own timeout");
+
+        assert_eq!(outcome, McpInitWait::TimedOut);
+    }
+
+    /// The budget only bounds a wait that would otherwise never end: a server
+    /// that finishes is still waited for.
+    #[tokio::test(start_paused = true)]
+    async fn a_server_that_finishes_is_waited_for() {
+        let mut state = inner::McpState::new(vec![stdio("kagi")]);
+        assert!(state.try_start_init());
+        state.mark_servers_initializing(["kagi".to_string()]);
+        let state = std::sync::Arc::new(tokio::sync::Mutex::new(state));
+
+        let settler = std::sync::Arc::clone(&state);
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            let mut state = settler.lock().await;
+            state.mark_server_ready("kagi");
+            state.finish_init();
+        });
+
+        assert_eq!(
+            wait_until_mcp_init_settles(&state, std::time::Duration::from_secs(30)).await,
+            McpInitWait::Initialized,
+        );
+    }
+
+    /// Nothing in flight and never completed is the caller's cue to start
+    /// initialization, not to wait out the budget.
+    #[tokio::test(start_paused = true)]
+    async fn an_unstarted_init_returns_immediately() {
+        let state = tokio::sync::Mutex::new(inner::McpState::new(vec![stdio("kagi")]));
+
+        assert_eq!(
+            wait_until_mcp_init_settles(&state, std::time::Duration::from_secs(30)).await,
+            McpInitWait::NotInitializing,
+        );
+    }
 }
 
 pub async fn start_mcp_servers(

@@ -2202,6 +2202,7 @@ mod extensions_action_target_tests {
 
     fn server_info(name: &str, enabled: bool) -> crate::views::mcps_modal::McpServerInfo {
         crate::views::mcps_modal::McpServerInfo {
+            error: None,
             name: name.into(),
             display_name: None,
             status: crate::views::mcps_modal::McpServerDisplayStatus::Initializing,
@@ -2715,6 +2716,7 @@ mod connectors_url_click_tests {
 
     fn managed_server() -> McpServerInfo {
         McpServerInfo {
+            error: None,
             name: "grok_com_linear".into(),
             display_name: None,
             status: McpServerDisplayStatus::Ready,
@@ -2963,6 +2965,7 @@ mod extensions_modal_confirmation_tests {
         wire_source: crate::views::mcps_modal::McpWireSource,
     ) -> crate::views::mcps_modal::McpServerInfo {
         crate::views::mcps_modal::McpServerInfo {
+            error: None,
             name: name.into(),
             display_name: None,
             status: crate::views::mcps_modal::McpServerDisplayStatus::Initializing,

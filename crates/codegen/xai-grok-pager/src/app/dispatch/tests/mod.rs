@@ -441,6 +441,7 @@ fn cta_mcp_server(
 ) -> crate::views::mcps_modal::McpServerInfo {
     use crate::views::mcps_modal::{McpServerDisplayStatus, McpWireSource};
     crate::views::mcps_modal::McpServerInfo {
+        error: None,
         name: name.into(),
         display_name: None,
         status,
