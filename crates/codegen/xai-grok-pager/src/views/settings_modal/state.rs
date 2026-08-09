@@ -1096,7 +1096,6 @@ pub(super) fn action_for_int(key: SettingKey, value: i64) -> Option<Action> {
         "max_thoughts_width" => Some(Action::SetMaxThoughtsWidth(value)),
         "scroll_speed" => Some(Action::SetScrollSpeed(value)),
         "scroll_lines" => Some(Action::SetScrollLines(value)),
-        "openai_compatible.context_window" => Some(Action::SetOpenAiCompatibleContextWindow(value)),
         _ => None,
     }
 }

@@ -598,21 +598,6 @@ impl ModelsManager {
             merge_codex_catalog(cfg, base, &self.inner.codex_models.read());
     }
 
-
-    /// Replace the additive Codex catalog and notify selectors.
-    /// xAI models remain untouched so a second provider expands the picker.
-    pub fn set_codex_models(&self, models: IndexMap<String, ModelEntry>) {
-        *self.inner.codex_models.write() = models;
-        let cfg = self.inner.cfg.read().clone();
-        let prefetched = self.inner.catalog.read().prefetched.clone();
-        self.rebuild(&cfg, prefetched);
-        self.reselect_current_model_if_missing(&cfg);
-        self.notify_models_updated();
-    }
-
-    pub fn clear_codex_models(&self) {
-        self.set_codex_models(IndexMap::new());
-    }
     /// Refresh models when the etag changes.
     pub async fn refresh_if_new_etag(&self, etag: String) {
         let same_etag = {

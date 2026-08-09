@@ -317,7 +317,6 @@ pub struct OpenAiCompatibleSnapshot {
     pub base_url: String,
     pub model: String,
     pub api_backend: String,
-    pub context_window: u64,
     pub make_default: bool,
     pub api_key_configured: bool,
 }
@@ -330,7 +329,6 @@ impl Default for OpenAiCompatibleSnapshot {
             base_url: profile.base_url,
             model: profile.model,
             api_backend: "chat_completions".to_owned(),
-            context_window: profile.context_window,
             make_default: profile.make_default,
             api_key_configured: false,
         }
@@ -364,7 +362,6 @@ impl OpenAiCompatibleSnapshot {
             base_url: profile.base_url,
             model: profile.model,
             api_backend: api_backend.to_owned(),
-            context_window: profile.context_window,
             make_default: profile.make_default,
             api_key_configured,
         }
@@ -760,9 +757,6 @@ pub fn current_value_for(
             } else {
                 "chat_completions"
             },
-        )),
-        "openai_compatible.context_window" => Some(SettingValue::Int(
-            i64::try_from(pager.openai_compatible.context_window).unwrap_or(i64::MAX),
         )),
         "openai_compatible.make_default" => {
             Some(SettingValue::Bool(pager.openai_compatible.make_default))
@@ -1273,12 +1267,6 @@ mod tests {
                 }
                 ("openai_compatible.api_backend", SettingKind::Enum { default, .. }) => {
                     assert_eq!(*default, OpenAiCompatibleSnapshot::default().api_backend);
-                }
-                ("openai_compatible.context_window", SettingKind::Int { default, .. }) => {
-                    assert_eq!(
-                        *default,
-                        OpenAiCompatibleSnapshot::default().context_window as i64
-                    );
                 }
                 ("openai_compatible.make_default", SettingKind::Bool { default }) => {
                     assert_eq!(*default, OpenAiCompatibleSnapshot::default().make_default);

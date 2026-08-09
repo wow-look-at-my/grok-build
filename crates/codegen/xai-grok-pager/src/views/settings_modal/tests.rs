@@ -728,7 +728,6 @@ fn rows_contain_categories_and_settings_through_pr_14() {
             "openai_compatible.base_url",
             "openai_compatible.model",
             "openai_compatible.api_backend",
-            "openai_compatible.context_window",
             "openai_compatible.make_default",
             "openai_compatible.api_key",
             // Models category. `default_reasoning_effort`,

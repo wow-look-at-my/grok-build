@@ -33,15 +33,6 @@ pub async fn set_openai_compatible_api_backend(value: String) -> Result<()> {
     update_config(|cfg| openai_compatible_mut(cfg).api_backend = backend).await
 }
 
-/// Persist the token context window used for compaction decisions.
-pub async fn set_openai_compatible_context_window(value: i64) -> Result<()> {
-    let value = u64::try_from(value)
-        .ok()
-        .filter(|value| *value > 0)
-        .ok_or_else(|| anyhow::anyhow!("context window must be greater than zero"))?;
-    update_config(|cfg| openai_compatible_mut(cfg).context_window = value).await
-}
-
 /// Persist whether this profile should become the default model.
 pub async fn set_openai_compatible_make_default(value: bool) -> Result<()> {
     update_config(|cfg| openai_compatible_mut(cfg).make_default = value).await

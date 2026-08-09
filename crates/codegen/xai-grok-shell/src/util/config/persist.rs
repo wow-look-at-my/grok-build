@@ -259,6 +259,15 @@ mod tests {
             profile.get("future_option").and_then(TomlValue::as_str),
             Some("keep-me")
         );
+        // `context_window` is no longer part of the `[openai_compatible]`
+        // profile — the only supported knobs are the per-model
+        // `[model.<id>] context_window`. A stale global key in the file is
+        // ignored on parse and, like any unknown field, preserved verbatim on
+        // merge so we never hand-mangle the user's config.toml.
+        assert_eq!(
+            profile.get("context_window").and_then(TomlValue::as_integer),
+            Some(131_072)
+        );
     }
 
     /// The `[toolset.ask_user_question]` settings write merges only that

@@ -242,6 +242,74 @@
         );
     }
 
+    /// Regression: the subagent's `model` field in `SubagentSpawned` is a raw
+    /// model *id*. At ingestion it must be resolved through the parent session's
+    /// model catalog (`ModelId -> ModelInfo.name`) so the displayed model is the
+    /// friendly name (e.g. "openrouter/deepseek/... (gateway.pazer.ai)") rather
+    /// than the raw id "agent-host" — on both the `SubagentInfo` (tasks pane /
+    /// title bar) and the parent scrollback `SubagentBlock`.
+    #[test]
+    fn subagent_spawned_resolves_model_id_to_friendly_name() {
+        let mut app = make_app_with_agent("sess-parent");
+        let parent = app.agents.get_mut(&AgentId(0)).unwrap();
+        // Seed a catalog entry whose friendly name differs from its id, the way
+        // the real catalog maps "agent-host" -> "openrouter/deepseek/...".
+        parent.session.models.available.insert(
+            acp::ModelId::new(std::sync::Arc::from("agent-host")),
+            acp::ModelInfo::new(
+                acp::ModelId::new(std::sync::Arc::from("agent-host")),
+                "openrouter/deepseek/deepseek-v4-flash-0731 (gateway.pazer.ai)".to_string(),
+            ),
+        );
+
+        let child_sid = "child-sess-model";
+        // Mirror `test_subagent_spawned`, but with a raw model *id* set.
+        let spawned = XaiSessionUpdate::SubagentSpawned {
+            subagent_id: child_sid.into(),
+            parent_session_id: "sess-parent".into(),
+            parent_prompt_id: None,
+            child_session_id: child_sid.into(),
+            subagent_type: "general-purpose".into(),
+            description: "run model resolve".into(),
+            effective_context_source: None,
+            context_normalized: false,
+            capability_mode: None,
+            workflow_run_id: None,
+            persona: None,
+            role: None,
+            model: Some("agent-host".to_string()),
+            resumed_from: None,
+        };
+        let _ = handle(
+            make_ext_session_notification("sess-parent", spawned),
+            &mut app,
+        );
+
+        let agent = app.agents.get(&AgentId(0)).unwrap();
+        let info = agent
+            .subagent_sessions
+            .get(child_sid)
+            .expect("spawn must register SubagentInfo");
+        // SubagentInfo.model must be the resolved friendly name, not the raw id.
+        assert_eq!(
+            info.model.as_deref(),
+            Some("openrouter/deepseek/deepseek-v4-flash-0731 (gateway.pazer.ai)"),
+            "SubagentInfo.model must show the friendly name resolved via the model catalog"
+        );
+
+        // The parent scrollback SubagentBlock must show the same friendly name.
+        let entry_id = info.scrollback_entry_id.expect("spawn must stash block id");
+        let entry = agent.scrollback.get_by_id(entry_id).unwrap();
+        let RenderBlock::Subagent(sb) = &entry.block else {
+            panic!("SubagentSpawned must push a SubagentBlock to parent scrollback");
+        };
+        assert_eq!(
+            sb.model.as_deref(),
+            Some("openrouter/deepseek/deepseek-v4-flash-0731 (gateway.pazer.ai)"),
+            "scrollback SubagentBlock.model must show the friendly name, not the raw id"
+        );
+    }
+
     /// The live activity label fans out to `SubagentInfo` (tasks pane /
     /// dashboard rows) alongside the scrollback block — from both the child
     /// session/update path and the `SubagentProgress` path — and

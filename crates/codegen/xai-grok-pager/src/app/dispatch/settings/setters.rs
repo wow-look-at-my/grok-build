@@ -2114,7 +2114,6 @@ fn compatible_profile_from_snapshot(
         } else {
             xai_grok_shell::sampling::ApiBackend::ChatCompletions
         },
-        context_window: snapshot.context_window,
         make_default: snapshot.make_default,
     }
 }
@@ -2228,36 +2227,6 @@ pub(in crate::app::dispatch) fn set_openai_compatible_api_backend(
         key: "openai_compatible.api_backend",
         value: crate::settings::SettingValue::Enum(value),
         rollback_value: crate::settings::SettingValue::Enum(previous),
-    }]
-}
-
-pub(super) fn set_openai_compatible_context_window_inner(app: &mut AppView, value: u64) {
-    app.openai_compatible.context_window = value;
-}
-
-pub(in crate::app::dispatch) fn set_openai_compatible_context_window(
-    app: &mut AppView,
-    value: i64,
-) -> Vec<Effect> {
-    let Ok(value_u64) = u64::try_from(value) else {
-        return vec![];
-    };
-    let previous = app.openai_compatible.context_window;
-    if previous == value_u64 {
-        return vec![];
-    }
-    set_openai_compatible_context_window_inner(app, value_u64);
-    refresh_open_settings_modals(app);
-    app.show_toast(&compatible_restart_toast(
-        "Compatible context window",
-        &value.to_string(),
-    ));
-    vec![Effect::PersistSetting {
-        key: "openai_compatible.context_window",
-        value: crate::settings::SettingValue::Int(value),
-        rollback_value: crate::settings::SettingValue::Int(
-            i64::try_from(previous).unwrap_or(i64::MAX),
-        ),
     }]
 }
 

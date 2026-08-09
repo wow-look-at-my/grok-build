@@ -955,28 +955,6 @@ pub fn default_settings() -> Vec<SettingMeta> {
             hidden_in_minimal: false,
         },
         SettingMeta {
-            key: "openai_compatible.context_window",
-            category: SettingCategory::Models,
-            owner: SettingOwner::Shell,
-            label: "Compatible context window",
-            description: "Maximum model context in tokens; used to decide when to compact.",
-            keywords: &[
-                "openai",
-                "compatible",
-                "context",
-                "window",
-                "tokens",
-                "compact",
-            ],
-            kind: SettingKind::Int {
-                default: 200_000,
-                min: 1_024,
-                max: 10_000_000,
-            },
-            restart_required: true,
-            hidden_in_minimal: false,
-        },
-        SettingMeta {
             key: "openai_compatible.make_default",
             category: SettingCategory::Models,
             owner: SettingOwner::Shell,

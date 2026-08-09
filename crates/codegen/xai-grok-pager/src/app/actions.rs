@@ -601,7 +601,6 @@ pub enum Action {
     SetOpenAiCompatibleBaseUrl(String),
     SetOpenAiCompatibleModel(String),
     SetOpenAiCompatibleApiBackend(String),
-    SetOpenAiCompatibleContextWindow(i64),
     SetOpenAiCompatibleMakeDefault(bool),
     /// The payload's `Debug` representation is always redacted.
     SetOpenAiCompatibleApiKey(SecretString),
