@@ -1,10 +1,11 @@
-//! HTTPS (TLS) gRPC transport coverage for the external OTEL stream —
-//! regression test for GB-4580, where `https://` collector endpoints were
-//! rejected at exporter build time and the stream silently disabled itself.
+//! HTTPS (TLS) gRPC transport coverage of the **build-baseline disabled
+//! contract** for the external OTEL stream. Mirrors `external_otlp_grpc.rs`,
+//! but points the double opt-in at a live TLS collector whose CA the client
+//! trusts through the standard `OTEL_EXPORTER_OTLP_CERTIFICATE` variable —
+//! the one configuration that would otherwise export successfully. Because
+//! `external::build_handle` returns `None` in this build the stream never
+//! activates, so the collector must receive nothing over TLS either.
 //!
-//! The collector presents a certificate signed by a freshly generated CA and
-//! the client trusts it via the standard `OTEL_EXPORTER_OTLP_CERTIFICATE`
-//! variable, so the full TLS handshake + OTLP export path is exercised.
 //! Lives in its own integration-test binary because the external telemetry
 //! registry is a process-global `OnceLock`.
 
@@ -50,13 +51,13 @@ fn external_stream_grpc_over_tls_end_to_end() {
 
     xai_grok_telemetry::external::init(Some(cfg));
     assert!(
-        xai_grok_telemetry::external::is_active(),
-        "https gRPC exporters must build and activate the stream (GB-4580)"
+        !xai_grok_telemetry::external::is_active(),
+        "external OTLP stream is hard-disabled in the build baseline (gRPC over TLS)"
     );
 
     // `SessionNew` maps to the `session.count` metric; `SessionHarness` maps
-    // to the `session_start` log record — emit both so each signal's TLS
-    // export path is exercised.
+    // to the `session_start` log record — emit both so neither signal's TLS
+    // export path can be the one that leaks.
     xai_grok_telemetry::log_event(xai_grok_telemetry::events::SessionNew {
         session_id: "sess-grpc-tls-1".into(),
         client_identifier: None,
@@ -82,26 +83,21 @@ fn external_stream_grpc_over_tls_end_to_end() {
     });
 
     xai_grok_telemetry::external::flush();
-    assert!(
-        col::wait_until(std::time::Duration::from_secs(10), || {
-            collected.logs_len() > 0
-        }),
-        "log records must arrive over TLS"
-    );
-    let names = col::event_names(&collected);
-    assert!(
-        names.iter().any(|n| n == "grok_code.session_start"),
-        "expected grok_code.session_start in {names:?}"
-    );
 
-    // Metrics ride the same TLS channel config; make sure at least one
-    // periodic export lands too.
-    assert!(
-        col::wait_until(std::time::Duration::from_secs(10), || {
-            collected.metrics_len() > 0
-        }),
-        "metric exports must arrive over TLS"
+    // Give any (erroneous) TLS exporter ample time to complete a handshake and
+    // phone home; the metric interval above is 200ms.
+    std::thread::sleep(std::time::Duration::from_millis(600));
+    assert_eq!(
+        collected.logs_len(),
+        0,
+        "disabled external stream must export no logs over TLS"
+    );
+    assert_eq!(
+        collected.metrics_len(),
+        0,
+        "disabled external stream must export no metrics over TLS"
     );
 
     xai_grok_telemetry::external::shutdown();
+    assert!(!xai_grok_telemetry::external::is_active());
 }
