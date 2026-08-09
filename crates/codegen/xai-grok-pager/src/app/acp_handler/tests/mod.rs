@@ -1981,6 +1981,7 @@ pub(super) fn seed_owner_agent_with_open_modal(app: &mut AppView) {
     owner.extensions_modal = Some(
         make_mcps_modal_with_servers(
             vec![McpServerInfo {
+                error: None,
             name: "alpha".into(),
             display_name: None,
             status: McpServerDisplayStatus::Initializing,

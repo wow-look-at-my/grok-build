@@ -199,6 +199,13 @@ From the modal you can:
 - Authenticate an OAuth server with `i`
 - Add a server with `a`, or remove a local server with `x` (the modal asks for confirmation; press lowercase `y` to remove, or any other key to cancel)
 
+A server that could not be started shows `[unavailable]` with the reason on the
+row — expand it to read the whole message. The common one is a `command` that is
+not installed: `uvx`/`npx` servers report
+`No such file or directory (os error 2)`. `initializing` means the handshake is
+still running; it is bounded by `startup_timeout_sec` (30s by default), so a row
+that stays there is a slow server, not a stuck one.
+
 ### Tool Discovery
 
 The model has access to two built-in tools for working with MCP servers:
