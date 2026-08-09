@@ -256,6 +256,69 @@ pub fn resolve_model_catalog(
     catalog
 }
 
+/// Add a provider-qualified Codex catalog to the resolved xAI/custom catalog.
+///
+/// Provider entries are deliberately kept outside `prefetched`: xAI auth
+/// refreshes and cache reloads may replace that catalog wholesale, while an
+/// independent Codex sign-in must remain available. User model filters still
+/// apply uniformly to both providers.
+pub(crate) fn merge_codex_catalog(
+    cfg: &config::Config,
+    mut catalog: IndexMap<String, ModelEntry>,
+    codex_models: &IndexMap<String, ModelEntry>,
+) -> IndexMap<String, ModelEntry> {
+    let mut additive = codex_models.clone();
+
+    if let Ok(Some(disabled)) = ModelGlobSet::compile(cfg.models.disabled_models.as_ref()) {
+        additive.retain(|key, entry| !disabled.matches(key, &entry.model));
+    }
+
+    match ModelGlobSet::compile(cfg.models.allowed_models.as_ref()) {
+        Ok(None) => {
+            for entry in additive.values_mut() {
+                entry.info.user_selectable = true;
+            }
+        }
+        Ok(Some(allowed)) => {
+            for (key, entry) in additive.iter_mut() {
+                entry.info.user_selectable = allowed.matches(key, &entry.model);
+            }
+        }
+        Err(_) => {
+            for entry in additive.values_mut() {
+                entry.info.user_selectable = false;
+            }
+        }
+    }
+
+    if let Ok(Some(hidden)) = ModelGlobSet::compile(cfg.models.hidden_models.as_ref()) {
+        for (key, entry) in additive.iter_mut() {
+            if hidden.matches(key, &entry.model) {
+                entry.info.hidden = true;
+            }
+        }
+    }
+
+    if let Some(effort) = cfg.models.default_reasoning_effort
+        && let Some(default_id) = cfg.models.default.as_deref()
+        && let Some(entry) = additive.get_mut(default_id)
+        && entry.info.supports_reasoning_effort
+    {
+        entry.info.reasoning_effort = Some(effort);
+    }
+
+    if let Some(effort) = cfg.reasoning_effort_override {
+        for entry in additive.values_mut() {
+            if model_offers_reasoning_effort(&entry.info, effort) {
+                entry.info.reasoning_effort = Some(effort);
+            }
+        }
+    }
+
+    catalog.extend(additive);
+    catalog
+}
+
 /// Whether `effort` is a value this model will accept on the wire.
 pub(crate) fn model_offers_reasoning_effort(info: &config::ModelInfo, effort: ReasoningEffort) -> bool {
     if !info.supports_reasoning_effort {

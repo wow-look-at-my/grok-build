@@ -676,10 +676,8 @@ impl SamplingClient {
                             headers.insert(AUTHORIZATION, v);
                         }
                     }
-                    AuthScheme::None => {
-                        headers.remove(AUTHORIZATION);
-                        headers.remove(HeaderName::from_static("x-api-key"));
-                    }
+                    // Already stripped above; a fresh bearer never gets attached.
+                    AuthScheme::None => {}
                 }
             }
         }
@@ -706,6 +704,16 @@ impl SamplingClient {
     fn current_sent_bearer_prefix(&self) -> Option<String> {
         if self.defaults.auth_scheme == AuthScheme::None {
             return None;
+        }
+        if self.bearer_resolver.is_some() {
+            return self
+                .bearer_resolver
+                .as_ref()
+                .and_then(|r| r.current_bearer())
+                .map(|mut s| {
+                    s.truncate(crate::attribution::SENT_BEARER_PREFIX_LEN.min(s.len()));
+                    s
+                });
         }
         self.bearer_resolver
             .as_ref()

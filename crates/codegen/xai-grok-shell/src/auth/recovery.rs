@@ -737,6 +737,7 @@ mod tests {
 
     #[tokio::test]
     async fn fresh_mint_guard_never_returns_policy_hidden_token() {
+        crate::auth::ensure_crypto_provider();
         // Wrong-team fresh token: `current()` hides it (vet_cached), so the
         // guard must fall through to a normal refresh — fail closed.
         let dir = tempfile::tempdir().unwrap();
@@ -1080,12 +1081,9 @@ mod tests {
 
     // -- force_login_team_uuid pin enforced on the 401-recovery path -------
 
-    fn ensure_crypto_provider() {
-        let _ = jsonwebtoken::crypto::rust_crypto::DEFAULT_PROVIDER.install_default();
-    }
 
     fn team_jwt(principal_id: &str) -> String {
-        ensure_crypto_provider();
+        crate::auth::ensure_crypto_provider();
         jsonwebtoken::encode(
             &jsonwebtoken::Header::new(jsonwebtoken::Algorithm::HS256),
             &serde_json::json!({
@@ -1103,6 +1101,7 @@ mod tests {
     /// must reject + clear it at `next()`, not hand it back as a bearer.
     #[tokio::test]
     async fn recovery_rejects_wrong_team_adopted_disk_token() {
+        crate::auth::ensure_crypto_provider();
         let dir = tempfile::tempdir().unwrap();
         let cfg = GrokComConfig {
             force_login_team_uuid: Some(crate::auth::config::ForceLoginTeam::Single(

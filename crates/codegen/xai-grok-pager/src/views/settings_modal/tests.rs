@@ -26,16 +26,13 @@ fn make_state() -> SettingsModalState {
     )
 }
 
-
 #[test]
 fn api_key_editor_debug_is_redacted() {
+    let mut editor = LineEditor::default();
+    editor.set_text("never-print-this-key");
     let mode = SettingsMode::EditingString {
         key: "openai_compatible.api_key",
-        editor: {
-            let mut editor = LineEditor::default();
-            editor.set_text("never-print-this-key".to_owned());
-            editor
-        },
+        editor,
         validator: StringValidator::Any,
         validation_error: None,
     };
@@ -48,7 +45,8 @@ fn api_key_editor_debug_is_redacted() {
 fn api_key_editor_renders_mask_instead_of_secret() {
     let mut state = make_state();
     let mut editor = LineEditor::default();
-    editor.set_text("super-secret".to_owned());
+    editor.set_text("super-secret");
+    let _ = editor.set_cursor_byte("super-secret".len());
     state.transition_to_editing_string(
         "openai_compatible.api_key",
         editor,
@@ -606,8 +604,9 @@ fn render_setting_row_shows_full_label_when_one_line_fits() {
 /// (3 bools + 3 enums + 1 int = 7 entries), the Editor entry
 /// `multiline_mode`, the Agent entries `permission_mode` and
 /// `plan_mode`, the Privacy entry `coding_data_sharing`, the
-/// Models entry `default_model`, and the Advanced entries
-/// `show_tips` and `auto_update`. `default_reasoning_effort` and
+/// Models entries `default_model` and the `openai_compatible.*`
+/// endpoint settings, and the Advanced entries `show_tips` and
+/// `auto_update`. `default_reasoning_effort` and
 /// `auto_compact_threshold_percent` are not exposed in the modal.
 #[test]
 fn rows_contain_categories_and_settings_through_pr_14() {
@@ -723,6 +722,15 @@ fn rows_contain_categories_and_settings_through_pr_14() {
             "coding_data_sharing",
             // SHELL-owned default_model (Models category).
             "default_model",
+            // User-managed OpenAI-compatible endpoint (Models category),
+            // registered directly after default_model.
+            "openai_compatible.enabled",
+            "openai_compatible.base_url",
+            "openai_compatible.model",
+            "openai_compatible.api_backend",
+            "openai_compatible.context_window",
+            "openai_compatible.make_default",
+            "openai_compatible.api_key",
             // Models category. `default_reasoning_effort`,
             // `web_search_model`, and `session_summary_model` are
             // not exposed in the modal.

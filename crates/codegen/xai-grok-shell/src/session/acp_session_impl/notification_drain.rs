@@ -308,6 +308,14 @@ impl SessionActor {
         // before the user-message chunk can race in.
         self.broadcast_queue_changed_promoting(&state, running_display);
 
+        // Under the same lock as the promotion, so a follow-up queued after
+        // this point is never mistaken for one that predates the turn.
+        *self.queued_at_turn_start.borrow_mut() = state
+            .pending_inputs
+            .iter()
+            .map(|item| item.prompt_id.clone())
+            .collect();
+
         state.running_task = Some(AgentTask::new_prompt(
             self.clone(),
             prompt_id,

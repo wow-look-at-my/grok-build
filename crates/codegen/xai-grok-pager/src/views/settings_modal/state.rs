@@ -222,6 +222,7 @@ pub(super) fn mode_is_consent_chooser(mode: &SettingsMode) -> bool {
 }
 
 
+
 /// Settings modal state. Boxed inside `ActiveModal::Settings` to
 /// avoid clippy `large_enum_variant`.
 pub struct SettingsModalState {
@@ -758,8 +759,9 @@ impl SettingsModalState {
             SettingKind::String {
                 default, validator, ..
             } => {
-                // API key row shows only a presence bit — never seed the secret.
                 let text = if key == "openai_compatible.api_key" {
+                    // The row displays only a presence bit. Never seed the
+                    // editor with that label (or with the stored secret).
                     String::new()
                 } else {
                     match value {
