@@ -144,6 +144,9 @@ pub struct McpServerSessionState {
     pub enabled: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<McpSessionStatus>,
+    /// Why the server is unavailable, when the session knows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tools: Vec<McpToolEntry>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -222,6 +225,10 @@ pub struct McpClientStatus {
     pub name: String,
     pub status: McpSessionStatus,
     pub tools: Vec<McpToolEntry>,
+    /// Why an `Unavailable` server is unavailable, as recorded in
+    /// [`McpState::init_failed`]. Without it the UI can only say a server is
+    /// not working, which is indistinguishable from one still starting.
+    pub error: Option<String>,
 }
 
 // ── Notification: mcp/servers_updated ────────────────────────────────
@@ -478,6 +485,7 @@ pub fn build_mcp_catalog_with_gateway_tools(
                 session: Some(McpServerSessionState {
                     enabled: !server_disabled,
                     status: (!auth_required && !server_disabled).then_some(McpSessionStatus::Ready),
+                    error: None,
                     tools: tools
                         .into_iter()
                         .map(|tool| {
@@ -597,6 +605,7 @@ fn disabled_server_placeholder_entry(name: &str) -> McpServerEntry {
         session: Some(McpServerSessionState {
             enabled: false,
             status: None,
+            error: None,
             tools: vec![],
             auth_required: false,
             setup_required: false,
@@ -623,6 +632,7 @@ pub async fn build_mcp_status(
         auth_required,
         init_failed,
         disabled_regs,
+        finished_init,
     ) = {
         let state = mcp_state.lock().await;
         (
@@ -643,6 +653,7 @@ pub async fn build_mcp_status(
                 .iter()
                 .map(|(k, v)| (k.clone(), v.description.clone()))
                 .collect::<Vec<_>>(),
+            state.has_finished_init(),
         )
     };
 
@@ -715,24 +726,51 @@ pub async fn build_mcp_status(
             (McpSessionStatus::Unavailable, vec![])
         };
 
+        let error = (!ready)
+            .then(|| init_failed.get(name.as_str()).cloned())
+            .flatten()
+            .filter(|reason| !reason.is_empty());
         client_statuses.push(McpClientStatus {
             name,
             status,
             tools,
+            error,
         });
     }
 
     // Configured but not yet handshaked (either global init or per-server bg init) → Initializing.
     // We use initializing_servers (populated before spawning handshakes) so that
     // slow servers continue showing Initializing after we call finish_init() early.
+    //
+    // Once init has finished, a configured server that is in neither set has no
+    // client and is not starting: its spawn failed. Reporting nothing for it
+    // left the UI with no status to render, which reads as "still starting" —
+    // forever, for a command that was never going to run. Before init finishes
+    // there is nothing to conclude, so those servers are still left out.
     for config in &configs {
         let cname = crate::session::mcp_servers::mcp_server_name(config);
-        if !client_statuses.iter().any(|c| c.name == cname) && initializing_servers.contains(cname)
-        {
+        if client_statuses.iter().any(|c| c.name == cname) {
+            continue;
+        }
+        if initializing_servers.contains(cname) {
             client_statuses.push(McpClientStatus {
                 name: cname.to_string(),
                 status: McpSessionStatus::Initializing,
                 tools: vec![],
+                error: None,
+            });
+        } else if finished_init && !auth_required.contains(cname) {
+            client_statuses.push(McpClientStatus {
+                name: cname.to_string(),
+                status: McpSessionStatus::Unavailable,
+                tools: vec![],
+                error: Some(
+                    init_failed
+                        .get(cname)
+                        .filter(|reason| !reason.is_empty())
+                        .cloned()
+                        .unwrap_or_else(|| "server did not start".to_string()),
+                ),
             });
         }
     }
@@ -1043,6 +1081,7 @@ async fn handle_list(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
             session: Some(McpServerSessionState {
                 enabled,
                 status,
+                error: None,
                 tools: vec![],
                 auth_required: false,
                 setup_required,
@@ -1123,15 +1162,16 @@ async fn handle_list(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
                 .configs
                 .iter()
                 .any(|c| crate::session::mcp_servers::mcp_server_name(c) == entry.name);
-            let (status, tools) = snapshot
+            let (status, tools, error) = snapshot
                 .clients
                 .iter()
                 .find(|c| c.name == entry.name)
-                .map(|c| (Some(c.status.clone()), c.tools.clone()))
-                .unwrap_or((None, vec![]));
+                .map(|c| (Some(c.status.clone()), c.tools.clone(), c.error.clone()))
+                .unwrap_or((None, vec![], None));
             entry.session = Some(McpServerSessionState {
                 enabled,
                 status,
+                error,
                 tools,
                 auth_required: snapshot.auth_required.contains(&entry.name),
                 setup_required: false,
@@ -1156,6 +1196,7 @@ async fn handle_list(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
                     session: Some(McpServerSessionState {
                         enabled: true,
                         status: Some(client_status.status.clone()),
+                        error: client_status.error.clone(),
                         tools: client_status.tools.clone(),
                         auth_required: snapshot.auth_required.contains(&client_status.name),
                         setup_required: false,
@@ -1939,6 +1980,106 @@ async fn handle_delete(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
 mod tests {
     use super::*;
 
+    fn stdio_config(name: &str, command: &str) -> acp::McpServer {
+        acp::McpServer::Stdio(acp::McpServerStdio::new(
+            name,
+            std::path::PathBuf::from(command),
+        ))
+    }
+
+    /// A configured server that never produced a client is the shape a bad
+    /// `command` takes: `uvx` with no uv installed fails at spawn, so there is
+    /// no client to report on and nothing marks it as still handshaking.
+    /// Emitting nothing for it left the UI without a status, which reads as a
+    /// server that is still starting — forever.
+    #[tokio::test]
+    async fn a_server_that_failed_to_spawn_is_reported_with_its_reason() {
+        let mut state = McpState::new(vec![stdio_config("kagi", "uvx")]);
+        assert!(state.try_start_init());
+        state.mark_servers_initializing(["kagi".to_string()]);
+        state.mark_server_ready("kagi");
+        state.finish_init();
+        state.record_init_failure(
+            "kagi",
+            false,
+            Some(
+                "Failed to spawn MCP server 'kagi': No such file or directory (os error 2)".into(),
+            ),
+        );
+        let mcp_state = Arc::new(TokioMutex::new(state));
+        let bridge = Arc::new(crate::tools::bridge::ToolBridge::for_test());
+
+        let snapshot = build_mcp_status(&mcp_state, &bridge, None).await;
+
+        let entry = snapshot
+            .clients
+            .iter()
+            .find(|c| c.name == "kagi")
+            .expect("a configured server must appear in the status");
+        assert_eq!(entry.status, McpSessionStatus::Unavailable);
+        assert_eq!(
+            entry.error.as_deref(),
+            Some("Failed to spawn MCP server 'kagi': No such file or directory (os error 2)"),
+        );
+    }
+
+    /// Same shape, no recorded reason: the status still has to say the server
+    /// is not running rather than say nothing at all.
+    #[tokio::test]
+    async fn a_server_with_no_client_is_never_reported_as_starting() {
+        let mut state = McpState::new(vec![stdio_config("kagi", "uvx")]);
+        assert!(state.try_start_init());
+        state.finish_init();
+        let mcp_state = Arc::new(TokioMutex::new(state));
+        let bridge = Arc::new(crate::tools::bridge::ToolBridge::for_test());
+
+        let snapshot = build_mcp_status(&mcp_state, &bridge, None).await;
+
+        let entry = snapshot
+            .clients
+            .iter()
+            .find(|c| c.name == "kagi")
+            .expect("a configured server must appear in the status");
+        assert_eq!(entry.status, McpSessionStatus::Unavailable);
+        assert_eq!(entry.error.as_deref(), Some("server did not start"));
+    }
+
+    /// Before init has run there is nothing to conclude about a configured
+    /// server, so it is left out entirely — exactly as before this change.
+    #[tokio::test]
+    async fn a_server_is_not_judged_before_init_has_finished() {
+        let mcp_state = Arc::new(TokioMutex::new(McpState::new(vec![stdio_config(
+            "kagi", "uvx",
+        )])));
+        let bridge = Arc::new(crate::tools::bridge::ToolBridge::for_test());
+
+        let snapshot = build_mcp_status(&mcp_state, &bridge, None).await;
+
+        assert!(snapshot.clients.iter().all(|c| c.name != "kagi"));
+    }
+
+    /// A server that is genuinely mid-handshake keeps saying so: the fix must
+    /// not turn a slow start into a reported failure.
+    #[tokio::test]
+    async fn a_handshaking_server_still_reports_initializing() {
+        let mut state = McpState::new(vec![stdio_config("kagi", "uvx")]);
+        assert!(state.try_start_init());
+        state.mark_servers_initializing(["kagi".to_string()]);
+        state.finish_init();
+        let mcp_state = Arc::new(TokioMutex::new(state));
+        let bridge = Arc::new(crate::tools::bridge::ToolBridge::for_test());
+
+        let snapshot = build_mcp_status(&mcp_state, &bridge, None).await;
+
+        let entry = snapshot
+            .clients
+            .iter()
+            .find(|c| c.name == "kagi")
+            .expect("a configured server must appear in the status");
+        assert_eq!(entry.status, McpSessionStatus::Initializing);
+        assert_eq!(entry.error, None);
+    }
+
     /// The emit-only reverse method (`x.ai/mcp/sdk_call`) shares the `x.ai/mcp/`
     /// prefix, so `mvp_agent`'s dispatcher routes an inbound copy of it to this
     /// module's `handle`. It must NOT collide with any forward route — i.e. it has no
@@ -2121,6 +2262,7 @@ mod tests {
                         env: vec![],
                     },
                     session: Some(McpServerSessionState {
+                        error: None,
                         enabled: true,
                         status: Some(McpSessionStatus::Ready),
                         auth_required: false,
@@ -2155,6 +2297,7 @@ mod tests {
             setup_values: None,
             config: McpServerConfig::ManagedGateway,
             session: Some(McpServerSessionState {
+                error: None,
                 enabled: true,
                 status: Some(McpSessionStatus::Ready),
                 tools: vec![],
@@ -2459,6 +2602,7 @@ mod tests {
                 scope_name: None,
             },
             session: Some(McpServerSessionState {
+                error: None,
                 enabled: true,
                 status: Some(McpSessionStatus::SetupRequired),
                 tools: vec![],
@@ -2531,6 +2675,7 @@ mod tests {
                 scope_name: None,
             },
             session: Some(McpServerSessionState {
+                error: None,
                 enabled: false,
                 status: None,
                 tools: vec![],

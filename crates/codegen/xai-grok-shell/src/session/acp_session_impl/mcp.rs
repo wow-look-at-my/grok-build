@@ -1,21 +1,51 @@
 use super::*;
+
+/// Margin added to one init pass's own budget before
+/// [`SessionActor::wait_for_mcp_initialized`] gives up. Covers the scheduling
+/// slack between a pass finishing and the state settling, and nothing more:
+/// the point of the deadline is that a session never waits on a server that is
+/// not coming back.
+const MCP_INIT_WAIT_GRACE: std::time::Duration = std::time::Duration::from_secs(10);
+
 impl SessionActor {
     /// Wait for MCP tools to be initialized.
-    /// If initialization is in progress by another task, this will poll until complete.
+    /// If initialization is in progress by another task, this will poll until
+    /// complete or until [`MCP_INIT_WAIT_GRACE`] past the point every server
+    /// should have given up.
+    ///
+    /// The deadline is the whole point. A server that keeps failing is
+    /// re-initialized, which puts the state back into `initializing`, so a poll
+    /// loop with no deadline never returns and the caller -- a prompt, under
+    /// the blocking strategy -- hangs for the life of the process. Proceeding
+    /// without a server that will not start is always better than a session
+    /// that answers nothing.
     pub(super) async fn wait_for_mcp_initialized(&self) {
-        loop {
-            {
-                let mcp_state = self.mcp_state.lock().await;
-                if mcp_state.is_initialized() {
-                    return;
-                }
-                if !mcp_state.is_initializing() {
-                    break;
-                }
+        use crate::session::mcp_servers::{McpInitWait, wait_until_mcp_init_settles};
+        match wait_until_mcp_init_settles(&self.mcp_state, self.mcp_init_wait_budget()).await {
+            McpInitWait::Initialized => {}
+            McpInitWait::NotInitializing => self.ensure_mcp_tools_initialized().await,
+            McpInitWait::TimedOut => {
+                let still_initializing: Vec<String> = {
+                    let mcp_state = self.mcp_state.lock().await;
+                    mcp_state.handshaking_servers_iter().cloned().collect()
+                };
+                tracing::warn!(
+                    session_id = %self.session_info.id.0,
+                    servers = ?still_initializing,
+                    "MCP initialization did not settle in time; continuing without it"
+                );
             }
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
-        self.ensure_mcp_tools_initialized().await;
+    }
+
+    /// How long any caller may wait on MCP initialization: the budget one init
+    /// pass takes per server (`2 × startup_timeout + 5s`, see the background
+    /// handshake task) plus a grace margin, so the wait only expires once a
+    /// pass that should have finished has not.
+    fn mcp_init_wait_budget(&self) -> std::time::Duration {
+        let startup = crate::util::config::resolved_mcp_startup_timeout_secs();
+        std::time::Duration::from_secs(startup.saturating_mul(2).saturating_add(5))
+            + MCP_INIT_WAIT_GRACE
     }
     /// If managed tokens are near expiry, swap clients using the agent-level cache.
     pub(super) async fn refresh_managed_mcp_if_stale(&self) {
@@ -1265,6 +1295,7 @@ impl SessionActor {
         .await;
         tokio::task::yield_now().await;
         let mut spawn_auth_failures: Vec<String> = Vec::new();
+        let mut spawn_failures: Vec<(String, String)> = Vec::new();
         let mcp_clients: Vec<_> = mcp_results
             .into_iter()
             .filter_map(|result| match result {
@@ -1277,6 +1308,13 @@ impl SessionActor {
                     let sname = e.server_name().unwrap_or("unknown").to_string();
                     if e.is_auth_rejection() && sname != "unknown" {
                         spawn_auth_failures.push(sname.clone());
+                    } else if sname != "unknown" {
+                        // A spawn that never produced a client leaves nothing
+                        // for `build_mcp_status` to report, so the reason is
+                        // kept here or the server shows as merely absent --
+                        // which is how `command = "uvx"` with no uv installed
+                        // ended up looking like it was still starting.
+                        spawn_failures.push((sname.clone(), e.to_string()));
                     }
                     let cfg = mcp_server_configs
                         .iter()
@@ -1321,6 +1359,12 @@ impl SessionActor {
                 );
                 if spawn_auth_failures.iter().any(|n| n == name) {
                     mcp_state.record_init_failure(name, true, None);
+                } else {
+                    let detail = spawn_failures
+                        .iter()
+                        .find(|(n, _)| n == name)
+                        .map(|(_, reason)| reason.clone());
+                    mcp_state.record_init_failure(name, false, detail);
                 }
                 mcp_state.mark_server_ready(name);
             }

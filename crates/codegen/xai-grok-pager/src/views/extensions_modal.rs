@@ -3083,7 +3083,13 @@ pub fn render_extensions_modal(
                             );
                             entry_right_labels.push(format!("({})", server.source));
                             // Summary line: tools count + enabled count.
-                            if server.tools.is_empty() {
+                            if let Some(reason) = server.error.as_deref() {
+                                // The reason the server is not running is the
+                                // only thing worth the line here: "no tools"
+                                // does not tell anyone their `command` is not
+                                // installed.
+                                entry_desc_lines.push(vec![reason.to_string()]);
+                            } else if server.tools.is_empty() {
                                 entry_desc_lines.push(vec![
                                     "no tools (server may not be connected)".to_string(),
                                 ]);
@@ -4178,6 +4184,7 @@ mod tests {
         };
 
         let mut server = McpServerInfo {
+            error: None,
             name: "acme".into(),
             display_name: None,
             status: McpServerDisplayStatus::SetupRequired,
@@ -4289,6 +4296,7 @@ mod tests {
 
         let mut state = ExtensionsModalState::new(ExtensionsTab::McpServers);
         state.mcps_data = TabDataState::Loaded(vec![McpServerInfo {
+            error: None,
             name: "needs-oauth".into(),
             display_name: None,
             status: McpServerDisplayStatus::NeedsAuth,
@@ -4340,6 +4348,7 @@ mod tests {
             .collect();
         let tc = tool_details.len();
         crate::views::mcps_modal::McpServerInfo {
+            error: None,
             name: name.into(),
             display_name: None,
             status: McpServerDisplayStatus::Ready,
@@ -4432,6 +4441,7 @@ mod tests {
 
         let servers = vec![
             McpServerInfo {
+                error: None,
                 name: "p1-srv".into(),
                 display_name: None,
                 status: McpServerDisplayStatus::Ready,
@@ -4448,6 +4458,7 @@ mod tests {
                 is_managed_gateway: false,
             },
             McpServerInfo {
+                error: None,
                 name: "p2-srv".into(),
                 display_name: None,
                 status: McpServerDisplayStatus::Ready,
@@ -4497,6 +4508,7 @@ mod tests {
         use crate::views::mcps_modal::{McpServerDisplayStatus, McpServerInfo, McpWireSource};
 
         let server = |name: &str, plugin: Option<&str>| McpServerInfo {
+            error: None,
             name: name.into(),
             display_name: None,
             status: McpServerDisplayStatus::Ready,
