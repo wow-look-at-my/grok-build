@@ -6043,5 +6043,42 @@ mod soft_default_settings_emit {
             .await;
     }
 }
+/// Session replicas carry the session summary, first prompt and repo head to
+/// cli-chat-proxy. Upstream lets the server switch that on through
+/// `remote_settings.session_registry_enabled` whenever the operator set
+/// nothing locally; this build ignores the remote flag, so the only way the
+/// replica client exists is an explicit local opt-in.
+#[tokio::test(flavor = "current_thread")]
+#[serial_test::serial]
+async fn remote_settings_alone_cannot_enable_session_replicas() {
+    use crate::agent::config::Config as AgentConfig;
+    use crate::auth::{AuthManager, GrokComConfig, XAI_OAUTH2_ISSUER};
+    use xai_grok_test_support::EnvGuard;
+
+    let _no_local_optin = EnvGuard::unset(crate::util::config::SESSION_REGISTRY_ENV_VAR);
+
+    let mut auth = auth_with_mode(crate::auth::AuthMode::Oidc, "session-key");
+    auth.oidc_issuer = Some(XAI_OAUTH2_ISSUER.to_owned());
+    let temp_dir = tempfile::tempdir().unwrap();
+    let auth_manager =
+        std::sync::Arc::new(AuthManager::new(temp_dir.path(), GrokComConfig::default()));
+    auth_manager.hot_swap(auth);
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    let gateway = GatewaySender::new(tx);
+
+    let mut cfg = AgentConfig::default();
+    cfg.remote_settings = Some(crate::util::config::RemoteSettings {
+        session_registry_enabled: Some(true),
+        ..Default::default()
+    });
+    let agent = MvpAgent::new(gateway, &cfg, auth_manager, None).expect("valid test config");
+
+    assert!(
+        agent.build_registry_config().is_none(),
+        "a server-set session_registry_enabled must not enable replica uploads"
+    );
+    assert!(agent.session_registry_client().is_none());
+}
+
 #[cfg(feature = "dhat-heap")]
 mod dhat_soak;

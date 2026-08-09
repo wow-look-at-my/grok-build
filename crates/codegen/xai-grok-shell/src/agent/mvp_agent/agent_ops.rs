@@ -554,13 +554,13 @@ impl MvpAgent {
     pub(super) fn build_registry_config(
         &self,
     ) -> Option<crate::session::RegistryConfig> {
-        let remote = self
-            .cfg
-            .borrow()
-            .remote_settings
-            .as_ref()
-            .and_then(|s| s.session_registry_enabled);
-        if !self.session_registry_local.or(remote).unwrap_or(false) {
+        // Local opt-in only. Session replicas push the session summary, first
+        // prompt and repo head to cli-chat-proxy, and upstream lets
+        // `remote_settings.session_registry_enabled` turn that on from the
+        // server when no local setting is present — the operator would never
+        // see the switch flip. The env var and `[cli] session_registry` still
+        // work for anyone who wants it.
+        if !self.session_registry_local.unwrap_or(false) {
             return None;
         }
         let auth = self.auth_manager.current_or_expired()?;
