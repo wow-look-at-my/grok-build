@@ -1524,6 +1524,12 @@ impl SessionActor {
                     event_writer.emit(xai_file_utils::events::Event::McpInitCancelled {
                         reason: MCP_INIT_CANCELLED_CONFIG_CHANGED.to_string(),
                     });
+                    // The completion signal below is skipped along with the
+                    // rest of this pass, so wake anyone parked on it here.
+                    // A waiter that keeps waiting for a pass that was
+                    // superseded is a turn that never runs.
+                    drop(mcp_state);
+                    mcp_handshakes_done.notify_waiters();
                     return;
                 }
                 let mut servers_succeeded: u32 = 0;
