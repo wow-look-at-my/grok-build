@@ -3735,11 +3735,12 @@ fn kill_switched_cold_cwd_stays_allowed_through_plugins_config_read() {
             "gate must still allow the kill-switched folder after the config read"
         );
 }
-/// Writeback requires grok.com auth: remote may advertise it, but a non-xai
-/// credential is downgraded to `Local`.
+/// Writeback flushes the conversation to grok-code-backend, so the server
+/// advertising it never turns it on here — with or without first-party auth.
+/// Only `--storage-mode` / `GROK_STORAGE_MODE` reach Writeback.
 #[test]
 #[serial_test::serial]
-fn from_remote_gated_requires_xai_auth_for_writeback() {
+fn from_remote_gated_ignores_server_advertised_writeback() {
     let _env = crate::env::EnvVarGuard::remove("GROK_STORAGE_MODE");
     let writeback = crate::util::config::RemoteSettings {
         writeback_enabled: Some(true),
@@ -3747,7 +3748,8 @@ fn from_remote_gated_requires_xai_auth_for_writeback() {
     };
     assert_eq!(
         StorageMode::from_remote_gated(Some(&writeback), true),
-        StorageMode::Writeback
+        StorageMode::Local,
+        "a server-set writeback_enabled must not start syncing the conversation"
     );
     assert_eq!(
         StorageMode::from_remote_gated(Some(&writeback), false),
@@ -3756,5 +3758,13 @@ fn from_remote_gated_requires_xai_auth_for_writeback() {
     assert_eq!(
         StorageMode::from_remote_gated(None, true),
         StorageMode::Local
+    );
+    // Reuse the guard: it holds a process-wide env lock that a second guard
+    // for the same variable would deadlock on.
+    _env.set_value("writeback");
+    assert_eq!(
+        StorageMode::resolve(None, None),
+        StorageMode::Writeback,
+        "the operator's own opt-in still works"
     );
 }

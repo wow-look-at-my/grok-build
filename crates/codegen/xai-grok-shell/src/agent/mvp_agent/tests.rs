@@ -4499,7 +4499,7 @@ fn supervisor_reaps_panicked_resident_actor() {
 /// (the field used to be frozen at construction).
 #[tokio::test]
 #[serial_test::serial]
-async fn storage_mode_self_corrects_to_writeback_when_settings_arrive() {
+async fn storage_mode_stays_local_when_settings_advertise_writeback() {
     let _env = crate::env::EnvVarGuard::remove("GROK_STORAGE_MODE");
     let auth = crate::auth::GrokAuth {
         auth_mode: crate::auth::AuthMode::Oidc,
@@ -4515,7 +4515,12 @@ async fn storage_mode_self_corrects_to_writeback_when_settings_arrive() {
         ..Default::default()
     });
     agent.on_remote_settings_changed();
-    assert_eq!(agent.storage_mode(), StorageMode::Writeback);
+    assert_eq!(
+        agent.storage_mode(),
+        StorageMode::Local,
+        "settings arriving from the server must not switch the session into \
+         conversation writeback"
+    );
 }
 /// `spawn_settings_reapply` coalesces: while one reapply is in flight,
 /// repeated calls (boot + rapid `/new`) do not spawn overlapping tasks.
@@ -4670,12 +4675,13 @@ async fn access_gate_does_not_leak_verdict_across_identities() {
         "identity B must not inherit identity A's denied allow_access verdict",
     );
 }
-/// First-party xAI auth + `writeback_enabled` settings → storage upgrades to
-/// Writeback; the settings arrival also emits `x.ai/settings/update` and opens
-/// the external-OTEL gate.
+/// First-party xAI auth + `writeback_enabled` settings must still leave
+/// storage Local (the server does not get to start syncing conversations);
+/// the settings arrival still emits `x.ai/settings/update` and opens the
+/// external-OTEL gate.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[serial_test::serial]
-async fn post_auth_settings_xai_upgrades_writeback_emits_and_opens_gate() {
+async fn post_auth_settings_xai_keeps_local_but_emits_and_opens_gate() {
     use crate::agent::config::AgentMode;
     use crate::auth::{GrokAuth, XAI_OAUTH2_ISSUER};
     let _restore = RestoreOtelGate;
@@ -4704,8 +4710,8 @@ async fn post_auth_settings_xai_upgrades_writeback_emits_and_opens_gate() {
     agent.maybe_fetch_post_auth_settings().await;
     assert_eq!(
         agent.storage_mode(),
-        StorageMode::Writeback,
-        "xai auth + writeback_enabled settings must upgrade storage to Writeback"
+        StorageMode::Local,
+        "xai auth + a server-set writeback_enabled must not upgrade storage"
     );
     assert!(
         xai_grok_telemetry::external::is_settings_gate_open(),

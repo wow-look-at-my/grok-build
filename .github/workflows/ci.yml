@@ -72,6 +72,8 @@ jobs:
           set -o pipefail
           pins=(
             agent::mvp_agent::tests::remote_settings_alone_cannot_enable_session_replicas
+            agent::mvp_agent::tests::storage_mode_stays_local_when_settings_advertise_writeback
+            config::tests::from_remote_gated_ignores_server_advertised_writeback
           )
           cargo test --locked -p xai-grok-shell --lib -- --exact "${pins[@]}" \
             | tee /tmp/shell-pins.log

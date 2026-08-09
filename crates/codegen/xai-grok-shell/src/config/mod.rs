@@ -983,11 +983,12 @@ impl StorageMode {
             Ok("local") => return Self::Local,
             _ => {}
         }
-        if let Some(remote) = remote
-            && remote.writeback_enabled == Some(true)
-        {
-            return Self::Writeback;
-        }
+        // `remote.writeback_enabled` is deliberately not consulted: Writeback
+        // flushes every turn of the conversation to grok-code-backend, and
+        // upstream lets the server turn that on for a client that asked for
+        // nothing. Writeback stays reachable through --storage-mode and
+        // GROK_STORAGE_MODE, which are the operator's own choices.
+        let _ = remote;
         Self::Local
     }
     /// Resolve from remote settings, enforcing the rule that `Writeback`
