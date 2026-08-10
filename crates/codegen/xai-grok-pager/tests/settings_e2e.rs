@@ -68,6 +68,13 @@ const ALL_SETTINGS_EXERCISED: &[&str] = &[
     "voice_keybind_enabled",
     "voice_capture_mode",
     "voice_stt_language",
+    // User-managed OpenAI-compatible endpoint (Models category).
+    "openai_compatible.enabled",
+    "openai_compatible.base_url",
+    "openai_compatible.model",
+    "openai_compatible.api_backend",
+    "openai_compatible.make_default",
+    "openai_compatible.api_key",
     // Contextual-hints group + its per-tip child toggles (exercised via the
     // group sub-sheet, not as top-level rows).
     "contextual_hints",
@@ -299,6 +306,18 @@ fn assert_set_bool_action(outcome: SettingsKeyOutcome, key: &str, expected: bool
             assert_eq!(
                 b, expected,
                 "SetDisplayRefreshAutoCadence value differs from expected"
+            )
+        }
+        ("openai_compatible.enabled", Action::SetOpenAiCompatibleEnabled(b)) => {
+            assert_eq!(
+                b, expected,
+                "SetOpenAiCompatibleEnabled value differs from expected"
+            )
+        }
+        ("openai_compatible.make_default", Action::SetOpenAiCompatibleMakeDefault(b)) => {
+            assert_eq!(
+                b, expected,
+                "SetOpenAiCompatibleMakeDefault value differs from expected"
             )
         }
         (key, action) => panic!(
@@ -1849,6 +1868,8 @@ fn registry_kind_membership_through_pr_14() {
             "contextual_hints.small_screen",
             "contextual_hints.word_select",
             "contextual_hints.ssh_wrap",
+            "openai_compatible.enabled",
+            "openai_compatible.make_default",
         ]
         .into_iter()
         .collect::<std::collections::BTreeSet<_>>()
@@ -1867,6 +1888,7 @@ fn registry_kind_membership_through_pr_14() {
             "default_selected_permission",
             "hunk_tracker_mode",
             "keep_text_selection",
+            "openai_compatible.api_backend",
             "permission_mode",
             "plan_mode",
             "render_mermaid",
@@ -1880,10 +1902,19 @@ fn registry_kind_membership_through_pr_14() {
     );
 
     let string_keys = by_kind.remove("String").unwrap_or_default();
-    assert!(
-        string_keys.is_empty(),
-        "no String-kind settings should remain — `default_model` + `fork_secondary_model` \
-         migrated to DynamicEnum; got: {string_keys:?}",
+    assert_eq!(
+        string_keys,
+        vec![
+            // The user-managed OpenAI-compatible endpoint, sorted like every
+            // other list here. `default_model` and `fork_secondary_model`
+            // migrated to DynamicEnum and must not come back; these three are
+            // free text by nature (a URL, a slug the endpoint defines, and a
+            // secret).
+            "openai_compatible.api_key",
+            "openai_compatible.base_url",
+            "openai_compatible.model",
+        ],
+        "String kind membership drift",
     );
 
     let dynamic_enum_keys = by_kind.remove("DynamicEnum").unwrap_or_default();
@@ -1936,6 +1967,7 @@ fn enum_settings_membership_through_pr_14() {
             "default_selected_permission",
             "hunk_tracker_mode",
             "keep_text_selection",
+            "openai_compatible.api_backend",
             "permission_mode",
             "plan_mode",
             "render_mermaid",
@@ -2025,6 +2057,15 @@ fn defaults_round_trip_through_registry() {
             "contextual_hints.small_screen" => SettingValue::Bool(true),
             "contextual_hints.word_select" => SettingValue::Bool(true),
             "contextual_hints.ssh_wrap" => SettingValue::Bool(true),
+            // The compatible endpoint ships off and unconfigured; make_default
+            // only takes effect once `enabled` is turned on.
+            "openai_compatible.enabled" => SettingValue::Bool(false),
+            "openai_compatible.make_default" => SettingValue::Bool(true),
+            "openai_compatible.base_url" => SettingValue::String(String::new()),
+            "openai_compatible.model" => SettingValue::String(String::new()),
+            "openai_compatible.api_backend" => SettingValue::Enum("chat_completions"),
+            // api_key never reaches here: it is asserted separately below,
+            // because its live value is a status string, not its stored value.
             other => panic!("test must list expected default for `{other}`"),
         }
     };
@@ -2037,6 +2078,25 @@ fn defaults_round_trip_through_registry() {
         let live_value = current_value_for(meta.key, &ui, &pager)
             .unwrap_or_else(|| panic!("current_value_for(`{}`) returned None", meta.key));
         let default_value = xai_grok_pager::settings::default_value_for(meta);
+
+        // The API key is the one setting whose live value is deliberately NOT
+        // its stored value: the row reports whether a key exists, so the secret
+        // is never rendered or logged. Round-tripping it like the others would
+        // mean reading it back out.
+        if meta.key == "openai_compatible.api_key" {
+            assert_eq!(
+                live_value,
+                SettingValue::String("Not configured".to_owned()),
+                "an unset api_key must read as a status, never as its value",
+            );
+            assert_eq!(
+                default_value,
+                SettingValue::String(String::new()),
+                "the api_key default is the empty secret, not the status string",
+            );
+            continue;
+        }
+
         let expected_value = expected(meta.key);
 
         assert_eq!(
@@ -2099,7 +2159,9 @@ fn settings_value_payload_matches_kind() {
             | SettingsKeyOutcome::Action(Action::SetCollapsedEditBlocks(_))
             | SettingsKeyOutcome::Action(Action::SetInvertScroll(_))
             | SettingsKeyOutcome::Action(Action::SetDisplayRefreshAutoCadence(_))
-            | SettingsKeyOutcome::Action(Action::SetVoiceKeybindEnabled(_)) => {}
+            | SettingsKeyOutcome::Action(Action::SetVoiceKeybindEnabled(_))
+            | SettingsKeyOutcome::Action(Action::SetOpenAiCompatibleEnabled(_))
+            | SettingsKeyOutcome::Action(Action::SetOpenAiCompatibleMakeDefault(_)) => {}
             other => panic!(
                 "expected a typed bool setter for `{}`, got {:?}",
                 meta.key, other
@@ -7804,4 +7866,202 @@ fn collapsed_edit_blocks_renders_under_appearance_category_shell_owned() {
         "collapsed_edit_blocks must be immediately below group_tool_verbs; \
          Appearance order: {keys:?}"
     );
+}
+
+// ---------------------------------------------------------------------------
+// User-managed OpenAI-compatible endpoint (Models category)
+//
+// Six rows of three kinds: two Bools, three Strings, one Enum. Every one is
+// restart_required, and api_key is masked in the row and stored in auth.json
+// rather than config.toml.
+// ---------------------------------------------------------------------------
+
+/// Space on the `openai_compatible.enabled` row toggles it on (default OFF).
+#[test]
+fn space_on_openai_compatible_enabled_toggles_on() {
+	let mut s = make_state();
+	navigate_to(&mut s, "openai_compatible.enabled");
+	let outcome = handle_settings_key(&mut s, &press(KeyCode::Char(' ')));
+	assert_set_bool_action(outcome, "openai_compatible.enabled", true);
+}
+
+/// Mouse parity: one click on the value column toggles `enabled` on.
+#[test]
+fn mouse_click_on_openai_compatible_enabled_toggles_on() {
+	let mut s = make_state();
+	synth_rects(&mut s);
+	let row = row_idx_for(&s, "openai_compatible.enabled") as u16;
+	let outcome = handle_settings_mouse(
+		&mut s,
+		MouseEventKind::Down(crossterm::event::MouseButton::Left),
+		72,
+		row,
+	);
+	assert_set_bool_action(outcome, "openai_compatible.enabled", true);
+}
+
+/// Space on `openai_compatible.make_default` toggles it off (default ON).
+#[test]
+fn space_on_openai_compatible_make_default_toggles_off() {
+	let mut s = make_state();
+	navigate_to(&mut s, "openai_compatible.make_default");
+	let outcome = handle_settings_key(&mut s, &press(KeyCode::Char(' ')));
+	assert_set_bool_action(outcome, "openai_compatible.make_default", false);
+}
+
+/// Mouse parity: one click on the value column toggles `make_default` off.
+#[test]
+fn mouse_click_on_openai_compatible_make_default_toggles_off() {
+	let mut s = make_state();
+	synth_rects(&mut s);
+	let row = row_idx_for(&s, "openai_compatible.make_default") as u16;
+	let outcome = handle_settings_mouse(
+		&mut s,
+		MouseEventKind::Down(crossterm::event::MouseButton::Left),
+		72,
+		row,
+	);
+	assert_set_bool_action(outcome, "openai_compatible.make_default", false);
+}
+
+/// Enter on the `openai_compatible.api_backend` row opens the picker seeded at
+/// the default `chat_completions`.
+#[test]
+fn enter_on_openai_compatible_api_backend_enters_picking_enum() {
+	let mut s = make_state();
+	navigate_to(&mut s, "openai_compatible.api_backend");
+	let outcome = handle_settings_key(&mut s, &press(KeyCode::Enter));
+	assert!(
+		matches!(outcome, SettingsKeyOutcome::Changed),
+		"Enter on api_backend row must transition to PickingEnum, got {outcome:?}"
+	);
+	match &s.mode() {
+		SettingsModalMode::PickingEnum {
+			key,
+			original_value,
+			..
+		} => {
+			assert_eq!(*key, "openai_compatible.api_backend");
+			assert_eq!(
+				original_value,
+				&SettingValue::Enum("chat_completions"),
+				"default api_backend → original 'chat_completions'"
+			);
+		}
+		other => panic!("expected PickingEnum mode, got {other:?}"),
+	}
+}
+
+/// Mouse parity: clicking the `api_backend` value column opens the picker.
+#[test]
+fn mouse_click_on_openai_compatible_api_backend_opens_picker() {
+	let mut s = make_state();
+	synth_rects(&mut s);
+	let row = row_idx_for(&s, "openai_compatible.api_backend") as u16;
+	let outcome = handle_settings_mouse(
+		&mut s,
+		MouseEventKind::Down(crossterm::event::MouseButton::Left),
+		72,
+		row,
+	);
+	assert!(matches!(outcome, SettingsKeyOutcome::Changed));
+	assert!(
+		matches!(
+			s.mode(),
+			SettingsModalMode::PickingEnum { key, .. } if key == "openai_compatible.api_backend"
+		),
+		"click on the api_backend value column must open the picker, got {:?}",
+		s.mode(),
+	);
+}
+
+/// The three String rows: Enter opens the editor seeded empty, typing fills the
+/// buffer, and Enter commits the typed text as that row's typed setter.
+#[test]
+fn enter_type_enter_commits_each_openai_compatible_string_row() {
+	for (key, typed) in [
+		("openai_compatible.base_url", "http://localhost:11434/v1"),
+		("openai_compatible.model", "llama3.3"),
+		("openai_compatible.api_key", "sk-test-key"),
+	] {
+		let mut s = make_state();
+		navigate_to(&mut s, key);
+
+		let outcome = handle_settings_key(&mut s, &press(KeyCode::Enter));
+		assert!(
+			matches!(outcome, SettingsKeyOutcome::Changed),
+			"Enter on `{key}` must open the editor, got {outcome:?}"
+		);
+		assert!(
+			matches!(s.mode(), SettingsModalMode::EditingValue { key: k, .. } if k == key),
+			"Enter on `{key}` must transition to EditingValue, got {:?}",
+			s.mode(),
+		);
+		assert_eq!(
+			s.editing_buffer(),
+			Some(""),
+			"`{key}` defaults to empty, so the editor opens on an empty buffer"
+		);
+
+		for ch in typed.chars() {
+			let _ = handle_settings_key(&mut s, &press(KeyCode::Char(ch)));
+		}
+		assert_eq!(s.editing_buffer(), Some(typed));
+
+		let outcome = handle_settings_key(&mut s, &press(KeyCode::Enter));
+		let action = match outcome {
+			SettingsKeyOutcome::Action(a) => a,
+			other => panic!("committing `{key}` must emit a typed setter, got {other:?}"),
+		};
+		match (key, action) {
+			("openai_compatible.base_url", Action::SetOpenAiCompatibleBaseUrl(v)) => {
+				assert_eq!(v, typed)
+			}
+			("openai_compatible.model", Action::SetOpenAiCompatibleModel(v)) => {
+				assert_eq!(v, typed)
+			}
+			// The key is wrapped in a SecretString so it cannot be logged by
+			// accident; compare through its accessor rather than Debug.
+			("openai_compatible.api_key", Action::SetOpenAiCompatibleApiKey(v)) => {
+				assert_eq!(v.expose_secret(), typed)
+			}
+			(k, action) => panic!("`{k}` committed the wrong Action variant: {action:?}"),
+		}
+	}
+}
+
+/// Mouse parity for the String rows: a second click on the value column opens
+/// the editor (the first click only focuses the row).
+#[test]
+fn mouse_click_opens_editor_for_each_openai_compatible_string_row() {
+	for key in [
+		"openai_compatible.base_url",
+		"openai_compatible.model",
+		"openai_compatible.api_key",
+	] {
+		let mut s = make_state();
+		synth_rects(&mut s);
+		let row = row_idx_for(&s, key) as u16;
+		let _ = handle_settings_mouse(
+			&mut s,
+			MouseEventKind::Down(crossterm::event::MouseButton::Left),
+			20,
+			row,
+		);
+		let outcome = handle_settings_mouse(
+			&mut s,
+			MouseEventKind::Down(crossterm::event::MouseButton::Left),
+			20,
+			row,
+		);
+		assert!(
+			matches!(outcome, SettingsKeyOutcome::Changed),
+			"second click on `{key}` must be Changed, got {outcome:?}"
+		);
+		assert!(
+			matches!(s.mode(), SettingsModalMode::EditingValue { key: k, .. } if k == key),
+			"second click on `{key}` must open the editor, got {:?}",
+			s.mode(),
+		);
+	}
 }
