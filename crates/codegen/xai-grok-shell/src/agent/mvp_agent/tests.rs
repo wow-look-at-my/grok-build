@@ -982,6 +982,20 @@ fn harnesses_are_compatible_for_stock_family_pairs() {
 fn harnesses_are_compatible_rejects_strict_mismatches() {
     assert!(harnesses_are_compatible("codex", "codex"));
     assert!(!harnesses_are_compatible("grok-build-plan", "codex"));
+    assert!(!harnesses_are_compatible("codex", "grok-build"));
+}
+
+/// An agent type nobody has heard of is never strict, because
+/// `is_strict_harness_agent_type` refuses to enforce a harness it cannot
+/// resolve -- so against the non-strict default it is COMPATIBLE. Worth
+/// pinning: a test that wants a mismatch has to name a real strict harness, and
+/// an invented one silently produces the opposite of what it looks like it asks
+/// for. (Against a strict harness it still mismatches, from the other side.)
+#[test]
+fn an_unknown_agent_type_is_never_strict() {
+    assert!(harnesses_are_compatible("grok-build", "cursor"));
+    assert!(harnesses_are_compatible("cursor", "grok-build-plan"));
+    assert!(!harnesses_are_compatible("cursor", "codex"));
 }
 #[test]
 fn explicit_agent_type_wins_over_session_default() {
