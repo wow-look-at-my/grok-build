@@ -965,6 +965,42 @@ pub(super) fn make_viewer_chunk_with_turn_start(
         response_tx: tx,
     })
 }
+/// A durable `TurnCompleted` carrying a reported per-turn `PromptUsage` cost,
+/// built through the typed `SessionNotification` so the wire shape (and the
+/// `cost_usd_ticks` field the handler reads to attach per-turn cost) can't
+/// drift from what the dispatch parses.
+pub(super) fn xai_turn_completed_notif_with_cost(
+    session_id: &str,
+    prompt_id: &str,
+    cost_usd_ticks: Option<i64>,
+) -> acp::ExtNotification {
+    use xai_grok_shell::extensions::notification::{PromptUsage, PromptUsageModel};
+    let payload = SessionNotification {
+        session_id: acp::SessionId::new(session_id),
+        update: XaiSessionUpdate::TurnCompleted {
+            prompt_id: prompt_id.into(),
+            stop_reason: "end_turn".into(),
+            agent_result: None,
+            usage: Some(PromptUsage {
+                totals: PromptUsageModel {
+                    input_tokens: 10,
+                    output_tokens: 5,
+                    total_tokens: 15,
+                    cost_usd_ticks,
+                    ..Default::default()
+                },
+                model_usage: Default::default(),
+                num_turns: 1,
+                usage_is_incomplete: false,
+            }),
+        },
+        meta: Some(serde_json::json!({ "isReplay": false })),
+    };
+    acp::ExtNotification::new(
+        "x.ai/session/update",
+        std::sync::Arc::from(serde_json::value::to_raw_value(&payload).unwrap()),
+    )
+}
 /// Build a durable `TurnCompleted` update on the `x.ai/session/update` rail,
 /// optionally stamped `isReplay`. Built through the typed `SessionNotification`
 /// so the wire shape can't drift from what the dispatch parses.

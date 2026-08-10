@@ -30,6 +30,7 @@ mod padded;
 pub use accented::Accented;
 pub use block_renderer::BlockRenderer;
 pub use entry_renderer::EntryRenderer;
+pub(crate) use entry_renderer::cost_ticks_to_display;
 pub(crate) use entry_renderer::group_header_chrome_prefix_width;
 pub use padded::Padded;
 
