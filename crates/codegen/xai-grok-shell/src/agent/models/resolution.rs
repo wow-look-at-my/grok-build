@@ -1,5 +1,30 @@
 use super::*;
 
+/// Resolve a model's context window from a `/v1/models` listing, per exact
+/// requested slug.
+///
+/// The listing is the parsed provider response (each entry carrying its own
+/// `contextWindow` / `context_window` value read via
+/// `parse_remote_model_value`). An entry is matched by its
+/// catalog key or its routing `model` slug, so a multi-model listing yields
+/// each model's own window — never a max or first-match value. A requested
+/// slug absent from the listing (or a provider whose listing exposes no
+/// per-model window) resolves to the documented `DEFAULT_CONTEXT_WINDOW`
+/// fallback rather than an error, so a cold catalog never aborts the build.
+pub(crate) fn resolve_context_window(
+    requested: &str,
+    listing: &IndexMap<String, ModelEntry>,
+) -> std::num::NonZeroU64 {
+    listing
+        .get(requested)
+        .or_else(|| listing.values().find(|entry| entry.info.model == requested))
+        .map(|entry| entry.info.context_window)
+        .unwrap_or_else(|| {
+            std::num::NonZeroU64::new(crate::remote::DEFAULT_CONTEXT_WINDOW)
+                .expect("DEFAULT_CONTEXT_WINDOW is non-zero")
+        })
+}
+
 /// Map a model id (catalog key or routing slug) to its catalog key.
 pub(crate) fn resolve_catalog_key(
     models: &IndexMap<String, ModelEntry>,

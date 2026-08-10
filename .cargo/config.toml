@@ -79,3 +79,14 @@ AARCH64_APPLE_DARWIN_JEMALLOC_SYS_WITH_LG_PAGE = "14"
 AARCH64_UNKNOWN_LINUX_GNU_JEMALLOC_SYS_WITH_LG_PAGE = "16"
 AARCH64_UNKNOWN_LINUX_MUSL_JEMALLOC_SYS_WITH_LG_PAGE = "16"
 AARCH64_UNKNOWN_LINUX_MUSL_JEMALLOC_SYS_WITH_BACKGROUND_THREADS = "0"
+
+# Ensure test threads have a stack large enough for the session actor's
+# recursive turn/retry harness (which can temporarily recurse > 2 MiB deep in
+# `session::acp_session` unit tests). libtest spawns each test on its own
+# thread using Rust's default minimum stack (`RUST_MIN_STACK`, 2 MiB by
+# default); on constrained hosts that default aborts these deep-but-bounded
+# turns with a `stack overflow` (SIGABRT) instead of passing. Raise it for
+# every cargo-invoked process so `cargo test -p xai-grok-shell --lib` runs
+# the whole suite to completion. This is a test-environment tweak only: the
+# shipped binaries' threads are sized independently and are unaffected.
+RUST_MIN_STACK = "16777216"
