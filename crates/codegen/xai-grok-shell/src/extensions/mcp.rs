@@ -719,18 +719,25 @@ pub(crate) async fn build_mcp_status(
                 tools: vec![],
                 error: None,
             });
-        } else if finished_init && !auth_required.contains(cname) {
+            continue;
+        }
+        if auth_required.contains(cname) {
+            continue;
+        }
+        // A recorded reason is proof the server failed, whatever phase init is
+        // in — a config change cancels init back to "not started", and that
+        // window is exactly when an operator is looking at the row they just
+        // added. Without a reason, only a finished pass can conclude anything.
+        let reason = init_failed
+            .get(cname)
+            .filter(|reason| !reason.is_empty())
+            .cloned();
+        if reason.is_some() || finished_init {
             client_statuses.push(McpClientStatus {
                 name: cname.to_string(),
                 status: McpSessionStatus::Unavailable,
                 tools: vec![],
-                error: Some(
-                    init_failed
-                        .get(cname)
-                        .filter(|reason| !reason.is_empty())
-                        .cloned()
-                        .unwrap_or_else(|| "server did not start".to_string()),
-                ),
+                error: Some(reason.unwrap_or_else(|| "server did not start".to_string())),
             });
         }
     }
@@ -2016,6 +2023,32 @@ mod tests {
             .expect("a configured server must appear in the status");
         assert_eq!(entry.status, McpSessionStatus::Unavailable);
         assert_eq!(entry.error.as_deref(), Some("server did not start"));
+    }
+
+    /// A config change (adding a server is one) cancels init back to "not
+    /// started". A failure recorded before that must still be reported: this
+    /// window is exactly when an operator is staring at the row they just
+    /// added, which is where "stuck on initializing" was seen.
+    #[tokio::test]
+    async fn a_recorded_failure_is_reported_even_when_init_was_cancelled() {
+        let mut state = McpState::new(vec![stdio_config("kagi", "uvx")]);
+        assert!(state.try_start_init());
+        state.finish_init();
+        state.record_init_failure("kagi", false, Some("boom".into()));
+        state.cancel_init();
+        assert!(!state.has_finished_init());
+        let mcp_state = Arc::new(TokioMutex::new(state));
+        let bridge = Arc::new(crate::tools::bridge::ToolBridge::for_test());
+
+        let snapshot = build_mcp_status(&mcp_state, &bridge, None).await;
+
+        let entry = snapshot
+            .clients
+            .iter()
+            .find(|c| c.name == "kagi")
+            .expect("a failure survives an init cancel");
+        assert_eq!(entry.status, McpSessionStatus::Unavailable);
+        assert_eq!(entry.error.as_deref(), Some("boom"));
     }
 
     /// Before init has run there is nothing to conclude about a configured
