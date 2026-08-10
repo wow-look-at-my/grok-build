@@ -287,6 +287,21 @@ pub struct AcpUpdateTracker {
     /// is responsible for copying to `AgentSession.available_commands` and
     /// bumping `available_commands_generation`.
     pending_acp_commands: Option<Vec<acp::AvailableCommand>>,
+    /// The scrollback entry of the most recently finished agent message (the one
+    /// `finish_turn` finalized from `current_agent_msg`). The turn-completion
+    /// path uses this to attach the API-reported per-turn cost onto the block
+    /// it just finished rendering. Cleared when a new streaming agent message
+    /// starts, so a stale cost notification is never mistaken for the current turn's.
+    last_finished_agent_entry: Option<EntryId>,
+    /// Bounded prompt→entry attribution map for finished turns. The durable
+    /// `TurnCompleted` notification (which carries `cost_usd_ticks`) is keyed by
+    /// prompt and can arrive out of order relative to the driver's `finish_turn`
+    /// (`PromptResponse`). Recording which finished entry each prompt finalized
+    /// lets a late `TurnCompleted` still attach its reported cost to the correct
+    /// block, while a stale one for a *different* prompt cannot land on a newer
+    /// turn. Bounded to the last few turns.
+    finished_prompt_costs: Vec<(String, EntryId)>,
+
     /// Pending agent toolset from the most recent `AvailableCommandsUpdate.meta`.
     /// Format on the wire: `{"tools": ["read_file", ...]}`.
     /// `Some(_)` only if the shell included a tools list this round.
@@ -833,11 +848,23 @@ impl AcpUpdateTracker {
         changed
     }
     /// Called when PromptResponse is received (turn complete).
-    pub fn finish_turn(&mut self, scrollback: &mut ScrollbackState) {
+    pub fn finish_turn(&mut self, scrollback: &mut ScrollbackState, prompt_id: Option<&str>) {
         self.epoch_at_last_finish = self.agent_output_epoch;
         self.finish_thinking(scrollback);
         if let Some(agent_id) = self.current_agent_msg.take() {
             scrollback.finish_running(agent_id);
+            // Remember the just-finished agent-message entry so the
+            // turn-completion path can attach the API-reported cost to it.
+            self.last_finished_agent_entry = Some(agent_id);
+            // Key the finished entry by prompt (when known) so an out-of-order
+            // `TurnCompleted` can still attribute its cost to this exact turn.
+            if let Some(prompt) = prompt_id.filter(|p| !p.is_empty()) {
+                self.finished_prompt_costs.retain(|(p, _)| p != prompt);
+                self.finished_prompt_costs.push((prompt.to_string(), agent_id));
+                if self.finished_prompt_costs.len() > 8 {
+                    self.finished_prompt_costs.remove(0);
+                }
+            }
         }
         for (_, pending) in self.pending_tools.drain() {
             if let Some(entry_id) = pending.entry_id {
@@ -861,6 +888,79 @@ impl AcpUpdateTracker {
         self.blocking_waits.clear();
         self.orphan_updates.clear();
         self.skip_next_skill_body = false;
+    }
+    /// Attach the API-reported per-turn cost (USD ticks) to the agent-message
+    /// block that rendered this turn. The ACP text chunk rail does not carry
+    /// cost; the *durable* `TurnCompleted` notification carries it in an
+    /// adjacent `PromptUsage`, so the turn-completion handler calls this once
+    /// per `TurnCompleted`, keyed by the turn's prompt.
+    ///
+    /// Attribution is order-independent across the two ways a turn ends:
+    ///
+    /// - **Driver** (`attached_as_viewer=false`) finishes on `PromptResponse`
+    ///   (`prompt.rs`), which is usually *after* `TurnCompleted` arrives. At
+    ///   that moment the agent message is still streaming (`current_agent_msg`),
+    ///   so the cost attaches to the running turn — but only when the
+    ///   `TurnCompleted`'s prompt matches the running turn, so a stale
+    ///   notification for a previous prompt is never stamped onto a newer turn.
+    /// - **Viewer and other pre-finish paths** finish on `TurnCompleted` itself
+    ///   (`finalize_turn_from_terminal` → `finish_turn`), so the finished entry
+    ///   is found via the prompt→entry map recorded by `finish_turn`.
+    ///
+    /// A stale/misordered `TurnCompleted` (for a prompt that already finished,
+    /// arriving after the *next* turn began streaming) is routed to its own
+    /// prompt-keyed finished entry, never the live block of a different turn.
+    /// Cost is normalized exactly as
+    /// [`crate::scrollback::ScrollbackEntry::with_cost_usd_ticks`] (non-positive
+    /// or missing ⇒ `None`), matching `reported_cost_ticks`. No-op when there is
+    /// no agent-message block to attribute cost to.
+    pub fn set_last_turn_cost(
+        &mut self,
+        scrollback: &mut ScrollbackState,
+        prompt_id: Option<&str>,
+        current_prompt_id: Option<&str>,
+        cost_usd_ticks: Option<i64>,
+    ) {
+        let Some(cost) = cost_usd_ticks.filter(|&t| t > 0) else {
+            return;
+        };
+        let prompt = prompt_id.filter(|p| !p.is_empty());
+        // (1) The turn is still streaming (healthy driver order: TurnCompleted
+        // before PromptResponse). Attach only if the `TurnCompleted`'s prompt
+        // is the run currently in flight — a stale notification for an older
+        // prompt must never be stamped onto the live block of a newer turn.
+        let streaming_matches = match (prompt, current_prompt_id) {
+            // No prompt key at all → nothing to disambiguate against.
+            (None, _) => true,
+            // The TurnCompleted's prompt is the run currently in flight.
+            (Some(p), Some(cur)) => p == cur,
+            // A keyed TurnCompleted with no known running prompt: default to
+            // the streaming turn (the sole live block) — it is the only
+            // candidate, so attaching there is unambiguous.
+            (Some(_), None) => true,
+        };
+        if streaming_matches
+            && let Some(id) = self.current_agent_msg
+            && let Some(entry) = scrollback.get_by_id_mut(id)
+        {
+            entry.cost_usd_ticks = entry.cost_usd_ticks.or(Some(cost));
+            return;
+        }
+        // (2) Prompt-keyed finished entry (viewer order, or a late TurnCompleted
+        // for an already-finished turn after a newer turn began streaming).
+        if let Some(prompt) = prompt
+            && let Some((_, entry_id)) = self.finished_prompt_costs.iter().find(|(p, _)| p == prompt)
+            && let Some(entry) = scrollback.get_by_id_mut(*entry_id)
+        {
+            entry.cost_usd_ticks = entry.cost_usd_ticks.or(Some(cost));
+            return;
+        }
+        // (3) Non-prompt fallback: the single most-recently finished agent entry.
+        if let Some(entry_id) = self.last_finished_agent_entry
+            && let Some(entry) = scrollback.get_by_id_mut(entry_id)
+        {
+            entry.cost_usd_ticks = entry.cost_usd_ticks.or(Some(cost));
+        }
     }
     /// Finish the current thinking block, passing elapsed time to the entry.
     ///
@@ -937,6 +1037,9 @@ impl AcpUpdateTracker {
         }
         let is_new = self.current_agent_msg.is_none();
         let id = *self.current_agent_msg.get_or_insert_with(|| {
+            // A new streaming message starts a fresh attribution scope: a stale
+            // `last_finished_agent_entry` must not receive a later turn's cost.
+            self.last_finished_agent_entry = None;
             let entry_id = scrollback.start_streaming_agent();
             scrollback.set_last_running(true);
             entry_id
@@ -2820,7 +2923,7 @@ mod tests {
     fn output_since_last_finish_flips_per_turn() {
         let mut sb = ScrollbackState::new();
         let mut tracker = AcpUpdateTracker::new();
-        tracker.finish_turn(&mut sb);
+        tracker.finish_turn(&mut sb, None);
         assert!(
             !tracker.output_since_last_finish(),
             "no output right after a finish"
@@ -2830,7 +2933,7 @@ mod tests {
             tracker.output_since_last_finish(),
             "an agent message chunk flips the flag"
         );
-        tracker.finish_turn(&mut sb);
+        tracker.finish_turn(&mut sb, None);
         assert!(
             !tracker.output_since_last_finish(),
             "the next finish snapshots the epoch again"
@@ -2989,7 +3092,7 @@ mod tests {
         tracker.handle_update(tool_update_completed("tc-orphan"), &meta(), &mut sb);
         assert_eq!(tracker.orphan_updates.len(), 1);
         tracker.task_tool_background.insert("task-x".into(), true);
-        tracker.finish_turn(&mut sb);
+        tracker.finish_turn(&mut sb, None);
         assert!(tracker.current_agent_msg.is_none());
         assert!(tracker.current_thinking.is_none());
         assert!(tracker.pending_tools.is_empty());
@@ -3105,7 +3208,7 @@ mod tests {
             tracker.current_agent_msg.is_some(),
             "turn 1 agent msg should be tracked"
         );
-        tracker.finish_turn(&mut sb);
+        tracker.finish_turn(&mut sb, None);
         sb.push_block(RenderBlock::user_prompt("whats the current weather"));
         tracker.expect_user_echo();
         let modified =
@@ -3150,7 +3253,7 @@ mod tests {
         tracker.handle_update(thought_chunk("thinking..."), &meta(), &mut sb);
         tracker.handle_update(agent_chunk("Today is February 8, 2026."), &meta(), &mut sb);
         assert!(tracker.current_agent_msg.is_some());
-        tracker.finish_turn(&mut sb);
+        tracker.finish_turn(&mut sb, None);
         assert!(tracker.current_agent_msg.is_none());
         sb.push_block(RenderBlock::user_prompt("whats the weather"));
         tracker.handle_update(thought_chunk("thinking about weather..."), &meta(), &mut sb);
@@ -3302,7 +3405,7 @@ mod tests {
                     <command-message>/commit</command-message>";
         tracker.handle_update(user_message(xml), &meta(), &mut sb);
         assert!(tracker.skip_next_skill_body);
-        tracker.finish_turn(&mut sb);
+        tracker.finish_turn(&mut sb, None);
         assert!(!tracker.skip_next_skill_body);
         assert!(tracker.handle_update(user_message("new question"), &meta(), &mut sb,));
         assert_eq!(sb.len(), 2);
@@ -4583,7 +4686,7 @@ mod tests {
         );
         assert_kept(&sb, "tool call");
         let (mut tracker, mut sb) = setup();
-        tracker.finish_turn(&mut sb);
+        tracker.finish_turn(&mut sb, None);
         assert_kept(&sb, "finish_turn");
         let mut sb = scrollback_with_respect_manual_folds();
         let mut tracker = AcpUpdateTracker::new();
@@ -4782,7 +4885,7 @@ mod tests {
         let stream = meta_stream(1000);
         tracker.handle_update(agent_chunk("turn 1"), &stream, &mut sb);
         assert_eq!(tracker.last_stream_start_ms, Some(1000));
-        tracker.finish_turn(&mut sb);
+        tracker.finish_turn(&mut sb, None);
         assert_eq!(
             tracker.last_stream_start_ms, None,
             "finish_turn should reset last_stream_start_ms"
@@ -4980,7 +5083,7 @@ mod tests {
         let mut tracker = AcpUpdateTracker::new();
         tracker.handle_update(agent_chunk("text"), &meta(), &mut sb);
         assert_eq!(tracker.activity(), Some(TurnActivity::Responding));
-        tracker.finish_turn(&mut sb);
+        tracker.finish_turn(&mut sb, None);
         assert_eq!(tracker.activity(), None);
     }
     #[test]
@@ -4991,7 +5094,7 @@ mod tests {
         assert_eq!(tracker.activity(), Some(TurnActivity::Responding));
         tracker.set_compaction_activity(Some(TurnActivity::AutoCompacting));
         assert_eq!(tracker.activity(), Some(TurnActivity::AutoCompacting));
-        tracker.finish_turn(&mut sb);
+        tracker.finish_turn(&mut sb, None);
         assert_eq!(tracker.activity(), None);
     }
     /// The blocking bg-plumbing tools are kept out of scrollback but the turn
@@ -5191,7 +5294,7 @@ mod tests {
             tracker.activity(),
             Some(TurnActivity::Waiting(WaitingReason::TasksComplete))
         );
-        tracker.finish_turn(&mut sb);
+        tracker.finish_turn(&mut sb, None);
         assert_eq!(tracker.activity(), None);
     }
     /// `kill_*` is suppressed but doesn't block the turn — no waiting reason.
@@ -5427,7 +5530,7 @@ mod tests {
             tracker.activity(),
             Some(TurnActivity::Waiting(WaitingReason::Subagent))
         );
-        tracker.finish_turn(&mut sb);
+        tracker.finish_turn(&mut sb, None);
         assert_eq!(tracker.activity(), None);
     }
     /// A background subagent doesn't block the parent: once an update reveals
@@ -5689,7 +5792,7 @@ mod tests {
         let mut tracker = AcpUpdateTracker::new();
         let mut sb = ScrollbackState::new();
         tracker.handle_update(available_commands_update(&["persist"]), &meta(), &mut sb);
-        tracker.finish_turn(&mut sb);
+        tracker.finish_turn(&mut sb, None);
         assert!(tracker.take_pending_acp_commands().is_some());
     }
     #[test]
@@ -5708,7 +5811,7 @@ mod tests {
             ),
         );
         tracker.handle_update(update, &meta(), &mut sb);
-        tracker.finish_turn(&mut sb);
+        tracker.finish_turn(&mut sb, None);
         let tools = tracker
             .take_pending_acp_tools()
             .expect("pending_acp_tools should survive finish_turn");
@@ -6213,7 +6316,7 @@ mod tests {
             tracker.pending_tools.contains_key("tc1"),
             "tool should still be in pending_tools",
         );
-        tracker.finish_turn(&mut sb);
+        tracker.finish_turn(&mut sb, None);
         assert!(
             !sb.get(0).unwrap().is_running,
             "Execute block must be finished even when in bg_deferred_tools",

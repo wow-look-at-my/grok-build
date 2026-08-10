@@ -225,10 +225,22 @@ pub(super) fn handle_session_notification(notif: &acp::ExtNotification, app: &mu
             prompt_id,
             stop_reason,
             agent_result,
-            ..
+            usage,
         } => {
-            if agent.session.loading_replay {
-                agent.replayed_terminal_prompts.insert(prompt_id);
+            // The ACP text chunk rail never carries cost; the durable
+            // `TurnCompleted` notification carries the per-turn usage (incl.
+            // exact `cost_usd_ticks`, already scrubbed when partial/incomplete)
+            // alongside the terminal outcome. Attribute that reported cost to
+            // the agent-message block this turn rendered.
+            let reported_cost = usage
+                .as_ref()
+                .and_then(|u| u.totals.cost_usd_ticks);
+            // Snapshot the run currently in flight *before* any turn-finish
+            // path clears it, so cost attribution can decide whether this
+            // `TurnCompleted` (keyed by `prompt_id`) belongs to the live block.
+            let running_prompt_id = agent.session.current_prompt_id.clone();
+            let result: bool = if agent.session.loading_replay {
+                agent.replayed_terminal_prompts.insert(prompt_id.clone());
                 false
             } else if is_wake_prompt(&prompt_id) {
                 if agent
@@ -301,7 +313,10 @@ pub(super) fn handle_session_notification(notif: &acp::ExtNotification, app: &mu
                     }
                     false
                 } else {
-                    agent.session.tracker.finish_turn(&mut agent.scrollback);
+                    agent.session.tracker.finish_turn(
+                        &mut agent.scrollback,
+                        agent.session.current_prompt_id.as_deref(),
+                    );
                     true
                 }
             } else {
@@ -321,6 +336,20 @@ pub(super) fn handle_session_notification(notif: &acp::ExtNotification, app: &mu
                     ));
                 false
             }
+            ;
+            // Attribute this turn's reported cost to the agent block it
+            // rendered, keyed by prompt so out-of-order notifications land on
+            // the correct turn (and a stale one never corrupts a newer turn).
+            agent
+                .session
+                .tracker
+                .set_last_turn_cost(
+                    &mut agent.scrollback,
+                    Some(&prompt_id),
+                    running_prompt_id.as_deref(),
+                    reported_cost,
+                );
+            result
         }
         XaiSessionUpdate::SubagentSpawned {
             subagent_id,

@@ -107,7 +107,10 @@ pub(super) fn finish_wake_turn(
     use crate::scrollback::blocks::SessionEvent;
 
     let had_output = agent.session.tracker.output_since_last_finish();
-    agent.session.tracker.finish_turn(&mut agent.scrollback);
+    agent
+        .session
+        .tracker
+        .finish_turn(&mut agent.scrollback, agent.session.current_prompt_id.as_deref());
     // The stored `turn_start_ms` may belong to an earlier turn (a silent wake
     // streamed no deltas of its own; interleaved deltas can re-stamp it) —
     // claim an elapsed only when the anchor is provably this wake's.
