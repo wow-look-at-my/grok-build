@@ -1660,6 +1660,18 @@ mod tests {
         assert!(!is_command_complete("hello", &reg));
     }
 
+    /// The Enter path must ask this of the whole prompt line, never of a
+    /// suggestion row on its own. An argument row's `insert_text` is a bare
+    /// value, and a bare value parses as no invocation at all -- so asking
+    /// here reads "incomplete" for a line that is finished, and Enter stops
+    /// sending. `/model <name>` is the case that caught it.
+    #[test]
+    fn an_argument_value_alone_is_not_a_complete_command() {
+        let reg = test_registry();
+        assert!(!is_command_complete("cursor-model", &reg));
+        assert!(is_command_complete("/model cursor-model", &reg));
+    }
+
     // -- Controller tests --
 
     #[test]

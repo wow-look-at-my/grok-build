@@ -235,17 +235,19 @@ impl AgentView {
                         // gets one whenever a command ACCEPTS args, so keying
                         // off it also stalls on `/login` and `/compact`, whose
                         // args are optional and which run fine without them.
-                        let completed = snap
-                            .selection()
-                            .map(|row| row.insert_text.trim_end().to_owned());
+                        //
+                        // Ask that of the LINE the accept produced, never of
+                        // the row on its own: an argument row's insert_text is
+                        // a bare value (`cursor-model`), which parses as no
+                        // command at all and reads as forever-incomplete.
+                        let had_selection = snap.selection().is_some();
                         self.prompt.slash_commit_preview();
                         self.prompt.accept_slash_completion(&self.session.models);
-                        let chains = completed.is_some_and(|line| {
-                            !crate::slash::is_command_complete(
-                                &line,
+                        let chains = had_selection
+                            && !crate::slash::is_command_complete(
+                                self.prompt.text(),
                                 self.prompt.slash_controller.registry(),
-                            )
-                        });
+                            );
                         if chains {
                             return InputOutcome::Changed;
                         }
