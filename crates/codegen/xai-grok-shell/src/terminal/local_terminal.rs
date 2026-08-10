@@ -289,7 +289,11 @@ mod tests {
     #[cfg(unix)]
     async fn test_timeout_kills_grandchildren_and_returns_promptly() {
         let mut request = make_request("sleep 5 & echo bgpid=$!; sleep 5");
-        request.timeout = std::time::Duration::from_millis(300);
+        // Long enough that spawning the shell and reading its first line wins
+        // the race on a loaded runner -- at 300ms the kill sometimes landed
+        // before `bgpid=` was ever collected -- and still nowhere near the 5s
+        // sleeps this must not wait for.
+        request.timeout = std::time::Duration::from_millis(1500);
 
         let started = std::time::Instant::now();
         let result = LocalTerminalRunner.run(request).await.unwrap();

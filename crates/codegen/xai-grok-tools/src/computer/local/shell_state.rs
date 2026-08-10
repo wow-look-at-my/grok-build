@@ -74,6 +74,19 @@ fn sudo_alias_injection() -> String {
 /// functions, and aliases as base64-encoded replayable shell snippets.
 const DUMP_BASH_STATE_SCRIPT: &str = r##"
 dump_bash_state() {
+  # allexport marks every assignment below for export, `local` included. env_vars
+  # alone holds a copy of the environment, so the next external command inherits
+  # the environment plus a copy of itself and exec fails with E2BIG -- surfacing
+  # as `tr: Argument list too long` and a 126 from a command that was fine. Note
+  # it, switch it off for the dump, and put it back in the replay below.
+  local __grok_allexport=
+  case $- in *a*) __grok_allexport=1 ;; esac
+  builtin set +a
+  # This assignment happened while allexport was still on, so strip the export
+  # attribute it picked up -- otherwise the flag itself lands in export -p and
+  # rides into every later shell.
+  builtin declare +x __grok_allexport 2>/dev/null || true
+
   set -euo pipefail
   if ! command -v base64 >/dev/null 2>&1; then
     echo "Error: base64 command is required" >&2
@@ -93,6 +106,11 @@ dump_bash_state() {
       builtin printf '\nGROK_SNAP_EOF_%s\n' "$var_name"
       builtin printf ')\n'
       builtin printf 'eval "$grok_snap_%s"\n' "$var_name"
+      # Drop the carrier as soon as it is consumed. Once the replay restores
+      # allexport, every later grok_snap_* assignment is an exported variable,
+      # and FUNCTIONS_B64 carries every function in the shell -- left in the
+      # environment they push the next exec past ARG_MAX.
+      builtin printf 'builtin unset grok_snap_%s\n' "$var_name"
     fi
   }
 
@@ -106,8 +124,17 @@ dump_bash_state() {
 
   # errexit/pipefail here are this function's own `set -euo pipefail` (set is
   # shell-global in bash); replaying them would abort later user commands.
+  # allexport is dropped for the same reason -- this function turned it off --
+  # and re-stated from what the user's shell actually had.
   local posix_opts
-  posix_opts=$(builtin shopt -po 2>/dev/null | command grep -vE '^set [-+]o (nounset|errexit|pipefail)$' || true)
+  posix_opts=$(builtin shopt -po 2>/dev/null | command grep -vE '^set [-+]o (nounset|errexit|pipefail|allexport)$' || true)
+  if [[ -n "$__grok_allexport" ]]; then
+    posix_opts="$posix_opts
+set -o allexport"
+  else
+    posix_opts="$posix_opts
+set +o allexport"
+  fi
   _emit_encoded "$posix_opts" "POSIX_OPTS_B64"
 
   local bash_opts
@@ -149,6 +176,11 @@ function dump_zsh_state() {
       builtin printf '\nGROK_SNAP_EOF_%s\n' "$var_name"
       builtin printf ')\n'
       builtin printf 'eval "$grok_snap_%s"\n' "$var_name"
+      # Drop the carrier as soon as it is consumed. Once the replay restores
+      # allexport, every later grok_snap_* assignment is an exported variable,
+      # and FUNCTIONS_B64 carries every function in the shell -- left in the
+      # environment they push the next exec past ARG_MAX.
+      builtin printf 'builtin unset grok_snap_%s\n' "$var_name"
     fi
   }
 
@@ -1204,6 +1236,64 @@ mod tests {
         assert!(
             stdout.contains("ENV_CLEAN") && !stdout.contains("LEAKED_TO_ENV"),
             "temp var must not be exported to child processes under allexport, got: {stdout:?}"
+        );
+    }
+
+    /// Regression test: `set -a` must not break the commands that follow it.
+    ///
+    /// Under allexport every assignment is exported, which caught both the dump
+    /// function's own locals (env_vars is a copy of the environment) and the
+    /// snapshot's grok_snap_* carriers (FUNCTIONS_B64 is every function in the
+    /// shell). Either one leaves the environment big enough that the next exec
+    /// fails with E2BIG, which the shell reports as an unexplained 126 -- from a
+    /// command that has nothing wrong with it.
+    ///
+    /// Runs several commands after `set -a`, since the environment grew with
+    /// each snapshot round-trip rather than all at once.
+    #[tokio::test]
+    async fn test_allexport_does_not_break_later_commands_bash() {
+        if !bash_available() {
+            return;
+        }
+        let cwd = std::env::current_dir().unwrap();
+        let mut state = ShellState::init(ShellKind::Bash, &cwd, None).await.unwrap();
+
+        // A function makes FUNCTIONS_B64 non-trivial, the way a real rc file would.
+        let (code, _) = run_command(&mut state, "grok_probe_fn() { echo hi; }").await;
+        assert_eq!(code, 0);
+        let (code, _) = run_command(&mut state, "set -a").await;
+        assert_eq!(code, 0, "`set -a` itself must succeed");
+
+        for round in 1..=4 {
+            // `env` is external, so it only runs if exec still fits in ARG_MAX.
+            let (code, stdout) = run_command(&mut state, "command env >/dev/null && echo OK").await;
+            assert_eq!(
+                code, 0,
+                "round {round}: an external command after `set -a` must still exec \
+                 (126 here means the environment outgrew ARG_MAX), stdout={stdout:?}"
+            );
+            assert!(stdout.contains("OK"), "round {round}: got {stdout:?}");
+        }
+
+        // allexport must survive the round-trips it just stopped breaking.
+        let (code, stdout) = run_command(&mut state, "case $- in *a*) echo SET;; *) echo UNSET;; esac").await;
+        assert_eq!(code, 0);
+        assert!(
+            stdout.contains("SET"),
+            "allexport must still be on after the snapshot round-trip, got {stdout:?}"
+        );
+
+        // And the snapshot carriers must not be sitting in the environment.
+        let (code, stdout) = run_command(
+            &mut state,
+            "command env | command grep -c '^grok_snap_' || true",
+        )
+        .await;
+        assert_eq!(code, 0);
+        assert_eq!(
+            stdout.trim(),
+            "0",
+            "no grok_snap_* carrier may remain exported, got {stdout:?}"
         );
     }
 

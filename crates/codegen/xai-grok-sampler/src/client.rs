@@ -21,7 +21,9 @@ use reqwest::header::{
 };
 use serde::Serialize;
 
-use xai_grok_sampling_types::error::{try_parse_stream_error, user_facing_api_error_message};
+use xai_grok_sampling_types::error::{
+    api_error_message_for_endpoint, try_parse_stream_error, user_facing_api_error_message,
+};
 use xai_grok_sampling_types::{
     ChatCompletionChunk, ChatCompletionRequest, ChatCompletionResponse, ConversationRequest,
     ConversationResponse, CreateResponseWrapper, DOOM_LOOP_CHECK_HEADER, MessagesRequestWrapper,
@@ -868,6 +870,7 @@ impl SamplingClient {
         sent_bearer: Option<&str>,
     ) -> Result<ChatCompletionResponse> {
         let status = response.status();
+        let request_url = response.url().to_string();
         let model_metadata = extract_model_metadata(response.headers());
         let retry_after_secs = extract_retry_after(response.headers());
         let should_retry = extract_should_retry(response.headers());
@@ -885,7 +888,8 @@ impl SamplingClient {
                     sent_bearer,
                 ));
             }
-            let message = user_facing_api_error_message(status, bytes.as_ref());
+            let message =
+                api_error_message_for_endpoint(status, bytes.as_ref(), &request_url);
             return Err(SamplingError::Api {
                 status,
                 message,
@@ -1024,6 +1028,7 @@ impl SamplingClient {
         })?;
 
         let status = response.status();
+        let request_url = response.url().to_string();
         let span = tracing::Span::current();
         span.record("status_code", status.as_u16() as i64);
         span.record("success", status.is_success());
@@ -1047,7 +1052,8 @@ impl SamplingClient {
             }
 
             let bytes = response.bytes().await?;
-            let message = user_facing_api_error_message(status, bytes.as_ref());
+            let message =
+                api_error_message_for_endpoint(status, bytes.as_ref(), &request_url);
             span.record("error", message.as_str());
             tracing::error!(
                 status = %status,
@@ -1227,6 +1233,7 @@ impl SamplingClient {
         })?;
 
         let status = response.status();
+        let request_url = response.url().to_string();
         let model_metadata = extract_model_metadata(response.headers());
         let retry_after_secs = extract_retry_after(response.headers());
         let should_retry = extract_should_retry(response.headers());
@@ -1246,7 +1253,8 @@ impl SamplingClient {
                 ));
             }
 
-            let message = user_facing_api_error_message(status, bytes.as_ref());
+            let message =
+                api_error_message_for_endpoint(status, bytes.as_ref(), &request_url);
             tracing::warn!(
                 status = %status,
                 error_message = %message,
@@ -1395,6 +1403,7 @@ impl SamplingClient {
         })?;
 
         let status = response.status();
+        let request_url = response.url().to_string();
         let span = tracing::Span::current();
         span.record("status_code", status.as_u16() as i64);
         span.record("success", status.is_success());
@@ -1417,7 +1426,8 @@ impl SamplingClient {
             let retry_after_secs = extract_retry_after(response.headers());
             let should_retry = extract_should_retry(response.headers());
             let bytes = response.bytes().await?;
-            let message = user_facing_api_error_message(status, bytes.as_ref());
+            let message =
+                api_error_message_for_endpoint(status, bytes.as_ref(), &request_url);
             span.record("error", message.as_str());
             tracing::error!(
                 status = %status,
@@ -1580,6 +1590,7 @@ impl SamplingClient {
         })?;
 
         let status = response.status();
+        let request_url = response.url().to_string();
         let model_metadata = extract_model_metadata(response.headers());
         let retry_after_secs = extract_retry_after(response.headers());
         let should_retry = extract_should_retry(response.headers());
@@ -1599,7 +1610,8 @@ impl SamplingClient {
                 ));
             }
 
-            let message = user_facing_api_error_message(status, bytes.as_ref());
+            let message =
+                api_error_message_for_endpoint(status, bytes.as_ref(), &request_url);
             tracing::warn!(
                 status = %status,
                 error_message = %message,
@@ -1709,6 +1721,7 @@ impl SamplingClient {
         })?;
 
         let status = response.status();
+        let request_url = response.url().to_string();
         let span = tracing::Span::current();
         span.record("status_code", status.as_u16() as i64);
         span.record("success", status.is_success());
@@ -1731,7 +1744,8 @@ impl SamplingClient {
             let retry_after_secs = extract_retry_after(response.headers());
             let should_retry = extract_should_retry(response.headers());
             let bytes = response.bytes().await?;
-            let message = user_facing_api_error_message(status, bytes.as_ref());
+            let message =
+                api_error_message_for_endpoint(status, bytes.as_ref(), &request_url);
             span.record("error", message.as_str());
             tracing::error!(
                 status = %status,
