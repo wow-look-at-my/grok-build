@@ -230,14 +230,31 @@ impl AgentView {
                         self.prompt.slash_close();
                         slash_accepted_send = true;
                     } else {
-                        let chains = snap
+                        // Whether to wait for an argument is the registry's
+                        // two-bit contract, not the trailing space: insert_text
+                        // gets one whenever a command ACCEPTS args, so keying
+                        // off it also stalls on `/login` and `/compact`, whose
+                        // args are optional and which run fine without them.
+                        let completed = snap
                             .selection()
-                            .is_some_and(|row| row.insert_text.ends_with(' '));
+                            .map(|row| row.insert_text.trim_end().to_owned());
                         self.prompt.slash_commit_preview();
                         self.prompt.accept_slash_completion(&self.session.models);
+                        let chains = completed.is_some_and(|line| {
+                            !crate::slash::is_command_complete(
+                                &line,
+                                self.prompt.slash_controller.registry(),
+                            )
+                        });
                         if chains {
                             return InputOutcome::Changed;
                         }
+                        // The accepted text carries the space that was there to
+                        // type an argument into. Nothing is going to be typed
+                        // into it, so it would ride along into the command line.
+                        let sent = self.prompt.text().trim_end().to_owned();
+                        self.prompt.set_text(&sent);
+                        self.prompt.set_cursor(sent.len());
                         self.prompt.slash_close();
                         slash_accepted_send = true;
                     }

@@ -518,6 +518,14 @@ impl FeedbackClient {
         request: RequestBuilder,
         context: &'static str,
     ) -> Result<T> {
+        // Every endpoint on this client reports upstream -- session signals,
+        // session events, feedback bodies, terminal details. This build sends
+        // none of it, so refuse here rather than at each call site, and refuse
+        // loudly: a caller that believes it delivered something is worse than
+        // one told it did not.
+        let _ = &request;
+        anyhow::bail!("{context} disabled: this build does not report to xAI");
+        #[allow(unreachable_code)]
         let request = xai_file_utils::trace_context::inject_trace_context_into_request(request);
         let req = request.build().context(context)?;
         let (response, stamp) = xai_grok_auth::execute_with_stamp(&self.client, req)
@@ -552,6 +560,10 @@ impl FeedbackClient {
     }
 
     async fn send_empty(&self, request: RequestBuilder, context: &'static str) -> Result<()> {
+        // See send_json: nothing on this client goes out.
+        let _ = &request;
+        anyhow::bail!("{context} disabled: this build does not report to xAI");
+        #[allow(unreachable_code)]
         let request = xai_file_utils::trace_context::inject_trace_context_into_request(request);
         let req = request.build().context(context)?;
         let (response, stamp) = xai_grok_auth::execute_with_stamp(&self.client, req)
@@ -865,6 +877,71 @@ pub(crate) fn snapshot_to_turn_delta(
         delta_human_files_touched: d.delta_human_files_touched,
         delta_total_files_touched: d.delta_total_files_touched,
         loc_tracking_enabled,
+    }
+}
+
+#[cfg(test)]
+mod egress_disabled_pins {
+    use prod_mc_cli_chat_proxy_types::feedback_types::{
+        SessionEventRequest, SessionEventType, SessionSignalsUpdate,
+    };
+
+    use super::*;
+
+    /// Every reporting call must refuse, and none may open a connection.
+    ///
+    /// Pointed at a listener on loopback that accepts nothing: if any endpoint
+    /// starts sending again, the accept below completes and this fails. An
+    /// error-only assertion would not catch a request that goes out and then
+    /// errors on the reply.
+    #[tokio::test]
+    async fn no_reporting_endpoint_touches_the_network() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let client = FeedbackClient::new(format!("http://{addr}/v1"), Some("token".to_string()));
+
+        let signals = signals_to_update(
+            &crate::session::signals::SessionSignals::default(),
+            ClientType::Tui,
+        );
+        let event = SessionEventRequest {
+            event_type: SessionEventType::Error,
+            event_data: None,
+            timestamp: None,
+        };
+
+        let results: Vec<(&str, anyhow::Result<()>)> = vec![
+            (
+                "signals",
+                client
+                    .update_signals("session", &signals)
+                    .await
+                    .map(|_| ()),
+            ),
+            (
+                "events",
+                client.record_event("session", &event).await.map(|_| ()),
+            ),
+            (
+                "dismiss",
+                client.dismiss_request("request").await.map(|_| ()),
+            ),
+        ];
+        for (name, result) in results {
+            let err = result.expect_err("{name} must refuse while reporting is disabled");
+            assert!(
+                err.to_string().contains("disabled"),
+                "`{name}` failed for the wrong reason: {err}"
+            );
+        }
+
+        // A connection would mean something dialled out before failing.
+        let accepted = tokio::time::timeout(std::time::Duration::from_millis(250), listener.accept())
+            .await;
+        assert!(
+            accepted.is_err(),
+            "a reporting endpoint opened a connection: nothing may leave this build"
+        );
     }
 }
 
