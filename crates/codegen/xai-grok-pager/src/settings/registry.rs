@@ -317,7 +317,6 @@ pub struct OpenAiCompatibleSnapshot {
     pub base_url: String,
     pub model: String,
     pub api_backend: String,
-    pub context_window: u64,
     pub make_default: bool,
     pub api_key_configured: bool,
 }
@@ -330,7 +329,6 @@ impl Default for OpenAiCompatibleSnapshot {
             base_url: profile.base_url,
             model: profile.model,
             api_backend: "chat_completions".to_owned(),
-            context_window: profile.context_window,
             make_default: profile.make_default,
             api_key_configured: false,
         }
@@ -364,7 +362,6 @@ impl OpenAiCompatibleSnapshot {
             base_url: profile.base_url,
             model: profile.model,
             api_backend: api_backend.to_owned(),
-            context_window: profile.context_window,
             make_default: profile.make_default,
             api_key_configured,
         }
@@ -586,6 +583,7 @@ pub fn current_value_for(
         "combine_queued_prompts" => Some(SettingValue::Bool(
             crate::appearance::cache::load_combine_queued_prompts(),
         )),
+        "confirm_before_rewind" => Some(SettingValue::Bool(ui.confirm_before_rewind_enabled())),
         "simple_mode" => Some(SettingValue::Bool(ui.simple_mode.unwrap_or(true))),
         // Per-tip contextual hints — `None` (inherit) reads as the default ON.
         "contextual_hints.undo" => {
@@ -761,9 +759,6 @@ pub fn current_value_for(
                 "chat_completions"
             },
         )),
-        "openai_compatible.context_window" => Some(SettingValue::Int(
-            i64::try_from(pager.openai_compatible.context_window).unwrap_or(i64::MAX),
-        )),
         "openai_compatible.make_default" => {
             Some(SettingValue::Bool(pager.openai_compatible.make_default))
         }
@@ -790,13 +785,21 @@ pub fn current_value_for(
         // CLI batch: snapshot mirrors; `None` → effective default `true`.
         "show_tips" => Some(SettingValue::Bool(pager.show_tips.unwrap_or(true))),
         "auto_update" => Some(SettingValue::Bool(pager.auto_update.unwrap_or(true))),
-        // fork_secondary_model: baseline value folds to empty string.
+        // fork_secondary_model: baseline value folds to empty string. The
+        // mirror persists the ModelId slug but the DynamicEnum canonicals
+        // are catalog display names, so resolve via the snapshot; a stale
+        // id passes through raw.
         "fork_secondary_model" => Some(SettingValue::String({
             let baseline = xai_grok_shell::models::default_model();
             if ui.fork_secondary_model == baseline {
                 String::new()
             } else {
-                ui.fork_secondary_model.clone()
+                pager
+                    .available_models
+                    .iter()
+                    .find(|(_, id)| id.0.as_ref() == ui.fork_secondary_model.as_str())
+                    .map(|(name, _)| name.clone())
+                    .unwrap_or_else(|| ui.fork_secondary_model.clone())
             }
         })),
 
@@ -924,6 +927,13 @@ mod tests {
                         *default,
                         ui.page_flip_on_send_enabled(),
                         "page_flip_on_send default drifts from UiConfig::default()"
+                    );
+                }
+                ("confirm_before_rewind", SettingKind::Bool { default }) => {
+                    assert_eq!(
+                        *default,
+                        ui.confirm_before_rewind_enabled(),
+                        "confirm_before_rewind default drifts from UiConfig::default()"
                     );
                 }
                 ("combine_queued_prompts", SettingKind::Bool { default }) => {
@@ -1274,12 +1284,6 @@ mod tests {
                 ("openai_compatible.api_backend", SettingKind::Enum { default, .. }) => {
                     assert_eq!(*default, OpenAiCompatibleSnapshot::default().api_backend);
                 }
-                ("openai_compatible.context_window", SettingKind::Int { default, .. }) => {
-                    assert_eq!(
-                        *default,
-                        OpenAiCompatibleSnapshot::default().context_window as i64
-                    );
-                }
                 ("openai_compatible.make_default", SettingKind::Bool { default }) => {
                     assert_eq!(*default, OpenAiCompatibleSnapshot::default().make_default);
                 }
@@ -1561,6 +1565,51 @@ mod tests {
         let pager = PagerLocalSnapshot::default();
         let value = current_value_for("auto_dark_theme", &ui, &pager).expect("must resolve");
         assert_eq!(value, SettingValue::Enum("groknight"));
+    }
+
+    /// The persisted `fork_secondary_model` slug resolves to the catalog
+    /// display name (matching the `default_model` row and the DynamicEnum
+    /// picker canonicals); the baseline still folds to the empty sentinel
+    /// and a slug missing from the catalog passes through raw.
+    #[test]
+    fn fork_secondary_model_current_value_resolves_display_name() {
+        let slug = "grok-4.5-fast";
+        assert_ne!(
+            slug,
+            xai_grok_shell::models::default_model(),
+            "test slug must differ from the baseline or the empty-fold arm masks the lookup",
+        );
+        let pager = PagerLocalSnapshot {
+            available_models: vec![(
+                "Grok 4.5 Fast".to_string(),
+                acp::ModelId::new(std::sync::Arc::from(slug)),
+            )],
+            ..Default::default()
+        };
+        let ui = UiConfig {
+            fork_secondary_model: slug.to_string(),
+            ..Default::default()
+        };
+        assert_eq!(
+            current_value_for("fork_secondary_model", &ui, &pager),
+            Some(SettingValue::String("Grok 4.5 Fast".to_string())),
+        );
+
+        // Baseline folds to the empty "no override" sentinel.
+        assert_eq!(
+            current_value_for("fork_secondary_model", &UiConfig::default(), &pager),
+            Some(SettingValue::String(String::new())),
+        );
+
+        // Stale slug (not in the catalog) passes through unresolved.
+        let stale_ui = UiConfig {
+            fork_secondary_model: "retired-model".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(
+            current_value_for("fork_secondary_model", &stale_ui, &pager),
+            Some(SettingValue::String("retired-model".to_string())),
+        );
     }
 
     /// Keywords must be lowercase and non-empty.

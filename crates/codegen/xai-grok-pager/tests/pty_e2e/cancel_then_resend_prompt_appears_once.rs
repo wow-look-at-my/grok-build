@@ -2,7 +2,7 @@
 #[allow(unused_imports)]
 use super::common::*;
 
-/// The `cancel_then_send` confounder: submit, Ctrl+C (pristine rewind), then
+/// The `cancel_then_send` confounder: submit, Ctrl+C (no-output rewind), then
 /// Enter to resend the restored text. The prompt must appear EXACTLY ONCE in
 /// scrollback and in each wire request — the rewound turn's copy must not
 /// survive in session history and pair with the resend as 2x.

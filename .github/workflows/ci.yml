@@ -60,6 +60,26 @@ jobs:
       - name: Test (auto-update disable pins)
         run: cargo test --locked -p xai-grok-update --lib
 
+      # The shell's own egress pins. Named tests rather than the whole crate:
+      # its suite is long and needs fixtures this job does not stage, and a
+      # pin nothing runs is not a pin.
+      # The shell's own egress pins. Named tests rather than the whole crate:
+      # its suite is long and needs fixtures this job does not stage, and a
+      # pin nothing runs is not a pin. A filter that matches nothing exits 0,
+      # so the run is only green if the expected count actually ran.
+      - name: Test (shell egress pins)
+        run: |
+          set -o pipefail
+          pins=(
+            agent::mvp_agent::tests::remote_settings_alone_cannot_enable_session_replicas
+            agent::mvp_agent::tests::storage_mode_stays_local_when_settings_advertise_writeback
+            config::tests::from_remote_gated_ignores_server_advertised_writeback
+          )
+          cargo test --locked -p xai-grok-shell --lib -- --exact "${pins[@]}" \
+            | tee /tmp/shell-pins.log
+          grep -q "^test result: ok\. ${#pins[@]} passed" /tmp/shell-pins.log \
+            || { echo "expected ${#pins[@]} egress pin(s) to run; filter matched nothing?"; exit 1; }
+
   build-release:
     name: Build release binary (${{ matrix.target_os }}/${{ matrix.target_arch }})
     runs-on: ${{ matrix.runner }}

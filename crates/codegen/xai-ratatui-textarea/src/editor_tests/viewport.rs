@@ -1,4 +1,4 @@
-use rand::{Rng as _, SeedableRng as _};
+use rand::{RngExt as _, SeedableRng as _};
 use unicode_width::UnicodeWidthStr as _;
 
 use super::super::*;

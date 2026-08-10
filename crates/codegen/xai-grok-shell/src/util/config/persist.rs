@@ -9,10 +9,6 @@ use xai_grok_agent::prompt::skills::SkillsConfig;
 /// Serializes the read-modify-write in `save_config` so two rapid
 /// settings toggles can't interleave and clobber each other.
 static SAVE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
-pub async fn save_config(config: &Config) -> Result<()> {
-    let _guard = SAVE_LOCK.lock().await;
-    save_config_locked(config).await
-}
 /// [`save_config`] body; caller must hold [`SAVE_LOCK`].
 async fn save_config_locked(config: &Config) -> Result<()> {
     let path = user_config_path();
@@ -258,6 +254,15 @@ mod tests {
         assert_eq!(
             profile.get("future_option").and_then(TomlValue::as_str),
             Some("keep-me")
+        );
+        // `context_window` is no longer part of the `[openai_compatible]`
+        // profile — the only supported knobs are the per-model
+        // `[model.<id>] context_window`. A stale global key in the file is
+        // ignored on parse and, like any unknown field, preserved verbatim on
+        // merge so we never hand-mangle the user's config.toml.
+        assert_eq!(
+            profile.get("context_window").and_then(TomlValue::as_integer),
+            Some(131_072)
         );
     }
 

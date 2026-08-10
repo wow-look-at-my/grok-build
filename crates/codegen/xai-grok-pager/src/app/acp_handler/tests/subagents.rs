@@ -242,6 +242,74 @@
         );
     }
 
+    /// Test that a subagent's `model` field in `SubagentSpawned` — a raw model
+    /// *id* — is resolved through the parent session's model catalog
+    /// (`ModelId -> ModelInfo.name`) at ingestion, so the displayed model is the
+    /// friendly name (e.g. "openrouter/deepseek/... (gateway.pazer.ai)") rather
+    /// than the raw id "agent-host", on both the `SubagentInfo` (tasks pane /
+    /// title bar) and the parent scrollback `SubagentBlock`.
+    #[test]
+    fn subagent_spawned_resolves_model_id_to_friendly_name() {
+        let mut app = make_app_with_agent("sess-parent");
+        let parent = app.agents.get_mut(&AgentId(0)).unwrap();
+        // Seed a catalog entry whose friendly name differs from its id, the way
+        // the real catalog maps "agent-host" -> "openrouter/deepseek/...".
+        parent.session.models.available.insert(
+            acp::ModelId::new(std::sync::Arc::from("agent-host")),
+            acp::ModelInfo::new(
+                acp::ModelId::new(std::sync::Arc::from("agent-host")),
+                "openrouter/deepseek/deepseek-v4-flash-0731 (gateway.pazer.ai)".to_string(),
+            ),
+        );
+
+        let child_sid = "child-sess-model";
+        // Mirror `test_subagent_spawned`, but with a raw model *id* set.
+        let spawned = XaiSessionUpdate::SubagentSpawned {
+            subagent_id: child_sid.into(),
+            parent_session_id: "sess-parent".into(),
+            parent_prompt_id: None,
+            child_session_id: child_sid.into(),
+            subagent_type: "general-purpose".into(),
+            description: "run model resolve".into(),
+            effective_context_source: None,
+            context_normalized: false,
+            capability_mode: None,
+            workflow_run_id: None,
+            persona: None,
+            role: None,
+            model: Some("agent-host".to_string()),
+            resumed_from: None,
+        };
+        let _ = handle(
+            make_ext_session_notification("sess-parent", spawned),
+            &mut app,
+        );
+
+        let agent = app.agents.get(&AgentId(0)).unwrap();
+        let info = agent
+            .subagent_sessions
+            .get(child_sid)
+            .expect("spawn must register SubagentInfo");
+        // SubagentInfo.model must be the resolved friendly name, not the raw id.
+        assert_eq!(
+            info.model.as_deref(),
+            Some("openrouter/deepseek/deepseek-v4-flash-0731 (gateway.pazer.ai)"),
+            "SubagentInfo.model must show the friendly name resolved via the model catalog"
+        );
+
+        // The parent scrollback SubagentBlock must show the same friendly name.
+        let entry_id = info.scrollback_entry_id.expect("spawn must stash block id");
+        let entry = agent.scrollback.get_by_id(entry_id).unwrap();
+        let RenderBlock::Subagent(sb) = &entry.block else {
+            panic!("SubagentSpawned must push a SubagentBlock to parent scrollback");
+        };
+        assert_eq!(
+            sb.model.as_deref(),
+            Some("openrouter/deepseek/deepseek-v4-flash-0731 (gateway.pazer.ai)"),
+            "scrollback SubagentBlock.model must show the friendly name, not the raw id"
+        );
+    }
+
     /// The live activity label fans out to `SubagentInfo` (tasks pane /
     /// dashboard rows) alongside the scrollback block — from both the child
     /// session/update path and the `SubagentProgress` path — and
@@ -347,6 +415,74 @@
                 "spawn must set child_updates_replayed"
             );
         });
+    }
+
+    /// Isolated `isReplay` with `loading_replay == false`: drop_unexpected_replay
+    /// runs before SubagentSpawned (`!meta.is_replay` is defense-in-depth).
+    #[test]
+    fn replayed_subagent_spawned_without_loading_replay_is_dropped() {
+        with_replay_disk_home(|_| {
+            let child_sid = "child-unexpected-replay";
+            let mut app = make_app_with_agent("sess-parent");
+            assert!(!app.agents[&AgentId(0)].session.loading_replay);
+            write_child_updates_jsonl(
+                replay_disk_test_home(),
+                child_sid,
+                &(child_tool_line(child_sid) + "\n"),
+            );
+            let spawned = subagent_ext_replay(
+                "sess-parent",
+                serde_json::json!({
+                    "sessionUpdate": "subagent_spawned",
+                    "subagent_id": child_sid,
+                    "parent_session_id": "sess-parent",
+                    "child_session_id": child_sid,
+                    "subagent_type": "explore",
+                    "description": "scan src/",
+                }),
+                "sess-parent-1",
+            );
+            handle_ext_notification(&spawned, &mut app);
+            let agent = app.agents.get(&AgentId(0)).unwrap();
+            assert!(
+                agent.subagent_sessions.is_empty(),
+                "unexpected replay spawn must not register"
+            );
+            assert!(agent.subagent_views.is_empty());
+        });
+    }
+
+    #[test]
+    fn late_replay_grace_accepts_is_replay_after_loading_replay_clears() {
+        let mut app = make_app_with_agent("sess-late");
+        let agent = app.agents.get_mut(&AgentId(0)).unwrap();
+        assert!(!agent.session.loading_replay);
+        agent.arm_late_replay_grace();
+        let meta = crate::acp::meta::NotificationMeta {
+            is_replay: true,
+            ..crate::acp::meta::NotificationMeta::default()
+        };
+        assert!(
+            !drop_unexpected_replay(agent, &meta, "sess-late", "test"),
+            "isReplay during late grace must apply"
+        );
+    }
+
+    #[test]
+    fn live_update_closes_late_replay_grace() {
+        let mut app = make_app_with_agent("sess-late");
+        let agent = app.agents.get_mut(&AgentId(0)).unwrap();
+        agent.arm_late_replay_grace();
+        let live = crate::acp::meta::NotificationMeta::default();
+        assert!(!drop_unexpected_replay(agent, &live, "sess-late", "test"));
+        let replay = crate::acp::meta::NotificationMeta {
+            is_replay: true,
+            ..crate::acp::meta::NotificationMeta::default()
+        };
+        assert!(
+            drop_unexpected_replay(agent, &replay, "sess-late", "test"),
+            "this-session live must close late grace"
+        );
     }
 
     /// Resume: a `SubagentSpawned` during `loading_replay` must defer the child

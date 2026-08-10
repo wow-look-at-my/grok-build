@@ -54,6 +54,8 @@ pub enum SettingsKeyOutcome {
     /// Used by `d`-reset-in-picker to revert preview before opening
     /// the reset-confirm overlay.
     ActionPair(Action, Action),
+    /// Close the modal and dispatch `Action` (deep-link Esc revert or Enter commit).
+    ActionThenClose(Action),
     /// Internal state mutation, no action.
     Changed,
     /// No-op.
@@ -157,15 +159,6 @@ pub(super) enum SettingsMode {
 }
 
 /// Is the open sub-pane a [`crate::settings::is_consent_chooser`] pane?
-pub(super) fn mode_is_consent_chooser(mode: &SettingsMode) -> bool {
-    matches!(
-        mode,
-        SettingsMode::PickingEnum { key, .. } if crate::settings::is_consent_chooser(key)
-    )
-}
-
-// Manual Debug: the live editor buffer must never surface in a debug dump
-// when it's editing a secret (`openai_compatible.api_key`).
 impl std::fmt::Debug for SettingsMode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -193,20 +186,20 @@ impl std::fmt::Debug for SettingsMode {
                 editor,
                 validator,
                 validation_error,
-            } => f
-                .debug_struct("EditingString")
-                .field("key", key)
-                .field(
-                    "editor",
-                    if *key == "openai_compatible.api_key" {
-                        &"[REDACTED]" as &dyn std::fmt::Debug
-                    } else {
-                        editor as &dyn std::fmt::Debug
-                    },
-                )
-                .field("validator", validator)
-                .field("validation_error", validation_error)
-                .finish(),
+            } => {
+                let text = editor.text();
+                let buffer_field: &dyn std::fmt::Debug = if *key == "openai_compatible.api_key" {
+                    &"[REDACTED]"
+                } else {
+                    &text
+                };
+                f.debug_struct("EditingString")
+                    .field("key", key)
+                    .field("buffer", buffer_field)
+                    .field("validator", validator)
+                    .field("validation_error", validation_error)
+                    .finish()
+            }
             Self::EditingInt {
                 key,
                 buffer,
@@ -222,6 +215,15 @@ impl std::fmt::Debug for SettingsMode {
         }
     }
 }
+
+pub(super) fn mode_is_consent_chooser(mode: &SettingsMode) -> bool {
+    matches!(
+        mode,
+        SettingsMode::PickingEnum { key, .. } if crate::settings::is_consent_chooser(key)
+    )
+}
+
+
 
 /// Settings modal state. Boxed inside `ActiveModal::Settings` to
 /// avoid clippy `large_enum_variant`.
@@ -268,6 +270,10 @@ pub struct SettingsModalState {
     /// `rows` in Browse, `picker_choice_rects` in PickingEnum,
     /// always `None` in EditingValue.
     pub hover_row: Option<usize>,
+    /// When true, Esc/Enter from `PickingEnum` close the modal instead of
+    /// returning to Browse. Set by deep-link open (`OpenSettingsFocus`
+    /// / `/privacy`); cleared on leave from the picker.
+    pub close_on_picker_exit: bool,
 }
 
 impl SettingsModalState {
@@ -306,6 +312,7 @@ impl SettingsModalState {
             breadcrumb_hovered: false,
             expanded_keys: std::collections::HashSet::new(),
             hover_row: None,
+            close_on_picker_exit: false,
         }
     }
 
@@ -565,6 +572,7 @@ impl SettingsModalState {
         self.hover_row = None;
         self.settings_breadcrumb_rect = None;
         self.breadcrumb_hovered = false;
+        self.close_on_picker_exit = false;
     }
 
     pub fn focus_filter(&mut self) {
@@ -959,6 +967,7 @@ pub(super) fn action_for_bool(key: SettingKey, new: bool) -> Option<Action> {
         "prompt_suggestions" => Some(Action::SetPromptSuggestions(new)),
         "respect_manual_folds" => Some(Action::SetRespectManualFolds(new)),
         "page_flip_on_send" => Some(Action::SetPageFlipOnSend(new)),
+        "confirm_before_rewind" => Some(Action::SetConfirmBeforeRewind(new)),
         "combine_queued_prompts" => Some(Action::SetCombineQueuedPrompts(new)),
         "invert_scroll" => Some(Action::SetInvertScroll(new)),
         "show_tips" => Some(Action::SetShowTips(new)),
@@ -1096,7 +1105,6 @@ pub(super) fn action_for_int(key: SettingKey, value: i64) -> Option<Action> {
         "max_thoughts_width" => Some(Action::SetMaxThoughtsWidth(value)),
         "scroll_speed" => Some(Action::SetScrollSpeed(value)),
         "scroll_lines" => Some(Action::SetScrollLines(value)),
-        "openai_compatible.context_window" => Some(Action::SetOpenAiCompatibleContextWindow(value)),
         _ => None,
     }
 }
