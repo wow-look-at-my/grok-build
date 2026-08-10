@@ -1797,9 +1797,6 @@ fn move_setting_away_from_default(app: &mut AppView, key: crate::settings::Setti
                 app,
             );
         }
-        "openai_compatible.context_window" => {
-            let _ = dispatch(Action::SetOpenAiCompatibleContextWindow(131_072), app);
-        }
         "openai_compatible.make_default" => {
             let _ = dispatch(Action::SetOpenAiCompatibleMakeDefault(false), app);
         }

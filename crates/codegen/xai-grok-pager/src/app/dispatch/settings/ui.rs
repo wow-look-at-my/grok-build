@@ -10,9 +10,8 @@ use super::setters::{
     set_invert_scroll_inner, set_keep_text_selection_inner, set_max_thoughts_width_inner,
     set_multiline_mode, set_openai_compatible_api_backend_inner,
     set_openai_compatible_api_key_configured_inner, set_openai_compatible_base_url_inner,
-    set_openai_compatible_context_window_inner, set_openai_compatible_enabled_inner,
-    set_openai_compatible_make_default_inner, set_openai_compatible_model_inner,
-    set_page_flip_on_send_inner, set_prompt_suggestions_inner,
+    set_openai_compatible_enabled_inner, set_openai_compatible_make_default_inner,
+    set_openai_compatible_model_inner, set_page_flip_on_send_inner, set_prompt_suggestions_inner,
     set_remember_tool_approvals_inner, set_render_mermaid_inner, set_respect_manual_folds_inner,
     set_screen_mode_inner, set_scroll_lines_inner, set_scroll_mode_inner, set_scroll_speed_inner,
     set_show_thinking_blocks_inner, set_show_tips_inner, set_simple_mode_inner, set_theme_inner,
@@ -897,9 +896,6 @@ pub(in crate::app::dispatch) fn action_for_reset(
         ("openai_compatible.api_backend", SettingValue::Enum(value)) => {
             Some(Action::SetOpenAiCompatibleApiBackend((*value).to_owned()))
         }
-        ("openai_compatible.context_window", SettingValue::Int(value)) => {
-            Some(Action::SetOpenAiCompatibleContextWindow(*value))
-        }
         ("openai_compatible.make_default", SettingValue::Bool(value)) => {
             Some(Action::SetOpenAiCompatibleMakeDefault(*value))
         }
@@ -1254,12 +1250,6 @@ pub(in crate::app::dispatch) fn apply_setting_rollback(
         }
         ("openai_compatible.api_backend", SettingValue::Enum(value)) => {
             set_openai_compatible_api_backend_inner(app, value)
-        }
-        ("openai_compatible.context_window", SettingValue::Int(value)) => {
-            set_openai_compatible_context_window_inner(
-                app,
-                u64::try_from(*value).unwrap_or_default(),
-            )
         }
         ("openai_compatible.make_default", SettingValue::Bool(value)) => {
             set_openai_compatible_make_default_inner(app, *value)

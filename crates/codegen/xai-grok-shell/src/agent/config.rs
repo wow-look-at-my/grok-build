@@ -584,7 +584,6 @@ pub struct OpenAiCompatibleConfig {
     pub base_url: String,
     pub model: String,
     pub api_backend: ApiBackend,
-    pub context_window: u64,
     pub make_default: bool,
 }
 
@@ -595,7 +594,6 @@ impl Default for OpenAiCompatibleConfig {
             base_url: String::new(),
             model: String::new(),
             api_backend: ApiBackend::ChatCompletions,
-            context_window: 200_000,
             make_default: true,
         }
     }
@@ -621,9 +619,6 @@ impl OpenAiCompatibleConfig {
         }
         if self.model.trim().is_empty() {
             return Some("model name cannot be empty".to_owned());
-        }
-        if self.context_window == 0 {
-            return Some("context window must be greater than zero".to_owned());
         }
         None
     }
@@ -654,8 +649,8 @@ impl OpenAiCompatibleConfig {
             api_base_url: None,
             name: Some(format!("OpenAI-compatible ({})", self.model.trim())),
             description: Some("User-configured OpenAI-compatible endpoint".to_owned()),
-            context_window: NonZeroU64::new(self.context_window)
-                .expect("validated context window is non-zero"),
+            context_window: NonZeroU64::new(DEFAULT_CONTEXT_WINDOW)
+                .expect("default context window is non-zero"),
             auto_compact_threshold_percent: None,
             system_prompt_label: None,
             temperature: None,
@@ -13003,7 +12998,6 @@ default = "grok-4.5"
             base_url = "http://localhost:11434/v1"
             model = "llama3.3"
             api_backend = "responses"
-            context_window = 131072
             make_default = true
             "#,
         )
@@ -13014,7 +13008,6 @@ default = "grok-4.5"
         assert_eq!(profile.base_url, "http://localhost:11434/v1");
         assert_eq!(profile.model, "llama3.3");
         assert_eq!(profile.api_backend, ApiBackend::Responses);
-        assert_eq!(profile.context_window, 131_072);
         assert_eq!(
             cfg.models.default.as_deref(),
             Some(OPENAI_COMPATIBLE_MODEL_ID)
@@ -13031,7 +13024,6 @@ default = "grok-4.5"
             base_url: "https://example.test/openai/v1/".to_owned(),
             model: "example-model".to_owned(),
             api_backend: ApiBackend::ChatCompletions,
-            context_window: 64_000,
             make_default: false,
         });
         let models = resolve_model_list(&cfg, None);
@@ -13040,7 +13032,11 @@ default = "grok-4.5"
             .expect("compatible model must be injected");
         assert_eq!(entry.info.model, "example-model");
         assert_eq!(entry.info.base_url, "https://example.test/openai/v1");
-        assert_eq!(entry.info.context_window.get(), 64_000);
+        assert_eq!(
+            entry.info.context_window.get(),
+            DEFAULT_CONTEXT_WINDOW,
+            "global context_window is removed; the compatible endpoint inherits the model default"
+        );
         assert_eq!(entry.info.auth_scheme, AuthScheme::Bearer);
         assert_eq!(entry.api_key.as_deref(), Some("compat-test-key"));
     }

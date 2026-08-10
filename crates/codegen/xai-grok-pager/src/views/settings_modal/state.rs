@@ -159,15 +159,6 @@ pub(super) enum SettingsMode {
 }
 
 /// Is the open sub-pane a [`crate::settings::is_consent_chooser`] pane?
-pub(super) fn mode_is_consent_chooser(mode: &SettingsMode) -> bool {
-    matches!(
-        mode,
-        SettingsMode::PickingEnum { key, .. } if crate::settings::is_consent_chooser(key)
-    )
-}
-
-// Manual Debug: the live editor buffer must never surface in a debug dump
-// when it's editing a secret (`openai_compatible.api_key`).
 impl std::fmt::Debug for SettingsMode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -195,20 +186,20 @@ impl std::fmt::Debug for SettingsMode {
                 editor,
                 validator,
                 validation_error,
-            } => f
-                .debug_struct("EditingString")
-                .field("key", key)
-                .field(
-                    "editor",
-                    if *key == "openai_compatible.api_key" {
-                        &"[REDACTED]" as &dyn std::fmt::Debug
-                    } else {
-                        editor as &dyn std::fmt::Debug
-                    },
-                )
-                .field("validator", validator)
-                .field("validation_error", validation_error)
-                .finish(),
+            } => {
+                let text = editor.text();
+                let buffer_field: &dyn std::fmt::Debug = if *key == "openai_compatible.api_key" {
+                    &"[REDACTED]"
+                } else {
+                    &text
+                };
+                f.debug_struct("EditingString")
+                    .field("key", key)
+                    .field("buffer", buffer_field)
+                    .field("validator", validator)
+                    .field("validation_error", validation_error)
+                    .finish()
+            }
             Self::EditingInt {
                 key,
                 buffer,
@@ -224,6 +215,15 @@ impl std::fmt::Debug for SettingsMode {
         }
     }
 }
+
+pub(super) fn mode_is_consent_chooser(mode: &SettingsMode) -> bool {
+    matches!(
+        mode,
+        SettingsMode::PickingEnum { key, .. } if crate::settings::is_consent_chooser(key)
+    )
+}
+
+
 
 /// Settings modal state. Boxed inside `ActiveModal::Settings` to
 /// avoid clippy `large_enum_variant`.
@@ -1105,7 +1105,6 @@ pub(super) fn action_for_int(key: SettingKey, value: i64) -> Option<Action> {
         "max_thoughts_width" => Some(Action::SetMaxThoughtsWidth(value)),
         "scroll_speed" => Some(Action::SetScrollSpeed(value)),
         "scroll_lines" => Some(Action::SetScrollLines(value)),
-        "openai_compatible.context_window" => Some(Action::SetOpenAiCompatibleContextWindow(value)),
         _ => None,
     }
 }
