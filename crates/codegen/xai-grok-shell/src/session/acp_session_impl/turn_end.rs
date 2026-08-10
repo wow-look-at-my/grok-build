@@ -416,12 +416,45 @@ impl SessionActor {
         )
     }
 
-    /// `(turn_succeeded, suppress_goal_continuation, infra_pause_message)`.
+    /// Whether re-sending the same request could plausibly succeed.
+    ///
+    /// Every terminal sampler failure arrives as `-32603`, so the pause path
+    /// treats them all as infra and offers `/goal resume`. For a request the
+    /// server rejected on its content, that offer is a loop: resume rebuilds
+    /// the same conversation and earns the same rejection. The status is what
+    /// separates the two — 4xx is about what was sent, minus the ones that
+    /// clear on their own: 401 (a credential refresh runs between attempts),
+    /// 408/425 (timing), 429 (the wait is the remedy).
+    pub(super) fn retry_can_clear_turn_error(err: &acp::Error) -> bool {
+        match crate::sampling::error::http_status_from_error(err) {
+            Some(401 | 408 | 425 | 429) => true,
+            Some(status) => !(400..500).contains(&status),
+            None => true,
+        }
+    }
+
+    /// The `/goal` pause line. Never offers a retry that cannot work: with no
+    /// remedy named, a user re-runs `/goal resume` until they give up on the
+    /// session.
+    pub(super) fn goal_pause_slash_text(detail: &str, retry_can_clear: bool) -> String {
+        if retry_can_clear {
+            format!("Goal paused due to turn error: {detail}. Use /goal resume to retry.")
+        } else {
+            format!(
+                "Goal paused due to turn error: {detail}. The server rejected the request \
+                 itself, so /goal resume will hit the same error — switch models with /model, \
+                 or change what the turn sends, and then resume."
+            )
+        }
+    }
+
+    /// `(turn_succeeded, suppress_goal_continuation, infra_pause)`, where
+    /// `infra_pause` is `(message, retry_can_clear)`.
     /// StationarityEnded is success for the streak but skips GoalSummary re-queue.
-    /// `infra_pause_message` is extracted before `handle_completion` consumes `result`.
+    /// `infra_pause` is extracted before `handle_completion` consumes `result`.
     pub(super) fn post_turn_goal_degradation_plan(
         result: &PromptTurnResult,
-    ) -> (bool, bool, Option<String>) {
+    ) -> (bool, bool, Option<(String, bool)>) {
         let suppress_goal_continuation = result.as_ref().ok().is_some_and(|ok| {
             matches!(
                 ok.completion_kind,
@@ -439,19 +472,24 @@ impl SessionActor {
             .as_ref()
             .ok()
             .is_some_and(|ok| !turn_cancelled && ok.stop_reason != acp::StopReason::Refusal);
-        let infra_pause_message = result
+        let infra_pause = result
             .as_ref()
             .err()
             .filter(|err| Self::is_infra_turn_error(err))
-            .map(Self::format_turn_error_message);
-        (
-            turn_succeeded,
-            suppress_goal_continuation,
-            infra_pause_message,
-        )
+            .map(|err| {
+                (
+                    Self::format_turn_error_message(err),
+                    Self::retry_can_clear_turn_error(err),
+                )
+            });
+        (turn_succeeded, suppress_goal_continuation, infra_pause)
     }
 
-    pub(super) async fn apply_infra_pause_after_turn_err(&self, message: String) -> bool {
+    pub(super) async fn apply_infra_pause_after_turn_err(
+        &self,
+        message: String,
+        retry_can_clear: bool,
+    ) -> bool {
         let slash_detail = match message.strip_prefix("Turn failed: ") {
             Some(rest) => rest.to_owned(),
             None => message.clone(),
@@ -463,8 +501,9 @@ impl SessionActor {
             )
             .await;
         if paused {
-            self.send_slash_command_output(&format!(
-                "Goal paused due to turn error: {slash_detail}. Use /goal resume to retry."
+            self.send_slash_command_output(&Self::goal_pause_slash_text(
+                &slash_detail,
+                retry_can_clear,
             ))
             .await;
         }
@@ -497,5 +536,47 @@ impl SessionActor {
         err: &xai_grok_agent::plugins::install_registry::InstallError,
     ) -> String {
         crate::plugin::classify_install_error(err)
+    }
+}
+
+#[cfg(test)]
+mod goal_pause_message_tests {
+    use super::*;
+
+    fn terminal_err(status: Option<u16>) -> acp::Error {
+        acp::Error::internal_error().data(crate::sampling::error::error_data_with_status(
+            "boom".to_string(),
+            status,
+        ))
+    }
+
+    /// The reported trap: a content rejection (here the vision 404) offered
+    /// `/goal resume`, which rebuilt the same request and failed the same way.
+    #[test]
+    fn content_rejections_do_not_offer_a_bare_resume() {
+        for status in [400u16, 403, 404, 413, 422] {
+            assert!(
+                !SessionActor::retry_can_clear_turn_error(&terminal_err(Some(status))),
+                "{status} rejects the request as sent; a plain retry cannot clear it"
+            );
+        }
+        let text = SessionActor::goal_pause_slash_text("no image input", false);
+        assert!(text.contains("/model"), "must name a remedy: {text}");
+        assert!(
+            !text.contains("Use /goal resume to retry"),
+            "must not offer the retry that loops: {text}"
+        );
+    }
+
+    #[test]
+    fn transient_failures_keep_the_resume_offer() {
+        for status in [None, Some(401), Some(408), Some(429), Some(500), Some(529)] {
+            assert!(
+                SessionActor::retry_can_clear_turn_error(&terminal_err(status)),
+                "{status:?} can clear on its own: waiting or a credential refresh is the remedy"
+            );
+        }
+        let text = SessionActor::goal_pause_slash_text("overloaded", true);
+        assert!(text.contains("Use /goal resume to retry"), "got: {text}");
     }
 }

@@ -458,7 +458,7 @@ pub(super) async fn run_session(
                     if let Some(notification) = replay_buffer.flush() {
                         session.emit_buffered(notification).await;
                     }
-                    let (turn_succeeded, suppress_goal_continuation, infra_pause_message) =
+                    let (turn_succeeded, suppress_goal_continuation, infra_pause) =
                         SessionActor::post_turn_goal_degradation_plan(&result);
                     // A `RemovedFromQueue` completion never started a turn, so
                     // there is nothing to summarize below.
@@ -474,8 +474,10 @@ pub(super) async fn run_session(
                     // Drain any monitor events that were routed to the mid-turn buffer
                     // but arrived after the turn ended (race between is_turn_active and buffer push).
                     session.drain_monitor_buffer_to_pending().await;
-                    if let Some(message) = infra_pause_message {
-                        session.apply_infra_pause_after_turn_err(message).await;
+                    if let Some((message, retry_can_clear)) = infra_pause {
+                        session
+                            .apply_infra_pause_after_turn_err(message, retry_can_clear)
+                            .await;
                     }
                     // Goal continuation (success) or back-off (non-success).
                     // Owns the streak-tracking and reminder-injection path.
