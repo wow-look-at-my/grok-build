@@ -626,14 +626,40 @@ pub struct ConversationRequest {
     pub prompt_cache_key: Option<String>,
 }
 
+/// Why [`ConversationRequest::strip_images`] ran, which decides the
+/// placeholder the model reads in place of the image.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImageStripReason {
+    /// The payload was rejected as too large, or one image was unreadable.
+    /// Another model, or a smaller image, would have carried it.
+    PayloadRejected,
+    /// The routed model accepts no image input, so no retry of this
+    /// conversation ever carries the image. The placeholder says so: the model
+    /// is otherwise free to claim it looked and saw nothing.
+    ModelLacksVision,
+}
+
+impl ImageStripReason {
+    fn placeholder(self) -> &'static str {
+        match self {
+            Self::PayloadRejected => "[image removed — conversation too large]",
+            Self::ModelLacksVision => {
+                "[image removed — this model cannot read images. Say so instead of \
+                 guessing at the contents; the user can switch to a vision model.]"
+            }
+        }
+    }
+}
+
 impl ConversationRequest {
-    /// Strip all inline image data from the conversation to reduce payload size.
+    /// Strip all inline image data from the conversation.
     ///
     /// Replaces `ContentPart::Image` entries with a text placeholder so the
-    /// model knows an image was there but the base64 blob is gone. This is
-    /// used as a recovery strategy when the downstream API returns 413
-    /// "Request Entity Too Large".
-    pub fn strip_images(&mut self) -> usize {
+    /// model knows an image was there but the base64 blob is gone. Recovery
+    /// path for a 413 "Request Entity Too Large", an unreadable image, and a
+    /// model that takes no image input at all — see [`ImageStripReason`].
+    pub fn strip_images(&mut self, reason: ImageStripReason) -> usize {
+        let placeholder = Arc::<str>::from(reason.placeholder());
         let mut stripped = 0usize;
         for item in &mut self.items {
             match item {
@@ -641,7 +667,7 @@ impl ConversationRequest {
                     for part in &mut user.content {
                         if matches!(part, ContentPart::Image { .. }) {
                             *part = ContentPart::Text {
-                                text: Arc::<str>::from("[image removed — conversation too large]"),
+                                text: placeholder.clone(),
                             };
                             stripped += 1;
                         }
@@ -4461,7 +4487,7 @@ mod tests {
         user.add_image("data:image/png;base64,abc123".to_string());
         req.items.push(user);
 
-        let stripped = req.strip_images();
+        let stripped = req.strip_images(ImageStripReason::PayloadRejected);
         assert_eq!(stripped, 1);
 
         // Verify image was replaced with placeholder text
@@ -4475,6 +4501,37 @@ mod tests {
         }
     }
 
+    /// The placeholder is the only thing the model learns about the missing
+    /// image, so it has to name the real cause: told "conversation too large"
+    /// on a vision-less model, the model retries or invents the contents.
+    #[test]
+    fn test_strip_images_placeholder_names_the_reason() {
+        let placeholder_for = |reason| {
+            let mut req = ConversationRequest::default();
+            let mut user = ConversationItem::user("describe this");
+            user.add_image("data:image/png;base64,abc123".to_string());
+            req.items.push(user);
+            assert_eq!(req.strip_images(reason), 1);
+            match &req.items[0] {
+                ConversationItem::User(u) => match &u.content[1] {
+                    ContentPart::Text { text } => text.to_string(),
+                    other => panic!("expected the image replaced by text, got {other:?}"),
+                },
+                other => panic!("expected User item, got {other:?}"),
+            }
+        };
+
+        let too_large = placeholder_for(ImageStripReason::PayloadRejected);
+        assert!(too_large.contains("too large"), "got: {too_large}");
+
+        let no_vision = placeholder_for(ImageStripReason::ModelLacksVision);
+        assert!(no_vision.contains("cannot read images"), "got: {no_vision}");
+        assert!(
+            !no_vision.contains("too large"),
+            "a vision strip must not blame the payload size: {no_vision}"
+        );
+    }
+
     #[test]
     fn test_strip_images_returns_zero_when_no_images() {
         let mut req = ConversationRequest::default();
@@ -4482,7 +4539,7 @@ mod tests {
         req.items.push(ConversationItem::system("system prompt"));
         req.items.push(ConversationItem::assistant("response"));
 
-        let stripped = req.strip_images();
+        let stripped = req.strip_images(ImageStripReason::PayloadRejected);
         assert_eq!(stripped, 0);
     }
 
@@ -4491,7 +4548,7 @@ mod tests {
         let mut req = ConversationRequest::default();
         req.items.push(ConversationItem::user("hello world"));
 
-        req.strip_images();
+        req.strip_images(ImageStripReason::PayloadRejected);
 
         if let ConversationItem::User(user) = &req.items[0] {
             assert_eq!(user.content.len(), 1);
@@ -4511,7 +4568,7 @@ mod tests {
         req.items
             .push(ConversationItem::tool_result("call-1", "result text"));
 
-        let stripped = req.strip_images();
+        let stripped = req.strip_images(ImageStripReason::PayloadRejected);
         assert_eq!(stripped, 0);
 
         // Verify nothing was modified
@@ -4533,7 +4590,7 @@ mod tests {
         user.add_image("data:image/png;base64,img1".to_string());
         req.items.push(user);
 
-        req.strip_images();
+        req.strip_images(ImageStripReason::PayloadRejected);
 
         if let ConversationItem::User(user) = &req.items[0] {
             assert_eq!(user.content.len(), 2);
@@ -4565,7 +4622,7 @@ mod tests {
         user2.add_image("data:image/png;base64,ccc".to_string());
         req.items.push(user2);
 
-        let stripped = req.strip_images();
+        let stripped = req.strip_images(ImageStripReason::PayloadRejected);
         assert_eq!(stripped, 3);
     }
 
@@ -4585,7 +4642,7 @@ mod tests {
             ],
         ));
 
-        let stripped = req.strip_images();
+        let stripped = req.strip_images(ImageStripReason::PayloadRejected);
         assert_eq!(stripped, 2);
 
         // Images should be cleared
