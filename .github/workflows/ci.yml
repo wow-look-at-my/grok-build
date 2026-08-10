@@ -16,6 +16,11 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: "0"
+  # Linking every crate's test binaries WITH debuginfo needs >37 GB of target/
+  # (measured); a runner has ~14 GB free, and ld dies on a bus error partway
+  # through the shell crate's integration tests. Nothing here reads a symbol.
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
   BUILDHOST_SERVER: https://pazer.build
   BUILDHOST_PROJECT: grok-build
 
@@ -50,43 +55,21 @@ jobs:
       - name: Smoke-test the binary
         run: ./target/debug/xai-grok-pager --version
 
-      - name: Test (core + telemetry-disabled crates)
-        run: cargo test --locked -p xai-grok-config -p xai-grok-telemetry -p xai-mixpanel
+      - name: Test (workspace)
+        run: cargo test --locked --workspace
 
-      # Unit tests only (--lib): they pin the auto-update hard-disable stubs.
-      # The crate's integration suites (test_network, test_downgrade_matrix,
-      # test_install_internal, ...) still exercise the disabled updater
-      # end-to-end and fail against the stubs, so they are not run here.
-      - name: Test (auto-update disable pins)
-        run: cargo test --locked -p xai-grok-update --lib
-
-      # Sampling recovery: whether a rejected request recovers or bricks the
-      # session is decided here, and both suites run in seconds.
-      - name: Test (sampler + sampling types)
-        run: cargo test --locked -p xai-grok-sampler -p xai-grok-sampling-types
-
-      # The goal harness's pause copy, named for the same reason as the egress
-      # pins below. Same count check: a filter that matches nothing exits 0.
-      - name: Test (goal pause remedy)
+      # The pins below re-run tests the workspace step already ran, and assert
+      # by NAME that they exist. A renamed or deleted test is invisible to the
+      # step above -- the suite just gets quietly smaller -- and these are the
+      # tests where that silence costs a session: the egress gates, and the
+      # pause copy that decides whether a stuck goal offers a retry that
+      # cannot work. A filter matching nothing exits 0, so assert the count.
+      - name: Pin (named tests still exist)
         run: |
           set -o pipefail
           pins=(
             session::acp_session::turn_end::goal_pause_message_tests::content_rejections_do_not_offer_a_bare_resume
             session::acp_session::turn_end::goal_pause_message_tests::transient_failures_keep_the_resume_offer
-          )
-          cargo test --locked -p xai-grok-shell --lib -- --exact "${pins[@]}" \
-            | tee /tmp/goal-pause.log
-          grep -q "^test result: ok\. ${#pins[@]} passed" /tmp/goal-pause.log \
-            || { echo "expected ${#pins[@]} goal-pause test(s) to run; filter matched nothing?"; exit 1; }
-
-      # The shell's own egress pins. Named tests rather than the whole crate:
-      # its suite is long and needs fixtures this job does not stage, and a
-      # pin nothing runs is not a pin. A filter that matches nothing exits 0,
-      # so the run is only green if the expected count actually ran.
-      - name: Test (shell egress pins)
-        run: |
-          set -o pipefail
-          pins=(
             agent::mvp_agent::tests::remote_settings_alone_cannot_enable_session_replicas
             agent::mvp_agent::tests::storage_mode_stays_local_when_settings_advertise_writeback
             config::tests::from_remote_gated_ignores_server_advertised_writeback
@@ -94,7 +77,7 @@ jobs:
           cargo test --locked -p xai-grok-shell --lib -- --exact "${pins[@]}" \
             | tee /tmp/shell-pins.log
           grep -q "^test result: ok\. ${#pins[@]} passed" /tmp/shell-pins.log \
-            || { echo "expected ${#pins[@]} egress pin(s) to run; filter matched nothing?"; exit 1; }
+            || { echo "expected ${#pins[@]} pinned test(s) to run; renamed or deleted?"; exit 1; }
 
   build-release:
     name: Build release binary (${{ matrix.target_os }}/${{ matrix.target_arch }})
