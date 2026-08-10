@@ -195,14 +195,25 @@ pub(crate) fn spawn_polling_session_with_env(
 /// and return a `ContentController` configured for agent-type-mismatch
 /// testing. The default model is `"default-model"` (no agent type → uses
 /// `grok-build` harness).
+///
+/// The second model's agent type must be one `is_strict_harness_agent_type`
+/// recognizes, which means a name in `BuiltinAgentName`. An unknown name
+/// resolves to non-strict -- deliberately, so no harness is enforced that
+/// cannot be verified -- and non-strict against non-strict is COMPATIBLE, so a
+/// made-up type produces no mismatch and every one of these tests waits out its
+/// timeout on a modal that was never going to open.
 pub(crate) async fn start_dual_agent_type_content() -> ContentController {
     ContentController::start_with_models(vec![
         MockModel::new("default-model"),
-        MockModel::with_agent_type("cursor-model", "cursor"),
+        MockModel::with_agent_type("cursor-model", STRICT_HARNESS_AGENT_TYPE),
     ])
     .await
     .expect("start content with dual agent types")
 }
+
+/// A strict-harness agent type for mismatch tests -- see
+/// [`start_dual_agent_type_content`] for why it cannot be an arbitrary string.
+pub(crate) const STRICT_HARNESS_AGENT_TYPE: &str = "codex";
 
 // ── Folder-trust welcome sub-state e2e ──────────────────────────────────
 

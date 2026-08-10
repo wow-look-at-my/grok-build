@@ -19,8 +19,6 @@ use crate::views::suggestion_controller::{CompletionDropdownState, CompletionIte
 /// Maximum visible rows in the completion dropdown.
 pub const MAX_VISIBLE_ROWS: u16 = 6;
 
-/// Hard cap on label column width.
-const LABEL_CAP: usize = 40;
 
 /// Gap between label and description columns.
 const LABEL_DESC_GAP: usize = 2;
@@ -52,13 +50,12 @@ pub fn scroll_offset(state: &CompletionDropdownState) -> usize {
 }
 
 fn compute_label_column_w(items: &[CompletionItemParsed], content_w: usize) -> usize {
-    let budget = (content_w * 3 / 5).min(LABEL_CAP);
-    let max_w = items
-        .iter()
-        .map(|r| r.display.width())
-        .filter(|&w| w <= LABEL_CAP)
-        .max()
-        .unwrap_or(0);
+    // The available width is the only bound: 60% of it for the label, the rest
+    // for the description. Every row contributes -- excluding the long ones
+    // leaves nothing to take a max over when they are ALL long, and the
+    // zero-width column that results truncates every label to nothing.
+    let budget = content_w * 3 / 5;
+    let max_w = items.iter().map(|r| r.display.width()).max().unwrap_or(0);
     max_w.min(budget)
 }
 
@@ -410,5 +407,94 @@ mod tests {
         // overwrites it atomically with the new items.
         assert_eq!(state.request_text, "a");
         assert_eq!(state.request_cursor, 1);
+    }
+}
+
+#[cfg(test)]
+mod label_column_tests {
+    use super::*;
+    use crate::views::suggestion_controller::SuggestionSource;
+
+    fn item(display: &str) -> CompletionItemParsed {
+        CompletionItemParsed {
+            display: display.into(),
+            description: String::new(),
+            insert_text: display.into(),
+            source: SuggestionSource::History,
+            priority: 0,
+            replace_range: None,
+            token_text: None,
+            truncated: false,
+        }
+    }
+
+    /// A catalog of uniformly long labels must still render, and on a wide
+    /// terminal it must render in full.
+    ///
+    /// Gateway-style ids (`provider/vendor:family:size`) run past 40 columns on
+    /// their own, and the selected row adds " (current)" on top. Deriving the
+    /// column by discarding long labels discards all of them here, leaving a
+    /// zero-width column: rows that draw, highlight and select while showing
+    /// nothing.
+    #[test]
+    fn a_catalog_of_long_labels_renders_in_full_on_a_wide_terminal() {
+        let items = [
+            item("Synthetic_Anthropic/syn:small:text (current)"),
+            item("Synthetic_Anthropic/hf:zai-org/GLM-4.7-Flash"),
+            item("Synthetic_Anthropic/hf:moonshotai/Kimi-K2-Instruct"),
+            item("Synthetic_Anthropic/hf:deepseek-ai/DeepSeek-V3.2"),
+        ];
+        let longest = items.iter().map(|i| i.display.width()).max().unwrap();
+
+        // A 173-column terminal has room to spare for a 50-column label.
+        let width = compute_label_column_w(&items, 173 - PREFIX_W);
+        assert_eq!(
+            width, longest,
+            "a wide terminal must show the whole label, not a fixed slice of it"
+        );
+        for it in &items {
+            assert_eq!(
+                truncate_str(&it.display, width),
+                it.display,
+                "no truncation is warranted at this width"
+            );
+        }
+    }
+
+    /// The same catalog in a narrow terminal: truncated to what fits, never
+    /// blanked, and never wider than its share of the row.
+    #[test]
+    fn long_labels_are_truncated_to_the_available_width_not_blanked() {
+        let items = [
+            item("Synthetic_Anthropic/syn:small:text (current)"),
+            item("Synthetic_Anthropic/hf:zai-org/GLM-4.7-Flash"),
+        ];
+        let content_w = 60 - PREFIX_W;
+        let width = compute_label_column_w(&items, content_w);
+
+        assert!(width > 0, "a narrow terminal still gets a label column");
+        assert!(
+            width <= content_w * 3 / 5,
+            "the label may not crowd out the description column, got {width}"
+        );
+        assert!(
+            !truncate_str(&items[0].display, width).is_empty(),
+            "a row must render something"
+        );
+    }
+
+    /// Mixed lengths: one over-cap label must not shrink the column below what
+    /// the shorter labels need.
+    #[test]
+    fn a_single_long_label_does_not_collapse_the_column() {
+        let items = [
+            item("grok-4"),
+            item("Synthetic_Anthropic/hf:zai-org/GLM-4.7-Flash-Extended-Name"),
+        ];
+        let width = compute_label_column_w(&items, 120);
+        assert!(
+            width >= "grok-4".width(),
+            "the short label must still fit, got {width}"
+        );
     }
 }

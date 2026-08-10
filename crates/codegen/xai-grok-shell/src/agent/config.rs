@@ -3838,6 +3838,25 @@ pub(crate) fn resolve_model_list(
     for entry in resolved.values_mut() {
         entry.info.derive_reasoning_effort_fields();
     }
+    // An empty catalog is a dead end -- the model picker renders nothing and
+    // every turn has nothing to route to -- and each way of reaching it is
+    // silent on its own: a custom endpoint skips the built-in defaults, a
+    // discovery 404 is a warn nobody sees, and no [model.*] entries is not an
+    // error. Say so once, here, where all three are known. A provider whose
+    // surface has no /models listing (several Anthropic-protocol ones do not)
+    // lands here through no fault of the config.
+    if resolved.is_empty() {
+        tracing::error!(
+            models_base_url = ?cfg.endpoints.models_base_url,
+            models_list_url = ?cfg.endpoints.models_list_url,
+            custom_endpoint = cfg.endpoints.has_custom_endpoint(),
+            config_models = cfg.config_models.len(),
+            "no models resolved: the picker will be empty and no turn can be routed. \
+             A custom models endpoint replaces the built-in defaults, so a failed or \
+             empty listing leaves nothing behind it. Point models_list_url at a URL \
+             that serves a listing, or declare [model.*] entries in config.toml."
+        );
+    }
     resolved
 }
 /// Layer 6 of [`resolve_model_list`]: fold the global `[models].extra_headers`
