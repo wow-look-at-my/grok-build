@@ -200,6 +200,246 @@
     }
 
     #[test]
+    fn turn_completed_reported_cost_attaches_to_agent_entry_and_session_total() {
+        // The durable `TurnCompleted` carries the per-turn `PromptUsage` cost
+        // (`cost_usd_ticks`) that the ACP text-chunk rail never delivers. This
+        // drives the SHIPPED runtime path end-to-end: stream an agent message,
+        // finalize the turn via the extension notification, and assert the
+        // reported cost lands on the agent-message entry AND the session-total
+        // indicator data (`session_total_cost_usd_ticks`) reflects it.
+        let mut app = make_app_with_agent("sess-cost");
+        app.agents.get_mut(&AgentId(0)).unwrap().attached_as_viewer = true;
+
+        // Turn 1: stream an agent message, then finalize with a reported cost.
+        {
+            let agent = app.agents.get_mut(&AgentId(0)).unwrap();
+            agent.session.start_turn(&mut agent.scrollback);
+            agent.session.current_prompt_id = Some("pid-cost-1".into());
+            agent.turn_started_at = Some(std::time::Instant::now());
+        }
+        let _ = handle(
+            make_agent_chunk_message_with_prompt("sess-cost", "cost turn one", "pid-cost-1", false),
+            &mut app,
+        );
+        let _ = handle(
+            make_agent_chunk_message_with_prompt("sess-cost", " more text", "pid-cost-1", false),
+            &mut app,
+        );
+        let affected = handle_ext_notification(
+            &xai_turn_completed_notif_with_cost("sess-cost", "pid-cost-1", Some(1_234_500_000)),
+            &mut app,
+        );
+        assert!(affected, "finalizing the active viewer turn should redraw");
+
+        // The reported cost was attributed to the agent-message block, and the
+        // session-total indicator data reflects exactly that one turn's cost.
+        let (entry_cost, total) = {
+            let agent = app.agents.get_mut(&AgentId(0)).unwrap();
+            assert!(agent.session.state.is_idle());
+            let entry_cost = agent
+                .scrollback
+                .entries_mut()
+                .find(|e| e.block.is_agent_message())
+                .expect("an agent-message entry was streamed")
+                .cost_usd_ticks;
+            let total = agent.scrollback.session_total_cost_usd_ticks();
+            (entry_cost, total)
+        };
+        assert_eq!(
+            entry_cost,
+            Some(1_234_500_000),
+            "the agent-message block must carry the API-reported per-turn cost"
+        );
+        assert_eq!(
+            total,
+            Some(1_234_500_000),
+            "session-total indicator data must equal the reported turn cost"
+        );
+
+        // Turn 2: a second reported cost accumulates into the running total.
+        {
+            let agent = app.agents.get_mut(&AgentId(0)).unwrap();
+            agent.session.start_turn(&mut agent.scrollback);
+            agent.session.current_prompt_id = Some("pid-cost-2".into());
+            agent.turn_started_at = Some(std::time::Instant::now());
+        }
+        let _ = handle(
+            make_agent_chunk_message_with_prompt("sess-cost", "second turn", "pid-cost-2", false),
+            &mut app,
+        );
+        let _ = handle_ext_notification(
+            &xai_turn_completed_notif_with_cost("sess-cost", "pid-cost-2", Some(5_000_000_000)),
+            &mut app,
+        );
+        let total = app.agents[&AgentId(0)].scrollback.session_total_cost_usd_ticks();
+        assert_eq!(
+            total,
+            Some(6_234_500_000),
+            "the session-total is the exact cumulative sum of reported costs (got {total:?})"
+        );
+
+        // Turn 3: a TurnCompleted that reports NO cost (e.g. scrubbed/partial)
+        // must not fabricate a zero — it leaves the prior total unchanged.
+        {
+            let agent = app.agents.get_mut(&AgentId(0)).unwrap();
+            agent.session.start_turn(&mut agent.scrollback);
+            agent.session.current_prompt_id = Some("pid-cost-3".into());
+            agent.turn_started_at = Some(std::time::Instant::now());
+        }
+        let _ = handle(
+            make_agent_chunk_message_with_prompt("sess-cost", "third turn", "pid-cost-3", false),
+            &mut app,
+        );
+        let _ = handle_ext_notification(
+            &xai_turn_completed_notif_with_cost("sess-cost", "pid-cost-3", None),
+            &mut app,
+        );
+        let total = app.agents[&AgentId(0)].scrollback.session_total_cost_usd_ticks();
+        assert_eq!(
+            total,
+            Some(6_234_500_000),
+            "a missing cost must render as missing, not as a fabricated $0"
+        );
+    }
+
+    #[test]
+    fn driver_turn_completed_cost_lands_on_running_entry_before_prompt_finish() {
+        // DRIVER path (attached_as_viewer=false, the pager's own prompted turns
+        // — the primary interactive flow). On the driver the `PromptResponse`
+        // RPC owns the lifecycle, so `TurnCompleted` normally arrives BEFORE
+        // `finish_turn` runs (in `prompt.rs`). At that moment the agent message
+        // is still streaming (`current_agent_msg`), and the reported cost must
+        // be attributed to the running turn's live block — not dropped because
+        // no turn had been "finished" yet.
+        let mut app = make_app_with_agent("sess-drive-cost");
+        {
+            let agent = app.agents.get_mut(&AgentId(0)).unwrap();
+            assert!(!agent.attached_as_viewer);
+            agent.session.start_turn(&mut agent.scrollback);
+            agent.session.current_prompt_id = Some("pid-d1".into());
+            agent.turn_started_at = Some(std::time::Instant::now());
+        }
+        let _ = handle(
+            make_agent_chunk_message_with_prompt("sess-drive-cost", "streaming one", "pid-d1", false),
+            &mut app,
+        );
+
+        // TurnCompleted (with cost) arrives while the driver is still streaming.
+        let _ = handle_ext_notification(
+            &xai_turn_completed_notif_with_cost("sess-drive-cost", "pid-d1", Some(7_000_000_000)),
+            &mut app,
+        );
+
+        // The driver must STILL be running (TurnCompleted arms reconcile, does
+        // not finish), and the reported cost must already be on the live entry.
+        {
+            let agent = app.agents.get_mut(&AgentId(0)).unwrap();
+            assert!(matches!(agent.session.state, AgentState::TurnRunning));
+            let entry_cost = agent
+                .scrollback
+                .entries_mut()
+                .find(|e| e.block.is_agent_message())
+                .expect("an agent-message entry was streamed")
+                .cost_usd_ticks;
+            assert_eq!(
+                entry_cost,
+                Some(7_000_000_000),
+                "cost must attach to the running driver entry before finish"
+            );
+        }
+
+        // Now the driver's actual finish arrives (PromptResponse → prompt.rs
+        // `finish_turn`). It must NOT drop or duplicate the already-attached
+        // cost, and the session total reflects exactly that one turn.
+        prompt_response(&mut app, "pid-d1");
+        let (entry_cost, total, idle) = {
+            let agent = app.agents.get_mut(&AgentId(0)).unwrap();
+            let idle = agent.session.state.is_idle();
+            let entry_cost = agent
+                .scrollback
+                .entries_mut()
+                .find(|e| e.block.is_agent_message())
+                .expect("agent-message entry")
+                .cost_usd_ticks;
+            let total = agent.scrollback.session_total_cost_usd_ticks();
+            (entry_cost, total, idle)
+        };
+        assert!(idle, "driver turn finished via PromptResponse");
+        assert_eq!(entry_cost, Some(7_000_000_000), "finish must preserve cost");
+        assert_eq!(
+            total,
+            Some(7_000_000_000),
+            "session-total equals exactly the reported cost (got {total:?})"
+        );
+    }
+
+    #[test]
+    fn stale_turn_completed_cannot_corrupt_a_later_turn_cost() {
+        // A stale/misordered `TurnCompleted` for an ALREADY-FINISHED turn must
+        // be routed to that turn's own prompt-keyed entry, NOT to a newer turn
+        // that has begun streaming. Drives real finishes via `prompt.rs`
+        // (`PromptResponse`) so the prompt→entry map is populated by shipped code.
+        let mut app = make_app_with_agent("sess-stale-cost");
+
+        // Turn P1: stream + finish via PromptResponse (no cost reported on the
+        // live TurnCompleted this time — P1's cost arrives late below).
+        {
+            let agent = app.agents.get_mut(&AgentId(0)).unwrap();
+            agent.session.start_turn(&mut agent.scrollback);
+            agent.session.current_prompt_id = Some("pid-p1".into());
+            agent.turn_started_at = Some(std::time::Instant::now());
+        }
+        let _ = handle(
+            make_agent_chunk_message_with_prompt("sess-stale-cost", "first turn", "pid-p1", false),
+            &mut app,
+        );
+        prompt_response(&mut app, "pid-p1");
+
+        // Turn P2 begins streaming.
+        {
+            let agent = app.agents.get_mut(&AgentId(0)).unwrap();
+            agent.session.start_turn(&mut agent.scrollback);
+            agent.session.current_prompt_id = Some("pid-p2".into());
+            agent.turn_started_at = Some(std::time::Instant::now());
+        }
+        let _ = handle(
+            make_agent_chunk_message_with_prompt("sess-stale-cost", "second turn", "pid-p2", false),
+            &mut app,
+        );
+
+        // Late TurnCompleted for the OLD turn P1, carrying its cost, arrives
+        // while P2 is streaming.
+        let _ = handle_ext_notification(
+            &xai_turn_completed_notif_with_cost("sess-stale-cost", "pid-p1", Some(3_000_000_000)),
+            &mut app,
+        );
+
+        let (p1_cost, later_costs) = {
+            let agent = app.agents.get_mut(&AgentId(0)).unwrap();
+            let mut msgs: Vec<Option<i64>> = agent
+                .scrollback
+                .entries_mut()
+                .filter(|e| e.block.is_agent_message())
+                .map(|e| e.cost_usd_ticks)
+                .collect();
+            assert_eq!(msgs.len(), 2, "exactly two agent-message entries (P1, P2)");
+            let p1 = msgs.remove(0);
+            (p1, msgs)
+        };
+        // P1's own entry carries its reported cost.
+        assert_eq!(
+            p1_cost,
+            Some(3_000_000_000),
+            "a late TurnCompleted must land on its own prompt-keyed entry (P1), not the newer turn"
+        );
+        // The newer, still-streaming P2 entry must be untouched.
+        assert!(
+            later_costs.iter().all(|c| c.is_none()),
+            "the newer turn's cost must never be corrupted by a stale TurnCompleted"
+        );
+    }
+
+    #[test]
     fn live_turn_completed_driver_arms_reconcile() {
         // For the driver the `PromptResponse` RPC owns the lifecycle, so a live
         // TurnCompleted for the turn it is driving arms the lost-RPC reconcile

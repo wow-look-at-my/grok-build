@@ -713,6 +713,23 @@ struct ListModelsEndpoint {
     url: String,
     auth: EndpointAuth,
 }
+/// The model-listing endpoint for an OpenAI-compatible **or** Anthropic base.
+///
+/// Both providers serve their model list at the same `/v1/models` shape: an
+/// OpenAI-style base `https://api.openai.com/v1` lists at
+/// `https://api.openai.com/v1/models`, and an Anthropic base
+/// `https://api.anthropic.com/v1` lists at `https://api.anthropic.com/v1/models`.
+/// Sharing one resolver (rather than a fixed OpenAI-only assumption) lets a
+/// provider base of either kind compute the correct listing URL. A base that
+/// already ends in `/models` is returned unchanged.
+pub(crate) fn models_list_url_for_base(base: &str) -> String {
+    if base.ends_with("/models") {
+        base.to_owned()
+    } else {
+        format!("{base}/models")
+    }
+}
+
 /// The `/v1/models` URL [`fetch_models_blocking`] hits for this
 /// endpoints/auth shape. Doubles as the models disk-cache origin key: cached
 /// entries embed absolute `base_url`s from the backend that served them, so a
@@ -736,7 +753,7 @@ impl ListModelsEndpoint {
             }
         } else if fetch_auth == crate::agent::models::ModelFetchAuth::ApiKey {
             Self {
-                url: format!("{}/models", endpoints.xai_api_base_url),
+                url: models_list_url_for_base(&endpoints.xai_api_base_url),
                 auth: EndpointAuth::ApiKey,
             }
         } else {
@@ -845,10 +862,20 @@ pub(crate) fn parse_remote_model_value(
         .or_else(|| get_string(obj, "base_url"))
         .unwrap_or_else(|| default_base_url.to_owned());
     let name = get_string(obj, "name").or_else(|| Some(model.clone()));
+    // Anthropic exposes its per-model input-context-window in the `/v1/models`
+    // listing as `max_input_tokens` ("Maximum input context window size in
+    // tokens for this model"), NOT `contextWindow`/`context_window`. Read it as
+    // a last-resort fallback so an Anthropic-style listing still resolves a
+    // window. A `0` (e.g. docs placeholder) is ignored so the non-zero entry
+    // isn't dropped; a positive value wins only when no OpenAI-style field is
+    // present.
     let context_window = get_u64(obj, "contextWindow")
         .or_else(|| get_u64(obj, "context_window"))
         .or_else(|| meta.and_then(|m| get_u64(m, "contextWindow")))
         .or_else(|| meta.and_then(|m| get_u64(m, "totalContextTokens")))
+        .or_else(|| get_u64(obj, "max_input_tokens"))
+        .or_else(|| get_u64(obj, "maxInputTokens"))
+        .filter(|&v| v > 0)
         .unwrap_or(DEFAULT_CONTEXT_WINDOW);
     let context_window = std::num::NonZeroU64::new(context_window)?;
     let agent_type = get_string(obj, "systemPromptType")
@@ -1503,6 +1530,45 @@ mod tests {
         assert_eq!(result.name.as_deref(), Some("grok-3"));
     }
     #[test]
+    fn parse_anthropic_style_listing_max_input_tokens_resolves_context_window() {
+        // Anthropic's official `/v1/models` ModelInfo shape (`id`, `created_at`,
+        // `display_name`, `type`) carries the input-context-window as
+        // `max_input_tokens`, not `contextWindow`/`context_window`. This drives
+        // the real shipped parse path and asserts the value lands in `context_window`.
+        let value = serde_json::json!({
+            "id": "claude-sonnet-4-5",
+            "type": "model",
+            "display_name": "Claude Sonnet 4.5",
+            "created_at": "2025-07-14T00:00:00Z",
+            "max_input_tokens": 200_000
+        });
+        let result = parse_remote_model_value(&value, "https://api.anthropic.com").unwrap();
+        assert_eq!(result.model, "claude-sonnet-4-5");
+        assert_eq!(result.context_window.get(), 200_000);
+
+        // camelCase spelling is also accepted.
+        let value = serde_json::json!({ "id": "claude-opus-4-6", "maxInputTokens": 1_000_000 });
+        let result = parse_remote_model_value(&value, "https://api.anthropic.com").unwrap();
+        assert_eq!(result.context_window.get(), 1_000_000);
+
+        // An OpenAI-style field still wins when present alongside Anthropic's.
+        let value = serde_json::json!({
+            "id": "claude-sonnet-4-5",
+            "max_input_tokens": 200_000,
+            "contextWindow": 350_000
+        });
+        let result = parse_remote_model_value(&value, "https://api.anthropic.com").unwrap();
+        assert_eq!(result.context_window.get(), 350_000);
+
+        // A `0` placeholder (docs example) does not drop the entry; it falls back.
+        let value = serde_json::json!({ "id": "claude-3-5-haiku", "max_input_tokens": 0 });
+        let result = parse_remote_model_value(&value, "https://api.anthropic.com").unwrap();
+        assert_eq!(
+            result.context_window.get(),
+            crate::remote::DEFAULT_CONTEXT_WINDOW
+        );
+    }
+    #[test]
     fn parse_model_field_takes_priority_over_id() {
         let value = serde_json::json!({
             "id": "display-key",
@@ -1945,6 +2011,57 @@ mod tests {
     /// Session/Deployment → cli-chat-proxy (Session auth), never the inference host;
     /// ApiKey → `xai_api_base_url` (ApiKey, public default when unset); a custom
     /// models endpoint → that URL verbatim.
+    #[test]
+    fn models_list_url_for_openai_base() {
+        // OpenAI-style base → its `/v1/models` listing.
+        assert_eq!(
+            models_list_url_for_base("https://api.openai.com/v1"),
+            "https://api.openai.com/v1/models"
+        );
+        // An OpenAI-compatible gateway base of the same shape.
+        assert_eq!(
+            models_list_url_for_base("https://gateway.example.com/v1"),
+            "https://gateway.example.com/v1/models"
+        );
+    }
+    #[test]
+    fn models_list_url_for_anthropic_base() {
+        // Anthropic serves its model list at the OpenAI-compatible
+        // `{base}/models` URL — no Anthropic-specific divergent path needed.
+        assert_eq!(
+            models_list_url_for_base("https://api.anthropic.com/v1"),
+            "https://api.anthropic.com/v1/models"
+        );
+    }
+    #[test]
+    fn models_list_url_for_base_idempotent_for_full_list_url() {
+        assert_eq!(
+            models_list_url_for_base("https://api.anthropic.com/v1/models"),
+            "https://api.anthropic.com/v1/models"
+        );
+    }
+    #[test]
+    fn resolve_models_list_url_covers_openai_and_anthropic_bases() {
+        use crate::agent::config::EndpointsConfig;
+        // OpenAI-style base derived from models_base_url.
+        let openai = EndpointsConfig {
+            models_base_url: Some("https://api.openai.com/v1".to_owned()),
+            ..EndpointsConfig::default()
+        };
+        assert_eq!(
+            openai.resolve_models_list_url(),
+            "https://api.openai.com/v1/models"
+        );
+        // Anthropic base derived from models_base_url.
+        let anthropic = EndpointsConfig {
+            models_base_url: Some("https://api.anthropic.com/v1".to_owned()),
+            ..EndpointsConfig::default()
+        };
+        assert_eq!(
+            anthropic.resolve_models_list_url(),
+            "https://api.anthropic.com/v1/models"
+        );
+    }
     #[test]
     #[serial_test::serial]
     fn models_fetch_endpoint_matches_auth_mode() {

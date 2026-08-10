@@ -170,6 +170,7 @@ mod tests {
     #[test]
     fn ledger_sums_partial_subagent_and_zero_cost() {
         let mut ledger = UsageLedger::default();
+
         ledger.record_main_loop_call("m", &tu(1, 1), None, Some(0));
         assert_eq!(ledger.totals.cost_usd_ticks, None);
         assert_eq!(ledger.totals.cost_missing_calls, 1);
@@ -198,5 +199,31 @@ mod tests {
 
         ledger.record_subagent(&[], true);
         assert!(ledger.incomplete);
+    }
+
+    #[test]
+    fn ledger_session_total_is_exact_sum_of_reported_ticks() {
+        // The top-right session-cost indicator is the cumulative sum of every
+        // API-reported cost in the per-session ledger — not just the last
+        // call, and never polluted by unreported (zero-backfilled) calls.
+        let mut ledger = UsageLedger::default();
+
+        ledger.record_main_loop_call("m", &tu(1, 1), None, Some(0)); // wire 0 → unreported
+        assert_eq!(ledger.totals.cost_usd_ticks, None);
+        assert_eq!(ledger.totals.cost_missing_calls, 1);
+
+        ledger.record_main_loop_call("a", &tu(10, 5), Some(100), None); // unreported
+        ledger.record_main_loop_call("a", &tu(50, 5), Some(50), Some(1_000));
+        ledger.record_main_loop_call("b", &tu(20, 5), Some(50), Some(23_000));
+
+        // Exact integer sum of the three reported costs; the unreported and
+        // the zero-backfilled calls contribute nothing.
+        assert_eq!(ledger.totals.cost_usd_ticks, Some(24_000));
+        // Every call's cost value (reported or not) feeds the same session
+        // total, so the per-session total aggregates across models.
+        assert_eq!(ledger.by_model["a"].cost_usd_ticks, Some(1_000));
+        assert_eq!(ledger.by_model["b"].cost_usd_ticks, Some(23_000));
+        assert_eq!(ledger.totals.model_calls, 4);
+        assert!(ledger.totals.cost_is_partial());
     }
 }
