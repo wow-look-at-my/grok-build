@@ -124,7 +124,7 @@ jobs:
           mkdir -p dist
           cp target/release/xai-grok-pager "dist/grok-${{ matrix.target_os }}-${{ matrix.target_arch }}"
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: wow-look-at-my/actions@cache-upload#latest
         with:
           name: grok-${{ matrix.target_os }}-${{ matrix.target_arch }}
           path: dist/grok-${{ matrix.target_os }}-${{ matrix.target_arch }}
@@ -161,7 +161,7 @@ jobs:
           - target_os: darwin
             target_arch: arm64
     steps:
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      - uses: wow-look-at-my/actions@cache-download#latest
         with:
           name: grok-${{ matrix.target_os }}-${{ matrix.target_arch }}
           path: dist
@@ -185,6 +185,7 @@ jobs:
       contents: read
       id-token: write
       artifact-metadata: write # buildhost-publish-release records what it stored on the org's linked artifacts page
+      actions: write # cache-cleanup deletes this run's binary hand-offs
     steps:
       - name: Publish release
         uses: wow-look-at-my/buildhost/.github/actions/buildhost-publish-release@master
@@ -192,3 +193,9 @@ jobs:
           server: ${{ env.BUILDHOST_SERVER }}
           project: ${{ env.BUILDHOST_PROJECT }}
           version: ${{ needs.publish-create.outputs.version }}
+
+      # The binaries are on buildhost now; the run-scoped cache copies are dead
+      # weight. always() so a failed publish still cleans up after itself.
+      - name: Clean up binary hand-offs
+        if: always()
+        uses: wow-look-at-my/actions@cache-cleanup#latest
