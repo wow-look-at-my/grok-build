@@ -30,7 +30,6 @@ const SID: &str = "11111111-1111-4111-8111-111111111111";
 const TEST_VERSION: &str = "9.9.9-heaptest";
 const DUMP_PAYLOAD: u64 = 4096;
 const AUTH_TOKEN: &str = "heap-profile-test-bearer";
-const AUTH_BEARER: &str = "Bearer heap-profile-test-bearer";
 
 static HOOKS_INIT: Once = Once::new();
 static FAKE_ALLOCATED: AtomicU64 = AtomicU64::new(1_000);
@@ -185,30 +184,6 @@ fn assert_jemalloc_object_pair(sid: &str, version: &str, heap: &str, meta: &str)
     let (expected_heap, expected_meta) = object_paths(sid, version, ts);
     assert_eq!(heap, expected_heap);
     assert_eq!(meta, expected_meta);
-}
-
-fn assert_storage_auth(uploads: &[xai_grok_test_support::mock_server::StorageUpload]) {
-    for u in uploads {
-        assert_eq!(
-            u.authorization.as_deref(),
-            Some(AUTH_BEARER),
-            "storage upload {:?} missing live AuthManager bearer",
-            u.path
-        );
-    }
-}
-
-fn assert_meta_json(body: &[u8], threshold: u64, resident: u64, allocated: u64) {
-    let meta: serde_json::Value = serde_json::from_slice(body).expect("meta.json parses");
-    assert_eq!(meta["session_id"], SID);
-    assert_eq!(meta["binary_version"], TEST_VERSION);
-    assert_eq!(meta["threshold_bytes"], threshold);
-    assert_eq!(meta["stats_resident"], resident);
-    assert_eq!(meta["stats_allocated"], allocated);
-    assert_eq!(meta["lg_prof_sample"], heap_profile::LG_PROF_SAMPLE);
-    assert_eq!(meta["os"], std::env::consts::OS);
-    assert!(meta["ts_unix"].as_u64().is_some());
-    assert!(meta["rss_peak_bytes"].as_u64().is_some());
 }
 
 /// Busy-wait past the wall-clock second boundary so successive dumps get

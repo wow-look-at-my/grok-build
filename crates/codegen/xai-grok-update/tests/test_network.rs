@@ -14,7 +14,7 @@
 //! so there's no contention).
 
 use wiremock::matchers::{method, path};
-use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate};
+use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use xai_grok_update::version::fetch_gcs_version_from_base;
 
@@ -326,38 +326,3 @@ async fn gcs_pointer_connection_refused_is_retried_and_returns_error() {
 // (no Content-Length) and the progress-bar path (with Content-Length).
 // ─────────────────────────────────────────────────────────────────────────────
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Parallel byte-range path — exercises the HEAD + 206 Partial Content code path
-// in download_silent / download_with_progress for files >= 16 MiB.
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// Wiremock responder for `GET` that honors `Range: bytes=A-B` with `206`.
-/// Without a Range header it returns the full body with `200`.
-#[derive(Clone)]
-struct RangeResponder {
-    body: std::sync::Arc<Vec<u8>>,
-}
-
-impl Respond for RangeResponder {
-    fn respond(&self, request: &Request) -> ResponseTemplate {
-        let total = self.body.len();
-        let spec = request
-            .headers
-            .get("range")
-            .and_then(|v| v.to_str().ok())
-            .and_then(|s| s.strip_prefix("bytes=").map(|x| x.to_string()));
-        if let Some(spec) = spec
-            && let Some((start_str, end_str)) = spec.split_once('-')
-            && let (Ok(start), Ok(end)) = (start_str.parse::<usize>(), end_str.parse::<usize>())
-        {
-            let end = end.min(total - 1);
-            if start <= end {
-                let slice = self.body[start..=end].to_vec();
-                return ResponseTemplate::new(206)
-                    .insert_header("content-range", format!("bytes {start}-{end}/{total}"))
-                    .set_body_bytes(slice);
-            }
-        }
-        ResponseTemplate::new(200).set_body_bytes((*self.body).clone())
-    }
-}
