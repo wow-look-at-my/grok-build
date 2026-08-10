@@ -844,6 +844,52 @@ pub(crate) fn fetch_models_blocking(
     }
     Ok(FetchModelsResult { models, etag })
 }
+/// Fetch and parse a `/v1/models` listing from an arbitrary OpenAI-compatible
+/// base (BYOK / custom provider, e.g. `https://gateway.pazer.ai/v1`), using a
+/// Bearer API key when supplied.
+///
+/// This is the per-model counterpart to [`fetch_models_blocking`]: that fetch
+/// is driven by `EndpointsConfig` (so it only ever queries the configured
+/// xAI proxy or the single `[endpoints].models_base_url`), whereas a BYOK
+/// model carries its own `api_base_url` and API key that the generic prefetch
+/// never targets. Without this primitive the fork can never auto-detect a
+/// BYOK model's real context window (e.g. 1M) when the model's own provider
+/// lists it.
+pub(crate) fn fetch_models_for_api_base_blocking(
+    base_url: &str,
+    api_key: Option<&str>,
+) -> Result<Vec<crate::agent::config::ModelEntryConfig>, BackendError> {
+    let client = crate::http::shared_startup_blocking_client();
+    let url = models_list_url_for_base(base_url.trim_end_matches('/'));
+    tracing::debug!(models_url = %url, "Fetching models for BYOK/custom API base");
+    let mut request = client.get(&url);
+    if let Some(key) = api_key
+        && !key.is_empty()
+    {
+        request = request.header("Authorization", format!("Bearer {key}"));
+    }
+    let response = request.send()?;
+    if !response.status().is_success() {
+        let status = response.status().as_u16();
+        let body = response.text().unwrap_or_default();
+        tracing::warn!("Failed to fetch models for base: {} - {}", status, body);
+        return Err(BackendError::RequestFailed { status, body });
+    }
+    let models_response: ModelsResponse = response.json()?;
+    let mut models = Vec::with_capacity(models_response.data.len());
+    for (idx, value) in models_response.data.into_iter().enumerate() {
+        match parse_remote_model_value(&value, base_url) {
+            Some(model) => models.push(model),
+            None => {
+                tracing::warn!(
+                    "Skipping model at index {} (BYOK base): missing required field ('model' or 'context_window') or invalid types",
+                    idx
+                )
+            }
+        }
+    }
+    Ok(models)
+}
 /// Parse a single model entry from the /models-v2 response.
 /// Used by both initial model fetch and session-resume metadata refresh.
 pub(crate) fn parse_remote_model_value(
@@ -2317,5 +2363,62 @@ mod tests {
             let count = request.headers().get_all(name).iter().count();
             assert_eq!(count, 1, "duplicate header {name}");
         }
+    }
+
+    /// Drive `fetch_models_for_api_base_blocking` (the BYOK /v1/models fetch
+    /// primitive) against a loopback OpenAI-compatible listing. Proves the
+    /// shipped fetch parses per-model `context_window` and matches the routing
+    /// slug, and that a `0`/missing window falls back to the sentinel.
+    async fn start_models_listing_server(
+        body: serde_json::Value,
+    ) -> (String, tokio::task::JoinHandle<()>) {
+        use axum::routing::get;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base =
+            format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+        let app = axum::Router::new().route("/v1/models", get(move || async move {
+            axum::Json(body)
+        }));
+        let handle = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        (base, handle)
+    }
+    /// The blocking /v1/models fetch parses per-model `context_window` and the
+    /// Anthropic `max_input_tokens` form, matching the routing slug.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn fetch_models_for_api_base_blocking_parses_per_model_windows() {
+        let (base, server) = start_models_listing_server(serde_json::json!({
+            "data": [
+                {
+                    "model": "openrouter/deepseek/deepseek-test",
+                    "contextWindow": 1_000_000,
+                },
+                {
+                    "model": "vendor-2",
+                    "max_input_tokens": 700_000,
+                },
+            ]
+        }))
+        .await;
+        let mock_url = format!("{base}/v1");
+
+        let entries = tokio::task::spawn_blocking(move || {
+            fetch_models_for_api_base_blocking(&mock_url, Some("test-key"))
+                .expect("mock /v1/models should be reachable")
+        })
+        .await
+        .unwrap();
+        server.abort();
+
+        let deepseek =
+            entries.iter().find(|m| m.model == "openrouter/deepseek/deepseek-test").unwrap();
+        assert_eq!(
+            deepseek.context_window.get(), 1_000_000,
+            "per-model contextWindow must parse from the model's own provider listing"
+        );
+        let vendor2 = entries.iter().find(|m| m.model == "vendor-2").unwrap();
+        assert_eq!(
+            vendor2.context_window.get(), 700_000,
+            "Anthropic max_input_tokens form must parse too"
+        );
     }
 }
