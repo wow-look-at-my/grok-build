@@ -21,6 +21,8 @@
 //!
 //! **Special handling** (not counted against retry budget):
 //! - 413 / image processing errors → strip images and retry once
+//! - model-takes-no-image-input errors (any of 400/404/415/422/500,
+//!   provider-worded) → strip images and retry once
 //!
 //! **Not retried** (Fatal immediately):
 //! - 400, 401, 403, 404, 408, 422 (client errors)
@@ -195,6 +197,16 @@ pub fn classify_error(
     // Image processing errors (direct 400 or proxy-wrapped 500): strip
     // images and retry, same recovery as 413.
     if err.is_image_processing_error() {
+        return RetryDecision::RetryWithImageStrip;
+    }
+
+    // The routed model takes no image input (e.g. OpenRouter's 404 "No
+    // endpoints found that support image input"). Same strip recovery, and it
+    // has to come before the status-code arms below, which would call a 404
+    // fatal: the images are in conversation history, so a fatal here fails
+    // every following turn on the same history with no way out but a new
+    // session.
+    if err.is_image_input_unsupported_error() {
         return RetryDecision::RetryWithImageStrip;
     }
 
@@ -581,6 +593,47 @@ mod tests {
         assert!(matches!(
             classify_error(&err, 0, 5, RATE_LIMIT_RETRY_THRESHOLD),
             RetryDecision::RetryWithImageStrip
+        ));
+    }
+
+    /// A vision-less model is a 404, which every other rule calls fatal. It has
+    /// to strip instead: the images sit in conversation history, so a fatal
+    /// here fails every later turn on the same history too.
+    #[test]
+    fn classify_image_input_unsupported_404_strips_images() {
+        let err = api_err(
+            StatusCode::NOT_FOUND,
+            "No endpoints found that support image input",
+        );
+        assert!(matches!(
+            classify_error(&err, 0, 5, RATE_LIMIT_RETRY_THRESHOLD),
+            RetryDecision::RetryWithImageStrip
+        ));
+    }
+
+    /// The server's "don't retry" hint is about the request it saw; stripping
+    /// images makes a different request, so the strip must outrank the veto.
+    #[test]
+    fn classify_image_input_unsupported_outranks_should_retry_veto() {
+        let err = SamplingError::Api {
+            status: StatusCode::NOT_FOUND,
+            message: "No endpoints found that support image input".to_string(),
+            model_metadata: None,
+            retry_after_secs: None,
+            should_retry: Some(false),
+        };
+        assert!(matches!(
+            classify_error(&err, 0, 5, RATE_LIMIT_RETRY_THRESHOLD),
+            RetryDecision::RetryWithImageStrip
+        ));
+    }
+
+    #[test]
+    fn classify_unrelated_404_stays_fatal() {
+        let err = api_err(StatusCode::NOT_FOUND, "The model `gpt-9` does not exist");
+        assert!(matches!(
+            classify_error(&err, 0, 5, RATE_LIMIT_RETRY_THRESHOLD),
+            RetryDecision::Fatal(_)
         ));
     }
 

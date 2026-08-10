@@ -77,6 +77,7 @@ pub(crate) fn resolve_context_window_from_provider(
     (cw != default).then_some(cw)
 }
 
+
 /// Map a model id (catalog key or routing slug) to its catalog key.
 pub(crate) fn resolve_catalog_key(
     models: &IndexMap<String, ModelEntry>,
