@@ -108,6 +108,13 @@ pub struct ScrollbackEntry {
     /// to flash the accent briefly after completion.
     pub finished_at: Option<std::time::Instant>,
 
+    /// The API-reported cost of this response, in USD ticks (1e10 per USD),
+    /// as reported by `ConversationResponse.cost_usd_ticks`. `None` when the
+    /// API did not report a cost (or the value was non-positive) — never
+    /// `Some(0)`. Stored on the entry so the renderer can show it in the
+    /// timestamp gutter without re-deriving it from token estimates.
+    pub cost_usd_ticks: Option<i64>,
+
     /// Cached output and its render key.
     /// Interior-mutable so EntryRenderer (which holds `&self`) can populate and
     /// read the cache without &mut self.
@@ -197,6 +204,7 @@ impl ScrollbackEntry {
             hook_data: None,
             created_at: Some(Local::now()),
             finished_at: None,
+            cost_usd_ticks: None,
             cached_output: RefCell::new(None),
             cached_truncated_height: RefCell::new(None),
             cached_estimate_lines: RefCell::new(None),
@@ -229,6 +237,7 @@ impl ScrollbackEntry {
             hook_data: None,
             created_at: Some(Local::now()),
             finished_at: None,
+            cost_usd_ticks: None,
             cached_output: RefCell::new(None),
             cached_truncated_height: RefCell::new(None),
             cached_estimate_lines: RefCell::new(None),
@@ -239,6 +248,18 @@ impl ScrollbackEntry {
     /// Set the display mode (builder pattern).
     pub fn with_display_mode(mut self, mode: DisplayMode) -> Self {
         self.display_mode = mode;
+        self
+    }
+
+    /// Attach the API-reported cost (in USD ticks, 1e10 per USD) for this
+    /// entry's response, alongside `created_at`.
+    ///
+    /// Mirrors `reported_cost_ticks` normalization: a missing or non-positive
+    /// value (the wire often backfills `0`) is stored as `None` — an
+    /// unreported cost is never recorded as a free `0`, and the renderer
+    /// shows no fabricated `$0.00`.
+    pub fn with_cost_usd_ticks(mut self, cost_usd_ticks: Option<i64>) -> Self {
+        self.cost_usd_ticks = cost_usd_ticks.filter(|&t| t > 0);
         self
     }
 

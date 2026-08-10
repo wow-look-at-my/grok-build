@@ -1569,6 +1569,21 @@ impl AgentView {
         ) {
             status.push("badge", Line::from(badge_spans));
         }
+        // Top-right: running session-total cost, the cumulative sum of the
+        // API-reported per-message costs in this session's scrollback (exact
+        // ticks summed, then formatted). Absent while no message has reported
+        // a cost — never a fabricated `$0.00`.
+        if let Some(cost_display) =
+            crate::scrollback::wrappers::cost_ticks_to_display(
+                self.scrollback.session_total_cost_usd_ticks(),
+            )
+        {
+            let cost_style = Style::default().fg(theme.gray_dim).bg(theme.bg_base);
+            status.push(
+                "cost",
+                Line::from(Span::styled(format!("{cost_display} session"), cost_style)),
+            );
+        }
         let areas = status.render(buf, layout.status_bar);
         self.hit_bg_status.rect = areas.get("bg_tasks").copied();
         self.hit_goal_status.rect = areas.get("goal").copied();

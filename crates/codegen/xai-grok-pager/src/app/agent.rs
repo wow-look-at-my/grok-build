@@ -892,7 +892,7 @@ impl AgentSession {
     ///
     /// Called by `maybe_drain_queue` when a prompt is being sent.
     pub fn start_turn(&mut self, scrollback: &mut ScrollbackState) {
-        self.tracker.finish_turn(scrollback);
+        self.tracker.finish_turn(scrollback, None);
         self.compact_held_prompt = None;
         self.tracker.set_session_cwd(&self.cwd);
         self.tracker.expect_user_echo();
@@ -903,7 +903,7 @@ impl AgentSession {
     ///
     /// Called when `PromptResponse` is received.
     pub fn finish_turn(&mut self, scrollback: &mut ScrollbackState) {
-        self.tracker.finish_turn(scrollback);
+        self.tracker.finish_turn(scrollback, self.current_prompt_id.as_deref());
         self.state = AgentState::Idle;
         self.rate_limited = false;
         self.model_incompatible = false;
@@ -924,7 +924,7 @@ impl AgentSession {
     }
     /// Cancel the current turn: cleanup tracker, set state to Cancelling.
     pub fn cancel_turn(&mut self, scrollback: &mut ScrollbackState) {
-        self.tracker.finish_turn(scrollback);
+        self.tracker.finish_turn(scrollback, self.current_prompt_id.as_deref());
         self.state = AgentState::TurnCancelling;
     }
     /// Current activity within a running turn (for turn status line display).

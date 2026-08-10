@@ -1080,6 +1080,26 @@ impl ScrollbackState {
         self.entries.len()
     }
 
+    /// Sum of the API-reported per-message costs (in USD ticks, 1e10 per USD)
+    /// across every entry currently in the scrollback — i.e. this session's
+    /// running total cost, derived purely from the API-reported
+    /// `ConversationResponse.cost_usd_ticks` values stored on the entries.
+    ///
+    /// Normalization means no entry ever carries a fabricated `0` cost, so this
+    /// sum is `None` only while *no* entry has reported a cost (it is never a
+    /// misleading `$0.00` otherwise).
+    pub fn session_total_cost_usd_ticks(&self) -> Option<i64> {
+        let mut total: i64 = 0;
+        let mut any = false;
+        for entry in self.entries.values() {
+            if let Some(ticks) = entry.cost_usd_ticks {
+                total = total.saturating_add(ticks);
+                any = true;
+            }
+        }
+        any.then_some(total)
+    }
+
     /// Check if empty.
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
@@ -2059,6 +2079,46 @@ mod tests {
         assert!(state.is_empty());
         assert_eq!(state.len(), 0);
         assert_eq!(state.turn_count(), 0);
+    }
+
+    // ── session total cost (top-right indicator data source) ──
+
+    #[test]
+    fn session_total_cost_sums_reported_ticks_across_entries() {
+        let mut state = ScrollbackState::new();
+        // Nothing reported → None, never a fabricated $0.
+        assert_eq!(state.session_total_cost_usd_ticks(), None);
+
+        state.push(
+            ScrollbackEntry::new(RenderBlock::agent_message("a")).with_cost_usd_ticks(Some(1_000)),
+        );
+        state.push(
+            ScrollbackEntry::new(RenderBlock::agent_message("b")).with_cost_usd_ticks(Some(23_456)),
+        );
+        state.push(
+            ScrollbackEntry::new(RenderBlock::agent_message("c")).with_cost_usd_ticks(None),
+        );
+        state.push(
+            ScrollbackEntry::new(RenderBlock::user_prompt("d")).with_cost_usd_ticks(Some(5)),
+        );
+
+        // Exact sum of every API-reported cost; unreported rows contribute 0.
+        assert_eq!(state.session_total_cost_usd_ticks(), Some(24_461));
+    }
+
+    #[test]
+    fn with_cost_usd_ticks_discards_non_positive_values() {
+        // Mirror `reported_cost_ticks`: a wire-backfilled 0 (or negative) cost
+        // is unreported, so it must not contribute a fake "free" zero.
+        let e0 = ScrollbackEntry::new(RenderBlock::agent_message("a")).with_cost_usd_ticks(Some(0));
+        assert_eq!(e0.cost_usd_ticks, None);
+        let neg = ScrollbackEntry::new(RenderBlock::agent_message("a")).with_cost_usd_ticks(Some(-5));
+        assert_eq!(neg.cost_usd_ticks, None);
+        // Non-positive rows are simply absent from the session sum.
+        let mut state = ScrollbackState::new();
+        state.push(e0);
+        state.push(ScrollbackEntry::new(RenderBlock::agent_message("b")).with_cost_usd_ticks(Some(7)));
+        assert_eq!(state.session_total_cost_usd_ticks(), Some(7));
     }
 
     /// State with an explicit pager.toml-shaped `expanded_by_default`
