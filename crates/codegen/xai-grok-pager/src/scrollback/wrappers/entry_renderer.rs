@@ -380,19 +380,32 @@ impl<'a> EntryRenderer<'a> {
         )
     }
 
-    /// The per-message cost indicator shares the timestamp's block gating —
-    /// it decorates the same message blocks, never thinking/tool/system rows.
+    /// The per-message cost indicator shares the timestamp's message-block
+    /// gating — it decorates the same message blocks, never thinking/tool/
+    /// system rows. Unlike the timestamp it is deliberately NOT coupled to the
+    /// `show_timestamps` appearance toggle: a reported cost must render even
+    /// when timestamps are hidden, so the indicator never silently vanishes.
     fn should_show_cost(&self) -> bool {
-        self.should_show_timestamp()
+        self.should_show_timestamp() && self.entry.cost_usd_ticks.is_some_and(|t| t > 0)
     }
 
-    /// The cost string (if one is present) displayed in the reserved gutter,
-    /// rendered to the left of the timestamp.
+    /// The cost string (if one is present) displayed in the reserved gutter.
     fn cost_display(&self) -> Option<String> {
         if !self.should_show_cost() {
             return None;
         }
         cost_ticks_to_display(self.entry.cost_usd_ticks)
+    }
+
+    /// Width reserved on the right for the per-message cost indicator, when
+    /// this message block reports a cost. Independent of the `show_timestamps`
+    /// toggle so a reported cost always has a gutter to render into.
+    fn cost_reserved(&self) -> u16 {
+        if self.should_show_cost() {
+            cost_ticks_display_width(self.entry.cost_usd_ticks)
+        } else {
+            0
+        }
     }
 
     /// Width reserved on the right side of content lines for the timestamp and
@@ -401,19 +414,21 @@ impl<'a> EntryRenderer<'a> {
     /// When > 0, content is wrapped at `content_width - reserved` so text
     /// never collides with the overlay.
     fn timestamp_reserved(&self) -> u16 {
+        let cost = self.cost_reserved();
         if self.appearance().show_timestamps && self.should_show_timestamp() {
             let ts: u16 = 10; // max short format: "  12:30 PM"
             // The cost token (when present) sits left of the timestamp with one
             // space between. When no cost is reported there is no extra
             // reservation — keep the historical 10-col timestamp gutter intact.
-            let cost: u16 = cost_ticks_display_width(self.entry.cost_usd_ticks);
             if cost > 0 {
                 ts.saturating_add(cost.saturating_add(1))
             } else {
                 ts
             }
         } else {
-            0
+            // When the timestamp is hidden, a reported cost still reserves its
+            // own right-aligned gutter so it does not collide with content.
+            cost
         }
     }
 
@@ -993,48 +1008,59 @@ impl Renderable for EntryRenderer<'_> {
             row += 1;
         }
 
-        // Overlay timestamp on the first content line for message blocks.
-        // Short format (h:mm AM/PM) by default; expands to full format
-        // (HH:mm:ss | MMM DD) when the mouse hovers over the timestamp area.
-        // Gated on appearance.show_timestamps (toggled via /timestamps).
-        if self.appearance().show_timestamps
-            && content_skip == 0
-            && !output.is_empty()
-            && self.should_show_timestamp()
-            && let Some(ts) = self.entry.created_at
-        {
+        // Overlay on the first content line of message blocks: the per-message
+        // API-reported cost (always, when reported) and the timestamp (when the
+        // /timestamps toggle is on). The cost indicator is deliberately NOT
+        // coupled to `show_timestamps`: a reported cost renders even when
+        // timestamps are hidden (anchored to the right gutter on its own), so
+        // it never silently vanishes. Absent when the response reported no cost
+        // — never a fabricated `$0.00`.
+        if content_skip == 0 && !output.is_empty() && self.should_show_timestamp() {
             let first_content_y = content_area.y + if vpad_top_visible { 1 } else { 0 };
-
-            // The per-message API-reported cost, drawn to the LEFT of the
-            // timestamp in the same reserved gutter. Absent when the response
-            // reported no cost — never a fabricated `$0.00`.
             let cost = self.cost_display();
-
-            // Check if mouse is hovering the timestamp zone (rightmost 10 cols
-            // of the first content row).
-            let ts_hovered = self.mouse_pos.is_some_and(|(mx, my)| {
-                my == first_content_y
-                    && mx >= content_area.x + content_area.width.saturating_sub(10)
-                    && mx < content_area.x + content_area.width
-            });
-            let ts_str = if ts_hovered {
-                ts.format("  %H:%M:%S | %b %d").to_string()
-            } else {
-                ts.format("  %-I:%M %p").to_string()
-            };
-            let ts_width = ts_str.len() as u16;
-            // Total overlay width = cost (if any) + spacer + timestamp.
             let cost_width = cost.as_ref().map_or(0, |c| c.len() as u16);
-            let overlay_width = ts_width
-                .saturating_add(if cost.is_some() { cost_width.saturating_add(1) } else { 0 });
-            if content_area.width > overlay_width + 1 && first_content_y < max_row {
-                let ts_x = content_area.x + content_area.width - ts_width;
-                let ts_style = Style::default().fg(self.theme.gray);
-                buf.set_string_safe(ts_x, first_content_y, &ts_str, ts_style);
-                if let Some(cost) = cost {
-                    // Cost sits immediately left of the timestamp, separated by
-                    // one space. Subtle, honest chrome: dim but legible.
-                    let cost_x = ts_x.saturating_sub(cost_width.saturating_add(1));
+
+            // Timestamp: rightmost element when shown. When a cost is present
+            // it sits to the LEFT of the cost (cost stays right-aligned).
+            if self.appearance().show_timestamps
+                && let Some(ts) = self.entry.created_at
+            {
+                // Check if mouse is hovering the timestamp zone (rightmost 10
+                // cols of the first content row).
+                let ts_hovered = self.mouse_pos.is_some_and(|(mx, my)| {
+                    my == first_content_y
+                        && mx >= content_area.x + content_area.width.saturating_sub(10)
+                        && mx < content_area.x + content_area.width
+                });
+                let ts_str = if ts_hovered {
+                    ts.format("  %H:%M:%S | %b %d").to_string()
+                } else {
+                    ts.format("  %-I:%M %p").to_string()
+                };
+                let ts_width = ts_str.len() as u16;
+                // Total overlay width = cost (if any) + spacer + timestamp.
+                let overlay_width = ts_width.saturating_add(if cost_width > 0 {
+                    cost_width.saturating_add(1)
+                } else {
+                    0
+                });
+                if content_area.width > overlay_width + 1 && first_content_y < max_row {
+                    let ts_x = content_area.x + content_area.width - ts_width;
+                    let ts_style = Style::default().fg(self.theme.gray);
+                    buf.set_string_safe(ts_x, first_content_y, &ts_str, ts_style);
+                    if let Some(cost) = cost {
+                        // Cost sits immediately left of the timestamp, separated
+                        // by one space. Subtle, honest chrome: dim but legible.
+                        let cost_x = ts_x.saturating_sub(cost_width.saturating_add(1));
+                        let cost_style = Style::default().fg(self.theme.gray_dim);
+                        buf.set_string_safe(cost_x, first_content_y, &cost, cost_style);
+                    }
+                }
+            } else if let Some(cost) = cost {
+                // Timestamps hidden: the reported cost still renders, anchored
+                // to the reserved right gutter, so the indicator never vanishes.
+                if content_area.width > cost_width + 1 && first_content_y < max_row {
+                    let cost_x = content_area.x + content_area.width - cost_width;
                     let cost_style = Style::default().fg(self.theme.gray_dim);
                     buf.set_string_safe(cost_x, first_content_y, &cost, cost_style);
                 }
@@ -1637,6 +1663,53 @@ mod tests {
         assert!(
             cost_pos >= gutter.start as usize,
             "cost must be inside the reserved gutter (pos {cost_pos}, gutter {gutter:?})"
+        );
+    }
+
+    #[test]
+    fn cost_indicator_renders_when_timestamps_off() {
+        // A reported per-message cost must NOT silently vanish when the
+        // timestamp display is toggled off: criterion 1 requires the indicator
+        // whenever the API reports a cost, independent of unrelated appearance
+        // gates. With `show_timestamps=false` the cost token still renders,
+        // right-aligned in the reserved gutter, with no timestamp beside it.
+        let theme = Theme::current();
+        let appearance = AppearanceConfig {
+            show_timestamps: false,
+            ..Default::default()
+        };
+        let entry = ScrollbackEntry::new(RenderBlock::agent_message("hello"))
+            .with_cost_usd_ticks(Some(1_234_500_000)); // $0.12345
+        let renderer = EntryRenderer::new(&entry, &theme).with_appearance(appearance);
+
+        let width: u16 = 80;
+        let height = renderer.desired_height(width);
+        let area = Rect::new(0, 0, width, height);
+        let mut buf = Buffer::empty(area);
+        renderer.render(area, &mut buf);
+
+        let row = collect_row_symbols(&buf, 0, 0, width);
+        assert!(
+            row.contains("$0.12345"),
+            "cost token must render with timestamps off: {row:?}"
+        );
+        // No timestamp is shown when the timestamp toggle is off.
+        assert!(
+            !has_ampm_timestamp(&buf, 0, width),
+            "no timestamp when show_timestamps is off: {row:?}"
+        );
+        // The cost lives in the reserved right gutter, right-aligned.
+        let right = width - renderer.appearance().scrollback.layout.block_pad_right;
+        let cost_pos = row.find("$0.12345").expect("cost token present");
+        let gutter = gutter_band(&renderer, width);
+        assert!(
+            cost_pos >= gutter.start as usize,
+            "cost must be inside the reserved gutter (pos {cost_pos}, gutter {gutter:?})"
+        );
+        assert_eq!(
+            (right - "$0.12345".len() as u16) as usize,
+            cost_pos,
+            "cost must be right-aligned in the gutter"
         );
     }
 
