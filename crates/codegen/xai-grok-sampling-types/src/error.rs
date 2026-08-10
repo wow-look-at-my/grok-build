@@ -313,6 +313,49 @@ impl SamplingError {
         )
     }
 
+    /// The API rejected the request because the routed model or endpoint
+    /// accepts no image input at all. Distinct from
+    /// [`Self::is_image_processing_error`], which is one unreadable image on a
+    /// model that does support them; here every image in the conversation is
+    /// unroutable, so the recovery is the same strip but the cause is the
+    /// model choice.
+    ///
+    /// Providers disagree on both status and wording — OpenRouter answers 404
+    /// "No endpoints found that support image input", OpenAI answers 400
+    /// "Invalid content type. image_url is only supported by certain models" —
+    /// so this matches a phrase set case-insensitively across the statuses
+    /// providers actually use for it.
+    pub fn is_image_input_unsupported_error(&self) -> bool {
+        let SamplingError::Api {
+            status, message, ..
+        } = self
+        else {
+            return false;
+        };
+        if !matches!(status.as_u16(), 400 | 404 | 415 | 422 | 500) {
+            return false;
+        }
+        let message = message.to_ascii_lowercase();
+        [
+            "support image input",
+            "supports image input",
+            "support image_url",
+            "image_url is only supported",
+            "does not support image",
+            "doesn't support image",
+            "do not support image",
+            "don't support image",
+            "image input is not supported",
+            "image input not supported",
+            "images are not supported",
+            "does not support vision",
+            "doesn't support vision",
+            "vision is not supported",
+        ]
+        .iter()
+        .any(|needle| message.contains(needle))
+    }
+
     pub fn is_retryable(&self) -> bool {
         match self {
             SamplingError::Auth { .. } => false,
@@ -1174,6 +1217,83 @@ mod tests {
         assert!(
             !err.is_encrypted_content_error(),
             "unrelated 400 errors must not match"
+        );
+    }
+
+    /// The reported trap: OpenRouter answers a vision-less model with a 404,
+    /// which is otherwise a fatal status, so the images stayed in history and
+    /// every retry — including `/goal resume` — hit the same wall.
+    #[test]
+    fn image_input_unsupported_openrouter_404_detected() {
+        let err = SamplingError::Api {
+            status: StatusCode::NOT_FOUND,
+            message: "No endpoints found that support image input".into(),
+            model_metadata: None,
+            retry_after_secs: None,
+            should_retry: None,
+        };
+        assert!(err.is_image_input_unsupported_error());
+    }
+
+    #[test]
+    fn image_input_unsupported_matches_other_provider_wordings() {
+        for (status, message) in [
+            (
+                StatusCode::BAD_REQUEST,
+                "Invalid content type. image_url is only supported by certain models.",
+            ),
+            (
+                StatusCode::BAD_REQUEST,
+                "This model does not support image inputs",
+            ),
+            (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "images are not supported for this model",
+            ),
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "upstream error: 404: No endpoints found that support image input",
+            ),
+        ] {
+            let err = SamplingError::Api {
+                status,
+                message: message.into(),
+                model_metadata: None,
+                retry_after_secs: None,
+                should_retry: None,
+            };
+            assert!(
+                err.is_image_input_unsupported_error(),
+                "expected a match for {status}: {message}"
+            );
+        }
+    }
+
+    /// The other 404 this code path sees is a wrong model name, which stripping
+    /// images would not fix — it must stay fatal.
+    #[test]
+    fn image_input_unsupported_ignores_unrelated_errors() {
+        for (status, message) in [
+            (StatusCode::NOT_FOUND, "The model `gpt-9` does not exist"),
+            (StatusCode::BAD_REQUEST, "Could not process image"),
+            (StatusCode::TOO_MANY_REQUESTS, "support image input"),
+        ] {
+            let err = SamplingError::Api {
+                status,
+                message: message.into(),
+                model_metadata: None,
+                retry_after_secs: None,
+                should_retry: None,
+            };
+            assert!(
+                !err.is_image_input_unsupported_error(),
+                "unexpected match for {status}: {message}"
+            );
+        }
+        assert!(
+            !SamplingError::InvalidConfiguration("no endpoints support image input".into())
+                .is_image_input_unsupported_error(),
+            "only an API rejection carries this meaning"
         );
     }
 

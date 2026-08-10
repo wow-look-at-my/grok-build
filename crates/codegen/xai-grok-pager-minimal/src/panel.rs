@@ -572,6 +572,7 @@ mod tests {
             wire_source: McpWireSource::Local,
             plugin_name: None,
             is_managed_gateway: false,
+            error: None,
         }
     }
 

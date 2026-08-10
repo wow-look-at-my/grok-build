@@ -951,3 +951,110 @@ async fn await_event_matching(
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Model that takes no image input
+// ---------------------------------------------------------------------------
+
+fn user_request_with_image(text: &str) -> ConversationRequest {
+    use xai_grok_sampling_types::ContentPart;
+    ConversationRequest {
+        items: vec![ConversationItem::User(UserItem {
+            content: vec![
+                ContentPart::Text {
+                    text: std::sync::Arc::<str>::from(text),
+                },
+                ContentPart::Image {
+                    url: std::sync::Arc::<str>::from("data:image/png;base64,AAAA"),
+                },
+            ],
+            synthetic_reason: None,
+            ..Default::default()
+        })],
+        ..Default::default()
+    }
+}
+
+/// The reported trap, end to end: a vision-less model answers an image with a
+/// 404, which is otherwise fatal. The images live in conversation history, so
+/// a fatal there bricks every following turn — including `/goal resume` — with
+/// no way out but a new session.
+///
+/// Proves both halves of the recovery: this request completes after a strip,
+/// and the *next* request never ships the image at all, so a session that
+/// pasted a screenshot does not pay a rejected upload on every turn.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn image_input_rejection_strips_and_then_stops_resending() {
+    let bodies = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let bodies_handler = Arc::clone(&bodies);
+    let app = Router::new().route(
+        "/v1/chat/completions",
+        post(move |body: String| {
+            let bodies = Arc::clone(&bodies_handler);
+            async move {
+                let saw_image = body.contains("image_url");
+                bodies.lock().unwrap().push(body);
+                if saw_image {
+                    return Err::<Sse<_>, (StatusCode, String)>((
+                        StatusCode::NOT_FOUND,
+                        json!({
+                            "error": { "message": "No endpoints found that support image input" }
+                        })
+                        .to_string(),
+                    ));
+                }
+                let events = sse::chat_completion_events("ok", "test-model");
+                Ok(Sse::new(stream::iter(
+                    events.into_iter().map(Ok::<_, std::convert::Infallible>),
+                )))
+            }
+        }),
+    );
+    let server = MockServer::spawn(app).await;
+    let (event_tx, _event_rx) = mpsc::unbounded_channel();
+    let cfg = test_config(server.base_url(), "no-vision-model");
+    let handle = SamplerActor::spawn(cfg, RetryPolicy::default(), event_tx);
+
+    let (first, _) = handle
+        .submit_and_collect(
+            RequestId::from("req-image-1"),
+            user_request_with_image("what is in this screenshot"),
+        )
+        .await
+        .expect("the rejection must recover by stripping, not fail the turn");
+    assert_eq!(
+        first.assistant().map(|a| a.content.to_string()).as_deref(),
+        Some("ok")
+    );
+
+    let (second, _) = handle
+        .submit_and_collect(
+            RequestId::from("req-image-2"),
+            user_request_with_image("and now"),
+        )
+        .await
+        .expect("second turn must not fail either");
+    assert_eq!(
+        second.assistant().map(|a| a.content.to_string()).as_deref(),
+        Some("ok")
+    );
+
+    server.shutdown();
+
+    let bodies = bodies.lock().unwrap().clone();
+    assert_eq!(
+        bodies.iter().filter(|b| b.contains("image_url")).count(),
+        1,
+        "the image is sent once; after the model rejects it, later turns strip it up front"
+    );
+    assert_eq!(
+        bodies.len(),
+        3,
+        "one rejected attempt, its strip retry, then one clean turn"
+    );
+    assert!(
+        bodies[1].contains("cannot read images"),
+        "the placeholder must tell the model why the image is gone: {}",
+        bodies[1]
+    );
+}

@@ -117,7 +117,13 @@ impl SamplerActor {
                     .unwrap_or_else(|| self.state.config.clone());
                 let event_tx = self.event_tx.clone();
                 let retry_policy = self.state.retry_policy.clone();
-                let request_inner = *request;
+                let mut request_inner = *request;
+                let image_input_rejections = self.state.image_input_rejections.clone();
+                // This model already answered an image with "I take no image
+                // input". Strip up front rather than re-uploading the same
+                // blobs for the same rejection on every turn.
+                image_input_rejections
+                    .strip_if_rejected(&effective_config.model, &mut request_inner);
                 self.tasks.spawn(request_task::run_request_task(
                     request_id,
                     request_inner,
@@ -126,6 +132,7 @@ impl SamplerActor {
                     event_tx,
                     cancel_token,
                     completion_tx,
+                    image_input_rejections,
                 ));
             }
             SamplerCommand::Cancel { request_id } => {
