@@ -24,11 +24,10 @@ async fn model_picker_shows_long_model_names() {
         "Synthetic_Anthropic/hf:deepseek-ai/DeepSeek-V3.2",
     ];
 
-    let content = ContentController::start_with_models(
-        LONG_MODELS.iter().map(|m| MockModel::new(m)).collect(),
-    )
-    .await
-    .expect("start content with gateway-length model ids");
+    let content =
+        ContentController::start_with_models(LONG_MODELS.into_iter().map(MockModel::new).collect())
+            .await
+            .expect("start content with gateway-length model ids");
 
     let binary = pager_binary().expect("resolve pager binary");
     let mut harness =
@@ -47,15 +46,14 @@ async fn model_picker_shows_long_model_names() {
     // truncation is fine. Blank is not.
     for model in LONG_MODELS {
         let visible_prefix = &model[..30.min(model.len())];
-        harness
+        let found = harness
             .wait_for_text(visible_prefix, Duration::from_secs(15))
-            .unwrap_or_else(|_| {
-                panic!(
-                    "`{model}` is missing from the /model dropdown -- the row is blank.\n\
-                     screen:\n{}",
-                    harness.screen_contents()
-                )
-            });
+            .is_ok();
+        assert!(
+            found,
+            "`{model}` is missing from the /model dropdown -- the row is blank.\nscreen:\n{}",
+            harness.screen_contents()
+        );
     }
 
     assert!(
