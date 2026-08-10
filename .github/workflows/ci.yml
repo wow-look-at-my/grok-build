@@ -55,8 +55,11 @@ jobs:
       - name: Smoke-test the binary
         run: ./target/debug/xai-grok-pager --version
 
+      # --no-fail-fast: without it cargo stops at the first failing crate, so a
+      # single failure hides every crate after it and the next push finds a new
+      # one. One run, the whole list.
       - name: Test (workspace)
-        run: cargo test --locked --workspace
+        run: cargo test --locked --workspace --no-fail-fast
 
   build-release:
     name: Build release binary (${{ matrix.target_os }}/${{ matrix.target_arch }})

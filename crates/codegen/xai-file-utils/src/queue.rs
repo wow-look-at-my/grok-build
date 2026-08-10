@@ -2344,9 +2344,17 @@ fn cleanup_queue_dir(queue_dir: &Path, max_age: Duration, stats: Option<&UploadQ
         Err(_) => return 0,
     };
     let all_names: HashSet<std::ffi::OsString> = entries.iter().map(|e| e.file_name()).collect();
+    // Age every entry before removing any of them: pair_age reads the
+    // companion sidecar off disk, so sweeping a pair's sidecar first -- which
+    // readdir order alone decides -- would leave its temp file with no
+    // readable sidecar, and it would then look as fresh as its own mtime.
+    let ages: Vec<Option<Duration>> = entries
+        .iter()
+        .map(|e| pair_age(&e.path(), &e.file_name(), &all_names))
+        .collect();
     let mut cleaned = 0u64;
     let mut cleaned_bytes = 0u64;
-    for entry in &entries {
+    for (entry, pair_age) in entries.iter().zip(&ages) {
         let Ok(metadata) = entry.metadata() else {
             continue;
         };
@@ -2359,7 +2367,7 @@ fn cleanup_queue_dir(queue_dir: &Path, max_age: Duration, stats: Option<&UploadQ
             cleaned_bytes += sub_bytes;
             continue;
         }
-        let age = pair_age(&path, &name, &all_names).unwrap_or_else(|| {
+        let age = pair_age.unwrap_or_else(|| {
             metadata
                 .modified()
                 .ok()
@@ -6430,6 +6438,51 @@ mod tests {
         assert!(keep_sc.exists(), "fresh-by-sidecar sidecar kept");
         assert!(!drop_tmp.exists(), "expired-by-sidecar temp removed");
         assert!(!drop_sc.exists(), "expired-by-sidecar sidecar removed");
+    }
+
+    /// Every temp here is expired by its sidecar and fresh by its own mtime, so
+    /// any pair the sweep reaches sidecar-first survives if the sweep re-reads
+    /// sidecars as it deletes. One pair makes that a coin flip on readdir
+    /// order; a spread of names makes it near-certain some pair loses.
+    #[test]
+    fn cleanup_orphans_removes_expired_pairs_whatever_the_readdir_order() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let queue_dir = temp.path().join("upload_queue");
+        std::fs::create_dir_all(&queue_dir).unwrap();
+        let enqueued = (chrono::Utc::now() - chrono::Duration::hours(3)).to_rfc3339();
+        let pairs: Vec<_> = ["aa", "bb", "cc", "dd", "ee", "ff", "gg", "hh"]
+            .iter()
+            .map(|stem| {
+                let tmp = queue_dir.join(format!("{stem}_turn1_a.tar.gz_1_0"));
+                std::fs::write(&tmp, b"bytes").unwrap();
+                let sidecar = QueueItemSidecar {
+                    schema_version: 1,
+                    session_id: "s".to_string(),
+                    turn_number: 1,
+                    gcs_path: "s/turn_1/a".to_string(),
+                    content_type: "application/gzip".to_string(),
+                    artifact_name: "a".to_string(),
+                    enqueued_at: enqueued.clone(),
+                    sha256: "0".repeat(64),
+                };
+                let sc = sidecar_path_for(&tmp);
+                std::fs::write(&sc, serde_json::to_vec(&sidecar).unwrap()).unwrap();
+                (tmp, sc)
+            })
+            .collect();
+
+        cleanup_queue_dir(&queue_dir, Duration::from_secs(2 * 3600), None);
+
+        let survivors: Vec<_> = pairs
+            .iter()
+            .flat_map(|(tmp, sc)| [tmp, sc])
+            .filter(|p| p.exists())
+            .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        assert!(
+            survivors.is_empty(),
+            "every pair is 3h old by sidecar and must be swept whole; survived: {survivors:?}"
+        );
     }
     /// `remove_owned_source` deletes both variants — both are queue-owned (a
     /// working-tree source is snapshotted, never enqueued directly).
