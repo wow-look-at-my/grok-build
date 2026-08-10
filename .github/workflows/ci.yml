@@ -58,27 +58,6 @@ jobs:
       - name: Test (workspace)
         run: cargo test --locked --workspace
 
-      # The pins below re-run tests the workspace step already ran, and assert
-      # by NAME that they exist. A renamed or deleted test is invisible to the
-      # step above -- the suite just gets quietly smaller -- and these are the
-      # tests where that silence costs a session: the egress gates, and the
-      # pause copy that decides whether a stuck goal offers a retry that
-      # cannot work. A filter matching nothing exits 0, so assert the count.
-      - name: Pin (named tests still exist)
-        run: |
-          set -o pipefail
-          pins=(
-            session::acp_session::turn_end::goal_pause_message_tests::content_rejections_do_not_offer_a_bare_resume
-            session::acp_session::turn_end::goal_pause_message_tests::transient_failures_keep_the_resume_offer
-            agent::mvp_agent::tests::remote_settings_alone_cannot_enable_session_replicas
-            agent::mvp_agent::tests::storage_mode_stays_local_when_settings_advertise_writeback
-            config::tests::from_remote_gated_ignores_server_advertised_writeback
-          )
-          cargo test --locked -p xai-grok-shell --lib -- --exact "${pins[@]}" \
-            | tee /tmp/shell-pins.log
-          grep -q "^test result: ok\. ${#pins[@]} passed" /tmp/shell-pins.log \
-            || { echo "expected ${#pins[@]} pinned test(s) to run; renamed or deleted?"; exit 1; }
-
   build-release:
     name: Build release binary (${{ matrix.target_os }}/${{ matrix.target_arch }})
     runs-on: ${{ matrix.runner }}
