@@ -1069,6 +1069,51 @@ fn subagents_config_parses_max_depth_from_toml() {
     });
 }
 #[test]
+fn subagent_limit_counts_resolve_env_over_toml_over_remote_over_default() {
+    use xai_grok_tools::implementations::grok_build::task::admission;
+    let resolve = SubagentsConfig::resolve_max_concurrent;
+    assert_eq!(resolve(Some("3"), Some(2), Some(4)), 3);
+    assert_eq!(resolve(None, Some(2), Some(4)), 2);
+    assert_eq!(resolve(None, None, Some(5)), 5);
+    assert_eq!(resolve(None, None, None), admission::DEFAULT_MAX_CONCURRENT);
+    assert_eq!(resolve(Some("-2"), Some(2), None), 2);
+    assert_eq!(resolve(None, Some(0), Some(3)), 1);
+    assert_eq!(
+            SubagentsConfig::resolve_workflow_max_concurrent(None, None, None),
+            crate::session::workflow::host_service::DEFAULT_WORKFLOW_MAX_CONCURRENT_AGENTS
+        );
+}
+#[test]
+fn subagent_limit_behavior_resolves_env_over_toml_over_remote_over_queue() {
+    use xai_grok_tools::implementations::grok_build::task::admission::LimitBehavior;
+    let resolve = SubagentsConfig::resolve_limit_behavior;
+    assert_eq!(
+            resolve(Some("fail"), Some("queue"), Some("queue")),
+            LimitBehavior::Fail
+        );
+    assert_eq!(resolve(None, Some("FAIL"), Some("queue")), LimitBehavior::Fail);
+    assert_eq!(resolve(None, None, Some("fail")), LimitBehavior::Fail);
+    assert_eq!(resolve(None, None, None), LimitBehavior::Queue);
+    assert_eq!(
+            resolve(Some("sometimes"), Some("fail"), None),
+            LimitBehavior::Fail
+        );
+    assert_eq!(resolve(None, Some("sometimes"), None), LimitBehavior::Queue);
+}
+#[test]
+fn subagents_config_parses_limits_from_toml() {
+    without_grok_subagents(|| {
+        let config: toml::Value = toml::from_str(
+                "[subagents]\nmax_concurrent = 4\nlimit_behavior = \"fail\"\nworkflow_max_concurrent = 8\n",
+            )
+            .unwrap();
+        let sa = SubagentsConfig::resolve(false, &config);
+        assert_eq!(sa.max_concurrent, Some(4));
+        assert_eq!(sa.limit_behavior.as_deref(), Some("fail"));
+        assert_eq!(sa.workflow_max_concurrent, Some(8));
+    });
+}
+#[test]
 fn subagents_config_parses_negative_max_depth_without_dropping_section() {
     without_grok_subagents(|| {
         let config: toml::Value = toml::from_str(
@@ -3690,11 +3735,12 @@ fn kill_switched_cold_cwd_stays_allowed_through_plugins_config_read() {
             "gate must still allow the kill-switched folder after the config read"
         );
 }
-/// Writeback requires grok.com auth: remote may advertise it, but a non-xai
-/// credential is downgraded to `Local`.
+/// Writeback flushes the conversation to grok-code-backend, so the server
+/// advertising it never turns it on here — with or without first-party auth.
+/// Only `--storage-mode` / `GROK_STORAGE_MODE` reach Writeback.
 #[test]
 #[serial_test::serial]
-fn from_remote_gated_requires_xai_auth_for_writeback() {
+fn from_remote_gated_ignores_server_advertised_writeback() {
     let _env = crate::env::EnvVarGuard::remove("GROK_STORAGE_MODE");
     let writeback = crate::util::config::RemoteSettings {
         writeback_enabled: Some(true),
@@ -3702,7 +3748,8 @@ fn from_remote_gated_requires_xai_auth_for_writeback() {
     };
     assert_eq!(
         StorageMode::from_remote_gated(Some(&writeback), true),
-        StorageMode::Writeback
+        StorageMode::Local,
+        "a server-set writeback_enabled must not start syncing the conversation"
     );
     assert_eq!(
         StorageMode::from_remote_gated(Some(&writeback), false),
@@ -3711,5 +3758,13 @@ fn from_remote_gated_requires_xai_auth_for_writeback() {
     assert_eq!(
         StorageMode::from_remote_gated(None, true),
         StorageMode::Local
+    );
+    // Reuse the guard: it holds a process-wide env lock that a second guard
+    // for the same variable would deadlock on.
+    _env.set_value("writeback");
+    assert_eq!(
+        StorageMode::resolve(None, None),
+        StorageMode::Writeback,
+        "the operator's own opt-in still works"
     );
 }

@@ -38,7 +38,7 @@ fn resolve_overrides(
 }
 
 /// Build the config-resolved event data from a list of MCP server configs.
-pub fn build_config_resolved_event(
+pub(crate) fn build_config_resolved_event(
     configs: &[acp::McpServer],
     cwd: &Path,
 ) -> xai_file_utils::events::Event {
@@ -50,14 +50,12 @@ pub fn build_config_resolved_event(
         .map(|c| xai_file_utils::events::McpConfigServer {
             name: inner::mcp_server_name(c).to_string(),
             transport: inner::mcp_transport_str(c).to_string(),
-            source: if inner::mcp_server_name(c)
-                .starts_with(crate::session::managed_mcp::MANAGED_MCP_PREFIX)
-            {
-                "managed"
-            } else {
-                "local"
-            }
-            .to_string(),
+            source:
+                match crate::session::mcp_dispatcher::classify_source(inner::mcp_server_name(c)) {
+                    crate::extensions::mcp::McpServerSource::Managed => "managed",
+                    crate::extensions::mcp::McpServerSource::Local => "local",
+                }
+                .to_string(),
         })
         .collect();
     xai_file_utils::events::Event::McpConfigResolved { servers, disabled }
@@ -65,7 +63,7 @@ pub fn build_config_resolved_event(
 
 /// Outcome of [`wait_until_mcp_init_settles`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum McpInitWait {
+pub(crate) enum McpInitWait {
     /// Every server finished; tools are registered.
     Initialized,
     /// Nothing is in flight, and it never completed — the caller owns starting
@@ -80,7 +78,7 @@ pub enum McpInitWait {
 /// The budget is the point of this function. A server that keeps failing gets
 /// re-initialized, which puts the state back in flight, so a poll with no
 /// deadline never returns — and its caller is a prompt waiting to run.
-pub async fn wait_until_mcp_init_settles(
+pub(crate) async fn wait_until_mcp_init_settles(
     mcp_state: &tokio::sync::Mutex<inner::McpState>,
     budget: std::time::Duration,
 ) -> McpInitWait {
@@ -102,7 +100,7 @@ pub async fn wait_until_mcp_init_settles(
     }
 }
 
-pub async fn start_mcp_server(
+pub(crate) async fn start_mcp_server(
     mcp_server: acp::McpServer,
     cwd: Option<&Path>,
     meta_config: Option<&inner::McpServerMetaConfig>,
@@ -118,7 +116,7 @@ pub async fn start_mcp_server(
 /// servers (built under a brief lock via `McpState::build_pending_acp_clients`). SDK clients
 /// never fail to build, so they enter as `Ok`. One entry point so the init batch doesn't
 /// invoke two builders.
-pub async fn build_pending_clients(
+pub(crate) async fn build_pending_clients(
     mcp_state: &tokio::sync::Mutex<inner::McpState>,
     configs_to_start: Vec<acp::McpServer>,
     cwd: Option<&Path>,
@@ -220,7 +218,7 @@ mod tests {
     }
 }
 
-pub async fn start_mcp_servers(
+pub(crate) async fn start_mcp_servers(
     mcp_servers: Vec<acp::McpServer>,
     cwd: Option<&Path>,
     meta_config_map: &inner::McpMetaConfigMap,
