@@ -67,6 +67,23 @@ jobs:
       - name: Test (workspace)
         run: cargo test --locked --workspace --no-fail-fast
 
+      # The PTY suites drive the real binary through a virtual terminal and
+      # assert on what is actually on screen. They are #[ignore]d because they
+      # need a built binary, which is why nothing ran them -- and unit tests
+      # cannot stand in for them: a model picker whose rows rendered blank had
+      # passing tests over the width function the whole time. Every case here
+      # spawns a process, so cap the workers rather than letting libtest fan out
+      # to the core count.
+      - name: Test (PTY end-to-end)
+        env:
+          PAGER_BINARY: ${{ github.workspace }}/target/debug/xai-grok-pager
+        run: |
+          cargo test --locked -p xai-grok-pager --no-fail-fast \
+            --test pty_e2e_smoke \
+            --test pty_e2e_config_ui \
+            --test pty_e2e_minimal \
+            -- --ignored --test-threads 4
+
   build-release:
     name: Build release binary (${{ matrix.target_os }}/${{ matrix.target_arch }})
     runs-on: ${{ matrix.runner }}
