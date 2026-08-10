@@ -790,14 +790,32 @@ mod tests {
     /// Spawn a long-sleeping child to stand in for a predecessor process.
     #[cfg(target_os = "linux")]
     #[allow(clippy::disallowed_methods)] // test fixture; the test kills it
+    /// Spawn a `sleep` predecessor and wait until it has actually exec'd.
+    ///
+    /// Between `spawn` returning and the exec landing, `/proc/<pid>/comm` still
+    /// reads the forked test binary's name, so `PredecessorTarget::open` finds
+    /// no "sleep" to match, declines the takeover, and signals nobody. That
+    /// window is short enough to never lose locally and wide enough to lose on
+    /// a loaded runner.
     fn spawn_predecessor() -> Child {
-        Command::new("sleep")
+        let child = Command::new("sleep")
             .arg("300")
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()
-            .expect("spawn sleep")
+            .expect("spawn sleep");
+        let comm = format!("/proc/{}/comm", child.id());
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while fs::read_to_string(&comm).is_ok_and(|c| c.trim() != "sleep") {
+            assert!(
+                Instant::now() < deadline,
+                "predecessor never exec'd sleep (comm: {:?})",
+                fs::read_to_string(&comm)
+            );
+            thread::sleep(Duration::from_millis(5));
+        }
+        child
     }
 
     /// Wait (bounded) for a child to exit; returns true if it did.

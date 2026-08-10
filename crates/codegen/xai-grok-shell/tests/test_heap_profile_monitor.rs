@@ -30,7 +30,6 @@ const SID: &str = "11111111-1111-4111-8111-111111111111";
 const TEST_VERSION: &str = "9.9.9-heaptest";
 const DUMP_PAYLOAD: u64 = 4096;
 const AUTH_TOKEN: &str = "heap-profile-test-bearer";
-const AUTH_BEARER: &str = "Bearer heap-profile-test-bearer";
 
 static HOOKS_INIT: Once = Once::new();
 static FAKE_ALLOCATED: AtomicU64 = AtomicU64::new(1_000);
@@ -145,6 +144,22 @@ fn proxy_handles(server: &MockInferenceServer, auth: Arc<AuthManager>) -> HeapPr
     )
 }
 
+/// The upload egress is neutralized in this build (see `heap_profile::monitor`,
+/// where the GCS call is replaced by a `telemetry_disabled` log line), so a
+/// crossing writes its dump locally and stops there. Every threshold test
+/// asserts that rather than assuming it.
+fn assert_no_storage_egress(h: &Harness) {
+    assert_eq!(
+        h.server.storage_request_count(),
+        0,
+        "heap dumps must not be uploaded: this build reports nothing"
+    );
+    assert!(
+        h.server.storage_uploads().is_empty(),
+        "heap dumps must not be uploaded: this build reports nothing"
+    );
+}
+
 fn assert_jemalloc_object_pair(sid: &str, version: &str, heap: &str, meta: &str) {
     assert!(is_valid_session_id(sid));
     let ver = sanitize_version(version);
@@ -169,30 +184,6 @@ fn assert_jemalloc_object_pair(sid: &str, version: &str, heap: &str, meta: &str)
     let (expected_heap, expected_meta) = object_paths(sid, version, ts);
     assert_eq!(heap, expected_heap);
     assert_eq!(meta, expected_meta);
-}
-
-fn assert_storage_auth(uploads: &[xai_grok_test_support::mock_server::StorageUpload]) {
-    for u in uploads {
-        assert_eq!(
-            u.authorization.as_deref(),
-            Some(AUTH_BEARER),
-            "storage upload {:?} missing live AuthManager bearer",
-            u.path
-        );
-    }
-}
-
-fn assert_meta_json(body: &[u8], threshold: u64, resident: u64, allocated: u64) {
-    let meta: serde_json::Value = serde_json::from_slice(body).expect("meta.json parses");
-    assert_eq!(meta["session_id"], SID);
-    assert_eq!(meta["binary_version"], TEST_VERSION);
-    assert_eq!(meta["threshold_bytes"], threshold);
-    assert_eq!(meta["stats_resident"], resident);
-    assert_eq!(meta["stats_allocated"], allocated);
-    assert_eq!(meta["lg_prof_sample"], heap_profile::LG_PROF_SAMPLE);
-    assert_eq!(meta["os"], std::env::consts::OS);
-    assert!(meta["ts_unix"].as_u64().is_some());
-    assert!(meta["rss_peak_bytes"].as_u64().is_some());
 }
 
 /// Busy-wait past the wall-clock second boundary so successive dumps get
@@ -267,7 +258,7 @@ impl Harness {
 
 #[tokio::test]
 #[serial_test::serial(heap_profile_integration)]
-async fn mock_settings_enable_threshold_upload_hits_storage_with_object_paths() {
+async fn crossing_a_threshold_dumps_locally_and_uploads_nothing() {
     let mut h = Harness::start(settings(true, &[1_000])).await;
     assert!(h.mon.config().enabled);
     assert!(FAKE_PROF_ACTIVE.load(Ordering::Relaxed));
@@ -278,20 +269,12 @@ async fn mock_settings_enable_threshold_upload_hits_storage_with_object_paths() 
 
     assert!(h.mon.latched().contains(&1_000));
     assert_eq!(FAKE_DUMP_COUNT.load(Ordering::Relaxed), 1);
-    assert_eq!(h.server.storage_request_count(), 2);
+    assert_no_storage_egress(&h);
 
-    let uploads = h.server.storage_uploads();
-    assert_eq!(uploads.len(), 2);
-    assert_eq!(uploads[0].size, DUMP_PAYLOAD as usize);
-    assert_eq!(uploads[0].body.len(), DUMP_PAYLOAD as usize);
-    assert!(uploads[0].body.iter().all(|&b| b == 0xAB));
-    assert_jemalloc_object_pair(SID, TEST_VERSION, &uploads[0].path, &uploads[1].path);
-    assert_storage_auth(&uploads);
-    assert_meta_json(&uploads[1].body, 1_000, 2_000, 1_000);
-
+    // Latched, so a second tick at the same resident size changes nothing.
     h.mon.poll_tick().await;
     assert_eq!(FAKE_DUMP_COUNT.load(Ordering::Relaxed), 1);
-    assert_eq!(h.server.storage_request_count(), 2);
+    assert_no_storage_egress(&h);
 }
 
 #[tokio::test]
@@ -303,7 +286,7 @@ async fn mock_settings_disable_stops_sampling_and_further_dumps() {
     FAKE_RESIDENT.store(600, Ordering::Relaxed);
     h.mon.poll_tick().await;
     assert!(h.mon.latched().contains(&500));
-    assert_eq!(h.server.storage_uploads().len(), 2);
+    assert_no_storage_egress(&h);
     let dumps_after_first = FAKE_DUMP_COUNT.load(Ordering::Relaxed);
     assert_eq!(dumps_after_first, 1);
 
@@ -318,7 +301,7 @@ async fn mock_settings_disable_stops_sampling_and_further_dumps() {
     FAKE_RESIDENT.store(10_000, Ordering::Relaxed);
     h.mon.poll_tick().await;
     assert_eq!(FAKE_DUMP_COUNT.load(Ordering::Relaxed), dumps_after_first);
-    assert_eq!(h.server.storage_uploads().len(), 2);
+    assert_no_storage_egress(&h);
     assert!(!h.mon.latched().contains(&2_000));
 }
 
@@ -338,9 +321,12 @@ async fn mock_settings_off_from_start_never_dumps() {
     assert!(h.server.storage_uploads().is_empty());
 }
 
+/// A storage endpoint that would reject the upload changes nothing, because no
+/// upload is attempted in the first place. Latching is local and must not
+/// depend on what a server would have said.
 #[tokio::test]
 #[serial_test::serial(heap_profile_integration)]
-async fn storage_unauthorized_latches_without_accepted_upload() {
+async fn storage_rejection_cannot_affect_latching() {
     let mut h = Harness::start(settings(true, &[100])).await;
     h.server.set_storage_unauthorized(true);
 
@@ -348,10 +334,8 @@ async fn storage_unauthorized_latches_without_accepted_upload() {
     h.mon.poll_tick().await;
 
     assert!(h.mon.latched().contains(&100));
-    // Heap upload fails (401); meta is not attempted (no orphan .meta.json).
-    assert_eq!(h.server.storage_request_count(), 1);
-    assert!(h.server.storage_uploads().is_empty());
     assert_eq!(FAKE_DUMP_COUNT.load(Ordering::Relaxed), 1);
+    assert_no_storage_egress(&h);
 }
 
 #[tokio::test]
@@ -384,28 +368,41 @@ async fn trace_upload_disabled_keeps_monitor_off() {
 
 #[tokio::test]
 #[serial_test::serial(heap_profile_integration)]
-async fn multi_threshold_uploads_unique_paths_in_order() {
+async fn multi_threshold_latches_one_at_a_time() {
     let mut h = Harness::start(settings(true, &[100, 200])).await;
 
     FAKE_RESIDENT.store(500, Ordering::Relaxed);
     h.mon.poll_tick().await;
     assert!(h.mon.latched().contains(&100));
     assert!(!h.mon.latched().contains(&200));
-    assert_eq!(h.server.storage_uploads().len(), 2);
+    assert_eq!(FAKE_DUMP_COUNT.load(Ordering::Relaxed), 1);
 
     wait_for_next_unix_second().await;
     h.mon.poll_tick().await;
     assert!(h.mon.latched().contains(&200));
-    let uploads = h.server.storage_uploads();
-    assert_eq!(uploads.len(), 4);
+    assert_eq!(
+        FAKE_DUMP_COUNT.load(Ordering::Relaxed),
+        2,
+        "one dump per threshold crossed, not one per tick"
+    );
+    assert_no_storage_egress(&h);
+}
 
-    assert_jemalloc_object_pair(SID, TEST_VERSION, &uploads[0].path, &uploads[1].path);
-    assert_jemalloc_object_pair(SID, TEST_VERSION, &uploads[2].path, &uploads[3].path);
-    assert_ne!(uploads[0].path, uploads[2].path);
-    assert_ne!(uploads[1].path, uploads[3].path);
-    assert_storage_auth(&uploads);
-    assert_meta_json(&uploads[1].body, 100, 500, 1_000);
-    assert_meta_json(&uploads[3].body, 200, 500, 1_000);
+/// The object paths the dumps would have been stored under, checked directly
+/// rather than through uploads that no longer happen. They stay live because
+/// they name the local dump files, and two crossings in the same session must
+/// not collide.
+#[tokio::test]
+#[serial_test::serial(heap_profile_integration)]
+async fn object_paths_are_well_formed_and_unique_per_crossing() {
+    let first = object_paths(SID, TEST_VERSION, 100);
+    wait_for_next_unix_second().await;
+    let second = object_paths(SID, TEST_VERSION, 200);
+
+    assert_jemalloc_object_pair(SID, TEST_VERSION, &first.0, &first.1);
+    assert_jemalloc_object_pair(SID, TEST_VERSION, &second.0, &second.1);
+    assert_ne!(first.0, second.0, "heap objects must not collide");
+    assert_ne!(first.1, second.1, "meta objects must not collide");
 }
 
 #[tokio::test]
@@ -424,20 +421,16 @@ async fn below_threshold_does_not_touch_storage() {
 
 #[tokio::test]
 #[serial_test::serial(heap_profile_integration)]
-async fn exact_threshold_triggers_dump_and_upload() {
+async fn exact_threshold_triggers_dump() {
     let mut h = Harness::start(settings(true, &[10_000])).await;
 
+    // Landing exactly on the threshold counts as crossing it.
     FAKE_RESIDENT.store(10_000, Ordering::Relaxed);
     h.mon.poll_tick().await;
 
     assert!(h.mon.latched().contains(&10_000));
     assert_eq!(FAKE_DUMP_COUNT.load(Ordering::Relaxed), 1);
-    assert_eq!(h.server.storage_request_count(), 2);
-    let uploads = h.server.storage_uploads();
-    assert_eq!(uploads.len(), 2);
-    assert_jemalloc_object_pair(SID, TEST_VERSION, &uploads[0].path, &uploads[1].path);
-    assert_storage_auth(&uploads);
-    assert_meta_json(&uploads[1].body, 10_000, 10_000, 1_000);
+    assert_no_storage_egress(&h);
 }
 
 #[tokio::test]
@@ -461,7 +454,7 @@ async fn re_enable_after_kill_switch_keeps_prior_latches() {
     FAKE_RESIDENT.store(150, Ordering::Relaxed);
     h.mon.poll_tick().await;
     assert!(h.mon.latched().contains(&100));
-    assert_eq!(h.server.storage_uploads().len(), 2);
+    assert_eq!(FAKE_DUMP_COUNT.load(Ordering::Relaxed), 1);
 
     h.server.set_settings(settings(false, &[100, 200]));
     h.reconfigure_from_server().await;
@@ -469,7 +462,11 @@ async fn re_enable_after_kill_switch_keeps_prior_latches() {
 
     FAKE_RESIDENT.store(500, Ordering::Relaxed);
     h.mon.poll_tick().await;
-    assert_eq!(h.server.storage_uploads().len(), 2);
+    assert_eq!(
+        FAKE_DUMP_COUNT.load(Ordering::Relaxed),
+        1,
+        "the kill switch must stop dumping"
+    );
 
     h.server.set_settings(settings(true, &[100, 200]));
     h.reconfigure_from_server().await;
@@ -479,11 +476,10 @@ async fn re_enable_after_kill_switch_keeps_prior_latches() {
     wait_for_next_unix_second().await;
     h.mon.poll_tick().await;
     assert!(h.mon.latched().contains(&100));
-    assert!(h.mon.latched().contains(&200));
-    assert_eq!(h.server.storage_uploads().len(), 4);
+    assert!(
+        h.mon.latched().contains(&200),
+        "re-enabling must resume latching new thresholds"
+    );
     assert_eq!(FAKE_DUMP_COUNT.load(Ordering::Relaxed), 2);
-    let uploads = h.server.storage_uploads();
-    assert_ne!(uploads[0].path, uploads[2].path);
-    assert_storage_auth(&uploads[2..]);
-    assert_meta_json(&uploads[3].body, 200, 500, 1_000);
+    assert_no_storage_egress(&h);
 }

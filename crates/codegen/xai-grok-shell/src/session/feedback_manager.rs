@@ -1545,11 +1545,15 @@ mod tests {
         );
     }
 
-    /// A hung analytics endpoint must not hold process exit for the full HTTP
-    /// client timeout when the session *does* have reportable activity.
-    /// `shutdown` wraps the final force-sync in `SHUTDOWN_SIGNAL_SYNC_TIMEOUT` (2s).
+    /// Reportable activity must not make shutdown wait on a hung endpoint.
+    ///
+    /// `shutdown` caps the final force-sync at `SHUTDOWN_SIGNAL_SYNC_TIMEOUT`
+    /// (2s), but that cap is now unreachable: the client refuses every report
+    /// before the wire, so the sync fails instantly against an endpoint that
+    /// never answers. The session below has a turn on it precisely so the
+    /// force-sync is attempted rather than skipped.
     #[tokio::test]
-    async fn test_shutdown_force_sync_is_timeout_capped() {
+    async fn test_shutdown_does_not_wait_on_a_hung_endpoint_when_reportable() {
         use crate::agent::feedback_client::FeedbackClient;
         use std::time::Instant;
 
@@ -1573,15 +1577,9 @@ mod tests {
         let started = Instant::now();
         manager.shutdown(None).await;
         let elapsed = started.elapsed();
-        // Outer budget is 2s; allow generous slack for slow CI hosts, but
-        // never approach the 60s client timeout.
         assert!(
-            elapsed < Duration::from_secs(5),
-            "shutdown must return within the signal-sync budget + slack on a hung signals POST, got {elapsed:?}"
-        );
-        assert!(
-            elapsed >= Duration::from_millis(1500),
-            "expected to wait most of the force_sync budget when reportable, got {elapsed:?}"
+            elapsed < Duration::from_millis(500),
+            "nothing is reported, so shutdown must not wait on the hung endpoint at all, got {elapsed:?}"
         );
     }
 
@@ -1887,37 +1885,11 @@ mod tests {
 mod author_identity_tests {
     use super::*;
     use crate::util::user_identity::ResolvedUserIdentity;
-    use axum::{Router, routing::post};
-    use std::net::SocketAddr;
-    use tokio::net::TcpListener;
 
-    /// Mock feedback backend: capture the POST /v1/feedback JSON body.
-    async fn start_capture_server() -> (
-        SocketAddr,
-        Arc<parking_lot::Mutex<Option<serde_json::Value>>>,
-    ) {
-        let captured = Arc::new(parking_lot::Mutex::new(None::<serde_json::Value>));
-        let captured_for_handler = captured.clone();
-        let router = Router::new().route(
-            "/v1/feedback",
-            post(move |body: axum::Json<serde_json::Value>| {
-                let captured = captured_for_handler.clone();
-                async move {
-                    *captured.lock() = Some(body.0);
-                    axum::Json(serde_json::json!({
-                        "feedbackId": "fb-1",
-                        "createdAt": chrono::Utc::now(),
-                    }))
-                }
-            }),
-        );
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        tokio::spawn(async move {
-            axum::serve(listener, router).await.unwrap();
-        });
-        (addr, captured)
-    }
+    // No mock backend here: nothing this build produces reaches one. The
+    // workflow's observable output is the local `feedback.jsonl` entry, which
+    // it writes before it ever consults a client, so identity resolution and
+    // metadata merging are asserted there.
 
     fn text_submission() -> FeedbackSubmission {
         let mut s = new_submission(
@@ -1931,11 +1903,10 @@ mod author_identity_tests {
 
     /// End-to-end: an env var (as a device-management launcher would inject)
     /// referenced by `[feedback.user]` with `$VAR` is expanded at config load,
-    /// resolved, carried on the feedback POST alongside the rest of the
-    /// submission, and retained on the local entry.
+    /// resolved, carried onto the submission, and retained on the local entry.
     #[tokio::test]
     #[serial_test::serial]
-    async fn env_var_identity_reaches_the_wire_end_to_end() {
+    async fn env_var_identity_reaches_the_local_entry_end_to_end() {
         let _email =
             xai_grok_test_support::env::EnvGuard::set("GROK_TEST_WORK_EMAIL", "ada@corp.example");
         let _name =
@@ -1961,17 +1932,11 @@ email = ["$GROK_TEST_WORK_EMAIL"]
         assert_eq!(identity.name.as_deref(), Some("Ada Lovelace"));
         assert_eq!(identity.email.as_deref(), Some("ada@corp.example"));
 
-        let (addr, captured) = start_capture_server().await;
-        let client = crate::agent::feedback_client::FeedbackClient::with_client(
-            reqwest::Client::new(),
-            format!("http://{addr}/v1"),
-            Some("tok".into()),
-        );
         let mut submission = text_submission();
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let outcome = submit_feedback_workflow(
             &mut submission,
-            Some(&client),
+            None,
             Some(&tx),
             SubmitFeedbackOptions {
                 solicited: false,
@@ -1980,15 +1945,7 @@ email = ["$GROK_TEST_WORK_EMAIL"]
             },
         )
         .await;
-        assert!(matches!(outcome, SubmitOutcome::Submitted));
-
-        // Author identity rides on the same submission as the rest of the
-        // feedback; nothing is stripped here.
-        let body = captured.lock().clone().expect("server saw the POST");
-        assert_eq!(body["authorName"], "Ada Lovelace");
-        assert_eq!(body["authorEmail"], "ada@corp.example");
-        assert_eq!(body["modelId"], "grok-4");
-        assert_eq!(body["feedbackText"], "great session");
+        assert!(matches!(outcome, SubmitOutcome::LocalOnly));
 
         // The local entry keeps the author fields and the full context.
         let msg = rx.try_recv().expect("persistence entry was sent");
@@ -2001,8 +1958,8 @@ email = ["$GROK_TEST_WORK_EMAIL"]
         assert_eq!(persisted.model_id.as_deref(), Some("grok-4"));
     }
 
-    /// `GROK_USER_METADATA` is merged into the submission and travels with it:
-    /// onto the wire body for triage and onto the local feedback.jsonl entry.
+    /// `GROK_USER_METADATA` is merged into the submission and lands on the
+    /// local feedback.jsonl entry.
     #[tokio::test]
     #[serial_test::serial]
     async fn workflow_merges_user_metadata_into_submission() {
@@ -2010,18 +1967,12 @@ email = ["$GROK_TEST_WORK_EMAIL"]
             "GROK_USER_METADATA",
             r#"{"team": "platform-tools"}"#,
         );
-        let (addr, captured) = start_capture_server().await;
-        let client = crate::agent::feedback_client::FeedbackClient::with_client(
-            reqwest::Client::new(),
-            format!("http://{addr}/v1"),
-            Some("tok".into()),
-        );
         let mut submission = text_submission();
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
 
         let outcome = submit_feedback_workflow(
             &mut submission,
-            Some(&client),
+            None,
             Some(&tx),
             SubmitFeedbackOptions {
                 solicited: false,
@@ -2030,10 +1981,7 @@ email = ["$GROK_TEST_WORK_EMAIL"]
             },
         )
         .await;
-        assert!(matches!(outcome, SubmitOutcome::Submitted));
-
-        let body = captured.lock().clone().expect("server saw the POST");
-        assert_eq!(body["metadata"]["team"], "platform-tools");
+        assert!(matches!(outcome, SubmitOutcome::LocalOnly));
 
         let msg = rx.try_recv().expect("persistence entry was sent");
         let PersistenceMsg::Feedback(LocalFeedbackEntry::UserFeedback(entry)) = msg else {
@@ -2049,26 +1997,17 @@ email = ["$GROK_TEST_WORK_EMAIL"]
     #[tokio::test]
     #[serial_test::serial]
     async fn workflow_without_identity_omits_author_fields() {
-        let (addr, captured) = start_capture_server().await;
-        let client = crate::agent::feedback_client::FeedbackClient::with_client(
-            reqwest::Client::new(),
-            format!("http://{addr}/v1"),
-            Some("tok".into()),
-        );
-
         // Both no opt-in and an unresolved opt-in must leave the author keys
-        // out of the body and the local entry.
+        // off the local entry.
         for (case, author_identity) in [
             ("no opt-in", None),
             ("unresolved", Some(ResolvedUserIdentity::default())),
         ] {
-            // Reset so this case can't pass on the previous case's body.
-            *captured.lock() = None;
             let mut submission = text_submission();
             let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
             let outcome = submit_feedback_workflow(
                 &mut submission,
-                Some(&client),
+                None,
                 Some(&tx),
                 SubmitFeedbackOptions {
                     solicited: false,
@@ -2077,11 +2016,7 @@ email = ["$GROK_TEST_WORK_EMAIL"]
                 },
             )
             .await;
-            assert!(matches!(outcome, SubmitOutcome::Submitted), "{case}");
-
-            let body = captured.lock().clone().expect("server saw the POST");
-            assert!(body.get("authorName").is_none(), "{case}: {body}");
-            assert!(body.get("authorEmail").is_none(), "{case}: {body}");
+            assert!(matches!(outcome, SubmitOutcome::LocalOnly), "{case}");
 
             let msg = rx.try_recv().expect("persistence entry was sent");
             let PersistenceMsg::Feedback(LocalFeedbackEntry::UserFeedback(entry)) = msg else {

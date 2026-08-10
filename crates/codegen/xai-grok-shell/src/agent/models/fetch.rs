@@ -96,11 +96,24 @@ fn prefetch_models_blocking_gated(
             Some(map)
         }
         Ok(FetchModelsResult { .. }) => {
-            tracing::warn!("Models endpoint returned empty list");
+            tracing::error!(
+                url = %cache_origin,
+                "models listing is empty: nothing to fall back on if a custom \
+                 endpoint replaced the built-in defaults"
+            );
             None
         }
         Err(e) => {
-            tracing::warn!("Failed to fetch models: {:?}", e);
+            // Name the URL: a 404 here usually means the base serves inference
+            // but no listing (several Anthropic-protocol providers expose
+            // /v1/messages and nothing else), which is a different fix from a
+            // bad key or an unreachable host.
+            tracing::error!(
+                url = %cache_origin,
+                error = ?e,
+                "models fetch failed: the model picker will be empty unless \
+                 [model.*] entries are configured"
+            );
             None
         }
     }

@@ -607,7 +607,12 @@ impl TerminalContext {
             is_ssh: self.is_ssh,
             is_byobu: self.is_byobu(),
             term_var: self.term_var_or_na().to_owned(),
-            term_version: None,
+            // Empty means nothing reported a version, which the wire type says
+            // with None rather than with "".
+            term_version: match self.term_version().0 {
+                v if v.is_empty() => None,
+                v => Some(v),
+            },
             tmux_version: if self.is_tmux_backed() {
                 self.tmux_version.clone()
             } else {
