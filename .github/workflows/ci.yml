@@ -60,9 +60,25 @@ jobs:
       - name: Test (auto-update disable pins)
         run: cargo test --locked -p xai-grok-update --lib
 
-      # The shell's own egress pins. Named tests rather than the whole crate:
-      # its suite is long and needs fixtures this job does not stage, and a
-      # pin nothing runs is not a pin.
+      # Sampling recovery: whether a rejected request recovers or bricks the
+      # session is decided here, and both suites run in seconds.
+      - name: Test (sampler + sampling types)
+        run: cargo test --locked -p xai-grok-sampler -p xai-grok-sampling-types
+
+      # The goal harness's pause copy, named for the same reason as the egress
+      # pins below. Same count check: a filter that matches nothing exits 0.
+      - name: Test (goal pause remedy)
+        run: |
+          set -o pipefail
+          pins=(
+            session::acp_session::turn_end::goal_pause_message_tests::content_rejections_do_not_offer_a_bare_resume
+            session::acp_session::turn_end::goal_pause_message_tests::transient_failures_keep_the_resume_offer
+          )
+          cargo test --locked -p xai-grok-shell --lib -- --exact "${pins[@]}" \
+            | tee /tmp/goal-pause.log
+          grep -q "^test result: ok\. ${#pins[@]} passed" /tmp/goal-pause.log \
+            || { echo "expected ${#pins[@]} goal-pause test(s) to run; filter matched nothing?"; exit 1; }
+
       # The shell's own egress pins. Named tests rather than the whole crate:
       # its suite is long and needs fixtures this job does not stage, and a
       # pin nothing runs is not a pin. A filter that matches nothing exits 0,

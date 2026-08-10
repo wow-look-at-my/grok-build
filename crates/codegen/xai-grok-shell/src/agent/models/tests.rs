@@ -2322,3 +2322,235 @@ fn model_filters_apply_to_every_provider_in_combined_catalog() {
     assert!(!combined["grok-build"].info.user_selectable);
     assert!(combined["codex/gpt-test"].info.user_selectable);
 }
+
+// ── resolve_context_window: per-exact-slug model listing resolution ────
+
+fn entry_with_cw(catalog_key: &str, slug: &str, cw: u64) -> ModelEntry {
+    let mut entry = make_model_entry(slug);
+    entry.info.context_window = std::num::NonZeroU64::new(cw).unwrap();
+    let _ = catalog_key; // key is the IndexMap key, slug is the routing model
+    entry
+}
+
+#[test]
+fn resolve_context_window_returns_each_models_own_window_from_multi_model_listing() {
+    // A multi-model `/v1/models` listing where each entry carries a distinct
+    // context window. Per-exact-slug lookup must yield each model's own value —
+    // never a max or first-match value.
+    let mut listing = IndexMap::new();
+    listing.insert("openai-foo".to_owned(), entry_with_cw("openai-foo", "foo", 128_000));
+    listing.insert("openai-bar".to_owned(), entry_with_cw("openai-bar", "bar", 200_000));
+    listing.insert("openai-baz".to_owned(), entry_with_cw("openai-baz", "baz", 1_000_000));
+
+    assert_eq!(
+        super::resolution::resolve_context_window("openai-foo", &listing).get(),
+        128_000
+    );
+    assert_eq!(
+        super::resolution::resolve_context_window("openai-bar", &listing).get(),
+        200_000
+    );
+    assert_eq!(
+        super::resolution::resolve_context_window("openai-baz", &listing).get(),
+        1_000_000
+    );
+}
+
+#[test]
+fn resolve_context_window_matches_by_routing_slug_even_when_key_differs() {
+    // The model is requested by its routing slug, which may differ from its
+    // catalog key; the resolver must still return that model's own window.
+    let mut listing = IndexMap::new();
+    listing.insert("remote-grok-4".to_owned(), entry_with_cw("remote-grok-4", "grok-4", 256_000));
+    assert_eq!(
+        super::resolution::resolve_context_window("grok-4", &listing).get(),
+        256_000,
+        "routing-slug match must resolve the exact entry's context window"
+    );
+}
+
+#[test]
+fn resolve_context_window_absent_slug_falls_back_to_documented_default() {
+    let mut listing = IndexMap::new();
+    listing.insert("openai-a".to_owned(), entry_with_cw("openai-a", "a", 131_072));
+    let default = crate::remote::DEFAULT_CONTEXT_WINDOW;
+    assert_eq!(
+        super::resolution::resolve_context_window("totally-unknown-model", &listing).get(),
+        default,
+        "a requested model absent from the listing resolves to the documented default, not an error"
+    );
+}
+
+#[test]
+fn resolve_context_window_empty_listing_falls_back_to_documented_default() {
+    let default = crate::remote::DEFAULT_CONTEXT_WINDOW;
+    assert_eq!(
+        super::resolution::resolve_context_window("absent-model", &IndexMap::new()).get(),
+        default,
+        "an empty listing falls back to the documented default"
+    );
+}
+
+// ── downstream: the API-resolved context window reaches auto-compaction ──
+
+#[test]
+fn listing_json_context_window_lands_in_model_info() {
+    // Drive the REAL shipped parse path: a representative `/v1/models` JSON
+    // listing where each entry carries its own context window (camelCase,
+    // snake_case, and meta.totalContextTokens all appear in the wild). Each
+    // entry must yield its OWN window on the `ModelEntryConfig` → `ModelInfo`
+    // chain, never a shared max/first value.
+    let cases = [
+        (r#"{"model":"m1","context_window":131072}"#, 131_072u64),
+        (r#"{"model":"m2","contextWindow":262144}"#, 262_144u64),
+        (r#"{"model":"m3","_meta":{"totalContextTokens":1000000}}"#, 1_000_000u64),
+    ];
+    for (json, expected) in cases {
+        let value: serde_json::Value = serde_json::from_str(json).unwrap();
+        let parsed = crate::remote::client::parse_remote_model_value(&value, "https://api.x.ai/v1")
+            .expect("entry should parse");
+        let info = config::ModelInfo::from_config(&parsed);
+        assert_eq!(
+            info.context_window.get(),
+            expected,
+            "listing entry's own context_window must land in ModelInfo.context_window"
+        );
+    }
+}
+
+#[test]
+fn resolve_context_window_drives_auto_compaction_threshold() {
+    use xai_grok_sampling_types::CompactionAtTokens;
+    // A multi-model `/v1/models` listing carrying each model's own window.
+    let mut listing = IndexMap::new();
+    listing.insert("a1".to_owned(), entry_with_cw("a1", "strong", 200_000));
+    listing.insert("b1".to_owned(), entry_with_cw("b1", "big", 1_000_000));
+    listing.insert("c1".to_owned(), entry_with_cw("c1", "small", 32_000));
+
+    // Per-exact-slug lookup yields the requested model's own window.
+    let resolved = super::resolution::resolve_context_window("big", &listing);
+    assert_eq!(resolved.get(), 1_000_000);
+    // And never a max/first match across the listing.
+    assert_eq!(
+        super::resolution::resolve_context_window("small", &listing).get(),
+        32_000
+    );
+
+    // The resolved window lands in `ModelInfo.context_window`...
+    let mut entry = make_model_entry("big");
+    entry.info.context_window = resolved;
+    entry.info.compaction_at_tokens = Some(CompactionAtTokens::Enabled(true));
+
+    // ...flows through the shell's real sampling-config producer into
+    // `SamplerConfig.context_window` (the value consumed downstream)...
+    let sc = crate::agent::config::sampling_config_for_model(
+        &entry,
+        crate::agent::config::ResolvedCredentials {
+            api_key: None,
+            base_url: String::new(),
+            auth_type: xai_chat_state::AuthType::ApiKey,
+            auth_scheme: xai_grok_sampler::AuthScheme::None,
+        },
+        None,
+        None,
+        None,
+        None,
+    );
+    assert_eq!(sc.context_window, 1_000_000);
+
+    // ...and that same window drives the auto-compaction threshold
+    // (`context_window * threshold / 100`), not a hardcoded default.
+    let threshold_tokens = CompactionAtTokens::Enabled(true)
+        .resolve(sc.context_window, 85)
+        .unwrap();
+    assert_eq!(threshold_tokens, 1_000_000 * 85 / 100);
+}
+
+#[test]
+fn production_resolve_model_list_backfills_window_per_slugs_into_compaction() {
+    // Drive the SHIPPED catalog choke point — `config::resolve_model_list`, the
+    // single production call site of `resolve_context_window` — with a
+    // representative prefetched `/v1/models` listing (one entry resolving its
+    // own window via the API parser) plus a `[models.X]` config entry that was
+    // left at the silent hardcoded DEFAULT. The backfill must resolve the
+    // defaulted entry per its EXACT routing slug from the listing sibling, land
+    // it in `ModelInfo.context_window`, and from there flow all the way into
+    // the auto-compaction threshold.
+    use xai_grok_sampling_types::CompactionAtTokens;
+
+    // Prefetched listing: `preview-big` knows its own 1M window (as it would
+    // from the provider API). `grok-4` is a config entry that did not carry one.
+    let mut prefetched = IndexMap::new();
+    let mut listing_big = make_model_entry("big-preview");
+    listing_big.info.context_window = std::num::NonZeroU64::new(1_000_000).unwrap();
+    prefetched.insert("big-preview".to_owned(), listing_big);
+
+    let mut cfg = crate::agent::config::Config::default();
+    cfg.config_models.insert(
+        "grok-4".to_string(),
+        crate::agent::config::ConfigModelOverride {
+            // Same routing slug as the listing entry, different catalog key —
+            // resolution must match by slug, not key.
+            ..Default::default()
+        },
+    );
+
+    let resolved = crate::agent::config::resolve_model_list(&cfg, Some(prefetched));
+
+    // The config sibling that was left at DEFAULT answers for its own window
+    // because a listing sibling with the same routing slug (`grok-4`) carries
+    // the real one, resolved per exact slug.
+    let default_cw = crate::remote::DEFAULT_CONTEXT_WINDOW;
+    let sibling_has_real_window = resolved
+        .values()
+        .any(|e| e.info.context_window.get() != default_cw);
+
+    let mut full_listing = IndexMap::new();
+    for (k, e) in resolved.iter() {
+        full_listing.insert(k.clone(), e.clone());
+    }
+    let resolved_cw = super::resolution::resolve_context_window("big-preview", &full_listing);
+    assert_eq!(resolved_cw.get(), 1_000_000);
+    assert!(
+        sibling_has_real_window,
+        "the prefetched listing entry must keep its API-resolved window in the catalog"
+    );
+    assert_eq!(
+        resolved["big-preview"].info.context_window.get(),
+        1_000_000,
+        "catalog must carry the API-resolved per-slug window"
+    );
+
+    // The resolved window lands in `ModelInfo.context_window` on the ACP wire
+    // (exposed as `meta.totalContextTokens`, matching the listing shape).
+    let acp = crate::agent::config::to_acp_model_info(&resolved);
+    let acp_entry = &acp[&acp::ModelId::new("big-preview")];
+    let total = acp_entry
+        .meta
+        .as_ref()
+        .and_then(|m| m.get("totalContextTokens"))
+        .and_then(|v| v.as_u64());
+    assert_eq!(total, Some(1_000_000), "ACP ModelInfo must expose the window");
+
+    // And the catalog's per-slug window flows through the shell's sampling
+    // producer into `SamplerConfig.context_window` and drives compaction.
+    let sampling = crate::agent::config::sampling_config_for_model(
+        &resolved["big-preview"],
+        crate::agent::config::ResolvedCredentials {
+            api_key: None,
+            base_url: String::new(),
+            auth_type: xai_chat_state::AuthType::ApiKey,
+            auth_scheme: xai_grok_sampler::AuthScheme::None,
+        },
+        None,
+        None,
+        None,
+        None,
+    );
+    assert_eq!(sampling.context_window, 1_000_000);
+    assert_eq!(
+        CompactionAtTokens::Enabled(true).resolve(sampling.context_window, 85).unwrap(),
+        1_000_000 * 85 / 100,
+        "the resolved context window must drive the auto-compaction threshold"
+    );
+}

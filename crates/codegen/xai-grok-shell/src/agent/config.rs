@@ -534,7 +534,7 @@ impl EndpointsConfig {
             .models_base_url
             .clone()
             .unwrap_or_else(|| self.proxy_url());
-        format!("{}/models", base)
+        crate::remote::models_list_url_for_base(&base)
     }
 }
 impl Default for EndpointsConfig {
@@ -3779,33 +3779,46 @@ pub(crate) fn resolve_model_list(
     }
     {
         let default_cw = DEFAULT_CONTEXT_WINDOW;
-        let donors: std::collections::HashMap<String, (std::num::NonZeroU64, ApiBackend)> =
-            resolved
-                .values()
-                .filter(|e| e.info.context_window.get() != default_cw)
-                .map(|e| {
-                    (
-                        e.info.model.clone(),
-                        (e.info.context_window, e.info.api_backend.clone()),
-                    )
-                })
-                .collect();
+        // Entries that carry a real (non-default) context window, treated as a
+        // per-slug `/v1/models` listing for backfilling entries that were left
+        // at the silent hardcoded default. Resolution is per exact routing
+        // slug (each model answers for its OWN window — never a max or
+        // first-match value), via the same `resolve_context_window` lookup the
+        // prefetch resolution path uses.
+        let cw_sources: IndexMap<String, ModelEntry> = resolved
+            .iter()
+            .filter(|(_, e)| e.info.context_window.get() != default_cw)
+            .map(|(k, e)| (k.clone(), e.clone()))
+            .collect();
+        // api_backend inherits from a sibling with the same routing slug. This
+        // is keyed by slug with last-inserted-wins so an explicitly-set
+        // `api_backend` (e.g. an explicit `chat_completions` that equals the
+        // default) on a config model is never overridden by a bundled sibling
+        // that shares its slug.
+        let backend_donors: std::collections::HashMap<String, ApiBackend> = resolved
+            .values()
+            .filter(|e| e.info.context_window.get() != default_cw)
+            .map(|e| (e.info.model.clone(), e.info.api_backend.clone()))
+            .collect();
         for entry in resolved.values_mut() {
-            if let Some((donor_cw, donor_backend)) = donors.get(&entry.info.model) {
-                if entry.info.context_window.get() == default_cw {
+            if entry.info.context_window.get() == default_cw {
+                let resolved_cw =
+                    crate::agent::models::resolve_context_window(&entry.info.model, &cw_sources);
+                if resolved_cw.get() != default_cw {
                     tracing::debug!(
                         model = %entry.info.model,
                         from = default_cw,
-                        to = donor_cw.get(),
-                        "slug-match: inheriting context_window from sibling catalog entry"
+                        to = resolved_cw.get(),
+                        "context_window resolved per exact slug from sibling model-listing entry"
                     );
-                    entry.info.context_window = *donor_cw;
+                    entry.info.context_window = resolved_cw;
                 }
-                if entry.info.api_backend == ApiBackend::default()
-                    && *donor_backend != ApiBackend::default()
-                {
-                    entry.info.api_backend.clone_from(donor_backend);
-                }
+            }
+            if entry.info.api_backend == ApiBackend::default()
+                && let Some(donor_backend) = backend_donors.get(&entry.info.model)
+                && *donor_backend != ApiBackend::default()
+            {
+                entry.info.api_backend.clone_from(donor_backend);
             }
         }
     }

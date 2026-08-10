@@ -2403,10 +2403,8 @@ mod tests {
             ..minimal_config()
         };
         let client = SamplingClient::new(cfg).expect("client should build");
-        let request = client
-            .post("https://example.test/v1/chat/completions")
-            .build()
-            .expect("request should build");
+        let SentRequest { builder, .. } = client.post("https://example.test/v1/chat/completions");
+        let request = builder.build().expect("request should build");
 
         assert!(request.headers().get(AUTHORIZATION).is_none());
         assert!(request.headers().get("x-api-key").is_none());
