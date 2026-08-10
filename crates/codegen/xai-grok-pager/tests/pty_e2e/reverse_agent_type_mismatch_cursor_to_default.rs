@@ -9,7 +9,7 @@ use super::common::*;
 #[ignore]
 async fn reverse_agent_type_mismatch_cursor_to_default() {
     let content = ContentController::start_with_models(vec![
-        MockModel::with_agent_type("cursor-model", "cursor"),
+        MockModel::with_agent_type("cursor-model", STRICT_HARNESS_AGENT_TYPE),
         MockModel::new("default-model"),
     ])
     .await

@@ -26,6 +26,8 @@ mod dashboard_overlay_tab_esc_backout_and_ctrl_backslash;
 mod extensions_modal_copy_hints_pty;
 #[path = "pty_e2e/iterm_readline_editing.rs"]
 mod iterm_readline_editing;
+#[path = "pty_e2e/model_picker_shows_long_model_names.rs"]
+mod model_picker_shows_long_model_names;
 #[path = "pty_e2e/prompt_suggestion_ghost_tab_accepts.rs"]
 mod prompt_suggestion_ghost_tab_accepts;
 #[path = "pty_e2e/reasoning_efforts_fallback_menu_matches_builtin.rs"]
