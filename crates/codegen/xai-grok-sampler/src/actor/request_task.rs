@@ -18,9 +18,11 @@ use tokio_util::sync::CancellationToken;
 use tracing::Instrument;
 
 use xai_grok_sampling_types::{
-    ConversationRequest, ConversationResponse, EmptyResponseContext, SamplingError, SentCredential,
-    error::Result as SamplingResult,
+    ConversationRequest, ConversationResponse, EmptyResponseContext, ImageStripReason,
+    SamplingError, SentCredential, error::Result as SamplingResult,
 };
+
+use crate::actor::state::ImageInputRejections;
 
 use crate::client::{ApiBackend, SamplingClient};
 use crate::config::{RetryPolicy, SamplerConfig};
@@ -86,6 +88,7 @@ pub(crate) async fn run_request_task(
     event_tx: mpsc::UnboundedSender<SamplingEvent>,
     cancel_token: CancellationToken,
     completion_tx: Option<oneshot::Sender<CompletionResult>>,
+    image_input_rejections: ImageInputRejections,
 ) -> RequestId {
     let mut completion_tx = completion_tx;
     let idle_timeout = Duration::from_secs(
@@ -225,6 +228,7 @@ pub(crate) async fn run_request_task(
                     &config,
                     &cancel_token,
                     &mut completion_tx,
+                    &image_input_rejections,
                 )
                 .await
                 {
@@ -278,6 +282,7 @@ pub(crate) async fn run_request_task(
                     &config,
                     &cancel_token,
                     &mut completion_tx,
+                    &image_input_rejections,
                 )
                 .await
                 {
@@ -301,6 +306,7 @@ pub(crate) async fn run_request_task(
                     &config,
                     &cancel_token,
                     &mut completion_tx,
+                    &image_input_rejections,
                 )
                 .await
                 {
@@ -329,6 +335,7 @@ async fn apply_retry_decision(
     config: &SamplerConfig,
     cancel_token: &CancellationToken,
     completion_tx: &mut Option<oneshot::Sender<CompletionResult>>,
+    image_input_rejections: &ImageInputRejections,
 ) -> bool {
     let rate_limit_threshold = if retry_policy.rate_limit_retry_threshold == 0 {
         retry_mod::RATE_LIMIT_RETRY_THRESHOLD
@@ -342,7 +349,7 @@ async fn apply_retry_decision(
     // images proactively before any retry of those errors so we don't
     // burn budget re-uploading the same large body.
     if err.is_likely_body_rejected() {
-        let stripped = request.strip_images();
+        let stripped = request.strip_images(ImageStripReason::PayloadRejected);
         if stripped > 0 {
             tracing::warn!(
                 stripped,
@@ -373,7 +380,21 @@ async fn apply_retry_decision(
             }
         }
         RetryDecision::RetryWithImageStrip => {
-            let stripped = request.strip_images();
+            let reason = if err.is_image_input_unsupported_error() {
+                // Remember the model, not just this request: the images live on
+                // in conversation history, and every later turn would re-upload
+                // them for the same rejection.
+                image_input_rejections.mark(&config.model);
+                tracing::warn!(
+                    model = %config.model,
+                    reason = %err,
+                    "model rejected image input; stripping images for this and later turns"
+                );
+                ImageStripReason::ModelLacksVision
+            } else {
+                ImageStripReason::PayloadRejected
+            };
+            let stripped = request.strip_images(reason);
             if stripped == 0 {
                 // Nothing left to strip; upgrade to fatal.
                 emit_failed(event_tx, request_id, err);
@@ -998,6 +1019,7 @@ mod tests {
             &config,
             &cancel_token,
             &mut completion_tx,
+            &ImageInputRejections::default(),
         )
         .await;
 
