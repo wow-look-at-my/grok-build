@@ -1256,7 +1256,11 @@ impl ModelsManager {
             let first_real_catalog = !cat.has_fetched_real_catalog;
             cat.has_fetched_real_catalog = true;
             cat.prefetched = Some(models);
-            cat.models = resolve_model_catalog(cfg, cat.prefetched.clone());
+            cat.models = merge_codex_catalog(
+                cfg,
+                resolve_model_catalog(cfg, cat.prefetched.clone()),
+                &self.inner.codex_models.read(),
+            );
             cat.etag = new_etag;
             cat.allowlist_excludes_all = allowlist_matches_nothing(cfg, &cat.models);
             // In the lock: the flag and its mirror can't desync vs `clear()`.
@@ -1381,6 +1385,82 @@ impl ModelsManager {
             self.set_current_model_id_internal(new_id);
         }
     }
+}
+
+
+/// Add a provider-qualified Codex catalog to the resolved xAI/custom catalog.
+///
+/// Provider entries are kept outside `prefetched`: xAI auth refreshes may
+/// replace that catalog wholesale, while an independent Codex sign-in must
+/// remain available. User model filters still apply uniformly.
+fn merge_codex_catalog(
+    cfg: &config::Config,
+    mut catalog: IndexMap<String, ModelEntry>,
+    codex_models: &IndexMap<String, ModelEntry>,
+) -> IndexMap<String, ModelEntry> {
+    let mut additive = codex_models.clone();
+
+    if let Ok(Some(disabled)) = ModelGlobSet::compile(cfg.models.disabled_models.as_ref()) {
+        additive.retain(|key, entry| !disabled.matches(key, &entry.model));
+    }
+
+    match ModelGlobSet::compile(cfg.models.allowed_models.as_ref()) {
+        Ok(None) => {
+            for entry in additive.values_mut() {
+                entry.info.user_selectable = true;
+            }
+        }
+        Ok(Some(allowed)) => {
+            for (key, entry) in additive.iter_mut() {
+                entry.info.user_selectable = allowed.matches(key, &entry.model);
+            }
+        }
+        Err(_) => {
+            for entry in additive.values_mut() {
+                entry.info.user_selectable = false;
+            }
+        }
+    }
+
+    if let Ok(Some(hidden)) = ModelGlobSet::compile(cfg.models.hidden_models.as_ref()) {
+        for (key, entry) in additive.iter_mut() {
+            if hidden.matches(key, &entry.model) {
+                entry.info.hidden = true;
+            }
+        }
+    }
+
+    if let Some(effort) = cfg.models.default_reasoning_effort
+        && let Some(default_id) = cfg.models.default.as_deref()
+        && let Some(entry) = additive.get_mut(default_id)
+        && entry.info.supports_reasoning_effort
+    {
+        entry.info.reasoning_effort = Some(effort);
+    }
+
+    if let Some(effort) = cfg.reasoning_effort_override {
+        for entry in additive.values_mut() {
+            if model_offers_reasoning_effort(&entry.info, effort) {
+                entry.info.reasoning_effort = Some(effort);
+            }
+        }
+    }
+
+    catalog.extend(additive);
+    catalog
+}
+
+// ── Refresh strategy ────────────────────────────────────────────────────────
+
+/// How to resolve the model list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RefreshStrategy {
+    /// Always fetch from network, ignore cache.
+    Online,
+    /// Only use cached data, never fetch.
+    Offline,
+    /// Use cache if fresh, otherwise fetch.
+    OnlineIfUncached,
 }
 
 mod cache;

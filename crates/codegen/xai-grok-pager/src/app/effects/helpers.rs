@@ -1235,14 +1235,6 @@ pub(crate) async fn persist_setting(
                 .await
                 .map_err(|e| e.to_string())
         }
-        "openai_compatible.context_window" => {
-            let SettingValue::Int(value) = value else {
-                return Err(kind_mismatch(key, "Int", &value));
-            };
-            xai_grok_shell::util::config::set_openai_compatible_context_window(value)
-                .await
-                .map_err(|e| e.to_string())
-        }
         "openai_compatible.make_default" => {
             let SettingValue::Bool(value) = value else {
                 return Err(kind_mismatch(key, "Bool", &value));

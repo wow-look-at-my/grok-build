@@ -380,7 +380,16 @@ pub(super) fn handle_session_notification(notif: &acp::ExtNotification, app: &mu
                 .unwrap_or(false);
             let persona_display = persona.clone();
             let role_display = role.clone();
-            let model_display = model.clone();
+            // The `model` field carries the subagent's *model id* string.
+            // Resolve it to its friendly display name through the parent
+            // session's model catalog (`ModelId -> ModelInfo.name`) so every
+            // downstream surface (scrollback subagent block, subagent title
+            // bar, tasks pane) shows the same friendly name the dashboard
+            // peek resolves. Models unknown to the catalog fall back to the
+            // raw id via `display_name_for`.
+            let model_display = model
+                .as_deref()
+                .map(|m| agent.session.models.display_name_for(&acp::ModelId::new(Arc::from(m))));
             agent.subagent_sessions.insert(
                 child_session_id.clone(),
                 SubagentInfo {
@@ -390,7 +399,7 @@ pub(super) fn handle_session_notification(notif: &acp::ExtNotification, app: &mu
                     subagent_type: Arc::from(subagent_type.clone()),
                     persona: persona.map(Arc::from),
                     role: role.map(Arc::from),
-                    model: model.map(Arc::from),
+                    model: model_display.clone().map(Arc::from),
                     context_source: effective_context_source.map(Arc::from),
                     resumed_from: resumed_from.map(Arc::from),
                     capability_mode: capability_mode.map(Arc::from),
