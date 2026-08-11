@@ -127,10 +127,16 @@ impl PromptUsage {
         }
     }
 
-    /// Drop cost ticks when partial or incomplete so all wire surfaces fail closed.
-    /// Incomplete bills clear ticks even when `cost_is_partial` is false.
+    /// Drop cost ticks when the bill is incomplete (genuine data loss: drain
+    /// timeout, apply-miss, or nested-subagent incomplete). A **partial** cost
+    /// (`cost_is_partial` — some calls lacked cost) is NOT scrubbed: the
+    /// reported ticks are valid for the calls that did report, and hiding them
+    /// entirely is worse than showing a partial sum (especially for
+    /// OpenAI-compatible endpoints where per-call cost reporting is
+    /// inconsistent). The `cost_is_partial` flag still rides the wire for
+    /// billing reconciliation.
     pub(crate) fn scrub_untrustworthy_costs(&mut self) {
-        if !(self.usage_is_incomplete || self.totals.cost_is_partial) {
+        if !self.usage_is_incomplete {
             return;
         }
         self.totals.cost_usd_ticks = None;
@@ -328,7 +334,10 @@ pub(crate) fn project_result_usage(result: &mut serde_json::Value, usage: &Promp
     if usage.usage_is_incomplete {
         result["usage_is_incomplete"] = true.into();
     }
-    let hide_costs = cost_is_partial || usage.usage_is_incomplete;
+    // Hide costs only on genuine data loss (incomplete). A partial bill
+    // (some calls lacked cost) still shows the reported sum — the
+    // `cost_is_partial` flag rides the wire for reconciliation.
+    let hide_costs = usage.usage_is_incomplete;
     if hide_costs {
         if cost_is_partial {
             result["cost_is_partial"] = true.into();
@@ -338,6 +347,9 @@ pub(crate) fn project_result_usage(result: &mut serde_json::Value, usage: &Promp
         // Exact integer ticks beside the float, under the same trust gate:
         // reconciliation sums ticks exactly, which floats cannot guarantee.
         result["total_cost_usd_ticks"] = serde_json::json!(ticks);
+        if cost_is_partial {
+            result["cost_is_partial"] = true.into();
+        }
     }
     if !usage.model_usage.is_empty() {
         let mut model_usage = serde_json::Map::new();
@@ -365,7 +377,6 @@ pub(crate) fn project_result_usage(result: &mut serde_json::Value, usage: &Promp
             });
             if !hide_costs
                 && let Some(ticks) = cost_usd_ticks
-                && !cost_is_partial
             {
                 entry["costUSD"] = serde_json::json!(ticks_to_usd(ticks));
             }
@@ -2352,7 +2363,12 @@ mod tests {
     }
 
     #[test]
-    fn project_result_hides_costs_when_partial_or_incomplete() {
+    fn project_result_hides_costs_when_incomplete_but_not_partial() {
+        // A partial bill (some calls lacked cost) still shows the reported
+        // cost — hiding it entirely is worse than a partial sum, especially
+        // for OpenAI-compatible endpoints with inconsistent per-call cost
+        // reporting. Only a genuinely incomplete bill (drain timeout /
+        // apply-miss) hides cost.
         let mut model_usage = indexmap::IndexMap::new();
         model_usage.insert(
             "m".into(),
@@ -2385,11 +2401,13 @@ mod tests {
         let mut result = serde_json::json!({});
         project_result_usage(&mut result, &partial);
         assert_eq!(result["usage"]["input_tokens"], 60);
-        assert!(result.get("total_cost_usd").is_none());
-        assert!(result.get("total_cost_usd_ticks").is_none());
+        // Partial cost is still shown (not scrubbed).
+        assert_eq!(result["total_cost_usd"], 0.1);
+        assert_eq!(result["total_cost_usd_ticks"], 1_000_000_000);
         assert_eq!(result["cost_is_partial"], true);
-        assert!(result["modelUsage"]["m"].get("costUSD").is_none());
+        assert_eq!(result["modelUsage"]["m"]["costUSD"], 0.1);
 
+        // Incomplete (genuine data loss) still scrubs cost.
         let mut incomplete = PromptUsage {
             totals: PromptUsageModel {
                 input_tokens: 50,
@@ -2447,8 +2465,10 @@ mod tests {
     }
 
     #[test]
-    fn scrub_untrustworthy_costs_clears_ticks_when_partial() {
-        let mut usage = PromptUsage {
+    fn scrub_untrustworthy_costs_keeps_ticks_when_partial_but_clears_when_incomplete() {
+        // Partial cost (some calls lacked cost) is NOT scrubbed — the reported
+        // ticks are valid for the calls that did report.
+        let mut partial = PromptUsage {
             totals: PromptUsageModel {
                 input_tokens: 10,
                 output_tokens: 1,
@@ -2462,9 +2482,37 @@ mod tests {
             num_turns: 1,
             usage_is_incomplete: false,
         };
-        usage.scrub_untrustworthy_costs();
-        assert!(usage.totals.cost_usd_ticks.is_none());
-        assert!(usage.totals.cost_is_partial);
+        partial.scrub_untrustworthy_costs();
+        assert_eq!(
+            partial.totals.cost_usd_ticks,
+            Some(100),
+            "partial cost must NOT be scrubbed"
+        );
+
+        // Incomplete (genuine data loss) IS scrubbed.
+        let mut incomplete = PromptUsage {
+            totals: PromptUsageModel {
+                input_tokens: 10,
+                output_tokens: 1,
+                total_tokens: 11,
+                cost_usd_ticks: Some(100),
+                cost_is_partial: true,
+                cost_missing_calls: 1,
+                ..Default::default()
+            },
+            model_usage: Default::default(),
+            num_turns: 1,
+            usage_is_incomplete: true,
+        };
+        incomplete.scrub_untrustworthy_costs();
+        assert!(
+            incomplete.totals.cost_usd_ticks.is_none(),
+            "incomplete cost must be scrubbed"
+        );
+        assert!(
+            incomplete.totals.cost_is_partial,
+            "cost_is_partial flag preserved for reporting"
+        );
     }
 
     #[test]
