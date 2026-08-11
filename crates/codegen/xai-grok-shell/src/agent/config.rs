@@ -594,7 +594,6 @@ impl Default for OpenAiCompatibleConfig {
             base_url: String::new(),
             model: String::new(),
             api_backend: ApiBackend::AutoDetect,
-            context_window: 200_000,
             make_default: true,
         }
     }
@@ -3755,9 +3754,8 @@ pub(crate) fn resolve_model_list(
     // single configured entry under `OPENAI_COMPATIBLE_MODEL_ID` is kept as an
     // offline fallback. Computed here (while `prefetched` is still owned) so the
     // prefetched map can be moved into `resolved` afterwards without a partial move.
-    let mut openai_entries = None;
-    if let Some(mut prefetched) = prefetched {
-        openai_entries = cfg
+    let openai_entries = if let Some(mut prefetched) = prefetched {
+        let entries = cfg
             .openai_compatible
             .as_ref()
             .and_then(|p| p.catalog_entries(Some(&prefetched)));
@@ -3791,12 +3789,12 @@ pub(crate) fn resolve_model_list(
             }
         }
         resolved = prefetched;
+        entries
     } else {
-        openai_entries = cfg
-            .openai_compatible
+        cfg.openai_compatible
             .as_ref()
-            .and_then(|p| p.catalog_entries(None));
-    }
+            .and_then(|p| p.catalog_entries(None))
+    };
     if let Some(openai_entries) = openai_entries {
         // Make this block authoritative: drop any stale openai-compatible keys
         // (single + fetched) before inserting fresh ones.

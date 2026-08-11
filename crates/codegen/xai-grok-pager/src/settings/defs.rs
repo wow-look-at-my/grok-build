@@ -550,7 +550,6 @@ const OPENAI_COMPATIBLE_CHILDREN: &[&str] = &[
     "openai_compatible.enabled",
     "openai_compatible.model",
     "openai_compatible.api_backend",
-    "openai_compatible.context_window",
     "openai_compatible.make_default",
 ];
 

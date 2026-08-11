@@ -168,6 +168,8 @@ fn apply_terminal_event_overrides(event: &mut rs::ResponseStreamEvent, data: &st
     // Stash cost ticks in metadata for stream_responses. Two wire forms are
     // supported: xAI `cost_in_usd_ticks` (integer, authoritative) and the
     // standard `usage.cost` USD float (OpenRouter, etc.) converted to ticks.
+    // The `usage.cost` value may be a bare float or a Bifrost cost object
+    // (`{"total_cost": ...}`); both are handled via `UsageCost`.
     let ticks = xai_grok_sampling_types::reported_cost_ticks(
         value
             .pointer("/response/usage/cost_in_usd_ticks")
@@ -175,7 +177,15 @@ fn apply_terminal_event_overrides(event: &mut rs::ResponseStreamEvent, data: &st
     )
     .or_else(|| {
         xai_grok_sampling_types::usd_float_to_ticks(
-            value.pointer("/response/usage/cost").and_then(|v| v.as_f64()),
+            value
+                .pointer("/response/usage/cost")
+                .and_then(|v| {
+                    serde_json::from_value::<xai_grok_sampling_types::UsageCost>(
+                        v.clone(),
+                    )
+                    .ok()
+                })
+                .map(|c| c.as_usd_float()),
         )
     });
     if let Some(ticks) = ticks {

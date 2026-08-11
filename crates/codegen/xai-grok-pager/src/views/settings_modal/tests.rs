@@ -116,11 +116,11 @@ fn contextual_hints_group_sub_sheet_flow() {
 /// The OpenAI-compatible group renders as a single top-level row (children
 /// hidden); Enter opens the sub-sheet; a String child (base_url) opens its
 /// editor from inside the sheet, a Bool child (enabled) toggles in place, and
-/// an Int child (context_window) opens its editor; Esc returns to Browse.
+/// an Enum child (api_backend) opens its picker; Esc returns to Browse.
 #[test]
 fn openai_compatible_group_sub_sheet_flow() {
     let mut s = make_state();
-    // Group row present; all 7 child rows hidden from the top-level list.
+    // Group row present; all 6 child rows hidden from the top-level list.
     let group_idx = s
         .rows
         .iter()
@@ -187,25 +187,24 @@ fn openai_compatible_group_sub_sheet_flow() {
     assert!(matches!(out, SettingsKeyOutcome::Changed));
     assert!(matches!(s.mode(), SettingsModalMode::Browse));
 
-    // Re-open, move down to child 5 (`context_window`, Int): Enter opens
-    // EditingInt seeded with the current value.
+    // Re-open, move down to child 4 (`api_backend`, Enum): Enter opens the
+    // choice picker (PickingEnum) seeded with the current value.
     focus_group(&mut s);
-    for _ in 0..5 {
+    for _ in 0..4 {
         let _ = handle_settings_key(&mut s, &KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
     }
     assert!(matches!(
         s.mode(),
-        SettingsModalMode::PickingGroup { child_idx: 5, .. }
+        SettingsModalMode::PickingGroup { child_idx: 4, .. }
     ));
     let out = handle_settings_key(&mut s, &KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
     assert!(matches!(out, SettingsKeyOutcome::Changed));
     assert!(matches!(
         s.mode(),
-        SettingsModalMode::EditingValue { key: "openai_compatible.context_window" }
+        SettingsModalMode::PickingEnum { .. }
     ));
-    assert_eq!(int_stepper_buffer(&s), "200000");
 
-    // Esc cancels the int editor back to Browse.
+    // Esc cancels the picker back to Browse.
     let out = handle_settings_key(&mut s, &KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
     assert!(matches!(out, SettingsKeyOutcome::Changed));
     assert!(matches!(s.mode(), SettingsModalMode::Browse));
@@ -822,9 +821,9 @@ fn rows_contain_categories_and_settings_through_pr_14() {
             // SHELL-owned default_model (Models category).
             "default_model",
             // User-managed OpenAI-compatible endpoint (Models category),
-            // registered directly after default_model. All 7 child settings
+            // registered directly after default_model. All 6 child settings
             // (`openai_compatible.{base_url,api_key,enabled,model,api_backend,
-            // context_window,make_default}`) are hidden from the top-level list
+            // make_default}`) are hidden from the top-level list
             // and reached via this group's sub-sheet.
             "openai_compatible",
             // Models category. `default_reasoning_effort`,
@@ -2270,27 +2269,24 @@ fn int_editing_value_ignores_other_text_input_keys() {
 #[test]
 fn int_editing_value_typed_commit_dispatches_clamped_value() {
     use crossterm::event::KeyModifiers;
-    // context_window: min 1024, max 10_000_000.
-    let mut s = int_stepper_fixture_for("openai_compatible.context_window", 200_000);
-    // Clear the seeded value, then type 1000000.
+    // scroll_lines: min 1, max 10.
+    let mut s = int_stepper_fixture_for("scroll_lines", 3);
+    // Clear the seeded value, then type 7.
+    // "3" → "" (1 backspace for a single digit).
     let _ = handle_settings_key(&mut s, &KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
-    // 200000 → 20000 → 2000 → 200 → 20 → 2 → "" (7 backspaces for "200000").
-    for _ in 0..6 {
-        let _ = handle_settings_key(&mut s, &KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
-    }
     assert_eq!(int_stepper_buffer(&s), "");
-    for d in ['1', '0', '0', '0', '0', '0', '0'] {
+    for d in ['7'] {
         let _ = handle_settings_key(
             &mut s,
             &KeyEvent::new(KeyCode::Char(d), KeyModifiers::NONE),
         );
     }
-    assert_eq!(int_stepper_buffer(&s), "1000000");
+    assert_eq!(int_stepper_buffer(&s), "7");
     let outcome = handle_settings_key(&mut s, &KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
     assert!(
         matches!(
             outcome,
-            SettingsKeyOutcome::Action(Action::SetOpenAiCompatibleContextWindow(1_000_000))
+            SettingsKeyOutcome::Action(Action::SetScrollLines(7))
         ),
         "Enter must commit the typed value, got {outcome:?}",
     );
@@ -2301,17 +2297,15 @@ fn int_editing_value_typed_commit_dispatches_clamped_value() {
 #[test]
 fn int_editing_value_typed_out_of_range_clamps_on_commit() {
     use crossterm::event::KeyModifiers;
-    // context_window min 1024. Type "1" then commit → clamps to 1024.
-    let mut s = int_stepper_fixture_for("openai_compatible.context_window", 200_000);
-    for _ in 0..6 {
-        let _ = handle_settings_key(&mut s, &KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
-    }
-    let _ = handle_settings_key(&mut s, &KeyEvent::new(KeyCode::Char('1'), KeyModifiers::NONE));
+    // scroll_lines min 1. Type "0" then commit → clamps to 1.
+    let mut s = int_stepper_fixture_for("scroll_lines", 3);
+    let _ = handle_settings_key(&mut s, &KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
+    let _ = handle_settings_key(&mut s, &KeyEvent::new(KeyCode::Char('0'), KeyModifiers::NONE));
     let outcome = handle_settings_key(&mut s, &KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
     assert!(
         matches!(
             outcome,
-            SettingsKeyOutcome::Action(Action::SetOpenAiCompatibleContextWindow(1_024))
+            SettingsKeyOutcome::Action(Action::SetScrollLines(1))
         ),
         "out-of-range typed value must clamp to min, got {outcome:?}",
     );

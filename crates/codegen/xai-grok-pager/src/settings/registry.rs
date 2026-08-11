@@ -329,7 +329,6 @@ impl Default for OpenAiCompatibleSnapshot {
             base_url: profile.base_url,
             model: profile.model,
             api_backend: "auto".to_owned(),
-            context_window: profile.context_window,
             make_default: profile.make_default,
             api_key_configured: false,
         }
