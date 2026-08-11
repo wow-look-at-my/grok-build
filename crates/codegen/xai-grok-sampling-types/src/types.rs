@@ -485,6 +485,11 @@ pub enum FinishReason {
     ToolCalls,
     ContentFilter,
     FunctionCall,
+    /// Provider-reported error finish (OpenRouter sends this when the
+    /// upstream provider fails mid-generation). Maps to `StopReason::Stop`
+    /// so the turn completes normally rather than surfacing a deserialization
+    /// error to the user.
+    Error,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

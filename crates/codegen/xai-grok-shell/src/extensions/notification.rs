@@ -2515,6 +2515,65 @@ mod tests {
         );
     }
 
+    /// The core regression test: a ledger with `cost_missing_calls > 0`
+    /// (cost_is_partial = true) must still produce a `PromptUsage` with
+    /// `cost_usd_ticks = Some(...)` after `project_from_ledger` calls
+    /// `scrub_untrustworthy_costs`. This is the exact path that was broken —
+    /// OpenRouter reports `usage.cost` on most but not all streaming chunks,
+    /// so multi-call turns had `cost_missing_calls > 0`, which caused the scrub
+    /// to drop ALL cost from the `TurnCompleted` notification, hiding it from
+    /// the TUI. The fix: `scrub_untrustworthy_costs` only clears on
+    /// `usage_is_incomplete`, not `cost_is_partial`.
+    #[test]
+    fn project_from_ledger_preserves_partial_cost_through_scrub() {
+        use xai_chat_state::{UsageLedger, UsageTotals};
+        use xai_grok_sampling_types::TokenUsage;
+
+        // Simulate a turn with 3 model calls: 2 reported cost, 1 did not.
+        let mut ledger = UsageLedger::default();
+        let tu = TokenUsage {
+            prompt_tokens: 100,
+            completion_tokens: 10,
+            total_tokens: 110,
+            reasoning_tokens: 0,
+            cached_prompt_tokens: 0,
+            cache_creation_prompt_tokens: 0,
+        };
+        ledger.record_main_loop_call("z-ai/glm-5.2", &tu, Some(100), Some(500_000));
+        ledger.record_main_loop_call("z-ai/glm-5.2", &tu, Some(200), None); // no cost
+        ledger.record_main_loop_call("z-ai/glm-5.2", &tu, Some(300), Some(300_000));
+
+        // The ledger has cost_missing_calls = 1, cost_is_partial = true.
+        assert!(ledger.totals.cost_is_partial());
+        assert_eq!(ledger.totals.cost_usd_ticks, Some(800_000));
+
+        // project_from_ledger → scrub_untrustworthy_costs must NOT drop the cost.
+        let usage = PromptUsage::project_from_ledger(Some(&ledger), false)
+            .expect("ledger with tokens must produce usage");
+        assert_eq!(
+            usage.totals.cost_usd_ticks,
+            Some(800_000),
+            "partial cost must survive the scrub — the reported ticks are valid"
+        );
+        assert!(
+            usage.totals.cost_is_partial,
+            "cost_is_partial flag must still ride the wire for reconciliation"
+        );
+        assert!(
+            !usage.usage_is_incomplete,
+            "a partial bill is NOT incomplete (no data loss)"
+        );
+
+        // But a genuinely incomplete ledger (drain timeout) DOES scrub.
+        let usage_incomplete = PromptUsage::project_from_ledger(Some(&ledger), true)
+            .expect("incomplete ledger must still produce usage");
+        assert!(
+            usage_incomplete.totals.cost_usd_ticks.is_none(),
+            "incomplete cost must be scrubbed (genuine data loss)"
+        );
+        assert!(usage_incomplete.usage_is_incomplete);
+    }
+
     #[test]
     fn project_result_token_identity_uncached_plus_cache_plus_output() {
         let mut model_usage = indexmap::IndexMap::new();
