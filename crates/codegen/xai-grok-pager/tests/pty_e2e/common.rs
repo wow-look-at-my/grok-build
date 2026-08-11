@@ -1028,16 +1028,43 @@ pub(crate) fn spawn_minimal_in_dir(
     harness
 }
 
-/// Block until minimal has cold-started into its agent session and is idle at
-/// the prompt (the `minimal · /help` status line is showing). Minimal has no
-/// welcome screen, so this — not [`WELCOME_SCREEN_SENTINEL`] — is the readiness
-/// gate.
+/// Block until minimal is idle at the prompt (the `minimal · /help` status line
+/// is showing). Minimal has no welcome screen, so this — not
+/// [`WELCOME_SCREEN_SENTINEL`] — is the readiness gate.
+///
+/// This is PROMPT chrome, and it says nothing about the session. `session/new`
+/// is an async round-trip fired at startup, and the prompt renders without
+/// waiting for it, so a test that needs a bound session must follow this with
+/// [`wait_session_bound`]. Assuming otherwise is a race: it usually holds,
+/// because creation is fast, and it inverts under load.
 pub(crate) fn wait_minimal_ready(harness: &mut PtyHarness) {
     harness
         .wait_for_text(MINIMAL_IDLE_SENTINEL, WELCOME_TIMEOUT)
         .unwrap_or_else(|e| {
             panic!(
                 "minimal never cold-started to an idle prompt: {e}\nscreen:\n{}",
+                harness.screen_contents()
+            )
+        });
+}
+
+/// Block until the agent has bound a session, which is what gates every
+/// `session_id`-dependent surface.
+///
+/// A completed turn is the signal. The screen carries no direct one, and the
+/// shell's on-disk `summary.json` is NOT a substitute -- it lands while the
+/// pager's `session_id` is still `None`, so polling for it returns early and
+/// the caller races on anyway. A rendered response cannot: the turn it answers
+/// had to be routed to a bound session.
+pub(crate) fn wait_session_bound(harness: &mut PtyHarness) {
+    harness
+        .inject_keys(format!("{PROMPT}\r").as_bytes())
+        .expect("submit prompt to bind a session");
+    harness
+        .wait_for_text(MOCK_RESPONSE_SENTINEL, Duration::from_secs(30))
+        .unwrap_or_else(|e| {
+            panic!(
+                "no response, so no session was ever bound: {e}\nscreen:\n{}",
                 harness.screen_contents()
             )
         });
