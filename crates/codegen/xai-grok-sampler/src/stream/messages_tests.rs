@@ -5,6 +5,7 @@
 use super::*;
 use futures_util::stream;
 use std::pin::pin;
+use xai_grok_sampling_types::build_messages_request;
 use xai_grok_sampling_types::messages::{
     ContentBlock, MessageDeltaBody, MessageDeltaUsage, MessagesResponse, MessagesUsage,
     StreamDelta, StreamError,
@@ -212,6 +213,99 @@ async fn thinking_block_emits_reasoning_channel_and_preserved_in_response() {
         }
         other => panic!("expected Completed, got {other:?}"),
     }
+}
+
+/// End-to-end reasoning round-trip on the REAL Messages path: thinking deltas
+/// (with NO encrypted signature — the Anthropic-compatible third-party case,
+/// e.g. Kimi) streamed by a provider must survive (a) the stream's synthesis
+/// into a `ConversationItem::Reasoning` sibling, (b) the shell turn-loop commit
+/// order (the sibling rides the `push_tool_result` arm and lands in history as
+/// `[Reasoning, Assistant]`), and (c) the real `build_messages_request` wire
+/// conversion for the NEXT turn, where it must appear as a `Thinking` content
+/// block on the following assistant message. This is the regression the goal
+/// guards: real thinking text must be resent, not dropped.
+#[tokio::test]
+async fn reasoning_roundtrip_without_signature_survives_to_next_messages_request() {
+    use xai_grok_sampling_types::conversation::ConversationRequest;
+
+    // Turn N: a provider streams real thinking text, no encrypted signature.
+    let thinking_start = MessageStreamEvent::ContentBlockStart {
+        index: 0,
+        content_block: ContentBlock::Thinking {
+            thinking: String::new(),
+            signature: String::new(),
+        },
+    };
+    let thinking_delta = MessageStreamEvent::ContentBlockDelta {
+        index: 0,
+        delta: StreamDelta::ThinkingDelta {
+            thinking: "Let me think step by step about the token counter.".into(),
+        },
+    };
+    let events: Vec<Result<MessageStreamEvent, SamplingError>> = vec![
+        Ok(message_start()),
+        Ok(thinking_start),
+        Ok(thinking_delta),
+        Ok(block_stop(0)),
+        Ok(text_block_start(1)),
+        Ok(text_delta(1, "The answer is 42.")),
+        Ok(block_stop(1)),
+        Ok(message_delta_with_stop(messages::StopReason::EndTurn)),
+        Ok(MessageStreamEvent::MessageStop),
+    ];
+    let raw = stream::iter(events).boxed();
+    let evs = collect(stream_messages(raw, None, rid(), Duration::from_secs(60))).await;
+
+    // (a) The completed response carries the [Reasoning, Assistant] sibling pair.
+    let response = match evs.last().unwrap() {
+        SamplingEvent::Completed { response, .. } => response,
+        other => panic!("expected Completed, got {other:?}"),
+    };
+    let mut items = response.items.clone();
+    assert!(
+        matches!(
+            items.as_slice(),
+            [ConversationItem::Reasoning(_), ConversationItem::Assistant(_)]
+        ),
+        "expected [Reasoning, Assistant] from stream, got {:?}",
+        items
+    );
+
+    // (b) Shell turn-loop commit: the Reasoning sibling rides the
+    // `push_tool_result` arm and is appended to history verbatim; the
+    // Assistant rides `push_assistant_response`. Both end up in the flat
+    // history list that becomes the next ConversationRequest.
+    // (The real `push_message` appends + persists without dropping Reasoning;
+    // we reproduce the resulting ordered item list here.)
+
+    // Turn N+1: the user asks a follow-up; the previous turn's items are the
+    // prefix of the next request.
+    items.push(ConversationItem::user("continue"));
+
+    let req = ConversationRequest::from_items(items);
+    let msgs = build_messages_request(&req);
+
+    // (c) The turn-N thinking text must be present on the wire as a `Thinking`
+    // block on the follower assistant message.
+    let thinking_texts: Vec<String> = msgs
+        .messages
+        .iter()
+        .filter_map(|m| match &m.content {
+            xai_grok_sampling_types::messages::MessageContent::Blocks(blocks) => {
+                blocks.iter().find_map(|b| match b {
+                    ContentBlock::Thinking { thinking, .. } => Some(thinking.clone()),
+                    _ => None,
+                })
+            }
+            _ => None,
+        })
+        .collect();
+    assert!(
+        thinking_texts.iter().any(|t| t.contains("step by step")),
+        "turn-N thinking text must be resent as a Thinking block on turn N+1; \
+         wire thinking blocks: {thinking_texts:?}; full messages: {:#?}",
+        msgs.messages
+    );
 }
 
 /// `thinking(sig1) → text → thinking(sig2)` must surface each thinking block's

@@ -2014,6 +2014,7 @@ fn make_entry_config_with_id(
         show_model_fingerprint: false,
         stream_tool_calls: None,
         laziness_detector: config::LazinessDetectorPerModelConfig::default(),
+        pricing: xai_grok_sampling_types::ModelPricing::default(),
     }
 }
 

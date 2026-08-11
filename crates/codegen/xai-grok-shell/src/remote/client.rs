@@ -1064,6 +1064,7 @@ pub(crate) fn parse_remote_model_value(
                 }
             })
             .unwrap_or_default(),
+        pricing: xai_grok_sampling_types::ModelPricing::default(),
     })
 }
 fn get_string(obj: &serde_json::Map<String, serde_json::Value>, key: &str) -> Option<String> {

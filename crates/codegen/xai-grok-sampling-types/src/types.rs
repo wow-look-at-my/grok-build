@@ -546,6 +546,24 @@ pub struct Usage {
     /// normalize `0` to "unreported" (see `stream/chat_completions.rs`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cost_in_usd_ticks: Option<i64>,
+    /// Provider-reported request price in USD (float). OpenRouter and other
+    /// OpenAI-compatible aggregators report this instead of `cost_in_usd_ticks`.
+    /// Capture sites convert to ticks (×1e10) and prefer `cost_in_usd_ticks`
+    /// when both are present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost: Option<f64>,
+}
+
+/// Convert a USD float to integer ticks (1 USD = 1e10 ticks), rounding to
+/// the nearest tick. Non-positive or NaN/inf values yield `None` ("unreported",
+/// never "free"). Used by the capture sites that read `usage.cost`.
+pub fn usd_float_to_ticks(usd: Option<f64>) -> Option<i64> {
+    let v = usd?;
+    if !v.is_finite() || v <= 0.0 {
+        return None;
+    }
+    let ticks = (v * 1e10).round() as i64;
+    (ticks > 0).then_some(ticks)
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
@@ -637,6 +655,15 @@ pub struct ChatChunkDelta {
     pub role: Option<Role>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
+    /// Thinking/chain-of-thought text streamed by the model. Deserializes from
+    /// either `reasoning_content` (OpenAI/xAI naming) or `reasoning`
+    /// (synthetic.new's OpenAI-compatible naming) so both wire shapes feed the
+    /// same accumulator; serializes as `reasoning_content` (the shape the
+    /// resend path / providers accept).
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        alias = "reasoning"
+    )]
     pub reasoning_content: Option<String>,
     /// Tool call deltas. Handles `null` in JSON as empty vec.
     #[serde(
@@ -1513,6 +1540,48 @@ mod tests {
             .downcast_ref::<TestTrace>()
             .unwrap();
         assert_eq!(original.0, cloned_inner.0);
+    }
+
+    // ========================================================================
+    // usd_float_to_ticks — convert provider USD float to integer ticks
+    // ========================================================================
+
+    #[test]
+    fn usd_float_to_ticks_converts_correctly() {
+        // $0.0000416 → round(0.0000416 * 1e10) = 416_000
+        assert_eq!(usd_float_to_ticks(Some(0.0000416)), Some(416_000));
+        // $1.00 → 1e10 ticks
+        assert_eq!(usd_float_to_ticks(Some(1.0)), Some(10_000_000_000));
+    }
+
+    #[test]
+    fn usd_float_to_ticks_none_for_non_positive() {
+        assert_eq!(usd_float_to_ticks(Some(0.0)), None);
+        assert_eq!(usd_float_to_ticks(Some(-1.0)), None);
+        assert_eq!(usd_float_to_ticks(None), None);
+    }
+
+    #[test]
+    fn usd_float_to_ticks_none_for_nan_inf() {
+        assert_eq!(usd_float_to_ticks(Some(f64::NAN)), None);
+        assert_eq!(usd_float_to_ticks(Some(f64::INFINITY)), None);
+    }
+
+    #[test]
+    fn usage_struct_deserializes_openrouter_cost_float() {
+        // The wire shape OpenRouter emits: usage.cost as a USD float,
+        // no cost_in_usd_ticks.
+        let json = json!({
+            "prompt_tokens": 18,
+            "completion_tokens": 10,
+            "total_tokens": 28,
+            "cost": 6.92e-05
+        });
+        let usage: Usage = serde_json::from_value(json).unwrap();
+        assert_eq!(usage.prompt_tokens, 18);
+        assert_eq!(usage.completion_tokens, 10);
+        assert_eq!(usage.cost, Some(6.92e-05));
+        assert_eq!(usage.cost_in_usd_ticks, None);
     }
 
     /// Verify that cloning a `ChatCompletionRequest` with a trace does not recurse.
