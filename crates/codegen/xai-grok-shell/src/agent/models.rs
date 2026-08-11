@@ -1467,6 +1467,7 @@ mod cache;
 mod endpoint;
 mod fetch;
 mod resolution;
+mod synthetic;
 
 pub(crate) use cache::*;
 pub(crate) use endpoint::*;
@@ -1476,6 +1477,7 @@ pub use fetch::{
     start_early_prefetch_settings_only, start_early_prefetch_with_auth,
 };
 pub(crate) use resolution::*;
+pub(crate) use synthetic::*;
 
 #[cfg(test)]
 mod tests;

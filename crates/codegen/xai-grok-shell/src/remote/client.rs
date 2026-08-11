@@ -832,7 +832,17 @@ pub(crate) fn fetch_models_blocking(
     );
     let mut models = Vec::with_capacity(models_response.data.len());
     for (idx, value) in models_response.data.into_iter().enumerate() {
-        match parse_remote_model_value(&value, &inference_base_url) {
+        // Synthetic-shaped entries (non-standard `context_length`,
+        // `max_output_length`, `reasoning_parameters.efforts` keys) are parsed
+        // through the Synthetic-scoped home so the extension keys stay out of
+        // the generic cross-provider fallback chains. Everything else uses the
+        // generic parser unchanged.
+        let parsed = if crate::agent::models::is_synthetic_listing(&value) {
+            crate::agent::models::parse_synthetic_model_entry(&value, &inference_base_url)
+        } else {
+            parse_remote_model_value(&value, &inference_base_url)
+        };
+        match parsed {
             Some(model) => models.push(model),
             None => {
                 tracing::warn!(
@@ -871,14 +881,7 @@ pub(crate) fn parse_remote_model_value(
     // present.
     let context_window = get_u64(obj, "contextWindow")
         .or_else(|| get_u64(obj, "context_window"))
-        // Synthetic's `/v1/models` listing reports the window as
-        // `context_length` (e.g. 524288 for `syn:large:text`), not
-        // `contextWindow`/`context_window`/`max_input_tokens`. Read it so
-        // the chosen model's real window is adopted instead of the
-        // DEFAULT_CONTEXT_WINDOW fallback.
-        .or_else(|| get_u64(obj, "context_length"))
         .or_else(|| meta.and_then(|m| get_u64(m, "contextWindow")))
-        .or_else(|| meta.and_then(|m| get_u64(m, "context_length")))
         .or_else(|| meta.and_then(|m| get_u64(m, "totalContextTokens")))
         .or_else(|| get_u64(obj, "max_input_tokens"))
         .or_else(|| get_u64(obj, "maxInputTokens"))
@@ -909,9 +912,6 @@ pub(crate) fn parse_remote_model_value(
         description: get_string(obj, "description"),
         max_completion_tokens: get_u64(obj, "maxCompletionTokens")
             .or_else(|| get_u64(obj, "max_completion_tokens"))
-            // Synthetic's `/v1/models` listing reports this as
-            // `max_output_length` (e.g. 65536 for `syn:large:text`).
-            .or_else(|| get_u64(obj, "max_output_length"))
             .and_then(|v| u32::try_from(v).ok()),
         temperature: get_f64(obj, "temperature").map(|v| v as f32),
         top_p: get_f64(obj, "topP").or_else(|| get_f64(obj, "top_p")).map(|v| v as f32),
@@ -965,13 +965,6 @@ pub(crate) fn parse_remote_model_value(
             .get("reasoningEfforts")
             .or_else(|| obj.get("reasoning_efforts"))
             .or_else(|| meta.and_then(|m| m.get("reasoningEfforts")))
-            // Synthetic's `/v1/models` listing nests the effort menu under
-            // `reasoning_parameters.efforts` (an array of canonical effort
-            // strings, e.g. `["none","high","max"]` for `syn:large:text`).
-            .or_else(|| {
-                obj.get("reasoning_parameters")
-                    .and_then(|rp| rp.get("efforts"))
-            })
             .and_then(|v| v.as_array())
             .map(|arr| xai_grok_sampling_types::parse_reasoning_effort_options(arr))
             .unwrap_or_default(),
@@ -1584,62 +1577,6 @@ mod tests {
             result.context_window.get(),
             crate::remote::DEFAULT_CONTEXT_WINDOW
         );
-    }
-    #[test]
-    fn parse_synthetic_style_listing_extends_schema() {
-        // Synthetic's `/v1/models` entry shape (as served live). The window is
-        // `context_length`, max output is `max_output_length`, the effort menu
-        // lives under `reasoning_parameters.efforts`, and modalities are
-        // `input_modalities`/`output_modalities` arrays. Driving the real
-        // shipped parse path must adopt all of these rather than the
-        // DEFAULT_CONTEXT_WINDOW fallback.
-        use xai_grok_sampling_types::ReasoningEffort;
-        let value = serde_json::json!({
-            "provider": "synthetic",
-            "always_on": true,
-            "id": "syn:large:text",
-            "hugging_face_id": "zai-org/GLM-5.2",
-            "name": "syn:large:text",
-            "reasoning_parameters": { "efforts": ["none", "high", "max"] },
-            "description": "A very strong coding and writing model",
-            "input_modalities": ["text"],
-            "output_modalities": ["text"],
-            "context_length": 524288,
-            "max_output_length": 65536
-        });
-        let result = parse_remote_model_value(&value, "https://api.synthetic.new/openai/v1").unwrap();
-        assert_eq!(result.model, "syn:large:text");
-        // `id` is the routing slug here (`model`/`modelId` are absent).
-        assert_eq!(result.id.as_deref(), Some("syn:large:text"));
-        assert_eq!(result.context_window.get(), 524_288);
-        assert_eq!(result.max_completion_tokens, Some(65_536));
-
-        // `reasoning_parameters.efforts` becomes the effort menu. The
-        // `supports_reasoning_effort`/`reasoning_effort` legacy fields are
-        // derived later (in `resolve_model_list`), so only the list lands here.
-        let values: Vec<ReasoningEffort> = result.reasoning_efforts.iter().map(|o| o.value).collect();
-        assert_eq!(
-            values,
-            vec![ReasoningEffort::None, ReasoningEffort::High, ReasoningEffort::Max]
-        );
-    }
-    #[test]
-    fn parse_synthetic_listing_missing_context_fields_falls_back() {
-        // A Synthetic entry without `context_length` must still parse (not be
-        // dropped) and fall back to the documented default window, never error.
-        let value = serde_json::json!({
-            "id": "syn:minimal",
-            "name": "syn:minimal",
-            "input_modalities": ["text"],
-            "output_modalities": ["text"]
-        });
-        let result = parse_remote_model_value(&value, "https://api.synthetic.new/openai/v1").unwrap();
-        assert_eq!(result.model, "syn:minimal");
-        assert_eq!(
-            result.context_window.get(),
-            crate::remote::DEFAULT_CONTEXT_WINDOW
-        );
-        assert_eq!(result.max_completion_tokens, None);
     }
     #[test]
     fn parse_model_field_takes_priority_over_id() {
