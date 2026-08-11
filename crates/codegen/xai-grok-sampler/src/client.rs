@@ -2076,6 +2076,16 @@ impl SamplingClient {
                 let events = crate::stream::stream_messages(raw, meta, request_id, idle_timeout);
                 crate::stream::collect_response(events).await
             }
+            // `AutoDetect` must be resolved before the client is built (the
+            // shell does this). If an unresolved `AutoDetect` reaches the
+            // sampler, fall back to Chat Completions: the sampler never
+            // performs network I/O inside its dispatch.
+            ApiBackend::AutoDetect => {
+                let (raw, meta) = self.conversation_stream(request).await?;
+                let events =
+                    crate::stream::stream_chat_completions(raw, meta, request_id, idle_timeout);
+                crate::stream::collect_response(events).await
+            }
         };
         result
             .map(|(response, _metrics)| response)
@@ -2316,6 +2326,22 @@ mod tests {
     fn new_with_minimal_config_succeeds() {
         let client = SamplingClient::new(minimal_config()).expect("client should construct");
         assert_eq!(client.api_backend(), ApiBackend::ChatCompletions);
+    }
+
+    #[test]
+    fn auto_detect_config_constructs_and_reports_unresolved() {
+        // An unresolved `AutoDetect` must still construct a client (resolution
+        // happens in the shell, never inside `SamplingClient::new`, which does
+        // no network I/O). The client reports `AutoDetect` so the caller knows
+        // it is unresolved; dispatch-time it falls back to Chat Completions.
+        let mut cfg = minimal_config();
+        cfg.api_backend = ApiBackend::AutoDetect;
+        let client = SamplingClient::new(cfg).expect("client should construct");
+        assert_eq!(client.api_backend(), ApiBackend::AutoDetect);
+        assert_eq!(
+            ApiBackend::auto_detect_fallback(),
+            ApiBackend::ChatCompletions
+        );
     }
 
     #[test]

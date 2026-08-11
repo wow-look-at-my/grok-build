@@ -113,6 +113,104 @@ fn contextual_hints_group_sub_sheet_flow() {
     assert!(matches!(s.mode(), SettingsModalMode::Browse));
 }
 
+/// The OpenAI-compatible group renders as a single top-level row (children
+/// hidden); Enter opens the sub-sheet; a String child (base_url) opens its
+/// editor from inside the sheet, a Bool child (enabled) toggles in place, and
+/// an Int child (context_window) opens its editor; Esc returns to Browse.
+#[test]
+fn openai_compatible_group_sub_sheet_flow() {
+    let mut s = make_state();
+    // Group row present; all 7 child rows hidden from the top-level list.
+    let group_idx = s
+        .rows
+        .iter()
+        .position(|r| matches!(r, RowEntry::Setting { key, .. } if *key == "openai_compatible"))
+        .expect("openai group row present");
+    assert!(
+        !s.rows.iter().any(|r| matches!(
+            r,
+            RowEntry::Setting { key, .. } if key.starts_with("openai_compatible.")
+        )),
+        "openai child rows must be hidden from the top-level list",
+    );
+
+    let focus_group = |s: &mut SettingsModalState| {
+        s.selected = group_idx;
+        let _ = handle_settings_key(s, &KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(matches!(
+            s.mode(),
+            SettingsModalMode::PickingGroup { child_idx: 0, .. }
+        ));
+    };
+
+    // Focus the group, Enter → PickingGroup on the first child (base_url).
+    focus_group(&mut s);
+
+    // Child 0 is `base_url` (String): Enter opens its editor (EditingString).
+    let out = handle_settings_key(&mut s, &KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert!(matches!(out, SettingsKeyOutcome::Changed));
+    assert!(matches!(
+        s.mode(),
+        SettingsModalMode::EditingValue { key: "openai_compatible.base_url" }
+    ));
+    // Esc cancels back to Browse (standard editor cancel).
+    let out = handle_settings_key(&mut s, &KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    assert!(matches!(out, SettingsKeyOutcome::Changed));
+    assert!(matches!(s.mode(), SettingsModalMode::Browse));
+
+    // Re-open the group, move down to child 2 (`enabled`, Bool): Space toggles
+    // in place and the sheet stays open (default false → true).
+    focus_group(&mut s);
+    for _ in 0..2 {
+        let _ = handle_settings_key(&mut s, &KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+    }
+    assert!(matches!(
+        s.mode(),
+        SettingsModalMode::PickingGroup { child_idx: 2, .. }
+    ));
+    let out = handle_settings_key(&mut s, &KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+    assert!(
+        matches!(
+            out,
+            SettingsKeyOutcome::Action(Action::SetOpenAiCompatibleEnabled(true))
+        ),
+        "Space must toggle the focused Bool child, got {out:?}",
+    );
+    // Sheet stays open after the toggle.
+    assert!(matches!(
+        s.mode(),
+        SettingsModalMode::PickingGroup { child_idx: 2, .. }
+    ));
+
+    // Esc from the sheet itself returns to Browse.
+    let out = handle_settings_key(&mut s, &KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    assert!(matches!(out, SettingsKeyOutcome::Changed));
+    assert!(matches!(s.mode(), SettingsModalMode::Browse));
+
+    // Re-open, move down to child 5 (`context_window`, Int): Enter opens
+    // EditingInt seeded with the current value.
+    focus_group(&mut s);
+    for _ in 0..5 {
+        let _ = handle_settings_key(&mut s, &KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+    }
+    assert!(matches!(
+        s.mode(),
+        SettingsModalMode::PickingGroup { child_idx: 5, .. }
+    ));
+    let out = handle_settings_key(&mut s, &KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert!(matches!(out, SettingsKeyOutcome::Changed));
+    assert!(matches!(
+        s.mode(),
+        SettingsModalMode::EditingValue { key: "openai_compatible.context_window" }
+    ));
+    assert_eq!(int_stepper_buffer(&s), "200000");
+
+    // Esc cancels the int editor back to Browse.
+    let out = handle_settings_key(&mut s, &KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    assert!(matches!(out, SettingsKeyOutcome::Changed));
+    assert!(matches!(s.mode(), SettingsModalMode::Browse));
+}
+
 /// The permission_mode picker hides the "Auto" choice when the auto feature
 /// gate is off (matching the Shift+Tab cycle, which skips Auto when gated),
 /// and shows it when the gate is on. Other choices are unaffected.
@@ -724,13 +822,11 @@ fn rows_contain_categories_and_settings_through_pr_14() {
             // SHELL-owned default_model (Models category).
             "default_model",
             // User-managed OpenAI-compatible endpoint (Models category),
-            // registered directly after default_model.
-            "openai_compatible.enabled",
-            "openai_compatible.base_url",
-            "openai_compatible.model",
-            "openai_compatible.api_backend",
-            "openai_compatible.make_default",
-            "openai_compatible.api_key",
+            // registered directly after default_model. All 7 child settings
+            // (`openai_compatible.{base_url,api_key,enabled,model,api_backend,
+            // context_window,make_default}`) are hidden from the top-level list
+            // and reached via this group's sub-sheet.
+            "openai_compatible",
             // Models category. `default_reasoning_effort`,
             // `web_search_model`, and `session_summary_model` are
             // not exposed in the modal.
@@ -2112,33 +2208,50 @@ fn int_editing_value_clamps_to_min() {
     assert_eq!(int_stepper_buffer(&s), "40");
 }
 
-/// Digit keys are silently dropped — the stepper is not a
-/// text input.
+/// A digit key appends to the in-place buffer (in addition to the
+/// arrow stepper), so a user can type a number directly.
 #[test]
-fn int_editing_value_ignores_digit_keys() {
+fn int_editing_value_appends_digit_keys() {
     let mut s = int_stepper_fixture(50);
-    let outcome = handle_settings_key(
-        &mut s,
-        &KeyEvent::new(KeyCode::Char('7'), KeyModifiers::NONE),
-    );
-    assert!(matches!(outcome, SettingsKeyOutcome::Unchanged));
-    assert_eq!(int_stepper_buffer(&s), "50");
+    for d in ['7', '0', '0'] {
+        let outcome = handle_settings_key(
+            &mut s,
+            &KeyEvent::new(KeyCode::Char(d), KeyModifiers::NONE),
+        );
+        assert!(matches!(outcome, SettingsKeyOutcome::Changed));
+    }
+    assert_eq!(int_stepper_buffer(&s), "50700");
 }
 
-/// Backspace is silently dropped — the stepper has no
-/// editable buffer to backspace into.
+/// Backspace removes the last digit of the buffer, letting the user
+/// clear the seeded value before typing a fresh number.
 #[test]
-fn int_editing_value_ignores_backspace() {
+fn int_editing_value_backspace_removes_last_digit() {
     let mut s = int_stepper_fixture(50);
+    // Seed grew from 50 → 50700 in the append test; here start fresh.
     let outcome = handle_settings_key(
         &mut s,
         &KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE),
     );
+    assert!(matches!(outcome, SettingsKeyOutcome::Changed));
+    assert_eq!(int_stepper_buffer(&s), "5");
+    // Backspace on the empty buffer is a no-op.
+    let mut s2 = int_stepper_fixture(0);
+    for _ in 0..3 {
+        let _ = handle_settings_key(
+            &mut s2,
+            &KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE),
+        );
+    }
+    assert_eq!(int_stepper_buffer(&s2), "");
+    let outcome = handle_settings_key(
+        &mut s2,
+        &KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE),
+    );
     assert!(matches!(outcome, SettingsKeyOutcome::Unchanged));
-    assert_eq!(int_stepper_buffer(&s), "50");
 }
 
-/// Delete / Home / End / Tab are likewise dropped.
+/// Delete / Home / End / Tab are still dropped.
 #[test]
 fn int_editing_value_ignores_other_text_input_keys() {
     let mut s = int_stepper_fixture(50);
@@ -2150,6 +2263,58 @@ fn int_editing_value_ignores_other_text_input_keys() {
         );
         assert_eq!(int_stepper_buffer(&s), "50");
     }
+}
+
+/// Typing digits into a cleared buffer and committing dispatches the typed
+/// number through `action_for_int` (clamped to [min,max]).
+#[test]
+fn int_editing_value_typed_commit_dispatches_clamped_value() {
+    use crossterm::event::KeyModifiers;
+    // context_window: min 1024, max 10_000_000.
+    let mut s = int_stepper_fixture_for("openai_compatible.context_window", 200_000);
+    // Clear the seeded value, then type 1000000.
+    let _ = handle_settings_key(&mut s, &KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
+    // 200000 → 20000 → 2000 → 200 → 20 → 2 → "" (7 backspaces for "200000").
+    for _ in 0..6 {
+        let _ = handle_settings_key(&mut s, &KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
+    }
+    assert_eq!(int_stepper_buffer(&s), "");
+    for d in ['1', '0', '0', '0', '0', '0', '0'] {
+        let _ = handle_settings_key(
+            &mut s,
+            &KeyEvent::new(KeyCode::Char(d), KeyModifiers::NONE),
+        );
+    }
+    assert_eq!(int_stepper_buffer(&s), "1000000");
+    let outcome = handle_settings_key(&mut s, &KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert!(
+        matches!(
+            outcome,
+            SettingsKeyOutcome::Action(Action::SetOpenAiCompatibleContextWindow(1_000_000))
+        ),
+        "Enter must commit the typed value, got {outcome:?}",
+    );
+    assert!(matches!(s.mode(), SettingsModalMode::Browse));
+}
+
+/// An out-of-range typed value clamps to [min,max] on commit.
+#[test]
+fn int_editing_value_typed_out_of_range_clamps_on_commit() {
+    use crossterm::event::KeyModifiers;
+    // context_window min 1024. Type "1" then commit → clamps to 1024.
+    let mut s = int_stepper_fixture_for("openai_compatible.context_window", 200_000);
+    for _ in 0..6 {
+        let _ = handle_settings_key(&mut s, &KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
+    }
+    let _ = handle_settings_key(&mut s, &KeyEvent::new(KeyCode::Char('1'), KeyModifiers::NONE));
+    let outcome = handle_settings_key(&mut s, &KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert!(
+        matches!(
+            outcome,
+            SettingsKeyOutcome::Action(Action::SetOpenAiCompatibleContextWindow(1_024))
+        ),
+        "out-of-range typed value must clamp to min, got {outcome:?}",
+    );
 }
 
 /// Render the stepper and assert the `‹` / `›` arrow glyphs

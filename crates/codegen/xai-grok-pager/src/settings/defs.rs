@@ -219,6 +219,11 @@ const PLAN_MODE_CHOICES: &[EnumChoice] = &[
 
 const OPENAI_COMPATIBLE_BACKEND_CHOICES: &[EnumChoice] = &[
     EnumChoice {
+        canonical: "auto",
+        display: "Auto (detect)",
+        description: "Probe the endpoint and pick Responses or Chat Completions automatically.",
+    },
+    EnumChoice {
         canonical: "chat_completions",
         display: "Chat Completions",
         description: "Use POST /chat/completions with streaming.",
@@ -530,6 +535,23 @@ const CONTEXTUAL_HINTS_CHILDREN: &[&str] = &[
     "contextual_hints.small_screen",
     "contextual_hints.word_select",
     "contextual_hints.ssh_wrap",
+];
+
+/// Child settings shown inside the "OpenAI-compatible endpoint" group sub-sheet.
+/// Keys match the `openai_compatible.*` settings registered in the Models
+/// category. They are hidden from the top-level list (`build_rows` skips any key
+/// that is a group child) and reached via the group's chevron row.
+///
+/// Ordering: `base_url` + `api_key` first so the URL and secret are colocated
+/// at the top, then the `enabled` gate, then the remaining knobs.
+const OPENAI_COMPATIBLE_CHILDREN: &[&str] = &[
+    "openai_compatible.base_url",
+    "openai_compatible.api_key",
+    "openai_compatible.enabled",
+    "openai_compatible.model",
+    "openai_compatible.api_backend",
+    "openai_compatible.context_window",
+    "openai_compatible.make_default",
 ];
 
 /// Build the catalog. Called once at process start via
@@ -891,6 +913,38 @@ pub fn default_settings() -> Vec<SettingMeta> {
             hidden_in_minimal: false,
         },
         SettingMeta {
+            key: "openai_compatible",
+            category: SettingCategory::Models,
+            owner: SettingOwner::Shell,
+            label: "OpenAI-compatible endpoint",
+            description: "Configure a user-managed OpenAI-compatible endpoint. \
+                          Its URL, API key, model, and limits live inside this \
+                          sub-sheet.",
+            keywords: &[
+                "openai",
+                "compatible",
+                "endpoint",
+                "provider",
+                "local",
+                "ollama",
+                "lm studio",
+                "url",
+                "base",
+                "api",
+                "key",
+                "model",
+                "context",
+                "window",
+                "backend",
+                "default",
+            ],
+            kind: SettingKind::Group {
+                children: OPENAI_COMPATIBLE_CHILDREN,
+            },
+            restart_required: false,
+            hidden_in_minimal: false,
+        },
+        SettingMeta {
             key: "openai_compatible.enabled",
             category: SettingCategory::Models,
             owner: SettingOwner::Shell,
@@ -961,7 +1015,7 @@ pub fn default_settings() -> Vec<SettingMeta> {
                 "protocol",
             ],
             kind: SettingKind::Enum {
-                default: "chat_completions",
+                default: "auto",
                 choices: OPENAI_COMPATIBLE_BACKEND_CHOICES,
                 supports_preview: false,
             },

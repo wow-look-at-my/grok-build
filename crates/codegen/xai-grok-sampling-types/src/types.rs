@@ -1050,6 +1050,17 @@ pub enum ApiBackend {
     Responses,
     /// Use the Anthropic Messages API (/v1/messages)
     Messages,
+    /// Detect the backend by probing the endpoint at runtime.
+    ///
+    /// Used by user-managed endpoints (e.g. `[openai_compatible]`) where the
+    /// caller doesn't know which wire protocol the server implements. It is
+    /// **not** the serde default — configs that omit `api_backend` keep
+    /// resolving to [`Self::ChatCompletions`] (backward compatible). Callers
+    /// that store `AutoDetect` must resolve it to a concrete backend before the
+    /// sampler builds a client; `xai-grok-sampler` treats an unresolved
+    /// `AutoDetect` as `ChatCompletions` (it never performs network I/O).
+    #[serde(rename = "auto")]
+    AutoDetect,
 }
 
 impl ApiBackend {
@@ -1070,6 +1081,13 @@ impl ApiBackend {
     /// [`ConversationRequest::prompt_cache_key`]: crate::conversation::ConversationRequest::prompt_cache_key
     pub fn forwards_prompt_cache_key(&self) -> bool {
         matches!(self, Self::Responses)
+    }
+
+    /// Fallback backend used when `AutoDetect` cannot be resolved (probe
+    /// failure or an unresolved `AutoDetect` reaching the sampler). Kept
+    /// `pub` so the shell and sampler share one default.
+    pub fn auto_detect_fallback() -> Self {
+        Self::ChatCompletions
     }
 }
 

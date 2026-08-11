@@ -328,7 +328,8 @@ impl Default for OpenAiCompatibleSnapshot {
             enabled: profile.enabled,
             base_url: profile.base_url,
             model: profile.model,
-            api_backend: "chat_completions".to_owned(),
+            api_backend: "auto".to_owned(),
+            context_window: profile.context_window,
             make_default: profile.make_default,
             api_key_configured: false,
         }
@@ -348,6 +349,7 @@ impl OpenAiCompatibleSnapshot {
             .unwrap_or_default();
         let api_backend = match profile.api_backend {
             xai_grok_shell::sampling::ApiBackend::Responses => "responses",
+            xai_grok_shell::sampling::ApiBackend::AutoDetect => "auto",
             _ => "chat_completions",
         };
         let api_key_configured = std::env::var("OPENAI_API_KEY")
@@ -753,10 +755,10 @@ pub fn current_value_for(
             Some(SettingValue::String(pager.openai_compatible.model.clone()))
         }
         "openai_compatible.api_backend" => Some(SettingValue::Enum(
-            if pager.openai_compatible.api_backend == "responses" {
-                "responses"
-            } else {
-                "chat_completions"
+            match pager.openai_compatible.api_backend.as_str() {
+                "responses" => "responses",
+                "auto" => "auto",
+                _ => "chat_completions",
             },
         )),
         "openai_compatible.make_default" => {
