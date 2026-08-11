@@ -15,7 +15,14 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  CARGO_INCREMENTAL: "0"
+  # Incremental compilation MUST stay on for CI. rust-cache restores target/
+  # (~2.7 GB) on a cache hit, but with CARGO_INCREMENTAL=0 cargo has no
+  # incremental compilation data to reuse — it recompiles every crate from
+  # scratch regardless of the restored artifacts (the fingerprints don't carry
+  # across the cache round-trip without the incremental database). With
+  # incremental on, a cache hit lets cargo skip unchanged crates entirely,
+  # cutting the build+test compile from ~14 min to ~1-2 min on a warm cache.
+  CARGO_INCREMENTAL: "1"
   # Linking every crate's test binaries WITH debuginfo needs >37 GB of target/
   # (measured); a runner has ~14 GB free, and ld dies on a bus error partway
   # through the shell crate's integration tests. Nothing here reads a symbol.
