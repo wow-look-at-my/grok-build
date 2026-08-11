@@ -4,26 +4,32 @@ use crate::common::*;
 
 const FEEDBACK_LABEL_SENTINEL: &str = "How can we improve Grok Build?";
 const FEEDBACK_PLACEHOLDER_SENTINEL: &str = "Please provide as much detail as possible.";
+const SESSION_GATE_SENTINEL: &str = "No active session";
 const THANKS_SENTINEL: &str = "Thanks for the feedback";
 const PANE_FEEDBACK: &str = "minimal-pty-feedback-report-xyz";
 
-/// Minimal: bare `/feedback` opens the freeform pane and submits like full TUI.
-///
-/// The no-session guard is NOT tested here. Reaching it means racing startup:
-/// the idle prompt renders before `NewSessionComplete` arrives, so whether
-/// `session_id` is bound when the keys land is a coin flip, and the assertion
-/// fails whenever the session wins. `enter_feedback_mode_requires_session`
-/// (dispatch::tests::notes) owns that guard instead -- it sets `session_id` to
-/// `None` outright and pins both the message and minimal's system-block
-/// rendering of it, which is the whole of what this half was reaching for.
+/// Minimal: bare `/feedback` without a session shows a system notice; after a session exists the freeform pane opens and submits like full TUI.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
-async fn minimal_feedback_pane_opens_and_submits() {
+async fn minimal_feedback_session_gate_and_pane() {
     let content = ContentController::start().await.expect("start content");
     content.set_response(format!("{MOCK_RESPONSE_SENTINEL} minimal ready."));
 
     let mut harness = spawn_minimal(&content);
     wait_minimal_ready(&mut harness);
+
+    // Pre-session: guard must be visible as system text (toast is invisible).
+    harness
+        .inject_keys(b"/feedback\r")
+        .expect("bare /feedback before session");
+    harness
+        .wait_for_full_text(SESSION_GATE_SENTINEL, Duration::from_secs(15))
+        .expect("minimal session gate must use a system notice");
+    assert!(
+        !harness.contains_text(FEEDBACK_LABEL_SENTINEL),
+        "pane must not open without a session\nscreen:\n{}",
+        harness.screen_contents()
+    );
 
     // Establish a session, then open the pane and submit.
     harness
