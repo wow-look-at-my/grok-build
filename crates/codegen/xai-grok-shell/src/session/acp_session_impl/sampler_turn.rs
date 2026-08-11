@@ -1161,6 +1161,9 @@ impl SessionActor {
     ///    ran, the outer turn loop should `continue`.
     /// * `Ok(SamplerTurnOutcome::RefreshAuthAndResubmit)` - auth 401
     ///    recovery succeeded, credentials refreshed, retry once.
+    /// * `Ok(SamplerTurnOutcome::CancelledForInterjection)` - the
+    ///    in-flight stream was cancelled for an asap injection; the outer
+    ///    turn loop drains the interjection and `continue`s (resubmit).
     /// * `Err(acp::Error)` - terminal failure already reported via
     ///    `send_xai_notification(RetryState::Failed)`.
     pub(crate) async fn run_turn_via_sampler(
@@ -1175,12 +1178,24 @@ impl SessionActor {
         };
         let request_id = xai_grok_sampler::RequestId::random();
         let request_id_str = request_id.as_str().to_string();
+        // Publish the in-flight id so a `SessionCommand::Interject` arriving
+        // mid-stream can cancel THIS request for an asap injection (the turn
+        // loop then drains the interjection and resubmits instead of waiting
+        // for the stream to finish).
+        *self.in_flight_sampler_request_id.lock() = Some(request_id.clone());
         match self
             .sampler_handle
             .submit_and_collect(request_id, request)
             .await
         {
             Ok((response, metrics)) => {
+                *self.in_flight_sampler_request_id.lock() = None;
+                // Clear a stale asap-injection flag: the cancel may have arrived
+                // after the stream already completed, in which case there is
+                // nothing to cancel — the interjection is drained at the next
+                // loop boundary as usual.
+                self.interjection_cancel_requested
+                    .store(false, std::sync::atomic::Ordering::SeqCst);
                 let span = tracing::Span::current();
                 span.record("request_id", request_id_str.as_str());
                 if let Some(ttft) = metrics.time_to_first_token_ms {
@@ -1205,7 +1220,27 @@ impl SessionActor {
                 ))
             }
             Err(rich_err) => {
+                *self.in_flight_sampler_request_id.lock() = None;
                 self.turn_stream_drained.lock().take();
+                // ASAP injection: the in-flight request was cancelled by the
+                // `SessionCommand::Interject` handler so the turn loop can
+                // drain the interjection and resubmit immediately. Preserve
+                // whatever text the model had already streamed so the
+                // resubmitted request sees `partial assistant turn + user
+                // interjection` (Claude-Code-style mid-stream steering) and
+                // the conversation stays consistent. Swallow the
+                // "request cancelled" error — it is not a real failure.
+                if self
+                    .interjection_cancel_requested
+                    .swap(false, std::sync::atomic::Ordering::SeqCst)
+                {
+                    let partial = self.partial_assistant_from_capture().await;
+                    tracing::info!(
+                        has_partial = partial.is_some(),
+                        "asap injection: cancelled in-flight stream for interjection; resubmitting"
+                    );
+                    return Ok(SamplerTurnOutcome::CancelledForInterjection { partial });
+                }
                 let info = xai_grok_sampler::SamplingErrorInfo::from(&rich_err);
                 match self.handle_sampling_failure(info).await? {
                     SamplerFailureRecovery::CompactAndResubmit => {
@@ -1445,6 +1480,33 @@ impl SessionActor {
         }
         self.chat_state_handle
             .push_assistant_response(assistant_item);
+    }
+
+    /// Build a partial assistant `ConversationItem` from the text the model
+    /// had already streamed before an asap-injection cancel, so the
+    /// resubmitted request sees `partial assistant turn + user interjection`
+    /// and the conversation stays consistent (no silent loss of streamed
+    /// text). Returns `None` when the model streamed nothing yet (clean
+    /// resubmit, nothing to preserve).
+    ///
+    /// Only the text channel is preserved: a tool call the model was still
+    /// emitting arguments for never completed (the sampler returns no
+    /// `Completed` on cancel), so there is nothing well-formed to commit.
+    async fn partial_assistant_from_capture(&self) -> Option<ConversationItem> {
+        let capture = self.streaming_turn_capture.lock();
+        let text = capture.response_text.clone();
+        if text.trim().is_empty() {
+            return None;
+        }
+        let model_id = capture.model_id.clone();
+        drop(capture);
+        Some(ConversationItem::Assistant(xai_grok_sampling_types::AssistantItem {
+            content: std::sync::Arc::from(text.as_str()),
+            tool_calls: Vec::new(),
+            model_id,
+            model_fingerprint: None,
+            reasoning_effort: None,
+        }))
     }
 }
 /// Per-tool precedence: a non-empty `over` wins, else the non-empty `seed`.
