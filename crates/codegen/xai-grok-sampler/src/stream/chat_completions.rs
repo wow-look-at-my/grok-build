@@ -135,7 +135,11 @@ pub fn stream_chat_completions<'a>(
                 // and the standard `usage.cost` USD float (OpenRouter, etc.).
                 // `cost_in_usd_ticks` is authoritative when present.
                 let chunk_cost = xai_grok_sampling_types::reported_cost_ticks(u.cost_in_usd_ticks)
-                    .or_else(|| xai_grok_sampling_types::usd_float_to_ticks(u.cost));
+                    .or_else(|| {
+                        xai_grok_sampling_types::usd_float_to_ticks(
+                            u.cost.as_ref().map(|c| c.as_usd_float()),
+                        )
+                    });
                 cost_usd_ticks = match (cost_usd_ticks, chunk_cost) {
                     (_, Some(n)) => Some(n),
                     (prev, None) => prev,
@@ -957,7 +961,7 @@ mod tests {
             prompt_tokens_details: None,
             completion_tokens_details: None,
             cost_in_usd_ticks: None,
-            cost: Some(0.0000416), // OpenRouter-style float
+            cost: Some(0.0000416).map(xai_grok_sampling_types::UsageCost::from), // OpenRouter-style float
         });
         let chunks: Vec<Result<ChatCompletionChunk, SamplingError>> = vec![
             Ok(text_chunk("ok")),
@@ -993,7 +997,7 @@ mod tests {
             prompt_tokens_details: None,
             completion_tokens_details: None,
             cost_in_usd_ticks: Some(42),
-            cost: Some(0.0000999),
+            cost: Some(0.0000999).map(xai_grok_sampling_types::UsageCost::from),
         });
         let chunks: Vec<Result<ChatCompletionChunk, SamplingError>> = vec![
             Ok(text_chunk("ok")),

@@ -168,6 +168,8 @@ fn apply_terminal_event_overrides(event: &mut rs::ResponseStreamEvent, data: &st
     // Stash cost ticks in metadata for stream_responses. Two wire forms are
     // supported: xAI `cost_in_usd_ticks` (integer, authoritative) and the
     // standard `usage.cost` USD float (OpenRouter, etc.) converted to ticks.
+    // The `usage.cost` value may be a bare float or a Bifrost cost object
+    // (`{"total_cost": ...}`); both are handled via `UsageCost`.
     let ticks = xai_grok_sampling_types::reported_cost_ticks(
         value
             .pointer("/response/usage/cost_in_usd_ticks")
@@ -175,7 +177,15 @@ fn apply_terminal_event_overrides(event: &mut rs::ResponseStreamEvent, data: &st
     )
     .or_else(|| {
         xai_grok_sampling_types::usd_float_to_ticks(
-            value.pointer("/response/usage/cost").and_then(|v| v.as_f64()),
+            value
+                .pointer("/response/usage/cost")
+                .and_then(|v| {
+                    serde_json::from_value::<xai_grok_sampling_types::UsageCost>(
+                        v.clone(),
+                    )
+                    .ok()
+                })
+                .map(|c| c.as_usd_float()),
         )
     });
     if let Some(ticks) = ticks {
@@ -2076,6 +2086,16 @@ impl SamplingClient {
                 let events = crate::stream::stream_messages(raw, meta, request_id, idle_timeout);
                 crate::stream::collect_response(events).await
             }
+            // `AutoDetect` must be resolved before the client is built (the
+            // shell does this). If an unresolved `AutoDetect` reaches the
+            // sampler, fall back to Chat Completions: the sampler never
+            // performs network I/O inside its dispatch.
+            ApiBackend::AutoDetect => {
+                let (raw, meta) = self.conversation_stream(request).await?;
+                let events =
+                    crate::stream::stream_chat_completions(raw, meta, request_id, idle_timeout);
+                crate::stream::collect_response(events).await
+            }
         };
         result
             .map(|(response, _metrics)| response)
@@ -2316,6 +2336,22 @@ mod tests {
     fn new_with_minimal_config_succeeds() {
         let client = SamplingClient::new(minimal_config()).expect("client should construct");
         assert_eq!(client.api_backend(), ApiBackend::ChatCompletions);
+    }
+
+    #[test]
+    fn auto_detect_config_constructs_and_reports_unresolved() {
+        // An unresolved `AutoDetect` must still construct a client (resolution
+        // happens in the shell, never inside `SamplingClient::new`, which does
+        // no network I/O). The client reports `AutoDetect` so the caller knows
+        // it is unresolved; dispatch-time it falls back to Chat Completions.
+        let mut cfg = minimal_config();
+        cfg.api_backend = ApiBackend::AutoDetect;
+        let client = SamplingClient::new(cfg).expect("client should construct");
+        assert_eq!(client.api_backend(), ApiBackend::AutoDetect);
+        assert_eq!(
+            ApiBackend::auto_detect_fallback(),
+            ApiBackend::ChatCompletions
+        );
     }
 
     #[test]
