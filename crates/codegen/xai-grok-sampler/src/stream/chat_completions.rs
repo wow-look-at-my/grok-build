@@ -493,6 +493,166 @@ mod tests {
         }
     }
 
+    /// End-to-end Chat Completions reasoning round-trip on the real path:
+    /// thinking deltas streamed by a provider during turn N must survive (a)
+    /// `stream_chat_completions`' synthesis into a `[Reasoning, Assistant]`
+    /// sibling pair, (b) the shell turn-loop commit (the sibling rides
+    /// `push_tool_result`, the assistant rides `push_assistant_response`), and
+    /// (c) the real `conversation_to_chat_messages` wire conversion for turn
+    /// N+1, where it MUST appear as `reasoning_content` on the following
+    /// assistant message.
+    #[tokio::test]
+    async fn reasoning_roundtrip_reaches_next_request_reasoning_content() {
+        use xai_grok_sampling_types::conversation_to_chat_messages;
+        use xai_grok_sampling_types::conversation::ConversationRequest;
+
+        let mut thinking_chunk = make_chunk(vec![ChatChunkDelta {
+            role: Some(Role::Assistant),
+            content: None,
+            reasoning_content: Some("deep chain of thought".into()),
+            tool_calls: vec![],
+            tool_call_id: None,
+        }]);
+        thinking_chunk.choices[0].finish_reason = None;
+
+        let chunks: Vec<Result<ChatCompletionChunk, SamplingError>> = vec![
+            Ok(thinking_chunk),
+            Ok(text_chunk("the final answer")),
+            Ok(final_chunk(FinishReason::Stop)),
+        ];
+        let raw = stream::iter(chunks).boxed();
+        let events = collect(stream_chat_completions(
+            raw,
+            None,
+            rid(),
+            Duration::from_secs(60),
+        ))
+        .await;
+
+        // (a) stream synthesizes [Reasoning, Assistant].
+        let response = match events.last().unwrap() {
+            SamplingEvent::Completed { response, .. } => response,
+            other => panic!("expected Completed, got {other:?}"),
+        };
+        assert!(
+            matches!(
+                response.items.as_slice(),
+                [ConversationItem::Reasoning(_), ConversationItem::Assistant(_)]
+            ),
+            "expected [Reasoning, Assistant], got {:?}",
+            response.items
+        );
+
+        // (b) shell turn-loop commit order — Reasoning rides the push_tool_result
+        // arm, Assistant rides push_assistant_response; both land in flat history.
+        let mut items = response.items.clone();
+
+        // Turn N+1: user follows up; previous turn's items are the request prefix.
+        items.push(ConversationItem::user("continue"));
+
+        // (c) real wire conversion for turn N+1.
+        let req = ConversationRequest::from_items(items);
+        let msgs = conversation_to_chat_messages(req.items.clone());
+
+        let assistant = msgs
+            .iter()
+            .find(|m| m.role == Role::Assistant)
+            .expect("assistant message present");
+        assert_eq!(
+            assistant.reasoning_content.as_deref(),
+            Some("deep chain of thought"),
+            "turn-N thinking text must be resent as reasoning_content on turn N+1"
+        );
+    }
+
+    /// Regression: synthetic.new's OpenAI-compatible endpoint streams thinking as
+    /// `delta.reasoning` (NOT `reasoning_content`). `ChatChunkDelta` must
+    /// deserialize that wire name (via the `reasoning` alias) into the field
+    /// `stream_chat_completions` already accumulates, so a naive backend switch
+    /// does NOT silently drop all reasoning. Drives the real `stream_chat_completions`
+    /// with a raw JSON chunk carrying `delta.reasoning`, then folds the captured
+    /// reasoning through the real `conversation_to_chat_messages` to `reasoning_content`.
+    #[tokio::test]
+    async fn reasoning_field_alias_captures_and_roundtrips() {
+        use xai_grok_sampling_types::conversation_to_chat_messages;
+        use xai_grok_sampling_types::conversation::ConversationRequest;
+
+        // The exact wire shape synthetic.new emits: `delta.reasoning` with no
+        // `reasoning_content` key. Deserializing raw JSON exercises the serde
+        // alias (the fix), not a Rust-struct construction.
+        let raw_chunk: ChatCompletionChunk = serde_json::from_str(
+            r#"{
+                "id":"chunk-1",
+                "object":"chat.completion.chunk",
+                "created":0,
+                "model":"test-model",
+                "choices":[{
+                    "index":0,
+                    "delta":{
+                        "role":"assistant",
+                        "reasoning":"Synthetic reasoning arrives as delta.reasoning"
+                    },
+                    "finish_reason":null
+                }]
+            }"#,
+        )
+        .expect("delta.reasoning must deserialize into ChatCompletionChunk");
+
+        // Feed the deserialized chunk (thinking delta) followed by text + stop.
+        let mut text_chunk_with_content = text_chunk("the answer");
+        text_chunk_with_content.choices[0].finish_reason = None;
+        let chunks: Vec<Result<ChatCompletionChunk, SamplingError>> = vec![
+            Ok(raw_chunk),
+            Ok(text_chunk_with_content),
+            Ok(final_chunk(FinishReason::Stop)),
+        ];
+        let raw = stream::iter(chunks).boxed();
+        let events = collect(stream_chat_completions(
+            raw,
+            None,
+            rid(),
+            Duration::from_secs(60),
+        ))
+        .await;
+
+        // (a) The `delta.reasoning` text must be synthesized into a Reasoning sibling.
+        let response = match events.last().unwrap() {
+            SamplingEvent::Completed { response, .. } => response,
+            other => panic!("expected Completed, got {other:?}"),
+        };
+        let reasoning_text: Vec<String> = response
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                ConversationItem::Reasoning(r) => {
+                    Some(xai_grok_sampling_types::reasoning_item_text(r))
+                }
+                _ => None,
+            })
+            .collect();
+        assert!(
+            reasoning_text.iter().any(|t| t.contains("Synthetic reasoning")),
+            "delta.reasoning must be captured into a Reasoning sibling; got: {reasoning_text:?}"
+        );
+
+        // (b) Round-trip: shell commit order + real wire conversion for turn N+1
+        // places it on the follower assistant's reasoning_content (the shape
+        // synthetic.new accepts and feeds back, verified live).
+        let mut items = response.items.clone();
+        items.push(ConversationItem::user("continue"));
+        let req = ConversationRequest::from_items(items);
+        let msgs = conversation_to_chat_messages(req.items.clone());
+        let assistant = msgs
+            .iter()
+            .find(|m| m.role == Role::Assistant)
+            .expect("assistant message present");
+        assert_eq!(
+            assistant.reasoning_content.as_deref(),
+            Some("Synthetic reasoning arrives as delta.reasoning"),
+            "delta.reasoning captured on turn N must resend as reasoning_content on turn N+1"
+        );
+    }
+
     #[tokio::test]
     async fn tool_call_stream_emits_deltas_and_assembles_final_call() {
         // First chunk has id + name + part of arguments.

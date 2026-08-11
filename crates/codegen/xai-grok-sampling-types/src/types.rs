@@ -637,6 +637,15 @@ pub struct ChatChunkDelta {
     pub role: Option<Role>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
+    /// Thinking/chain-of-thought text streamed by the model. Deserializes from
+    /// either `reasoning_content` (OpenAI/xAI naming) or `reasoning`
+    /// (synthetic.new's OpenAI-compatible naming) so both wire shapes feed the
+    /// same accumulator; serializes as `reasoning_content` (the shape the
+    /// resend path / providers accept).
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        alias = "reasoning"
+    )]
     pub reasoning_content: Option<String>,
     /// Tool call deltas. Handles `null` in JSON as empty vec.
     #[serde(

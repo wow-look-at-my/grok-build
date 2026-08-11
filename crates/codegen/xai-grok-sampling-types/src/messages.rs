@@ -131,6 +131,9 @@ pub enum ContentBlock {
     },
     Thinking {
         thinking: String,
+        // Some Anthropic-compatible providers (e.g. Synthetic) omit the
+        // encrypted `signature` on thinking blocks; tolerate its absence.
+        #[serde(default)]
         signature: String,
     },
     /// Encrypted reasoning the model chose to redact. Carries only an opaque
@@ -480,6 +483,31 @@ mod tests {
             serde_json::to_value(ContentBlock::RedactedThinking { data: "abc".into() }).unwrap();
         assert_eq!(json["type"], "redacted_thinking");
         assert_eq!(json["data"], "abc");
+    }
+
+    /// Anthropic-compatible providers without prompt caching / extended
+    /// thinking signatures (e.g. Synthetic) send thinking blocks with no
+    /// `signature`. The whole response must still parse; the signature falls
+    /// back to empty instead of failing the request.
+    #[test]
+    fn thinking_block_without_signature_parses() {
+        let event: MessageStreamEvent = serde_json::from_str(
+            r#"{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"pondering"}}"#,
+        )
+        .expect("signature-less thinking content_block_start must deserialize");
+        match event {
+            MessageStreamEvent::ContentBlockStart { content_block, .. } => match content_block {
+                ContentBlock::Thinking {
+                    thinking,
+                    signature,
+                } => {
+                    assert_eq!(thinking, "pondering");
+                    assert!(signature.is_empty());
+                }
+                other => panic!("expected Thinking, got {other:?}"),
+            },
+            other => panic!("expected ContentBlockStart, got {other:?}"),
+        }
     }
 
     #[test]

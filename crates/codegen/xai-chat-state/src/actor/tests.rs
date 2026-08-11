@@ -4075,6 +4075,89 @@ async fn prefix_stable_across_user_assistant_turns() {
     assert_prefix_stable_pair(&req2, &req3, "turn 2 -> turn 3");
 }
 
+/// End-to-end reasoning round-trip through the REAL chat-state actor:
+/// a turn-N `[Reasoning, Assistant]` pair (as the shell turn-loop commits it —
+/// the Reasoning sibling rides the `push_tool_result` arm, the Assistant rides
+/// `push_assistant_response`) must survive the integrity-repair + prune pass in
+/// `build_request` and reach the next turn's Messages wire as a `Thinking`
+/// block. The reasoning carries real thinking text with NO encrypted signature
+/// (the Anthropic-compatible third-party case, e.g. Kimi) — the exact scenario
+/// the goal suspects is being dropped.
+#[tokio::test]
+async fn reasoning_roundtrip_through_actor_reaches_next_messages_wire() {
+    use xai_grok_sampling_types::build_messages_request;
+    use xai_grok_sampling_types::rs;
+
+    let thinking_text = "Let me weigh the token budget in between turns.";
+
+    // Turn N: the Messages stream synthesized `[Reasoning, Assistant]`; the
+    // shell turn loop commits the Reasoning via `push_tool_result` and the
+    // Assistant via `push_assistant_response`.
+    let h = TestHarness::with_conversation(vec![
+        ConversationItem::system("You are a coding assistant."),
+        ConversationItem::user("q1"),
+    ]);
+    h.handle.push_tool_result(ConversationItem::Reasoning(
+        rs::ReasoningItem {
+            id: String::new(),
+            summary: vec![rs::SummaryPart::SummaryText(
+                rs::SummaryTextContent {
+                    text: thinking_text.to_string(),
+                },
+            )],
+            content: None,
+            encrypted_content: None, // no signature — Anthropic-compatible third party
+            status: None,
+        },
+    ));
+    h.handle.push_assistant_response(ConversationItem::assistant("The answer."));
+    // Turn N+1: user asks a follow-up.
+    h.handle.push_user_message(ConversationItem::user("q2"));
+
+    // `build_request` runs `ensure_conversation_integrity` (dangling-tool-call
+    // repair) then the prune/memory pass, then returns the request.
+    let request = h
+        .handle
+        .build_request(vec![], None, false, None, "c".into(), "r".into())
+        .await
+        .expect("build_request must succeed");
+
+    // The reasoning sibling must still be present in the request items.
+    assert!(
+        request
+            .items
+            .iter()
+            .any(|i| matches!(i, ConversationItem::Reasoning(r)
+                if !xai_grok_sampling_types::reasoning_item_text(r).is_empty())),
+        "reasoning sibling must survive chat-state repair + build_request; items: {:?}",
+        request.items
+    );
+
+    // It must reach the next turn's Messages wire as a Thinking block.
+    let msgs = build_messages_request(&request);
+    let thinking_texts: Vec<String> = msgs
+        .messages
+        .iter()
+        .filter_map(|m| match &m.content {
+            xai_grok_sampling_types::messages::MessageContent::Blocks(blocks) => {
+                blocks.iter().find_map(|b| match b {
+                    xai_grok_sampling_types::messages::ContentBlock::Thinking {
+                        thinking, ..
+                    } => Some(thinking.clone()),
+                    _ => None,
+                })
+            }
+            _ => None,
+        })
+        .collect();
+    assert!(
+        thinking_texts.iter().any(|t| t.contains("token budget")),
+        "turn-N thinking text must be resent as a Thinking block on turn N+1; \
+         wire thinking blocks: {thinking_texts:?}; full messages: {:#?}",
+        msgs.messages
+    );
+}
+
 /// Prefix stability when memory reminders are injected.
 /// Once a memory reminder is established, subsequent requests with the
 /// SAME reminder must produce stable prefixes.
