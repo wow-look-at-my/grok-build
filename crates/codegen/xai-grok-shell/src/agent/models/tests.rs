@@ -2014,6 +2014,7 @@ fn make_entry_config_with_id(
         show_model_fingerprint: false,
         stream_tool_calls: None,
         laziness_detector: config::LazinessDetectorPerModelConfig::default(),
+        pricing: xai_grok_sampling_types::ModelPricing::default(),
     }
 }
 
@@ -2552,5 +2553,52 @@ fn production_resolve_model_list_backfills_window_per_slugs_into_compaction() {
         CompactionAtTokens::Enabled(true).resolve(sampling.context_window, 85).unwrap(),
         1_000_000 * 85 / 100,
         "the resolved context window must drive the auto-compaction threshold"
+    );
+}
+
+/// A config-declared model must show up in the picker with a visible label.
+///
+/// The wire `name` is what every row renders, and it is the only thing that
+/// distinguishes one row from another. Nothing in config.toml is required to
+/// set it, so it has to fall back to something non-empty -- otherwise the
+/// picker draws four blank rows that each select a different model.
+#[test]
+fn config_declared_models_reach_the_picker_with_a_visible_label() {
+    let cfg = config_from_toml(
+        r#"
+[endpoints]
+models_base_url = "https://gateway.example.com/v1"
+
+[model."Synthetic_Anthropic/syn:small:text"]
+base_url = "https://gateway.example.com/v1"
+api_backend = "messages"
+
+[model."Synthetic_Anthropic/hf:zai-org/GLM-4.7-Flash"]
+base_url = "https://gateway.example.com/v1"
+api_backend = "messages"
+
+[model.named-entry]
+model = "syn:big:text"
+base_url = "https://gateway.example.com/v1"
+
+[model.labelled-entry]
+model = "syn:huge:text"
+name = "Huge"
+base_url = "https://gateway.example.com/v1"
+"#,
+    );
+
+    let resolved = config::resolve_model_list(&cfg, None);
+    assert_eq!(resolved.len(), 4, "all four config models must resolve");
+
+    let acp = config::to_acp_model_info(&resolved);
+    let blank: Vec<&str> = acp
+        .iter()
+        .filter(|(_, info)| info.name.trim().is_empty())
+        .map(|(id, _)| id.0.as_ref())
+        .collect();
+    assert!(
+        blank.is_empty(),
+        "these rows would render blank in the model picker: {blank:?}"
     );
 }

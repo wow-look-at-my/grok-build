@@ -68,6 +68,16 @@ const ALL_SETTINGS_EXERCISED: &[&str] = &[
     "voice_keybind_enabled",
     "voice_capture_mode",
     "voice_stt_language",
+    // User-managed OpenAI-compatible endpoint (Models category). Exercised
+    // via the `openai_compatible` group sub-sheet, not as top-level rows (the
+    // group hides its children the same way `contextual_hints` does).
+    "openai_compatible",
+    "openai_compatible.enabled",
+    "openai_compatible.base_url",
+    "openai_compatible.model",
+    "openai_compatible.api_backend",
+    "openai_compatible.make_default",
+    "openai_compatible.api_key",
     // Contextual-hints group + its per-tip child toggles (exercised via the
     // group sub-sheet, not as top-level rows).
     "contextual_hints",
@@ -193,6 +203,76 @@ fn navigate_to(state: &mut SettingsModalState, target: &str) {
     }
 }
 
+/// The ordered child keys of a `SettingKind::Group` registered under
+/// `group_key`, taken straight from the registry so the index of each child
+/// stays correct if the static `OPENAI_COMPATIBLE_CHILDREN` (or any other
+/// group's) ordering ever changes.
+fn group_children_of(state: &SettingsModalState, group_key: &str) -> Vec<&'static str> {
+    let meta = state
+        .registry
+        .all()
+        .iter()
+        .find(|m| m.key == group_key)
+        .unwrap_or_else(|| panic!("group `{group_key}` not registered"));
+    match &meta.kind {
+        SettingKind::Group { children } => children.to_vec(),
+        other => panic!("`{group_key}` is not a Group (got {other:?})"),
+    }
+}
+
+/// Navigate the keyboard selection to a group row, then press Enter to open
+/// its sub-sheet (`PickingGroup` on the first child). Assumes the modal is in
+/// `Browse` mode and the group row is at-or-after the current selection.
+fn open_group_sub_sheet(state: &mut SettingsModalState, group_key: &str) {
+    navigate_to(state, group_key);
+    let out = handle_settings_key(state, &press(KeyCode::Enter));
+    assert!(
+        matches!(out, SettingsKeyOutcome::Changed),
+        "Enter on group `{group_key}` must open the sub-sheet, got {out:?}"
+    );
+    assert!(
+        matches!(
+            state.mode(),
+            SettingsModalMode::PickingGroup { child_idx: 0, .. }
+        ),
+        "group `{group_key}` must open with the first child focused, got {:?}",
+        state.mode(),
+    );
+}
+
+/// Open a group's sub-sheet and move keyboard focus to `child_key` (pressing
+/// Down once per child after the first). Leaves the modal in `PickingGroup`
+/// with the requested child focused, ready for a Space/Enter/click.
+///
+/// `child_key` must be a direct child of `group_key`; the index is derived
+/// from the registry's static child ordering, so callers don't hard-code it.
+fn navigate_to_group_child(state: &mut SettingsModalState, group_key: &str, child_key: &str) {
+    open_group_sub_sheet(state, group_key);
+    let children = group_children_of(state, group_key);
+    let child_idx = children
+        .iter()
+        .position(|c| *c == child_key)
+        .unwrap_or_else(|| panic!("`{child_key}` is not a child of group `{group_key}`"));
+    for _ in 0..child_idx {
+        let out = handle_settings_key(state, &press(KeyCode::Down));
+        assert!(
+            matches!(out, SettingsKeyOutcome::Changed),
+            "Down inside `{group_key}` sub-sheet must advance, got {out:?}"
+        );
+    }
+    let actual = match state.mode() {
+        SettingsModalMode::PickingGroup { child_idx, .. } => child_idx,
+        other => panic!(
+            "expected `{group_key}` sub-sheet focused on `{child_key}` (child_idx {child_idx}), \
+             got {other:?}",
+        ),
+    };
+    assert_eq!(
+        actual, child_idx,
+        "expected `{group_key}` sub-sheet focused on `{child_key}` (child_idx {child_idx})",
+    );
+}
+
 /// Assert that `outcome` is the typed setter Action for the given bool key.
 fn assert_set_bool_action(outcome: SettingsKeyOutcome, key: &str, expected: bool) {
     let action = match outcome {
@@ -299,6 +379,18 @@ fn assert_set_bool_action(outcome: SettingsKeyOutcome, key: &str, expected: bool
             assert_eq!(
                 b, expected,
                 "SetDisplayRefreshAutoCadence value differs from expected"
+            )
+        }
+        ("openai_compatible.enabled", Action::SetOpenAiCompatibleEnabled(b)) => {
+            assert_eq!(
+                b, expected,
+                "SetOpenAiCompatibleEnabled value differs from expected"
+            )
+        }
+        ("openai_compatible.make_default", Action::SetOpenAiCompatibleMakeDefault(b)) => {
+            assert_eq!(
+                b, expected,
+                "SetOpenAiCompatibleMakeDefault value differs from expected"
             )
         }
         (key, action) => panic!(
@@ -591,6 +683,48 @@ fn synth_rects(state: &mut SettingsModalState) {
             x: 70,
             y: i as u16,
             width: 8,
+            height: 1,
+        })
+        .collect();
+}
+
+/// Mouse-open a `SettingKind::Group` sub-sheet: lay out row hit-rects, then
+/// click the group row's value column (the chevron) to enter `PickingGroup`
+/// on the first child. Mirrors `open_group_sub_sheet` for the keyboard path.
+/// Leaves the modal in `PickingGroup { child_idx: 0, .. }`.
+fn open_group_sub_sheet_mouse(state: &mut SettingsModalState, group_key: &str) {
+    synth_rects(state);
+    let group_row = row_idx_for(state, group_key) as u16;
+    let out = handle_settings_mouse(
+        state,
+        MouseEventKind::Down(crossterm::event::MouseButton::Left),
+        72,
+        group_row,
+    );
+    assert!(
+        matches!(out, SettingsKeyOutcome::Changed),
+        "click on group `{group_key}` value column must open the sub-sheet, got {out:?}"
+    );
+    assert!(
+        matches!(
+            state.mode(),
+            SettingsModalMode::PickingGroup { child_idx: 0, .. }
+        ),
+        "group `{group_key}` must open with the first child focused, got {:?}",
+        state.mode(),
+    );
+}
+
+/// Synthesize one hit-rect per child of a group's sub-sheet (the renderer
+/// doesn't run in tests), so a mouse click at `(x, child_idx)` resolves to
+/// that child. Rects span the full row width so any in-bounds x works.
+fn synth_group_child_rects(state: &mut SettingsModalState, group_key: &str) {
+    let n = group_children_of(state, group_key).len();
+    state.picker_choice_rects = (0..n)
+        .map(|i| Rect {
+            x: 0,
+            y: i as u16,
+            width: 80,
             height: 1,
         })
         .collect();
@@ -1849,6 +1983,8 @@ fn registry_kind_membership_through_pr_14() {
             "contextual_hints.small_screen",
             "contextual_hints.word_select",
             "contextual_hints.ssh_wrap",
+            "openai_compatible.enabled",
+            "openai_compatible.make_default",
         ]
         .into_iter()
         .collect::<std::collections::BTreeSet<_>>()
@@ -1867,6 +2003,7 @@ fn registry_kind_membership_through_pr_14() {
             "default_selected_permission",
             "hunk_tracker_mode",
             "keep_text_selection",
+            "openai_compatible.api_backend",
             "permission_mode",
             "plan_mode",
             "render_mermaid",
@@ -1880,10 +2017,19 @@ fn registry_kind_membership_through_pr_14() {
     );
 
     let string_keys = by_kind.remove("String").unwrap_or_default();
-    assert!(
-        string_keys.is_empty(),
-        "no String-kind settings should remain — `default_model` + `fork_secondary_model` \
-         migrated to DynamicEnum; got: {string_keys:?}",
+    assert_eq!(
+        string_keys,
+        vec![
+            // The user-managed OpenAI-compatible endpoint, sorted like every
+            // other list here. `default_model` and `fork_secondary_model`
+            // migrated to DynamicEnum and must not come back; these three are
+            // free text by nature (a URL, a slug the endpoint defines, and a
+            // secret).
+            "openai_compatible.api_key",
+            "openai_compatible.base_url",
+            "openai_compatible.model",
+        ],
+        "String kind membership drift",
     );
 
     let dynamic_enum_keys = by_kind.remove("DynamicEnum").unwrap_or_default();
@@ -1905,7 +2051,7 @@ fn registry_kind_membership_through_pr_14() {
     let group_keys = by_kind.remove("Group").unwrap_or_default();
     assert_eq!(
         group_keys,
-        vec!["contextual_hints"],
+        vec!["contextual_hints", "openai_compatible"],
         "Group kind membership drift",
     );
 
@@ -1936,6 +2082,7 @@ fn enum_settings_membership_through_pr_14() {
             "default_selected_permission",
             "hunk_tracker_mode",
             "keep_text_selection",
+            "openai_compatible.api_backend",
             "permission_mode",
             "plan_mode",
             "render_mermaid",
@@ -2025,6 +2172,15 @@ fn defaults_round_trip_through_registry() {
             "contextual_hints.small_screen" => SettingValue::Bool(true),
             "contextual_hints.word_select" => SettingValue::Bool(true),
             "contextual_hints.ssh_wrap" => SettingValue::Bool(true),
+            // The compatible endpoint ships off and unconfigured; make_default
+            // only takes effect once `enabled` is turned on.
+            "openai_compatible.enabled" => SettingValue::Bool(false),
+            "openai_compatible.make_default" => SettingValue::Bool(true),
+            "openai_compatible.base_url" => SettingValue::String(String::new()),
+            "openai_compatible.model" => SettingValue::String(String::new()),
+            "openai_compatible.api_backend" => SettingValue::Enum("auto"),
+            // api_key never reaches here: it is asserted separately below,
+            // because its live value is a status string, not its stored value.
             other => panic!("test must list expected default for `{other}`"),
         }
     };
@@ -2037,6 +2193,25 @@ fn defaults_round_trip_through_registry() {
         let live_value = current_value_for(meta.key, &ui, &pager)
             .unwrap_or_else(|| panic!("current_value_for(`{}`) returned None", meta.key));
         let default_value = xai_grok_pager::settings::default_value_for(meta);
+
+        // The API key is the one setting whose live value is deliberately NOT
+        // its stored value: the row reports whether a key exists, so the secret
+        // is never rendered or logged. Round-tripping it like the others would
+        // mean reading it back out.
+        if meta.key == "openai_compatible.api_key" {
+            assert_eq!(
+                live_value,
+                SettingValue::String("Not configured".to_owned()),
+                "an unset api_key must read as a status, never as its value",
+            );
+            assert_eq!(
+                default_value,
+                SettingValue::String(String::new()),
+                "the api_key default is the empty secret, not the status string",
+            );
+            continue;
+        }
+
         let expected_value = expected(meta.key);
 
         assert_eq!(
@@ -2099,7 +2274,9 @@ fn settings_value_payload_matches_kind() {
             | SettingsKeyOutcome::Action(Action::SetCollapsedEditBlocks(_))
             | SettingsKeyOutcome::Action(Action::SetInvertScroll(_))
             | SettingsKeyOutcome::Action(Action::SetDisplayRefreshAutoCadence(_))
-            | SettingsKeyOutcome::Action(Action::SetVoiceKeybindEnabled(_)) => {}
+            | SettingsKeyOutcome::Action(Action::SetVoiceKeybindEnabled(_))
+            | SettingsKeyOutcome::Action(Action::SetOpenAiCompatibleEnabled(_))
+            | SettingsKeyOutcome::Action(Action::SetOpenAiCompatibleMakeDefault(_)) => {}
             other => panic!(
                 "expected a typed bool setter for `{}`, got {:?}",
                 meta.key, other
@@ -4497,7 +4674,10 @@ fn pr15_int_stepper_up_down_left_right_steps_and_clamps() {
     assert_eq!(s.editing_buffer(), Some("40"), "Left must clamp to min",);
 }
 
-/// Int stepper rejects all text-input keys.
+/// Int stepper rejects non-numeric text-input keys but accepts digit typing
+/// and Backspace (digits append to the in-place buffer; Backspace drops the
+/// last digit). This mirrors the keyboard contract pinned by the unit tests
+/// `int_editing_value_appends_digit_keys` / `int_editing_value_backspace_removes_last_digit`.
 #[test]
 fn pr15_int_stepper_rejects_text_input_keys() {
     let mut s = make_state();
@@ -4509,15 +4689,37 @@ fn pr15_int_stepper_rejects_text_input_keys() {
         .to_owned();
     assert_eq!(initial_buffer, "120", "buffer seeds from default");
 
+    // Digits append to the in-place buffer (Changed); Backspace drops the last
+    // digit. These were previously rejected but are now accepted so a user can
+    // type a number directly.
+    let accept_keys: &[(KeyCode, &str)] = &[
+        (KeyCode::Char('5'), "1205"),
+        // Backspace undoes the appended digit, restoring the seed.
+        (KeyCode::Backspace, "120"),
+    ];
+    for (k, expected) in accept_keys {
+        let outcome = handle_settings_key(&mut s, &press(*k));
+        assert!(
+            matches!(outcome, SettingsKeyOutcome::Changed),
+            "Int stepper must accept {k:?} (got {outcome:?})",
+        );
+        assert_eq!(
+            s.editing_buffer(),
+            Some(*expected),
+            "buffer must be {expected:?} after {k:?}",
+        );
+    }
+
+    // The stepper is still NOT a free-form text input: letters, sign/decimal
+    // punctuation, Space, and navigation/edit keys other than Backspace are
+    // silently dropped, leaving the buffer untouched (back at the seed).
     let reject_keys = &[
-        KeyCode::Char('5'),
         KeyCode::Char('a'),
         KeyCode::Char('-'),
         // Extended reject-set.
         KeyCode::Char(' '), // Space (the Bool-toggle key in Browse mode)
         KeyCode::Char('+'), // Plus (would be a naïve numpad expectation)
         KeyCode::Char('.'), // Decimal point
-        KeyCode::Backspace,
         KeyCode::Delete,
         KeyCode::Home,
         KeyCode::End,
@@ -7804,4 +8006,266 @@ fn collapsed_edit_blocks_renders_under_appearance_category_shell_owned() {
         "collapsed_edit_blocks must be immediately below group_tool_verbs; \
          Appearance order: {keys:?}"
     );
+}
+
+// ---------------------------------------------------------------------------
+// User-managed OpenAI-compatible endpoint (Models category)
+//
+// Six rows of three kinds: two Bools, three Strings, one Enum. Every one is
+// restart_required, and api_key is masked in the row and stored in auth.json
+// rather than config.toml.
+// ---------------------------------------------------------------------------
+
+/// Space on the `openai_compatible.enabled` row toggles it on (default OFF).
+///
+/// `openai_compatible` is now a `SettingKind::Group`, so `enabled` is hidden
+/// inside the group sub-sheet. Open the group, move Down to the `enabled`
+/// child (index 2), then Space toggles it in place (the sheet stays open).
+#[test]
+fn space_on_openai_compatible_enabled_toggles_on() {
+	let mut s = make_state();
+	navigate_to_group_child(&mut s, "openai_compatible", "openai_compatible.enabled");
+	let outcome = handle_settings_key(&mut s, &press(KeyCode::Char(' ')));
+	assert_set_bool_action(outcome, "openai_compatible.enabled", true);
+	// Space on a Bool child toggles in place — the sub-sheet stays open.
+	assert!(matches!(
+		s.mode(),
+		SettingsModalMode::PickingGroup { .. }
+	));
+}
+
+/// Mouse parity: one click on the value column toggles `enabled` on.
+///
+/// `enabled` is a Bool child (index 2) of the `openai_compatible` group
+/// sub-sheet. Open the group by clicking its chevron, synthesize child
+/// hit-rects, then click the `enabled` child rect → toggles ON in one click
+/// (the sheet stays open).
+#[test]
+fn mouse_click_on_openai_compatible_enabled_toggles_on() {
+	let mut s = make_state();
+	open_group_sub_sheet_mouse(&mut s, "openai_compatible");
+	synth_group_child_rects(&mut s, "openai_compatible");
+	let child_idx = group_children_of(&s, "openai_compatible")
+		.iter()
+		.position(|c| *c == "openai_compatible.enabled")
+		.expect("enabled is an openai_compatible child") as u16;
+	let outcome = handle_settings_mouse(
+		&mut s,
+		MouseEventKind::Down(crossterm::event::MouseButton::Left),
+		1,
+		child_idx,
+	);
+	assert_set_bool_action(outcome, "openai_compatible.enabled", true);
+}
+
+/// Space on `openai_compatible.make_default` toggles it off (default ON).
+///
+/// `make_default` is the last child (index 5) of the `openai_compatible`
+/// group sub-sheet; Space toggles it in place and the sheet stays open.
+#[test]
+fn space_on_openai_compatible_make_default_toggles_off() {
+	let mut s = make_state();
+	navigate_to_group_child(
+		&mut s,
+		"openai_compatible",
+		"openai_compatible.make_default",
+	);
+	let outcome = handle_settings_key(&mut s, &press(KeyCode::Char(' ')));
+	assert_set_bool_action(outcome, "openai_compatible.make_default", false);
+	// Space on a Bool child toggles in place — the sub-sheet stays open.
+	assert!(matches!(
+		s.mode(),
+		SettingsModalMode::PickingGroup { .. }
+	));
+}
+
+/// Mouse parity: one click on the value column toggles `make_default` off.
+///
+/// `make_default` is a Bool child (index 5) of the `openai_compatible` group
+/// sub-sheet. Open the group by clicking its chevron, synthesize child
+/// hit-rects, then click the `make_default` child rect → toggles OFF in one
+/// click (default ON).
+#[test]
+fn mouse_click_on_openai_compatible_make_default_toggles_off() {
+	let mut s = make_state();
+	open_group_sub_sheet_mouse(&mut s, "openai_compatible");
+	synth_group_child_rects(&mut s, "openai_compatible");
+	let child_idx = group_children_of(&s, "openai_compatible")
+		.iter()
+		.position(|c| *c == "openai_compatible.make_default")
+		.expect("make_default is an openai_compatible child") as u16;
+	let outcome = handle_settings_mouse(
+		&mut s,
+		MouseEventKind::Down(crossterm::event::MouseButton::Left),
+		1,
+		child_idx,
+	);
+	assert_set_bool_action(outcome, "openai_compatible.make_default", false);
+}
+
+/// Enter on the `openai_compatible.api_backend` row opens the picker seeded at
+/// the default `auto`.
+///
+/// `api_backend` is an Enum child (index 4) of the `openai_compatible` group
+/// sub-sheet; Enter inside the sheet opens the enum picker (leaving the sheet).
+#[test]
+fn enter_on_openai_compatible_api_backend_enters_picking_enum() {
+	let mut s = make_state();
+	navigate_to_group_child(
+		&mut s,
+		"openai_compatible",
+		"openai_compatible.api_backend",
+	);
+	let outcome = handle_settings_key(&mut s, &press(KeyCode::Enter));
+	assert!(
+		matches!(outcome, SettingsKeyOutcome::Changed),
+		"Enter on api_backend row must transition to PickingEnum, got {outcome:?}"
+	);
+	match &s.mode() {
+		SettingsModalMode::PickingEnum {
+			key,
+			original_value,
+			..
+		} => {
+			assert_eq!(*key, "openai_compatible.api_backend");
+			assert_eq!(
+				original_value,
+				&SettingValue::Enum("auto"),
+				"default api_backend → original 'auto'"
+			);
+		}
+		other => panic!("expected PickingEnum mode, got {other:?}"),
+	}
+}
+
+/// Mouse parity: clicking the `api_backend` value column opens the picker.
+///
+/// `api_backend` is an Enum child (index 4) of the `openai_compatible` group
+/// sub-sheet. Open the group by clicking its chevron, synthesize child
+/// hit-rects, then click the `api_backend` child rect → opens the enum picker
+/// (the sub-sheet is left, same as the keyboard Enter path).
+#[test]
+fn mouse_click_on_openai_compatible_api_backend_opens_picker() {
+	let mut s = make_state();
+	open_group_sub_sheet_mouse(&mut s, "openai_compatible");
+	synth_group_child_rects(&mut s, "openai_compatible");
+	let child_idx = group_children_of(&s, "openai_compatible")
+		.iter()
+		.position(|c| *c == "openai_compatible.api_backend")
+		.expect("api_backend is an openai_compatible child") as u16;
+	let outcome = handle_settings_mouse(
+		&mut s,
+		MouseEventKind::Down(crossterm::event::MouseButton::Left),
+		1,
+		child_idx,
+	);
+	assert!(matches!(outcome, SettingsKeyOutcome::Changed));
+	assert!(
+		matches!(
+			s.mode(),
+			SettingsModalMode::PickingEnum { key, .. } if key == "openai_compatible.api_backend"
+		),
+		"click on the api_backend child rect must open the picker, got {:?}",
+		s.mode(),
+	);
+}
+
+/// The three String rows: Enter opens the editor seeded empty, typing fills the
+/// buffer, and Enter commits the typed text as that row's typed setter.
+///
+/// All three are String children of the `openai_compatible` group sub-sheet
+/// (base_url=index 0, model=index 3, api_key=index 1), so each iteration opens
+/// the group and moves Down to the child before Enter opens its editor.
+#[test]
+fn enter_type_enter_commits_each_openai_compatible_string_row() {
+	for (key, typed) in [
+		("openai_compatible.base_url", "http://localhost:11434/v1"),
+		("openai_compatible.model", "llama3.3"),
+		("openai_compatible.api_key", "sk-test-key"),
+	] {
+		let mut s = make_state();
+		navigate_to_group_child(&mut s, "openai_compatible", key);
+
+		let outcome = handle_settings_key(&mut s, &press(KeyCode::Enter));
+		assert!(
+			matches!(outcome, SettingsKeyOutcome::Changed),
+			"Enter on `{key}` must open the editor, got {outcome:?}"
+		);
+		assert!(
+			matches!(s.mode(), SettingsModalMode::EditingValue { key: k, .. } if k == key),
+			"Enter on `{key}` must transition to EditingValue, got {:?}",
+			s.mode(),
+		);
+		assert_eq!(
+			s.editing_buffer(),
+			Some(""),
+			"`{key}` defaults to empty, so the editor opens on an empty buffer"
+		);
+
+		for ch in typed.chars() {
+			let _ = handle_settings_key(&mut s, &press(KeyCode::Char(ch)));
+		}
+		assert_eq!(s.editing_buffer(), Some(typed));
+
+		let outcome = handle_settings_key(&mut s, &press(KeyCode::Enter));
+		let action = match outcome {
+			SettingsKeyOutcome::Action(a) => a,
+			other => panic!("committing `{key}` must emit a typed setter, got {other:?}"),
+		};
+		match (key, action) {
+			("openai_compatible.base_url", Action::SetOpenAiCompatibleBaseUrl(v)) => {
+				assert_eq!(v, typed)
+			}
+			("openai_compatible.model", Action::SetOpenAiCompatibleModel(v)) => {
+				assert_eq!(v, typed)
+			}
+			// The key is wrapped in a SecretString so it cannot be logged by
+			// accident; compare through its accessor rather than Debug.
+			("openai_compatible.api_key", Action::SetOpenAiCompatibleApiKey(v)) => {
+				assert_eq!(v.expose_secret(), typed)
+			}
+			(k, action) => panic!("`{k}` committed the wrong Action variant: {action:?}"),
+		}
+	}
+}
+
+/// Mouse parity for the String rows: a single click on the child rect opens
+/// the editor.
+///
+/// Inside the `openai_compatible` group sub-sheet, clicking a String child
+/// opens its editor in one click (mirroring the keyboard Enter path), unlike
+/// the flat-row world where the first click only focuses the row. Each
+/// iteration opens the group, synthesizes child hit-rects, and clicks the
+/// target child once.
+#[test]
+fn mouse_click_opens_editor_for_each_openai_compatible_string_row() {
+	for key in [
+		"openai_compatible.base_url",
+		"openai_compatible.model",
+		"openai_compatible.api_key",
+	] {
+		let mut s = make_state();
+		open_group_sub_sheet_mouse(&mut s, "openai_compatible");
+		synth_group_child_rects(&mut s, "openai_compatible");
+		let child_idx = group_children_of(&s, "openai_compatible")
+			.iter()
+			.position(|c| *c == key)
+			.unwrap_or_else(|| panic!("`{key}` is an openai_compatible child"))
+			 as u16;
+		let outcome = handle_settings_mouse(
+			&mut s,
+			MouseEventKind::Down(crossterm::event::MouseButton::Left),
+			20,
+			child_idx,
+		);
+		assert!(
+			matches!(outcome, SettingsKeyOutcome::Changed),
+			"click on `{key}` child rect must be Changed, got {outcome:?}"
+		);
+		assert!(
+			matches!(s.mode(), SettingsModalMode::EditingValue { key: k, .. } if k == key),
+			"click on `{key}` child rect must open the editor, got {:?}",
+			s.mode(),
+		);
+	}
 }

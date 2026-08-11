@@ -26,6 +26,7 @@ pub async fn set_openai_compatible_model(value: String) -> Result<()> {
 /// Persist the compatible wire protocol.
 pub async fn set_openai_compatible_api_backend(value: String) -> Result<()> {
     let backend = match value.as_str() {
+        "auto" => crate::sampling::ApiBackend::AutoDetect,
         "chat_completions" => crate::sampling::ApiBackend::ChatCompletions,
         "responses" => crate::sampling::ApiBackend::Responses,
         other => anyhow::bail!("unsupported OpenAI-compatible API backend: {other}"),

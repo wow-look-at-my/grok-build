@@ -518,6 +518,14 @@ impl FeedbackClient {
         request: RequestBuilder,
         context: &'static str,
     ) -> Result<T> {
+        // Every endpoint on this client reports upstream -- session signals,
+        // session events, feedback bodies, terminal details. This build sends
+        // none of it, so refuse here rather than at each call site, and refuse
+        // loudly: a caller that believes it delivered something is worse than
+        // one told it did not.
+        let _ = &request;
+        anyhow::bail!("{context} disabled: this build does not report to xAI");
+        #[allow(unreachable_code)]
         let request = xai_file_utils::trace_context::inject_trace_context_into_request(request);
         let req = request.build().context(context)?;
         let (response, stamp) = xai_grok_auth::execute_with_stamp(&self.client, req)
@@ -552,6 +560,10 @@ impl FeedbackClient {
     }
 
     async fn send_empty(&self, request: RequestBuilder, context: &'static str) -> Result<()> {
+        // See send_json: nothing on this client goes out.
+        let _ = &request;
+        anyhow::bail!("{context} disabled: this build does not report to xAI");
+        #[allow(unreachable_code)]
         let request = xai_file_utils::trace_context::inject_trace_context_into_request(request);
         let req = request.build().context(context)?;
         let (response, stamp) = xai_grok_auth::execute_with_stamp(&self.client, req)
@@ -869,6 +881,71 @@ pub(crate) fn snapshot_to_turn_delta(
 }
 
 #[cfg(test)]
+mod egress_disabled_pins {
+    use prod_mc_cli_chat_proxy_types::feedback_types::{
+        SessionEventRequest, SessionEventType, SessionSignalsUpdate,
+    };
+
+    use super::*;
+
+    /// Every reporting call must refuse, and none may open a connection.
+    ///
+    /// Pointed at a listener on loopback that accepts nothing: if any endpoint
+    /// starts sending again, the accept below completes and this fails. An
+    /// error-only assertion would not catch a request that goes out and then
+    /// errors on the reply.
+    #[tokio::test]
+    async fn no_reporting_endpoint_touches_the_network() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let client = FeedbackClient::new(format!("http://{addr}/v1"), Some("token".to_string()));
+
+        let signals = signals_to_update(
+            &crate::session::signals::SessionSignals::default(),
+            ClientType::Tui,
+        );
+        let event = SessionEventRequest {
+            event_type: SessionEventType::Error,
+            event_data: None,
+            timestamp: None,
+        };
+
+        let results: Vec<(&str, anyhow::Result<()>)> = vec![
+            (
+                "signals",
+                client
+                    .update_signals("session", &signals)
+                    .await
+                    .map(|_| ()),
+            ),
+            (
+                "events",
+                client.record_event("session", &event).await.map(|_| ()),
+            ),
+            (
+                "dismiss",
+                client.dismiss_request("request").await.map(|_| ()),
+            ),
+        ];
+        for (name, result) in results {
+            let err = result.expect_err("{name} must refuse while reporting is disabled");
+            assert!(
+                err.to_string().contains("disabled"),
+                "`{name}` failed for the wrong reason: {err}"
+            );
+        }
+
+        // A connection would mean something dialled out before failing.
+        let accepted = tokio::time::timeout(std::time::Duration::from_millis(250), listener.accept())
+            .await;
+        assert!(
+            accepted.is_err(),
+            "a reporting endpoint opened a connection: nothing may leave this build"
+        );
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -1058,190 +1135,19 @@ mod tests {
     }
 }
 
-#[cfg(test)]
-mod forbidden_tests {
-    use super::*;
-    use axum::{Router, response::IntoResponse, routing::post};
-    use std::net::SocketAddr;
-    use tokio::net::TcpListener;
-
-    async fn start_server(router: Router) -> (SocketAddr, tokio::task::JoinHandle<()>) {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        let handle = tokio::spawn(async move {
-            axum::serve(listener, router).await.unwrap();
-        });
-        (addr, handle)
-    }
-
-    fn forbidden_handler() -> impl IntoResponse {
-        (axum::http::StatusCode::FORBIDDEN, "ZDR team")
-    }
-
-    #[tokio::test]
-    async fn send_empty_returns_ok_on_403() {
-        let router = Router::new().route(
-            "/v1/feedback/requests/{id}/complete",
-            post(|| async { forbidden_handler() }),
-        );
-        let (addr, _) = start_server(router).await;
-
-        let client = FeedbackClient::with_client(
-            reqwest::Client::new(),
-            format!("http://{addr}/v1"),
-            Some("tok".into()),
-        );
-        let submission: FeedbackSubmission = serde_json::from_value(serde_json::json!({
-            "sessionId": "s1",
-            "clientType": "agent",
-            "feedbackType": "rating",
-        }))
-        .unwrap();
-        let result = client.complete_request("req-1", &submission).await;
-        assert!(result.is_ok(), "403 on send_empty must return Ok");
-    }
-
-    #[tokio::test]
-    async fn send_json_bails_on_403_with_clear_message() {
-        let router = Router::new().route(
-            "/v1/feedback/config",
-            axum::routing::get(|| async { forbidden_handler() }),
-        );
-        let (addr, _) = start_server(router).await;
-
-        let client = FeedbackClient::with_client(
-            reqwest::Client::new(),
-            format!("http://{addr}/v1"),
-            Some("tok".into()),
-        );
-        let result = client.get_feedback_config().await;
-        let err = result.unwrap_err();
-        assert!(
-            err.to_string().contains("(403)"),
-            "error must mention 403, got: {err}"
-        );
-    }
-}
-
 /// Auth resolve + 401 recovery tests.
+///
+/// Nothing here may drive a request through `send_json` / `send_empty`: those
+/// bail before the wire in this build (see `egress_disabled_pins`), so a test
+/// that stands up a server and waits to be called can only hang or fail. What
+/// remains testable is credential recovery, which never leaves the process.
 #[cfg(test)]
 mod auth_refresh_tests {
     use super::*;
     use crate::auth::{AuthManager, AuthMode, GrokAuth, GrokComConfig};
-    use axum::{Router, routing::get};
     use chrono::{Duration, Utc};
-    use std::net::SocketAddr;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicU32, Ordering};
-    use tokio::net::TcpListener;
-
-    async fn start_server(router: Router) -> (SocketAddr, tokio::task::JoinHandle<()>) {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        let handle = tokio::spawn(async move {
-            axum::serve(listener, router).await.unwrap();
-        });
-        (addr, handle)
-    }
-
-    /// `send_empty` must sign with the AuthManager bearer. Pre-fix
-    /// it skipped the resolve and went out unauthenticated.
-    #[tokio::test]
-    async fn send_empty_signs_request_with_active_auth() {
-        let captured = Arc::new(parking_lot::Mutex::new(None::<String>));
-        let captured_for_handler = captured.clone();
-        let router = Router::new().route(
-            "/v1/feedback/requests/{id}/complete",
-            axum::routing::post(move |headers: axum::http::HeaderMap| {
-                let captured = captured_for_handler.clone();
-                async move {
-                    if let Some(auth) = headers.get(axum::http::header::AUTHORIZATION) {
-                        *captured.lock() = Some(auth.to_str().unwrap_or("").to_owned());
-                    }
-                    axum::http::StatusCode::OK
-                }
-            }),
-        );
-        let (addr, _server) = start_server(router).await;
-
-        let dir = tempfile::tempdir().unwrap();
-        let am = Arc::new(AuthManager::new(dir.path(), GrokComConfig::default()));
-        am.hot_swap(GrokAuth {
-            key: "fresh-from-auth-manager".into(),
-            auth_mode: AuthMode::ApiKey,
-            create_time: Utc::now(),
-            user_id: "user-42".into(),
-            expires_at: Some(Utc::now() + Duration::hours(1)),
-            ..GrokAuth::test_default()
-        });
-
-        let client = FeedbackClient::new(
-            format!("http://{addr}/v1"),
-            Some("STALE-build-time-token".into()),
-        )
-        .with_auth_manager(am.clone());
-
-        let submission: FeedbackSubmission = serde_json::from_value(serde_json::json!({
-            "sessionId": "s1",
-            "clientType": "agent",
-            "feedbackType": "rating",
-        }))
-        .unwrap();
-        client
-            .complete_request("req-1", &submission)
-            .await
-            .expect("send_empty must succeed when authenticated");
-
-        let sent = captured.lock().clone().expect("server saw the request");
-        assert_eq!(sent, "Bearer fresh-from-auth-manager");
-    }
-
-    /// Outgoing bearer must match `AuthManager.current()`, not the
-    /// FeedbackClient's build-time snapshot.
-    #[tokio::test]
-    async fn feedback_client_uses_active_auth_for_each_request() {
-        let captured = Arc::new(parking_lot::Mutex::new(None::<String>));
-        let captured_for_handler = captured.clone();
-        let router = Router::new().route(
-            "/v1/feedback/config",
-            get(move |headers: axum::http::HeaderMap| {
-                let captured = captured_for_handler.clone();
-                async move {
-                    if let Some(auth) = headers.get(axum::http::header::AUTHORIZATION) {
-                        *captured.lock() = Some(auth.to_str().unwrap_or("").to_owned());
-                    }
-                    axum::Json(serde_json::json!({}))
-                }
-            }),
-        );
-        let (addr, _server) = start_server(router).await;
-
-        let dir = tempfile::tempdir().unwrap();
-        let am = Arc::new(AuthManager::new(dir.path(), GrokComConfig::default()));
-        let fresh = GrokAuth {
-            key: "fresh-from-auth-manager".into(),
-            auth_mode: AuthMode::ApiKey,
-            create_time: Utc::now(),
-            user_id: "user-42".into(),
-            expires_at: Some(Utc::now() + Duration::hours(1)),
-            ..GrokAuth::test_default()
-        };
-        am.hot_swap(fresh);
-
-        let client = FeedbackClient::new(
-            format!("http://{addr}/v1"),
-            Some("STALE-build-time-token".into()),
-        )
-        .with_auth_manager(am.clone());
-
-        let _ = client.get_feedback_config().await;
-
-        let sent = captured.lock().clone().expect("server saw the request");
-        assert_eq!(
-            sent, "Bearer fresh-from-auth-manager",
-            "outgoing bearer must come from AuthManager (not the build-time snapshot)"
-        );
-    }
 
     /// Counts refresh() calls -- proves disk-reload short-circuits
     /// before the IdP is hit.

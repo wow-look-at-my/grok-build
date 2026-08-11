@@ -737,6 +737,7 @@ impl From<FinishReason> for StopReason {
             FinishReason::Length => StopReason::Length,
             FinishReason::ToolCalls | FinishReason::FunctionCall => StopReason::ToolCalls,
             FinishReason::ContentFilter => StopReason::ContentFilter,
+            FinishReason::Error => StopReason::Stop,
         }
     }
 }
@@ -849,6 +850,82 @@ pub struct ConversationResponse {
 /// [`ConversationResponse::cost_usd_ticks`].
 pub fn reported_cost_ticks(raw: Option<i64>) -> Option<i64> {
     raw.filter(|&t| t > 0)
+}
+
+/// Per-token USD pricing for a model, used to **derive** cost from token
+/// counts when a backend reports usage but no `cost_in_usd_ticks` on the wire
+/// (e.g. OpenAI-compatible / third-party endpoints). When **any** tier is
+/// unset (zero), that tier contributes nothing; when the whole struct is
+/// `None` (no pricing configured) the cost stays honestly absent — the view
+/// never fabricates a `$0.00`.
+///
+/// All fields are USD **per single token**. Integer ticks are produced with
+/// `round(usd * 1e10)` (1e10 ticks = $1) via [`compute_cost_ticks`].
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ModelPricing {
+    /// USD per uncached input token (the portion of `prompt_tokens` that is
+    /// neither a cache read nor a cache write).
+    #[serde(default)]
+    pub input_per_token_usd: f64,
+    /// USD per output token (`completion_tokens`, which includes reasoning).
+    #[serde(default)]
+    pub output_per_token_usd: f64,
+    /// USD per cached-read input token (the `cached_prompt_tokens` subset of
+    /// `prompt_tokens`). Typically far cheaper than `input_per_token_usd`.
+    #[serde(default)]
+    pub cached_read_per_token_usd: f64,
+    /// USD per cache-creation input token (the `cache_creation_prompt_tokens`
+    /// subset of `prompt_tokens`). Typically ~1.25× `input_per_token_usd`.
+    #[serde(default)]
+    pub cache_creation_per_token_usd: f64,
+}
+
+impl ModelPricing {
+    /// True when every tier is zero — no usable pricing, so cost cannot be
+    /// derived and must stay absent.
+    pub fn is_unusable(&self) -> bool {
+        self.input_per_token_usd == 0.0
+            && self.output_per_token_usd == 0.0
+            && self.cached_read_per_token_usd == 0.0
+            && self.cache_creation_per_token_usd == 0.0
+    }
+}
+
+/// Derive cost in USD ticks (1e10 per USD) from reported token usage and a
+/// model's per-token pricing. Returns `None` when `pricing` is unusable
+/// (all tiers zero) or `usage` is absent, so the caller can fall back to the
+/// honest-absence behavior. Pure integer-arithmetic-at-the-f64 level then
+/// rounded to the nearest tick; deterministic and exactly assertable.
+///
+/// Billing tiers (mirroring [`TokenUsage`]):
+/// - uncached input = `prompt_tokens − cached_prompt_tokens − cache_creation`
+///   × `input_per_token_usd`
+/// - cached reads = `cached_prompt_tokens` × `cached_read_per_token_usd`
+/// - cache writes = `cache_creation_prompt_tokens` × `cache_creation_per_token_usd`
+/// - output = `completion_tokens` × `output_per_token_usd`
+///
+/// `prompt_tokens` always includes cache reads + writes (see [`TokenUsage`]),
+/// so the uncached portion is computed by subtraction and never double-counted.
+pub fn compute_cost_ticks(usage: Option<&TokenUsage>, pricing: &ModelPricing) -> Option<i64> {
+    let usage = usage?;
+    if pricing.is_unusable() {
+        return None;
+    }
+    let cached = f64::from(usage.cached_prompt_tokens);
+    let cache_creation = f64::from(usage.cache_creation_prompt_tokens);
+    let prompt = f64::from(usage.prompt_tokens);
+    // Saturate the uncached subset at 0 so a misreported cache split never
+    // produces a negative (and thus discarded) cost.
+    let uncached_input = (prompt - cached - cache_creation).max(0.0);
+    let usd = uncached_input * pricing.input_per_token_usd
+        + cached * pricing.cached_read_per_token_usd
+        + cache_creation * pricing.cache_creation_per_token_usd
+        + f64::from(usage.completion_tokens) * pricing.output_per_token_usd;
+    let ticks = (usd * 1e10).round() as i64;
+    // A configured-but-zero-usage turn yields 0 ticks; the capture site
+    // normalizes non-positive to `None` via `reported_cost_ticks`, which is
+    // the correct honest-absence outcome for a turn that billed nothing.
+    (ticks > 0).then_some(ticks)
 }
 
 impl ConversationResponse {
@@ -2425,6 +2502,16 @@ mod tests {
                     let mapped = super::messages::build_messages_request(&request());
                     serde_json::to_value(&mapped)
                         .expect("messages request serializes")
+                        .get("prompt_cache_key")
+                        .is_some()
+                }
+                // `AutoDetect` is resolved to a concrete backend before the
+                // sampler builds a client; its fallback is ChatCompletions
+                // (see `ApiBackend::auto_detect_fallback`), so it maps the same.
+                crate::ApiBackend::AutoDetect => {
+                    let mapped = ChatCompletionRequest::from(request());
+                    serde_json::to_value(&mapped)
+                        .expect("chat request serializes")
                         .get("prompt_cache_key")
                         .is_some()
                 }
@@ -5627,5 +5714,104 @@ mod tests {
         // The placeholder sentinel from the pre-refactor world must not appear.
         let body_str = serde_json::to_string(&input).unwrap();
         assert!(!body_str.contains("__RAW_OUTPUT_PLACEHOLDER_"));
+    }
+
+    // ========================================================================
+    // compute_cost_ticks — derive cost from token usage + per-token pricing
+    // ========================================================================
+
+    fn usage_with(prompt: u32, completion: u32, cached: u32, cache_creation: u32) -> TokenUsage {
+        TokenUsage {
+            prompt_tokens: prompt,
+            completion_tokens: completion,
+            total_tokens: prompt + completion,
+            reasoning_tokens: 0,
+            cached_prompt_tokens: cached,
+            cache_creation_prompt_tokens: cache_creation,
+        }
+    }
+
+    /// Exact integer-tick computation for a representative input: 1k uncached
+    /// input + 200 output at $5/M input and $15/M output (a typical grok-scale
+    /// price) → the expected tick count via `round(usd * 1e10)`.
+    #[test]
+    fn compute_cost_ticks_exact_for_representative_input() {
+        // $5 per million input tokens → $0.000005 per token.
+        // $15 per million output tokens → $0.000015 per token.
+        let pricing = ModelPricing {
+            input_per_token_usd: 0.000005,
+            output_per_token_usd: 0.000015,
+            ..Default::default()
+        };
+        let usage = usage_with(1_000, 200, 0, 0);
+        // 1000 * 0.000005 + 200 * 0.000015 = 0.005 + 0.003 = 0.008 USD
+        // ticks = round(0.008 * 1e10) = 80_000_000
+        assert_eq!(
+            compute_cost_ticks(Some(&usage), &pricing),
+            Some(80_000_000),
+        );
+    }
+
+    /// Cache tiers: cached reads billed at a discount and cache writes at a
+    /// premium must each contribute their own tier, with the uncached portion
+    /// correctly subtracted from `prompt_tokens`.
+    #[test]
+    fn compute_cost_ticks_covers_cache_tiers() {
+        // input $2/M, output $8/M, cached read $0.20/M, cache write $2.50/M
+        let pricing = ModelPricing {
+            input_per_token_usd: 0.000002,
+            output_per_token_usd: 0.000008,
+            cached_read_per_token_usd: 0.0000002,
+            cache_creation_per_token_usd: 0.0000025,
+        };
+        // prompt_tokens = 1000 = 700 uncached + 200 cached + 100 cache-write
+        let usage = usage_with(1_000, 300, 200, 100);
+        // uncached: 700 * 0.000002 = 0.0014
+        // cached:   200 * 0.0000002 = 0.00004
+        // cache wr: 100 * 0.0000025 = 0.00025
+        // output:   300 * 0.000008 = 0.0024
+        // total = 0.0014 + 0.00004 + 0.00025 + 0.0024 = 0.00409
+        // ticks = round(0.00409 * 1e10) = 40_900_000
+        assert_eq!(
+            compute_cost_ticks(Some(&usage), &pricing),
+            Some(40_900_000),
+        );
+    }
+
+    /// No usable pricing → `None` (honest absence, never a fabricated $0.00).
+    #[test]
+    fn compute_cost_ticks_none_when_pricing_unusable() {
+        let pricing = ModelPricing::default();
+        let usage = usage_with(1_000, 200, 0, 0);
+        assert_eq!(compute_cost_ticks(Some(&usage), &pricing), None);
+    }
+
+    /// No usage → `None` regardless of pricing.
+    #[test]
+    fn compute_cost_ticks_none_when_usage_absent() {
+        let pricing = ModelPricing {
+            input_per_token_usd: 0.000005,
+            output_per_token_usd: 0.000015,
+            ..Default::default()
+        };
+        assert_eq!(compute_cost_ticks(None, &pricing), None);
+    }
+
+    /// A misreported cache split (cached > prompt) must not produce a negative
+    /// cost; the uncached portion saturates at zero.
+    #[test]
+    fn compute_cost_ticks_saturates_negative_uncached_input() {
+        let pricing = ModelPricing {
+            input_per_token_usd: 0.000002,
+            output_per_token_usd: 0.0,
+            ..Default::default()
+        };
+        // cached (900) + cache_creation (200) > prompt (1000): uncached = -100
+        let usage = usage_with(1_000, 0, 900, 200);
+        // uncached saturates to 0; only the cached-read and cache-write tiers count
+        // cached:   900 * 0.0 = 0 (cached_read_per_token_usd is 0/default)
+        // cache wr: 200 * 0.0 = 0
+        // → total 0 → ticks 0 → reported as None (honest absence for a zero bill)
+        assert_eq!(compute_cost_ticks(Some(&usage), &pricing), None);
     }
 }

@@ -2139,6 +2139,80 @@ async fn append_chat_message_no_spurious_newlines_on_clean_tail() {
         .unwrap();
     assert_eq!(user_text(&items), vec!["one", "two"]);
 }
+/// Persistence round-trip for a current-format `Reasoning` sibling with real
+/// thinking text and NO encrypted signature (the Anthropic-compatible
+/// third-party case, e.g. Kimi). The item must be written to JSONL, reloaded
+/// through the real `read_chat_history_sync`, and come back with the thinking
+/// text verbatim — so a reloaded session resends the thinking, not a stub.
+#[tokio::test]
+async fn reasoning_sibling_without_signature_roundtrips_through_jsonl() {
+    use xai_grok_sampling_types::conversation_to_chat_messages;
+    use xai_grok_sampling_types::rs;
+
+    let temp_dir = TempDir::new().unwrap();
+    let info = create_test_info();
+    let adapter = JsonlStorageAdapter::with_root(temp_dir.path().to_path_buf());
+    adapter.init_session(&info, default_model_id()).await.unwrap();
+
+    let thinking_text = "Persist me across the reload boundary so the model stays smart.";
+    adapter
+        .append_chat_message(&info, &ConversationItem::user("q1"))
+        .await
+        .unwrap();
+    adapter
+        .append_chat_message(
+            &info,
+            &ConversationItem::Reasoning(rs::ReasoningItem {
+                id: String::new(),
+                summary: vec![rs::SummaryPart::SummaryText(rs::SummaryTextContent {
+                    text: thinking_text.to_string(),
+                })],
+                content: None,
+                encrypted_content: None,
+                status: None,
+            }),
+        )
+        .await
+        .unwrap();
+    adapter
+        .append_chat_message(&info, &ConversationItem::assistant("the answer"))
+        .await
+        .unwrap();
+
+    // Reload through the real reader (applies the current-format path).
+    let items = adapter
+        .read_chat_history_sync(adapter.chat_file(&info), CHAT_FORMAT_VERSION)
+        .unwrap();
+
+    let reloaded_thinking: Vec<String> = items
+        .iter()
+        .filter_map(|i| match i {
+            ConversationItem::Reasoning(r) => {
+                Some(xai_grok_sampling_types::reasoning_item_text(r))
+            }
+            _ => None,
+        })
+        .collect();
+    assert!(
+        reloaded_thinking.iter().any(|t| t.contains("reload boundary")),
+        "thinking text must survive JSONL write + reload; got: {reloaded_thinking:?}"
+    );
+
+    // And the reloaded reasoning must resend to a Chat Completions wire as
+    // reasoning_content on the follower assistant (the token-resend path).
+    let mut with_followup = items.clone();
+    with_followup.push(ConversationItem::user("q2"));
+    let msgs = conversation_to_chat_messages(with_followup);
+    let assistant = msgs
+        .iter()
+        .find(|m| m.role == xai_grok_sampling_types::Role::Assistant)
+        .expect("assistant message present");
+    assert_eq!(
+        assistant.reasoning_content.as_deref(),
+        Some(thinking_text),
+        "reloaded reasoning must resend as reasoning_content on turn N+1"
+    );
+}
 #[tokio::test]
 async fn retry_after_lost_ack_converges_memory_and_disk_to_authoritative_item() {
     let temp_dir = TempDir::new().unwrap();

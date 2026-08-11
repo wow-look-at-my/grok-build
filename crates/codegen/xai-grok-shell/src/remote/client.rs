@@ -832,7 +832,17 @@ pub(crate) fn fetch_models_blocking(
     );
     let mut models = Vec::with_capacity(models_response.data.len());
     for (idx, value) in models_response.data.into_iter().enumerate() {
-        match parse_remote_model_value(&value, &inference_base_url) {
+        // Synthetic-shaped entries (non-standard `context_length`,
+        // `max_output_length`, `reasoning_parameters.efforts` keys) are parsed
+        // through the Synthetic-scoped home so the extension keys stay out of
+        // the generic cross-provider fallback chains. Everything else uses the
+        // generic parser unchanged.
+        let parsed = if crate::agent::models::is_synthetic_listing(&value) {
+            crate::agent::models::parse_synthetic_model_entry(&value, &inference_base_url)
+        } else {
+            parse_remote_model_value(&value, &inference_base_url)
+        };
+        match parsed {
             Some(model) => models.push(model),
             None => {
                 tracing::warn!(
@@ -844,6 +854,59 @@ pub(crate) fn fetch_models_blocking(
     }
     Ok(FetchModelsResult { models, etag })
 }
+
+/// Fetch the advertised model list from a user-managed OpenAI-compatible
+/// endpoint's `{base_url}/models`.
+///
+/// Unlike [`fetch_models_blocking`] (which routes through the xAI endpoints /
+/// session auth), this path is fully BYOK and fail-closed: it authenticates
+/// only with the *openai* API key (env `OPENAI_API_KEY` or the dedicated
+/// owner-only `auth.json` scope) and never with a session bearer. The openai
+/// profile's `base_url` is used as the `default_base_url` so parsed entries
+/// inherit it when the payload omits `baseUrl`.
+pub(crate) fn fetch_openai_compatible_models_blocking(
+    profile: &crate::agent::config::OpenAiCompatibleConfig,
+) -> Result<FetchModelsResult, BackendError> {
+    let base_url = profile.base_url.trim().trim_end_matches('/');
+    let url = format!("{base_url}/models");
+    let api_key = profile.resolved_api_key_owned().ok_or_else(|| {
+        BackendError::Auth(
+            "No API key for OpenAI-compatible models endpoint. Set OPENAI_API_KEY.".into(),
+        )
+    })?;
+    let client = crate::http::shared_startup_blocking_client();
+    tracing::info!(%url, "Fetching models from OpenAI-compatible endpoint");
+    let request = client
+        .get(&url)
+        .header("Authorization", format!("Bearer {api_key}"));
+    let response = request.send()?;
+    if !response.status().is_success() {
+        let status = response.status().as_u16();
+        let body = response.text().unwrap_or_default();
+        tracing::warn!("Failed to fetch OpenAI-compatible models: {} - {}", status, body);
+        return Err(BackendError::RequestFailed { status, body });
+    }
+    let models_response: ModelsResponse = response.json()?;
+    tracing::info!(
+        "Fetched {} models from {}",
+        models_response.data.len(),
+        url
+    );
+    let mut models = Vec::with_capacity(models_response.data.len());
+    for (idx, value) in models_response.data.into_iter().enumerate() {
+        match parse_remote_model_value(&value, &profile.base_url) {
+            Some(model) => models.push(model),
+            None => {
+                tracing::warn!(
+                    "Skipping OpenAI-compatible model at index {}: missing required field ('model' or 'context_window') or invalid types",
+                    idx
+                )
+            }
+        }
+    }
+    Ok(FetchModelsResult { models, etag: None })
+}
+
 /// Parse a single model entry from the /models-v2 response.
 /// Used by both initial model fetch and session-resume metadata refresh.
 pub(crate) fn parse_remote_model_value(
@@ -1008,6 +1071,7 @@ pub(crate) fn parse_remote_model_value(
                 }
             })
             .unwrap_or_default(),
+        pricing: xai_grok_sampling_types::ModelPricing::default(),
     })
 }
 fn get_string(obj: &serde_json::Map<String, serde_json::Value>, key: &str) -> Option<String> {

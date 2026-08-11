@@ -1447,11 +1447,20 @@ impl SessionActor {
             self.chat_state_handle
                 .record_token_usage(u64::from(u.total_tokens));
             self.chat_state_handle.record_last_turn_usage(u.clone());
+            // Cost priority: server-reported ticks → server-reported USD float
+            // (both already resolved by the sampler into `cost_usd_ticks`) →
+            // computed cost from token usage × the model's per-token pricing.
+            let cost_ticks = response.cost_usd_ticks.or_else(|| {
+                let model_id = response.assistant().and_then(|a| a.model_id.clone());
+                let model_id = model_id.as_deref().unwrap_or("");
+                let pricing = crate::agent::config::resolve_model_pricing(model_id);
+                xai_grok_sampling_types::compute_cost_ticks(Some(u), &pricing)
+            });
             self.chat_state_handle.record_model_call_usage(
                 response.assistant().and_then(|a| a.model_id.clone()),
                 u.clone(),
                 api_duration_ms,
-                response.cost_usd_ticks,
+                cost_ticks,
             );
             self.signals_handle()
                 .record_token_usage(u.completion_tokens, u.reasoning_tokens);

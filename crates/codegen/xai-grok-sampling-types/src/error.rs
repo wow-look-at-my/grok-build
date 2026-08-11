@@ -588,6 +588,22 @@ pub fn user_facing_api_error_message(status: StatusCode, bytes: &[u8]) -> String
     structured_error_message(bytes).unwrap_or_else(|| status_user_message(status))
 }
 
+/// As [`user_facing_api_error_message`], naming the endpoint on a 404.
+///
+/// A 404 says the URL that was called does not exist there, so the URL is the
+/// whole diagnosis -- and it is the one thing the caller cannot see. Servers
+/// answer it with an empty or contentless body, which leaves the bare message
+/// ("Request failed (HTTP 404).") describing nothing a user can act on. Other
+/// statuses are about the request, not the address, and keep their message.
+pub fn api_error_message_for_endpoint(status: StatusCode, bytes: &[u8], endpoint: &str) -> String {
+    let message = user_facing_api_error_message(status, bytes);
+    if status == StatusCode::NOT_FOUND {
+        format!("{message} No such endpoint: {endpoint}")
+    } else {
+        message
+    }
+}
+
 pub fn try_parse_stream_error(data: &str) -> Option<SamplingError> {
     let (error_type, message) = try_parse_error(data)?;
     tracing::warn!(error_type, message, "Server-side stream error");
@@ -945,6 +961,50 @@ mod tests {
         assert_eq!(
             parse_error_bytes(b"some random gateway text"),
             "upstream error"
+        );
+    }
+
+    /// A 404 must name the URL. Without it the message is "Request failed
+    /// (HTTP 404)." -- true, and no help at all in telling a wrong base URL
+    /// from a wrong path from a model that is not served there.
+    #[test]
+    fn a_404_names_the_endpoint_and_other_statuses_do_not() {
+        let url = "https://api.example.com/v1/responses";
+
+        let not_found =
+            api_error_message_for_endpoint(StatusCode::NOT_FOUND, b"", url);
+        assert!(
+            not_found.contains(url),
+            "a 404 must name the endpoint that does not exist: {not_found}"
+        );
+
+        // An empty body is the common 404 shape, and the status text alone
+        // carries no address.
+        assert!(
+            !user_facing_api_error_message(StatusCode::NOT_FOUND, b"").contains(url),
+            "precondition: the plain message has no URL to begin with"
+        );
+
+        // Other statuses are about the request, not the address.
+        for status in [
+            StatusCode::BAD_REQUEST,
+            StatusCode::TOO_MANY_REQUESTS,
+            StatusCode::INTERNAL_SERVER_ERROR,
+        ] {
+            let message = api_error_message_for_endpoint(status, b"", url);
+            assert_eq!(
+                message,
+                user_facing_api_error_message(status, b""),
+                "{status} must keep its message unchanged"
+            );
+        }
+
+        // A server that does explain itself keeps its explanation.
+        let structured = br#"{"error":{"message":"model gpt-9 does not exist"}}"#;
+        let message = api_error_message_for_endpoint(StatusCode::NOT_FOUND, structured, url);
+        assert!(
+            message.contains("model gpt-9 does not exist") && message.contains(url),
+            "a structured 404 keeps its message AND gains the endpoint: {message}"
         );
     }
 

@@ -631,13 +631,24 @@ impl SettingsModalState {
     /// Transition to `PickingEnum` if the focused row is Enum/DynamicEnum.
     /// Returns `false` if the focused row is another kind.
     pub fn try_enter_picking_enum(&mut self) -> bool {
-        let (key, first_canonical, current_value, supports_preview, resolved_choices) = {
-            let Some((key, meta)) = self.focused_setting() else {
+        let Some((key, _)) = self.focused_setting() else {
+            return false;
+        };
+        if self.row_lock(key).is_some() {
+            return false;
+        }
+        self.try_enter_picking_enum_for(key)
+    }
+
+    /// Transition to `PickingEnum` for a specific setting key (used both by
+    /// the focused-row path and by the group sub-sheet when its focused child
+    /// is an Enum). Returns `false` if the key isn't a registered
+    /// Enum/DynamicEnum.
+    pub(super) fn try_enter_picking_enum_for(&mut self, key: SettingKey) -> bool {
+        let (first_canonical, current_value, supports_preview, resolved_choices) = {
+            let Some(meta) = self.registry.find(key) else {
                 return false;
             };
-            if self.row_lock(key).is_some() {
-                return false;
-            }
             // Handles both static `Enum` and `DynamicEnum` catalogs.
             let (supports_preview, resolved): (bool, Vec<OwnedEnumChoice>) = match &meta.kind {
                 SettingKind::Enum {
@@ -683,7 +694,7 @@ impl SettingsModalState {
                 .map(|c| c.canonical.clone())
                 .unwrap_or_default();
             let cur = self.value_for(key);
-            (key, first, cur, supports_preview, resolved)
+            (first, cur, supports_preview, resolved)
         };
 
         // Resolve choices_idx from current value. For DynamicEnum,
@@ -758,7 +769,17 @@ impl SettingsModalState {
 
     /// Transition to `EditingValue` if the focused row is String or Int.
     pub fn try_enter_editing_value(&mut self) -> bool {
-        let Some((key, meta)) = self.focused_setting() else {
+        let Some((key, _)) = self.focused_setting() else {
+            return false;
+        };
+        self.try_enter_editing_value_for(key)
+    }
+
+    /// Transition to `EditingValue` for a specific setting key (used both by
+    /// the focused-row path and by the group sub-sheet when its focused child
+    /// is a String or Int). Returns `false` for any other kind.
+    pub(super) fn try_enter_editing_value_for(&mut self, key: SettingKey) -> bool {
+        let Some(meta) = self.registry.find(key) else {
             return false;
         };
         let kind = meta.kind.clone();

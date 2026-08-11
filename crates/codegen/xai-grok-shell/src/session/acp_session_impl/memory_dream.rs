@@ -790,7 +790,8 @@ impl SessionActor {
         let idle_timeout = std::time::Duration::from_secs(15);
 
         let result = match sampling_client.api_backend() {
-            crate::sampling::ApiBackend::ChatCompletions => {
+            crate::sampling::ApiBackend::ChatCompletions
+            | crate::sampling::ApiBackend::AutoDetect => {
                 let (raw, meta) = sampling_client
                     .conversation_stream(request)
                     .await

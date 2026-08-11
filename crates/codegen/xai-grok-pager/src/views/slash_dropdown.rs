@@ -23,9 +23,6 @@ use crate::theme::Theme;
 /// Maximum number of visible rows in the dropdown (excluding separator).
 pub const MAX_DROPDOWN_ROWS: u16 = MAX_VISIBLE_SUGGESTIONS as u16;
 
-/// Hard cap on label column width (labels longer than this are truncated).
-const LABEL_CAP: usize = 40;
-
 /// Gap (in spaces) between the label column and the description.
 const LABEL_DESC_GAP: usize = 2;
 
@@ -59,24 +56,24 @@ fn tag_suffix_width(row: &SuggestionRow) -> usize {
 
 /// Compute the aligned label column width from all visible items.
 ///
-/// The label column gets up to 60% of the available width (capped at `LABEL_CAP`).
-/// This prioritises showing the full command name over the description. The tag
-/// suffix is folded in so a `/cmd [tag]` row and a plain `/cmd` row share the
-/// same description column. Untagged rows keep origin/main behavior (overlong
-/// commands are ignored); tagged rows always contribute a `LABEL_CAP`-clamped
-/// width so a long tag can never zero out the column.
+/// The longest label wins, bounded by 60% of the available width so the
+/// description column keeps the rest. That bound is the whole limit: on a wide
+/// terminal a long label gets the room it needs, and on a narrow one it is
+/// truncated to fit what is actually there.
+///
+/// The tag suffix is folded in so a `/cmd [tag]` row and a plain `/cmd` row
+/// share the same description column.
+///
+/// Every row must contribute. Excluding the long ones instead means a list
+/// where they are ALL long has nothing left to take a max over, which yields a
+/// zero-width column that truncates every label to nothing -- rows that draw,
+/// highlight and select while showing nothing. Model ids of the form
+/// `provider/vendor:family:size` do exactly that.
 fn compute_label_column_w(items: &[SuggestionRow], content_w: usize) -> usize {
-    let budget = (content_w * 3 / 5).min(LABEL_CAP);
+    let budget = content_w * 3 / 5;
     let max_display_w = items
         .iter()
-        .filter_map(|r| {
-            let base = r.display.width();
-            if r.tag.is_none() {
-                (base <= LABEL_CAP).then_some(base)
-            } else {
-                Some((base + tag_suffix_width(r)).min(LABEL_CAP))
-            }
-        })
+        .map(|r| r.display.width() + tag_suffix_width(r))
         .max()
         .unwrap_or(0);
     max_display_w.min(budget)
@@ -892,5 +889,74 @@ mod tests {
             let na = Rect::new(0, 0, w, 1);
             let _ = render_dropdown(&mut nb, na, &narrow, None, &theme);
         }
+    }
+}
+
+#[cfg(test)]
+mod label_column_width_tests {
+    use super::*;
+
+    fn row(display: &str) -> SuggestionRow {
+        SuggestionRow {
+            display: display.to_string(),
+            description: String::new(),
+            insert_text: display.to_string(),
+            indices: vec![],
+            tag: None,
+            provenance: None,
+        }
+    }
+
+    /// `/model` on a gateway: every row is a long `provider/vendor:family:size`
+    /// id, and the selected one carries " (current)" as well. Deriving the
+    /// column by discarding long labels discards all of them here, and the
+    /// zero-width column that follows truncates every label to nothing -- rows
+    /// that draw, highlight and switch models while showing nothing at all.
+    #[test]
+    fn a_list_where_every_label_is_long_still_shows_its_labels() {
+        let items = [
+            row("Synthetic_Anthropic/syn:small:text (current)"),
+            row("Synthetic_Anthropic/hf:zai-org/GLM-4.7-Flash"),
+            row("Synthetic_Anthropic/hf:moonshotai/Kimi-K2-Instruct"),
+            row("Synthetic_Anthropic/hf:deepseek-ai/DeepSeek-V3.2"),
+        ];
+        let longest = items.iter().map(|r| r.display.width()).max().unwrap();
+
+        let width = compute_label_column_w(&items, 173 - PREFIX_W);
+        assert_eq!(
+            width, longest,
+            "a 173-column terminal has the room; show the whole id"
+        );
+        for r in &items {
+            assert_eq!(truncate_str(&r.display, width), r.display);
+        }
+    }
+
+    /// The column tracks the terminal rather than a fixed number: the same list
+    /// gets more label room as the terminal grows.
+    #[test]
+    fn the_column_grows_with_the_terminal() {
+        let items = [row("Synthetic_Anthropic/hf:moonshotai/Kimi-K2-Instruct")];
+        let narrow = compute_label_column_w(&items, 60);
+        let wide = compute_label_column_w(&items, 173);
+        assert!(
+            wide > narrow,
+            "label room must follow the available width: {narrow} -> {wide}"
+        );
+        assert!(narrow > 0, "even a narrow terminal renders a label");
+    }
+
+    /// A tagged row still shares the description column with untagged rows.
+    #[test]
+    fn a_tag_is_folded_into_the_label_column() {
+        let mut tagged = row("/mcp");
+        tagged.tag = Some("server".to_string());
+        let items = [row("/model"), tagged];
+        let width = compute_label_column_w(&items, 173 - PREFIX_W);
+        assert_eq!(
+            width,
+            "/mcp".width() + " [server]".width(),
+            "the tag suffix has to fit inside the label column"
+        );
     }
 }

@@ -14,6 +14,19 @@ fn test_cwd() -> &'static std::path::Path {
     std::path::Path::new("/test/session")
 }
 
+/// Hold for any test that reads `Theme::current()`.
+///
+/// The theme kind, the color level and the terminal-native lock are all
+/// process-global, and the two `terminal_native_lock_*` tests in this file flip
+/// the last of those while they run. A test that samples `Theme::current()`
+/// without the shared lock reads whichever palette happened to be installed at
+/// that instant, so its color assertions pass or fail on thread scheduling.
+fn pinned_theme() -> (std::sync::MutexGuard<'static, ()>, Theme) {
+    let guard = xai_grok_pager::theme::cache::pin_theme();
+    let theme = Theme::current();
+    (guard, theme)
+}
+
 fn finalized(text: &str) -> ScrollbackEntry {
     ScrollbackEntry::new(RenderBlock::stub(text, Color::Blue))
 }
@@ -509,7 +522,7 @@ fn assert_committed_fits_entry(label: &str, entry: &ScrollbackEntry, width: u16)
     use ratatui::buffer::Buffer;
     use ratatui::layout::Rect;
 
-    let theme = Theme::current();
+    let (_theme_pin, theme) = pinned_theme();
     let appearance = committed_appearance(&AppearanceConfig::default());
 
     let renderer = minimal_renderer(entry, &theme, appearance, test_cwd(), COMMITTED_TICK);
@@ -545,7 +558,7 @@ fn committed_block_uses_owning_session_cwd_for_tool_paths() {
     let mut entry =
         ScrollbackEntry::new(RenderBlock::edit("/alternate/worktree/src/main.rs", None));
     entry.set_display_mode(DisplayMode::Expanded);
-    let theme = Theme::current();
+    let (_theme_pin, theme) = pinned_theme();
     let appearance = committed_appearance(&AppearanceConfig::default());
     let renderer = minimal_renderer(&entry, &theme, appearance, cwd, COMMITTED_TICK);
     let width = 80;
@@ -710,7 +723,7 @@ fn large_commit_is_capped_with_footer() {
     use ratatui::buffer::Buffer;
     use ratatui::layout::Rect;
 
-    let theme = Theme::current();
+    let (_theme_pin, theme) = pinned_theme();
     let appearance = committed_appearance(&AppearanceConfig::default());
     // A tall block: a fenced code block keeps each line on its own row
     // (markdown would otherwise join soft-wrapped prose into one paragraph),
@@ -751,7 +764,7 @@ fn small_commit_is_not_capped() {
     use ratatui::buffer::Buffer;
     use ratatui::layout::Rect;
 
-    let theme = Theme::current();
+    let (_theme_pin, theme) = pinned_theme();
     let appearance = committed_appearance(&AppearanceConfig::default());
     let mut entry = ScrollbackEntry::new(RenderBlock::agent_message("one short line"));
     entry.set_display_mode(minimal_commit_display_mode(&entry.block, &appearance));
@@ -812,7 +825,7 @@ fn committed_edit_keeps_diff_line_backgrounds() {
     ];
     let block = RenderBlock::edit_with_hunks("src/main.rs", vec![hunk]);
     let mut entry = ScrollbackEntry::new(block);
-    let theme = Theme::current();
+    let (_theme_pin, theme) = pinned_theme();
     let appearance = committed_appearance(&AppearanceConfig::default());
     entry.set_display_mode(minimal_commit_display_mode(&entry.block, &appearance));
     let renderer = minimal_renderer(&entry, &theme, appearance, test_cwd(), COMMITTED_TICK);
@@ -851,7 +864,7 @@ fn committed_edit_keeps_diff_line_backgrounds() {
 /// the rail, which is why restoring it is height-safe (K5).
 #[test]
 fn only_thinking_spends_the_accent_column() {
-    let theme = Theme::current();
+    let (_theme_pin, theme) = pinned_theme();
     let appearance = committed_appearance(&AppearanceConfig::default());
     let chrome = |entry: &ScrollbackEntry| {
         minimal_renderer(
@@ -1093,7 +1106,7 @@ fn collapsed_thinking_commit_is_one_advertised_row() {
     use ratatui::layout::Rect;
 
     minimal_api::set_show_thinking_blocks(true);
-    let theme = Theme::current();
+    let (_theme_pin, theme) = pinned_theme();
     let appearance = committed_appearance(&AppearanceConfig::default());
 
     let mut entry = ScrollbackEntry::new(RenderBlock::thinking(

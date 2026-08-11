@@ -593,7 +593,7 @@ impl Default for OpenAiCompatibleConfig {
             enabled: false,
             base_url: String::new(),
             model: String::new(),
-            api_backend: ApiBackend::ChatCompletions,
+            api_backend: ApiBackend::AutoDetect,
             make_default: true,
         }
     }
@@ -631,6 +631,13 @@ impl OpenAiCompatibleConfig {
                 crate::auth::read_openai_compatible_api_key(&crate::util::grok_home::grok_home())
                     .filter(|value| !value.trim().is_empty())
             })
+    }
+
+    /// `pub(crate)` accessor for the resolved OpenAI API key so the remote
+    /// model-fetch and backend-detection code can authenticate the openai
+    /// endpoint (BYOK) without forwarding any session credential.
+    pub(crate) fn resolved_api_key_owned(&self) -> Option<String> {
+        self.resolved_api_key()
     }
 
     fn to_model_entry(&self) -> Option<ModelEntry> {
@@ -680,8 +687,74 @@ impl OpenAiCompatibleConfig {
             show_model_fingerprint: false,
             stream_tool_calls: None,
             laziness_detector: LazinessDetectorPerModelConfig::default(),
+            pricing: xai_grok_sampling_types::ModelPricing::default(),
         };
         Some(ModelEntry::from_config_entry(&entry))
+    }
+
+    /// Build the catalog entries for this profile from prefetched
+    /// `openai-compatible/<model-slug>` entries (fetched from the profile's
+    /// `{base_url}/models` at startup).
+    ///
+    /// Each entry inherits the profile's `base_url`, resolved OpenAI API key,
+    /// `auth_scheme` (Bearer when a key is present, else None), `agent_type`
+    /// (the default harness), and `api_backend` (e.g. `AutoDetect`, resolved
+    /// by the shell before the sampler builds a client). Per-model
+    /// `context_window` from the fetched payload is preserved.
+    ///
+    /// Returns `None` when the profile is disabled/invalid, and `Some` with a
+    /// single fallback entry under `OPENAI_COMPATIBLE_MODEL_ID` when the fetch
+    /// is unavailable so the feature degrades gracefully offline.
+    fn catalog_entries(
+        &self,
+        prefetched: Option<&IndexMap<String, ModelEntry>>,
+    ) -> Option<IndexMap<String, ModelEntry>> {
+        if !self.enabled {
+            return None;
+        }
+        if let Some(error) = self.validation_error() {
+            tracing::warn!(%error, "ignoring invalid [openai_compatible] configuration");
+            return None;
+        }
+        let api_key = self.resolved_api_key();
+        let auth_scheme = if api_key.is_some() {
+            AuthScheme::Bearer
+        } else {
+            AuthScheme::None
+        };
+        let base_url = self.base_url.trim().trim_end_matches('/').to_owned();
+        let agent_type = default_agent_type();
+
+        let mut entries = IndexMap::new();
+        if let Some(prefetched) = prefetched {
+            for (key, entry) in prefetched {
+                let Some(slug) = key.strip_prefix("openai-compatible/") else {
+                    continue;
+                };
+                let mut e = entry.clone();
+                e.info.id = Some(key.clone());
+                e.info.base_url = base_url.clone();
+                e.info.api_backend = self.api_backend.clone();
+                e.info.auth_scheme = auth_scheme;
+                e.info.agent_type = agent_type.clone();
+                e.api_key = api_key.clone();
+                e.api_base_url = None;
+                entries.insert(key.clone(), e);
+            }
+        }
+
+        if entries.is_empty() {
+            // Offline / unavailable-fetch fallback: keep the single configured
+            // entry so `openai-compatible` still works (degradation path).
+            self.to_model_entry()
+                .map(|entry| {
+                    let mut m = IndexMap::new();
+                    m.insert(OPENAI_COMPATIBLE_MODEL_ID.to_owned(), entry);
+                    m
+                })
+        } else {
+            Some(entries)
+        }
     }
 }
 pub use xai_grok_config_types::{BoolFlag, ConfigSource, LazinessDetectorPerModelConfig, Resolved};
@@ -3675,7 +3748,17 @@ pub(crate) fn resolve_model_list(
         tracing::debug!(count = defaults.len(), "loaded default models");
         resolved.extend(defaults);
     }
-    if let Some(mut prefetched) = prefetched {
+    // Inject the user-managed OpenAI-compatible endpoint(s). When the
+    // `{base_url}/models` listing was prefetched, one catalog entry per
+    // advertised model (`openai-compatible/<slug>`) is produced; otherwise the
+    // single configured entry under `OPENAI_COMPATIBLE_MODEL_ID` is kept as an
+    // offline fallback. Computed here (while `prefetched` is still owned) so the
+    // prefetched map can be moved into `resolved` afterwards without a partial move.
+    let openai_entries = if let Some(mut prefetched) = prefetched {
+        let entries = cfg
+            .openai_compatible
+            .as_ref()
+            .and_then(|p| p.catalog_entries(Some(&prefetched)));
         tracing::debug!(count = prefetched.len(), "loaded prefetched models");
         let default_cw = DEFAULT_CONTEXT_WINDOW;
         for (key, entry) in prefetched.iter_mut() {
@@ -3706,13 +3789,19 @@ pub(crate) fn resolve_model_list(
             }
         }
         resolved = prefetched;
-    }
-    if let Some(entry) = cfg
-        .openai_compatible
-        .as_ref()
-        .and_then(OpenAiCompatibleConfig::to_model_entry)
-    {
-        resolved.insert(OPENAI_COMPATIBLE_MODEL_ID.to_owned(), entry);
+        entries
+    } else {
+        cfg.openai_compatible
+            .as_ref()
+            .and_then(|p| p.catalog_entries(None))
+    };
+    if let Some(openai_entries) = openai_entries {
+        // Make this block authoritative: drop any stale openai-compatible keys
+        // (single + fetched) before inserting fresh ones.
+        resolved.retain(|key, _| {
+            key != OPENAI_COMPATIBLE_MODEL_ID && !key.starts_with("openai-compatible/")
+        });
+        resolved.extend(openai_entries);
     }
     for (key, model_override) in &cfg.config_models {
         let had_base = resolved.contains_key(key);
@@ -3837,6 +3926,25 @@ pub(crate) fn resolve_model_list(
     apply_global_scalar_defaults(&mut resolved, &cfg.models);
     for entry in resolved.values_mut() {
         entry.info.derive_reasoning_effort_fields();
+    }
+    // An empty catalog is a dead end -- the model picker renders nothing and
+    // every turn has nothing to route to -- and each way of reaching it is
+    // silent on its own: a custom endpoint skips the built-in defaults, a
+    // discovery 404 is a warn nobody sees, and no [model.*] entries is not an
+    // error. Say so once, here, where all three are known. A provider whose
+    // surface has no /models listing (several Anthropic-protocol ones do not)
+    // lands here through no fault of the config.
+    if resolved.is_empty() {
+        tracing::error!(
+            models_base_url = ?cfg.endpoints.models_base_url,
+            models_list_url = ?cfg.endpoints.models_list_url,
+            custom_endpoint = cfg.endpoints.has_custom_endpoint(),
+            config_models = cfg.config_models.len(),
+            "no models resolved: the picker will be empty and no turn can be routed. \
+             A custom models endpoint replaces the built-in defaults, so a failed or \
+             empty listing leaves nothing behind it. Point models_list_url at a URL \
+             that serves a listing, or declare [model.*] entries in config.toml."
+        );
     }
     resolved
 }
@@ -4024,6 +4132,7 @@ fn default_models(endpoints: &EndpointsConfig) -> IndexMap<String, ModelEntryCon
                 show_model_fingerprint: m.show_model_fingerprint,
                 stream_tool_calls: None,
                 laziness_detector: LazinessDetectorPerModelConfig::default(),
+            pricing: xai_grok_sampling_types::ModelPricing::default(),
             };
             (key, config)
         })
@@ -4147,6 +4256,17 @@ pub struct ModelEntryConfig {
     /// the all-disabled state via `#[serde(default)]`.
     #[serde(default, skip_serializing_if = "is_default_laziness_detector")]
     pub laziness_detector: LazinessDetectorPerModelConfig,
+    /// Per-token USD pricing used to derive cost when the backend reports
+    /// token usage but no wire cost (no `cost_in_usd_ticks` and no `cost`
+    /// float). All four fields default to 0 (no pricing → no computation →
+    /// cost stays honestly absent).
+    #[serde(default, skip_serializing_if = "is_default_model_pricing")]
+    pub pricing: xai_grok_sampling_types::ModelPricing,
+}
+
+/// True when `pricing` equals the all-zero default.
+fn is_default_model_pricing(p: &xai_grok_sampling_types::ModelPricing) -> bool {
+    p.is_unusable()
 }
 /// True when `cfg` equals the all-disabled default. Derives `PartialEq`
 /// on `f32`, which is fine for the current shape because both `f32`
@@ -4214,6 +4334,7 @@ pub struct ConfigModelOverride {
     pub compaction_at_tokens: Option<CompactionAtTokens>,
     pub show_model_fingerprint: Option<bool>,
     pub stream_tool_calls: Option<bool>,
+    pub pricing: Option<xai_grok_sampling_types::ModelPricing>,
 }
 impl ConfigModelOverride {
     pub(crate) fn apply(
@@ -4308,6 +4429,9 @@ impl ConfigModelOverride {
         if self.stream_tool_calls.is_some() {
             entry.info.stream_tool_calls = self.stream_tool_calls;
         }
+        if let Some(ref p) = self.pricing {
+            entry.info.pricing = p.clone();
+        }
         if self.api_key.is_some() {
             entry.api_key.clone_from(&self.api_key);
         }
@@ -4401,6 +4525,10 @@ pub struct ModelInfo {
     /// injecting nudges. See [`LazinessDetectorPerModelConfig`].
     #[serde(default)]
     pub laziness_detector: LazinessDetectorPerModelConfig,
+    /// Per-token USD pricing used to derive cost when the backend reports
+    /// token usage but no wire cost.
+    #[serde(default)]
+    pub pricing: xai_grok_sampling_types::ModelPricing,
 }
 impl ModelInfo {
     /// Minimal fallback descriptor for an unknown model slug.
@@ -4421,7 +4549,7 @@ impl ModelInfo {
             extra_headers: IndexMap::new(),
             query_params: IndexMap::new(),
             env_http_headers: IndexMap::new(),
-            context_window: NonZeroU64::new(200_000).unwrap(),
+            context_window: NonZeroU64::new(DEFAULT_CONTEXT_WINDOW).unwrap(),
             auto_compact_threshold_percent: None,
             system_prompt_label: None,
             use_concise: false,
@@ -4439,6 +4567,7 @@ impl ModelInfo {
             show_model_fingerprint: false,
             stream_tool_calls: None,
             laziness_detector: LazinessDetectorPerModelConfig::default(),
+            pricing: xai_grok_sampling_types::ModelPricing::default(),
         }
     }
     /// Extract shared model metadata from a flat config entry.
@@ -4476,6 +4605,7 @@ impl ModelInfo {
             show_model_fingerprint: entry.show_model_fingerprint,
             stream_tool_calls: entry.stream_tool_calls,
             laziness_detector: entry.laziness_detector.clone(),
+            pricing: entry.pricing.clone(),
         }
     }
     /// Derive the legacy effort gate/default from `reasoning_efforts` so the
@@ -5147,6 +5277,16 @@ fn byok_from_lookup(lookup: &ModelLookup) -> ModelByok {
         ModelLookup::Loaded(_) => ModelByok::NotByok,
     }
 }
+/// Resolve the per-token pricing for `model_id` from the effective config.
+/// Returns the default (all-zero / unusable) pricing when the model is absent
+/// or config is unavailable, so the caller's `compute_cost_ticks` fallback
+/// correctly yields `None` (honest absence) rather than fabricating a cost.
+pub(crate) fn resolve_model_pricing(model_id: &str) -> xai_grok_sampling_types::ModelPricing {
+    with_resolved_model(model_id, |lookup| match lookup {
+        ModelLookup::Loaded(Some(e)) => e.info.pricing.clone(),
+        _ => xai_grok_sampling_types::ModelPricing::default(),
+    })
+}
 enum ModelLookup<'a> {
     /// `None` if `model_id` is absent from the catalog.
     Loaded(Option<&'a ModelEntry>),
@@ -5247,6 +5387,7 @@ pub(crate) fn resolve_aux_model_sampling_config(
                 show_model_fingerprint: false,
                 stream_tool_calls: None,
                 laziness_detector: LazinessDetectorPerModelConfig::default(),
+            pricing: xai_grok_sampling_types::ModelPricing::default(),
             },
             api_key: Some(bearer),
             env_key: None,
@@ -5460,6 +5601,7 @@ fn resolve_hidden_default_web_search_sampling_config(
             show_model_fingerprint: false,
             stream_tool_calls: None,
             laziness_detector: LazinessDetectorPerModelConfig::default(),
+            pricing: xai_grok_sampling_types::ModelPricing::default(),
         },
         api_key: None,
         env_key: None,
@@ -6683,6 +6825,7 @@ reasoning_effort = "low"
                 show_model_fingerprint: false,
                 stream_tool_calls: None,
                 laziness_detector: LazinessDetectorPerModelConfig::default(),
+            pricing: xai_grok_sampling_types::ModelPricing::default(),
             },
             api_key: api_key.map(|s| s.to_string()),
             env_key: env_key.map(EnvKeys::single),
@@ -7723,6 +7866,7 @@ reasoning_effort = "low"
             show_model_fingerprint: false,
             stream_tool_calls: None,
             laziness_detector: LazinessDetectorPerModelConfig::default(),
+            pricing: xai_grok_sampling_types::ModelPricing::default(),
         };
         let info = ModelInfo::from_config(&entry);
         assert!(info.use_concise);
@@ -7882,6 +8026,7 @@ reasoning_effort = "low"
             show_model_fingerprint: false,
             stream_tool_calls: None,
             laziness_detector: LazinessDetectorPerModelConfig::default(),
+            pricing: xai_grok_sampling_types::ModelPricing::default(),
         };
         let info = ModelInfo::from_config(&entry);
         assert_eq!(info.agent_type, "codex");
@@ -8333,6 +8478,7 @@ reasoning_effort = "low"
             show_model_fingerprint: false,
             stream_tool_calls: None,
             laziness_detector: LazinessDetectorPerModelConfig::default(),
+            pricing: xai_grok_sampling_types::ModelPricing::default(),
         };
         let info = ModelInfo::from_config(&entry);
         assert_eq!(info.inference_idle_timeout_secs, Some(120));
@@ -12223,6 +12369,7 @@ default = "grok-4.5"
                 show_model_fingerprint: false,
                 stream_tool_calls: None,
                 laziness_detector: LazinessDetectorPerModelConfig::default(),
+            pricing: xai_grok_sampling_types::ModelPricing::default(),
                 auto_compact_threshold_percent: None,
                 system_prompt_label: None,
             },
@@ -12503,6 +12650,41 @@ default = "grok-4.5"
             entry.info.context_window.get(),
             default_cw,
             "context_window should have been inherited from hardcoded default, not left at DEFAULT_CONTEXT_WINDOW"
+        );
+    }
+    #[test]
+    fn config_model_without_explicit_window_inherits_prefetched_sibling_by_slug() {
+        // A `[model.*]` config entry that shares a routing slug with a
+        // `/v1/models` listing entry (Synthetic's `syn:large:text`, whose
+        // `context_length` is read as `context_window`) must adopt the
+        // listing's real window even though the config override did not set
+        // `context_window` — it lands at DEFAULT_CONTEXT_WINDOW and the slug
+        // backfill promotes it. Regression for the Synthetic provider.
+        let mut cfg = Config::default();
+        cfg.config_models.insert(
+            "synthetic".to_owned(),
+            ConfigModelOverride {
+                model: Some("syn:large:text".to_owned()),
+                base_url: Some("https://api.synthetic.new/openai/v1".to_owned()),
+                api_key: Some("syn_…".to_owned()),
+                ..Default::default()
+            },
+        );
+        // The prefetched `/v1/models` entry for the model carries the real
+        // context (524288 = `context_length`) under its own routing slug.
+        let mut prefetched = IndexMap::new();
+        prefetched.insert(
+            "syn:large:text".to_owned(),
+            prefetch_model_entry("syn:large:text", 524_288, ApiBackend::default()),
+        );
+        let resolved = resolve_model_list(&cfg, Some(prefetched));
+        let entry = resolved
+            .get("synthetic")
+            .expect("[model.synthetic] must be present");
+        assert_eq!(
+            entry.info.context_window.get(),
+            524_288,
+            "config entry with no explicit window must inherit the real window from the prefetched sibling by routing slug",
         );
     }
     #[test]
