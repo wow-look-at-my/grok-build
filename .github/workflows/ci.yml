@@ -37,6 +37,13 @@ jobs:
   build-test:
     name: Build & test
     runs-on: ubuntu-latest
+    env:
+      # Namespace this job's sccache entries away from the darwin release
+      # job so the more-frequent linux runs can't evict the darwin cache
+      # entries from the shared 10 GB GHAC bucket. sccache reads
+      # SCCACHE_GHA_VERSION before falling back to SCCACHE_GHA_ENABLED and
+      # uses it as the cache namespace (SHA-256'd into the GHAC `name`).
+      SCCACHE_GHA_VERSION: sccache-v0.17.0-x86_64-unknown-linux-gnu
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
@@ -99,18 +106,25 @@ jobs:
   build-release:
     name: Build release binary (${{ matrix.target_os }}/${{ matrix.target_arch }})
     runs-on: ${{ matrix.runner }}
+    env:
+      # Per-target sccache namespace: linux and darwin get distinct GHAC
+      # buckets so neither can evict the other's entries from the shared
+      # 10 GB repo cache. See build-test's SCCACHE_GHA_VERSION comment.
+      SCCACHE_GHA_VERSION: ${{ matrix.sccache_version }}
     strategy:
       matrix:
         include:
           - runner: ubuntu-latest
             target_os: linux
             target_arch: amd64
+            sccache_version: sccache-v0.17.0-x86_64-unknown-linux-gnu
             protoc_url: https://github.com/protocolbuffers/protobuf/releases/download/v29.3/protoc-29.3-linux-x86_64.zip
             protoc_sha256: 3e866620c5be27664f3d2fa2d656b5f3e09b5152b42f1bedbf427b333e90021a
             checksum_cmd: sha256sum -c -
           - runner: macos-14
             target_os: darwin
             target_arch: arm64
+            sccache_version: sccache-v0.17.0-aarch64-apple-darwin
             protoc_url: https://github.com/protocolbuffers/protobuf/releases/download/v29.3/protoc-29.3-osx-aarch_64.zip
             protoc_sha256: 2b8a3403cd097f95f3ba656e14b76c732b6b26d7f183330b11e36ef2bc028765
             checksum_cmd: shasum -a 256 -c -
