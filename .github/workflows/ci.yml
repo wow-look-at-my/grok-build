@@ -68,17 +68,16 @@ jobs:
       - name: Run sccache-cache
         uses: mozilla-actions/sccache-action@v0.0.11
 
-      - name: Build grok binary
-        run: cargo build --locked -p xai-grok-pager-bin
-
-      - name: Smoke-test the binary
-        run: ./target/debug/xai-grok-pager --version
-
       # --no-fail-fast: without it cargo stops at the first failing crate, so a
       # single failure hides every crate after it and the next push finds a new
       # one. One run, the whole list.
+      # The smoke test runs first (cargo test --workspace compiles the binary
+      # as a workspace member; --version confirms it links and runs before we
+      # spend time on the full suite).
       - name: Test (workspace)
-        run: cargo test --locked --workspace --no-fail-fast
+        run: |
+          cargo test --locked --workspace --no-fail-fast
+          ./target/debug/xai-grok-pager --version
 
       # The PTY suites drive the real binary through a virtual terminal and
       # assert on what is actually on screen. They are #[ignore]d because they
