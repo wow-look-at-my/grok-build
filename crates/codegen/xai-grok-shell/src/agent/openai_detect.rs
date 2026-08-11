@@ -174,8 +174,9 @@ mod tests {
         ])
         .await
         .unwrap();
-        // base = {url}/v1 → probe hits .../v1/responses and .../v1/chat/completions
-        let base = format!("{}/v1", server.url());
+        // `server.url()` already includes the `/v1` prefix, so the probe hits
+        // `.../v1/responses` (served) → Responses.
+        let base = server.url();
         let backend = detect_api_backend(&base, Some("dummy-key")).await;
         assert_eq!(backend, ApiBackend::Responses);
     }
@@ -187,8 +188,10 @@ mod tests {
         ])
         .await
         .unwrap();
-        // base = {url} (no /v1) → nothing served at /responses or /chat/completions
-        let base = server.url();
+        // `server.url()` includes `/v1`; appending a bogus segment means the
+        // probe hits `.../v1/bogus/responses` and `.../v1/bogus/chat/completions`
+        // — neither is served (404) → fallback.
+        let base = format!("{}/bogus", server.url());
         let backend = detect_api_backend(&base, Some("dummy-key")).await;
         assert_eq!(backend, ApiBackend::auto_detect_fallback());
     }
