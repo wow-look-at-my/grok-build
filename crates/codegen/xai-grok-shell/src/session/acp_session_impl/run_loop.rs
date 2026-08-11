@@ -990,6 +990,12 @@ pub(super) async fn run_session(
                             // Clear, don't flush: converting interjections to
                             // prompt turns would restart the model after a stop.
                             session.pending_interjections.clear();
+                            // Drop a stale asap-injection cancel flag and the
+                            // in-flight id so they cannot affect a later turn.
+                            session
+                                .interjection_cancel_requested
+                                .store(false, std::sync::atomic::Ordering::SeqCst);
+                            *session.in_flight_sampler_request_id.lock() = None;
                             // Do not abort turn summary here. Summaries spawn only
                             // after a successful turn, so an in-flight call describes
                             // that prior success. Cancel targets the current turn;
@@ -1962,6 +1968,28 @@ pub(super) async fn run_session(
                                     attachments: images,
                                 });
                                 tracing::info!("Queued mid-turn interjection");
+                                // ASAP injection: if the model is mid-stream
+                                // (an in-flight request the turn loop is
+                                // awaiting on `submit_and_collect`), cancel it
+                                // so the turn loop iterates immediately, drains
+                                // this interjection, and resubmits — rather than
+                                // waiting for the stream, which can run for
+                                // many minutes on a long reasoning/text
+                                // generation. The cancel is a no-op if the
+                                // turn is between requests (inside a tool call),
+                                // where the buffer is drained at the next loop
+                                // boundary anyway.
+                                if let Some(req_id) =
+                                    session.in_flight_sampler_request_id.lock().take()
+                                {
+                                    session
+                                        .interjection_cancel_requested
+                                        .store(true, std::sync::atomic::Ordering::SeqCst);
+                                    session.sampler_handle.cancel(req_id);
+                                    tracing::info!(
+                                        "Cancelled in-flight model stream for asap interjection"
+                                    );
+                                }
                             } else {
                                 session
                                     .queue_interjection_fallback_prompt(text, images, true)
