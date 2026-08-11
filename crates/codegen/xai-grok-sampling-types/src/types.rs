@@ -575,6 +575,12 @@ impl UsageCost {
     }
 }
 
+impl From<f64> for UsageCost {
+    fn from(v: f64) -> Self {
+        UsageCost(v)
+    }
+}
+
 impl Serialize for UsageCost {
     fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         // Re-emit as the simpler float form; we only read cost, never forward it.

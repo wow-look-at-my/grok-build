@@ -961,7 +961,7 @@ mod tests {
             prompt_tokens_details: None,
             completion_tokens_details: None,
             cost_in_usd_ticks: None,
-            cost: Some(0.0000416), // OpenRouter-style float
+            cost: Some(0.0000416).map(xai_grok_sampling_types::UsageCost::from), // OpenRouter-style float
         });
         let chunks: Vec<Result<ChatCompletionChunk, SamplingError>> = vec![
             Ok(text_chunk("ok")),
@@ -997,7 +997,7 @@ mod tests {
             prompt_tokens_details: None,
             completion_tokens_details: None,
             cost_in_usd_ticks: Some(42),
-            cost: Some(0.0000999),
+            cost: Some(0.0000999).map(xai_grok_sampling_types::UsageCost::from),
         });
         let chunks: Vec<Result<ChatCompletionChunk, SamplingError>> = vec![
             Ok(text_chunk("ok")),
