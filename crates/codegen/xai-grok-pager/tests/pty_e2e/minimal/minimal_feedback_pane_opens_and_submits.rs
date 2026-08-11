@@ -4,40 +4,35 @@ use crate::common::*;
 
 const FEEDBACK_LABEL_SENTINEL: &str = "How can we improve Grok Build?";
 const FEEDBACK_PLACEHOLDER_SENTINEL: &str = "Please provide as much detail as possible.";
-const SESSION_GATE_SENTINEL: &str = "No active session";
 const THANKS_SENTINEL: &str = "Thanks for the feedback";
 const PANE_FEEDBACK: &str = "minimal-pty-feedback-report-xyz";
 
-/// Minimal: bare `/feedback` without a session shows a system notice; after a session exists the freeform pane opens and submits like full TUI.
+/// Minimal: bare `/feedback` opens the freeform pane and submits like full TUI.
+///
+/// The no-session guard is deliberately NOT here, and it is not a PTY subject
+/// at all: `session_id` is `None` only between the prompt rendering and
+/// `session/new` returning, and how long that lasts is a property of the
+/// machine. Sleeping 5s before the keys proves it -- unloaded, the session
+/// binds and the guard goes unreachable; under a full parallel suite it was
+/// still unbound 15s in. So the version of this test that asserted the guard
+/// was reading load, not behavior, and flipped with it. The other route to
+/// no-session does not reach the guard either: when creation fails,
+/// `handle_session_failed` removes the sole agent and shows Welcome, so
+/// `dispatch_open_feedback_pane` returns at its `ActiveView::Agent` check.
+/// `enter_feedback_mode_requires_session` (dispatch::tests::notes) owns the
+/// guard, setting `session_id` to `None` outright and pinning the message, the
+/// pane staying shut, and minimal's system block against fullscreen's toast.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
-async fn minimal_feedback_session_gate_and_pane() {
+async fn minimal_feedback_pane_opens_and_submits() {
     let content = ContentController::start().await.expect("start content");
     content.set_response(format!("{MOCK_RESPONSE_SENTINEL} minimal ready."));
 
     let mut harness = spawn_minimal(&content);
     wait_minimal_ready(&mut harness);
-
-    // Pre-session: guard must be visible as system text (toast is invisible).
-    harness
-        .inject_keys(b"/feedback\r")
-        .expect("bare /feedback before session");
-    harness
-        .wait_for_full_text(SESSION_GATE_SENTINEL, Duration::from_secs(15))
-        .expect("minimal session gate must use a system notice");
-    assert!(
-        !harness.contains_text(FEEDBACK_LABEL_SENTINEL),
-        "pane must not open without a session\nscreen:\n{}",
-        harness.screen_contents()
-    );
-
-    // Establish a session, then open the pane and submit.
-    harness
-        .inject_keys(format!("{PROMPT}\r").as_bytes())
-        .expect("submit prompt");
-    harness
-        .wait_for_text(MOCK_RESPONSE_SENTINEL, Duration::from_secs(30))
-        .expect("response rendered");
+    // The pane is gated on a bound session, and the idle prompt does not mean
+    // there is one.
+    wait_session_bound(&mut harness);
 
     harness
         .inject_keys(b"/feedback\r")
