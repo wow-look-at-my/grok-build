@@ -130,8 +130,12 @@ pub fn stream_chat_completions<'a>(
 
             if let Some(u) = chunk.usage.clone() {
                 // Wire cost is cumulative for the response, so last-write-wins.
-                // Never clobber a known cost with missing/unreported.
-                let chunk_cost = xai_grok_sampling_types::reported_cost_ticks(u.cost_in_usd_ticks);
+                // Never clobber a known cost with missing/unreported. Two wire
+                // forms are supported: xAI `cost_in_usd_ticks` (integer ticks)
+                // and the standard `usage.cost` USD float (OpenRouter, etc.).
+                // `cost_in_usd_ticks` is authoritative when present.
+                let chunk_cost = xai_grok_sampling_types::reported_cost_ticks(u.cost_in_usd_ticks)
+                    .or_else(|| xai_grok_sampling_types::usd_float_to_ticks(u.cost));
                 cost_usd_ticks = match (cost_usd_ticks, chunk_cost) {
                     (_, Some(n)) => Some(n),
                     (prev, None) => prev,
@@ -830,6 +834,7 @@ mod tests {
             prompt_tokens_details: None,
             completion_tokens_details: None,
             cost_in_usd_ticks: None,
+            cost: None,
         });
 
         let chunks: Vec<Result<ChatCompletionChunk, SamplingError>> = vec![
@@ -870,6 +875,7 @@ mod tests {
                 prompt_tokens_details: None,
                 completion_tokens_details: None,
                 cost_in_usd_ticks: wire,
+                cost: None,
             });
             let chunks: Vec<Result<ChatCompletionChunk, SamplingError>> = vec![
                 Ok(text_chunk("ok")),
@@ -903,6 +909,7 @@ mod tests {
             prompt_tokens_details: None,
             completion_tokens_details: None,
             cost_in_usd_ticks: Some(99),
+            cost: None,
         });
         let mut second = make_chunk(vec![ChatChunkDelta::default()]);
         second.usage = Some(Usage {
@@ -912,6 +919,7 @@ mod tests {
             prompt_tokens_details: None,
             completion_tokens_details: None,
             cost_in_usd_ticks: Some(0),
+            cost: None,
         });
         let chunks: Vec<Result<ChatCompletionChunk, SamplingError>> = vec![
             Ok(text_chunk("ok")),
@@ -930,6 +938,113 @@ mod tests {
         match events.last().unwrap() {
             SamplingEvent::Completed { response, .. } => {
                 assert_eq!(response.cost_usd_ticks, Some(99));
+            }
+            other => panic!("expected Completed, got {other:?}"),
+        }
+    }
+
+    /// When the backend reports `usage.cost` (USD float, the OpenRouter /
+    /// OpenAI-compatible form) but NOT `cost_in_usd_ticks`, the float is
+    /// converted to integer ticks (×1e10, rounded) and flows through as
+    /// `ConversationResponse.cost_usd_ticks`.
+    #[tokio::test]
+    async fn cost_float_converted_to_ticks_when_no_ticks_field() {
+        let mut chunk_with_usage = make_chunk(vec![ChatChunkDelta::default()]);
+        chunk_with_usage.usage = Some(Usage {
+            prompt_tokens: 10,
+            completion_tokens: 5,
+            total_tokens: 15,
+            prompt_tokens_details: None,
+            completion_tokens_details: None,
+            cost_in_usd_ticks: None,
+            cost: Some(0.0000416), // OpenRouter-style float
+        });
+        let chunks: Vec<Result<ChatCompletionChunk, SamplingError>> = vec![
+            Ok(text_chunk("ok")),
+            Ok(chunk_with_usage),
+            Ok(final_chunk(FinishReason::Stop)),
+        ];
+        let raw = stream::iter(chunks).boxed();
+        let events = collect(stream_chat_completions(
+            raw,
+            None,
+            rid(),
+            Duration::from_secs(60),
+        ))
+        .await;
+        match events.last().unwrap() {
+            SamplingEvent::Completed { response, .. } => {
+                // round(0.0000416 * 1e10) = 416_000
+                assert_eq!(response.cost_usd_ticks, Some(416_000));
+            }
+            other => panic!("expected Completed, got {other:?}"),
+        }
+    }
+
+    /// When BOTH `cost_in_usd_ticks` and `cost` are present, the ticks field
+    /// is authoritative.
+    #[tokio::test]
+    async fn cost_ticks_preferred_over_cost_float() {
+        let mut chunk_with_usage = make_chunk(vec![ChatChunkDelta::default()]);
+        chunk_with_usage.usage = Some(Usage {
+            prompt_tokens: 10,
+            completion_tokens: 5,
+            total_tokens: 15,
+            prompt_tokens_details: None,
+            completion_tokens_details: None,
+            cost_in_usd_ticks: Some(42),
+            cost: Some(0.0000999),
+        });
+        let chunks: Vec<Result<ChatCompletionChunk, SamplingError>> = vec![
+            Ok(text_chunk("ok")),
+            Ok(chunk_with_usage),
+            Ok(final_chunk(FinishReason::Stop)),
+        ];
+        let raw = stream::iter(chunks).boxed();
+        let events = collect(stream_chat_completions(
+            raw,
+            None,
+            rid(),
+            Duration::from_secs(60),
+        ))
+        .await;
+        match events.last().unwrap() {
+            SamplingEvent::Completed { response, .. } => {
+                assert_eq!(response.cost_usd_ticks, Some(42));
+            }
+            other => panic!("expected Completed, got {other:?}"),
+        }
+    }
+
+    /// When neither cost field is present, the cost stays `None` (honest absence).
+    #[tokio::test]
+    async fn cost_none_when_neither_field_present() {
+        let mut chunk_with_usage = make_chunk(vec![ChatChunkDelta::default()]);
+        chunk_with_usage.usage = Some(Usage {
+            prompt_tokens: 10,
+            completion_tokens: 5,
+            total_tokens: 15,
+            prompt_tokens_details: None,
+            completion_tokens_details: None,
+            cost_in_usd_ticks: None,
+            cost: None,
+        });
+        let chunks: Vec<Result<ChatCompletionChunk, SamplingError>> = vec![
+            Ok(text_chunk("ok")),
+            Ok(chunk_with_usage),
+            Ok(final_chunk(FinishReason::Stop)),
+        ];
+        let raw = stream::iter(chunks).boxed();
+        let events = collect(stream_chat_completions(
+            raw,
+            None,
+            rid(),
+            Duration::from_secs(60),
+        ))
+        .await;
+        match events.last().unwrap() {
+            SamplingEvent::Completed { response, .. } => {
+                assert_eq!(response.cost_usd_ticks, None);
             }
             other => panic!("expected Completed, got {other:?}"),
         }
