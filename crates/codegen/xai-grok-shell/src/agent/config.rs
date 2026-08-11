@@ -4483,7 +4483,7 @@ impl ModelInfo {
             extra_headers: IndexMap::new(),
             query_params: IndexMap::new(),
             env_http_headers: IndexMap::new(),
-            context_window: NonZeroU64::new(200_000).unwrap(),
+            context_window: NonZeroU64::new(DEFAULT_CONTEXT_WINDOW).unwrap(),
             auto_compact_threshold_percent: None,
             system_prompt_label: None,
             use_concise: false,
@@ -12565,6 +12565,41 @@ default = "grok-4.5"
             entry.info.context_window.get(),
             default_cw,
             "context_window should have been inherited from hardcoded default, not left at DEFAULT_CONTEXT_WINDOW"
+        );
+    }
+    #[test]
+    fn config_model_without_explicit_window_inherits_prefetched_sibling_by_slug() {
+        // A `[model.*]` config entry that shares a routing slug with a
+        // `/v1/models` listing entry (Synthetic's `syn:large:text`, whose
+        // `context_length` is read as `context_window`) must adopt the
+        // listing's real window even though the config override did not set
+        // `context_window` — it lands at DEFAULT_CONTEXT_WINDOW and the slug
+        // backfill promotes it. Regression for the Synthetic provider.
+        let mut cfg = Config::default();
+        cfg.config_models.insert(
+            "synthetic".to_owned(),
+            ConfigModelOverride {
+                model: Some("syn:large:text".to_owned()),
+                base_url: Some("https://api.synthetic.new/openai/v1".to_owned()),
+                api_key: Some("syn_…".to_owned()),
+                ..Default::default()
+            },
+        );
+        // The prefetched `/v1/models` entry for the model carries the real
+        // context (524288 = `context_length`) under its own routing slug.
+        let mut prefetched = IndexMap::new();
+        prefetched.insert(
+            "syn:large:text".to_owned(),
+            prefetch_model_entry("syn:large:text", 524_288, ApiBackend::default()),
+        );
+        let resolved = resolve_model_list(&cfg, Some(prefetched));
+        let entry = resolved
+            .get("synthetic")
+            .expect("[model.synthetic] must be present");
+        assert_eq!(
+            entry.info.context_window.get(),
+            524_288,
+            "config entry with no explicit window must inherit the real window from the prefetched sibling by routing slug",
         );
     }
     #[test]

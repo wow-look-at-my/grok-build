@@ -832,7 +832,17 @@ pub(crate) fn fetch_models_blocking(
     );
     let mut models = Vec::with_capacity(models_response.data.len());
     for (idx, value) in models_response.data.into_iter().enumerate() {
-        match parse_remote_model_value(&value, &inference_base_url) {
+        // Synthetic-shaped entries (non-standard `context_length`,
+        // `max_output_length`, `reasoning_parameters.efforts` keys) are parsed
+        // through the Synthetic-scoped home so the extension keys stay out of
+        // the generic cross-provider fallback chains. Everything else uses the
+        // generic parser unchanged.
+        let parsed = if crate::agent::models::is_synthetic_listing(&value) {
+            crate::agent::models::parse_synthetic_model_entry(&value, &inference_base_url)
+        } else {
+            parse_remote_model_value(&value, &inference_base_url)
+        };
+        match parsed {
             Some(model) => models.push(model),
             None => {
                 tracing::warn!(
