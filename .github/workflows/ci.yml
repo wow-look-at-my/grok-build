@@ -15,14 +15,16 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  # Incremental compilation MUST stay on for CI. rust-cache restores target/
-  # (~2.7 GB) on a cache hit, but with CARGO_INCREMENTAL=0 cargo has no
-  # incremental compilation data to reuse — it recompiles every crate from
-  # scratch regardless of the restored artifacts (the fingerprints don't carry
-  # across the cache round-trip without the incremental database). With
-  # incremental on, a cache hit lets cargo skip unchanged crates entirely,
-  # cutting the build+test compile from ~14 min to ~1-2 min on a warm cache.
-  CARGO_INCREMENTAL: "1"
+  # sccache wraps rustc and caches individual compilation outputs (per
+  # crate/compilation unit) in the GitHub Actions cache, so a changed crate
+  # only invalidates its own cached artifacts — not a whole target/ tarball.
+  # This requires CARGO_INCREMENTAL=0 (sccache cannot cache incremental
+  # compilation). rust-cache alone restored target/ but cargo recompiled
+  # everything anyway (fingerprints don't survive the zip round-trip), so the
+  # "cache hit" was a 14-min full recompile every time. sccache actually hits.
+  CARGO_INCREMENTAL: "0"
+  SCCACHE_GHA_ENABLED: "true"
+  RUSTC_WRAPPER: "sccache"
   # Linking every crate's test binaries WITH debuginfo needs >37 GB of target/
   # (measured); a runner has ~14 GB free, and ld dies on a bus error partway
   # through the shell crate's integration tests. Nothing here reads a symbol.
@@ -59,8 +61,12 @@ jobs:
       - name: Install ripgrep
         uses: wow-look-at-my/actions@cache-rg#latest
 
-      - name: Cache cargo build
-        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      # sccache caches individual rustc compilation outputs in the GHA cache.
+      # Unlike rust-cache (which restores a dumb target/ tarball that cargo
+      # recompiles from scratch anyway), sccache keys on the actual compilation
+      # inputs and only recompiles what genuinely changed.
+      - name: Run sccache-cache
+        uses: mozilla-actions/sccache-action@v0.0.11
 
       - name: Build grok binary
         run: cargo build --locked -p xai-grok-pager-bin
@@ -126,7 +132,8 @@ jobs:
       - name: Install Rust toolchain (pinned by rust-toolchain.toml)
         run: rustup show
 
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Run sccache-cache
+        uses: mozilla-actions/sccache-action@v0.0.11
 
       - name: Build release binary
         run: cargo build --locked --release -p xai-grok-pager-bin
