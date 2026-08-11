@@ -238,20 +238,40 @@ fn handle_picking_group(state: &mut SettingsModalState, key: &KeyEvent) -> Setti
             state.transition_to_picking_group(group_key, child_idx - 1);
             SettingsKeyOutcome::Changed
         }
-        // Space/Enter toggle the focused child Bool and stay in the sheet so the
-        // user can flip several tips in a row. The dispatcher refreshes the
-        // modal snapshot, so the new value paints on the next frame.
+        // Space/Enter on a Bool child toggle it in place and stay in the sheet
+        // so the user can flip several tips in a row. For a non-Bool child
+        // (String/Enum/Int) Enter opens the child's normal editor/picker,
+        // leaving the group sub-sheet.
         KeyCode::Char(' ') | KeyCode::Enter => {
             let Some(child_key) = children.get(child_idx).copied() else {
                 return SettingsKeyOutcome::Unchanged;
             };
-            let cur = match state.value_for(child_key) {
-                Some(SettingValue::Bool(b)) => b,
-                _ => return SettingsKeyOutcome::Unchanged,
-            };
-            match action_for_bool(child_key, !cur) {
-                Some(action) => SettingsKeyOutcome::Action(action),
-                None => SettingsKeyOutcome::Unchanged,
+            let is_bool = matches!(
+                state.registry.find(child_key).map(|m| &m.kind),
+                Some(SettingKind::Bool { .. })
+            );
+            if is_bool {
+                let cur = match state.value_for(child_key) {
+                    Some(SettingValue::Bool(b)) => b,
+                    _ => return SettingsKeyOutcome::Unchanged,
+                };
+                match action_for_bool(child_key, !cur) {
+                    Some(action) => SettingsKeyOutcome::Action(action),
+                    None => SettingsKeyOutcome::Unchanged,
+                }
+            } else {
+                // String → EditingString, Enum → PickingEnum, Int → EditingInt.
+                // The child's editor seeds from its current value (and the
+                // `openai_compatible.api_key` masked-secret behavior is
+                // preserved by `try_enter_editing_value_for`).
+                if state.try_enter_editing_value_for(child_key)
+                    || state.try_enter_picking_enum_for(child_key)
+                {
+                    state.hover_row = None;
+                    SettingsKeyOutcome::Changed
+                } else {
+                    SettingsKeyOutcome::Unchanged
+                }
             }
         }
         KeyCode::Esc => {
@@ -450,14 +470,15 @@ fn handle_int_stepper(
             SettingsKeyOutcome::Changed
         }
         KeyCode::Enter => {
-            // Commit. Buffer is guaranteed in-range by the
-            // clamp on every step; parse + dispatch.
-            let action_opt = buffer
-                .parse::<i64>()
-                .ok()
-                .and_then(|i| action_for_int(setting_key, i));
+            // Commit the raw buffer: parse as i64, clamp to [min,max], then
+            // dispatch. Stepper steps keep the buffer in-range, but typed
+            // digits may land out of range until the user Backspaces, so the
+            // clamp on commit is the guarantee that a dispatched value is
+            // always valid. An empty buffer parses to None and is treated as a
+            // no-op (nothing dispatches).
+            let clamped = buffer.parse::<i64>().ok().map(|i| i.clamp(min, max));
             state.transition_to_browse();
-            match action_opt {
+            match clamped.and_then(|i| action_for_int(setting_key, i)) {
                 Some(action) => SettingsKeyOutcome::Action(action),
                 None => {
                     tracing::error!(
@@ -467,6 +488,30 @@ fn handle_int_stepper(
                     );
                     SettingsKeyOutcome::Changed
                 }
+            }
+        }
+        // Digit typing: append the digit to the in-place buffer so the user can
+        // type e.g. `1000000` directly. The value is only clamped on commit
+        // (and when later stepping), so a number still being entered is never
+        // truncated mid-keystroke. Backspace drops the last digit, letting the
+        // user clear the seeded value before typing a fresh one.
+        KeyCode::Char(c) if key.modifiers.is_empty() && c.is_ascii_digit() => {
+            // Cap buffer length to avoid unbounded growth from held keys.
+            if buffer.chars().count() >= 12 {
+                return SettingsKeyOutcome::Unchanged;
+            }
+            let mut new_buf = buffer.to_string();
+            new_buf.push(c);
+            update_int_buffer(state, new_buf);
+            SettingsKeyOutcome::Changed
+        }
+        KeyCode::Backspace => {
+            let mut new_buf = buffer.to_string();
+            if new_buf.pop().is_some() {
+                update_int_buffer(state, new_buf);
+                SettingsKeyOutcome::Changed
+            } else {
+                SettingsKeyOutcome::Unchanged
             }
         }
         // Up / k: small step up.
@@ -1195,10 +1240,25 @@ fn handle_group_mouse(
     let Some(child_key) = children.get(idx).copied() else {
         return SettingsKeyOutcome::Changed;
     };
-    let cur = matches!(state.value_for(child_key), Some(SettingValue::Bool(true)));
-    match action_for_bool(child_key, !cur) {
-        Some(action) => SettingsKeyOutcome::Action(action),
-        None => SettingsKeyOutcome::Changed,
+    // Bool children toggle in place; String/Enum/Int children open their
+    // normal editor/picker (mirrors the keyboard path).
+    let is_bool = matches!(
+        state.registry.find(child_key).map(|m| &m.kind),
+        Some(SettingKind::Bool { .. })
+    );
+    if is_bool {
+        let cur = matches!(state.value_for(child_key), Some(SettingValue::Bool(true)));
+        match action_for_bool(child_key, !cur) {
+            Some(action) => SettingsKeyOutcome::Action(action),
+            None => SettingsKeyOutcome::Changed,
+        }
+    } else if state.try_enter_editing_value_for(child_key)
+        || state.try_enter_picking_enum_for(child_key)
+    {
+        state.hover_row = None;
+        SettingsKeyOutcome::Changed
+    } else {
+        SettingsKeyOutcome::Changed
     }
 }
 

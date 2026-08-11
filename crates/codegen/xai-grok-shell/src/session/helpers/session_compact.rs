@@ -440,7 +440,9 @@ pub(crate) async fn generate_session_compact(
         crate::util::config::CompactionToolChoice::None => ConversationToolChoice::None,
     };
     let output = match sampling_config.api_backend {
-        ApiBackend::ChatCompletions => {
+        // `AutoDetect` must be resolved before reaching this compaction path;
+        // if it leaks through unresolved, fall back to Chat Completions.
+        ApiBackend::ChatCompletions | ApiBackend::AutoDetect => {
             let chat_messages: Vec<ChatRequestMessage> =
                 conversation_to_chat_messages(chat_history);
             let mut message =

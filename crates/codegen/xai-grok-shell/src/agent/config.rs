@@ -598,7 +598,7 @@ impl Default for OpenAiCompatibleConfig {
             enabled: false,
             base_url: String::new(),
             model: String::new(),
-            api_backend: ApiBackend::ChatCompletions,
+            api_backend: ApiBackend::AutoDetect,
             make_default: true,
         }
     }
@@ -636,6 +636,13 @@ impl OpenAiCompatibleConfig {
                 crate::auth::read_openai_compatible_api_key(&crate::util::grok_home::grok_home())
                     .filter(|value| !value.trim().is_empty())
             })
+    }
+
+    /// `pub(crate)` accessor for the resolved OpenAI API key so the remote
+    /// model-fetch and backend-detection code can authenticate the openai
+    /// endpoint (BYOK) without forwarding any session credential.
+    pub(crate) fn resolved_api_key_owned(&self) -> Option<String> {
+        self.resolved_api_key()
     }
 
     fn to_model_entry(&self) -> Option<ModelEntry> {
@@ -688,6 +695,71 @@ impl OpenAiCompatibleConfig {
             pricing: xai_grok_sampling_types::ModelPricing::default(),
         };
         Some(ModelEntry::from_config_entry(&entry))
+    }
+
+    /// Build the catalog entries for this profile from prefetched
+    /// `openai-compatible/<model-slug>` entries (fetched from the profile's
+    /// `{base_url}/models` at startup).
+    ///
+    /// Each entry inherits the profile's `base_url`, resolved OpenAI API key,
+    /// `auth_scheme` (Bearer when a key is present, else None), `agent_type`
+    /// (the default harness), and `api_backend` (e.g. `AutoDetect`, resolved
+    /// by the shell before the sampler builds a client). Per-model
+    /// `context_window` from the fetched payload is preserved.
+    ///
+    /// Returns `None` when the profile is disabled/invalid, and `Some` with a
+    /// single fallback entry under `OPENAI_COMPATIBLE_MODEL_ID` when the fetch
+    /// is unavailable so the feature degrades gracefully offline.
+    fn catalog_entries(
+        &self,
+        prefetched: Option<&IndexMap<String, ModelEntry>>,
+    ) -> Option<IndexMap<String, ModelEntry>> {
+        if !self.enabled {
+            return None;
+        }
+        if let Some(error) = self.validation_error() {
+            tracing::warn!(%error, "ignoring invalid [openai_compatible] configuration");
+            return None;
+        }
+        let api_key = self.resolved_api_key();
+        let auth_scheme = if api_key.is_some() {
+            AuthScheme::Bearer
+        } else {
+            AuthScheme::None
+        };
+        let base_url = self.base_url.trim().trim_end_matches('/').to_owned();
+        let agent_type = default_agent_type();
+
+        let mut entries = IndexMap::new();
+        if let Some(prefetched) = prefetched {
+            for (key, entry) in prefetched {
+                let Some(slug) = key.strip_prefix("openai-compatible/") else {
+                    continue;
+                };
+                let mut e = entry.clone();
+                e.info.id = Some(key.clone());
+                e.info.base_url = base_url.clone();
+                e.info.api_backend = self.api_backend.clone();
+                e.info.auth_scheme = auth_scheme;
+                e.info.agent_type = agent_type.clone();
+                e.api_key = api_key.clone();
+                e.api_base_url = None;
+                entries.insert(key.clone(), e);
+            }
+        }
+
+        if entries.is_empty() {
+            // Offline / unavailable-fetch fallback: keep the single configured
+            // entry so `openai-compatible` still works (degradation path).
+            self.to_model_entry()
+                .map(|entry| {
+                    let mut m = IndexMap::new();
+                    m.insert(OPENAI_COMPATIBLE_MODEL_ID.to_owned(), entry);
+                    m
+                })
+        } else {
+            Some(entries)
+        }
     }
 }
 pub use xai_grok_config_types::{BoolFlag, ConfigSource, LazinessDetectorPerModelConfig, Resolved};
@@ -3681,7 +3753,17 @@ pub(crate) fn resolve_model_list(
         tracing::debug!(count = defaults.len(), "loaded default models");
         resolved.extend(defaults);
     }
-    if let Some(mut prefetched) = prefetched {
+    // Inject the user-managed OpenAI-compatible endpoint(s). When the
+    // `{base_url}/models` listing was prefetched, one catalog entry per
+    // advertised model (`openai-compatible/<slug>`) is produced; otherwise the
+    // single configured entry under `OPENAI_COMPATIBLE_MODEL_ID` is kept as an
+    // offline fallback. Computed here (while `prefetched` is still owned) so the
+    // prefetched map can be moved into `resolved` afterwards without a partial move.
+    let openai_entries = if let Some(mut prefetched) = prefetched {
+        let entries = cfg
+            .openai_compatible
+            .as_ref()
+            .and_then(|p| p.catalog_entries(Some(&prefetched)));
         tracing::debug!(count = prefetched.len(), "loaded prefetched models");
         let default_cw = DEFAULT_CONTEXT_WINDOW;
         for (key, entry) in prefetched.iter_mut() {
@@ -3712,13 +3794,19 @@ pub(crate) fn resolve_model_list(
             }
         }
         resolved = prefetched;
-    }
-    if let Some(entry) = cfg
-        .openai_compatible
-        .as_ref()
-        .and_then(OpenAiCompatibleConfig::to_model_entry)
-    {
-        resolved.insert(OPENAI_COMPATIBLE_MODEL_ID.to_owned(), entry);
+        entries
+    } else {
+        cfg.openai_compatible
+            .as_ref()
+            .and_then(|p| p.catalog_entries(None))
+    };
+    if let Some(openai_entries) = openai_entries {
+        // Make this block authoritative: drop any stale openai-compatible keys
+        // (single + fetched) before inserting fresh ones.
+        resolved.retain(|key, _| {
+            key != OPENAI_COMPATIBLE_MODEL_ID && !key.starts_with("openai-compatible/")
+        });
+        resolved.extend(openai_entries);
     }
     for (key, model_override) in &cfg.config_models {
         let had_base = resolved.contains_key(key);
