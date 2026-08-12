@@ -20,5 +20,8 @@ slow-timeout = { period = "60s", terminate-after = 1 }
 # Don't retry on timeout — fail immediately so the hang is visible.
 retries = 0
 
-# Fail fast on the first test timeout so CI doesn't waste time.
-fail-fast = true
+# Run ALL tests even on failure (equivalent to cargo test --no-fail-fast).
+# A single failure should not hide every test after it — the next push
+# would find a new one each time. fail-fast = false means nextest runs
+# every test regardless of individual failures.
+fail-fast = false
