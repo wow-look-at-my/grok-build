@@ -23,6 +23,17 @@
 //! value immediately and kick off an off-thread `gh` poll on a TTL, so the dot
 //! tracks fresh CI state instead of a value captured once at startup.
 //!
+//! Renders alone cannot carry that promise, because the session watching its
+//! own CI is precisely the one drawing no frames: the event loop parks until
+//! something asks it to move. Three pieces close that gap, and all of them
+//! must stay wired or the dot silently freezes at whatever it last showed:
+//!   - [`CI_POLL_INTERVAL`] — the loop's own poll timer keeps calling
+//!     [`refresh_ci_status`] with no frames in sight;
+//!   - [`set_change_notifier`] — a poll that lands on a *different* color asks
+//!     the loop for one repaint, so red/green arrives without a keypress;
+//!   - [`ci_dot_animating`] — the app demands animation ticks while a run is
+//!     in flight, which is what actually moves the yellow pulse.
+//!
 //! [gh]: https://cli.github.com/
 
 use std::collections::HashMap;
@@ -36,6 +47,18 @@ use serde::Deserialize;
 /// a per-frame caller can't spawn a storm of `gh` subprocesses.
 const CI_REFRESH_TTL: Duration = Duration::from_secs(30);
 
+/// How often the event loop re-arms its CI poll while an agent view is up.
+/// The render path only refreshes the dot on frames it actually draws, and an
+/// idle session draws none, so the poll timer is what keeps the color true
+/// while the user sits and watches a run.
+pub const CI_POLL_INTERVAL: Duration = CI_REFRESH_TTL;
+
+/// How long after its last refresh a cache entry still counts as describing
+/// the branch on screen. Entries for branches nobody renders any more stop
+/// being refreshed and age out of [`ci_dot_animating`], so a checked-out-and-
+/// abandoned branch can't keep an idle session animating.
+const CI_ENTRY_FRESH_FOR: Duration = Duration::from_secs(90);
+
 /// Only the `headBranch` the user cares about is ever fed into the cache.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct CiCacheKey {
@@ -46,6 +69,13 @@ struct CiCacheKey {
 type CiCacheEntry = (Option<CiStatus>, Instant);
 static CI_CACHE: LazyLock<Mutex<HashMap<CiCacheKey, CiCacheEntry>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// Nudged by an off-thread poll that lands on a *different* color, so a
+/// session with no input and no animation still repaints the moment CI goes
+/// red or green. Registered once by the event loop; `None` in tests and in
+/// any headless caller, where the send is simply skipped.
+static CI_CHANGE_TX: LazyLock<Mutex<Option<tokio::sync::mpsc::UnboundedSender<()>>>> =
+    LazyLock::new(|| Mutex::new(None));
 
 /// The tri-state CI color for a branch, plus the "no CI" absent state.
 ///
@@ -213,7 +243,9 @@ fn strip_ansi_csi(bytes: &[u8]) -> Vec<u8> {
 /// render tick, `min` + `(max-min)·(1+sin)/2`. Kept dependency-free and
 /// headless so the animation math is directly unit-testable.
 pub fn sine_value_factor(tick: u64, min: f32, max: f32) -> f32 {
-    // Full sine cycle (2π) every 48 ticks → a gentle pulse (~3.2s at 15fps).
+    // Full sine cycle (2π) every 48 ticks. A pulsing dot demands only slow
+    // ticks (83ms, `app_view::SLOW_TICK_INTERVAL`), so that is one breath
+    // per ~4s.
     let phase = (tick as f32) * std::f32::consts::TAU / 48.0;
     let unit = (phase.sin() + 1.0) / 2.0; // 0..=1
     min + unit * (max - min)
@@ -344,27 +376,77 @@ fn run_gh(repo_root: &Path, args: &[&str]) -> Option<std::process::Output> {
 /// blocks and never spawns `gh` synchronously on the render path — call this
 /// from render code.
 pub fn ci_status_lazy(repo_root: &Path, branch: &str) -> Option<CiStatus> {
+    let cached = ci_status_peek(repo_root, branch);
+    refresh_ci_status(repo_root, branch);
+    cached
+}
+
+/// Read the cached CI status for `(repo_root, branch)` without scheduling
+/// anything. Free of subprocesses, I/O, and cache mutation, so callers that
+/// run outside the render path — [`ci_dot_animating`], the tick-demand check —
+/// can ask what the dot currently shows without driving a poll.
+pub fn ci_status_peek(repo_root: &Path, branch: &str) -> Option<CiStatus> {
     let key = CiCacheKey {
         repo_root: repo_root.to_path_buf(),
         branch: branch.to_string(),
     };
-    let mut cache = CI_CACHE.lock().ok()?;
+    let cache = CI_CACHE.lock().ok()?;
+    cache.get(&key).and_then(|(status, _)| *status)
+}
+
+/// Whether a recently-polled branch under `repo_root` is mid-run, i.e. the dot
+/// is in the one state that animates ([`CiStatus::Yellow`] pulses).
+///
+/// Drives the app's animation-tick demand: without it the pulse only moves
+/// while something *else* is already redrawing the screen, which is never the
+/// case for the session sitting idle watching its own CI.
+pub fn ci_dot_animating(repo_root: &Path) -> bool {
+    let Ok(cache) = CI_CACHE.lock() else {
+        return false;
+    };
+    cache.iter().any(|(key, (status, polled_at))| {
+        key.repo_root == repo_root
+            && *status == Some(CiStatus::Yellow)
+            && polled_at.elapsed() < CI_ENTRY_FRESH_FOR
+    })
+}
+
+/// Schedule a throttled off-thread `gh` poll for `(repo_root, branch)`.
+/// Returns without spawning when the last poll is younger than
+/// [`CI_REFRESH_TTL`], so a per-frame caller can't start a subprocess storm.
+pub fn refresh_ci_status(repo_root: &Path, branch: &str) {
+    let key = CiCacheKey {
+        repo_root: repo_root.to_path_buf(),
+        branch: branch.to_string(),
+    };
+    let Ok(mut cache) = CI_CACHE.lock() else {
+        return;
+    };
     let (cached, needs_refresh) = match cache.get(&key) {
         Some((info, ts)) => (*info, ts.elapsed() >= CI_REFRESH_TTL),
         None => (None, true),
     };
-    if needs_refresh {
-        // Reserve the slot with a fresh timestamp BEFORE spawning so this
-        // frame's other reads (and the next few frames) don't spawn duplicate
-        // refreshes until this one lands or the TTL elapses.
-        cache.insert(key.clone(), (cached, Instant::now()));
-        drop(cache);
-        spawn_ci_refresh(key);
+    if !needs_refresh {
+        return;
     }
-    cached
+    // Reserve the slot with a fresh timestamp BEFORE spawning so this frame's
+    // other reads (and the next few frames) don't spawn duplicate refreshes
+    // until this one lands or the TTL elapses.
+    cache.insert(key.clone(), (cached, Instant::now()));
+    drop(cache);
+    spawn_ci_refresh(key, cached);
 }
 
-fn spawn_ci_refresh(key: CiCacheKey) {
+/// Register the channel an off-thread poll nudges when a branch's color
+/// changes. The event loop repaints on it; replacing an existing sender is
+/// harmless (one loop owns the terminal).
+pub fn set_change_notifier(tx: tokio::sync::mpsc::UnboundedSender<()>) {
+    if let Ok(mut slot) = CI_CHANGE_TX.lock() {
+        *slot = Some(tx);
+    }
+}
+
+fn spawn_ci_refresh(key: CiCacheKey, previous: Option<CiStatus>) {
     let Ok(handle) = tokio::runtime::Handle::try_current() else {
         return;
     };
@@ -373,15 +455,40 @@ fn spawn_ci_refresh(key: CiCacheKey) {
         if let Ok(mut cache) = CI_CACHE.lock() {
             cache.insert(key, (Some(status), Instant::now()));
         }
+        notify_if_changed(previous, status);
     });
 }
 
-/// Force-clear the CI cache (used by tests so a polled value can't leak into
-/// a later assertion).
+/// Ask the event loop for one repaint when this poll moved the dot. Silent
+/// when the color is unchanged (an idle loop must stay parked), when no loop
+/// registered a sender (unit tests, headless callers), and when the loop has
+/// already exited.
+fn notify_if_changed(previous: Option<CiStatus>, now: CiStatus) {
+    if previous == Some(now) {
+        return;
+    }
+    if let Ok(slot) = CI_CHANGE_TX.lock()
+        && let Some(tx) = slot.as_ref()
+    {
+        let _ = tx.send(());
+    }
+}
+
+/// Seed a polled result for `(repo_root, branch)` as if a `gh` poll had
+/// landed `age` ago. Lets the render/tick tests exercise the dot without a
+/// `gh` binary, a network, or a repo. Tests must use a repo path of their own:
+/// the cache is process-global.
 #[cfg(test)]
-fn ci_cache_clear() {
+pub(crate) fn seed_for_test(repo_root: &Path, branch: &str, status: CiStatus, age: Duration) {
+    let key = CiCacheKey {
+        repo_root: repo_root.to_path_buf(),
+        branch: branch.to_string(),
+    };
+    let polled_at = Instant::now()
+        .checked_sub(age)
+        .expect("test age is representable");
     if let Ok(mut cache) = CI_CACHE.lock() {
-        cache.clear();
+        cache.insert(key, (Some(status), polled_at));
     }
 }
 
@@ -500,12 +607,100 @@ mod tests {
         // With no tokio runtime (plain unit test) `ci_status_lazy` cannot
         // spawn a background poll, so a cache miss reads back `None` and the
         // cache is left in a well-defined state — no panic, graceful "no CI".
-        ci_cache_clear();
+        // The path is this test's own: the cache is process-global, and
+        // clearing it wholesale would race every other test that seeds one.
         assert_eq!(
-            ci_status_lazy(std::path::Path::new("/definitely/not/a/repo"), "master"),
+            ci_status_lazy(std::path::Path::new("/lazy/no-runtime"), "master"),
             None
         );
-        ci_cache_clear();
+    }
+
+    fn cache_seed(repo_root: &str, branch: &str, status: CiStatus, age: Duration) {
+        seed_for_test(Path::new(repo_root), branch, status, age);
+    }
+
+    /// Whether the cache holds an entry for this exact target. Tests key off
+    /// their own unique repo paths rather than clearing the shared cache, so
+    /// they stay correct when the suite runs threaded in one process.
+    fn cache_has(repo_root: &str, branch: &str) -> bool {
+        CI_CACHE.lock().expect("cache").contains_key(&CiCacheKey {
+            repo_root: PathBuf::from(repo_root),
+            branch: branch.to_string(),
+        })
+    }
+
+    #[test]
+    fn peek_reads_the_cache_without_scheduling_a_poll() {
+        let repo = "/peek/repo";
+        assert_eq!(ci_status_peek(Path::new(repo), "master"), None);
+        // A miss must not leave a reservation behind: peek is for callers off
+        // the render path, and reserving here would suppress the next real
+        // refresh for a whole TTL.
+        assert!(!cache_has(repo, "master"));
+        cache_seed(repo, "master", CiStatus::Green, Duration::ZERO);
+        assert_eq!(
+            ci_status_peek(Path::new(repo), "master"),
+            Some(CiStatus::Green)
+        );
+    }
+
+    #[test]
+    fn only_a_fresh_in_progress_entry_demands_animation() {
+        let repo = "/anim/repo";
+        assert!(
+            !ci_dot_animating(Path::new(repo)),
+            "empty cache never ticks"
+        );
+
+        for settled in [CiStatus::Green, CiStatus::Red, CiStatus::Off] {
+            cache_seed(repo, "master", settled, Duration::ZERO);
+            assert!(
+                !ci_dot_animating(Path::new(repo)),
+                "{settled:?} is a static dot"
+            );
+        }
+
+        cache_seed(repo, "master", CiStatus::Yellow, Duration::ZERO);
+        assert!(ci_dot_animating(Path::new(repo)), "a live run pulses");
+        // Another repo's run must not animate this one.
+        assert!(!ci_dot_animating(Path::new("/anim/other")));
+
+        // An entry nobody refreshes any more ages out, so an abandoned branch
+        // cannot keep an idle session redrawing forever.
+        cache_seed(repo, "master", CiStatus::Yellow, CI_ENTRY_FRESH_FOR);
+        assert!(
+            !ci_dot_animating(Path::new(repo)),
+            "stale entry stops ticks"
+        );
+    }
+
+    #[test]
+    fn change_notifier_fires_only_when_the_color_actually_changes() {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        set_change_notifier(tx);
+        // The poll landed on the same color the dot already shows: repainting
+        // would be pure churn on an otherwise-parked loop.
+        notify_if_changed(Some(CiStatus::Green), CiStatus::Green);
+        assert!(rx.try_recv().is_err());
+        notify_if_changed(Some(CiStatus::Green), CiStatus::Red);
+        assert!(rx.try_recv().is_ok(), "green -> red must repaint");
+        // First poll of a session: nothing was on screen, the dot appears.
+        notify_if_changed(None, CiStatus::Yellow);
+        assert!(rx.try_recv().is_ok(), "first result must repaint");
+        if let Ok(mut slot) = CI_CHANGE_TX.lock() {
+            *slot = None;
+        }
+    }
+
+    #[test]
+    fn refresh_without_runtime_leaves_a_reservation_and_never_panics() {
+        // No tokio runtime here, so nothing can poll `gh`; the call must still
+        // be infallible, and it must reserve the slot so the render path does
+        // not re-spawn on every frame.
+        let repo = "/refresh/no-runtime";
+        refresh_ci_status(Path::new(repo), "master");
+        assert!(cache_has(repo, "master"));
+        assert_eq!(ci_status_peek(Path::new(repo), "master"), None);
     }
 
     #[test]
