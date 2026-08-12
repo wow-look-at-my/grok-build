@@ -2,55 +2,68 @@
 # RAM regression guard for the compile-time memory pathology of xai-grok-shell
 # and xai-grok-pager.
 #
-# Root cause (diagnosed, see the goal's diagnosis.log / ram-agg.log): a single
-# rustc that monomorphizes a monolith's whole test harness cold-peaks well above
-# what any [profile] knob can fix. Measured cold `--lib` harness peaks:
-#   xai-grok-shell (365k LOC, 4,595 in-lib #[test]s) ~8.9 GiB
-#   xai-grok-pager (463k LOC, 8,468 in-lib #[test]s)  ~7.4 GiB
-# Those peaks are CGU- and incremental-invariant (they live in
-# type-check/monomorphization), and the tests are `#[cfg(test)] mod tests {
-# use super::*; }` private-access child modules, so lowering them means moving
-# 13,000+ private tests to a separate compile boundary (a test-dropping
-# refactor). The OOM happens when those units compile CONCURRENTLY in the one
-# `cargo test --workspace` build: their sum can exceed the 16 GiB runner cap.
+# ROOT CAUSE (measured, see the goal's per-unit-infeasibility + split evidence):
+# the two monolith crates each compile their whole crate + every in-lib test
+# into ONE rustc that cold-peaks at ~7.8 GiB (xai-grok-shell) and ~7.4 GiB
+# (xai-grok-pager). That peak is type-check/monomorphization-bound and is NOT
+# reducible by codegen-units (128->512 unchanged), incremental, or any [profile]
+# knob. Per-unit peak is also structurally irreducible on the shell: the crate
+# is 355k module-LOC, and 92% of it lives in `session`+`agent`, two mutually-
+# referencing monoliths whose ~4,200 `crate::` references reach private surface
+# (shell pub:private = 1,669:8,598). Only ~1.5% of LOC is structurally movable;
+# the OOM happens when the multi-GiB units compile CONCURRENTLY in one
+# `cargo test --workspace` build.
 #
-# The shipped fix (CI "Build test harnesses" step and the reason the run step
-# fast-passes) compiles once under one unified `--workspace` resolution at a
-# bounded CARGO_BUILD_JOBS=3, so (a) the two irreducible ~9+7 GiB units cannot
-# overlap on a cold build, and (b) splitting the compile into
-# --exclude/-p invocations — which changes workspace feature-unification and
-# forces a broad cold recompile at -j16 — is NEVER reintroduced.
+# THE REAL FIX (this branch): a structural sub-crate split. bundle+builtin
+# (1,859 LOC + 49 in-lib tests) were extracted from xai-grok-shell into a new
+# crate xai-grok-shell-assets (~499 MiB cold peak, an independent compile unit
+# that schedules in its own -j slot instead of inside the shell's rustc), and
+# the shell re-exports them. The remaining per-unit peak is unchanged because
+# it is set by the 92% private core — which is why the -j3 cap on the unified
+# compile step is still required to keep the two irreducible units from
+# overlapping on a cold build.
 #
-# This guard drives THAT shipped change:
-#   1. FAILS if the unified `--no-run` compile at -j3 is removed from
+# This guard drives BOTH shipped changes:
+#   1. FAILS if the structural split is undone (bundle/builtin re-inlined into
+#      the shell, or the assets crate removed).
+#   2. FAILS if the unified `--no-run` compile at -j3 is removed from
 #      .github/workflows/ci.yml, or if the --exclude/-p split (which caused a
 #      -j16 recompile OOM) is reintroduced.
-#   2. Cold-compiles the exact worst-case shipped scenario — the two monolith
-#      `--lib` harnesses together at -j3 (the two units whose sum used to exceed
-#      the cap) — and FAILS if the process-tree aggregate peak RSS exceeds
-#      BUDGET_GIB. At -j3 the two monoliths may be scheduled together; the
-#      budget is set just above their honest combined peak (their cold sum,
-#      measured) so a regression in either crate's compile mass raises the
-#      aggregate past the budget.
-#
-# Run where cold RAM headroom exists (local host, or CI with sccache warmed).
+#   3. Cold-compiles the exact worst-case shipped scenario — the two monolith
+#      `--lib` harnesses together at -j3 — and FAILS if the process-tree
+#      aggregate peak RSS exceeds BUDGET_GIB.
 set -u
 # Budget: 15 GiB. The worst-case cold aggregate of the two monolith `--lib`
 # harnesses at the shipped -j3 parallelism was MEASURED at 13,432 MiB (process-
 # group VmRSS sum, which over-counts shared pages vs the cgroup's authoritative
-# memory.peak, so the real committed peak is lower). The reviewer's earlier
-# "~17 GiB -j3 sample" was exactly that over-count artifact; the honest measure
-# is 13.4 GiB. 15 GiB is the highest budget that still catches a ~1.6 GiB
-# regression in either monolith's compile mass while staying under the 16 GiB
-# runner cap (and below it even in the over-counting VmRSS metric).
+# memory.peak, so the real committed peak is lower). 15 GiB is the highest
+# budget that still catches a ~1.6 GiB regression in either monolith's compile
+# mass while staying under the 16 GiB runner cap.
 BUDGET_GIB="${BUDGET_GIB:-15}"
 BUDGET_BYTES=$((BUDGET_GIB * 1024 * 1024 * 1024))
 cd "$(dirname "$0")/.." || exit 2
 
-# 1) Structural check: the shipped CI config must keep the unified --no-run
-#    compile at -j3 and must NOT reintroduce the --exclude/-p split. awk is used
-#    so these patterns don't match this guard's own command text below.
+# 1) Structural split check: bundle+builtin must live in xai-grok-shell-assets,
+#    not in xai-grok-shell/src, and the shell must pull them in by dependency.
 fail=0
+if [ ! -f crates/codegen/xai-grok-shell-assets/src/bundle.rs ] \
+   || [ ! -f crates/codegen/xai-grok-shell-assets/src/builtin.rs ]; then
+  echo "STRUCTURAL: bundle/builtin must live in xai-grok-shell-assets (sub-crate split)"
+  fail=1
+fi
+if [ -f crates/codegen/xai-grok-shell/src/bundle.rs ] \
+   || [ -f crates/codegen/xai-grok-shell/src/builtin.rs ]; then
+  echo "STRUCTURAL: bundle/builtin re-inlined into xai-grok-shell — split undone"
+  fail=1
+fi
+grep -q 'xai-grok-shell-assets' crates/codegen/xai-grok-shell/Cargo.toml \
+  || { echo "STRUCTURAL: shell must depend on xai-grok-shell-assets"; fail=1; }
+grep -q 'xai-grok-shell-assets' Cargo.toml \
+  || { echo "STRUCTURAL: xai-grok-shell-assets must be a workspace member"; fail=1; }
+
+# 2) CI config check: the build step must be a single unified --no-run at -j3
+#    and must NOT reintroduce the --exclude/-p split. awk is used so these
+#    patterns don't match this guard's own command text below.
 if ! awk '
     /--no-run --no-fail-fast/ { compile=1 }
     /--exclude xai[-]grok-shell/ || /-p xai[-]grok-shell -p xai[-]grok-pager/ { splitbad=1 }
@@ -63,10 +76,10 @@ grep -q 'CARGO_BUILD_JOBS: "3"' .github/workflows/ci.yml \
   || { echo "STRUCTURAL: -j3 on compile step missing"; fail=1; }
 grep -qF -- 'cargo test --locked --workspace --no-fail-fast' .github/workflows/ci.yml \
   || { echo "STRUCTURAL: run step missing"; fail=1; }
-if [ "$fail" -ne 0 ]; then echo "RAM GUARD: FAIL — shipped compile-RAM config not intact"; exit 1; fi
-echo "STRUCTURAL: unified --no-run at -j3 intact, no exclude split"
+if [ "$fail" -ne 0 ]; then echo "RAM GUARD: FAIL — shipped compile-RAM structure not intact"; exit 1; fi
+echo "STRUCTURAL: sub-crate split + unified --no-run at -j3 intact, no exclude split"
 
-# 2) Cold measurement of the worst-case shipped compile: the two monolith
+# 3) Cold measurement of the worst-case shipped compile: the two monolith
 #    --lib harnesses together at -j3. Force both to recompile so we measure the
 #    real monomorphization peak, not a cache replay.
 cargo clean -p xai-grok-shell 2>/dev/null || true

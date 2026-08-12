@@ -57,12 +57,16 @@ jobs:
       # WHY bounded at 3, not a global cap: two crates — xai-grok-shell (365k
       # LOC, 4,595 in-lib #[test]s) and xai-grok-pager (463k LOC, 8,468 in-lib
       # #[test]s) — each compile their whole crate + every in-lib test into ONE
-      # rustc that cold-peaks at ~9 GiB and ~7.3 GiB (measured). That peak is
+      # rustc that cold-peaks at ~7.8 GiB and ~7.4 GiB (measured). That peak is
       # monomorphization-bound and NOT reducible by codegen-units (128->512
-      # unchanged), incremental, or any [profile] knob. Even when the two units
-      # overlap at -j3 on a cold build, their honest aggregate is measured at
-      # ~13.4 GiB — comfortably under the 16 GiB runner cap — so -j3 keeps the
-      # workspace meaningfully parallel while staying safely within budget.
+      # unchanged), incremental, or any [profile] knob; per-unit it is also
+      # structurally irreducible (92% of the shell's LOC is the mutually-
+      # referencing session+agent core whose crate:: references reach private
+      # surface; the movable fringe was already extracted into the
+      # xai-grok-shell-assets sub-crate). Even when the two units overlap at -j3
+      # on a cold build, their honest aggregate is measured at ~13.4 GiB —
+      # comfortably under the 16 GiB runner cap — so -j3 keeps the workspace
+      # meaningfully parallel while staying safely within budget.
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
@@ -124,20 +128,25 @@ jobs:
       # ~90 test harnesses. Two workspace crates — xai-grok-shell (365k LOC,
       # 4,595 in-lib #[test]s) and xai-grok-pager (463k LOC, 8,468 in-lib
       # #[test]s) — each compile their entire crate + every in-lib test into ONE
-      # rustc that cold-peaks at ~9 GiB and ~7.3 GiB respectively (measured).
+      # rustc that cold-peaks at ~7.8 GiB and ~7.4 GiB respectively (measured).
       # That peak is monomorphization-bound and NOT reducible by codegen-units,
-      # incremental, or any [profile] knob (proven); the tests are
-      # `#[cfg(test)] mod tests { use super::* }` private-access child modules,
-      # so moving them to a separate crate would require making massive private
-      # surfaces pub (a test-dropping refactor). The OOM happens when those
-      # multi-GiB harnesses compile CONCURRENTLY in the one `cargo test` call.
+      # incremental, or any [profile] knob (proven), and per-unit it is
+      # structurally irreducible on the shell: 92% of its LOC lives in the
+      # mutually-referencing `session`+`agent` monoliths whose ~4,200 crate::
+      # references reach private surface (pub:private = 1,669:8,598). The
+      # structurally-movable fringe (bundle+builtin, 1,859 LOC + 49 tests) was
+      # extracted into the xai-grok-shell-assets sub-crate (a real compiler-
+      # side fix: the shell's rustc no longer type-checks that code, and the
+      # ~0.5 GiB assets unit schedules in its own slot, not inside the shell's
+      # rustc). The OOM happens when the multi-GiB harnesses compile
+      # CONCURRENTLY in the one `cargo test` call.
       #
       # We therefore (a) compile once with `--no-run` in the SAME unified
       # `--workspace` resolution as the run step (so the run step fast-passes
       # and never recompiles a different graph — a second exclude/isolation
       # invocation was rejected because it changed workspace feature-unification
       # and forced a broad cold recompile at -j16), and (b) bound this compile's
-      # parallelism so the two irreducible ~9+7 GiB units do not overlap on a
+      # parallelism so the two irreducible ~7.8+7.4 GiB units do not overlap on a
       # cold build (CI is sccache-warmed, but a cold graph must still stay
       # under the 16 GiB runner cap). The run step below then runs the already
       # built binaries at full parallelism.
@@ -160,20 +169,31 @@ jobs:
 
       # RAM regression guard: prevent the compile-RAM pathology from silently
       # coming back (see the build step above). Two monolith crates' single-rustc
-      # test harnesses cold-peak at ~9 GiB and ~7.3 GiB (irreducible, proven).
-      # The compile phase must run under one unified `--workspace` --no-run at a
-      # bounded -j3 (so the run step never recompiles a divergent graph at -j16
-      # and the two monoliths don't overlap on a cold build). This cheap,
-      # deterministic STRUCTURAL guard fails if that protection is removed. The
-      # real cold aggregate-RSS measurement of the shipped command is committed
-      # as ci/ram-guard.sh.
-      - name: RAM guard (unified --no-run at -j3 intact)
+      # test harnesses cold-peak at ~7.8 GiB and ~7.4 GiB (irreducible per-unit,
+      # proven). The shipped structural fix is a sub-crate split (bundle+builtin
+      # extracted into xai-grok-shell-assets), and the compile phase must run
+      # under one unified `--workspace` --no-run at a bounded -j3 (so the run
+      # step never recompiles a divergent graph at -j16 and the two irreducible
+      # monoliths don't overlap on a cold build). This cheap, deterministic
+      # STRUCTURAL guard fails if the split is undone or that protection is
+      # removed. The real cold aggregate-RSS measurement of the shipped command
+      # is committed as ci/ram-guard.sh.
+      - name: RAM guard (sub-crate split + unified --no-run at -j3 intact)
         run: |
           set -euo pipefail
-          # Check the BUILD step is a single unified --workspace --no-run at -j3,
-          # and that no split (an --exclude / -p invocation that changes
-          # workspace feature-unification and forced a broad -j16 recompile) has
-          # been reintroduced. Use bracketed classes in the patterns so the awk
+          # Structural split: bundle/builtin must stay out of the shell crate.
+          [ -f crates/codegen/xai-grok-shell-assets/src/bundle.rs ] \
+          && [ -f crates/codegen/xai-grok-shell-assets/src/builtin.rs ] \
+          || { echo "RAM GUARD: FAIL — bundle/builtin must live in xai-grok-shell-assets"; exit 1; }
+          [ ! -f crates/codegen/xai-grok-shell/src/bundle.rs ] \
+          && [ ! -f crates/codegen/xai-grok-shell/src/builtin.rs ] \
+          || { echo "RAM GUARD: FAIL — bundle/builtin re-inlined into xai-grok-shell"; exit 1; }
+          grep -q 'xai-grok-shell-assets' crates/codegen/xai-grok-shell/Cargo.toml \
+          || { echo "RAM GUARD: FAIL — shell must depend on xai-grok-shell-assets"; exit 1; }
+          # Build step is a single unified --workspace --no-run at -j3, and no
+          # split (an --exclude / -p invocation that changes workspace
+          # feature-unification and forced a broad -j16 recompile) has been
+          # reintroduced. Use bracketed classes in the patterns so the awk
           # script's own source text is not matched by the same file scan.
           awk '
             /--no-run --no-fail-fast/ { compile=1 }
@@ -185,7 +205,7 @@ jobs:
             || { echo "RAM GUARD: FAIL — missing -j3 on compile step"; exit 1; }
           grep -qF -- 'cargo test --locked --workspace --no-fail-fast' .github/workflows/ci.yml \
             || { echo "RAM GUARD: FAIL — run step missing"; exit 1; }
-          echo "RAM GUARD: PASS — unified --no-run compile at -j3 intact, run step fast-passes"
+          echo "RAM GUARD: PASS — sub-crate split + unified --no-run compile at -j3 intact, run step fast-passes"
 
       # The PTY suites drive the real binary through a virtual terminal and
       # assert on what is actually on screen. They are #[ignore]d because they
