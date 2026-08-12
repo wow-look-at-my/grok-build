@@ -43,7 +43,12 @@ jobs:
     # so the stock image's disk/RAM limits still apply unless CI_RUNNER points
     # at a genuinely larger or self-hosted runner.
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
-    timeout-minutes: 45
+    # The full `cargo test --workspace` (compile + ~90 test harness binaries)
+    # finishes within 45 min on a hosted ubuntu-latest, but a self-hosted
+    # CI_RUNNER runner is often slower (this repo's own runner took ~20 min to
+    # compile alone and was still running tests at 45 min), so allow more time
+    # there. Still bounded so a stuck job cannot run forever.
+    timeout-minutes: ${{ vars.CI_RUNNER && 60 || 45 }}
     env:
       # Namespace this job's sccache entries away from the darwin release
       # job so the more-frequent linux runs can't evict the darwin cache
