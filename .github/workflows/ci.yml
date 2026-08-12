@@ -37,6 +37,7 @@ jobs:
   build-test:
     name: Build & test
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     env:
       # Namespace this job's sccache entries away from the darwin release
       # job so the more-frequent linux runs can't evict the darwin cache
@@ -46,6 +47,25 @@ jobs:
       SCCACHE_GHA_VERSION: sccache-v0.17.0-x86_64-unknown-linux-gnu
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      # This repo's `cargo test --workspace` needs >37 GB of target/ (the
+      # pager links ~90 test binaries) and a stock runner only has ~14 GB
+      # free, so the long Build & test job has repeatedly ground to a hang on
+      # full disk (ld/rustc I/O stalls). Free the known-safe oversized image
+      # dirs BEFORE building. dotnet/android/swift/haskell are never needed
+      # here; tool caches (rustup, sccache) are kept for speed.
+      # Run early so there is headroom for the entire build+test.
+      - name: Free up disk space before build
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: false
+          large-packages: true
+          swap-storage: true
+          docker-images: true
+          android: true
+          dotnet: true
+          haskell: true
+          swift: true
 
       - name: Install protoc (pinned v29.3)
         run: |
@@ -106,6 +126,7 @@ jobs:
   build-release:
     name: Build release binary (${{ matrix.target_os }}/${{ matrix.target_arch }})
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
     env:
       # Per-target sccache namespace: linux and darwin get distinct GHAC
       # buckets so neither can evict the other's entries from the shared
