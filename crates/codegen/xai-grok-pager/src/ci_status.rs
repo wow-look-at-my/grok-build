@@ -95,7 +95,11 @@ pub enum CiStatus {
 }
 
 /// A single workflow run as reported by `gh run list --json`.
+///
+/// `gh` emits camelCase keys (`headBranch`, `workflowName`); without the
+/// rename every non-single-word field silently deserialized to its default.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GhRun {
     /// GitHub `status` of the run: `queued`, `in_progress`, `completed`,
     /// `requested`, `waiting`, `pending` … — `""` when unknown.
@@ -107,10 +111,16 @@ pub struct GhRun {
     /// still in progress.
     #[serde(default)]
     pub conclusion: String,
-    /// Branch that this run was triggered against. `gh run list` reports each
-    /// run's owning branch; we filter/verify against the requested branch.
+    /// Branch this run was triggered against. `--branch` already filters
+    /// server-side; [`gh_run_list`] re-checks it so a run for another branch
+    /// can never color this branch's dot.
     #[serde(default)]
     pub head_branch: Option<String>,
+    /// Workflow this run belongs to (`""` when unknown). A branch normally
+    /// has several — CI, release, previews — and they must be folded
+    /// separately: see [`newest_run_per_workflow`].
+    #[serde(default)]
+    pub workflow_name: String,
 }
 
 impl GhRun {
@@ -158,14 +168,16 @@ pub fn map_ci_status(status: Option<&str>, conclusion: Option<&str>) -> CiStatus
         status: status.to_string(),
         conclusion: conclusion.to_string(),
         head_branch: None,
+        workflow_name: String::new(),
     };
     ci_from_runs(std::iter::once(run))
 }
 
 /// Fold a set of runs (as returned by `gh run list`) into one tri-state color.
 ///
-/// Precedence (two passes, so a failing/errored run on the branch reports red
-/// even while a parallel run is still in progress):
+/// Only the newest run of each workflow counts — see
+/// [`newest_run_per_workflow`]. Across those, precedence (two passes, so a
+/// failing workflow reports red even while another is still in progress):
 ///   1. any failing/errored run → [`CiStatus::Red`]
 ///   2. else any in-progress/pending run → [`CiStatus::Yellow`]
 ///   3. else any successful run → [`CiStatus::Green`]
@@ -174,7 +186,7 @@ pub fn ci_from_runs<I>(runs: I) -> CiStatus
 where
     I: IntoIterator<Item = GhRun>,
 {
-    let runs: Vec<GhRun> = runs.into_iter().collect();
+    let runs = newest_run_per_workflow(runs);
     if runs.is_empty() {
         return CiStatus::Off;
     }
@@ -192,6 +204,27 @@ where
     }
     // Only neutral/skipped/no-op runs on this branch → nothing conclusive.
     CiStatus::Off
+}
+
+/// Keep the newest run of each workflow, dropping the ones it superseded.
+///
+/// `gh run list` returns newest first and reaches back ten runs, so a branch
+/// that has been pushed twice reports both. Pushing cancels the run in flight
+/// (`concurrency.cancel-in-progress`), and a cancelled run is a failure — so
+/// folding over the raw list paints the dot red off a run the newer push
+/// already replaced, and it stays red however green the branch gets.
+///
+/// Runs are grouped by workflow rather than collapsed to one, because a
+/// branch's workflows are independent: a failing test workflow must still
+/// show red while a release workflow is mid-upload.
+fn newest_run_per_workflow<I>(runs: I) -> Vec<GhRun>
+where
+    I: IntoIterator<Item = GhRun>,
+{
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    runs.into_iter()
+        .filter(|run| seen.insert(run.workflow_name.clone()))
+        .collect()
 }
 
 /// Parse the raw stdout of `gh run list --json` into runs + a tri-state color.
@@ -335,7 +368,15 @@ fn gh_run_list(repo_root: &Path, branch: &str) -> Option<Vec<GhRun>> {
             "status,conclusion,headBranch,workflowName",
         ],
     )?;
-    parse_gh_runs(&output.stdout)
+    let mut runs = parse_gh_runs(&output.stdout)?;
+    // `--branch` filters server-side; this is the belt to that suspenders,
+    // because a run from another branch would not just be noise — one
+    // cancelled run is enough to paint this branch's dot red.
+    runs.retain(|run| match run.head_branch.as_deref() {
+        Some(reported) => reported == branch,
+        None => true,
+    });
+    (!runs.is_empty()).then_some(runs)
 }
 
 fn run_gh(repo_root: &Path, args: &[&str]) -> Option<std::process::Output> {
@@ -497,10 +538,15 @@ mod tests {
     use super::*;
 
     fn run(status: &str, conclusion: &str) -> GhRun {
+        run_in("CI", status, conclusion)
+    }
+
+    fn run_in(workflow: &str, status: &str, conclusion: &str) -> GhRun {
         GhRun {
             status: status.to_string(),
             conclusion: conclusion.to_string(),
             head_branch: Some("feature/x".into()),
+            workflow_name: workflow.to_string(),
         }
     }
 
@@ -552,15 +598,41 @@ mod tests {
     }
 
     #[test]
-    fn ci_from_runs_red_wins_over_later_in_progress() {
-        // A branch with a failed run reports red even while other runs churn.
-        let runs = vec![run("in_progress", ""), run("completed", "failure")];
+    fn ci_from_runs_red_wins_over_another_workflow_in_progress() {
+        // A failing workflow reports red even while a different one churns.
+        let runs = vec![
+            run_in("Release", "in_progress", ""),
+            run_in("CI", "completed", "failure"),
+        ];
         assert_eq!(ci_from_runs(runs), CiStatus::Red);
     }
 
     #[test]
+    fn ci_from_runs_ignores_a_run_a_newer_push_superseded() {
+        // gh lists newest first. Pushing cancels the run in flight, so the
+        // list a branch reports after two pushes is [live, cancelled] for the
+        // SAME workflow — and the cancelled one must not color the dot, or a
+        // branch stays red forever after its second push.
+        let runs = vec![
+            run_in("CI", "in_progress", ""),
+            run_in("CI", "completed", "cancelled"),
+        ];
+        assert_eq!(ci_from_runs(runs), CiStatus::Yellow);
+
+        let settled = vec![
+            run_in("CI", "completed", "success"),
+            run_in("CI", "completed", "cancelled"),
+            run_in("CI", "completed", "failure"),
+        ];
+        assert_eq!(ci_from_runs(settled), CiStatus::Green);
+    }
+
+    #[test]
     fn ci_from_runs_yellow_when_in_progress_only() {
-        let runs = vec![run("in_progress", ""), run("queued", "")];
+        let runs = vec![
+            run_in("CI", "in_progress", ""),
+            run_in("Release", "queued", ""),
+        ];
         assert_eq!(ci_from_runs(runs), CiStatus::Yellow);
     }
 
@@ -580,10 +652,17 @@ mod tests {
 
     #[test]
     fn parse_gh_runs_real_json() {
-        let json = br#"[{"conclusion":"failure","status":"completed","headBranch":"master"},{"conclusion":"","status":"in_progress","headBranch":"master"}]"#;
+        // Exactly the shape `gh run list --json status,conclusion,headBranch,
+        // workflowName` emits: camelCase keys, newest run first.
+        let json = br#"[{"conclusion":"","status":"in_progress","headBranch":"master","workflowName":"CI"},{"conclusion":"failure","status":"completed","headBranch":"master","workflowName":"Release"}]"#;
         let runs = parse_gh_runs(json).expect("parseable");
         assert_eq!(runs.len(), 2);
-        // One terminal failure in the set → red.
+        // The camelCase keys must reach their snake_case fields — defaulting
+        // them away is invisible until something reads them.
+        assert_eq!(runs[0].head_branch.as_deref(), Some("master"));
+        assert_eq!(runs[0].workflow_name, "CI");
+        assert_eq!(runs[1].workflow_name, "Release");
+        // A failed workflow in the set → red.
         assert_eq!(ci_from_runs(runs.iter().cloned()), CiStatus::Red);
     }
 
