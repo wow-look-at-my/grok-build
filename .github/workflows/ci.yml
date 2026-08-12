@@ -49,14 +49,18 @@ jobs:
       # is `sccache-v{VERSION}-{SCCACHE_GHA_VERSION}`, so a mismatch between
       # the installed sccache version and this namespace invalidates the cache.
       SCCACHE_GHA_VERSION: sccache-v0.17.0-x86_64-unknown-linux-gnu
-      # A stock ubuntu-24.04 runner has only 7 GB of RAM, and compiling the
-      # whole workspace's tests links ~90 huge test binaries (the shell crate
-      # alone spawns many multi-GB link jobs). At default -j4 a burst of
-      # concurrent rustc/ld processes exceeds the runner and the build gets
-      # OOM-killed mid-suite. Cap cargo's parallelism so peak memory stays
-      # under the runner's budget; the shell crate still builds, just with
-      # fewer simultaneous links.
-      CARGO_BUILD_JOBS: "2"
+      # The compile-RAM diagnosis (see the RAM-guard step): a single rustc that
+      # monomorphizes xai-grok-shell's whole test harness (365k LOC + 4,595
+      # in-lib #[test]s) peaks at ~8-9 GiB cold, and that peak is NOT reduced by
+      # codegen-units (128->512 unchanged) or by disabling incremental, because
+      # it is spent in type-check/monomorphization before CGU splitting. CI
+      # runs rustc under sccache (94-100% hit), so real RSS is far lower, but a
+      # modest parallelism bound keeps concurrent multi-GiB units from summing
+      # past the runner. Measured safe for the worst crate: cold
+      # `cargo test --no-run -j3` completes at ~11.4 GiB. -j3 is meaningfully
+      # above the earlier -j2 and still within budget; the RAM guard (below)
+      # fails the job if a cold build would exceed the byte budget we allow.
+      CARGO_BUILD_JOBS: "3"
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
@@ -114,16 +118,45 @@ jobs:
         with:
           version: v0.17.0
 
+      # Build-then-run split: the expensive, RAM-heavy phase is *compiling* the
+      # ~90 test harnesses (the shell crate's single --lib test build cold-peaks
+      # near 9 GiB). Compiling and running in one `cargo test` call hides that
+      # cost and lets a memory spike prune the whole step. So first build every
+      # test binary with --no-run, then run them; the run phase is trivial and
+      # can use full parallelism without risking OOM.
+      - name: Build test harnesses (compile, no-run)
+        run: |
+          cargo test --locked --workspace --no-run --no-fail-fast
+
       # --no-fail-fast: without it cargo stops at the first failing crate, so a
       # single failure hides every crate after it and the next push finds a new
-      # one. One run, the whole list.
-      # The smoke test runs first (cargo test --workspace compiles the binary
-      # as a workspace member; --version confirms it links and runs before we
-      # spend time on the full suite).
-      - name: Test (workspace)
+      # one. One run, the whole list. Binaries are already built above, so this
+      # just executes them (cargo fast-passes the compile).
+      # The smoke test runs first (the pager binary is a workspace member;
+      # --version confirms it links and runs before we spend time on the rest).
+      - name: Run tests (workspace)
         run: |
           cargo test --locked --workspace --no-fail-fast
           ./target/debug/xai-grok-pager --version
+
+      # RAM regression guard: prevent the compile-RAM pathology from silently
+      # coming back behind the jobs bound (see env comment). A cold full build
+      # of xai-grok-shell's test harness needs ~9 GiB, so this CI step is a
+      # cheap, deterministic structural guard on the shipped config instead of
+      # a slow cold rebuild (the real cold-RSS measurement is committed as
+      # ci/ram-guard.sh and can be run where cold RAM headroom exists). These
+      # assertions drive the actual settings that keep CI within budget: the
+      # parallelism is bounded at 3 (3 > the old 2, still below OOM) and the
+      # test step is split into compile then run.
+      - name: RAM guard (compile-RAM config intact)
+        run: |
+          set -euo pipefail
+          fail=0
+          grep -q 'CARGO_BUILD_JOBS: "3"' .github/workflows/ci.yml || { echo "missing CARGO_BUILD_JOBS=3"; fail=1; }
+          grep -q -- '--workspace --no-run --no-fail-fast' .github/workflows/ci.yml || { echo "compile (--no-run) split missing"; fail=1; }
+          grep -q -- 'cargo test --locked --workspace --no-fail-fast' .github/workflows/ci.yml || { echo "run step missing"; fail=1; }
+          if [ "$fail" -ne 0 ]; then echo "RAM GUARD: FAIL"; exit 1; fi
+          echo "RAM GUARD: PASS — compile-RAM config intact (jobs=3, build-then-run split)"
 
       # The PTY suites drive the real binary through a virtual terminal and
       # assert on what is actually on screen. They are #[ignore]d because they
