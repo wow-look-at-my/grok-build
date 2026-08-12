@@ -127,14 +127,17 @@ jobs:
       # libssl-dev/zlib1g-dev preinstalled, but a lean CI_RUNNER image may not
       # (this repo's own runner hit `linker cc not found` compiling
       # proc-macro2). Ensure the packages exist, no-op when already present.
+      # Also ensure /bin/bash exists — the shell crate's PTY tests hardcode
+      # it (create_test_pty -> Some("/bin/bash")), and without it the test
+      # process hangs forever waiting for a shell that never starts.
       # (The C.UTF-8 locale is set via the global LANG/LC_ALL env; on glibc
       # 2.35+ it is built-in and needs no locale-gen.)
-      - name: Ensure C build toolchain (build-essential, pkg-config, libssl-dev, zlib1g-dev)
+      - name: Ensure C build toolchain (build-essential, pkg-config, libssl-dev, zlib1g-dev, bash)
         run: |
           set -euo pipefail
-          dpkg -s build-essential pkg-config libssl-dev zlib1g-dev >/dev/null 2>&1 || {
+          dpkg -s build-essential pkg-config libssl-dev zlib1g-dev bash >/dev/null 2>&1 || {
             sudo apt-get update -qq
-            sudo apt-get install -y -qq build-essential pkg-config libssl-dev zlib1g-dev
+            sudo apt-get install -y -qq build-essential pkg-config libssl-dev zlib1g-dev bash
           }
 
       # Install the toolchain pinned by rust-toolchain.toml. On the hosted
@@ -161,6 +164,18 @@ jobs:
       # on empty output rather than on anything they assert.
       - name: Install ripgrep
         uses: wow-look-at-my/actions@cache-rg#latest
+
+      # cargo-nextest runs each test in its own process with a per-test
+      # timeout (configured in .config/nextest.toml). This catches hung
+      # tests (e.g. a PTY test waiting for /bin/bash on a lean runner)
+      # in 60s instead of blocking the whole job until the timeout-minutes
+      # ceiling. The standard cargo test harness has no per-test timeout.
+      - name: Install cargo-nextest
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/nextest.tar.gz" \
+            https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-0.9.143/cargo-nextest-0.9.143-x86_64-unknown-linux-gnu.tar.gz
+          tar -xzf "$RUNNER_TEMP/nextest.tar.gz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/cargo-nextest" >> "$GITHUB_PATH"
 
       # sccache caches individual rustc compilation outputs in the GHA cache.
       # Unlike rust-cache (which restores a dumb target/ tarball that cargo
@@ -209,15 +224,16 @@ jobs:
         run: |
           cargo test --locked --workspace --no-run --no-fail-fast
 
-      # --no-fail-fast: without it cargo stops at the first failing crate, so a
-      # single failure hides every crate after it and the next push finds a new
-      # one. One run, the whole list. Binaries are already built above, so this
-      # just executes them (cargo fast-passes the compile).
-      # The smoke test runs first (the pager binary is a workspace member;
-      # --version confirms it links and runs before we spend time on the rest).
+      # Run the pre-built test binaries with cargo-nextest, which enforces a
+      # per-test timeout (60s, configured in .config/nextest.toml). A hung
+      # test — e.g. a PTY test waiting for /bin/bash on a lean runner —
+      # fails in 60s instead of blocking the whole job. nextest runs all
+      # tests even on failure by default (fail-fast = true in the profile
+      # means it stops the *binary* on first failure, not the whole run).
+      # The smoke test runs after.
       - name: Run tests (workspace)
         run: |
-          cargo test --locked --workspace --no-fail-fast
+          cargo nextest run --locked --workspace --profile ci
           ./target/debug/xai-grok-pager --version
 
       # RAM regression guard: prevent the compile-RAM pathology from silently
@@ -256,7 +272,7 @@ jobs:
             || { echo "RAM GUARD: FAIL — build must be a single unified --no-run, no exclude/-p split"; exit 1; }
           grep -q 'CARGO_BUILD_JOBS: "3"' .github/workflows/ci.yml \
             || { echo "RAM GUARD: FAIL — missing -j3 on compile step"; exit 1; }
-          grep -qF -- 'cargo test --locked --workspace --no-fail-fast' .github/workflows/ci.yml \
+          grep -qF -- 'cargo nextest run --locked --workspace --profile ci' .github/workflows/ci.yml \
             || { echo "RAM GUARD: FAIL — run step missing"; exit 1; }
           echo "RAM GUARD: PASS — sub-crate split + unified --no-run compile at -j3 intact, run step fast-passes"
 
@@ -271,11 +287,11 @@ jobs:
         env:
           PAGER_BINARY: ${{ github.workspace }}/target/debug/xai-grok-pager
         run: |
-          cargo test --locked -p xai-grok-pager --no-fail-fast \
+          cargo nextest run --locked -p xai-grok-pager --profile ci \
             --test pty_e2e_smoke \
             --test pty_e2e_config_ui \
             --test pty_e2e_minimal \
-            -- --ignored --test-threads 4
+            --run-ignored all --test-threads 4
 
   build-release:
     name: Build release binary (${{ matrix.target_os }}/${{ matrix.target_arch }})

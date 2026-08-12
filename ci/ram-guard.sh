@@ -74,7 +74,7 @@ if ! awk '
 fi
 grep -q 'CARGO_BUILD_JOBS: "3"' .github/workflows/ci.yml \
   || { echo "STRUCTURAL: -j3 on compile step missing"; fail=1; }
-grep -qF -- 'cargo test --locked --workspace --no-fail-fast' .github/workflows/ci.yml \
+grep -qF -- 'cargo nextest run --locked --workspace --profile ci' .github/workflows/ci.yml \
   || { echo "STRUCTURAL: run step missing"; fail=1; }
 if [ "$fail" -ne 0 ]; then echo "RAM GUARD: FAIL — shipped compile-RAM structure not intact"; exit 1; fi
 echo "STRUCTURAL: sub-crate split + unified --no-run at -j3 intact, no exclude split"
