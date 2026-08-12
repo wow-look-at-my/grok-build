@@ -172,10 +172,11 @@ jobs:
       # ceiling. The standard cargo test harness has no per-test timeout.
       - name: Install cargo-nextest
         run: |
+          mkdir -p "$RUNNER_TEMP/nextest-bin"
           curl -fsSL -o "$RUNNER_TEMP/nextest.tar.gz" \
             https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-0.9.143/cargo-nextest-0.9.143-x86_64-unknown-linux-gnu.tar.gz
-          tar -xzf "$RUNNER_TEMP/nextest.tar.gz" -C "$RUNNER_TEMP"
-          echo "$RUNNER_TEMP/cargo-nextest" >> "$GITHUB_PATH"
+          tar -xzf "$RUNNER_TEMP/nextest.tar.gz" -C "$RUNNER_TEMP/nextest-bin"
+          echo "$RUNNER_TEMP/nextest-bin" >> "$GITHUB_PATH"
 
       # sccache caches individual rustc compilation outputs in the GHA cache.
       # Unlike rust-cache (which restores a dumb target/ tarball that cargo
