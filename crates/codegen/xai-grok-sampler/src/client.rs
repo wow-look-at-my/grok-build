@@ -165,12 +165,30 @@ fn apply_terminal_event_overrides(event: &mut rs::ResponseStreamEvent, data: &st
     let Ok(value) = serde_json::from_str::<serde_json::Value>(data) else {
         return;
     };
-    // Stash cost ticks in metadata for stream_responses.
-    if let Some(ticks) = xai_grok_sampling_types::reported_cost_ticks(
+    // Stash cost ticks in metadata for stream_responses. Two wire forms are
+    // supported: xAI `cost_in_usd_ticks` (integer, authoritative) and the
+    // standard `usage.cost` USD float (OpenRouter, etc.) converted to ticks.
+    // The `usage.cost` value may be a bare float or a Bifrost cost object
+    // (`{"total_cost": ...}`); both are handled via `UsageCost`.
+    let ticks = xai_grok_sampling_types::reported_cost_ticks(
         value
             .pointer("/response/usage/cost_in_usd_ticks")
             .and_then(|v| v.as_i64()),
-    ) {
+    )
+    .or_else(|| {
+        xai_grok_sampling_types::usd_float_to_ticks(
+            value
+                .pointer("/response/usage/cost")
+                .and_then(|v| {
+                    serde_json::from_value::<xai_grok_sampling_types::UsageCost>(
+                        v.clone(),
+                    )
+                    .ok()
+                })
+                .map(|c| c.as_usd_float()),
+        )
+    });
+    if let Some(ticks) = ticks {
         response
             .metadata
             .get_or_insert_with(Default::default)
@@ -2068,6 +2086,16 @@ impl SamplingClient {
                 let events = crate::stream::stream_messages(raw, meta, request_id, idle_timeout);
                 crate::stream::collect_response(events).await
             }
+            // `AutoDetect` must be resolved before the client is built (the
+            // shell does this). If an unresolved `AutoDetect` reaches the
+            // sampler, fall back to Chat Completions: the sampler never
+            // performs network I/O inside its dispatch.
+            ApiBackend::AutoDetect => {
+                let (raw, meta) = self.conversation_stream(request).await?;
+                let events =
+                    crate::stream::stream_chat_completions(raw, meta, request_id, idle_timeout);
+                crate::stream::collect_response(events).await
+            }
         };
         result
             .map(|(response, _metrics)| response)
@@ -2308,6 +2336,22 @@ mod tests {
     fn new_with_minimal_config_succeeds() {
         let client = SamplingClient::new(minimal_config()).expect("client should construct");
         assert_eq!(client.api_backend(), ApiBackend::ChatCompletions);
+    }
+
+    #[test]
+    fn auto_detect_config_constructs_and_reports_unresolved() {
+        // An unresolved `AutoDetect` must still construct a client (resolution
+        // happens in the shell, never inside `SamplingClient::new`, which does
+        // no network I/O). The client reports `AutoDetect` so the caller knows
+        // it is unresolved; dispatch-time it falls back to Chat Completions.
+        let mut cfg = minimal_config();
+        cfg.api_backend = ApiBackend::AutoDetect;
+        let client = SamplingClient::new(cfg).expect("client should construct");
+        assert_eq!(client.api_backend(), ApiBackend::AutoDetect);
+        assert_eq!(
+            ApiBackend::auto_detect_fallback(),
+            ApiBackend::ChatCompletions
+        );
     }
 
     #[test]
@@ -2939,6 +2983,84 @@ mod tests {
             panic!("expected ResponseCompleted");
         };
         assert!(e.response.metadata.is_none());
+    }
+
+    #[test]
+    fn cost_usd_float_converted_to_ticks_when_no_ticks_field_responses() {
+        // OpenRouter-style: `usage.cost` (USD float) with no `cost_in_usd_ticks`.
+        // The override must convert the float to integer ticks and stash it
+        // in metadata for `stream_responses`.
+        let sse = r#"{
+            "type": "response.completed",
+            "sequence_number": 0,
+            "response": {
+                "id": "resp_1",
+                "object": "response",
+                "created_at": 0,
+                "model": "grok-build",
+                "status": "completed",
+                "output": [],
+                "usage": {
+                    "input_tokens": 10,
+                    "input_tokens_details": { "cached_tokens": 0 },
+                    "output_tokens": 5,
+                    "output_tokens_details": { "reasoning_tokens": 0 },
+                    "total_tokens": 15,
+                    "cost": 0.0000416
+                }
+            }
+        }"#;
+        let event = deserialize_response_event(sse).expect("parse");
+        let rs::ResponseStreamEvent::ResponseCompleted(e) = event else {
+            panic!("expected ResponseCompleted");
+        };
+        // round(0.0000416 * 1e10) = 416_000
+        assert_eq!(
+            e.response
+                .metadata
+                .as_ref()
+                .and_then(|m| m.get(COST_USD_TICKS_METADATA_KEY))
+                .map(String::as_str),
+            Some("416000")
+        );
+    }
+
+    #[test]
+    fn cost_usd_ticks_preferred_over_cost_float_responses() {
+        // When BOTH are present, the ticks field wins.
+        let sse = r#"{
+            "type": "response.completed",
+            "sequence_number": 0,
+            "response": {
+                "id": "resp_1",
+                "object": "response",
+                "created_at": 0,
+                "model": "grok-build",
+                "status": "completed",
+                "output": [],
+                "usage": {
+                    "input_tokens": 10,
+                    "input_tokens_details": { "cached_tokens": 0 },
+                    "output_tokens": 5,
+                    "output_tokens_details": { "reasoning_tokens": 0 },
+                    "total_tokens": 15,
+                    "cost_in_usd_ticks": 42,
+                    "cost": 0.0000999
+                }
+            }
+        }"#;
+        let event = deserialize_response_event(sse).expect("parse");
+        let rs::ResponseStreamEvent::ResponseCompleted(e) = event else {
+            panic!("expected ResponseCompleted");
+        };
+        assert_eq!(
+            e.response
+                .metadata
+                .as_ref()
+                .and_then(|m| m.get(COST_USD_TICKS_METADATA_KEY))
+                .map(String::as_str),
+            Some("42")
+        );
     }
 
     #[test]

@@ -485,6 +485,11 @@ pub enum FinishReason {
     ToolCalls,
     ContentFilter,
     FunctionCall,
+    /// Provider-reported error finish (OpenRouter sends this when the
+    /// upstream provider fails mid-generation). Maps to `StopReason::Stop`
+    /// so the turn completes normally rather than surfacing a deserialization
+    /// error to the user.
+    Error,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -546,6 +551,102 @@ pub struct Usage {
     /// normalize `0` to "unreported" (see `stream/chat_completions.rs`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cost_in_usd_ticks: Option<i64>,
+    /// Provider-reported request price in USD. OpenRouter and other
+    /// OpenAI-compatible aggregators report this instead of `cost_in_usd_ticks`.
+    /// Accepts both a bare float (e.g. `0.0000416`) and the Bifrost cost object
+    /// (e.g. `{"total_cost": 0.0000416, "input_tokens_cost": ...}`); capture
+    /// sites convert to ticks (×1e10) and prefer `cost_in_usd_ticks` when both
+    /// are present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost: Option<UsageCost>,
+}
+
+/// A provider-reported USD cost that may arrive as either a bare float or a
+/// Bifrost-style cost object. The float form is used by OpenRouter directly;
+/// the object form (`{"total_cost": ...}`) is what Bifrost emits when it
+/// re-serializes a passthrough `BifrostCost` struct.
+#[derive(Debug, Clone, PartialEq)]
+pub struct UsageCost(f64);
+
+impl UsageCost {
+    /// The total cost as a USD float, regardless of which wire shape arrived.
+    pub fn as_usd_float(&self) -> f64 {
+        self.0
+    }
+}
+
+impl From<f64> for UsageCost {
+    fn from(v: f64) -> Self {
+        UsageCost(v)
+    }
+}
+
+impl Serialize for UsageCost {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        // Re-emit as the simpler float form; we only read cost, never forward it.
+        s.serialize_f64(self.0)
+    }
+}
+
+impl<'de> Deserialize<'de> for UsageCost {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        use serde::de::Error;
+
+        #[derive(Deserialize)]
+        struct CostObject {
+            #[serde(default)]
+            total_cost: Option<f64>,
+            #[serde(default)]
+            input_tokens_cost: Option<f64>,
+            #[serde(default)]
+            output_tokens_cost: Option<f64>,
+            #[serde(default)]
+            reasoning_tokens_cost: Option<f64>,
+        }
+
+        let v = serde_json::Value::deserialize(d)?;
+        match &v {
+            // Bare float: `"cost": 0.0000416`
+            serde_json::Value::Number(n) => n.as_f64().map(UsageCost).ok_or_else(|| {
+                D::Error::custom("cost number is not a finite f64")
+            }),
+            // Bifrost object: `"cost": {"total_cost": 0.0000416, ...}`
+            serde_json::Value::Object(_) => {
+                let obj = serde_json::from_value::<CostObject>(v.clone()).map_err(|e| {
+                    D::Error::custom(format!("invalid cost object: {e}"))
+                })?;
+                // Prefer total_cost; fall back to the sum of the component
+                // costs when the gateway omits the rollup (some providers only
+                // report per-tier costs).
+                let total = obj
+                    .total_cost
+                    .or_else(|| {
+                        Some(
+                            obj.input_tokens_cost.unwrap_or(0.0)
+                                + obj.output_tokens_cost.unwrap_or(0.0)
+                                + obj.reasoning_tokens_cost.unwrap_or(0.0),
+                        )
+                    })
+                    .filter(|f| f.is_finite());
+                total
+                    .map(UsageCost)
+                    .ok_or_else(|| D::Error::custom("cost object has no usable cost fields"))
+            }
+            _ => Err(D::Error::custom("cost must be a number or an object")),
+        }
+    }
+}
+
+/// Convert a USD float to integer ticks (1 USD = 1e10 ticks), rounding to
+/// the nearest tick. Non-positive or NaN/inf values yield `None` ("unreported",
+/// never "free"). Used by the capture sites that read `usage.cost`.
+pub fn usd_float_to_ticks(usd: Option<f64>) -> Option<i64> {
+    let v = usd?;
+    if !v.is_finite() || v <= 0.0 {
+        return None;
+    }
+    let ticks = (v * 1e10).round() as i64;
+    (ticks > 0).then_some(ticks)
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
@@ -637,6 +738,15 @@ pub struct ChatChunkDelta {
     pub role: Option<Role>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
+    /// Thinking/chain-of-thought text streamed by the model. Deserializes from
+    /// either `reasoning_content` (OpenAI/xAI naming) or `reasoning`
+    /// (synthetic.new's OpenAI-compatible naming) so both wire shapes feed the
+    /// same accumulator; serializes as `reasoning_content` (the shape the
+    /// resend path / providers accept).
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        alias = "reasoning"
+    )]
     pub reasoning_content: Option<String>,
     /// Tool call deltas. Handles `null` in JSON as empty vec.
     #[serde(
@@ -1018,6 +1128,17 @@ pub enum ApiBackend {
     Responses,
     /// Use the Anthropic Messages API (/v1/messages)
     Messages,
+    /// Detect the backend by probing the endpoint at runtime.
+    ///
+    /// Used by user-managed endpoints (e.g. `[openai_compatible]`) where the
+    /// caller doesn't know which wire protocol the server implements. It is
+    /// **not** the serde default — configs that omit `api_backend` keep
+    /// resolving to [`Self::ChatCompletions`] (backward compatible). Callers
+    /// that store `AutoDetect` must resolve it to a concrete backend before the
+    /// sampler builds a client; `xai-grok-sampler` treats an unresolved
+    /// `AutoDetect` as `ChatCompletions` (it never performs network I/O).
+    #[serde(rename = "auto")]
+    AutoDetect,
 }
 
 impl ApiBackend {
@@ -1038,6 +1159,13 @@ impl ApiBackend {
     /// [`ConversationRequest::prompt_cache_key`]: crate::conversation::ConversationRequest::prompt_cache_key
     pub fn forwards_prompt_cache_key(&self) -> bool {
         matches!(self, Self::Responses)
+    }
+
+    /// Fallback backend used when `AutoDetect` cannot be resolved (probe
+    /// failure or an unresolved `AutoDetect` reaching the sampler). Kept
+    /// `pub` so the shell and sampler share one default.
+    pub fn auto_detect_fallback() -> Self {
+        Self::ChatCompletions
     }
 }
 
@@ -1513,6 +1641,91 @@ mod tests {
             .downcast_ref::<TestTrace>()
             .unwrap();
         assert_eq!(original.0, cloned_inner.0);
+    }
+
+    // ========================================================================
+    // usd_float_to_ticks — convert provider USD float to integer ticks
+    // ========================================================================
+
+    #[test]
+    fn usd_float_to_ticks_converts_correctly() {
+        // $0.0000416 → round(0.0000416 * 1e10) = 416_000
+        assert_eq!(usd_float_to_ticks(Some(0.0000416)), Some(416_000));
+        // $1.00 → 1e10 ticks
+        assert_eq!(usd_float_to_ticks(Some(1.0)), Some(10_000_000_000));
+    }
+
+    #[test]
+    fn usd_float_to_ticks_none_for_non_positive() {
+        assert_eq!(usd_float_to_ticks(Some(0.0)), None);
+        assert_eq!(usd_float_to_ticks(Some(-1.0)), None);
+        assert_eq!(usd_float_to_ticks(None), None);
+    }
+
+    #[test]
+    fn usd_float_to_ticks_none_for_nan_inf() {
+        assert_eq!(usd_float_to_ticks(Some(f64::NAN)), None);
+        assert_eq!(usd_float_to_ticks(Some(f64::INFINITY)), None);
+    }
+
+    #[test]
+    fn usage_struct_deserializes_openrouter_cost_float() {
+        // The wire shape OpenRouter emits: usage.cost as a USD float,
+        // no cost_in_usd_ticks.
+        let json = json!({
+            "prompt_tokens": 18,
+            "completion_tokens": 10,
+            "total_tokens": 28,
+            "cost": 6.92e-05
+        });
+        let usage: Usage = serde_json::from_value(json).unwrap();
+        assert_eq!(usage.prompt_tokens, 18);
+        assert_eq!(usage.completion_tokens, 10);
+        assert_eq!(usage.cost.as_ref().map(|c| c.as_usd_float()), Some(6.92e-05));
+        assert_eq!(usage.cost_in_usd_ticks, None);
+    }
+
+    #[test]
+    fn usage_struct_deserializes_bifrost_cost_object() {
+        // Bifrost re-serializes the upstream `BifrostCost` as an object with
+        // `total_cost` (and optional per-tier breakdown). The deserializer
+        // must accept this shape and expose the same USD float.
+        let json = json!({
+            "prompt_tokens": 18,
+            "completion_tokens": 10,
+            "total_tokens": 28,
+            "cost": {
+                "input_tokens_cost": 0.0000012,
+                "output_tokens_cost": 0.0000034,
+                "reasoning_tokens_cost": 0.0,
+                "total_cost": 0.0000046
+            }
+        });
+        let usage: Usage = serde_json::from_value(json).unwrap();
+        assert_eq!(
+            usage.cost.as_ref().map(|c| c.as_usd_float()),
+            Some(0.0000046)
+        );
+    }
+
+    #[test]
+    fn usage_struct_deserializes_bifrost_cost_object_without_total() {
+        // When the gateway omits `total_cost`, the deserializer falls back to
+        // the sum of the per-tier component costs.
+        let json = json!({
+            "prompt_tokens": 18,
+            "completion_tokens": 10,
+            "total_tokens": 28,
+            "cost": {
+                "input_tokens_cost": 0.0000012,
+                "output_tokens_cost": 0.0000034
+            }
+        });
+        let usage: Usage = serde_json::from_value(json).unwrap();
+        assert_eq!(
+            usage.cost.as_ref().map(|c| c.as_usd_float()),
+            Some(0.0000046)
+        );
     }
 
     /// Verify that cloning a `ChatCompletionRequest` with a trace does not recurse.

@@ -15,7 +15,16 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  # sccache wraps rustc and caches individual compilation outputs (per
+  # crate/compilation unit) in the GitHub Actions cache, so a changed crate
+  # only invalidates its own cached artifacts — not a whole target/ tarball.
+  # This requires CARGO_INCREMENTAL=0 (sccache cannot cache incremental
+  # compilation). rust-cache alone restored target/ but cargo recompiled
+  # everything anyway (fingerprints don't survive the zip round-trip), so the
+  # "cache hit" was a 14-min full recompile every time. sccache actually hits.
   CARGO_INCREMENTAL: "0"
+  SCCACHE_GHA_ENABLED: "true"
+  RUSTC_WRAPPER: "sccache"
   # Linking every crate's test binaries WITH debuginfo needs >37 GB of target/
   # (measured); a runner has ~14 GB free, and ld dies on a bus error partway
   # through the shell crate's integration tests. Nothing here reads a symbol.
@@ -28,8 +37,46 @@ jobs:
   build-test:
     name: Build & test
     runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      # Namespace this job's sccache entries away from the darwin release
+      # job so the more-frequent linux runs can't evict the darwin cache
+      # entries from the shared 10 GB GHAC bucket. sccache reads
+      # SCCACHE_GHA_VERSION before falling back to SCCACHE_GHA_ENABLED and
+      # uses it as the cache namespace (SHA-256'd into the GHAC `name`).
+      # The `0.17.0` token here MUST stay in sync with the pinned
+      # `version:` input on the sccache-action step below — the GHA cache key
+      # is `sccache-v{VERSION}-{SCCACHE_GHA_VERSION}`, so a mismatch between
+      # the installed sccache version and this namespace invalidates the cache.
+      SCCACHE_GHA_VERSION: sccache-v0.17.0-x86_64-unknown-linux-gnu
+      # A stock ubuntu-24.04 runner has only 7 GB of RAM, and compiling the
+      # whole workspace's tests links ~90 huge test binaries (the shell crate
+      # alone spawns many multi-GB link jobs). At default -j4 a burst of
+      # concurrent rustc/ld processes exceeds the runner and the build gets
+      # OOM-killed mid-suite. Cap cargo's parallelism so peak memory stays
+      # under the runner's budget; the shell crate still builds, just with
+      # fewer simultaneous links.
+      CARGO_BUILD_JOBS: "2"
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      # This repo's `cargo test --workspace` needs >37 GB of target/ (the
+      # pager links ~90 test binaries) and a stock runner only has ~14 GB
+      # free, so the long Build & test job has repeatedly ground to a hang on
+      # full disk (ld/rustc I/O stalls). Free the known-safe oversized image
+      # dirs BEFORE building. dotnet/android/swift/haskell are never needed
+      # here; tool caches (rustup, sccache) are kept for speed.
+      # Run early so there is headroom for the entire build+test.
+      - name: Free up disk space before build
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: false
+          large-packages: true
+          swap-storage: true
+          docker-images: true
+          android: true
+          dotnet: true
+          haskell: true
 
       - name: Install protoc (pinned v29.3)
         run: |
@@ -52,20 +99,31 @@ jobs:
       - name: Install ripgrep
         uses: wow-look-at-my/actions@cache-rg#latest
 
-      - name: Cache cargo build
-        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-
-      - name: Build grok binary
-        run: cargo build --locked -p xai-grok-pager-bin
-
-      - name: Smoke-test the binary
-        run: ./target/debug/xai-grok-pager --version
+      # sccache caches individual rustc compilation outputs in the GHA cache.
+      # Unlike rust-cache (which restores a dumb target/ tarball that cargo
+      # recompiles from scratch anyway), sccache keys on the actual compilation
+      # inputs and only recompiles what genuinely changed.
+      - name: Run sccache-cache
+        uses: mozilla-actions/sccache-action@v0.0.11
+        # The version input MUST carry the leading 'v': the action builds its
+        # download URL as releases/download/${version}/... which only exists
+        # for the tag 'v0.17.0'. Dropping the v made it 404 and skip the whole
+        # build. This installed binary still reports 0.17.0, so it stays in
+        # sync with SCCACHE_GHA_VERSION above and the GHA cache key
+        # (sccache-v{VERSION}-{SCCACHE_GHA_VERSION}) is unchanged.
+        with:
+          version: v0.17.0
 
       # --no-fail-fast: without it cargo stops at the first failing crate, so a
       # single failure hides every crate after it and the next push finds a new
       # one. One run, the whole list.
+      # The smoke test runs first (cargo test --workspace compiles the binary
+      # as a workspace member; --version confirms it links and runs before we
+      # spend time on the full suite).
       - name: Test (workspace)
-        run: cargo test --locked --workspace --no-fail-fast
+        run: |
+          cargo test --locked --workspace --no-fail-fast
+          ./target/debug/xai-grok-pager --version
 
       # The PTY suites drive the real binary through a virtual terminal and
       # assert on what is actually on screen. They are #[ignore]d because they
@@ -87,18 +145,33 @@ jobs:
   build-release:
     name: Build release binary (${{ matrix.target_os }}/${{ matrix.target_arch }})
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    env:
+      # Per-target sccache namespace: linux and darwin get distinct GHAC
+      # buckets so neither can evict the other's entries from the shared
+      # 10 GB repo cache. See build-test's SCCACHE_GHA_VERSION comment.
+      # The `0.17.0` token in each matrix value must stay in sync with the
+      # pinned `version:` input on the sccache-action step below.
+      SCCACHE_GHA_VERSION: ${{ matrix.sccache_version }}
     strategy:
       matrix:
         include:
-          - runner: ubuntu-latest
+          # ubuntu-22.04 ships glibc 2.35, the same libc users on Ubuntu 22.04
+          # (and most other distros) have. Building here keeps every GLIBC_x.y
+          # dependency at or below 2.35, so the amd64 binary runs on 22.04
+          # instead of demanding GLIBC_2.38/2.39 (which the previous
+          # ubuntu-latest, glibc 2.39, runner linked against).
+          - runner: ubuntu-22.04
             target_os: linux
             target_arch: amd64
+            sccache_version: sccache-v0.17.0-x86_64-unknown-linux-gnu
             protoc_url: https://github.com/protocolbuffers/protobuf/releases/download/v29.3/protoc-29.3-linux-x86_64.zip
             protoc_sha256: 3e866620c5be27664f3d2fa2d656b5f3e09b5152b42f1bedbf427b333e90021a
             checksum_cmd: sha256sum -c -
           - runner: macos-14
             target_os: darwin
             target_arch: arm64
+            sccache_version: sccache-v0.17.0-aarch64-apple-darwin
             protoc_url: https://github.com/protocolbuffers/protobuf/releases/download/v29.3/protoc-29.3-osx-aarch_64.zip
             protoc_sha256: 2b8a3403cd097f95f3ba656e14b76c732b6b26d7f183330b11e36ef2bc028765
             checksum_cmd: shasum -a 256 -c -
@@ -119,10 +192,33 @@ jobs:
       - name: Install Rust toolchain (pinned by rust-toolchain.toml)
         run: rustup show
 
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Run sccache-cache
+        uses: mozilla-actions/sccache-action@v0.0.11
+        # Same 'v' prefix requirement as build-test: the tag is v0.17.0.
+        with:
+          version: v0.17.0
 
       - name: Build release binary
         run: cargo build --locked --release -p xai-grok-pager-bin
+
+      # The linux binary is built on ubuntu-22.04 (glibc 2.35) so it runs on
+      # Ubuntu 22.04. Guard the floor: fail if the produced binary demands any
+      # symbol newer than 2.35 (which would reproduce the GLIBC_2.38/2.39 load
+      # error on 22.04). Darwin binaries don't use GLIBC, so skip them.
+      - name: Verify glibc symbols are <= 2.35 (linux/amd64)
+        if: matrix.target_os == 'linux'
+        shell: bash
+        run: |
+          max_glibc="$(readelf --version-info target/release/xai-grok-pager 2>/dev/null \
+            | grep -oE 'GLIBC_[0-9]+\.[0-9]+' | sed 's/GLIBC_//' | sort -V | tail -n1)"
+          echo "max GLIBC symbol referenced: ${max_glibc:-none}"
+          if [[ -z "$max_glibc" ]]; then exit 1; fi
+          # Version string comparison, no external tools: 2.35 is the ceiling.
+          if ! printf '%s\n2.35\n' "$max_glibc" | sort -V | head -n1 | grep -qx "$max_glibc"; then
+            echo "FAIL: binary requires GLIBC $max_glibc, which is newer than 2.35 (not runnable on Ubuntu 22.04)"
+            exit 1
+          fi
+          echo "PASS: max GLIBC $max_glibc <= 2.35, runs on Ubuntu 22.04"
 
       - name: Stage artifact
         run: |

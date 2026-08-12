@@ -2235,15 +2235,15 @@ pub(in crate::app::dispatch) fn set_openai_compatible_api_backend(
     app: &mut AppView,
     value: String,
 ) -> Vec<Effect> {
-    let value = if value == "responses" {
-        "responses"
-    } else {
-        "chat_completions"
+    let value: &'static str = match value.as_str() {
+        "auto" => "auto",
+        "responses" => "responses",
+        _ => "chat_completions",
     };
-    let previous = if app.openai_compatible.api_backend == "responses" {
-        "responses"
-    } else {
-        "chat_completions"
+    let previous: &'static str = match app.openai_compatible.api_backend.as_str() {
+        "auto" => "auto",
+        "responses" => "responses",
+        _ => "chat_completions",
     };
     if previous == value {
         return vec![];
