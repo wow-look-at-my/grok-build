@@ -15,6 +15,13 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  # A UTF-8 locale is required for tests that round-trip non-ASCII OsStrings
+  # (e.g. xai-grok-sandbox's `fails_closed_on_non_utf8_*` hit errno 84
+  # "Invalid or incomplete multibyte or wide character" on a lean runner with
+  # no locale set). Hosted ubuntu-latest defaults to C.UTF-8; setting it
+  # globally is a no-op there and fixes the lean CI_RUNNER image.
+  LANG: C.UTF-8
+  LC_ALL: C.UTF-8
   # sccache wraps rustc and caches individual compilation outputs (per
   # crate/compilation unit) in the GitHub Actions cache, so a changed crate
   # only invalidates its own cached artifacts — not a whole target/ tarball.
@@ -45,10 +52,12 @@ jobs:
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     # The full `cargo test --workspace` (compile + ~90 test harness binaries)
     # finishes within 45 min on a hosted ubuntu-latest, but a self-hosted
-    # CI_RUNNER runner is often slower (this repo's own runner took ~20 min to
-    # compile alone and was still running tests at 45 min), so allow more time
-    # there. Still bounded so a stuck job cannot run forever.
-    timeout-minutes: ${{ vars.CI_RUNNER && 60 || 45 }}
+    # CI_RUNNER runner is often much slower at test execution (this repo's own
+    # runner compiled in ~14 min but was still running the ~90 test binaries
+    # 46 min later when the 60 min timeout hit), so allow 90 min there while
+    # keeping the hosted fallback at 45. Still bounded so a stuck job cannot
+    # run forever.
+    timeout-minutes: ${{ vars.CI_RUNNER && 90 || 45 }}
     env:
       # Namespace this job's sccache entries away from the darwin release
       # job so the more-frequent linux runs can't evict the darwin cache
@@ -119,6 +128,8 @@ jobs:
       # libssl-dev/zlib1g-dev preinstalled, but a lean CI_RUNNER image may not
       # (this repo's own runner hit `linker cc not found` compiling
       # proc-macro2). Ensure the packages exist, no-op when already present.
+      # Also ensure the C.UTF-8 locale is available (glibc 2.35+ ships it
+      # built-in, but generate it explicitly in case the image strips locales).
       - name: Ensure C build toolchain (build-essential, pkg-config, libssl-dev, zlib1g-dev)
         run: |
           set -euo pipefail
@@ -126,6 +137,7 @@ jobs:
             sudo apt-get update -qq
             sudo apt-get install -y -qq build-essential pkg-config libssl-dev zlib1g-dev
           }
+          locale -a 2>/dev/null | grep -qi '^C\.utf-8$' || sudo locale-gen C.UTF-8
 
       # Install the toolchain pinned by rust-toolchain.toml. On the hosted
       # ubuntu-latest fallback rustup is preinstalled, but when CI_RUNNER
