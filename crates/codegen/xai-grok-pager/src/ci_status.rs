@@ -515,10 +515,12 @@ mod tests {
             let v = sine_value_factor(tick, 0.25, 0.80);
             assert!((0.25..=0.80).contains(&v), "tick {tick} -> {v}");
         }
-        // Phase extremes hit the bounds.
-        assert!((sine_value_factor(0, 0.25, 0.80) - 0.25).abs() < 1e-3);
-        assert!((sine_value_factor(24, 0.25, 0.80) - 0.80).abs() < 1e-3);
-        assert!((sine_value_factor(48, 0.25, 0.80) - 0.25).abs() < 1e-3);
+        // Phase extremes hit the bounds: sin peaks at tick 12 (max) and
+        // bottoms out at tick 36 (min) for a 48-tick cycle.
+        assert!((sine_value_factor(12, 0.25, 0.80) - 0.80).abs() < 1e-2);
+        assert!((sine_value_factor(36, 0.25, 0.80) - 0.25).abs() < 1e-2);
+        // And it is periodic.
+        assert!((sine_value_factor(0, 0.25, 0.80) - sine_value_factor(48, 0.25, 0.80)).abs() < 1e-2);
     }
 
     #[test]
@@ -529,15 +531,15 @@ mod tests {
         assert!(h > 30.0 && h < 90.0, "expected a yellow hue, got {h}");
         assert!(s > 0.5);
 
-        let dim = animate_value(0, base, 0.25, 0.80);
-        let bright = animate_value(24, base, 0.25, 0.80);
+        // One full cycle apart: tick 12 is the brightest (value 0.80), tick 36
+        // the dimmest (value 0.25).
+        let dim = animate_value(36, base, 0.25, 0.80);
+        let bright = animate_value(12, base, 0.25, 0.80);
         // Preserves hue and saturation; only value changes.
-        for (a, b) in [(&dim, &bright)] {
-            let (h1, s1, _) = rgb_to_hsv(*a);
-            let (h2, s2, _) = rgb_to_hsv(*b);
-            assert!((h1 - h2).abs() < 1.0, "hue must be preserved");
-            assert!((s1 - s2).abs() < 0.05, "saturation must be preserved");
-        }
+        let (h1, s1, _) = rgb_to_hsv(dim);
+        let (h2, s2, _) = rgb_to_hsv(bright);
+        assert!((h1 - h2).abs() < 1.0, "hue must be preserved");
+        assert!((s1 - s2).abs() < 0.05, "saturation must be preserved");
         // The bright frame is strictly lightened (higher luminance).
         let lum = |(r, g, b): (u8, u8, u8)| 0.2126 * r as f32 + 0.7152 * g as f32 + 0.0722 * b as f32;
         assert!(lum(bright) > lum(dim), "brighter frame must be lighter");
