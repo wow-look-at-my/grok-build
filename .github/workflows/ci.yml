@@ -156,7 +156,12 @@ jobs:
     strategy:
       matrix:
         include:
-          - runner: ubuntu-latest
+          # ubuntu-22.04 ships glibc 2.35, the same libc users on Ubuntu 22.04
+          # (and most other distros) have. Building here keeps every GLIBC_x.y
+          # dependency at or below 2.35, so the amd64 binary runs on 22.04
+          # instead of demanding GLIBC_2.38/2.39 (which the previous
+          # ubuntu-latest, glibc 2.39, runner linked against).
+          - runner: ubuntu-22.04
             target_os: linux
             target_arch: amd64
             sccache_version: sccache-v0.17.0-x86_64-unknown-linux-gnu
