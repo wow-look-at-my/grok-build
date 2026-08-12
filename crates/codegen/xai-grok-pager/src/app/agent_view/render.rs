@@ -1569,14 +1569,20 @@ impl AgentView {
         ) {
             status.push("badge", Line::from(badge_spans));
         }
-        // Top-right: running session-total cost, the cumulative sum of the
-        // API-reported per-message costs in this session's scrollback (exact
-        // ticks summed, then formatted). Absent while no message has reported
-        // a cost — never a fabricated `$0.00`.
+        // Top-right: running session-total cost. The agent's own session ledger
+        // is the source of truth — it counts every model call and subagent
+        // fold, including spend behind a message that was rewound or never
+        // rendered, which a sum over the scrollback cannot see. The scrollback
+        // sum is the fallback for an agent too old to report the total; it can
+        // only under-count, never over-count. Absent until something reports a
+        // cost — never a fabricated `$0.00`.
+        let session_cost_ticks = self
+            .session
+            .tracker
+            .reported_session_cost_usd_ticks()
+            .or_else(|| self.scrollback.session_total_cost_usd_ticks());
         if let Some(cost_display) =
-            crate::scrollback::wrappers::cost_ticks_to_display(
-                self.scrollback.session_total_cost_usd_ticks(),
-            )
+            crate::scrollback::wrappers::cost_ticks_to_display(session_cost_ticks)
         {
             let cost_style = Style::default().fg(theme.gray_dim).bg(theme.bg_base);
             status.push(

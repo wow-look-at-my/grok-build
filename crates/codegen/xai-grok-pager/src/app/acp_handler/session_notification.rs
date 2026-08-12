@@ -226,15 +226,25 @@ pub(super) fn handle_session_notification(notif: &acp::ExtNotification, app: &mu
             stop_reason,
             agent_result,
             usage,
+            session_cost_usd_ticks,
         } => {
             // The ACP text chunk rail never carries cost; the durable
             // `TurnCompleted` notification carries the per-turn usage (incl.
             // exact `cost_usd_ticks`, already scrubbed when partial/incomplete)
             // alongside the terminal outcome. Attribute that reported cost to
-            // the agent-message block this turn rendered.
+            // the agent-message block this turn rendered — unless
+            // `ResponseCompleted` already priced this turn's messages one by
+            // one, which `set_last_turn_cost` checks for.
             let reported_cost = usage
                 .as_ref()
                 .and_then(|u| u.totals.cost_usd_ticks);
+            // Terminal refresh of the session total: a subagent fold can land
+            // after this turn's last model call, so this is the last chance to
+            // be exact before the session goes idle.
+            agent
+                .session
+                .tracker
+                .set_reported_session_cost(session_cost_usd_ticks);
             // Snapshot the run currently in flight *before* any turn-finish
             // path clears it, so cost attribution can decide whether this
             // `TurnCompleted` (keyed by `prompt_id`) belongs to the live block.
@@ -1122,6 +1132,26 @@ pub(super) fn handle_session_notification(notif: &acp::ExtNotification, app: &mu
         }
         XaiSessionUpdate::InteractionResolved { tool_call_id } => {
             agent.dismiss_resolved_interaction(&tool_call_id)
+        }
+        XaiSessionUpdate::ResponseCompleted {
+            cost_usd_ticks,
+            session_cost_usd_ticks,
+            ..
+        } => {
+            // One model call just closed. It rides the buffered chunk rail, so
+            // it arrives after that call's own agent-message chunks and before
+            // the next call's — which is exactly the block its cost belongs to.
+            let running_prompt_id = agent.session.current_prompt_id.clone();
+            let priced = agent.session.tracker.set_response_cost(
+                &mut agent.scrollback,
+                running_prompt_id.as_deref(),
+                cost_usd_ticks,
+            );
+            let total_changed = agent
+                .session
+                .tracker
+                .set_reported_session_cost(session_cost_usd_ticks);
+            priced || total_changed
         }
         _ => {
             tracing::trace!(
