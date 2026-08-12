@@ -37,6 +37,11 @@ Date: 2026-08-12 (final round). All numbers are real, captured measurements.
              views::timeline::RailViewport). Fine-grained web, not layered boundaries.
   - Structurally-movable LOC (modules with <=10 crate:: refs, i.e. cycle-free leaves):
       shell = 5,253 module-LOC (1.5%) — this ENTIRE fringe was extracted (below).
+      pager: even the best-candidate modules are either core-coupled or a small
+      fraction of the 463k-LOC crate — e.g. headless (5,879 LOC, 106 tests) still
+      reaches crate::acp::* and crate::glyphs::*; scrollback (53,894 LOC) reaches
+      app::error_display::WireErrorType / views::timeline::RailViewport. No
+      candidate is a large cycle-free leaf that would move the 7.4 GiB peak.
   - Rust visibility wall: in-lib tests are `#[cfg(test)] mod tests { use super::* }` child
     modules reaching private/pub(crate) items; an integration-test crate sees only `pub`
     (E0432 proof). There is NO test-preserving way to compile those tests in a separate rustc
