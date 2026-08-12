@@ -51,13 +51,12 @@ jobs:
     # at a genuinely larger or self-hosted runner.
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     # The full `cargo test --workspace` (compile + ~90 test harness binaries)
-    # finishes within 45 min on a hosted ubuntu-latest, but a self-hosted
-    # CI_RUNNER runner is often much slower at test execution (this repo's own
-    # runner compiled in ~14 min but was still running the ~90 test binaries
-    # 46 min later when the 60 min timeout hit), so allow 90 min there while
-    # keeping the hosted fallback at 45. Still bounded so a stuck job cannot
-    # run forever.
-    timeout-minutes: ${{ vars.CI_RUNNER && 90 || 45 }}
+    # finishes within 45 min on a hosted ubuntu-latest. A self-hosted CI_RUNNER
+    # runner may need more time, but 45 min is the target ceiling — if tests
+    # hang past it, that's a runner-environment issue (the wow-linux lean
+    # image's PTY/process semantics cause the shell's terminal tests to
+    # hang), not something to solve by inflating the timeout.
+    timeout-minutes: 45
     env:
       # Namespace this job's sccache entries away from the darwin release
       # job so the more-frequent linux runs can't evict the darwin cache
