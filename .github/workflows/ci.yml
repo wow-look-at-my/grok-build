@@ -44,6 +44,10 @@ jobs:
       # entries from the shared 10 GB GHAC bucket. sccache reads
       # SCCACHE_GHA_VERSION before falling back to SCCACHE_GHA_ENABLED and
       # uses it as the cache namespace (SHA-256'd into the GHAC `name`).
+      # The `0.17.0` token here MUST stay in sync with the pinned
+      # `version:` input on the sccache-action step below — the GHA cache key
+      # is `sccache-v{VERSION}-{SCCACHE_GHA_VERSION}`, so a mismatch between
+      # the installed sccache version and this namespace invalidates the cache.
       SCCACHE_GHA_VERSION: sccache-v0.17.0-x86_64-unknown-linux-gnu
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -94,6 +98,8 @@ jobs:
       # inputs and only recompiles what genuinely changed.
       - name: Run sccache-cache
         uses: mozilla-actions/sccache-action@v0.0.11
+        with:
+          version: 0.17.0
 
       # --no-fail-fast: without it cargo stops at the first failing crate, so a
       # single failure hides every crate after it and the next push finds a new
@@ -131,6 +137,8 @@ jobs:
       # Per-target sccache namespace: linux and darwin get distinct GHAC
       # buckets so neither can evict the other's entries from the shared
       # 10 GB repo cache. See build-test's SCCACHE_GHA_VERSION comment.
+      # The `0.17.0` token in each matrix value must stay in sync with the
+      # pinned `version:` input on the sccache-action step below.
       SCCACHE_GHA_VERSION: ${{ matrix.sccache_version }}
     strategy:
       matrix:
@@ -168,6 +176,8 @@ jobs:
 
       - name: Run sccache-cache
         uses: mozilla-actions/sccache-action@v0.0.11
+        with:
+          version: 0.17.0
 
       - name: Build release binary
         run: cargo build --locked --release -p xai-grok-pager-bin
