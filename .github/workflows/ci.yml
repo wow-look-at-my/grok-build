@@ -109,6 +109,19 @@ jobs:
           echo "PROTOC=$RUNNER_TEMP/protoc/bin/protoc" >> "$GITHUB_ENV"
           "$RUNNER_TEMP/protoc/bin/protoc" --version
 
+      # The Rust build needs a C toolchain + openssl/zlib dev headers at the
+      # OS level: hosted ubuntu-latest ships build-essential/pkg-config/
+      # libssl-dev/zlib1g-dev preinstalled, but a lean CI_RUNNER image may not
+      # (this repo's own runner hit `linker cc not found` compiling
+      # proc-macro2). Ensure the packages exist, no-op when already present.
+      - name: Ensure C build toolchain (build-essential, pkg-config, libssl-dev, zlib1g-dev)
+        run: |
+          set -euo pipefail
+          dpkg -s build-essential pkg-config libssl-dev zlib1g-dev >/dev/null 2>&1 || {
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq build-essential pkg-config libssl-dev zlib1g-dev
+          }
+
       # Install the toolchain pinned by rust-toolchain.toml. On the hosted
       # ubuntu-latest fallback rustup is preinstalled, but when CI_RUNNER
       # points at a lean self-hosted runner rustup may be absent (builtin
