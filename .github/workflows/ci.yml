@@ -49,6 +49,14 @@ jobs:
       # is `sccache-v{VERSION}-{SCCACHE_GHA_VERSION}`, so a mismatch between
       # the installed sccache version and this namespace invalidates the cache.
       SCCACHE_GHA_VERSION: sccache-v0.17.0-x86_64-unknown-linux-gnu
+      # A stock ubuntu-24.04 runner has only 7 GB of RAM, and compiling the
+      # whole workspace's tests links ~90 huge test binaries (the shell crate
+      # alone spawns many multi-GB link jobs). At default -j4 a burst of
+      # concurrent rustc/ld processes exceeds the runner and the build gets
+      # OOM-killed mid-suite. Cap cargo's parallelism so peak memory stays
+      # under the runner's budget; the shell crate still builds, just with
+      # fewer simultaneous links.
+      CARGO_BUILD_JOBS: "2"
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
