@@ -66,43 +66,36 @@ async fn assert_cell_passes(cell_id: &str) {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "spawns the real pager binary in a PTY (CI runs via --run-ignored in the PTY e2e step)"]
 async fn c1_auto_g3_flood_speed100() {
     assert_cell_passes("c1_auto_g3_flood_speed100").await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "spawns the real pager binary in a PTY (CI runs via --run-ignored in the PTY e2e step)"]
 async fn c2_auto_g3_flood_speed100() {
     assert_cell_passes("c2_auto_g3_flood_speed100").await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "spawns the real pager binary in a PTY (CI runs via --run-ignored in the PTY e2e step)"]
 async fn c3_wheel_lines1_g1() {
     assert_cell_passes("c3_wheel_lines1_g1").await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "spawns the real pager binary in a PTY (CI runs via --run-ignored in the PTY e2e step)"]
 async fn c4_auto_g10_ambiguous() {
     assert_cell_passes("c4_auto_g10_ambiguous").await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "spawns the real pager binary in a PTY (CI runs via --run-ignored in the PTY e2e step)"]
 async fn c5_tmux_g9a() {
     assert_cell_passes("c5_tmux_g9a").await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "spawns the real pager binary in a PTY (CI runs via --run-ignored in the PTY e2e step)"]
 async fn c5_tmux_g9b() {
     assert_cell_passes("c5_tmux_g9b").await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "spawns the real pager binary in a PTY (CI runs via --run-ignored in the PTY e2e step)"]
 async fn c1_auto_g8_midstream() {
     assert_cell_passes("c1_auto_g8_midstream").await;
 }
@@ -113,7 +106,6 @@ async fn c1_auto_g8_midstream() {
 /// xfail set to ordinary pass rows. The cell id keeps its historical name
 /// for artifact continuity.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "spawns the real pager binary in a PTY (CI runs via --run-ignored in the PTY e2e step)"]
 async fn c1_auto_g4_jerk_xfail() {
     assert_cell_passes("c1_auto_g4_jerk_xfail").await;
 }

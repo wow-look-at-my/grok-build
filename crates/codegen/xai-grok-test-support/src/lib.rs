@@ -33,17 +33,6 @@ pub fn scaled(base: std::time::Duration) -> std::time::Duration {
         .unwrap_or(1);
     base * scale
 }
-
-/// True when the current environment cannot reliably run PTY process-group
-/// tests (signal propagation, process teardown).  Container environments
-/// (containerd overlayfs, lean CI runners) set `PTY_PROCESS_TESTS=skip` in
-/// the CI workflow so these tests are no-ops instead of hanging or failing.
-pub fn pty_process_tests_skipped() -> bool {
-    std::env::var("PTY_PROCESS_TESTS")
-        .ok()
-        .map(|v| v == "skip")
-        .unwrap_or(false)
-}
 pub mod acp_client;
 pub mod counting_server;
 pub mod env;

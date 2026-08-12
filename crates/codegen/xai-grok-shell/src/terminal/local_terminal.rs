@@ -288,10 +288,6 @@ mod tests {
     #[tokio::test]
     #[cfg(unix)]
     async fn test_timeout_kills_grandchildren_and_returns_promptly() {
-        if xai_grok_test_support::pty_process_tests_skipped() {
-            eprintln!("skipped: PTY_PROCESS_TESTS=skip");
-            return;
-        }
         let mut request = make_request("sleep 5 & echo bgpid=$!; sleep 5");
         // Long enough that spawning the shell and reading its first line wins
         // the race on a loaded runner -- at 300ms the kill sometimes landed

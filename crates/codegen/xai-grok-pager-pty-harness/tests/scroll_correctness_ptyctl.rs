@@ -41,7 +41,6 @@ fn any_marker(s: &str, range: std::ops::Range<usize>) -> bool {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "spawns the real pager binary in a PTY (CI runs via --run-ignored in the PTY e2e step)"]
 async fn scroll_up_from_follow_bottom_then_back_down() -> Result<()> {
     let binary = pager_binary().context("resolve pager binary")?;
     let content = ContentController::start()

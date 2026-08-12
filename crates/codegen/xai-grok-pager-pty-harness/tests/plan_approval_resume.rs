@@ -10,7 +10,6 @@
 //! ```
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "spawns the real pager binary in a PTY (CI runs via --run-ignored in the PTY e2e step)"]
 async fn plan_approval_restored_after_resume() {
     xai_grok_pager_pty_harness::scenarios::plan_approval_resume::assert_plan_approval_restored_after_resume()
         .await

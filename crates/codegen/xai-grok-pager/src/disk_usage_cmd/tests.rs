@@ -220,17 +220,11 @@ fn top_level_symlink_costs_its_own_inode_not_the_target() {
 
     let link_bytes = physical_file_size(&std::fs::symlink_metadata(&link).unwrap());
     let target_bytes = physical_file_size(&std::fs::metadata(&external).unwrap());
-    // On containerd overlayfs, `st_blocks` is unreliable — every file reports
-    // the same value (typically 2 * 512 = 1024) regardless of size, so the
-    // symlink and its target appear equal.  Only enforce the size difference
-    // when the filesystem reports distinct block counts.
-    if link_bytes != target_bytes {
-        assert!(
-            link_bytes < target_bytes,
-            "the target must be big enough for following it to be visible: \
-             link {link_bytes}, target {target_bytes}"
-        );
-    }
+    assert!(
+        link_bytes < target_bytes,
+        "the target must be big enough for following it to be visible: \
+         link {link_bytes}, target {target_bytes}"
+    );
     assert_eq!(
         report.root_files_bytes, link_bytes,
         "a top-level symlink must cost exactly its own inode, never the target"
@@ -327,15 +321,8 @@ fn a_row_off_the_anchor_reports_no_size() {
     assert_eq!(size, Measure::Elsewhere);
     assert_eq!(size.bytes(), None, "no row prints bytes no total holds");
     assert_eq!(issues.other_filesystems, 1);
-    // Sanity check: the bytes ARE on disk, so the *only* reason the row reports
-    // no size is the mismatched anchor.  `physical_file_size` uses
-    // `st_blocks * 512` (matching `du` without `--apparent-size`); some
-    // container filesystems (containerd overlayfs) report `st_blocks=2` for
-    // any newly-written file regardless of size, so the measured bytes may
-    // be far smaller than the logical file size.  The point is that the
-    // bytes are *measurable* (Some), not the exact count.
     assert!(
-        measured(&wt).is_some(),
+        measured(&wt).is_some_and(|bytes| bytes >= 65536),
         "the bytes are there to measure: the anchor is the only reason the row has none"
     );
 }

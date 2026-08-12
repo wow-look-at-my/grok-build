@@ -888,10 +888,6 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn pty_drop_tree_cleanup_is_bounded_and_reaps_grandchild() {
-        if xai_grok_test_support::pty_process_tests_skipped() {
-            eprintln!("skipped: PTY_PROCESS_TESTS=skip");
-            return;
-        }
         let sandbox = TestSandbox::new();
         let pid_file = sandbox.temp_dir().join("pty-grandchild.pid");
         let pid_path = pid_file.to_string_lossy().into_owned();

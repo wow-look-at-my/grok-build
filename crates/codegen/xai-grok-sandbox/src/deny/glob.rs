@@ -1112,15 +1112,7 @@ mod tests {
             let base = tmp_tree("nonutf8-workspace");
             let _workspace_guard = TmpTree(base.clone());
             let workspace = base.join(std::ffi::OsStr::from_bytes(b"workspace\xFF"));
-            // Some container filesystems (containerd overlayfs) reject
-            // non-UTF-8 filenames with errno 84 at the OS level, so the
-            // directory can't be created.  Skip the test when the filesystem
-            // doesn't allow non-UTF-8 paths — the fail-closed logic is only
-            // testable on filesystems that accept raw bytes.
-            if std::fs::create_dir_all(&workspace).is_err() {
-                eprintln!("skipped: filesystem rejects non-UTF-8 paths");
-                return;
-            }
+            std::fs::create_dir_all(&workspace).unwrap();
             let err = expand_deny_globs(&workspace, &["**/*.pem".to_string()], DENY_GLOB_CAPS)
                 .unwrap_err();
             assert!(err.contains("not UTF-8"), "{err}");
@@ -1132,11 +1124,7 @@ mod tests {
             let workspace = tmp_tree("nonutf8");
             let _workspace_guard = TmpTree(workspace.clone());
             let name = std::ffi::OsStr::from_bytes(b"secret\xFF.pem");
-            // See fails_closed_on_non_utf8_workspace for the skip rationale.
-            if std::fs::write(workspace.join(name), "x").is_err() {
-                eprintln!("skipped: filesystem rejects non-UTF-8 paths");
-                return;
-            }
+            std::fs::write(workspace.join(name), "x").unwrap();
             let err = expand_deny_globs(&workspace, &["**/*.pem".to_string()], DENY_GLOB_CAPS)
                 .unwrap_err();
             assert!(err.contains("non-UTF8"), "{err}");

@@ -1052,10 +1052,6 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn wait_timeout_then_hard_kill_reaps_grandchild_tree() {
-        if crate::pty_process_tests_skipped() {
-            eprintln!("skipped: PTY_PROCESS_TESTS=skip");
-            return;
-        }
         let sandbox = TestSandbox::new();
         let pid_file = sandbox.temp_dir().join("grandchild.pid");
         let mut process = TestProcess::spawn(
@@ -1166,10 +1162,6 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn panic_like_owner_drop_kills_direct_child_and_grandchild() {
-        if crate::pty_process_tests_skipped() {
-            eprintln!("skipped: PTY_PROCESS_TESTS=skip");
-            return;
-        }
         let sandbox = TestSandbox::new();
         let pid_file = sandbox.temp_dir().join("drop-grandchild.pid");
         let process = TestProcess::spawn(

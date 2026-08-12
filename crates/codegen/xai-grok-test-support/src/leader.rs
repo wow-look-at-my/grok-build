@@ -976,10 +976,6 @@ mod tests {
 
     #[tokio::test]
     async fn close_hard_kills_term_ignoring_descendant() {
-        if crate::pty_process_tests_skipped() {
-            eprintln!("skipped: PTY_PROCESS_TESTS=skip");
-            return;
-        }
         let temp = tempfile::tempdir().expect("tempdir");
         let pid_file = temp.path().join("descendant.pid");
         let script = format!(

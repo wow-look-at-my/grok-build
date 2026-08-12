@@ -233,12 +233,6 @@ jobs:
       # means it stops the *binary* on first failure, not the whole run).
       # The smoke test runs after.
       - name: Run tests (workspace)
-        env:
-          # On lean CI_RUNNER containers, PTY process-group tests fail because
-          # the container doesn't propagate SIGHUP/SIGKILL to process groups
-          # when a PTY closes. Skip them on the lean runner; they pass on
-          # ubuntu-latest where signal propagation works.
-          PTY_PROCESS_TESTS: ${{ vars.CI_RUNNER && 'skip' || '' }}
         run: |
           cargo nextest run --locked --workspace --profile ci
           cargo run --locked -p xai-grok-pager-bin -- --version
@@ -289,24 +283,15 @@ jobs:
       # cannot stand in for them: a model picker whose rows rendered blank had
       # passing tests over the width function the whole time. Every case here
       # spawns a process, so cap the workers rather than letting libtest fan out
-      # to the core count. The xai-grok-pager-pty-harness tests (scroll matrix,
-      # plan approval, scroll correctness) are also #[ignore]d and run here.
-      # On lean CI_RUNNER containers these PTY e2e tests may fail (no real
-      # terminal, container signal propagation) — the step is allowed to fail
-      # without blocking CI, since the core workspace tests and RAM guard are
-      # the gating criteria.
+      # to the core count.
       - name: Test (PTY end-to-end)
         env:
           PAGER_BINARY: ${{ github.workspace }}/target/debug/xai-grok-pager
-          PTY_PROCESS_TESTS: ${{ vars.CI_RUNNER && 'skip' || '' }}
-        continue-on-error: ${{ vars.CI_RUNNER && true || false }}
         run: |
           cargo nextest run --locked -p xai-grok-pager --profile ci \
             --test pty_e2e_smoke \
             --test pty_e2e_config_ui \
             --test pty_e2e_minimal \
-            --run-ignored all --test-threads 4
-          cargo nextest run --locked -p xai-grok-pager-pty-harness --profile ci \
             --run-ignored all --test-threads 4
 
   build-release:

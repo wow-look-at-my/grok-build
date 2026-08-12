@@ -103,16 +103,9 @@ fn a_root_off_the_anchor_is_measured_by_nobody() {
     let elsewhere = Volume::of(tmp.path()).other_device_for_test();
 
     let home = physical_buckets(&root, Volume::of(&root));
-    // On containerd overlayfs, `st_blocks` is unreliable (every file reports
-    // the same block count regardless of size), so the measured bytes may be
-    // far smaller than the logical file size.  The point is that the bytes
-    // ARE measured (Some), not the exact count.
+    assert!(home.total.bytes().is_some_and(|bytes| bytes >= 65536));
     assert!(
-        home.total.bytes().is_some(),
-        "the root is on its own volume and must be measured"
-    );
-    assert!(
-        home.buckets[&worktree].bytes().is_some(),
+        home.buckets[&worktree].bytes().is_some_and(|b| b >= 65536),
         "on its own volume the worktree is a counted bucket"
     );
 

@@ -943,10 +943,6 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn close_pty_kills_a_background_grandchild() {
-        if xai_grok_test_support::pty_process_tests_skipped() {
-            eprintln!("skipped: PTY_PROCESS_TESTS=skip");
-            return;
-        }
         tokio::task::LocalSet::new()
             .run_until(async {
                 let (gateway, _) = recording_gateway();
@@ -992,10 +988,6 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn scope_teardown_kills_a_background_grandchild() {
-        if xai_grok_test_support::pty_process_tests_skipped() {
-            eprintln!("skipped: PTY_PROCESS_TESTS=skip");
-            return;
-        }
         tokio::task::LocalSet::new()
             .run_until(async {
                 let (gateway, _) = recording_gateway();
