@@ -4042,6 +4042,38 @@ mod tests {
     use super::*;
     use crossterm::event::{KeyEvent, KeyEventState};
 
+    /// The CI poll timer fires with no frame in flight, so what it polls comes
+    /// from here rather than from the renderer. It must agree with the
+    /// renderer about which branch the dot is reporting — and report nothing
+    /// wherever the renderer draws no dot.
+    #[test]
+    fn ci_dot_target_follows_the_branch_the_dot_reports() {
+        use crate::app::agent::AgentId;
+        use crate::app::app_view::tests::test_app_with_agent;
+
+        let mut app = test_app_with_agent();
+        let id = AgentId(0);
+        let cwd = std::path::PathBuf::from("/ci-dot/poll-target");
+        {
+            let agent = app.agents.get_mut(&id).expect("agent");
+            agent.session.cwd = cwd.clone();
+            agent.current_branch = Some("feature/x".into());
+        }
+        assert_eq!(
+            ci_dot_target(&app),
+            Some((cwd.clone(), "feature/x".to_string()))
+        );
+
+        // Detached HEAD renders as `detached` with no dot, so there is nothing
+        // to poll for.
+        app.agents.get_mut(&id).expect("agent").current_branch = Some(String::new());
+        assert_eq!(ci_dot_target(&app), None);
+
+        // No agent view up: no status bar, no dot.
+        app.active_view = ActiveView::Welcome;
+        assert_eq!(ci_dot_target(&app), None);
+    }
+
     #[cfg(feature = "local-workspace")]
     #[test]
     fn welcome_oneshot_applies_to_create_worktree_session() {
