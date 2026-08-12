@@ -1476,6 +1476,10 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn process_group_kill_reaps_grandchild_tree() {
+        if std::env::var("PTY_PROCESS_TESTS").ok().map(|v| v == "skip").unwrap_or(false) {
+            eprintln!("skipped: PTY_PROCESS_TESTS=skip");
+            return;
+        }
         use tokio::io::{AsyncBufReadExt, BufReader};
 
         // Leader = sh; it backgrounds a grandchild in the SAME group (sh does

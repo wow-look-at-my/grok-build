@@ -423,6 +423,10 @@ pub(crate) mod tests {
     /// wait_for(Text) returns as soon as delayed output lands, not at the timeout.
     #[tokio::test(flavor = "multi_thread")]
     async fn wait_text_matches_delayed_output() {
+        if std::env::var("PTY_PROCESS_TESTS").ok().map(|v| v == "skip").unwrap_or(false) {
+            eprintln!("skipped: PTY_PROCESS_TESTS=skip");
+            return;
+        }
         let session = start_session(vec![
             "/bin/sh".into(),
             "-c".into(),
