@@ -43,3 +43,16 @@ verify serially wastes time when a parallel CI build could be running.
   into the session status bar in `src/app/agent_view/render.rs`.
 - The yellow "in progress" dot animates its HSV value in a sine wave between
   25% and 80% (see `ci_status::animate_value`).
+
+## Self-hosted CI runner
+
+- `vars.CI_RUNNER` selects the org's self-hosted runner; CI falls back to
+  hosted `ubuntu-latest` wherever that variable is unset. The image is lean,
+  so the workflow installs the C toolchain, rustup, ripgrep and protoc rather
+  than assuming either environment.
+- That runner has no PID 1 that reaps orphans, so
+  `xai-grok-pager-pty-harness`'s process-tree and `privacy_banner_e2e` cases
+  fail there (`PTY grandchild leaked after controller Drop`). Those suites are
+  `#[ignore]`d and CI runs only the pager's own `pty_e2e_*` tests, as it does
+  on `master`. Fixing that needs a change to the runner image (a `--init`-style
+  reaper), which belongs to the fleet owner — not a skip in this repo's tests.

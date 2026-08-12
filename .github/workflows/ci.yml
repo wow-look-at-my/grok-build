@@ -15,11 +15,10 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  # A UTF-8 locale is required for tests that round-trip non-ASCII OsStrings
-  # (e.g. xai-grok-sandbox's `fails_closed_on_non_utf8_*` hit errno 84
-  # "Invalid or incomplete multibyte or wide character" on a lean runner with
-  # no locale set). Hosted ubuntu-latest defaults to C.UTF-8; setting it
-  # globally is a no-op there and fixes the lean CI_RUNNER image.
+  # Tests that round-trip non-ASCII OsStrings (xai-grok-sandbox's
+  # `fails_closed_on_non_utf8_*`) fail with errno 84 under a non-UTF-8 locale.
+  # The runners default to C.UTF-8, so this states the requirement rather than
+  # changing anything.
   LANG: C.UTF-8
   LC_ALL: C.UTF-8
   # sccache wraps rustc and caches individual compilation outputs (per
@@ -43,20 +42,19 @@ env:
 jobs:
   build-test:
     name: Build & test
-    # The heavy build runs on a runner named by the CI_RUNNER repo/org
-    # variable (e.g. a self-hosted runner label), defaulting to the standard
-    # hosted ubuntu-latest. On the self-hosted runner, the job runs inside
-    # a container built from ci/Dockerfile.runner (tini + tmpfs), which
-    # fixes overlayfs and signal-propagation issues. Note: a `container:` job on a hosted runner does
-    # NOT swap the runner's OS image — it only isolates the job's processes,
-    # so the stock image's disk/RAM limits still apply unless CI_RUNNER points
-    # at a genuinely larger or self-hosted runner.
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
-    # The full `cargo test --workspace` (compile + ~90 test harness binaries)
-    # runner may need more time, but 45 min is the target ceiling — if tests
-    # hang past it, that's a runner-environment issue (the wow-linux lean
-    # image's PTY/process semantics cause the shell's terminal tests to
-    # hang), not something to solve by inflating the timeout.
+    # Hosted, deliberately. This suite asserts on host semantics the org's lean
+    # self-hosted image does not provide: orphan reaping and process-group
+    # signals (every `*_grandchild*` case), st_blocks on a non-overlay
+    # filesystem (disk_usage_cmd / fs_size), and a real /bin/bash for the PTY
+    # tests. Pointing this job at that runner turns ~20 of them red, and the
+    # only way to make them pass there is to weaken what they check — so the
+    # runner belongs to the image, not to the tests. Revisit if the fleet image
+    # gains an init/reaper.
+    runs-on: ubuntu-latest
+    # Compiling ~90 test harness binaries dominates this job; the run itself is
+    # minutes. 45 is the ceiling, not a target to grow: a job that needs more
+    # has a hung test, and nextest's per-test timeout (.config/nextest.toml)
+    # is what fails that in 60s instead of burning the whole budget.
     timeout-minutes: 45
     env:
       # Namespace this job's sccache entries away from the darwin release
@@ -69,6 +67,10 @@ jobs:
       # is `sccache-v{VERSION}-{SCCACHE_GHA_VERSION}`, so a mismatch between
       # the installed sccache version and this namespace invalidates the cache.
       SCCACHE_GHA_VERSION: sccache-v0.17.0-x86_64-unknown-linux-gnu
+      # Every PTY suite drives this binary, and the harness builds it itself
+      # when this is unset — see the build step. Job-wide so the workspace run
+      # and the PTY step resolve the same one.
+      PAGER_BINARY: ${{ github.workspace }}/target/debug/xai-grok-pager
       # No global CARGO_BUILD_JOBS here. The compile-RAM protection lives
       # entirely on the "Build test harnesses" step, which pins CARGO_BUILD_JOBS
       # to 3 (see its comment). The run step reuses that same unified graph and
@@ -96,11 +98,7 @@ jobs:
       # full disk (ld/rustc I/O stalls). Free the known-safe oversized image
       # dirs BEFORE building. dotnet/android/swift/haskell are never needed
       # here; tool caches (rustup, sccache) are kept for speed.
-      # Only needed on the hosted ubuntu-latest fallback: when CI_RUNNER
-      # points at a self-hosted runner, that image is already lean (that was
-      # the point), so there is nothing to free and the step would just churn.
       - name: Free up disk space before build
-        if: ${{ !vars.CI_RUNNER }}
         uses: jlumbroso/free-disk-space@main
         with:
           tool-cache: false
@@ -123,42 +121,8 @@ jobs:
           echo "PROTOC=$RUNNER_TEMP/protoc/bin/protoc" >> "$GITHUB_ENV"
           "$RUNNER_TEMP/protoc/bin/protoc" --version
 
-      # The Rust build needs a C toolchain + openssl/zlib dev headers at the
-      # OS level: hosted ubuntu-latest ships build-essential/pkg-config/
-      # libssl-dev/zlib1g-dev preinstalled, but a lean CI_RUNNER image may not
-      # (this repo's own runner hit `linker cc not found` compiling
-      # proc-macro2). Ensure the packages exist, no-op when already present.
-      # Also ensure /bin/bash exists — the shell crate's PTY tests hardcode
-      # it (create_test_pty -> Some("/bin/bash")), and without it the test
-      # process hangs forever waiting for a shell that never starts.
-      # (The C.UTF-8 locale is set via the global LANG/LC_ALL env; on glibc
-      # 2.35+ it is built-in and needs no locale-gen.)
-      - name: Ensure C build toolchain (build-essential, pkg-config, libssl-dev, zlib1g-dev, bash)
-        run: |
-          set -euo pipefail
-          dpkg -s build-essential pkg-config libssl-dev zlib1g-dev bash >/dev/null 2>&1 || {
-            sudo apt-get update -qq
-            sudo apt-get install -y -qq build-essential pkg-config libssl-dev zlib1g-dev bash
-          }
-
-      # Install the toolchain pinned by rust-toolchain.toml. On the hosted
-      # ubuntu-latest fallback rustup is preinstalled, but when CI_RUNNER
-      # points at a lean self-hosted runner rustup may be absent (builtin
-      # images ship it; a purpose-built lean image may not), so bootstrap it
-      # first when missing. rustup show then installs the pinned channel,
-      # components, and targets from the committed rust-toolchain.toml.
       - name: Install Rust toolchain (pinned by rust-toolchain.toml)
-        run: |
-          command -v rustup >/dev/null 2>&1 || {
-            curl --proto '=https' --tlsv1.2 -sSf \
-              https://sh.rustup.rs -o "$RUNNER_TEMP/rustup-init.sh"
-            sh "$RUNNER_TEMP/rustup-init.sh" -y --no-modify-path --default-toolchain none
-            # GITHUB_PATH only reaches later steps, so also export for this
-            # step's own `rustup show` below.
-            export PATH="$HOME/.cargo/bin:$PATH"
-            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-          }
-          rustup show
+        run: rustup show
 
       # The grep and glob tools shell out to ripgrep: rg_path() ends at a bare
       # "rg" on PATH, and a runner has none, so every one of their tests failed
@@ -167,10 +131,11 @@ jobs:
         uses: wow-look-at-my/actions@cache-rg#latest
 
       # cargo-nextest runs each test in its own process with a per-test
-      # timeout (configured in .config/nextest.toml). This catches hung
-      # tests (e.g. a PTY test waiting for /bin/bash on a lean runner)
-      # in 60s instead of blocking the whole job until the timeout-minutes
-      # ceiling. The standard cargo test harness has no per-test timeout.
+      # timeout (configured in .config/nextest.toml), so a test that wedges —
+      # a PTY suite waiting on a process that never starts — fails in 60s
+      # instead of eating the whole timeout-minutes budget. The standard cargo
+      # test harness has no per-test timeout, which is how a single hung test
+      # used to burn a 45-minute job.
       - name: Install cargo-nextest
         run: |
           mkdir -p "$RUNNER_TEMP/nextest-bin"
@@ -225,18 +190,24 @@ jobs:
           CARGO_BUILD_JOBS: "3"
         run: |
           cargo test --locked --workspace --no-run --no-fail-fast
+          # The pager binary too, and here rather than from a test: the PTY
+          # suites drive the real binary, and `pager_binary()` falls back to
+          # running `cargo build` itself when PAGER_BINARY is unset. Under
+          # nextest that fallback is once per test process, so a dozen of them
+          # queue on cargo's package lock and time out. Building it once, and
+          # exporting PAGER_BINARY for the whole job, removes that entirely.
+          cargo build --locked -p xai-grok-pager-bin
 
       # Run the pre-built test binaries with cargo-nextest, which enforces a
       # per-test timeout (60s, configured in .config/nextest.toml). A hung
-      # test — e.g. a PTY test waiting for /bin/bash on a lean runner —
-      # fails in 60s instead of blocking the whole job. nextest runs all
-      # tests even on failure by default (fail-fast = true in the profile
-      # means it stops the *binary* on first failure, not the whole run).
-      # The smoke test runs after.
+      # test fails in 60s instead of blocking the whole job. The `ci` profile
+      # also sets fail-fast = false, so one failure doesn't hide every test
+      # behind it and each push surfaces the whole list. The smoke test runs
+      # after: the binary every PTY suite drives must at least start.
       - name: Run tests (workspace)
         run: |
           cargo nextest run --locked --workspace --profile ci
-          cargo run --locked -p xai-grok-pager-bin -- --version
+          "$PAGER_BINARY" --version
 
       # RAM regression guard: prevent the compile-RAM pathology from silently
       # coming back (see the build step above). Two monolith crates' single-rustc
@@ -286,8 +257,6 @@ jobs:
       # spawns a process, so cap the workers rather than letting libtest fan out
       # to the core count.
       - name: Test (PTY end-to-end)
-        env:
-          PAGER_BINARY: ${{ github.workspace }}/target/debug/xai-grok-pager
         run: |
           cargo nextest run --locked -p xai-grok-pager --profile ci \
             --test pty_e2e_smoke \
