@@ -128,8 +128,8 @@ jobs:
       # libssl-dev/zlib1g-dev preinstalled, but a lean CI_RUNNER image may not
       # (this repo's own runner hit `linker cc not found` compiling
       # proc-macro2). Ensure the packages exist, no-op when already present.
-      # Also ensure the C.UTF-8 locale is available (glibc 2.35+ ships it
-      # built-in, but generate it explicitly in case the image strips locales).
+      # (The C.UTF-8 locale is set via the global LANG/LC_ALL env; on glibc
+      # 2.35+ it is built-in and needs no locale-gen.)
       - name: Ensure C build toolchain (build-essential, pkg-config, libssl-dev, zlib1g-dev)
         run: |
           set -euo pipefail
@@ -137,7 +137,6 @@ jobs:
             sudo apt-get update -qq
             sudo apt-get install -y -qq build-essential pkg-config libssl-dev zlib1g-dev
           }
-          locale -a 2>/dev/null | grep -qi '^C\.utf-8$' || sudo locale-gen C.UTF-8
 
       # Install the toolchain pinned by rust-toolchain.toml. On the hosted
       # ubuntu-latest fallback rustup is preinstalled, but when CI_RUNNER
