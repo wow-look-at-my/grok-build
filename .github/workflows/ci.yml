@@ -69,7 +69,6 @@ jobs:
           android: true
           dotnet: true
           haskell: true
-          swift: true
 
       - name: Install protoc (pinned v29.3)
         run: |
@@ -98,8 +97,14 @@ jobs:
       # inputs and only recompiles what genuinely changed.
       - name: Run sccache-cache
         uses: mozilla-actions/sccache-action@v0.0.11
+        # The version input MUST carry the leading 'v': the action builds its
+        # download URL as releases/download/${version}/... which only exists
+        # for the tag 'v0.17.0'. Dropping the v made it 404 and skip the whole
+        # build. This installed binary still reports 0.17.0, so it stays in
+        # sync with SCCACHE_GHA_VERSION above and the GHA cache key
+        # (sccache-v{VERSION}-{SCCACHE_GHA_VERSION}) is unchanged.
         with:
-          version: 0.17.0
+          version: v0.17.0
 
       # --no-fail-fast: without it cargo stops at the first failing crate, so a
       # single failure hides every crate after it and the next push finds a new
@@ -176,8 +181,9 @@ jobs:
 
       - name: Run sccache-cache
         uses: mozilla-actions/sccache-action@v0.0.11
+        # Same 'v' prefix requirement as build-test: the tag is v0.17.0.
         with:
-          version: 0.17.0
+          version: v0.17.0
 
       - name: Build release binary
         run: cargo build --locked --release -p xai-grok-pager-bin
