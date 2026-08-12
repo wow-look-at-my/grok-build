@@ -82,8 +82,11 @@ jobs:
       # full disk (ld/rustc I/O stalls). Free the known-safe oversized image
       # dirs BEFORE building. dotnet/android/swift/haskell are never needed
       # here; tool caches (rustup, sccache) are kept for speed.
-      # Run early so there is headroom for the entire build+test.
+      # Only needed on the hosted ubuntu-latest fallback: when CI_RUNNER
+      # points at a self-hosted runner, that image is already lean (that was
+      # the point), so there is nothing to free and the step would just churn.
       - name: Free up disk space before build
+        if: ${{ !vars.CI_RUNNER }}
         uses: jlumbroso/free-disk-space@main
         with:
           tool-cache: false
@@ -106,8 +109,24 @@ jobs:
           echo "PROTOC=$RUNNER_TEMP/protoc/bin/protoc" >> "$GITHUB_ENV"
           "$RUNNER_TEMP/protoc/bin/protoc" --version
 
+      # Install the toolchain pinned by rust-toolchain.toml. On the hosted
+      # ubuntu-latest fallback rustup is preinstalled, but when CI_RUNNER
+      # points at a lean self-hosted runner rustup may be absent (builtin
+      # images ship it; a purpose-built lean image may not), so bootstrap it
+      # first when missing. rustup show then installs the pinned channel,
+      # components, and targets from the committed rust-toolchain.toml.
       - name: Install Rust toolchain (pinned by rust-toolchain.toml)
-        run: rustup show
+        run: |
+          command -v rustup >/dev/null 2>&1 || {
+            curl --proto '=https' --tlsv1.2 -sSf \
+              https://sh.rustup.rs -o "$RUNNER_TEMP/rustup-init.sh"
+            sh "$RUNNER_TEMP/rustup-init.sh" -y --no-modify-path --default-toolchain none
+            # GITHUB_PATH only reaches later steps, so also export for this
+            # step's own `rustup show` below.
+            export PATH="$HOME/.cargo/bin:$PATH"
+            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          }
+          rustup show
 
       # The grep and glob tools shell out to ripgrep: rg_path() ends at a bare
       # "rg" on PATH, and a runner has none, so every one of their tests failed
