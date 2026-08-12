@@ -49,18 +49,21 @@ jobs:
       # is `sccache-v{VERSION}-{SCCACHE_GHA_VERSION}`, so a mismatch between
       # the installed sccache version and this namespace invalidates the cache.
       SCCACHE_GHA_VERSION: sccache-v0.17.0-x86_64-unknown-linux-gnu
-      # The compile-RAM diagnosis (see the RAM-guard step): a single rustc that
-      # monomorphizes xai-grok-shell's whole test harness (365k LOC + 4,595
-      # in-lib #[test]s) peaks at ~8-9 GiB cold, and that peak is NOT reduced by
-      # codegen-units (128->512 unchanged) or by disabling incremental, because
-      # it is spent in type-check/monomorphization before CGU splitting. CI
-      # runs rustc under sccache (94-100% hit), so real RSS is far lower, but a
-      # modest parallelism bound keeps concurrent multi-GiB units from summing
-      # past the runner. Measured safe for the worst crate: cold
-      # `cargo test --no-run -j3` completes at ~11.4 GiB. -j3 is meaningfully
-      # above the earlier -j2 and still within budget; the RAM guard (below)
-      # fails the job if a cold build would exceed the byte budget we allow.
-      CARGO_BUILD_JOBS: "3"
+      # Compile-RAM handling (see the RAM-guard step). Two workspace crates —
+      # xai-grok-shell (365k LOC, 4,595 in-lib #[test]s) and xai-grok-pager
+      # (463k LOC, 8,468 in-lib #[test]s) — each compile their whole crate plus
+      # every in-lib test into ONE rustc that cold-peaks at ~8-9 GiB and ~7.3
+      # GiB respectively (measured). That peak is NOT reduced by codegen-units
+      # (128->512 unchanged), disabling incremental, or any [profile] knob: it
+      # is spent in type-check/monomorphization before CGU splitting, so it is
+      # inherent to the monolith scale. The fix is structural, not a global
+      # parallelism cap: the two monolith harnesses are built in an isolated
+      # -j1 phase (so they never overlap each other or any other multi-GiB
+      # unit), while the remaining ~62 crates compile in parallel at -j8. This
+      # keeps the aggregate process-group peak deterministically bounded by
+      # max(shell ~9 GiB, pager ~7.3 GiB, parallel-tier sum) instead of the
+      # sum of many concurrent multi-GiB units that used to hit the 16 GiB cap.
+      CARGO_BUILD_JOBS: "8"
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
@@ -118,15 +121,32 @@ jobs:
         with:
           version: v0.17.0
 
-      # Build-then-run split: the expensive, RAM-heavy phase is *compiling* the
-      # ~90 test harnesses (the shell crate's single --lib test build cold-peaks
-      # near 9 GiB). Compiling and running in one `cargo test` call hides that
-      # cost and lets a memory spike prune the whole step. So first build every
-      # test binary with --no-run, then run them; the run phase is trivial and
-      # can use full parallelism without risking OOM.
-      - name: Build test harnesses (compile, no-run)
+      # Build-then-run split with monolith isolation: the expensive, RAM-heavy
+      # phase is *compiling* the ~90 test harnesses. Two crates (xai-grok-shell
+      # and xai-grok-pager) each compile their entire crate + every in-lib test
+      # into ONE rustc that cold-peaks at ~9 GiB and ~7.3 GiB respectively.
+      # Compiling and running in one `cargo test` call hides that cost and lets
+      # a memory spike prune the whole step. Worse, running those two multi-GiB
+      # harnesses CONCURRENTLY with each other or with the other crates' harnesses
+      # under the old global -j3/-j2 cap was a lottery that could sum past the
+      # 16 GiB runner limit (one measured -j3 sample pushed the aggregate to
+      # ~17 GiB once shared-page overcount is set aside). So we first build in
+      # two non-overlapping phases: (1) all the ordinary crates' harnesses in
+      # parallel at -j8 (no shell/pager), then (2) the two monolith harnesses in
+      # an isolated -j1 phase where each compiles alone, so their combined
+      # aggregate never exceeds the larger of the two (~9 GiB). Then we run
+      # everything; the run phase is trivial and can use full parallelism
+      # without risking OOM.
+      - name: Build test harnesses (parallel tier, monoliths excluded)
         run: |
-          cargo test --locked --workspace --no-run --no-fail-fast
+          cargo test --locked --workspace \
+            --exclude xai-grok-shell \
+            --exclude xai-grok-pager \
+            --no-run --no-fail-fast
+      - name: Build monolith test harnesses (isolated, -j1)
+        run: |
+          cargo test --locked -p xai-grok-shell -p xai-grok-pager \
+            --lib --no-run --no-fail-fast -j1
 
       # --no-fail-fast: without it cargo stops at the first failing crate, so a
       # single failure hides every crate after it and the next push finds a new
@@ -140,23 +160,33 @@ jobs:
           ./target/debug/xai-grok-pager --version
 
       # RAM regression guard: prevent the compile-RAM pathology from silently
-      # coming back behind the jobs bound (see env comment). A cold full build
-      # of xai-grok-shell's test harness needs ~9 GiB, so this CI step is a
-      # cheap, deterministic structural guard on the shipped config instead of
-      # a slow cold rebuild (the real cold-RSS measurement is committed as
-      # ci/ram-guard.sh and can be run where cold RAM headroom exists). These
-      # assertions drive the actual settings that keep CI within budget: the
-      # parallelism is bounded at 3 (3 > the old 2, still below OOM) and the
-      # test step is split into compile then run.
-      - name: RAM guard (compile-RAM config intact)
+      # coming back behind the monolith-isolation build split (see the two build
+      # steps above). A cold full build of xai-grok-shell's test harness needs
+      # ~9 GiB and xai-grok-pager's ~7.3 GiB, so this CI step is a cheap,
+      # deterministic STRUCTURAL guard on the shipped config — it fails if the
+      # monolith isolation (parallel tier without shell/pager + an isolated -j1
+      # phase) is ever removed and the multi-GiB harnesses could again overlap.
+      # The real cold aggregate-RSS measurement of the shipped isolated command
+      # is committed as ci/ram-guard.sh and can be run where cold RAM headroom
+      # exists. These assertions drive the actual settings that keep CI within
+      # budget: the two monolith crates are isolated out of the parallel tier
+      # and built at -j1.
+      - name: RAM guard (monolith-isolation split intact)
         run: |
           set -euo pipefail
           fail=0
-          grep -q 'CARGO_BUILD_JOBS: "3"' .github/workflows/ci.yml || { echo "missing CARGO_BUILD_JOBS=3"; fail=1; }
-          grep -q -- '--workspace --no-run --no-fail-fast' .github/workflows/ci.yml || { echo "compile (--no-run) split missing"; fail=1; }
-          grep -q -- 'cargo test --locked --workspace --no-fail-fast' .github/workflows/ci.yml || { echo "run step missing"; fail=1; }
+          for crate in xai-grok-shell xai-grok-pager; do
+            grep -qF -- "--exclude $crate" .github/workflows/ci.yml \
+              || { echo "missing --exclude ${crate} in parallel tier"; fail=1; }
+          done
+          grep -qF -- '-p xai-grok-shell -p xai-grok-pager' .github/workflows/ci.yml \
+            || { echo "missing isolated monolith phase (-p shell -p pager)"; fail=1; }
+          grep -qF -- '--no-run --no-fail-fast -j1' .github/workflows/ci.yml \
+            || { echo "missing -j1 isolated phase"; fail=1; }
+          grep -q 'CARGO_BUILD_JOBS: "8"' .github/workflows/ci.yml \
+            || { echo "missing parallel CARGO_BUILD_JOBS=8"; fail=1; }
           if [ "$fail" -ne 0 ]; then echo "RAM GUARD: FAIL"; exit 1; fi
-          echo "RAM GUARD: PASS — compile-RAM config intact (jobs=3, build-then-run split)"
+          echo "RAM GUARD: PASS — monolith-isolation split intact (shell+pager excluded from -j8 tier, built isolated at -j1)"
 
       # The PTY suites drive the real binary through a virtual terminal and
       # assert on what is actually on screen. They are #[ignore]d because they
