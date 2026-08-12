@@ -41,17 +41,58 @@ env:
   BUILDHOST_PROJECT: grok-build
 
 jobs:
+  # Build (or rebuild) the runner container image from ci/Dockerfile.runner.
+  # Only runs on the self-hosted runner (when CI_RUNNER is set). The image
+  # is tagged with the Dockerfile's content hash, so it rebuilds only when
+  # the Dockerfile changes. The build-test job depends on this step.
+  build-runner-image:
+    name: Build runner image
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    if: ${{ vars.CI_RUNNER }}
+    timeout-minutes: 10
+    outputs:
+      image-tag: ${{ steps.image-tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Compute image tag from Dockerfile hash
+        id: image-tag
+        run: |
+          TAG="runner-$(sha256sum ci/Dockerfile.runner | cut -c1-12)"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Image tag: $TAG"
+
+      - name: Check if image exists
+        id: check
+        run: |
+          if docker image inspect "${{ steps.image-tag.outputs.tag }}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Image already up to date"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "Image needs building"
+          fi
+
+      - name: Build runner image
+        if: steps.check.outputs.exists != 'true'
+        run: |
+          docker build \
+            -t "${{ steps.image-tag.outputs.tag }}" \
+            -f ci/Dockerfile.runner \
+            .
+
   build-test:
     name: Build & test
     # The heavy build runs on a runner named by the CI_RUNNER repo/org
     # variable (e.g. a self-hosted runner label), defaulting to the standard
-    # hosted ubuntu-latest. Note: a `container:` job on a hosted runner does
+    # hosted ubuntu-latest. On the self-hosted runner, the job runs inside
+    # a container built from ci/Dockerfile.runner (tini + tmpfs), which
+    # fixes overlayfs and signal-propagation issues. Note: a `container:` job on a hosted runner does
     # NOT swap the runner's OS image — it only isolates the job's processes,
     # so the stock image's disk/RAM limits still apply unless CI_RUNNER points
     # at a genuinely larger or self-hosted runner.
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     # The full `cargo test --workspace` (compile + ~90 test harness binaries)
-    # finishes within 45 min on a hosted ubuntu-latest. A self-hosted CI_RUNNER
     # runner may need more time, but 45 min is the target ceiling — if tests
     # hang past it, that's a runner-environment issue (the wow-linux lean
     # image's PTY/process semantics cause the shell's terminal tests to
