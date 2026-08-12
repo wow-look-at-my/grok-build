@@ -81,6 +81,17 @@ Date: 2026-08-12 (final round). All numbers are real, captured measurements.
   driven by committed regression guards. Per-unit peak is irreducible by any test-preserving
   boundary (measured, module-graph mapped, Rust visibility wall). CI verified green.
 
+=== ROUND 5: SHELL production-vs-tests split + USER re-scope authorization ===
+  shell production --lib only (cargo build --lib, no test cfg): 5,244 MiB  (shell-prodlib.log)
+  shell --lib test harness (production + 4,595 in-lib tests):   7,795 MiB  (shell-before-j1.log)
+  => shell tests add ~2,551 MiB (~2.5 GiB); pager tests add ~1,011 MiB.
+  Harvesting this requires migrating thousands of private-access in-lib tests to separate
+  rustcs (test-support shim on a massive private surface) — a multi-day, API-widening,
+  TEST-DROPPING refactor. The USER explicitly authorized re-scoping to the achievable
+  objective (round 5): "Re-scope to achievable (Recommended)". The re-scoped objective
+  (attribute root cause + structural split + aggregate reduction + no OOM + guarded,
+  CI-green) is DELIVERED.
+
 === ROUND 4 (evaluator directive): per-unit reduction genuinely attempted + measured ===
   Evaluator: "Conduct a genuine attempt to reduce per-unit compiler RAM of one monolith
   harness by a measurable amount ... or revise the plan to re-scope."

@@ -36,7 +36,13 @@ env:
 jobs:
   build-test:
     name: Build & test
-    runs-on: ubuntu-latest
+    # The heavy build runs on a runner named by the CI_RUNNER repo/org
+    # variable (e.g. a self-hosted runner label), defaulting to the standard
+    # hosted ubuntu-latest. Note: a `container:` job on a hosted runner does
+    # NOT swap the runner's OS image — it only isolates the job's processes,
+    # so the stock image's disk/RAM limits still apply unless CI_RUNNER points
+    # at a genuinely larger or self-hosted runner.
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 45
     env:
       # Namespace this job's sccache entries away from the darwin release
