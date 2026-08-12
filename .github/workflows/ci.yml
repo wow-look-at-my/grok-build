@@ -241,7 +241,7 @@ jobs:
           PTY_PROCESS_TESTS: ${{ vars.CI_RUNNER && 'skip' || '' }}
         run: |
           cargo nextest run --locked --workspace --profile ci
-          ./target/debug/xai-grok-pager --version
+          cargo run --locked -p xai-grok-pager-bin -- --version
 
       # RAM regression guard: prevent the compile-RAM pathology from silently
       # coming back (see the build step above). Two monolith crates' single-rustc
