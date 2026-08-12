@@ -130,6 +130,9 @@ pub struct WelcomeRenderResult {
     pub privacy_banner_opt_out_rect: Option<Rect>,
     pub privacy_banner_terms_rect: Option<Rect>,
     pub privacy_banner_policy_rect: Option<Rect>,
+    /// Screen rect of the build-commit hash text in the version badge, so the
+    /// caller can wrap it with an OSC 8 hyperlink when the terminal supports it.
+    pub commit_hash_link_rect: Option<Rect>,
     /// Hit-test rects for the chat workspace-mode segmented control.
     #[cfg(feature = "local-workspace")]
     pub workspace_mode_rects: WorkspaceModeHitRects,
@@ -410,7 +413,7 @@ pub(super) fn render_version_badge(
     h_margin: u16,
     is_api_key_auth: bool,
     mode: VersionBadgeMode<'_>,
-) {
+) -> Option<Rect> {
     let version_area = Rect {
         width: version_rect.width.saturating_sub(h_margin),
         ..version_rect
@@ -448,10 +451,21 @@ pub(super) fn render_version_badge(
             "Logged in with API key",
             Style::default().fg(theme.gray),
         ));
-        spans.push(sep);
+        spans.push(sep.clone());
     }
 
     let channel = xai_grok_update::channel_label();
+
+    // The build-commit short hash, displayed after the version string so the
+    // welcome screen shows exactly which commit the binary was built from.
+    // The full hash (BUILD_COMMIT) is used as the OSC 8 link target via the
+    // returned `hash_link_rect` (see below). Suppressed when the build ran
+    // outside a git worktree (`"unknown"`), and in the HeroFooter mode (the
+    // hero-box layout already shows the hash inline inside the box).
+    let commit_short = xai_grok_version::BUILD_COMMIT_SHORT;
+    let show_hash = commit_short != "unknown"
+        && !matches!(mode, VersionBadgeMode::HeroFooter);
+
     match &mode {
         VersionBadgeMode::Full { .. } => {
             spans.push(Span::styled(
@@ -487,13 +501,62 @@ pub(super) fn render_version_badge(
         }
     }
 
+    // Append the commit hash span (with a separator) after the version text.
+    // Track whether the hash is the last span so we can compute its screen
+    // position for the OSC 8 link overlay.
+    if show_hash {
+        spans.push(sep.clone());
+        spans.push(Span::styled(
+            commit_short,
+            Style::default()
+                .fg(theme.gray)
+                .add_modifier(Modifier::UNDERLINED),
+        ));
+    }
+
     // Only alpha and beta builds print a channel, so on stable the spans can end on a separator.
     if spans.last().is_some_and(|s| s.content == SEP) {
         spans.pop();
     }
 
+    // Compute the hash span's absolute screen rect so the caller can wrap it
+    // with an OSC 8 hyperlink. The Paragraph widget places the line according
+    // to `align`; for right-aligned lines the line starts at
+    // `area.x + area.width - line_width`.
+    let mut hash_link_rect = None;
+    if show_hash
+        && let Some(hash_span) = spans.last()
+    {
+        let total_width: usize = spans.iter().map(|s| s.content.width()).sum();
+        let hash_width = hash_span.content.width() as u16;
+        let hash_offset: usize = spans[..spans.len().saturating_sub(1)]
+            .iter()
+            .map(|s| s.content.width())
+            .sum();
+
+        let line_start_x = match align {
+            Alignment::Right => version_area
+                .x
+                .saturating_add(version_area.width)
+                .saturating_sub(total_width as u16),
+            Alignment::Center => {
+                version_area.x + version_area.width.saturating_sub(total_width as u16) / 2
+            }
+            Alignment::Left => version_area.x,
+        };
+        let hash_x = line_start_x.saturating_add(hash_offset as u16);
+        hash_link_rect = Some(Rect {
+            x: hash_x,
+            y: version_area.y,
+            width: hash_width,
+            height: 1,
+        });
+    }
+
     let version_line = Line::from(spans).alignment(align);
     Paragraph::new(version_line).render(version_area, buf);
+
+    hash_link_rect
 }
 
 /// Render the prompt box and version line (shared across welcome states).
@@ -519,6 +582,7 @@ fn render_prompt_and_version(
 ) -> (
     Option<(u16, u16)>,
     Option<crate::terminal::overlay::PostFlush>,
+    Option<Rect>,
 ) {
     let [_, prompt_centered, _] = Layout::horizontal([
         Constraint::Min(0),
@@ -569,7 +633,7 @@ fn render_prompt_and_version(
             layout.version.width,
         );
     } else if !skip_version {
-        render_version_badge(
+        let hash_rect = render_version_badge(
             layout.version,
             buf,
             theme,
@@ -580,8 +644,9 @@ fn render_prompt_and_version(
                 subscription_tier: None,
             },
         );
+        return (prompt_result.0, prompt_result.1, hash_rect);
     } else {
-        render_version_badge(
+        let hash_rect = render_version_badge(
             layout.version,
             buf,
             theme,
@@ -590,9 +655,10 @@ fn render_prompt_and_version(
             is_api_key_auth,
             VersionBadgeMode::HeroFooter,
         );
+        return (prompt_result.0, prompt_result.1, hash_rect);
     }
 
-    prompt_result
+    (prompt_result.0, prompt_result.1, None)
 }
 
 /// All display state for rendering the welcome screen.
@@ -723,7 +789,7 @@ pub fn render_welcome(
                 usage_warning: None,
                 usage_warning_critical: false,
             };
-            let (menu_rects, post_flush_escapes) = render_welcome_blocked(
+            let (menu_rects, post_flush_escapes, commit_hash_link_rect) = render_welcome_blocked(
                 content_area,
                 buf,
                 msg,
@@ -737,6 +803,7 @@ pub fn render_welcome(
                 cursor_pos: None,
                 post_flush_escapes,
                 menu_rects,
+                commit_hash_link_rect,
                 ..Default::default()
             }
         }
@@ -762,7 +829,7 @@ pub fn render_welcome(
         }
         AuthState::Done if params.is_zdr_blocked => {
             let menu = [("l", "Switch account"), ("q", "Quit")];
-            let (menu_rects, post_flush_escapes) = render_welcome_blocked(
+            let (menu_rects, post_flush_escapes, commit_hash_link_rect) = render_welcome_blocked(
                 content_area,
                 buf,
                 Some((
@@ -778,6 +845,7 @@ pub fn render_welcome(
             WelcomeRenderResult {
                 post_flush_escapes,
                 menu_rects,
+                commit_hash_link_rect,
                 ..Default::default()
             }
         }
@@ -844,7 +912,11 @@ fn render_welcome_blocked(
     prompt: Option<(&mut PromptWidget, &PromptInfo<'_>)>,
     h_margin: u16,
     compact: bool,
-) -> (Vec<Rect>, Option<crate::terminal::overlay::PostFlush>) {
+) -> (
+    Vec<Rect>,
+    Option<crate::terminal::overlay::PostFlush>,
+    Option<Rect>,
+) {
     let theme = Theme::current();
 
     let msg_height = if message.is_some() { 2u16 } else { 0u16 };
@@ -896,7 +968,7 @@ fn render_welcome_blocked(
         None
     };
 
-    render_version_badge(
+    let hash_rect = render_version_badge(
         layout.version,
         buf,
         &theme,
@@ -907,7 +979,7 @@ fn render_welcome_blocked(
             subscription_tier: None,
         },
     );
-    (menu_rects, post_flush_escapes)
+    (menu_rects, post_flush_escapes, hash_rect)
 }
 
 /// Render the folder-trust question. Mirrors [`render_welcome_blocked`]'s
@@ -971,7 +1043,7 @@ fn render_welcome_trust(
     let menu_area = inset_horizontal(layout.menu, prompt::prompt_inset(compact));
     let menu_rects = render_menu(menu_area, buf, theme, &menu_items, selected, None, 0);
 
-    render_version_badge(
+    let commit_hash_link_rect = render_version_badge(
         layout.version,
         buf,
         theme,
@@ -988,6 +1060,7 @@ fn render_welcome_trust(
     // all-`None` literal.
     WelcomeRenderResult {
         menu_rects,
+        commit_hash_link_rect,
         ..Default::default()
     }
 }
@@ -1827,6 +1900,7 @@ fn render_welcome_done(
     let mut announcement_truncated = false;
     let mut announcement_rect: Option<Rect> = None;
     let mut upgrade_cta_rect: Option<Rect> = None;
+    let mut commit_hash_link_rect: Option<Rect> = None;
 
     #[cfg(feature = "local-workspace")]
     let mut workspace_mode_rects = WorkspaceModeHitRects::default();
@@ -1886,6 +1960,7 @@ fn render_welcome_done(
         announcement_truncated = rects.announcement_truncated;
         announcement_rect = rects.announcement_rect;
         upgrade_cta_rect = rects.upgrade_cta_rect;
+        commit_hash_link_rect = rects.commit_hash_link_rect;
         #[cfg(feature = "local-workspace")]
         {
             workspace_mode_rects = rects.workspace_mode_rects;
@@ -2081,7 +2156,7 @@ fn render_welcome_done(
             VersionBadgeMode::Full {
                 subscription_tier: p.subscription_tier,
             },
-        );
+        ).map(|r| commit_hash_link_rect = Some(r));
         (None, None)
     } else {
         // Privacy banner owns the tip slot when visible (above the prompt),
@@ -2198,7 +2273,7 @@ fn render_welcome_done(
             usage_warning_critical,
         };
 
-        render_prompt_and_version(
+        let (cp, pf, hash_rect) = render_prompt_and_version(
             &layout,
             content_area.width,
             buf,
@@ -2221,7 +2296,13 @@ fn render_welcome_done(
             p.pending_hint,
             p.is_api_key_auth,
             layout.has_hero_box(),
-        )
+        );
+        // Don't clobber the hash rect from the hero-box inline badge when
+        // the footer path returned None (HeroFooter suppresses the hash).
+        if hash_rect.is_some() {
+            commit_hash_link_rect = hash_rect;
+        }
+        (cp, pf)
     };
 
     WelcomeRenderResult {
@@ -2248,6 +2329,7 @@ fn render_welcome_done(
         privacy_banner_opt_out_rect,
         privacy_banner_terms_rect,
         privacy_banner_policy_rect,
+        commit_hash_link_rect,
         #[cfg(feature = "local-workspace")]
         workspace_mode_rects,
     }
@@ -2689,7 +2771,7 @@ mod tests {
     fn badge_text(mode: VersionBadgeMode<'_>, team: Option<&str>) -> String {
         let area = Rect::new(0, 0, 80, 1);
         let mut buf = Buffer::empty(area);
-        render_version_badge(area, &mut buf, &Theme::current(), team, 0, false, mode);
+        let _ = render_version_badge(area, &mut buf, &Theme::current(), team, 0, false, mode);
         (0..area.width)
             .map(|x| buf.cell((x, 0)).map_or(" ", |c| c.symbol()).to_string())
             .collect::<String>()
@@ -2723,6 +2805,135 @@ mod tests {
             !footer.ends_with('\u{2502}'),
             "footer must not end on a separator: {footer:?}"
         );
+    }
+
+    /// The build-commit hash must appear in the rendered badge cells when the
+    /// build has a real commit hash (i.e. BUILD_COMMIT_SHORT is not "unknown").
+    /// This drives the shipped `render_version_badge` into a real `Buffer` and
+    /// reads back the painted cell symbols — no terminal required.
+    #[test]
+    fn version_badge_paints_commit_hash() {
+        // Only run the assertion when the build actually has a commit hash
+        // (in this repo it does; in a tarball it would be "unknown" and the
+        // hash span is suppressed).
+        let hash = xai_grok_version::BUILD_COMMIT_SHORT;
+        if hash == "unknown" {
+            return;
+        }
+
+        let full = badge_text(
+            VersionBadgeMode::Full {
+                subscription_tier: None,
+            },
+            None,
+        );
+        let inline = badge_text(VersionBadgeMode::HeroInline, None);
+
+        assert!(
+            full.contains(hash),
+            "full badge must contain commit hash {:?}: {}",
+            hash,
+            full,
+        );
+        assert!(
+            inline.contains(hash),
+            "inline badge must contain commit hash {:?}: {}",
+            hash,
+            inline,
+        );
+        // HeroFooter must NOT contain the hash (suppressed to avoid duplication
+        // with the hero-box inline badge).
+        let footer = badge_text(VersionBadgeMode::HeroFooter, None);
+        assert!(
+            !footer.contains(hash),
+            "hero footer must not duplicate the commit hash: {}",
+            footer,
+        );
+    }
+
+    /// `render_version_badge` must return a `Some(rect)` covering exactly the
+    /// hash text when the hash is present, so the caller can wrap it with an
+    /// OSC 8 link. The rect's width must equal the display width of the hash.
+    #[test]
+    fn version_badge_returns_hash_link_rect() {
+        let hash = xai_grok_version::BUILD_COMMIT_SHORT;
+        if hash == "unknown" {
+            return;
+        }
+
+        let area = Rect::new(0, 0, 80, 1);
+        let mut buf = Buffer::empty(area);
+        let rect = render_version_badge(
+            area,
+            &mut buf,
+            &Theme::current(),
+            None,
+            0,
+            false,
+            VersionBadgeMode::Full {
+                subscription_tier: None,
+            },
+        );
+
+        let rect = rect.expect("hash link rect must be Some when hash is known");
+        let expected_width = hash.width() as u16;
+        assert_eq!(
+            rect.width, expected_width,
+            "hash rect width must equal hash display width"
+        );
+        assert_eq!(rect.height, 1, "hash rect is a single row");
+        assert_eq!(rect.y, 0, "hash rect y matches the badge row");
+
+        // Verify the cells under the rect actually contain the hash text.
+        let painted: String = (rect.x..rect.x + rect.width)
+            .map(|x| buf.cell((x, rect.y)).map_or(" ", |c| c.symbol()).to_string())
+            .collect();
+        assert_eq!(
+            painted, hash,
+            "cells under the hash rect must spell the hash"
+        );
+    }
+
+    /// When the hash is "unknown" (tarball build), `render_version_badge` must
+    /// return `None` so the caller does not emit a malformed `…/commit/unknown`
+    /// link. This test is only meaningful when BUILD_COMMIT_SHORT happens to be
+    /// "unknown"; in a normal repo build it is a no-op pass.
+    #[test]
+    fn version_badge_no_hash_rect_when_unknown() {
+        if xai_grok_version::BUILD_COMMIT_SHORT != "unknown" {
+            return;
+        }
+        let area = Rect::new(0, 0, 80, 1);
+        let mut buf = Buffer::empty(area);
+        let rect = render_version_badge(
+            area,
+            &mut buf,
+            &Theme::current(),
+            None,
+            0,
+            false,
+            VersionBadgeMode::Full {
+                subscription_tier: None,
+            },
+        );
+        assert!(rect.is_none(), "no hash link rect when hash is unknown");
+    }
+
+    /// The OSC 8 link is only emitted when `hyperlink_route().emit_osc8` is
+    /// true (i.e. `Osc8Support::Native` and no skip reason). This test verifies
+    /// the gating logic in `app_view.rs` by checking that `commit_github_url`
+    /// returns `None` for "unknown" (so no link is pushed even if the route
+    /// would emit OSC 8), and `Some` for a real hash (so the link is pushed
+    /// when the route allows it). The actual `emit_osc8` gate is tested in
+    /// `hyperlink_route.rs`.
+    #[test]
+    fn commit_hash_link_gated_by_url_availability() {
+        // Real hash → URL available → link would be pushed when emit_osc8.
+        assert!(xai_grok_version::commit_github_url("abc123def").is_some());
+        // Unknown hash → no URL → no link pushed regardless of emit_osc8.
+        assert!(xai_grok_version::commit_github_url("unknown").is_none());
+        // Empty hash → no URL → no link pushed.
+        assert!(xai_grok_version::commit_github_url("").is_none());
     }
 
     #[test]
