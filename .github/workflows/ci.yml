@@ -201,6 +201,25 @@ jobs:
       - name: Build release binary
         run: cargo build --locked --release -p xai-grok-pager-bin
 
+      # The linux binary is built on ubuntu-22.04 (glibc 2.35) so it runs on
+      # Ubuntu 22.04. Guard the floor: fail if the produced binary demands any
+      # symbol newer than 2.35 (which would reproduce the GLIBC_2.38/2.39 load
+      # error on 22.04). Darwin binaries don't use GLIBC, so skip them.
+      - name: Verify glibc symbols are <= 2.35 (linux/amd64)
+        if: matrix.target_os == 'linux'
+        shell: bash
+        run: |
+          max_glibc="$(readelf --version-info target/release/xai-grok-pager 2>/dev/null \
+            | grep -oE 'GLIBC_[0-9]+\.[0-9]+' | sed 's/GLIBC_//' | sort -V | tail -n1)"
+          echo "max GLIBC symbol referenced: ${max_glibc:-none}"
+          if [[ -z "$max_glibc" ]]; then exit 1; fi
+          # Version string comparison, no external tools: 2.35 is the ceiling.
+          if ! printf '%s\n2.35\n' "$max_glibc" | sort -V | head -n1 | grep -qx "$max_glibc"; then
+            echo "FAIL: binary requires GLIBC $max_glibc, which is newer than 2.35 (not runnable on Ubuntu 22.04)"
+            exit 1
+          fi
+          echo "PASS: max GLIBC $max_glibc <= 2.35, runs on Ubuntu 22.04"
+
       - name: Stage artifact
         run: |
           mkdir -p dist
