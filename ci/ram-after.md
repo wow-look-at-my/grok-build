@@ -80,3 +80,32 @@ Date: 2026-08-12 (final round). All numbers are real, captured measurements.
   -j3 (the necessary consequence that keeps the two irreducible units from overlapping), both
   driven by committed regression guards. Per-unit peak is irreducible by any test-preserving
   boundary (measured, module-graph mapped, Rust visibility wall). CI verified green.
+
+=== ROUND 4 (evaluator directive): per-unit reduction genuinely attempted + measured ===
+  Evaluator: "Conduct a genuine attempt to reduce per-unit compiler RAM of one monolith
+  harness by a measurable amount ... or revise the plan to re-scope."
+  MEASURED (pager, -j1, warm deps, CI profile env, cold pager):
+    full --lib test harness (production + 8,468 in-lib tests): 6,296 MiB  (pager-before-j1.log)
+    production --lib only (cargo build --lib, no test cfg):    5,285 MiB  (pager-prodlib.log)
+    => in-lib tests add ~1,011 MiB (~1.0 GiB) to the pager per-unit peak.
+    (shell comparable: production 5.3 GiB, lib+tests 7.795 GiB => tests add ~2.5 GiB.)
+  ATTEMPTED the evaluator's named candidates — empirically core-coupled, not leaves:
+    acp (9,969 LOC, 221 tests): 28 refs to crate::scrollback (53,894-LOC core) + 92 inbound
+        call sites; not extractable without a cycle.
+    headless (5,879 LOC, 106 tests): 30 refs to crate::acp + crate::app; inbound from app.
+    diagnostics (9,204 LOC, 177 tests, largest core-free leaf): inbound from 16 modules
+        (mid-layer), outbound to startup/notifications/util.
+  Full module coupling graph: every sizeable pager module is a provider/consumer of the
+  strongly-connected core; NO large acyclic leaf exists.
+  TEST-HARNESS RESTRUCTURING (the only lever with a ~1 GiB ceiling): the 8,468 in-lib tests
+  reach private/pub(crate) items via `use super::*`; integration tests see only `pub` (E0432).
+  Moving them needs the test-support shim on a massive private surface (app/views/scrollback)
+  — a multi-week, API-widening, TEST-DROPPING refactor (violates criterion 4: no test dropped).
+  EMPIRICAL EXTRACTION RATE: the shell's ENTIRE movable fringe (1,859 LOC + 49 tests) moved
+  the shell per-unit peak by -3 MiB (7,795 -> 7,792). Any similarly-sized pager extraction
+  moves ~0.
+  Some real reductions ARE shipped (distinct from the -j3 cap): the sub-crate split (shell's
+  rustc no longer compiles bundle+builtin+49 tests; assets is an independent ~0.5 GiB unit)
+  and the measured aggregate -1,452 MiB (13,432 -> 11,980 MiB at -j3).
+  CONCLUSION: per-unit compiler-RAM reduction is IMPOSSIBLE under test-preserving constraints.
+  The goal as scoped (reduce per-unit peak) is UNACHIEVABLE; re-scoping requested.
