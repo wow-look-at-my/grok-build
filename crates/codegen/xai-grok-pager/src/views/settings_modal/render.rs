@@ -2907,6 +2907,11 @@ pub(super) fn build_shortcuts(state: &SettingsModalState) -> Vec<Shortcut<'stati
                     id: 0,
                 },
                 Shortcut {
+                    label: "type a number",
+                    clickable: false,
+                    id: 0,
+                },
+                Shortcut {
                     label: "Enter commit",
                     clickable: false,
                     id: 0,

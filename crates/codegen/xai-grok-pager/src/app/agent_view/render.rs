@@ -1609,6 +1609,47 @@ impl AgentView {
             .current_branch
             .clone()
             .or_else(|| lazy_git.as_ref().and_then(|i| i.branch.clone()));
+        // Realtime CI-status dot (issue #40): a colored dot beside the branch
+        // whose state is polled from the `gh` CLI. The poll is throttled and
+        // off-thread (see `ci_status::ci_status_lazy`), so this render call is
+        // cheap; absent a real branch (detached/empty) or any CI signal, no
+        // dot is drawn — a graceful "no CI status" state.
+        let mut ci_dot: Option<Span<'static>> = None;
+        if let Some(b) = branch.as_deref()
+            && !b.is_empty()
+        {
+            ci_dot = crate::ci_status::ci_status_lazy(&self.session.cwd, b).and_then(|status| {
+                let fg = match status {
+                    crate::ci_status::CiStatus::Red => Some(theme.accent_error),
+                    crate::ci_status::CiStatus::Yellow => {
+                        // While CI is running, pulse the yellow dot's HSV value
+                        // in a sine wave (25% → 80%) so it visibly "thinks".
+                        let tick = self.scrollback.animation_tick() as u64;
+                        let dyn_col = crate::ci_status::animate_value(
+                            tick,
+                            rgb_of(theme.warning),
+                            0.25,
+                            0.80,
+                        );
+                        Some(ratatui::style::Color::Rgb(
+                            dyn_col.0,
+                            dyn_col.1,
+                            dyn_col.2,
+                        ))
+                    }
+                    crate::ci_status::CiStatus::Green => Some(theme.accent_success),
+                    crate::ci_status::CiStatus::Off => None,
+                }?;
+                Some(Span::styled(
+                    "● ",
+                    Style::default().fg(fg).bg(theme.bg_base),
+                ))
+            });
+        }
+        if let Some(dot_span) = ci_dot {
+            path_offset += dot_span.width() as u16;
+            parts.push(dot_span);
+        }
         let git_text = branch.map(|b| {
             let icon = crate::git_info::branch_icon();
             if b.is_empty() {
@@ -4857,6 +4898,72 @@ mod permission_hint_tests {
             );
         }
     }
+}
+
+/// Extract `(r, g, b)` channels from a theme `Color` so the CI dot can animate
+/// its HSV value. The animated yellow dot is a concrete RGB in every stock
+/// theme; named ANSI colors fall back to their approximate RGB for the pulse.
+fn rgb_of(color: ratatui::style::Color) -> (u8, u8, u8) {
+    use ratatui::style::Color as C;
+    match color {
+        C::Rgb(r, g, b) => (r, g, b),
+        C::Indexed(i) => indexed_to_rgb(i),
+        C::Black => (0, 0, 0),
+        C::Red => (128, 0, 0),
+        C::Green => (0, 128, 0),
+        C::Yellow => (224, 175, 104),
+        C::Blue => (0, 0, 128),
+        C::Magenta => (128, 0, 128),
+        C::Cyan => (0, 128, 128),
+        C::Gray => (128, 128, 128),
+        C::DarkGray => (128, 128, 128),
+        C::LightRed => (255, 0, 0),
+        C::LightGreen => (0, 255, 0),
+        C::LightYellow => (255, 255, 0),
+        C::LightBlue => (0, 0, 255),
+        C::LightMagenta => (255, 0, 255),
+        C::LightCyan => (0, 255, 255),
+        C::White => (255, 255, 255),
+        _ => (0x80, 0x80, 0x80),
+    }
+}
+
+/// Map a 256-color palette index to approximate RGB (the common xterm cube).
+fn indexed_to_rgb(i: u8) -> (u8, u8, u8) {
+    if i < 16 {
+        // Standard 16 colors; built-in grayscale + base palette, approximated.
+        const BASE: [(u8, u8, u8); 16] = [
+            (0, 0, 0),       // 0 black
+            (128, 0, 0),     // 1 red
+            (0, 128, 0),     // 2 green
+            (128, 128, 0),   // 3 yellow
+            (0, 0, 128),     // 4 blue
+            (128, 0, 128),   // 5 magenta
+            (0, 128, 128),   // 6 cyan
+            (192, 192, 192), // 7 white
+            (128, 128, 128), // 8 bright black
+            (255, 0, 0),     // 9 bright red
+            (0, 255, 0),     // 10 bright green
+            (255, 255, 0),   // 11 bright yellow
+            (0, 0, 255),     // 12 bright blue
+            (255, 0, 255),   // 13 bright magenta
+            (0, 255, 255),   // 14 bright cyan
+            (255, 255, 255), // 15 bright white
+        ];
+        return BASE[i as usize];
+    }
+    if i < 232 {
+        // 6×6×6 color cube starting at 16.
+        let n = (i - 16) as u16;
+        let r = n / 36;
+        let g = (n % 36) / 6;
+        let b = n % 6;
+        let chan = |v: u16| -> u8 { (if v == 0 { 0 } else { 55 + v * 40 }) as u8 };
+        return (chan(r), chan(g), chan(b));
+    }
+    // Grayscale ramp 232..=255.
+    let g = 8 + (i - 232) * 10;
+    (g, g, g)
 }
 #[cfg(test)]
 mod feedback_input_tests {

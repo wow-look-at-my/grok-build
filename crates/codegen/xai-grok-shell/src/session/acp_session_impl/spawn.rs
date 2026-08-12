@@ -1638,6 +1638,8 @@ pub(crate) async fn spawn_session_actor(
         max_turns,
         max_retries: xai_grok_sampler::resolve_max_retries(max_retries),
         pending_interjections: InterjectionBuffer::new(),
+        in_flight_sampler_request_id: parking_lot::Mutex::new(None),
+        interjection_cancel_requested: std::sync::atomic::AtomicBool::new(false),
         queued_at_turn_start: Default::default(),
         pending_skill_reminders: Mutex::new(Vec::new()),
         idle_flush_timeout: memory_config

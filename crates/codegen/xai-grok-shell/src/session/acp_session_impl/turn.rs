@@ -2219,6 +2219,25 @@ impl SessionActor {
                     auth_retry_schedule.reset_on_success();
                     continue;
                 }
+                Ok(SamplerTurnOutcome::CancelledForInterjection { partial }) => {
+                    // ASAP injection: the in-flight stream was cancelled so the
+                    // turn loop can drain the pending interjection NOW and
+                    // resubmit, instead of waiting for the (potentially long)
+                    // stream to finish. Commit any partial assistant text the
+                    // model had already produced so the resubmitted request
+                    // sees `partial assistant turn + user interjection` and the
+                    // conversation stays consistent.
+                    if let Some(partial) = partial {
+                        self.record_assistant_response(partial).await;
+                    }
+                    // Drain the interjection that triggered the cancel so it
+                    // lands before the next model request; the loop then
+                    // `continue`s and rebuilds the request from the updated
+                    // chat state (partial assistant + interjection + prior
+                    // history).
+                    self.drain_pending_interjections().await;
+                    continue;
+                }
                 Ok(SamplerTurnOutcome::RefreshAuthAndResubmit { credential, store }) => {
                     if auth_retry_schedule.reset_if_incident_spans_suspend() {
                         tracing::info!("auth 401 retry: incident spanned a suspend; budget reset");

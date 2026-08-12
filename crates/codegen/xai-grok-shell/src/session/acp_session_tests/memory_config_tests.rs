@@ -206,6 +206,8 @@ async fn create_test_actor_with_memory(
         max_retries: 3,
         max_turns: None,
         pending_interjections: InterjectionBuffer::new(),
+        in_flight_sampler_request_id: parking_lot::Mutex::new(None),
+        interjection_cancel_requested: std::sync::atomic::AtomicBool::new(false),
         queued_at_turn_start: Default::default(),
         pending_skill_reminders: Mutex::new(Vec::new()),
         idle_flush_timeout: memory_config

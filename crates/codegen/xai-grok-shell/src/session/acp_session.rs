@@ -731,6 +731,24 @@ pub(crate) struct SessionActor {
     /// Pushed by `SessionCommand::Interject` handler, drained at safe
     /// points in `process_conversation_turn`. Internally synchronized.
     pub(crate) pending_interjections: InterjectionBuffer<acp::ImageContent>,
+    /// The in-flight sampler request id for the running turn, set by
+    /// `run_turn_via_sampler` and cleared on completion. The
+    /// `SessionCommand::Interject` handler reads this to cancel the
+    /// in-flight model stream so the turn loop iterates and drains the
+    /// interjection immediately (ASAP injection) instead of waiting for
+    /// the stream — which can run for many minutes on a long
+    /// reasoning/text generation — to finish. `None` while no turn is
+    /// streaming (idle, or inside a tool call between requests).
+    pub(crate) in_flight_sampler_request_id: parking_lot::Mutex<
+        Option<xai_grok_sampler::RequestId>,
+    >,
+    /// Set by the `SessionCommand::Interject` handler to tell
+    /// `run_turn_via_sampler` that the in-flight request it is awaiting
+    /// was cancelled *for an interjection* (not a user Stop). The error
+    /// path checks and clears this to return
+    /// [`SamplerTurnOutcome::CancelledForInterjection`] instead of a
+    /// terminal failure, so the turn loop drains and resubmits.
+    pub(crate) interjection_cancel_requested: std::sync::atomic::AtomicBool,
     /// Prompt ids queued when the running turn was promoted. Those rows were
     /// next in line before that turn existed, so mid-turn delivery
     /// (`harvest_queued_prompts_into_interjections`) leaves them to run as
@@ -1890,6 +1908,9 @@ mod chat_history_integrity_tests;
 #[cfg(test)]
 #[path = "acp_session_tests/turn/disk_full_tests.rs"]
 mod disk_full_tests;
+#[cfg(test)]
+#[path = "acp_session_tests/turn/asap_injection_tests.rs"]
+mod asap_injection_tests;
 #[cfg(test)]
 #[path = "acp_session_tests/feedback_turn_lookup_tests.rs"]
 mod feedback_turn_lookup_tests;

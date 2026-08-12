@@ -61,6 +61,17 @@ pub(crate) enum SamplerTurnOutcome {
         credential: xai_grok_sampling_types::SentCredential,
         store: RecoveredStore,
     },
+    /// The in-flight model request was cancelled because a user interjection
+    /// arrived mid-stream — the "asap injection" path. The turn loop drains
+    /// the interjection and resubmits immediately rather than waiting for the
+    /// (potentially long) stream to finish. `partial` is the text the model
+    /// had already streamed, preserved as a committed assistant message so the
+    /// resubmitted request sees `partial assistant turn + user interjection`
+    /// (Claude-Code-style mid-stream steering). `None` when nothing was
+    /// streamed yet (clean resubmit, nothing to preserve).
+    CancelledForInterjection {
+        partial: Option<ConversationItem>,
+    },
 }
 
 /// Outcome of `process_conversation_turn`, distinguishing normal completion from cancellation.
