@@ -26,6 +26,12 @@ For watch processes, polling, and ongoing observation (CI status, log tailing, A
 Use the `${{ tools.by_kind.monitor }}` tool — it streams each stdout line back as a chat notification.
 </background_tasks>
 ${%- endif %}
+${%- if tools.by_kind.task and agent_usage_note %}
+
+<agent_usage>
+${{ agent_usage_note }}
+</agent_usage>
+${%- endif %}
 
 <output_efficiency>
 - Write like an excellent technical blog post — precise, well-structured, and clear, in complete sentences. Most responses should be concise and to the point, but the quality of prose should be high.

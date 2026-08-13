@@ -41,6 +41,33 @@ enabled = false
 
 ---
 
+## Usage Frequency
+
+`usage_frequency` doesn't enable or disable subagents -- it tunes how strongly the system prompt and the `spawn_subagent` tool description nudge the model toward using them. Six levels, from most to least eager to delegate:
+
+| Level | Effect |
+| ----- | ------ |
+| `very-often` | Default to delegating: break work into independent pieces and spawn them in parallel. |
+| `often` | Look for opportunities to delegate independent work. |
+| `default` | No added nudge either way (the baseline behavior). |
+| `rare` | Prefer doing work directly; delegate only when clearly independent. |
+| `very-rare` | Reserve subagents for the rare, unmistakably independent case. |
+| `explicit-only` | Never spawn a subagent unless the user explicitly asks for one in the conversation. |
+
+```toml
+# ~/.grok/config.toml
+[subagents]
+usage_frequency = "often"
+```
+
+```bash
+export GROK_SUBAGENTS_USAGE_FREQUENCY=explicit-only   # env var takes precedence over config.toml
+```
+
+Even at `explicit-only`, the `spawn_subagent` tool stays available -- the model can still use it once the user asks. To remove the tool entirely, use `enabled = false` above instead.
+
+---
+
 ## How Subagents Work
 
 When the main agent identifies work to delegate, it calls the `spawn_subagent` tool to start a child session. The child runs with:

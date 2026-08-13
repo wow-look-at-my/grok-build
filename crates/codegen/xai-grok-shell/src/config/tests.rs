@@ -1101,6 +1101,36 @@ fn subagent_limit_behavior_resolves_env_over_toml_over_remote_over_queue() {
     assert_eq!(resolve(None, Some("sometimes"), None), LimitBehavior::Queue);
 }
 #[test]
+fn subagent_usage_frequency_resolves_env_over_toml_over_default() {
+    use xai_tool_types::AgentUsageFrequency;
+    let resolve = SubagentsConfig::resolve_usage_frequency;
+    assert_eq!(
+        resolve(Some("often"), Some("rare")),
+        AgentUsageFrequency::Often
+    );
+    assert_eq!(resolve(None, Some("rare")), AgentUsageFrequency::Rare);
+    assert_eq!(resolve(None, None), AgentUsageFrequency::Default);
+    assert_eq!(
+        resolve(Some("explicit-only"), None),
+        AgentUsageFrequency::ExplicitOnly
+    );
+    // Invalid values warn and fall through to the next source / default.
+    assert_eq!(
+        resolve(Some("sometimes"), Some("very-often")),
+        AgentUsageFrequency::VeryOften
+    );
+    assert_eq!(resolve(Some("sometimes"), None), AgentUsageFrequency::Default);
+}
+#[test]
+fn subagents_config_parses_usage_frequency_from_toml() {
+    without_grok_subagents(|| {
+        let config: toml::Value = toml::from_str("[subagents]\nusage_frequency = \"very-often\"\n")
+            .unwrap();
+        let sa = SubagentsConfig::resolve(false, &config);
+        assert_eq!(sa.usage_frequency.as_deref(), Some("very-often"));
+    });
+}
+#[test]
 fn subagents_config_parses_limits_from_toml() {
     without_grok_subagents(|| {
         let config: toml::Value = toml::from_str(
