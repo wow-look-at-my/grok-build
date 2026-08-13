@@ -6281,17 +6281,25 @@ mod tests {
                         )
                         .await
                 });
-                // Bounded so a regression that never prompts fails cleanly, not hangs.
-                for _ in 0..1000 {
-                    if seen.load(Ordering::Relaxed) >= 1 {
-                        break;
-                    }
-                    tokio::task::yield_now().await;
+                // Deadline in wall-clock time, not in yield iterations: A can't
+                // reach its prompt until a `tokio::fs` read of the permission
+                // state completes on the blocking pool, and a yield-only loop
+                // spends no wall clock waiting for it (measured: 1000 yields
+                // burn ~2.6ms total, while the read alone takes ~0.5ms and the
+                // prompt has arrived as late as 4ms in). The bound still fails
+                // cleanly on a regression that never prompts.
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+                while seen.load(Ordering::Relaxed) == 0 {
+                    assert!(
+                        std::time::Instant::now() < deadline,
+                        "request A must reach its prompt before B is sent"
+                    );
+                    tokio::time::sleep(std::time::Duration::from_millis(1)).await;
                 }
                 assert_eq!(
                     seen.load(Ordering::Relaxed),
                     1,
-                    "request A must reach its prompt before B is sent"
+                    "exactly one prompt must be in flight before B is sent"
                 );
                 let mgr_b = mgr.clone();
                 let b = tokio::task::spawn_local(async move {
@@ -6305,10 +6313,21 @@ mod tests {
                         )
                         .await
                 });
-                // Let B's request() increment the in-flight counter and enqueue
-                // before releasing A, so A's emit observes both in flight.
-                for _ in 0..50 {
-                    tokio::task::yield_now().await;
+                // Wait for B to actually register in flight before releasing A,
+                // so A's emit-time snapshot sees both. The counter the actor
+                // reads is the condition itself — a fixed number of yields only
+                // guesses at when B's task gets its turn.
+                let in_flight = match &mgr {
+                    PermissionHandle::Actor { in_flight, .. } => in_flight.clone(),
+                    PermissionHandle::AllowAll => panic!("spawned manager must be an actor handle"),
+                };
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+                while in_flight.load(Ordering::Relaxed) < 2 {
+                    assert!(
+                        std::time::Instant::now() < deadline,
+                        "request B must register in flight while A is parked"
+                    );
+                    tokio::time::sleep(std::time::Duration::from_millis(1)).await;
                 }
                 gate.notify_one();
 
