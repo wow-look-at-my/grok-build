@@ -513,7 +513,7 @@ async fn harvest_delivers_queued_follow_up_into_the_running_turn() {
                 state.pending_inputs.push_back(queued);
             }
 
-            assert!(actor.harvest_queued_prompts_into_interjections().await);
+            assert!(actor.harvest_queued_prompts_into_interjections(false).await);
 
             let state = actor.state.lock().await;
             assert_eq!(
@@ -572,7 +572,7 @@ async fn harvest_is_a_noop_while_idle() {
                 state.pending_inputs.push_back(user_item("p1", "A"));
             }
 
-            assert!(!actor.harvest_queued_prompts_into_interjections().await);
+            assert!(!actor.harvest_queued_prompts_into_interjections(false).await);
 
             let state = actor.state.lock().await;
             assert_eq!(
@@ -624,7 +624,7 @@ async fn harvest_leaves_rows_that_own_their_turn_queued() {
                 state.pending_inputs.push_back(user_item("plain1", "A"));
             }
 
-            assert!(actor.harvest_queued_prompts_into_interjections().await);
+            assert!(actor.harvest_queued_prompts_into_interjections(false).await);
 
             let state = actor.state.lock().await;
             assert_eq!(
@@ -659,7 +659,7 @@ async fn harvest_leaves_rows_queued_before_the_turn_started() {
             *actor.queued_at_turn_start.borrow_mut() =
                 ["running".to_string(), "before".to_string()].into();
 
-            assert!(actor.harvest_queued_prompts_into_interjections().await);
+            assert!(actor.harvest_queued_prompts_into_interjections(false).await);
 
             let state = actor.state.lock().await;
             assert_eq!(
@@ -670,6 +670,45 @@ async fn harvest_leaves_rows_queued_before_the_turn_started() {
                     .collect::<Vec<_>>(),
                 vec!["running", "before"],
                 "only the row queued during the turn may be delivered into it"
+            );
+        })
+        .await;
+}
+
+/// `DeliverQueuedPromptsNow` (bare Enter on an empty composer) means "every
+/// message I can see, now": the pre-turn row that the turn loop's own harvest
+/// leaves alone is delivered too. Rows that own their turn still stay queued —
+/// forcing does not make a bash row model-visible.
+#[tokio::test]
+async fn forced_harvest_delivers_rows_queued_before_the_turn_started() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (actor, _rx) = build_actor().await;
+            {
+                let mut state = actor.state.lock().await;
+                state.pending_inputs.push_back(user_item("running", "A"));
+                state.running_task = Some(running_task_stub("running"));
+                state.pending_inputs.push_back(user_item("before", "A"));
+                let mut bash = user_item("bash1", "A");
+                bash.queue_meta.as_mut().unwrap().kind = "bash".to_string();
+                state.pending_inputs.push_back(bash);
+                state.pending_inputs.push_back(user_item("during", "A"));
+            }
+            *actor.queued_at_turn_start.borrow_mut() =
+                ["running".to_string(), "before".to_string()].into();
+
+            assert!(actor.harvest_queued_prompts_into_interjections(true).await);
+
+            let state = actor.state.lock().await;
+            assert_eq!(
+                state
+                    .pending_inputs
+                    .iter()
+                    .map(|i| i.prompt_id.as_str())
+                    .collect::<Vec<_>>(),
+                vec!["running", "bash1"],
+                "both user rows are delivered; the bash row still owns its turn"
             );
         })
         .await;

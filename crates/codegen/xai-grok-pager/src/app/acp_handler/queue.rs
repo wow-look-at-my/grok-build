@@ -227,6 +227,30 @@ pub(super) fn handle_queue_changed(notif: &acp::ExtNotification, app: &mut AppVi
                     new_text: None,
                 });
         }
+        // Same race, one gesture wider: an interrupt-with-the-queue fired while
+        // a row was still an optimistic echo. This broadcast proves the shell
+        // holds its rows, so the deliver-now can land.
+        let redeliver = app.agents.get_mut(&aid).is_some_and(|agent| {
+            if !agent.deliver_now_awaiting_confirm || !agent.optimistic_queue_ids.is_empty() {
+                return false;
+            }
+            agent.deliver_now_awaiting_confirm = false;
+            agent
+                .shared_queue
+                .iter()
+                .any(|e| Some(e.id.as_str()) != running_prompt_id.as_deref())
+        });
+        if redeliver {
+            crate::unified_log::info(
+                "prompt.queue_deliver_now_confirmed",
+                Some(&session_id),
+                None,
+            );
+            app.pending_effects
+                .push(crate::app::actions::Effect::QueueDeliverNow {
+                    session_id: sid.clone(),
+                });
+        }
     }
 
     // Wake-turn marker reconcile: `running_prompt_id` is authoritative. A

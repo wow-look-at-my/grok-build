@@ -4617,3 +4617,104 @@ fn suggestion_debounce_routes_by_agent_id_not_active_view() {
         "expiry must fetch for the arming agent even off-screen: {effects:?}"
     );
 }
+
+/// Enter on an idle session sends immediately: one `SendPrompt` effect, and
+/// nothing left holding in either queue.
+#[test]
+fn idle_enter_sends_immediately() {
+    let mut app = test_app_with_agent();
+    let id = AgentId(0);
+    assert!(app.agents[&id].session.state.is_idle());
+
+    let effects = dispatch(Action::SendPrompt("go now".into()), &mut app);
+
+    assert!(
+        matches!(effects.as_slice(), [Effect::SendPrompt { text, .. }] if text == "go now"),
+        "an idle Enter must send, not queue: {effects:?}"
+    );
+    assert!(app.agents[&id].session.pending_prompts.is_empty());
+    assert!(app.agents[&id].shared_queue.is_empty());
+}
+
+/// Enter while a turn is running hands the prompt to the shell right away, so
+/// the running turn harvests it at its next gap between tool calls / model
+/// requests. Holding it in the local drip-feed queue instead would delay it to
+/// the end of the whole turn — the ASAP-send bug.
+#[test]
+fn mid_turn_enter_routes_to_the_shell_queue_for_gap_delivery() {
+    let mut app = test_app_with_agent();
+    let id = AgentId(0);
+    dispatch(Action::SendPrompt("first".into()), &mut app);
+    assert!(app.agents[&id].session.state.is_turn_running());
+
+    let effects = dispatch(Action::SendPrompt("read this next".into()), &mut app);
+
+    assert!(
+        matches!(
+            effects.as_slice(),
+            [Effect::SendPrompt { text, .. }] if text == "read this next"
+        ),
+        "a mid-turn prompt must reach the shell now, not sit in the local queue: {effects:?}"
+    );
+    assert!(
+        app.agents[&id].session.pending_prompts.is_empty(),
+        "nothing may be held locally — the shell owns the row"
+    );
+    assert_eq!(
+        app.agents[&id]
+            .shared_queue
+            .iter()
+            .map(|e| e.text.as_str())
+            .collect::<Vec<_>>(),
+        vec!["read this next"],
+        "the optimistic echo renders the queued row until the broadcast confirms it"
+    );
+}
+
+/// Bare Enter on an empty composer mid-turn interrupts: server-owned rows ride
+/// one `queue/deliver_now`, and local rows the shell never saw are sent as
+/// interjections. Both cancel the in-flight model stream shell-side.
+#[test]
+fn empty_enter_mid_turn_interrupts_with_every_queued_row() {
+    let mut app = test_app_with_agent();
+    let id = AgentId(0);
+    dispatch(Action::SendPrompt("first".into()), &mut app);
+    app.agents.get_mut(&id).unwrap().shared_queue =
+        vec![crate::app::prompt_queue::QueueEntryWire {
+            id: "srv-1".into(),
+            version: 0,
+            owner: None,
+            last_editor: None,
+            kind: "prompt".into(),
+            text: "server-owned".into(),
+            position: 0,
+            combined_texts: None,
+        }];
+    crate::app::dispatch::tests::enqueue_local(&mut app, id, "local-owned");
+
+    let effects = dispatch(Action::InterruptWithQueuedPrompts, &mut app);
+
+    assert!(
+        matches!(&effects[0], Effect::QueueDeliverNow { .. }),
+        "the shell's own rows are delivered by the queue effect: {effects:?}"
+    );
+    assert!(
+        matches!(&effects[1], Effect::SendInterject { text, .. } if text == "local-owned"),
+        "a local row the shell never saw rides the interjection path: {effects:?}"
+    );
+    assert!(
+        app.agents[&id].session.pending_prompts.is_empty(),
+        "the interjected local row must leave the queue"
+    );
+}
+
+/// Nothing queued: the interrupt is a no-op rather than a bare cancel — the
+/// gesture is "send my messages now", not "stop".
+#[test]
+fn interrupt_without_a_queue_sends_nothing() {
+    let mut app = test_app_with_agent();
+    dispatch(Action::SendPrompt("first".into()), &mut app);
+
+    let effects = dispatch(Action::InterruptWithQueuedPrompts, &mut app);
+    assert!(effects.is_empty(), "nothing to deliver: {effects:?}");
+}
