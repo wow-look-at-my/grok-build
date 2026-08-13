@@ -1757,6 +1757,16 @@ pub enum Effect {
         session_id: acp::SessionId,
         mode_id: acp::SessionModeId,
     },
+    /// Set the session mode twice, sequentially in one task. Two separate
+    /// `SetSessionMode` effects race (each is spawned as its own task), so
+    /// this exists for the one case that needs strict ordering: the
+    /// Shift+Tab ring wrapping past the last agent-identity stop, which
+    /// must restore the base agent before re-entering Plan.
+    SetModeThenMode {
+        session_id: acp::SessionId,
+        first_mode_id: acp::SessionModeId,
+        second_mode_id: acp::SessionModeId,
+    },
     /// Set session mode then send a prompt, sequentially in one task.
     /// Used by `/plan <desc>` to guarantee the mode switch ACP call
     /// completes before the prompt is dispatched.

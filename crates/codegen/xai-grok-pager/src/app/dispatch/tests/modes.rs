@@ -1999,10 +1999,11 @@ fn cycle_auto_with_nudge_jumps_to_plan() {
 }
 
 /// Shared/peek cycle body with Always-Approve + nudge must NOT jump to Plan:
-/// it takes the ring (→ Normal), leaves the nudge intact, and emits no
-/// SetSessionMode. Pins that collapse+accept live only in `dispatch_cycle_mode`.
+/// it takes the ring (→ Orchestrator, the first agent-identity stop), leaves
+/// the nudge intact. Pins that collapse+accept live only in
+/// `dispatch_cycle_mode`.
 #[test]
-fn dispatch_cycle_mode_and_sync_always_approve_with_nudge_takes_ring_to_normal() {
+fn dispatch_cycle_mode_and_sync_always_approve_with_nudge_takes_ring_to_orchestrator() {
     let mut app = test_app_with_agent();
     let _ = dispatch(Action::SetYoloMode(true), &mut app);
     assert!(app.agents[&AgentId(0)].session.is_yolo());
@@ -2020,12 +2021,17 @@ fn dispatch_cycle_mode_and_sync_always_approve_with_nudge_takes_ring_to_normal()
     );
     assert!(
         !app.agents[&AgentId(0)].session.is_yolo(),
-        "Always-Approve → Normal must still clear yolo"
+        "Always-Approve → Orchestrator must still clear yolo"
     );
     assert_eq!(
         app.current_ui.permission_mode.as_deref(),
         Some("ask"),
-        "ring lands on Normal/ask"
+        "ring lands on ask permission"
+    );
+    assert_eq!(
+        app.agents[&AgentId(0)].shift_tab_ring_agent_index,
+        Some(0),
+        "ring must enter the first agent-identity stop (Orchestrator)"
     );
     assert_eq!(
         app.agents[&AgentId(0)].ephemeral_tip.current_key(),
@@ -2033,10 +2039,12 @@ fn dispatch_cycle_mode_and_sync_always_approve_with_nudge_takes_ring_to_normal()
         "shared/peek body must not retire the nudge"
     );
     assert!(
-        !effects
-            .iter()
-            .any(|e| matches!(e, Effect::SetSessionMode { .. })),
-        "Always-Approve → Normal must not SetSessionMode, got {effects:?}"
+        effects.iter().any(|e| matches!(
+            e,
+            Effect::SetSessionMode { mode_id, .. }
+                if mode_id.0.as_ref() == "grok-build-orchestrator"
+        )),
+        "expected SetSessionMode(grok-build-orchestrator), got {effects:?}"
     );
     assert!(
         effects.iter().any(|e| matches!(
@@ -2050,11 +2058,11 @@ fn dispatch_cycle_mode_and_sync_always_approve_with_nudge_takes_ring_to_normal()
     );
 }
 
-/// Always-Approve → Normal: cycle_mode delegates the YOLO OFF
-/// transition through `set_yolo_mode_inner`. No queue drain (the
-/// inner's `if new` guard skips drain on OFF transition).
+/// Always-Approve → Orchestrator: cycle_mode delegates the YOLO OFF
+/// transition through `set_yolo_mode_inner`, then enters the first
+/// agent-identity ring stop instead of landing on Normal.
 #[test]
-fn dispatch_cycle_mode_always_approve_to_normal_delegates_off() {
+fn dispatch_cycle_mode_always_approve_to_orchestrator_delegates_yolo_off() {
     let mut app = test_app_with_agent();
     // Enter Always-Approve state via the typed setter (sets up
     // the lock-step properly).
@@ -2070,7 +2078,7 @@ fn dispatch_cycle_mode_always_approve_to_normal_delegates_off() {
     // YOLO OFF via delegation.
     assert!(
         !app.agents[&AgentId(0)].session.is_yolo(),
-        "Always-Approve → Normal must flip yolo_mode off through the inner",
+        "Always-Approve → Orchestrator must flip yolo_mode off through the inner",
     );
     assert!(!app.default_yolo, "default_yolo must flip in lock-step");
     assert_eq!(
@@ -2078,21 +2086,33 @@ fn dispatch_cycle_mode_always_approve_to_normal_delegates_off() {
         Some("ask"),
         "current_ui.permission_mode must update to 'ask'",
     );
+    assert_eq!(
+        app.agents[&AgentId(0)].shift_tab_ring_agent_index,
+        Some(0),
+        "ring must enter the first agent-identity stop (Orchestrator)"
+    );
 
-    // Single effect: PersistPermissionMode{BestEffort}.
-    assert_eq!(effects.len(), 1);
-    match &effects[0] {
-        Effect::PersistPermissionMode {
-            persist, canonical, ..
-        } => {
-            assert_eq!(
-                *persist,
-                crate::app::actions::PermissionModePersist::BestEffort,
-            );
-            assert_eq!(*canonical, "ask");
-        }
-        other => panic!("expected PersistPermissionMode, got {other:?}"),
-    }
+    // Two effects: PersistPermissionMode{BestEffort} + SetSessionMode(orchestrator).
+    assert_eq!(effects.len(), 2, "got {effects:?}");
+    assert!(
+        effects.iter().any(|e| matches!(
+            e,
+            Effect::PersistPermissionMode {
+                persist: crate::app::actions::PermissionModePersist::BestEffort,
+                canonical: "ask",
+                ..
+            }
+        )),
+        "expected PersistPermissionMode(ask, BestEffort), got {effects:?}"
+    );
+    assert!(
+        effects.iter().any(|e| matches!(
+            e,
+            Effect::SetSessionMode { mode_id, .. }
+                if mode_id.0.as_ref() == "grok-build-orchestrator"
+        )),
+        "expected SetSessionMode(grok-build-orchestrator), got {effects:?}"
+    );
 }
 
 /// `Action::SetTheme("auto")` enables `AUTO_MODE`, persists
