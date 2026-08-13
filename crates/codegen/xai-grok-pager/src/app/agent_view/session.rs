@@ -431,6 +431,7 @@ impl AgentView {
         self.front_message_committed = true;
         self.optimistic_queue_ids.clear();
         self.send_now_awaiting_confirm = None;
+        self.deliver_now_awaiting_confirm = false;
         self.send_now_painted_blocks.clear();
         self.workflow_blocks.clear();
         self.workflow_run_revisions.clear();
