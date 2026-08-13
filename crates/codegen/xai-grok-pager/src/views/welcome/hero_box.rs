@@ -290,6 +290,8 @@ pub(super) struct HeroBoxRects {
     pub(super) announcement_rect: Option<Rect>,
     /// Promo upgrade CTA `[label]` button rect (click → open), if drawn.
     pub(super) upgrade_cta_rect: Option<Rect>,
+    /// Screen rect of the build-commit hash text, for OSC 8 link overlay.
+    pub(super) commit_hash_link_rect: Option<Rect>,
     #[cfg(feature = "local-workspace")]
     pub(super) workspace_mode_rects: super::WorkspaceModeHitRects,
 }
@@ -325,7 +327,7 @@ pub(super) fn render_hero_box(
 
     super::logo::render_full_logo(layout.hero_logo, buf, theme);
 
-    super::render_version_badge(
+    let commit_hash_link_rect = super::render_version_badge(
         layout.hero_version,
         buf,
         theme,
@@ -424,6 +426,7 @@ pub(super) fn render_hero_box(
         announcement_truncated,
         announcement_rect,
         upgrade_cta_rect,
+        commit_hash_link_rect,
         #[cfg(feature = "local-workspace")]
         workspace_mode_rects,
     }
