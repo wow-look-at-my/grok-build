@@ -45,7 +45,8 @@ pub use process_resources::{ProcessResources, sample_process_memory, sample_proc
 mod process_scope;
 pub use process_scope::{ProcessScope, global_process_scope};
 
-/// How long a shell gets to forward a hangup to its jobs before it is killed.
+/// How long a shell gets to exit on its own after a hangup, before it is
+/// killed.
 pub const HANGUP_GRACE: std::time::Duration = std::time::Duration::from_millis(200);
 
 pub mod runtime;
@@ -603,15 +604,168 @@ impl ProcessGroup {
         }
     }
 
+    /// Whether any member of this group is still *running*, as opposed to a
+    /// zombie that has already died and is only waiting to be reaped.
+    ///
+    /// [`Self::has_live_members`] counts zombies, which is what you want when
+    /// deciding whether to send another signal — signalling a zombie is
+    /// harmless, and skipping a kill because one looked dead is not. It is the
+    /// wrong question when *reporting* that a teardown left something behind:
+    /// an orphaned zombie means the kill worked and the reaper has not run
+    /// yet, so reporting it as a leak is a false alarm, and a check that cries
+    /// wolf gets ignored on the run where the number is real.
+    ///
+    /// Linux reads the state straight out of `/proc`. Elsewhere there is no
+    /// cheap way to enumerate a group, so this falls back to
+    /// [`Self::has_live_members`] and keeps its over-reporting rather than
+    /// claiming a certainty it does not have.
+    pub fn has_running_members(&self) -> Option<bool> {
+        #[cfg(target_os = "linux")]
+        {
+            let Some(leader) = self.leader else {
+                return Some(false);
+            };
+            let Ok(entries) = std::fs::read_dir("/proc") else {
+                return None;
+            };
+            for entry in entries.flatten() {
+                let name = entry.file_name();
+                let Some(pid) = name.to_str().and_then(|n| n.parse::<u32>().ok()) else {
+                    continue;
+                };
+                // A process that exits mid-scan is not a leak; skip it.
+                let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else {
+                    continue;
+                };
+                // `comm` is parenthesised and may itself contain spaces and
+                // parens, so the fields after it start at the LAST ')'.
+                let Some((_, rest)) = stat.rsplit_once(')') else {
+                    continue;
+                };
+                let mut fields = rest.split_whitespace();
+                let (Some(state), Some(_ppid), Some(pgrp)) =
+                    (fields.next(), fields.next(), fields.next())
+                else {
+                    continue;
+                };
+                if state != "Z" && pgrp.parse::<u32>() == Ok(leader.get()) {
+                    return Some(true);
+                }
+            }
+            Some(false)
+        }
+        #[cfg(all(unix, not(target_os = "linux")))]
+        {
+            self.has_live_members()
+        }
+        #[cfg(windows)]
+        {
+            None
+        }
+    }
+
     /// Ask an interactive shell to hang up. Its job-control children each live
-    /// in their own process group, which no `killpg` here reaches, but a shell
-    /// forwards the hangup to them before it exits.
+    /// in their own process group, which no `killpg` here reaches; a shell is
+    /// supposed to forward the hangup to them on its way out, but it is not
+    /// reliable enough to be the only path — pair this with
+    /// [`Self::hangup_session_jobs`].
     pub fn hangup(&self) -> io::Result<()> {
         #[cfg(unix)]
         {
             self.killpg_unix(nix::sys::signal::Signal::SIGHUP)?;
             // A stopped shell cannot forward the hangup until it resumes.
             self.killpg_unix(nix::sys::signal::Signal::SIGCONT)
+        }
+        #[cfg(windows)]
+        {
+            Ok(())
+        }
+    }
+
+    /// Deliver the hangup to the shell's job-control children directly, in
+    /// every process group of the shell's session but its own.
+    ///
+    /// A shell that answers [`Self::hangup`] forwards it to its jobs itself and
+    /// this is unnecessary. It exists for the escalation path: a shell still
+    /// running at the end of [`HANGUP_GRACE`] gets killed, and killing it
+    /// destroys the only process that can reach jobs sitting in groups of their
+    /// own. Delivering the hangup here first keeps the policy identical to the
+    /// shell's — a job that ignores SIGHUP still survives, which is the point of
+    /// `nohup` — where the alternative is leaking every job whenever the shell
+    /// is late.
+    ///
+    /// Only the leader's own session is touched, so a group whose leader never
+    /// called `setsid` (anything but a terminal shell) finds nothing to signal.
+    /// Linux reads the session out of `/proc`; elsewhere there is no cheap way
+    /// to enumerate one, and the shell's own forwarding is all there is.
+    pub fn hangup_session_jobs(&self) -> io::Result<()> {
+        #[cfg(target_os = "linux")]
+        {
+            let Some(leader) = self.leader else {
+                return Ok(());
+            };
+            let mut groups: Vec<ProcessGroupId> = Vec::new();
+            for entry in std::fs::read_dir("/proc")? {
+                let Ok(entry) = entry else {
+                    continue;
+                };
+                let name = entry.file_name();
+                let Some(pid) = name.to_str().and_then(|n| n.parse::<u32>().ok()) else {
+                    continue;
+                };
+                // A process that exits mid-scan is not ours to signal; skip it.
+                let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else {
+                    continue;
+                };
+                // `comm` is parenthesised and may itself contain spaces and
+                // parens, so the fields after it start at the LAST ')'.
+                let Some((_, rest)) = stat.rsplit_once(')') else {
+                    continue;
+                };
+                let mut fields = rest.split_whitespace();
+                let (Some(state), Some(_ppid), Some(pgrp), Some(session)) =
+                    (fields.next(), fields.next(), fields.next(), fields.next())
+                else {
+                    continue;
+                };
+                if state == "Z" || session.parse::<u32>() != Ok(leader.get()) {
+                    continue;
+                }
+                // The leader's own group is the caller's to kill, and
+                // `ProcessGroupId` rejects the degenerate ids on the way past.
+                let Ok(pgid) = pgrp.parse::<u32>().map_err(io::Error::other).and_then(|p| {
+                    if p == leader.get() {
+                        Err(io::Error::other("the shell's own group"))
+                    } else {
+                        ProcessGroupId::new(p)
+                    }
+                }) else {
+                    continue;
+                };
+                if !groups.contains(&pgid) {
+                    groups.push(pgid);
+                }
+            }
+            for pgid in groups {
+                let target = nix::unistd::Pid::from_raw(pgid.get() as i32);
+                // A stopped job cannot act on the hangup until it resumes.
+                for signal in [
+                    nix::sys::signal::Signal::SIGHUP,
+                    nix::sys::signal::Signal::SIGCONT,
+                ] {
+                    match nix::sys::signal::killpg(target, signal) {
+                        // Exiting between the scan and the signal is not a
+                        // failure; it is the outcome being asked for.
+                        Ok(()) | Err(nix::errno::Errno::ESRCH) => {}
+                        Err(e) => return Err(io::Error::from_raw_os_error(e as i32)),
+                    }
+                }
+            }
+            Ok(())
+        }
+        #[cfg(all(unix, not(target_os = "linux")))]
+        {
+            Ok(())
         }
         #[cfg(windows)]
         {
@@ -1062,6 +1216,161 @@ mod tests {
         // Required: an unreaped zombie still reports live.
         child.wait().expect("reap sleeper");
         assert_eq!(group.has_live_members(), Some(false));
+    }
+
+    /// The two questions a killed group gets asked, and why they differ: a
+    /// zombie is a process for `has_live_members` (so another kill is still
+    /// worth sending) and NOT a leak for `has_running_members` (so a teardown
+    /// that worked does not report that it failed).
+    ///
+    /// Deterministic, with no waiting on a kill to land: the zombie here is
+    /// this test's own child, and it stays a zombie until this test reaps it.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn has_running_members_ignores_a_zombie_that_has_already_died() {
+        let mut group = ProcessGroup::new().expect("group");
+        assert_eq!(group.has_running_members(), Some(false), "empty group");
+
+        let mut cmd = std::process::Command::new("sleep");
+        cmd.arg("1000")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+        detach_std_command(&mut cmd);
+        #[allow(clippy::disallowed_methods)] // test: exercises ProcessGroup directly
+        let mut child = cmd.spawn().expect("spawn sleeper");
+        group.attach_std(&child).expect("attach");
+        assert_eq!(
+            group.has_running_members(),
+            Some(true),
+            "sleeper is running"
+        );
+
+        group.kill().expect("kill group");
+        // `wait` returns once the child is dead, so from here it is a reaped
+        // process, not a zombie — take the zombie reading from a child we
+        // deliberately have not waited on yet.
+        let mut zombie_cmd = std::process::Command::new("true");
+        zombie_cmd
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+        detach_std_command(&mut zombie_cmd);
+        #[allow(clippy::disallowed_methods)] // test: exercises ProcessGroup directly
+        let mut zombie = zombie_cmd.spawn().expect("spawn zombie-to-be");
+        let mut zombie_group = ProcessGroup::new().expect("group");
+        zombie_group.attach_std(&zombie).expect("attach");
+        // `true` exits immediately and nothing reaps it, so it parks in Z.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while zombie_group.has_running_members() == Some(true) {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "`true` should exit on its own"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert_eq!(
+            zombie_group.has_live_members(),
+            Some(true),
+            "an unreaped zombie is still a process to signal"
+        );
+        assert_eq!(
+            zombie_group.has_running_members(),
+            Some(false),
+            "an unreaped zombie is not a teardown leak"
+        );
+
+        child.wait().expect("reap sleeper");
+        zombie.wait().expect("reap zombie");
+    }
+
+    /// The escalation path's guarantee: a job parked in a process group of its
+    /// own, where the shell's `killpg` cannot reach it, still gets the hangup
+    /// when the shell is killed before it can forward one. A sleeper outside
+    /// the session holds the scan to the session rather than the machine, and
+    /// the shell itself is left running because its group is the caller's to
+    /// kill.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn hangup_session_jobs_reaches_a_job_in_its_own_group_but_nothing_outside_the_session() {
+        use std::io::BufRead;
+
+        fn sleeper() -> std::process::Child {
+            let mut cmd = std::process::Command::new("sleep");
+            cmd.arg("1000")
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null());
+            // Its own session, so the scan has somewhere to wrongly reach.
+            detach_std_command(&mut cmd);
+            #[allow(clippy::disallowed_methods)] // test: exercises ProcessGroup directly
+            cmd.spawn().expect("spawn outsider")
+        }
+
+        fn group_for(pid: u32) -> ProcessGroup {
+            let mut group = ProcessGroup::new().expect("group");
+            group.attach_pid(pid).expect("attach");
+            group
+        }
+
+        let mut outsider = sleeper();
+        let outsider_group = group_for(outsider.id());
+
+        // `set -m` is what puts the job in a group of its own; without it the
+        // job shares the shell's group and the caller's `killpg` would cover it.
+        let mut cmd = std::process::Command::new("bash");
+        cmd.arg("-c")
+            .arg("set -m; sleep 1000 & echo $!; sleep 1000")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null());
+        detach_std_command(&mut cmd);
+        #[allow(clippy::disallowed_methods)] // test: exercises ProcessGroup directly
+        let mut shell = cmd.spawn().expect("spawn shell");
+        let shell_group = group_for(shell.id());
+
+        let mut line = String::new();
+        std::io::BufReader::new(shell.stdout.take().expect("shell stdout"))
+            .read_line(&mut line)
+            .expect("read the job's pid");
+        let job: u32 = line.trim().parse().expect("job pid");
+        let pgid = |pid: u32| {
+            nix::unistd::getpgid(Some(nix::unistd::Pid::from_raw(pid as i32))).expect("pgid")
+        };
+        assert_ne!(
+            pgid(job),
+            pgid(shell.id()),
+            "job control did not put the job in a group of its own"
+        );
+        let job_group = group_for(job);
+
+        shell_group
+            .hangup_session_jobs()
+            .expect("hang up the session's jobs");
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while job_group.has_running_members() != Some(false) {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "job {job} outlived the hangup"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert_eq!(
+            outsider_group.has_running_members(),
+            Some(true),
+            "a process outside the session was signalled"
+        );
+        assert_eq!(
+            shell_group.has_running_members(),
+            Some(true),
+            "the shell's own group is the caller's to kill, not this call's"
+        );
+
+        shell_group.kill().expect("kill the shell");
+        shell.wait().expect("reap the shell");
+        outsider_group.kill().expect("kill the outsider");
+        outsider.wait().expect("reap the outsider");
     }
 
     /// Debug builds enforce the top-of-doc caveat that arming and spawning

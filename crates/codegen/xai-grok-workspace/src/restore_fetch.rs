@@ -490,9 +490,13 @@ fn escalate_and_reap(child: &mut Child, group: &ProcessGroup) -> EscalateResult 
             Err(err) => errors.push(format!("wait after SIGKILL: {err}")),
         }
     }
+    // `has_running_members`, not `has_live_members`: the kill leaves the
+    // descendants as orphaned zombies until init reaps them, and those count as
+    // live. Asking the live question here appended "still has live members" to
+    // EVERY timeout error, describing a teardown that had in fact worked.
     #[cfg(unix)]
-    if group.has_live_members() != Some(false) {
-        errors.push("fetch process group still has live members after teardown".to_owned());
+    if group.has_running_members() != Some(false) {
+        errors.push("fetch process group still has running members after teardown".to_owned());
     }
     EscalateResult {
         error: join_errors(errors),

@@ -153,6 +153,13 @@ impl LockedTestEnv {
         self._env.push(TestEnvGuard::set(key, val));
         self
     }
+    /// Unset `key` under the held lock, restoring the prior value on drop.
+    ///
+    /// Same distinct-key caveat as [`set`](Self::set).
+    pub(crate) fn unset(mut self, key: &'static str) -> Self {
+        self._env.push(TestEnvGuard::unset(key));
+        self
+    }
 }
 #[cfg(test)]
 mod init_metrics_tests {

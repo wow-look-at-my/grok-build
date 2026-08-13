@@ -67,9 +67,9 @@ jobs:
       # is `sccache-v{VERSION}-{SCCACHE_GHA_VERSION}`, so a mismatch between
       # the installed sccache version and this namespace invalidates the cache.
       SCCACHE_GHA_VERSION: sccache-v0.17.0-x86_64-unknown-linux-gnu
-      # Every PTY suite drives this binary, and the harness builds it itself
-      # when this is unset — see the build step. Job-wide so the workspace run
-      # and the PTY step resolve the same one.
+      # Workspace tests drive this binary, and the harness builds it itself
+      # when this is unset — see the build step. The PTY suites need the same
+      # thing and build their own in the pty-e2e job.
       PAGER_BINARY: ${{ github.workspace }}/target/debug/xai-grok-pager
       # No global CARGO_BUILD_JOBS here. The compile-RAM protection lives
       # entirely on the "Build test harnesses" step, which pins CARGO_BUILD_JOBS
@@ -202,8 +202,9 @@ jobs:
       # per-test timeout (60s, configured in .config/nextest.toml). A hung
       # test fails in 60s instead of blocking the whole job. The `ci` profile
       # also sets fail-fast = false, so one failure doesn't hide every test
-      # behind it and each push surfaces the whole list. The smoke test runs
-      # after: the binary every PTY suite drives must at least start.
+      # behind it and each push surfaces the whole list. The version check
+      # after it is a smoke test: the binary the tests drive must at least
+      # start.
       - name: Run tests (workspace)
         run: |
           cargo nextest run --locked --workspace --profile ci
@@ -249,13 +250,87 @@ jobs:
             || { echo "RAM GUARD: FAIL — run step missing"; exit 1; }
           echo "RAM GUARD: PASS — sub-crate split + unified --no-run compile at -j3 intact, run step fast-passes"
 
-      # The PTY suites drive the real binary through a virtual terminal and
-      # assert on what is actually on screen. They are #[ignore]d because they
-      # need a built binary, which is why nothing ran them -- and unit tests
-      # cannot stand in for them: a model picker whose rows rendered blank had
-      # passing tests over the width function the whole time. Every case here
-      # spawns a process, so cap the workers rather than letting libtest fan out
-      # to the core count.
+  # The PTY suites drive the real binary through a virtual terminal and assert
+  # on what is actually on screen. They are #[ignore]d because they need a
+  # built binary, which is why nothing ran them -- and unit tests cannot stand
+  # in for them: a model picker whose rows rendered blank had passing tests
+  # over the width function the whole time.
+  #
+  # Its own job, running beside build-test rather than after it. Measured on
+  # the first run of the split: 29m44 for build-test against 33m21 before, and
+  # 16m52 here -- so the saving is real but modest, and 706s of this job is
+  # recompiling the pager. That duplicate is NOT cheap, and anyone tempted to
+  # split another suite off should weigh it at roughly that price.
+  #
+  # What it does avoid is the RAM peak: `--test <name>` builds the pager lib
+  # without `--cfg test` plus three integration binaries, never the `--lib`
+  # harness whose 8,468 in-lib tests cold-peak at ~7.4 GiB. Nothing here can
+  # reach the pathology build-test's guard defends against, and sccache serves
+  # the shared crate graph to both jobs out of one bucket.
+  pty-e2e:
+    name: Test (PTY end-to-end)
+    # Hosted for the same reason as build-test: these need a real /bin/bash.
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      SCCACHE_GHA_VERSION: sccache-v0.17.0-x86_64-unknown-linux-gnu
+      PAGER_BINARY: ${{ github.workspace }}/target/debug/xai-grok-pager
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Free up disk space before build
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: false
+          large-packages: true
+          swap-storage: true
+          docker-images: true
+          android: true
+          dotnet: true
+          haskell: true
+
+      - name: Install protoc (pinned v29.3)
+        run: |
+          # Same release artifact + sha256 the repo's dotslash launcher
+          # (bin/protoc) pins for linux-x86_64. bin/protoc is the source of
+          # truth; update both together when bumping protoc.
+          curl -fsSL -o "$RUNNER_TEMP/protoc.zip" \
+            https://github.com/protocolbuffers/protobuf/releases/download/v29.3/protoc-29.3-linux-x86_64.zip
+          echo "3e866620c5be27664f3d2fa2d656b5f3e09b5152b42f1bedbf427b333e90021a  $RUNNER_TEMP/protoc.zip" | sha256sum -c -
+          unzip -q -o "$RUNNER_TEMP/protoc.zip" -d "$RUNNER_TEMP/protoc"
+          echo "PROTOC=$RUNNER_TEMP/protoc/bin/protoc" >> "$GITHUB_ENV"
+          "$RUNNER_TEMP/protoc/bin/protoc" --version
+
+      - name: Install Rust toolchain (pinned by rust-toolchain.toml)
+        run: rustup show
+
+      - name: Install cargo-nextest
+        run: |
+          mkdir -p "$RUNNER_TEMP/nextest-bin"
+          curl -fsSL -o "$RUNNER_TEMP/nextest.tar.gz" \
+            https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-0.9.143/cargo-nextest-0.9.143-x86_64-unknown-linux-gnu.tar.gz
+          tar -xzf "$RUNNER_TEMP/nextest.tar.gz" -C "$RUNNER_TEMP/nextest-bin"
+          echo "$RUNNER_TEMP/nextest-bin" >> "$GITHUB_PATH"
+
+      - name: Run sccache-cache
+        uses: mozilla-actions/sccache-action@v0.0.11
+        with:
+          version: v0.17.0
+
+      # The suites drive the real binary, and `pager_binary()` builds it itself
+      # when PAGER_BINARY is unset -- under nextest that is once per test
+      # process, all queued on cargo's package lock. Build it once here and
+      # export it job-wide, same as build-test does.
+      - name: Build the PTY harnesses and the pager binary
+        run: |
+          cargo test --locked -p xai-grok-pager --no-run \
+            --test pty_e2e_smoke \
+            --test pty_e2e_config_ui \
+            --test pty_e2e_minimal
+          cargo build --locked -p xai-grok-pager-bin
+
+      # Every case spawns a process, so cap the workers rather than letting the
+      # harness fan out to the core count.
       - name: Test (PTY end-to-end)
         run: |
           cargo nextest run --locked -p xai-grok-pager --profile ci \

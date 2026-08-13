@@ -74,6 +74,11 @@ impl Shell {
                 group: Some(group), ..
             } if group.wants_hangup() => {
                 let _ = group.hangup();
+                // Hand it to the job-control children directly rather than
+                // trusting the shell to forward it on the way out. A shell that
+                // exits first leaves them nothing else to hear it from, and
+                // then the group kill cannot reach them either.
+                let _ = group.hangup_session_jobs();
                 true
             }
             _ => false,
@@ -387,7 +392,12 @@ async fn run_pty_output_loop(
 
     let (data_tx, mut data_rx) = mpsc::channel::<Vec<u8>>(64);
 
-    tokio::task::spawn_blocking(move || {
+    // A dedicated thread, not the runtime's blocking pool: this `read` only
+    // returns once every slave fd is closed, which a job that outlives the
+    // shell keeps open indefinitely, and the pool is joined at runtime
+    // shutdown. On the pool one such job wedges the whole process instead of
+    // leaking one thread the exit will reclaim.
+    std::thread::spawn(move || {
         let mut reader = reader;
         let mut buf = [0u8; 4096];
         loop {
@@ -979,6 +989,41 @@ mod tests {
                     );
                     tokio::time::sleep(Duration::from_millis(50)).await;
                 }
+            })
+            .await;
+    }
+
+    /// A job that ignores the hangup is entitled to outlive the terminal — that
+    /// is what `nohup` is for — and it keeps its inherited slave fd open, so the
+    /// reader's `read` never returns. Off the runtime's blocking pool that costs
+    /// one leaked thread; on it, the pool join at runtime shutdown never
+    /// finishes and the whole process wedges. This test reaching its own last
+    /// line is the assertion: a regression hangs here rather than failing, so a
+    /// timeout on this name means shutdown is blocked on a pty read.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_job_that_ignores_the_hangup_does_not_wedge_runtime_shutdown() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let (gateway, _) = recording_gateway();
+                let pty_id = create_test_pty(gateway).await;
+
+                // It has to outlive the runtime drop below, which is what this
+                // covers, and killing it here would close the slave and hide
+                // that. Nothing reaps a job that ignores the hangup, so it ends
+                // itself instead of leaking one sleeper per run: 60s is far
+                // longer than the drop needs and short enough not to litter.
+                write_pty_input(&pty_id, b"(trap '' HUP; sleep 60) & echo pid=$!\n")
+                    .await
+                    .expect("write command");
+                let immune = wait_for_reported_pid(&pty_id).await;
+
+                close_pty(&pty_id).await.expect("close pty");
+                assert_eq!(
+                    unsafe { libc::kill(immune, 0) },
+                    0,
+                    "the job should have survived the hangup it ignores"
+                );
             })
             .await;
     }
