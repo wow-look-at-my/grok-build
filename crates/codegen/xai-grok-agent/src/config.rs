@@ -140,34 +140,6 @@ Write prompts the way you would brief a senior engineer:
 - Do NOT implement code changes yourself \u{2014} you have no file editing tools
 - Do NOT give subagents overly prescriptive step-by-step instructions \u{2014} trust their expertise
 - Do NOT summarize or re-explain what the user said \u{2014} get to work immediately";
-/// Coordinator-specific prompt body appended to the standard GrokBuild
-/// system prompt (`prompt.md`). Unlike [`ORCHESTRATOR_PROMPT_BODY`], the
-/// coordinator has no direct-work tools at all \u{2014} its toolset enforces
-/// that, and this prompt explains why and how to work within it.
-const COORDINATOR_PROMPT_BODY: &str = "\
-## Coordinator Mode
-
-You orchestrate work by dispatching specialized subagents. You never do the actual work \
-yourself \u{2014} you have no file-reading, file-editing, or terminal tools.
-
-### Your responsibilities:
-- Decompose the user's request into clear, well-scoped subtasks
-- Use ${{ tools.by_kind.list }} to get a feel for the repository structure when scoping a \
-subtask \u{2014} structure only, never content
-- Track the work with ${{ tools.by_kind.plan }}: list each subtask up front, and mark it \
-complete as results come back
-- Dispatch each subtask to the most appropriate subagent with ${{ tools.by_kind.task }} \
-(`explore` for read-only research, `general-purpose` for design and implementation)
-- Use ${{ tools.by_kind.ask_user }} to clarify ambiguities before dispatching, when the \
-request is under-specified
-- Synthesize the returned results into a coherent answer for the user
-
-### Constraints:
-- ${{ tools.by_kind.task }} is the only way work gets done \u{2014} every subtask, including \
-exploration, must go through a dispatched subagent
-- Dispatch independent subtasks in parallel, in a single message
-- Wait for each dispatched subagent's result before proceeding on work that depends on it
-- Present the final synthesized result to the user; do not merely relay subagent transcripts";
 /// Bash tool with clearer model-facing names:
 /// `run_terminal_cmd` → `run_terminal_command`, `is_background` → `background`.
 fn bash_tool_config() -> ToolConfig {
@@ -504,35 +476,6 @@ fn orchestrator_toolset() -> ToolServerConfig {
         behavior_preset: None,
     }
 }
-/// Coordinator toolset: dispatch and tracking only, nothing else.
-///
-/// Stricter than [`orchestrator_toolset`]: no `run_terminal_command`, no
-/// `read_file`, no `grep` — the coordinator cannot do any work directly,
-/// not even "quick orientation" reads. `list_dir` is retained only for
-/// scoping a subtask against the repo's directory structure. Every other
-/// piece of work — including exploration — must go through a dispatched
-/// subagent via the task tool.
-fn coordinator_toolset() -> ToolServerConfig {
-    ToolServerConfig {
-        tools: vec![
-            // Structure only, never content
-            (&grok_build::ListDirTool).into(),
-            // Subagent orchestration — the only way this agent gets work done
-            task_tool_config(),
-            task_output_tool_config(),
-            wait_tasks_tool_config(),
-            kill_task_tool_config(),
-            // Progress tracking and clarifying ambiguous requests
-            (&grok_build::TodoWriteTool).into(),
-            (&grok_build::AskUserQuestionTool).into(),
-            // Intentionally excluded:
-            // - BashTool / ReadFileTool / GrepTool / SearchReplaceTool (no direct work)
-            // - EnterPlanModeTool / ExitPlanModeTool (delegate planning to subagents)
-            // - Web, memory, scheduling, and media tools (out of scope for pure dispatch)
-        ],
-        behavior_preset: None,
-    }
-}
 /// Grok Build + plan mode toolset WITHOUT subagent tools.
 ///
 /// Same as `grok_build_plan_toolset` but excludes `TaskTool`,
@@ -731,7 +674,7 @@ where
 /// agents for centralized name management and `by_name()` dispatch.
 ///
 /// `subagent_variants()` returns only the 3 that are exposed to the LLM
-/// via the `TaskTool` description. The remaining 10 are top-level agent
+/// via the `TaskTool` description. The remaining 9 are top-level agent
 /// profiles resolvable by name but not advertised as subagent types.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Hash, Display, EnumString, EnumIter, AsRefStr, IntoStaticStr,
@@ -751,7 +694,6 @@ pub enum BuiltinAgentName {
     BrowserUse,
     #[strum(serialize = "grok-build-orchestrator")]
     GrokBuildOrchestrator,
-    Coordinator,
 }
 /// Strict-harness predicate by name. Resolves via `BuiltinAgentName` and
 /// delegates to [`AgentDefinition::is_strict_harness`]; unknown names
@@ -780,7 +722,6 @@ impl BuiltinAgentName {
             Self::Plan => AgentDefinition::plan(),
             Self::BrowserUse => AgentDefinition::browser_use(),
             Self::GrokBuildOrchestrator => AgentDefinition::grok_build_orchestrator(),
-            Self::Coordinator => AgentDefinition::coordinator(),
         }
     }
     /// Built-in agents available as subagents via the Task tool.
@@ -1710,21 +1651,6 @@ impl AgentDefinition {
             )
         }
     }
-    /// Coordinator — pure dispatcher. Never edits files, runs commands, or
-    /// reads file/search content directly; every unit of work goes through
-    /// a dispatched subagent via the task tool.
-    pub fn coordinator() -> Self {
-        Self {
-            tool_config: coordinator_toolset(),
-            inject_default_tools: false,
-            prompt_body: Some(COORDINATOR_PROMPT_BODY.to_string()),
-            ..Self::base(
-                BuiltinAgentName::Coordinator,
-                "Orchestrates work by dispatching specialized agents. Never edits files, \
-                 runs commands, or does work directly.",
-            )
-        }
-    }
     /// Deserialize an agent definition from a JSON value (e.g. from ACP `_meta.agentProfile`).
     ///
     /// Unlike `parse()` (which reads YAML frontmatter + Markdown body from a file),
@@ -1904,9 +1830,7 @@ mod tests {
     /// until classified.
     fn expected_strict_harness(name: BuiltinAgentName) -> bool {
         match name {
-            BuiltinAgentName::Codex
-            | BuiltinAgentName::GrokBuildOrchestrator
-            | BuiltinAgentName::Coordinator => true,
+            BuiltinAgentName::Codex | BuiltinAgentName::GrokBuildOrchestrator => true,
             BuiltinAgentName::GrokBuild
             | BuiltinAgentName::GrokBuildConcise
             | BuiltinAgentName::GrokBuildPlan
@@ -1937,7 +1861,7 @@ mod tests {
     }
     #[test]
     fn is_strict_harness_agent_type_classifies_by_name() {
-        for strict in ["codex", "grok-build-orchestrator", "coordinator"] {
+        for strict in ["codex", "grok-build-orchestrator"] {
             assert!(
                 is_strict_harness_agent_type(strict),
                 "{strict} should be strict"
