@@ -1,0 +1,21 @@
+[package]
+name = "xai-grok-shell-assets"
+version = "0.1.0"
+edition.workspace = true
+license = "Apache-2.0"
+description = "Asset extraction and bundle management for the grok shell family: bundled skill/persona archives, built-in metadata files, and checksums."
+
+[dependencies]
+anyhow = { workspace = true }
+flate2 = { workspace = true }
+prod-mc-cli-chat-proxy-types = { path = "../../../prod/mc/cli-chat-proxy-types" }
+serde = { workspace = true }
+serde_json = { workspace = true, features = ["preserve_order"] }
+sha2 = { workspace = true }
+tar = { workspace = true }
+tracing = { workspace = true }
+xai-grok-config = { workspace = true }
+xai-grok-version = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

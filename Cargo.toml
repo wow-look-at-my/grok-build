@@ -46,6 +46,7 @@ members = [
     "crates/codegen/xai-grok-secrets",
     "crates/codegen/xai-grok-shared",
     "crates/codegen/xai-grok-shell",
+    "crates/codegen/xai-grok-shell-assets",
     "crates/codegen/xai-grok-shell-base",
     "crates/codegen/xai-grok-shell-session-support",
     "crates/codegen/xai-grok-subagent-resolution",
