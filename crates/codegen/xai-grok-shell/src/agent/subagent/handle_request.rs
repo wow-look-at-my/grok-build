@@ -1101,6 +1101,7 @@ pub(crate) async fn run_shell_child(
         ctx.background_workflows_enabled,
         true,
         ctx.subagents_max_depth,
+        ctx.subagent_usage_frequency,
         ctx.workflow_max_concurrent_agents,
         ctx.ask_user_question_enabled,
         ctx.client_hooks.clone(),

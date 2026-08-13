@@ -1698,6 +1698,19 @@ export GROK_SUBAGENTS=0              # Environment variable
 enabled = false
 ```
 
+### Usage Frequency
+
+`usage_frequency` doesn't gate the tool — it tunes how strongly the system prompt and tool wording nudge the model toward spawning subagents: `explicit-only`, `very-rare`, `rare`, `default` (no added nudge, the default), `often`, or `very-often`.
+
+```toml
+[subagents]
+usage_frequency = "often"
+```
+
+```bash
+export GROK_SUBAGENTS_USAGE_FREQUENCY=explicit-only   # env var takes precedence over config.toml
+```
+
 ### Toggles and Model Overrides
 
 Disable specific subagent types while keeping the system enabled, or route them to different models:
