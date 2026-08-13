@@ -1436,11 +1436,15 @@ impl SessionActor {
     /// Resetting `estimated_tokens_since_model = 0` here also keeps the
     /// preflight-overflow guard accurate against the next turn's
     /// tool-result deltas.
+    ///
+    /// Returns the cost (USD ticks) this one call was folded into the ledgers
+    /// with, so the caller can put it on the wire per response — the per-turn
+    /// bill is a sum and cannot be split back apart across a tool loop.
     pub(crate) fn record_response_token_usage(
         &self,
         response: &ConversationResponse,
         api_duration_ms: Option<u64>,
-    ) {
+    ) -> Option<i64> {
         if let Some(ref u) = response.usage {
             self.tool_context
                 .record_task_model_output(u64::from(u.completion_tokens));
@@ -1464,17 +1468,22 @@ impl SessionActor {
             );
             self.signals_handle()
                 .record_token_usage(u.completion_tokens, u.reasoning_tokens);
+            xai_grok_sampling_types::reported_cost_ticks(cost_ticks)
         } else if self.tool_context.task_output_token_budget.is_some() {
             self.tool_context.fail_task_output_usage_closed();
             let handle = self.chat_state_handle.clone();
             tokio::spawn(async move {
                 let _ = handle.mark_usage_incomplete(true, true).await;
             });
+            None
         } else if self.tool_context.sampler_retry_only_before_output {
             let handle = self.chat_state_handle.clone();
             tokio::spawn(async move {
                 let _ = handle.mark_usage_incomplete(true, true).await;
             });
+            None
+        } else {
+            None
         }
     }
     pub(super) async fn record_assistant_response(&self, assistant_item: ConversationItem) {

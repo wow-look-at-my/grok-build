@@ -10049,6 +10049,61 @@ pub(crate) mod tests {
         }
     }
     #[test]
+    fn status_bar_session_cost_is_the_agent_ledger_not_the_scrollback_sum() {
+        // The indicator must show what the session actually spent. Here the one
+        // rendered message cost $0.10 while the agent's ledger says $0.50 (the
+        // rest went to a subagent, or to a call that rendered no message) —
+        // summing the scrollback would under-report it, which is the bug.
+        let mut app = test_app_with_agent();
+        let id = super::super::agent::AgentId(0);
+        let agent = app.agents.get_mut(&id).unwrap();
+        agent.scrollback.push(
+            crate::scrollback::ScrollbackEntry::new(
+                crate::scrollback::RenderBlock::agent_message("priced message"),
+            )
+            .with_cost_usd_ticks(Some(1_000_000_000)),
+        );
+        agent
+            .session
+            .tracker
+            .set_reported_session_cost(Some(5_000_000_000));
+        let area = ratatui::layout::Rect::new(0, 0, 120, 24);
+        agent.scrollback.prepare_layout(area.width, area.height);
+        let mut buf = ratatui::buffer::Buffer::empty(area);
+        let _ = agent.draw(
+            area,
+            &mut buf,
+            &ActionRegistry::defaults(),
+            &mut crate::scrollback::render::ScratchBuffer::new(),
+            None,
+            false,
+            crate::app::agent_view::BannerSlotParams::none(),
+            &BundleState::default(),
+            false,
+            false,
+            &mut Vec::new(),
+            crate::app::agent_view::AppRenderParams::default(),
+        );
+        let screen: String = (0..area.height)
+            .map(|y| {
+                (0..area.width)
+                    .map(|x| buf[(x, y)].symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            screen.contains("$0.5 session"),
+            "status bar must show the agent's ledger total; got:\n{screen}"
+        );
+        assert!(
+            !screen.contains("$0.1 session"),
+            "the scrollback sum must not be shown while the agent reports a \
+             total; got:\n{screen}"
+        );
+    }
+
+    #[test]
     fn moved_with_button_held_promotes_pending_scrollback_drag() {
         let mut app = test_app_with_agent();
         let id = super::super::agent::AgentId(0);

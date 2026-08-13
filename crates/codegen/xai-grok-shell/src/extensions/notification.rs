@@ -1050,6 +1050,13 @@ pub enum SessionUpdate {
         agent_result: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         usage: Option<PromptUsage>,
+        /// Session-cumulative reported cost in USD ticks after this turn, read
+        /// from the session ledger. Prompt-scoped `usage` covers this turn
+        /// only; a client's running session total must not be a sum of turns
+        /// it happened to observe. Absent when no call in the session reported
+        /// a cost.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        session_cost_usd_ticks: Option<i64>,
     },
     /// One model response opened (Messages `message_start`), carrying the real
     /// message id, model, and input-side token counts. Rides the buffered chunk
@@ -1104,6 +1111,19 @@ pub enum SessionUpdate {
         /// `streaming-messages-json` stamps it onto the assistant frame.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         stop_sequence: Option<String>,
+        /// THIS response's cost in USD ticks (1e10 = $1) — server-reported when
+        /// the gateway priced the call, else computed from its token usage and
+        /// the model's pricing. One response is one rendered agent message, so
+        /// this is the per-message cost; the turn-level `TurnCompleted.usage`
+        /// sum cannot be split back apart across a tool loop's responses.
+        /// Absent when the call reported no usage at all.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cost_usd_ticks: Option<i64>,
+        /// Session-cumulative reported cost in USD ticks after folding this
+        /// call, from the session ledger (every main-loop call plus subagent
+        /// folds) — not a sum of what any one client rendered.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        session_cost_usd_ticks: Option<i64>,
     },
     /// Catch-all for unrecognized session update types.
     /// Allows forward/backward compatibility when variants are added or removed.
@@ -2319,12 +2339,14 @@ mod tests {
             stop_reason: "end_turn".into(),
             agent_result: Some("done".into()),
             usage: None,
+            session_cost_usd_ticks: Some(24_000),
         };
         let json = serde_json::to_value(&update).unwrap();
         assert_eq!(json["sessionUpdate"], "turn_completed");
         assert_eq!(json["prompt_id"], "p-1");
         assert_eq!(json["stop_reason"], "end_turn");
         assert_eq!(json["agent_result"], "done");
+        assert_eq!(json["session_cost_usd_ticks"], 24_000);
     }
 
     #[test]
@@ -2334,10 +2356,13 @@ mod tests {
             stop_reason: "cancelled".into(),
             agent_result: None,
             usage: None,
+            session_cost_usd_ticks: None,
         };
         let json = serde_json::to_value(&update).unwrap();
         assert_eq!(json["sessionUpdate"], "turn_completed");
         assert!(json.get("agent_result").is_none());
+        // An unreported session total is absent, never a wire `0`.
+        assert!(json.get("session_cost_usd_ticks").is_none());
     }
 
     #[test]
@@ -2348,12 +2373,14 @@ mod tests {
                 stop_reason: "end_turn".into(),
                 agent_result: Some("result text".into()),
                 usage: None,
+                session_cost_usd_ticks: Some(1_234_500_000),
             },
             SessionUpdate::TurnCompleted {
                 prompt_id: "p-min".into(),
                 stop_reason: "error".into(),
                 agent_result: None,
                 usage: None,
+                session_cost_usd_ticks: None,
             },
         ] {
             let json_str = serde_json::to_string(&update).unwrap();
