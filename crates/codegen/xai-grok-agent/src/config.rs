@@ -728,6 +728,13 @@ impl BuiltinAgentName {
     pub fn subagent_variants() -> &'static [Self] {
         &[Self::GeneralPurpose, Self::Explore, Self::Plan]
     }
+    /// Built-in agent identities the pager's Shift+Tab ring can cycle
+    /// through live, in ring order. Selecting one triggers a full agent
+    /// rebuild (tool registry + prompt), not just a prompt swap — see
+    /// `SessionActor::handle_session_mode`.
+    pub fn shift_tab_variants() -> &'static [Self] {
+        &[Self::GrokBuildOrchestrator, Self::Explore]
+    }
 }
 /// Portable agent identity — parsed from .grok/agents/*.md.
 /// Usable as both a top-level agent and a subagent definition.
