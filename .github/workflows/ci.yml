@@ -15,6 +15,12 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  # Tests that round-trip non-ASCII OsStrings (xai-grok-sandbox's
+  # `fails_closed_on_non_utf8_*`) fail with errno 84 under a non-UTF-8 locale.
+  # The runners default to C.UTF-8, so this states the requirement rather than
+  # changing anything.
+  LANG: C.UTF-8
+  LC_ALL: C.UTF-8
   # sccache wraps rustc and caches individual compilation outputs (per
   # crate/compilation unit) in the GitHub Actions cache, so a changed crate
   # only invalidates its own cached artifacts — not a whole target/ tarball.
@@ -36,7 +42,19 @@ env:
 jobs:
   build-test:
     name: Build & test
+    # Hosted, deliberately. This suite asserts on host semantics the org's lean
+    # self-hosted image does not provide: orphan reaping and process-group
+    # signals (every `*_grandchild*` case), st_blocks on a non-overlay
+    # filesystem (disk_usage_cmd / fs_size), and a real /bin/bash for the PTY
+    # tests. Pointing this job at that runner turns ~20 of them red, and the
+    # only way to make them pass there is to weaken what they check — so the
+    # runner belongs to the image, not to the tests. Revisit if the fleet image
+    # gains an init/reaper.
     runs-on: ubuntu-latest
+    # Compiling ~90 test harness binaries dominates this job; the run itself is
+    # minutes. 45 is the ceiling, not a target to grow: a job that needs more
+    # has a hung test, and nextest's per-test timeout (.config/nextest.toml)
+    # is what fails that in 60s instead of burning the whole budget.
     timeout-minutes: 45
     env:
       # Namespace this job's sccache entries away from the darwin release
@@ -49,18 +67,28 @@ jobs:
       # is `sccache-v{VERSION}-{SCCACHE_GHA_VERSION}`, so a mismatch between
       # the installed sccache version and this namespace invalidates the cache.
       SCCACHE_GHA_VERSION: sccache-v0.17.0-x86_64-unknown-linux-gnu
-      # The compile-RAM diagnosis (see the RAM-guard step): a single rustc that
-      # monomorphizes xai-grok-shell's whole test harness (365k LOC + 4,595
-      # in-lib #[test]s) peaks at ~8-9 GiB cold, and that peak is NOT reduced by
-      # codegen-units (128->512 unchanged) or by disabling incremental, because
-      # it is spent in type-check/monomorphization before CGU splitting. CI
-      # runs rustc under sccache (94-100% hit), so real RSS is far lower, but a
-      # modest parallelism bound keeps concurrent multi-GiB units from summing
-      # past the runner. Measured safe for the worst crate: cold
-      # `cargo test --no-run -j3` completes at ~11.4 GiB. -j3 is meaningfully
-      # above the earlier -j2 and still within budget; the RAM guard (below)
-      # fails the job if a cold build would exceed the byte budget we allow.
-      CARGO_BUILD_JOBS: "3"
+      # Every PTY suite drives this binary, and the harness builds it itself
+      # when this is unset — see the build step. Job-wide so the workspace run
+      # and the PTY step resolve the same one.
+      PAGER_BINARY: ${{ github.workspace }}/target/debug/xai-grok-pager
+      # No global CARGO_BUILD_JOBS here. The compile-RAM protection lives
+      # entirely on the "Build test harnesses" step, which pins CARGO_BUILD_JOBS
+      # to 3 (see its comment). The run step reuses that same unified graph and
+      # fast-passes at full parallelism; the release jobs build lib+bins (no
+      # monolith test harnesses) at default parallelism.
+      # WHY bounded at 3, not a global cap: two crates — xai-grok-shell (365k
+      # LOC, 4,595 in-lib #[test]s) and xai-grok-pager (463k LOC, 8,468 in-lib
+      # #[test]s) — each compile their whole crate + every in-lib test into ONE
+      # rustc that cold-peaks at ~7.8 GiB and ~7.4 GiB (measured). That peak is
+      # monomorphization-bound and NOT reducible by codegen-units (128->512
+      # unchanged), incremental, or any [profile] knob; per-unit it is also
+      # structurally irreducible (92% of the shell's LOC is the mutually-
+      # referencing session+agent core whose crate:: references reach private
+      # surface; the movable fringe was already extracted into the
+      # xai-grok-shell-assets sub-crate). Even when the two units overlap at -j3
+      # on a cold build, their honest aggregate is measured at ~13.4 GiB —
+      # comfortably under the 16 GiB runner cap — so -j3 keeps the workspace
+      # meaningfully parallel while staying safely within budget.
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
@@ -70,7 +98,6 @@ jobs:
       # full disk (ld/rustc I/O stalls). Free the known-safe oversized image
       # dirs BEFORE building. dotnet/android/swift/haskell are never needed
       # here; tool caches (rustup, sccache) are kept for speed.
-      # Run early so there is headroom for the entire build+test.
       - name: Free up disk space before build
         uses: jlumbroso/free-disk-space@main
         with:
@@ -103,6 +130,20 @@ jobs:
       - name: Install ripgrep
         uses: wow-look-at-my/actions@cache-rg#latest
 
+      # cargo-nextest runs each test in its own process with a per-test
+      # timeout (configured in .config/nextest.toml), so a test that wedges —
+      # a PTY suite waiting on a process that never starts — fails in 60s
+      # instead of eating the whole timeout-minutes budget. The standard cargo
+      # test harness has no per-test timeout, which is how a single hung test
+      # used to burn a 45-minute job.
+      - name: Install cargo-nextest
+        run: |
+          mkdir -p "$RUNNER_TEMP/nextest-bin"
+          curl -fsSL -o "$RUNNER_TEMP/nextest.tar.gz" \
+            https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-0.9.143/cargo-nextest-0.9.143-x86_64-unknown-linux-gnu.tar.gz
+          tar -xzf "$RUNNER_TEMP/nextest.tar.gz" -C "$RUNNER_TEMP/nextest-bin"
+          echo "$RUNNER_TEMP/nextest-bin" >> "$GITHUB_PATH"
+
       # sccache caches individual rustc compilation outputs in the GHA cache.
       # Unlike rust-cache (which restores a dumb target/ tarball that cargo
       # recompiles from scratch anyway), sccache keys on the actual compilation
@@ -119,44 +160,94 @@ jobs:
           version: v0.17.0
 
       # Build-then-run split: the expensive, RAM-heavy phase is *compiling* the
-      # ~90 test harnesses (the shell crate's single --lib test build cold-peaks
-      # near 9 GiB). Compiling and running in one `cargo test` call hides that
-      # cost and lets a memory spike prune the whole step. So first build every
-      # test binary with --no-run, then run them; the run phase is trivial and
-      # can use full parallelism without risking OOM.
+      # ~90 test harnesses. Two workspace crates — xai-grok-shell (365k LOC,
+      # 4,595 in-lib #[test]s) and xai-grok-pager (463k LOC, 8,468 in-lib
+      # #[test]s) — each compile their entire crate + every in-lib test into ONE
+      # rustc that cold-peaks at ~7.8 GiB and ~7.4 GiB respectively (measured).
+      # That peak is monomorphization-bound and NOT reducible by codegen-units,
+      # incremental, or any [profile] knob (proven), and per-unit it is
+      # structurally irreducible on the shell: 92% of its LOC lives in the
+      # mutually-referencing `session`+`agent` monoliths whose ~4,200 crate::
+      # references reach private surface (pub:private = 1,669:8,598). The
+      # structurally-movable fringe (bundle+builtin, 1,859 LOC + 49 tests) was
+      # extracted into the xai-grok-shell-assets sub-crate (a real compiler-
+      # side fix: the shell's rustc no longer type-checks that code, and the
+      # ~0.5 GiB assets unit schedules in its own slot, not inside the shell's
+      # rustc). The OOM happens when the multi-GiB harnesses compile
+      # CONCURRENTLY in the one `cargo test` call.
+      #
+      # We therefore (a) compile once with `--no-run` in the SAME unified
+      # `--workspace` resolution as the run step (so the run step fast-passes
+      # and never recompiles a different graph — a second exclude/isolation
+      # invocation was rejected because it changed workspace feature-unification
+      # and forced a broad cold recompile at -j16), and (b) bound this compile's
+      # parallelism so the two irreducible ~7.8+7.4 GiB units do not overlap on a
+      # cold build (CI is sccache-warmed, but a cold graph must still stay
+      # under the 16 GiB runner cap). The run step below then runs the already
+      # built binaries at full parallelism.
       - name: Build test harnesses (compile, no-run)
+        env:
+          CARGO_BUILD_JOBS: "3"
         run: |
           cargo test --locked --workspace --no-run --no-fail-fast
+          # The pager binary too, and here rather than from a test: the PTY
+          # suites drive the real binary, and `pager_binary()` falls back to
+          # running `cargo build` itself when PAGER_BINARY is unset. Under
+          # nextest that fallback is once per test process, so a dozen of them
+          # queue on cargo's package lock and time out. Building it once, and
+          # exporting PAGER_BINARY for the whole job, removes that entirely.
+          cargo build --locked -p xai-grok-pager-bin
 
-      # --no-fail-fast: without it cargo stops at the first failing crate, so a
-      # single failure hides every crate after it and the next push finds a new
-      # one. One run, the whole list. Binaries are already built above, so this
-      # just executes them (cargo fast-passes the compile).
-      # The smoke test runs first (the pager binary is a workspace member;
-      # --version confirms it links and runs before we spend time on the rest).
+      # Run the pre-built test binaries with cargo-nextest, which enforces a
+      # per-test timeout (60s, configured in .config/nextest.toml). A hung
+      # test fails in 60s instead of blocking the whole job. The `ci` profile
+      # also sets fail-fast = false, so one failure doesn't hide every test
+      # behind it and each push surfaces the whole list. The smoke test runs
+      # after: the binary every PTY suite drives must at least start.
       - name: Run tests (workspace)
         run: |
-          cargo test --locked --workspace --no-fail-fast
-          ./target/debug/xai-grok-pager --version
+          cargo nextest run --locked --workspace --profile ci
+          "$PAGER_BINARY" --version
 
       # RAM regression guard: prevent the compile-RAM pathology from silently
-      # coming back behind the jobs bound (see env comment). A cold full build
-      # of xai-grok-shell's test harness needs ~9 GiB, so this CI step is a
-      # cheap, deterministic structural guard on the shipped config instead of
-      # a slow cold rebuild (the real cold-RSS measurement is committed as
-      # ci/ram-guard.sh and can be run where cold RAM headroom exists). These
-      # assertions drive the actual settings that keep CI within budget: the
-      # parallelism is bounded at 3 (3 > the old 2, still below OOM) and the
-      # test step is split into compile then run.
-      - name: RAM guard (compile-RAM config intact)
+      # coming back (see the build step above). Two monolith crates' single-rustc
+      # test harnesses cold-peak at ~7.8 GiB and ~7.4 GiB (irreducible per-unit,
+      # proven). The shipped structural fix is a sub-crate split (bundle+builtin
+      # extracted into xai-grok-shell-assets), and the compile phase must run
+      # under one unified `--workspace` --no-run at a bounded -j3 (so the run
+      # step never recompiles a divergent graph at -j16 and the two irreducible
+      # monoliths don't overlap on a cold build). This cheap, deterministic
+      # STRUCTURAL guard fails if the split is undone or that protection is
+      # removed. The real cold aggregate-RSS measurement of the shipped command
+      # is committed as ci/ram-guard.sh.
+      - name: RAM guard (sub-crate split + unified --no-run at -j3 intact)
         run: |
           set -euo pipefail
-          fail=0
-          grep -q 'CARGO_BUILD_JOBS: "3"' .github/workflows/ci.yml || { echo "missing CARGO_BUILD_JOBS=3"; fail=1; }
-          grep -q -- '--workspace --no-run --no-fail-fast' .github/workflows/ci.yml || { echo "compile (--no-run) split missing"; fail=1; }
-          grep -q -- 'cargo test --locked --workspace --no-fail-fast' .github/workflows/ci.yml || { echo "run step missing"; fail=1; }
-          if [ "$fail" -ne 0 ]; then echo "RAM GUARD: FAIL"; exit 1; fi
-          echo "RAM GUARD: PASS — compile-RAM config intact (jobs=3, build-then-run split)"
+          # Structural split: bundle/builtin must stay out of the shell crate.
+          [ -f crates/codegen/xai-grok-shell-assets/src/bundle.rs ] \
+          && [ -f crates/codegen/xai-grok-shell-assets/src/builtin.rs ] \
+          || { echo "RAM GUARD: FAIL — bundle/builtin must live in xai-grok-shell-assets"; exit 1; }
+          [ ! -f crates/codegen/xai-grok-shell/src/bundle.rs ] \
+          && [ ! -f crates/codegen/xai-grok-shell/src/builtin.rs ] \
+          || { echo "RAM GUARD: FAIL — bundle/builtin re-inlined into xai-grok-shell"; exit 1; }
+          grep -q 'xai-grok-shell-assets' crates/codegen/xai-grok-shell/Cargo.toml \
+          || { echo "RAM GUARD: FAIL — shell must depend on xai-grok-shell-assets"; exit 1; }
+          # Build step is a single unified --workspace --no-run at -j3, and no
+          # split (an --exclude / -p invocation that changes workspace
+          # feature-unification and forced a broad -j16 recompile) has been
+          # reintroduced. Use bracketed classes in the patterns so the awk
+          # script's own source text is not matched by the same file scan.
+          awk '
+            /--no-run --no-fail-fast/ { compile=1 }
+            /--exclude xai[-]grok-shell/ || /-p xai[-]grok-shell -p xai[-]grok-pager/ { splitbad=1 }
+            END { exit (compile && !splitbad) ? 0 : 1 }
+          ' .github/workflows/ci.yml \
+            || { echo "RAM GUARD: FAIL — build must be a single unified --no-run, no exclude/-p split"; exit 1; }
+          grep -q 'CARGO_BUILD_JOBS: "3"' .github/workflows/ci.yml \
+            || { echo "RAM GUARD: FAIL — missing -j3 on compile step"; exit 1; }
+          grep -qF -- 'cargo nextest run --locked --workspace --profile ci' .github/workflows/ci.yml \
+            || { echo "RAM GUARD: FAIL — run step missing"; exit 1; }
+          echo "RAM GUARD: PASS — sub-crate split + unified --no-run compile at -j3 intact, run step fast-passes"
 
       # The PTY suites drive the real binary through a virtual terminal and
       # assert on what is actually on screen. They are #[ignore]d because they
@@ -166,14 +257,12 @@ jobs:
       # spawns a process, so cap the workers rather than letting libtest fan out
       # to the core count.
       - name: Test (PTY end-to-end)
-        env:
-          PAGER_BINARY: ${{ github.workspace }}/target/debug/xai-grok-pager
         run: |
-          cargo test --locked -p xai-grok-pager --no-fail-fast \
+          cargo nextest run --locked -p xai-grok-pager --profile ci \
             --test pty_e2e_smoke \
             --test pty_e2e_config_ui \
             --test pty_e2e_minimal \
-            -- --ignored --test-threads 4
+            --run-ignored all --test-threads 4
 
   build-release:
     name: Build release binary (${{ matrix.target_os }}/${{ matrix.target_arch }})

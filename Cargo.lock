@@ -14087,6 +14087,7 @@ dependencies = [
  "xai-grok-sampling-types",
  "xai-grok-sandbox",
  "xai-grok-shared",
+ "xai-grok-shell-assets",
  "xai-grok-shell-base",
  "xai-grok-shell-session-support",
  "xai-grok-subagent-resolution",
@@ -14110,6 +14111,23 @@ dependencies = [
  "xai-tty-utils",
  "xai-workflow",
  "zstd",
+]
+
+[[package]]
+name = "xai-grok-shell-assets"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "flate2",
+ "prod-mc-cli-chat-proxy-types",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tar",
+ "tempfile",
+ "tracing",
+ "xai-grok-config",
+ "xai-grok-version",
 ]
 
 [[package]]

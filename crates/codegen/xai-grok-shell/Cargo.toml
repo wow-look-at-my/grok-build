@@ -128,6 +128,7 @@ tonic = { workspace = true, optional = true }
 prost = { workspace = true, optional = true }
 xai-grok-paths = { path = "../xai-grok-paths" }
 xai-grok-shell-base = { workspace = true }
+xai-grok-shell-assets = { path = "../xai-grok-shell-assets" }
 xai-grok-shell-session-support = { workspace = true }
 xai-grok-shared = { workspace = true }
 xai-tracing-macros = { path = "../xai-tracing-macros" }
