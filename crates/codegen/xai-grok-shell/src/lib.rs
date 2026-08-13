@@ -14,8 +14,13 @@ pub use xai_tracing_macros::{teprintln, timed, tprintln};
 pub mod active_sessions;
 pub mod agent;
 pub mod auth;
-pub mod builtin;
-pub mod bundle;
+// `bundle` and `builtin` live in the `xai-grok-shell-assets` sub-crate (kept
+// out of the shell crate so its giant test-harness rustc has a smaller
+// monomorphization surface — part of the compile-RAM work). Re-exported here
+// so existing `crate::bundle::*` / `crate::builtin::*` call sites are
+// unchanged.
+pub use xai_grok_shell_assets::bundle;
+pub use xai_grok_shell_assets::builtin;
 pub mod claude_import;
 pub mod claude_import_state;
 pub mod cli_models;
