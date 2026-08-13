@@ -443,6 +443,9 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
             expected_version,
             new_text,
         } => queue::dispatch_queue_interject_shared(app, id, expected_version, new_text),
+        Action::InterruptWithQueuedPrompts => {
+            super::interject::dispatch_interrupt_with_queued_prompts(app)
+        }
         Action::FocusPrompt => {
             with_active_agent(app, |agent| {
                 agent.set_active_pane(ActivePane::Prompt, false);

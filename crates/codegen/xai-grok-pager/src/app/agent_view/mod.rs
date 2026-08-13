@@ -1595,6 +1595,13 @@ pub struct AgentView {
     /// Parked here and fired from the confirming `x.ai/queue/changed`
     /// broadcast with the row's authoritative version.
     pub(crate) send_now_awaiting_confirm: Option<String>,
+    /// An interrupt-with-the-queue (bare Enter on an empty composer) the user
+    /// fired while a row was still an optimistic echo. `x.ai/queue/deliver_now`
+    /// sent then could overtake the row's own in-flight `session/prompt` and
+    /// harvest nothing — a fast double-Enter would silently not interrupt.
+    /// Parked here and re-fired from the confirming `x.ai/queue/changed`
+    /// broadcast, which proves the shell holds the rows.
+    pub(crate) deliver_now_awaiting_confirm: bool,
     /// User blocks painted at send-now dispatch, keyed by prompt id; the
     /// turn-start adoption consumes an entry to reuse its block. The flag
     /// marks an edit-interject override (fresher than the mirror text the

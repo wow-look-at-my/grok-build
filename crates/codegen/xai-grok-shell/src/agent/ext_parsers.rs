@@ -5,7 +5,7 @@
 
 use crate::session::SessionCommand;
 
-/// Parse a `x.ai/queue/{remove,reorder,clear,edit,interject,hold_edit,release_edit}`
+/// Parse a `x.ai/queue/{remove,reorder,clear,edit,interject,deliver_now,hold_edit,release_edit}`
 /// ext-notification's params into the corresponding [`SessionCommand`].
 /// `owner` is the resolved attribution (params `owner`/`clientIdentifier`) used
 /// to scope remove/clear to the requesting client's own items, and recorded as
@@ -69,6 +69,7 @@ pub(super) fn parse_queue_edit_command(
                 new_text,
             })
         }
+        "x.ai/queue/deliver_now" => Some(SessionCommand::DeliverQueuedPromptsNow),
         "x.ai/queue/edit" => {
             let id = params.get("id").and_then(|v| v.as_str())?.to_string();
             let new_text = params.get("newText").and_then(|v| v.as_str())?.to_string();

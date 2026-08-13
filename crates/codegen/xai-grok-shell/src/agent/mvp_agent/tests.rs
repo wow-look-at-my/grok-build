@@ -3790,7 +3790,7 @@ async fn ext_notification_forwards_each_queue_method_to_session_actor() {
     let (handle, _tx, mut cmd_rx) = make_live_session_handle(&sid, None);
     agent.insert_resident(&sid, handle);
     let session_id = sid.0.as_ref();
-    let cases: [(&str, serde_json::Value); 7] = [
+    let cases: [(&str, serde_json::Value); 8] = [
         (
             "x.ai/queue/remove",
             serde_json::json!({
@@ -3831,6 +3831,12 @@ async fn ext_notification_forwards_each_queue_method_to_session_actor() {
                 "expectedVersion": 2,
                 "owner": "grok-tui",
                 "newText": "now",
+            }),
+        ),
+        (
+            "x.ai/queue/deliver_now",
+            serde_json::json!({
+                "sessionId": session_id,
             }),
         ),
         (
@@ -3902,6 +3908,7 @@ async fn ext_notification_forwards_each_queue_method_to_session_actor() {
                 assert_eq!(owner.as_deref(), Some("grok-tui"));
                 assert_eq!(new_text.as_deref(), Some("now"));
             }
+            ("x.ai/queue/deliver_now", SessionCommand::DeliverQueuedPromptsNow) => {}
             ("x.ai/queue/hold_edit", SessionCommand::HoldCombineEdit { id }) => {
                 assert_eq!(id, "p-hold");
             }
