@@ -1,39 +1,32 @@
-//! `/debug` — Claude-Code-style debug self-help: ensure the firehose is on,
-//! hand the model the concrete per-session log path, and direct it to debug
-//! what the user said.
+//! `/debug <what is wrong>` — a self-debugging skill: hand the model this
+//! process's execution context (binary, config, log, model) and turn it loose
+//! on the user's question.
 //!
-//! Reworked from a set of debug-overlay toggles. The toggles still live on
-//! behind their subcommands ([`SUBCOMMANDS`]: `scroll` / `fps` / `log`, the
-//! same actions as `/scroll-debug` and friends) — untouched — but a **bare**
-//! `/debug` no longer just prints an overlay status line. It now:
+//! `/debug why was the context size defaulted to 256k?` injects the question
+//! together with the answers the model would otherwise have to guess at:
 //!
-//! 1. Resolves the *real* debug-log target the firehose writes to for this
-//!    session: the per-session `<grok_home>/debug/<session_id>.txt` file when
+//! 1. The *real* debug-log target the firehose writes to for this session: the
+//!    per-session `<grok_home>/debug/<session_id>.txt` file when
 //!    `GROK_DEBUG_LOG` is enabled (per-session routing — the exact path
 //!    `xai_grok_telemetry::debug_log`'s routing layer writes to), or the single
 //!    explicit file when `GROK_LOG_FILE` / `GROK_DEBUG_LOG=<path>` is set
-//!    (single-file routing writes only to that file).
-//! 2. *Confirms / records* whether the firehose ("debug logging") is on for
-//!    this session by reading the same environment variables
-//!    (`GROK_DEBUG_LOG` / `GROK_LOG_FILE`) the already-installed firehose
-//!    resolved at startup, and *ensures* the log file it names exists on disk
-//!    so the advertised path is real and readable by the model's tools.
-//! 3. Injects model-facing instructions through the real
-//!    [`CommandResult::InjectSkill`] path (the same delivery used by `/loop`
-//!    and skills) telling the model it is in debug mode, naming the log file
-//!    path, and directing it to debug whatever the user just said.
+//!    (single-file routing writes only to that file). The file is created if it
+//!    does not exist, so the advertised path is always real and readable.
+//! 2. Whether the firehose is on at all, read from the same environment
+//!    variables (`GROK_DEBUG_LOG` / `GROK_LOG_FILE`) the already-installed
+//!    subscriber resolved at startup.
+//! 3. The rest of the execution context — running binary vs installed binary
+//!    (staleness), version and commit, config layers, model id, context window,
+//!    effort, `GROK_*`/`XAI_*` environment — assembled by
+//!    [`super::debug_context::DebugContext`].
 //!
-//! Registration/visibility split: the command is registered on EVERY binary
-//! and fully functional in release — like the hidden diagnostics it fronts
-//! (`/scroll-debug`, `/gboom`) — but it is LISTED (dropdown, completion,
-//! recognized-token highlight via `visible()`) only on debug binaries
-//! (`cfg(debug_assertions)`). Discoverable where developers live, out of
-//! sight for users, yet still typeable in the field when support asks.
+//! Delivery is [`CommandResult::InjectSkill`], the same path skills and `/loop`
+//! use, so the injected prompt reaches the model as the next turn's content.
 //!
-//! Subcommands (args-based; a popup menu can come later):
-//! - `/debug` bare — the Claude-Code-style injection: confirm/provision the
-//!   firehose and inject the debug instructions + log path to the model.
-//! - `/debug on` — alias for the bare behavior (explicit "make debug on").
+//! Args that are not one of the reserved overlay keywords are the user's
+//! question, verbatim. The overlay toggles keep their keywords:
+//! - `/debug` bare / `/debug on` — inject the context with no question; the
+//!   model debugs whatever the user says next.
 //! - `/debug scroll` — the scroll-diagnostics HUD; same
 //!   [`Action::ToggleScrollDebugHud`] as `/scroll-debug`, which stays
 //!   registered as the hidden long-form alias.
@@ -47,6 +40,7 @@ use std::path::PathBuf;
 
 use agent_client_protocol as acp;
 
+use super::debug_context::{DebugContext, ModelFacts};
 use crate::app::actions::Action;
 use crate::slash::command::{AppCtx, ArgItem, CommandExecCtx, CommandResult, SlashCommand};
 
@@ -153,58 +147,45 @@ fn os_path(v: &std::ffi::OsStr) -> PathBuf {
     }
 }
 
-/// The model-facing instruction block delivered on a bare `/debug`.
-///
-/// Names the concrete log path so the model can read it through its own file
-/// tools, and directs it to debug whatever the user just said. Pure, so tests
-/// assert on the actual text.
-pub fn debug_instruction_text(path: &std::path::Path, on: bool) -> String {
-    let state = if on {
-        "Debug / firehose logging is confirmed ON for this session."
+/// One line describing where the firehose writes and whether it is on, for the
+/// `Session log` row of the execution context.
+pub fn log_summary(state: &DebugLogState) -> String {
+    match state {
+        DebugLogState::On { .. } => {
+            "firehose ON (GROK_DEBUG_LOG, per-session routing)".to_string()
+        }
+        DebugLogState::OnSingleFile { .. } => {
+            "firehose ON (GROK_LOG_FILE / GROK_DEBUG_LOG=<path>, single-file routing)".to_string()
+        }
+        DebugLogState::Off => "firehose OFF (no GROK_DEBUG_LOG / GROK_LOG_FILE): the file exists \
+                               but stays empty until grok is relaunched with GROK_DEBUG_LOG=1"
+            .to_string(),
+    }
+}
+
+/// Build the scrollback display text for an injecting `/debug`.
+pub fn debug_display_text(path: &std::path::Path, request: &str) -> String {
+    let request = request.trim();
+    if request.is_empty() {
+        format!(
+            "/debug: injected debug context; log: {}",
+            path.display()
+        )
     } else {
-        "Debug / firehose logging is currently OFF for this session (no \
-         GROK_DEBUG_LOG / GROK_LOG_FILE). The per-session log file below is \
-         provisioned and ready; relaunch grok with GROK_DEBUG_LOG=1 to have the \
-         firehose populate it."
-    };
-    format!(
-        "You are in DEBUG mode for this grok session.\n\
-         {state}\n\
-         The debug log file for this session is:\n\
-         {}\n\
-         Read it (and any supporting harness state) with your file tools, then \
-         diagnose and debug what the user just said. Explain the root cause and \
-         fix anything that is broken.",
-        path.display()
-    )
+        format!("/debug {request}")
+    }
 }
 
-/// Build the scrollback display text for a bare `/debug`.
-pub fn debug_display_text(path: &std::path::Path) -> String {
-    format!(
-        "/debug: injected debug instructions; log: {}",
-        path.display()
-    )
-}
-
-/// Whether `/debug` is listed on completion surfaces. `visible()` returns
-/// this constant, so release invisibility is pinned by the constant's shape
-/// (`cfg!(debug_assertions)`) rather than a runtime check — tests always
-/// compile with `debug_assertions`, so the release half is untestable by
-/// assertion and locked by construction instead.
-pub const LISTED_IN_COMPLETIONS: bool = cfg!(debug_assertions);
-
-/// Subcommand name/description pairs (single source for run + suggestions).
-/// `on` and the bare invocation share the Claude-Code-style injection; the
-/// overlay toggles stay as-is.
+/// Args that are NOT the user's question: the overlay toggles plus the `on`
+/// alias for a bare invocation. Anything else is free text.
 const SUBCOMMANDS: &[(&str, &str)] = &[
-    ("on", "Ensure debug logging is on and inject debug instructions + log path"),
+    ("on", "Inject the debug context with no question attached"),
     ("scroll", "Toggle the scroll-diagnostics HUD"),
     ("fps", "Toggle the FPS overlay"),
     ("log", "Toggle the scroll flight recorder (JSONL)"),
 ];
 
-/// Debug self-help + overlay toggles; listed only on debug binaries.
+/// Self-debugging skill + the overlay toggles it fronts.
 pub struct DebugCommand;
 
 impl SlashCommand for DebugCommand {
@@ -213,11 +194,11 @@ impl SlashCommand for DebugCommand {
     }
 
     fn description(&self) -> &str {
-        "Debug the session: hand the model the debug log path and instructions"
+        "Debug grok itself: inject this session's execution context and a question"
     }
 
     fn usage(&self) -> &str {
-        "/debug [on|scroll|fps|log]"
+        "/debug [<what is wrong> | scroll | fps | log]"
     }
 
     fn takes_args(&self) -> bool {
@@ -225,12 +206,7 @@ impl SlashCommand for DebugCommand {
     }
 
     fn arg_placeholder(&self) -> Option<&str> {
-        Some("on | scroll | fps | log")
-    }
-
-    /// Debug binaries only; release keeps it registered but unlisted.
-    fn visible(&self, _ctx: &AppCtx) -> bool {
-        LISTED_IN_COMPLETIONS
+        Some("what is wrong? (or: scroll | fps | log)")
     }
 
     fn suggest_args(&self, _ctx: &AppCtx, _args_query: &str) -> Option<Vec<ArgItem>> {
@@ -249,65 +225,90 @@ impl SlashCommand for DebugCommand {
 
     fn run(&self, ctx: &mut CommandExecCtx, args: &str) -> CommandResult {
         match args.trim() {
-            // Bare (and explicit `on`): the Claude-Code-style debug self-help.
-            // Resolve the firehose state + per-session log path, ensure the log
-            // file exists, then hand the model the path + instructions.
-            "" | "on" => match ctx.session_id {
-                Some(session_id) => {
-                    let home = xai_grok_config::grok_home();
-                    let state = debug_log_state(
-                        std::env::var_os("GROK_LOG_FILE").as_deref(),
-                        std::env::var_os("GROK_DEBUG_LOG").as_deref(),
-                        &home.join("debug"),
-                    );
-                    // The path the firehose ACTUALLY writes to for this session.
-                    // Per-session routing (`On`) writes `<dir>/<session_id>.txt`;
-                    // a single explicit file (`GROK_LOG_FILE` /
-                    // `GROK_DEBUG_LOG=<path>`) writes only to that file, so the
-                    // injection must name that file — never a per-session path
-                    // that would stay empty. `Off` falls back to provisioning
-                    // the per-session file so the model still has a real log.
-                    let path = match &state {
-                        DebugLogState::OnSingleFile { path } => path.clone(),
-                        DebugLogState::On { .. } | DebugLogState::Off => {
-                            debug_log_path(&home, session_id.0.as_ref())
-                        }
-                    };
-                    let on = state != DebugLogState::Off;
-                    // Ensure the log file exists so the advertised path is real
-                    // and readable by the model's tools, even before the firehose
-                    // writes to it. Best-effort: if the dir can't be created the
-                    // injection still proceeds.
-                    if let Some(parent) = path.parent() {
-                        let _ = std::fs::create_dir_all(parent);
-                    }
-                    let _ = std::fs::OpenOptions::new()
-                        .create(true)
-                        .append(true)
-                        .open(&path);
-                    CommandResult::InjectSkill {
-                        display_text: debug_display_text(&path),
-                        prompt_blocks: vec![acp::ContentBlock::Text(acp::TextContent::new(
-                            debug_instruction_text(&path, on),
-                        ))],
-                        display_as_skill: false,
-                        scheduled_task_preview: None,
-                    }
-                }
-                None => CommandResult::Error(
-                    "/debug needs an active session so it can resolve the per-session \
-                     debug log path".to_string(),
-                ),
-            },
             "scroll" => CommandResult::Action(Action::ToggleScrollDebugHud),
             "fps" => CommandResult::Action(Action::ToggleFpsHud),
             "log" => CommandResult::Action(Action::ToggleScrollLog),
-            other => CommandResult::Error(format!(
-                "Unknown /debug option '{other}'. Usage: /debug [on|scroll|fps|log]"
-            )),
+            // Everything else is the user's question — `on` and a bare `/debug`
+            // are the same invocation with no question attached.
+            request => {
+                let request = if request == "on" { "" } else { request };
+                self.inject(ctx, request)
+            }
         }
     }
 }
+
+impl DebugCommand {
+    /// Resolve the firehose target, provision it, and inject the execution
+    /// context plus the user's question.
+    fn inject(&self, ctx: &mut CommandExecCtx, request: &str) -> CommandResult {
+        let Some(session_id) = ctx.session_id else {
+            return CommandResult::Error(
+                "/debug needs an active session so it can resolve the per-session \
+                 debug log path"
+                    .to_string(),
+            );
+        };
+        let home = xai_grok_config::grok_home();
+        let state = debug_log_state(
+            std::env::var_os("GROK_LOG_FILE").as_deref(),
+            std::env::var_os("GROK_DEBUG_LOG").as_deref(),
+            &home.join("debug"),
+        );
+        // The path the firehose ACTUALLY writes to for this session. Per-session
+        // routing (`On`) writes `<dir>/<session_id>.txt`; a single explicit file
+        // (`GROK_LOG_FILE` / `GROK_DEBUG_LOG=<path>`) writes only to that file,
+        // so the injection must name that file — never a per-session path that
+        // would stay empty. `Off` falls back to provisioning the per-session
+        // file so the model still has a real log.
+        let path = match &state {
+            DebugLogState::OnSingleFile { path } => path.clone(),
+            DebugLogState::On { .. } | DebugLogState::Off => {
+                debug_log_path(&home, session_id.0.as_ref())
+            }
+        };
+        // Ensure the log file exists so the advertised path is real and readable
+        // by the model's tools, even before the firehose writes to it.
+        // Best-effort: if the dir can't be created the injection still proceeds.
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let _ = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path);
+
+        let context = DebugContext::gather(
+            session_id.0.as_ref(),
+            path.clone(),
+            log_summary(&state),
+            model_facts(ctx),
+        );
+        CommandResult::InjectSkill {
+            display_text: debug_display_text(&path, request),
+            prompt_blocks: vec![acp::ContentBlock::Text(acp::TextContent::new(
+                context.render(request),
+            ))],
+            display_as_skill: true,
+            scheduled_task_preview: None,
+        }
+    }
+}
+
+/// The model rows of the execution context, read from the pager's own state so
+/// they match what this session is acting on rather than the catalog default.
+fn model_facts(ctx: &CommandExecCtx) -> ModelFacts {
+    ModelFacts {
+        name: ctx.models.current_model_name(),
+        id: ctx.models.current_model_id_str().map(str::to_string),
+        context_window: ctx.models.get_context_window(),
+        reasoning_effort: ctx
+            .models
+            .reasoning_effort
+            .map(|effort| effort.as_str().to_string()),
+    }
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -340,23 +341,15 @@ mod tests {
         LOCK.lock().unwrap_or_else(|p| p.into_inner())
     }
 
-    /// Tests compile with `debug_assertions`, so this asserts the
-    /// debug-binary half live: `/debug` must be visible here. The release
-    /// half (invisible) is untestable from a debug test build and pinned by
-    /// mechanism instead — `visible()` returns `LISTED_IN_COMPLETIONS =
-    /// cfg!(debug_assertions)`, which a release compile evaluates to
-    /// `false` by construction; the `assert_eq!` locks `visible()` to that
-    /// constant under whichever profile compiles the test.
+    /// The whole point of the command is being typeable: it has to be listed on
+    /// every binary, release included, not just where `debug_assertions` is on.
     #[test]
-    fn debug_listed_on_debug_binaries_only() {
+    fn debug_is_listed_on_every_binary() {
         let models = ModelState::default();
-        let listed = DebugCommand.visible(&app_ctx(&models));
-        assert_eq!(
-            listed,
-            cfg!(debug_assertions),
-            "visible() must track the binary profile"
+        assert!(
+            DebugCommand.visible(&app_ctx(&models)),
+            "/debug must be offered in the composer regardless of build profile"
         );
-        assert_eq!(listed, LISTED_IN_COMPLETIONS);
     }
 
     /// `/debug scroll` and `/scroll-debug` must stay routed to the SAME
@@ -393,28 +386,12 @@ mod tests {
     fn debug_requires_session_for_injection() {
         let models = ModelState::default();
         let mut ctx = make_ctx(&models);
-        // make_ctx has session_id: None — a bare /debug must refuse cleanly.
-        for args in ["", "   ", "on"] {
+        // make_ctx has session_id: None — an injecting /debug must refuse cleanly.
+        for args in ["", "   ", "on", "why is the context window 256k?"] {
             assert!(
                 matches!(DebugCommand.run(&mut ctx, args), CommandResult::Error(_)),
-                "bare /debug without a session must error, args={args:?}"
+                "/debug without a session must error, args={args:?}"
             );
-        }
-    }
-
-    #[test]
-    fn debug_junk_subcommand_errors_helpfully() {
-        let models = ModelState::default();
-        let mut ctx = make_ctx(&models);
-        match DebugCommand.run(&mut ctx, "wat") {
-            CommandResult::Error(msg) => {
-                assert!(msg.contains("wat"), "must echo the bad option: {msg}");
-                assert!(
-                    msg.contains("scroll") && msg.contains("fps") && msg.contains("log"),
-                    "must list the valid options: {msg}"
-                );
-            }
-            other => panic!("expected Error, got {other:?}"),
         }
     }
 
@@ -425,11 +402,7 @@ mod tests {
             .suggest_args(&app_ctx(&models), "")
             .expect("suggestions");
         let names: Vec<&str> = items.iter().map(|i| i.insert_text.as_str()).collect();
-        assert_eq!(
-            names,
-            vec!["on", "scroll", "fps", "log"],
-            "completion must surface the new `on` subcommand"
-        );
+        assert_eq!(names, vec!["on", "scroll", "fps", "log"]);
     }
 
     // ── Pure resolver / builder tests ────────────────────────────────────
@@ -508,63 +481,68 @@ mod tests {
             }
         );
         assert_eq!(
-            debug_log_state(None, Some(std::ffi::OsStr::new("/tmp/custom.log")), Path::new("/debug")),
+            debug_log_state(
+                None,
+                Some(std::ffi::OsStr::new("/tmp/custom.log")),
+                Path::new("/debug")
+            ),
             DebugLogState::OnSingleFile {
                 path: PathBuf::from("/tmp/custom.log")
             }
         );
     }
 
+    /// The summary line must let the model tell an empty log from a live one —
+    /// a firehose-off session's file exists but never fills.
     #[test]
-    fn debug_instruction_text_names_the_path_and_debug_directive() {
-        let text = debug_instruction_text(Path::new("/h/.grok/debug/sid.txt"), true);
+    fn log_summary_distinguishes_on_off_and_single_file() {
         assert!(
-            text.contains("/h/.grok/debug/sid.txt"),
-            "must name the concrete log path: {text}"
-        );
-        assert!(text.contains("DEBUG mode"), "must declare debug mode: {text}");
-        assert!(
-            text.contains("Read it") && text.contains("debug what the user just said"),
-            "must direct the model to read the log and debug the user's request: {text}"
+            log_summary(&DebugLogState::On {
+                dir: PathBuf::from("/d")
+            })
+            .contains("ON"),
         );
         assert!(
-            text.contains("confirmed ON"),
-            "must report firehose on: {text}"
+            log_summary(&DebugLogState::OnSingleFile {
+                path: PathBuf::from("/f")
+            })
+            .contains("single-file"),
         );
+        let off = log_summary(&DebugLogState::Off);
+        assert!(off.contains("OFF") && off.contains("GROK_DEBUG_LOG=1"), "{off}");
     }
 
     #[test]
-    fn debug_instruction_text_off_reports_provisioned_and_relaunch() {
-        let text = debug_instruction_text(Path::new("/h/.grok/debug/sid.txt"), false);
-        assert!(
-            text.contains("currently OFF"),
-            "must state firehose off: {text}"
+    fn display_text_shows_the_question_and_falls_back_to_the_log_path() {
+        assert_eq!(
+            debug_display_text(Path::new("/h/.grok/debug/s.txt"), "  why 256k?  "),
+            "/debug why 256k?"
         );
         assert!(
-            text.contains("GROK_DEBUG_LOG=1"),
-            "must tell how to enable on relaunch: {text}"
+            debug_display_text(Path::new("/h/.grok/debug/s.txt"), "")
+                .contains("/h/.grok/debug/s.txt")
         );
     }
 
-    /// Drive the real bare invocation: it must return an `InjectSkill` whose
-    /// prompt block embeds the real per-session path under the grok debug home
-    /// and instructs the model to debug. This exercises the full `run()` glue
-    /// (routing + resolver + builder) with the shipped code.
+    /// The user's headline case: `/debug <free text>` must reach the model as a
+    /// skill injection carrying the question AND this process's real context —
+    /// not an "unknown option" error.
     #[test]
-    fn debug_bare_invocation_injects_path_and_instructions() {
+    fn debug_with_a_question_injects_it_with_the_execution_context() {
         let _env = run_env_lock();
         let models = ModelState::default();
         let mut ctx = make_ctx(&models);
-        let sid = acp::SessionId::new("debug-bare-sess");
+        let sid = acp::SessionId::new("debug-question-sess");
         ctx.session_id = Some(&sid);
-        // This test asserts on the ambient (test) environment being firehose-off,
-        // so it must not inherit GROK_LOG_FILE/GROK_DEBUG_LOG from the host.
         unsafe {
             std::env::remove_var("GROK_LOG_FILE");
             std::env::remove_var("GROK_DEBUG_LOG");
         }
 
-        let result = DebugCommand.run(&mut ctx, "");
+        let result = DebugCommand.run(
+            &mut ctx,
+            "why was the context size defaulted to 256k? this model is 1m",
+        );
         let CommandResult::InjectSkill {
             display_text,
             prompt_blocks,
@@ -572,44 +550,89 @@ mod tests {
             scheduled_task_preview,
         } = result
         else {
-            panic!("bare /debug must InjectSkill, got {result:?}");
+            panic!("/debug <question> must InjectSkill, got {result:?}");
         };
-        assert_eq!(display_as_skill, false);
+        assert!(display_as_skill, "it renders as the skill invocation it is");
         assert!(scheduled_task_preview.is_none());
+        assert_eq!(
+            display_text,
+            "/debug why was the context size defaulted to 256k? this model is 1m"
+        );
         let acp::ContentBlock::Text(text) = &prompt_blocks[0] else {
             panic!("expected a text prompt block");
         };
         let home = xai_grok_config::grok_home();
-        let expected = debug_log_path(&home, "debug-bare-sess");
+        let expected_log = debug_log_path(&home, "debug-question-sess");
         assert!(
-            text.text.contains(expected.to_str().unwrap()),
-            "prompt block must name the session's real debug log path; \
-             got: {}",
+            text.text.contains("why was the context size defaulted to 256k?"),
+            "the question must reach the model: {}",
             text.text
         );
-        assert!(
-            text.text.contains("debug what the user just said"),
-            "prompt block must direct the model to debug: {}",
-            text.text
-        );
-        assert!(
-            display_text.contains("debug-bare-sess.txt"),
-            "scrollback display must reference the session log: {display_text}"
-        );
+        for expected in [
+            expected_log.to_str().unwrap(),
+            home.join("config.toml").to_str().unwrap(),
+            "Running binary",
+            "PID",
+            "DEBUG mode",
+        ] {
+            assert!(
+                text.text.contains(expected),
+                "execution context missing {expected:?} in: {}",
+                text.text
+            );
+        }
         // The ensure-step must have provisioned a real file at that path.
         assert!(
-            expected.is_file(),
-            "bare /debug must ensure the session log file exists: {expected:?}"
+            expected_log.is_file(),
+            "/debug must ensure the session log file exists: {expected_log:?}"
         );
     }
 
-    /// When a single firehose file is configured (`GROK_LOG_FILE` or
-    /// `GROK_DEBUG_LOG=<path>`), `run()` must inject THAT file's path — the
-    /// only file the firehose actually writes to — not an empty per-session
-    /// `<debug>/<sid>.txt` file. Drives the real `run()` glue with the real
-    /// env-backed state resolver.
+    /// A bare `/debug` (and its `on` alias) still injects — with no question,
+    /// so the model debugs whatever the user says next.
     #[test]
-    fn debug_bare_invocation_with_grok_log_file_injects_single_file_path() {
+    fn debug_bare_and_on_inject_without_a_question() {
+        let _env = run_env_lock();
+        let models = ModelState::default();
+        let mut ctx = make_ctx(&models);
+        let sid = acp::SessionId::new("debug-bare-sess");
+        ctx.session_id = Some(&sid);
+        unsafe {
+            std::env::remove_var("GROK_LOG_FILE");
+            std::env::remove_var("GROK_DEBUG_LOG");
+        }
+
+        for args in ["", "on"] {
+            let result = DebugCommand.run(&mut ctx, args);
+            let CommandResult::InjectSkill {
+                display_text,
+                prompt_blocks,
+                ..
+            } = result
+            else {
+                panic!("/debug {args:?} must InjectSkill, got {result:?}");
+            };
+            let acp::ContentBlock::Text(text) = &prompt_blocks[0] else {
+                panic!("expected a text prompt block");
+            };
+            assert!(
+                text.text.contains("debug what the user says next"),
+                "a question-less /debug must still be actionable: {}",
+                text.text
+            );
+            assert!(
+                display_text.contains("debug-bare-sess.txt"),
+                "scrollback must reference the session log: {display_text}"
+            );
+        }
+    }
+
+    /// When a single firehose file is configured (`GROK_LOG_FILE` or
+    /// `GROK_DEBUG_LOG=<path>`), the injection must name THAT file — the only
+    /// file the firehose actually writes to — not an empty per-session
+    /// `<debug>/<sid>.txt`.
+    #[test]
+    fn debug_with_grok_log_file_injects_single_file_path() {
         let _env = run_env_lock();
         let models = ModelState::default();
         let mut ctx = make_ctx(&models);
@@ -626,7 +649,7 @@ mod tests {
 
         let result = DebugCommand.run(&mut ctx, "");
         let CommandResult::InjectSkill { prompt_blocks, .. } = result else {
-            panic!("bare /debug with GROK_LOG_FILE set must InjectSkill, got {result:?}");
+            panic!("/debug with GROK_LOG_FILE set must InjectSkill, got {result:?}");
         };
         let acp::ContentBlock::Text(text) = &prompt_blocks[0] else {
             panic!("expected a text prompt block");
@@ -638,12 +661,9 @@ mod tests {
              path); got: {}",
             text.text
         );
-        // It must NOT fall back to the per-session file: name the session sibling?
-        // No — for OnSingleFile the per-session file is never used; assert the
-        // text is firehose-on and names the target.
         assert!(
-            text.text.contains("confirmed ON"),
-            "a configured single file means the firehose is on: {}",
+            text.text.contains("single-file"),
+            "the log line must say where the firehose is routed: {}",
             text.text
         );
         // The ensure-step must have provisioned the single file itself.
