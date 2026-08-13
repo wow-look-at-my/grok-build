@@ -1715,14 +1715,10 @@ mod tests {
         assert_eq!(cmd.name(), "gboom");
     }
 
-    /// `/debug` lists via `visible()` = cfg!(debug_assertions); tests
-    /// compile with debug_assertions, so it must surface here. Release
-    /// builds flip the same constant to false (the /gboom hidden
-    /// mechanism), which is untestable from a debug test build — hence
-    /// the cfg gate rather than a release-side assertion.
+    /// `/debug` is a user-facing skill, so it must be offered in the composer
+    /// on every binary — no `debug_assertions` gate, no release-only hiding.
     #[test]
-    #[cfg(debug_assertions)]
-    fn debug_appears_in_suggestions_on_debug_binaries() {
+    fn debug_appears_in_suggestions() {
         let mut ctrl = SlashController::with_builtins(std::path::PathBuf::from("."));
         let state = SlashState::default();
         let models = ModelState::default();

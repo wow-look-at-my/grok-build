@@ -151,7 +151,9 @@ fn openai_compatible_group_sub_sheet_flow() {
     assert!(matches!(out, SettingsKeyOutcome::Changed));
     assert!(matches!(
         s.mode(),
-        SettingsModalMode::EditingValue { key: "openai_compatible.base_url" }
+        SettingsModalMode::EditingValue {
+            key: "openai_compatible.base_url"
+        }
     ));
     // Esc cancels back to Browse (standard editor cancel).
     let out = handle_settings_key(&mut s, &KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
@@ -168,7 +170,10 @@ fn openai_compatible_group_sub_sheet_flow() {
         s.mode(),
         SettingsModalMode::PickingGroup { child_idx: 2, .. }
     ));
-    let out = handle_settings_key(&mut s, &KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+    let out = handle_settings_key(
+        &mut s,
+        &KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE),
+    );
     assert!(
         matches!(
             out,
@@ -199,10 +204,7 @@ fn openai_compatible_group_sub_sheet_flow() {
     ));
     let out = handle_settings_key(&mut s, &KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
     assert!(matches!(out, SettingsKeyOutcome::Changed));
-    assert!(matches!(
-        s.mode(),
-        SettingsModalMode::PickingEnum { .. }
-    ));
+    assert!(matches!(s.mode(), SettingsModalMode::PickingEnum { .. }));
 
     // Esc cancels the picker back to Browse.
     let out = handle_settings_key(&mut s, &KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
@@ -2213,10 +2215,8 @@ fn int_editing_value_clamps_to_min() {
 fn int_editing_value_appends_digit_keys() {
     let mut s = int_stepper_fixture(50);
     for d in ['7', '0', '0'] {
-        let outcome = handle_settings_key(
-            &mut s,
-            &KeyEvent::new(KeyCode::Char(d), KeyModifiers::NONE),
-        );
+        let outcome =
+            handle_settings_key(&mut s, &KeyEvent::new(KeyCode::Char(d), KeyModifiers::NONE));
         assert!(matches!(outcome, SettingsKeyOutcome::Changed));
     }
     assert_eq!(int_stepper_buffer(&s), "50700");
@@ -2273,13 +2273,13 @@ fn int_editing_value_typed_commit_dispatches_clamped_value() {
     let mut s = int_stepper_fixture_for("scroll_lines", 3);
     // Clear the seeded value, then type 7.
     // "3" → "" (1 backspace for a single digit).
-    let _ = handle_settings_key(&mut s, &KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
+    let _ = handle_settings_key(
+        &mut s,
+        &KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE),
+    );
     assert_eq!(int_stepper_buffer(&s), "");
     for d in ['7'] {
-        let _ = handle_settings_key(
-            &mut s,
-            &KeyEvent::new(KeyCode::Char(d), KeyModifiers::NONE),
-        );
+        let _ = handle_settings_key(&mut s, &KeyEvent::new(KeyCode::Char(d), KeyModifiers::NONE));
     }
     assert_eq!(int_stepper_buffer(&s), "7");
     let outcome = handle_settings_key(&mut s, &KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
@@ -2299,8 +2299,14 @@ fn int_editing_value_typed_out_of_range_clamps_on_commit() {
     use crossterm::event::KeyModifiers;
     // scroll_lines min 1. Type "0" then commit → clamps to 1.
     let mut s = int_stepper_fixture_for("scroll_lines", 3);
-    let _ = handle_settings_key(&mut s, &KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
-    let _ = handle_settings_key(&mut s, &KeyEvent::new(KeyCode::Char('0'), KeyModifiers::NONE));
+    let _ = handle_settings_key(
+        &mut s,
+        &KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE),
+    );
+    let _ = handle_settings_key(
+        &mut s,
+        &KeyEvent::new(KeyCode::Char('0'), KeyModifiers::NONE),
+    );
     let outcome = handle_settings_key(&mut s, &KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
     assert!(
         matches!(

@@ -138,8 +138,8 @@ impl GhRun {
     /// waiting) is a live, moving CI signal → yellow. A `completed` run that
     /// is still missing a final conclusion is also treated as in-flight.
     fn is_in_progress(&self) -> bool {
-        let status_pending = !self.status.is_empty()
-            && !self.status.eq_ignore_ascii_case("completed");
+        let status_pending =
+            !self.status.is_empty() && !self.status.eq_ignore_ascii_case("completed");
         status_pending || (self.conclusion.is_empty() && !self.status.is_empty())
     }
 
@@ -587,14 +587,23 @@ mod tests {
 
     #[test]
     fn map_success_is_green() {
-        assert_eq!(map_ci_status(Some("completed"), Some("success")), CiStatus::Green);
+        assert_eq!(
+            map_ci_status(Some("completed"), Some("success")),
+            CiStatus::Green
+        );
     }
 
     #[test]
     fn map_no_signal_is_off() {
         assert_eq!(map_ci_status(None, None), CiStatus::Off);
-        assert_eq!(map_ci_status(Some("completed"), Some("neutral")), CiStatus::Off);
-        assert_eq!(map_ci_status(Some("completed"), Some("skipped")), CiStatus::Off);
+        assert_eq!(
+            map_ci_status(Some("completed"), Some("neutral")),
+            CiStatus::Off
+        );
+        assert_eq!(
+            map_ci_status(Some("completed"), Some("skipped")),
+            CiStatus::Off
+        );
     }
 
     #[test]
@@ -794,7 +803,9 @@ mod tests {
         assert!((sine_value_factor(12, 0.25, 0.80) - 0.80).abs() < 1e-2);
         assert!((sine_value_factor(36, 0.25, 0.80) - 0.25).abs() < 1e-2);
         // And it is periodic.
-        assert!((sine_value_factor(0, 0.25, 0.80) - sine_value_factor(48, 0.25, 0.80)).abs() < 1e-2);
+        assert!(
+            (sine_value_factor(0, 0.25, 0.80) - sine_value_factor(48, 0.25, 0.80)).abs() < 1e-2
+        );
     }
 
     #[test]
@@ -815,7 +826,8 @@ mod tests {
         assert!((h1 - h2).abs() < 1.0, "hue must be preserved");
         assert!((s1 - s2).abs() < 0.05, "saturation must be preserved");
         // The bright frame is strictly lightened (higher luminance).
-        let lum = |(r, g, b): (u8, u8, u8)| 0.2126 * r as f32 + 0.7152 * g as f32 + 0.0722 * b as f32;
+        let lum =
+            |(r, g, b): (u8, u8, u8)| 0.2126 * r as f32 + 0.7152 * g as f32 + 0.0722 * b as f32;
         assert!(lum(bright) > lum(dim), "brighter frame must be lighter");
     }
 
