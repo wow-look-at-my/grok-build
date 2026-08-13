@@ -1,0 +1,40 @@
+# cargo-nextest configuration.
+# https://nexte.st/docs/configuration/
+#
+# Per-test timeout: a hung test (e.g. a PTY test waiting for a shell that
+# doesn't exist on a lean runner) blocks the whole test binary and wastes
+# the entire CI job timeout. nextest runs each test in its own process and
+# enforces a per-test timeout via slow-timeout, so a hung test fails fast
+# instead of blocking the rest.
+#
+# slow-timeout: after `period` (60s) with no output, mark the test as slow;
+# after `terminate-after` (1) slow period, kill the test process and fail
+# it. Most tests finish in <1s; the slowest legitimate tests (PTY e2e,
+# integration suites) finish in <30s. 60s gives headroom while catching
+# true hangs (the shell's PTY tests blocked for 29+ min on a lean runner
+# with no /bin/bash).
+
+[profile.ci]
+slow-timeout = { period = "60s", terminate-after = 1 }
+
+# Don't retry on timeout — fail immediately so the hang is visible.
+retries = 0
+
+# Run ALL tests even on failure (equivalent to cargo test --no-fail-fast).
+# A single failure should not hide every test after it — the next push
+# would find a new one each time. fail-fast = false means nextest runs
+# every test regardless of individual failures.
+fail-fast = false
+
+# The curated scroll-matrix cells are host-paced PTY sessions: they measure
+# real scroll timing against a live pager, so running several at once stretches
+# the gesture gaps they assert on. The suite serializes them with a static
+# mutex, which works under `cargo test` (one process, many threads) and NOT
+# under nextest, which gives every test its own process. This group restores
+# that guarantee — without it the mutex is a no-op and the cells go flaky.
+[test-groups]
+scroll-matrix = { max-threads = 1 }
+
+[[profile.default.overrides]]
+filter = 'binary(scroll_matrix_curated)'
+test-group = 'scroll-matrix'
