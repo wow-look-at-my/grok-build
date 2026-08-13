@@ -55,7 +55,10 @@ pub struct FileFact {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FileState {
-    Present { bytes: u64, modified: Option<String> },
+    Present {
+        bytes: u64,
+        modified: Option<String>,
+    },
     Missing,
 }
 
@@ -108,7 +111,15 @@ pub enum EnvValue {
 /// like a credential are named but not printed.
 pub fn is_secret_name(name: &str) -> bool {
     const MARKERS: &[&str] = &[
-        "KEY", "TOKEN", "SECRET", "PASSWORD", "PASSWD", "CRED", "COOKIE", "AUTH", "SESSION_ID",
+        "KEY",
+        "TOKEN",
+        "SECRET",
+        "PASSWORD",
+        "PASSWD",
+        "CRED",
+        "COOKIE",
+        "AUTH",
+        "SESSION_ID",
     ];
     let upper = name.to_ascii_uppercase();
     MARKERS.iter().any(|m| upper.contains(m))
@@ -168,7 +179,7 @@ pub struct DebugContext {
     pub grok_home_from_env: bool,
     pub config_files: Vec<FileFact>,
     pub session_id: String,
-    pub log_path: PathBuf,
+    pub log: FileFact,
     pub log_summary: String,
     pub cwd: Option<PathBuf>,
     pub model: ModelFacts,
@@ -204,7 +215,7 @@ impl DebugContext {
             grok_home,
             config_files,
             session_id: session_id.to_string(),
-            log_path,
+            log: FileFact::stat(log_path),
             log_summary,
             cwd: std::env::current_dir().ok(),
             model,
@@ -292,9 +303,11 @@ impl DebugContext {
             lines.push((if i == 0 { "Config files" } else { "" }, file.render()));
         }
         lines.push(("Session id", self.session_id.clone()));
+        // Size included: an empty file is the difference between "the firehose
+        // has nothing to say" and "nothing was ever written here".
         lines.push((
             "Session log",
-            format!("{} — {}", self.log_path.display(), self.log_summary),
+            format!("{} — {}", self.log.render(), self.log_summary),
         ));
         lines.push((
             "Process cwd",
@@ -444,7 +457,10 @@ mod tests {
     #[test]
     fn secret_shaped_variables_are_named_but_never_printed() {
         let facts = grok_env_facts([
-            ("XAI_API_KEY".to_string(), "sk-live-do-not-print".to_string()),
+            (
+                "XAI_API_KEY".to_string(),
+                "sk-live-do-not-print".to_string(),
+            ),
             ("GROK_AUTH_TOKEN".to_string(), "bearer-nope".to_string()),
             ("GROK_HOME".to_string(), "/h/.grok".to_string()),
             ("PATH".to_string(), "/usr/bin".to_string()),
@@ -489,7 +505,11 @@ mod tests {
 
         let absent = FileFact::stat(dir.path().join("managed_config.toml"));
         assert_eq!(absent.state, FileState::Missing);
-        assert!(absent.render().ends_with("(missing)"), "{}", absent.render());
+        assert!(
+            absent.render().ends_with("(missing)"),
+            "{}",
+            absent.render()
+        );
     }
 
     #[test]
@@ -517,12 +537,12 @@ mod tests {
             "the user's question must reach the model verbatim: {text}"
         );
         for expected in [
-            "/h/.grok/debug/sid.txt",  // the log to read
-            "/h/.grok/config.toml",    // the config to read
-            "262144",                  // the number the user is asking about
-            "grok-4.5",                // the model it belongs to
-            "GROK_DEBUG_LOG=1",        // how this process was launched
-            "0.2.7",                   // what is running
+            "/h/.grok/debug/sid.txt", // the log to read
+            "/h/.grok/config.toml",   // the config to read
+            "262144",                 // the number the user is asking about
+            "grok-4.5",               // the model it belongs to
+            "GROK_DEBUG_LOG=1",       // how this process was launched
+            "0.2.7",                  // what is running
         ] {
             assert!(text.contains(expected), "missing {expected:?} in: {text}");
         }
@@ -546,7 +566,10 @@ mod tests {
         let mut ctx = sample_context(BinaryFreshness::Current);
         ctx.env = grok_env_facts([("XAI_API_KEY".to_string(), "sk-live-leaked".to_string())]);
         let text = ctx.render("check auth");
-        assert!(!text.contains("sk-live-leaked"), "leaked a credential: {text}");
+        assert!(
+            !text.contains("sk-live-leaked"),
+            "leaked a credential: {text}"
+        );
         assert!(
             text.contains("XAI_API_KEY is set (value withheld)"),
             "the variable must still be named: {text}"
@@ -571,7 +594,13 @@ mod tests {
                 },
             }],
             session_id: "sid".to_string(),
-            log_path: PathBuf::from("/h/.grok/debug/sid.txt"),
+            log: FileFact {
+                path: PathBuf::from("/h/.grok/debug/sid.txt"),
+                state: FileState::Present {
+                    bytes: 8192,
+                    modified: None,
+                },
+            },
             log_summary: "firehose ON (per-session routing)".to_string(),
             cwd: Some(PathBuf::from("/workspace")),
             model: ModelFacts {

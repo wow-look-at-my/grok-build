@@ -117,9 +117,7 @@ pub fn debug_log_state(
     if let Some(raw) = grok_log_file
         && !is_blank_os(raw)
     {
-        return DebugLogState::OnSingleFile {
-            path: os_path(raw),
-        };
+        return DebugLogState::OnSingleFile { path: os_path(raw) };
     }
     match grok_debug_log {
         None => DebugLogState::Off,
@@ -129,9 +127,7 @@ pub fn debug_log_state(
                 dir: debug_dir.to_path_buf(),
             },
             // Any other UTF-8 value, or a non-UTF-8 value, is an explicit path.
-            _ => DebugLogState::OnSingleFile {
-                path: os_path(raw),
-            },
+            _ => DebugLogState::OnSingleFile { path: os_path(raw) },
         },
     }
 }
@@ -151,9 +147,7 @@ fn os_path(v: &std::ffi::OsStr) -> PathBuf {
 /// `Session log` row of the execution context.
 pub fn log_summary(state: &DebugLogState) -> String {
     match state {
-        DebugLogState::On { .. } => {
-            "firehose ON (GROK_DEBUG_LOG, per-session routing)".to_string()
-        }
+        DebugLogState::On { .. } => "firehose ON (GROK_DEBUG_LOG, per-session routing)".to_string(),
         DebugLogState::OnSingleFile { .. } => {
             "firehose ON (GROK_LOG_FILE / GROK_DEBUG_LOG=<path>, single-file routing)".to_string()
         }
@@ -167,10 +161,7 @@ pub fn log_summary(state: &DebugLogState) -> String {
 pub fn debug_display_text(path: &std::path::Path, request: &str) -> String {
     let request = request.trim();
     if request.is_empty() {
-        format!(
-            "/debug: injected debug context; log: {}",
-            path.display()
-        )
+        format!("/debug: injected debug context; log: {}", path.display())
     } else {
         format!("/debug {request}")
     }
@@ -209,6 +200,12 @@ impl SlashCommand for DebugCommand {
         Some("what is wrong? (or: scroll | fps | log)")
     }
 
+    /// The injection needs a session id to resolve the log path, so the
+    /// session-less dashboard input does not offer it.
+    fn session_scoped(&self) -> bool {
+        true
+    }
+
     fn suggest_args(&self, _ctx: &AppCtx, _args_query: &str) -> Option<Vec<ArgItem>> {
         Some(
             SUBCOMMANDS
@@ -230,68 +227,64 @@ impl SlashCommand for DebugCommand {
             "log" => CommandResult::Action(Action::ToggleScrollLog),
             // Everything else is the user's question — `on` and a bare `/debug`
             // are the same invocation with no question attached.
-            request => {
-                let request = if request == "on" { "" } else { request };
-                self.inject(ctx, request)
-            }
+            request => inject(ctx, if request == "on" { "" } else { request }),
         }
     }
 }
 
-impl DebugCommand {
-    /// Resolve the firehose target, provision it, and inject the execution
-    /// context plus the user's question.
-    fn inject(&self, ctx: &mut CommandExecCtx, request: &str) -> CommandResult {
-        let Some(session_id) = ctx.session_id else {
-            return CommandResult::Error(
-                "/debug needs an active session so it can resolve the per-session \
+/// Resolve the firehose target, provision it, and inject the execution context
+/// plus the user's question.
+fn inject(ctx: &mut CommandExecCtx, request: &str) -> CommandResult {
+    let Some(session_id) = ctx.session_id else {
+        return CommandResult::Error(
+            "/debug needs an active session so it can resolve the per-session \
                  debug log path"
-                    .to_string(),
-            );
-        };
-        let home = xai_grok_config::grok_home();
-        let state = debug_log_state(
-            std::env::var_os("GROK_LOG_FILE").as_deref(),
-            std::env::var_os("GROK_DEBUG_LOG").as_deref(),
-            &home.join("debug"),
+                .to_string(),
         );
-        // The path the firehose ACTUALLY writes to for this session. Per-session
-        // routing (`On`) writes `<dir>/<session_id>.txt`; a single explicit file
-        // (`GROK_LOG_FILE` / `GROK_DEBUG_LOG=<path>`) writes only to that file,
-        // so the injection must name that file — never a per-session path that
-        // would stay empty. `Off` falls back to provisioning the per-session
-        // file so the model still has a real log.
-        let path = match &state {
-            DebugLogState::OnSingleFile { path } => path.clone(),
-            DebugLogState::On { .. } | DebugLogState::Off => {
-                debug_log_path(&home, session_id.0.as_ref())
-            }
-        };
-        // Ensure the log file exists so the advertised path is real and readable
-        // by the model's tools, even before the firehose writes to it.
-        // Best-effort: if the dir can't be created the injection still proceeds.
-        if let Some(parent) = path.parent() {
-            let _ = std::fs::create_dir_all(parent);
+    };
+    let home = xai_grok_config::grok_home();
+    let state = debug_log_state(
+        std::env::var_os("GROK_LOG_FILE").as_deref(),
+        std::env::var_os("GROK_DEBUG_LOG").as_deref(),
+        &home.join("debug"),
+    );
+    // The path the firehose ACTUALLY writes to for this session. Per-session
+    // routing (`On`) writes `<dir>/<session_id>.txt`; a single explicit file
+    // (`GROK_LOG_FILE` / `GROK_DEBUG_LOG=<path>`) writes only to that file,
+    // so the injection must name that file — never a per-session path that
+    // would stay empty. `Off` falls back to provisioning the per-session
+    // file so the model still has a real log.
+    let path = match &state {
+        DebugLogState::OnSingleFile { path } => path.clone(),
+        DebugLogState::On { .. } | DebugLogState::Off => {
+            debug_log_path(&home, session_id.0.as_ref())
         }
-        let _ = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&path);
+    };
+    // Ensure the log file exists so the advertised path is real and readable
+    // by the model's tools, even before the firehose writes to it.
+    // Best-effort: if the dir can't be created the injection still proceeds.
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path);
 
-        let context = DebugContext::gather(
-            session_id.0.as_ref(),
-            path.clone(),
-            log_summary(&state),
-            model_facts(ctx),
-        );
-        CommandResult::InjectSkill {
-            display_text: debug_display_text(&path, request),
-            prompt_blocks: vec![acp::ContentBlock::Text(acp::TextContent::new(
-                context.render(request),
-            ))],
-            display_as_skill: true,
-            scheduled_task_preview: None,
-        }
+    let display_text = debug_display_text(&path, request);
+    let context = DebugContext::gather(
+        session_id.0.as_ref(),
+        path,
+        log_summary(&state),
+        model_facts(ctx),
+    );
+    CommandResult::InjectSkill {
+        display_text,
+        prompt_blocks: vec![acp::ContentBlock::Text(acp::TextContent::new(
+            context.render(request),
+        ))],
+        display_as_skill: true,
+        scheduled_task_preview: None,
     }
 }
 
@@ -308,7 +301,6 @@ fn model_facts(ctx: &CommandExecCtx) -> ModelFacts {
             .map(|effort| effort.as_str().to_string()),
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -509,7 +501,10 @@ mod tests {
             .contains("single-file"),
         );
         let off = log_summary(&DebugLogState::Off);
-        assert!(off.contains("OFF") && off.contains("GROK_DEBUG_LOG=1"), "{off}");
+        assert!(
+            off.contains("OFF") && off.contains("GROK_DEBUG_LOG=1"),
+            "{off}"
+        );
     }
 
     #[test]
@@ -564,7 +559,8 @@ mod tests {
         let home = xai_grok_config::grok_home();
         let expected_log = debug_log_path(&home, "debug-question-sess");
         assert!(
-            text.text.contains("why was the context size defaulted to 256k?"),
+            text.text
+                .contains("why was the context size defaulted to 256k?"),
             "the question must reach the model: {}",
             text.text
         );
