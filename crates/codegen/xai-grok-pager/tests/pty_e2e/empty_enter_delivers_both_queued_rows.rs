@@ -51,6 +51,14 @@ async fn empty_enter_delivers_both_queued_rows() {
         .expect("bravo visible");
 
     harness.inject_keys(b"\r").expect("empty Enter interrupt");
+    // Hold turn 1 open until the delivery is observable. The shell harvests
+    // into a RUNNING turn, so releasing the completion barrier first would race
+    // the interrupt against turn end and let the rows drain as their own turns
+    // instead. Each delivered row is broadcast as an interjection and painted
+    // as a "❯ " block before the resubmitted request goes out.
+    harness
+        .wait_for_text("\u{276F} queue-alpha-top", Duration::from_secs(30))
+        .expect("alpha delivered into the running turn");
     turn_one.release();
     // Both rows land on the resubmitted request. Blocks can scroll above the
     // viewport before a 100ms poll observes them, so gate on the WIRE — the
@@ -86,7 +94,7 @@ async fn empty_enter_delivers_both_queued_rows() {
         .unwrap_or_else(|| panic!("top row never on wire: {users:#?}"));
     assert!(
         alpha.contains(INTERJECTION_WIRE_PREFIX),
-        "delivered rows arrive as mid-turn interjections: {alpha}"
+        "delivered rows arrive as mid-turn interjections; wire was: {users:#?}"
     );
 
     // The final request's user sequence proves the order: prompt, then alpha,
