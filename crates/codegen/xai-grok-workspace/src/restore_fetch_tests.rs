@@ -496,11 +496,7 @@ fn fetch_timeout_kills_process_group_with_grandchild() {
         start.elapsed()
     );
 
-    let grandchild: u32 = std::fs::read_to_string(&pidfile)
-        .expect("grandchild pidfile")
-        .trim()
-        .parse()
-        .expect("grandchild pid");
+    let grandchild = read_pid_when_written(&pidfile);
     assert!(
         pid_gone_within_deadline(leader),
         "leader {leader} must not remain live"
@@ -531,14 +527,48 @@ fn pid_alive(pid: u32) -> bool {
     kill(Pid::from_raw(pid as i32), None::<Signal>).is_ok()
 }
 
+/// The pid a spawned shell writes to `path`, waiting for the write to land.
+///
+/// `>file` creates the file when the shell parses the redirect, before `echo`
+/// puts anything in it, so a one-shot read can catch it empty — and a read
+/// that caught only the first digits would parse to some unrelated live
+/// process, which is a far worse way to fail. The trailing newline is `echo`'s
+/// own, so its presence is the proof that the write finished.
+#[cfg(unix)]
+fn read_pid_when_written(path: &Path) -> u32 {
+    const DEADLINE: Duration = Duration::from_secs(5);
+
+    let start = Instant::now();
+    loop {
+        if let Ok(raw) = std::fs::read_to_string(path)
+            && raw.ends_with('\n')
+            && let Ok(pid) = raw.trim().parse::<u32>()
+        {
+            return pid;
+        }
+        assert!(
+            start.elapsed() < DEADLINE,
+            "shell never wrote a pid to {}",
+            path.display()
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
 /// Whether `pid` is gone, waiting up to [`REAP_DEADLINE`] for it.
 ///
-/// A kill is asynchronous: the kernel marks the signal pending and the process
-/// dies when it is next scheduled. Reading `pid_alive` the instant the fetch
-/// returns races that, and loses it on a loaded machine — which is what CI is,
-/// running a test per core. The property these tests are about is that the
-/// tree dies, not that it dies within one scheduler tick; a process that never
-/// got the signal sleeps for 30s and is still live at the deadline.
+/// The kill is asynchronous. `killpg` marks SIGKILL pending on every member;
+/// each one dies when it is next scheduled, and only then becomes the zombie
+/// (or absence) that `pid_alive` reads as dead. Measured on this tree with 8
+/// copies of the test running at once — the shape nextest gives it — the
+/// descendants were already gone on 199 of 200 runs and still read live 2ms
+/// later on the 200th. Sampling `/proc` once, the instant the fetch call
+/// returns, is a coin flip against that tail; CI lost it once in two runs of
+/// identical code.
+///
+/// The deadline is 2500x the largest margin seen, and it cannot mask a real
+/// leak: the processes here sleep for 30s, so anything that never got the
+/// signal is still sitting there when it expires.
 #[cfg(unix)]
 fn pid_gone_within_deadline(pid: u32) -> bool {
     const REAP_DEADLINE: Duration = Duration::from_secs(5);
@@ -668,11 +698,7 @@ fn fetch_timeout_sigkills_term_immune_grandchild() {
         pid_gone_within_deadline(leader),
         "TERM-ignoring leader {leader} must die on SIGKILL"
     );
-    let grandchild: u32 = std::fs::read_to_string(&pidfile)
-        .expect("pidfile")
-        .trim()
-        .parse()
-        .expect("pid");
+    let grandchild = read_pid_when_written(&pidfile);
     assert!(
         pid_gone_within_deadline(grandchild),
         "grandchild {grandchild} must not remain live"

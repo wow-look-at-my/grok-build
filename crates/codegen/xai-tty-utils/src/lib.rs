@@ -603,6 +603,66 @@ impl ProcessGroup {
         }
     }
 
+    /// Whether any member of this group is still *running*, as opposed to a
+    /// zombie that has already died and is only waiting to be reaped.
+    ///
+    /// [`Self::has_live_members`] counts zombies, which is what you want when
+    /// deciding whether to send another signal — signalling a zombie is
+    /// harmless, and skipping a kill because one looked dead is not. It is the
+    /// wrong question when *reporting* that a teardown left something behind:
+    /// an orphaned zombie means the kill worked and the reaper has not run
+    /// yet, so reporting it as a leak is a false alarm, and a check that cries
+    /// wolf gets ignored on the run where the number is real.
+    ///
+    /// Linux reads the state straight out of `/proc`. Elsewhere there is no
+    /// cheap way to enumerate a group, so this falls back to
+    /// [`Self::has_live_members`] and keeps its over-reporting rather than
+    /// claiming a certainty it does not have.
+    pub fn has_running_members(&self) -> Option<bool> {
+        #[cfg(target_os = "linux")]
+        {
+            let Some(leader) = self.leader else {
+                return Some(false);
+            };
+            let Ok(entries) = std::fs::read_dir("/proc") else {
+                return None;
+            };
+            for entry in entries.flatten() {
+                let name = entry.file_name();
+                let Some(pid) = name.to_str().and_then(|n| n.parse::<u32>().ok()) else {
+                    continue;
+                };
+                // A process that exits mid-scan is not a leak; skip it.
+                let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else {
+                    continue;
+                };
+                // `comm` is parenthesised and may itself contain spaces and
+                // parens, so the fields after it start at the LAST ')'.
+                let Some((_, rest)) = stat.rsplit_once(')') else {
+                    continue;
+                };
+                let mut fields = rest.split_whitespace();
+                let (Some(state), Some(_ppid), Some(pgrp)) =
+                    (fields.next(), fields.next(), fields.next())
+                else {
+                    continue;
+                };
+                if state != "Z" && pgrp.parse::<u32>() == Ok(leader.get()) {
+                    return Some(true);
+                }
+            }
+            Some(false)
+        }
+        #[cfg(all(unix, not(target_os = "linux")))]
+        {
+            self.has_live_members()
+        }
+        #[cfg(windows)]
+        {
+            None
+        }
+    }
+
     /// Ask an interactive shell to hang up. Its job-control children each live
     /// in their own process group, which no `killpg` here reaches, but a shell
     /// forwards the hangup to them before it exits.
@@ -1062,6 +1122,72 @@ mod tests {
         // Required: an unreaped zombie still reports live.
         child.wait().expect("reap sleeper");
         assert_eq!(group.has_live_members(), Some(false));
+    }
+
+    /// The two questions a killed group gets asked, and why they differ: a
+    /// zombie is a process for `has_live_members` (so another kill is still
+    /// worth sending) and NOT a leak for `has_running_members` (so a teardown
+    /// that worked does not report that it failed).
+    ///
+    /// Deterministic, with no waiting on a kill to land: the zombie here is
+    /// this test's own child, and it stays a zombie until this test reaps it.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn has_running_members_ignores_a_zombie_that_has_already_died() {
+        let mut group = ProcessGroup::new().expect("group");
+        assert_eq!(group.has_running_members(), Some(false), "empty group");
+
+        let mut cmd = std::process::Command::new("sleep");
+        cmd.arg("1000")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+        detach_std_command(&mut cmd);
+        #[allow(clippy::disallowed_methods)] // test: exercises ProcessGroup directly
+        let mut child = cmd.spawn().expect("spawn sleeper");
+        group.attach_std(&child).expect("attach");
+        assert_eq!(
+            group.has_running_members(),
+            Some(true),
+            "sleeper is running"
+        );
+
+        group.kill().expect("kill group");
+        // `wait` returns once the child is dead, so from here it is a reaped
+        // process, not a zombie — take the zombie reading from a child we
+        // deliberately have not waited on yet.
+        let mut zombie_cmd = std::process::Command::new("true");
+        zombie_cmd
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+        detach_std_command(&mut zombie_cmd);
+        #[allow(clippy::disallowed_methods)] // test: exercises ProcessGroup directly
+        let mut zombie = zombie_cmd.spawn().expect("spawn zombie-to-be");
+        let mut zombie_group = ProcessGroup::new().expect("group");
+        zombie_group.attach_std(&zombie).expect("attach");
+        // `true` exits immediately and nothing reaps it, so it parks in Z.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while zombie_group.has_running_members() == Some(true) {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "`true` should exit on its own"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert_eq!(
+            zombie_group.has_live_members(),
+            Some(true),
+            "an unreaped zombie is still a process to signal"
+        );
+        assert_eq!(
+            zombie_group.has_running_members(),
+            Some(false),
+            "an unreaped zombie is not a teardown leak"
+        );
+
+        child.wait().expect("reap sleeper");
+        zombie.wait().expect("reap zombie");
     }
 
     /// Debug builds enforce the top-of-doc caveat that arming and spawning
