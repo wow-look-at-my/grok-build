@@ -5405,6 +5405,10 @@ impl AppView {
                 needs_redraw |= Self::tick_agent_image_load(child_view);
                 needs_redraw |= Self::tick_agent_block_viewer(child_view);
             }
+            // The CI dot pulses while a run is in flight, and the session
+            // watching its own CI is idle by definition — nothing else on
+            // screen is asking for these frames.
+            needs_redraw |= crate::ci_status::ci_dot_animating(&agent.session.cwd);
             let spinner_frame_tick =
                 agent.scrollback.animation_tick() % crate::views::turn_status::SPINNER_DIVISOR == 0;
             needs_redraw |= !agent.session.state.is_idle() && spinner_frame_tick;
@@ -5789,6 +5793,13 @@ impl AppView {
                             .values()
                             .any(|child| child.needs_link_modifier_poll()))
                 {
+                    return TickDemand::Slow;
+                }
+                // The CI dot pulses while a run is in flight. Slow, not Fast:
+                // the pulse is a 48-tick sine that reads as a gentle breath at
+                // this cadence, and a CI run here lasts tens of minutes —
+                // 30fps for all of it would be a lot of redraws for one cell.
+                if crate::ci_status::ci_dot_animating(&agent.session.cwd) {
                     return TickDemand::Slow;
                 }
                 TickDemand::None
@@ -6578,6 +6589,35 @@ pub(crate) mod tests {
             !app.needs_animation(),
             "closing the search stops the animation ticks"
         );
+    }
+    /// The session watching its own CI is idle by definition, so the pulse
+    /// only moves if the in-progress dot demands frames on its own — and the
+    /// tick must actually report a repaint, or the frames would draw nothing.
+    #[test]
+    fn tick_demand_slow_while_the_ci_dot_is_mid_run() {
+        use crate::ci_status::{CiStatus, seed_for_test};
+        let mut app = test_app_with_agent();
+        let id = super::super::agent::AgentId(0);
+        // The CI cache is process-global; key this test to its own path.
+        let cwd = std::path::PathBuf::from("/ci-dot/tick-demand");
+        app.agents.get_mut(&id).unwrap().session.cwd = cwd.clone();
+        assert_eq!(app.tick_demand(), TickDemand::None, "idle agent parks");
+
+        seed_for_test(&cwd, "master", CiStatus::Yellow, Duration::ZERO);
+        assert_eq!(
+            app.tick_demand(),
+            TickDemand::Slow,
+            "a run in flight must supply the pulse its frames"
+        );
+        assert!(app.tick(), "and each frame must repaint the dot");
+
+        seed_for_test(&cwd, "master", CiStatus::Green, Duration::ZERO);
+        assert_eq!(
+            app.tick_demand(),
+            TickDemand::None,
+            "a settled dot is static: no reason to keep redrawing"
+        );
+        assert!(!app.tick(), "a static dot asks for no repaint");
     }
     #[test]
     fn tick_demand_fast_while_wake_turn_streams() {

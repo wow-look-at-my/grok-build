@@ -19,7 +19,7 @@ struct ArchiveBundleMetadata {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct BundleManifest {
+pub struct BundleManifest {
     pub version: String,
     pub checksums: HashMap<String, String>,
 }
@@ -83,11 +83,11 @@ struct BundleFile<'a> {
     content: &'a str,
 }
 
-pub(crate) fn bundled_root() -> PathBuf {
+pub fn bundled_root() -> PathBuf {
     xai_grok_config::grok_home().join(BUNDLED_DIR_NAME)
 }
 
-pub(crate) fn read_cached_manifest(root: &Path) -> Result<Option<BundleManifest>> {
+pub fn read_cached_manifest(root: &Path) -> Result<Option<BundleManifest>> {
     let manifest_path = manifest_path(root);
     let bytes = match std::fs::read(&manifest_path) {
         Ok(bytes) => bytes,
@@ -103,7 +103,7 @@ pub(crate) fn read_cached_manifest(root: &Path) -> Result<Option<BundleManifest>
         .map(Some)
 }
 
-pub(crate) fn write_bundle_to_cache(
+pub fn write_bundle_to_cache(
     root: &Path,
     bundle: &SubagentBundle,
 ) -> Result<BundleManifest> {
@@ -152,7 +152,7 @@ pub(crate) fn write_bundle_to_cache(
     Ok(next_manifest)
 }
 
-pub(crate) fn extract_bundle_archive(root: &Path, archive_bytes: &[u8]) -> Result<BundleManifest> {
+pub fn extract_bundle_archive(root: &Path, archive_bytes: &[u8]) -> Result<BundleManifest> {
     let decoder = flate2::read::GzDecoder::new(archive_bytes);
     let mut archive = tar::Archive::new(decoder);
 
@@ -414,7 +414,7 @@ fn map_archive_path_to_cache_path(archive_path: &str) -> Option<String> {
     None
 }
 
-pub(crate) fn count_entries_by_prefix(manifest: &BundleManifest, prefix: &str) -> usize {
+pub fn count_entries_by_prefix(manifest: &BundleManifest, prefix: &str) -> usize {
     manifest
         .checksums
         .keys()
@@ -468,9 +468,14 @@ fn validate_bundle_name(kind: BundleFileKind, name: &str) -> Result<()> {
     Ok(())
 }
 
-#[cfg(test)]
-pub(crate) mod test_helpers {
-    pub(crate) fn make_test_archive(entries: &[(&str, &[u8])]) -> Vec<u8> {
+/// Test-only helpers for building in-memory bundle archives.
+///
+/// Kept non-`cfg(test)` so the `xai-grok-shell` crate's own unit tests can
+/// reuse these helpers cross-crate; the module is documentation-hidden and
+/// only referenced from test code in either crate.
+#[doc(hidden)]
+pub mod test_helpers {
+    pub fn make_test_archive(entries: &[(&str, &[u8])]) -> Vec<u8> {
         let encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
         let mut builder = tar::Builder::new(encoder);
         for &(path, content) in entries {

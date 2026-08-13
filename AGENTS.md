@@ -44,6 +44,16 @@ verify serially wastes time when a parallel CI build could be running.
 - The yellow "in progress" dot animates its HSV value in a sine wave between
   25% and 80% (see `ci_status::animate_value`).
 
+- The dot is only realtime because three things outside the render path keep
+  it moving; drop any one and it freezes at its last color, silently, on
+  exactly the idle session that is watching CI:
+  - the event loop's CI poll timer (`CI_POLL_INTERVAL`) keeps polling when no
+    frame is being drawn — the render path refreshes only on frames it draws;
+  - `set_change_notifier` gives the poller a way to ask for one repaint, and
+    only when the color actually changed;
+  - `ci_dot_animating` makes `tick_demand` report Slow while a run is in
+    flight, which is what supplies the frames the pulse animates over.
+
 ## Cost-indicator feature notes
 
 - Per-message cost rides `XaiSessionUpdate::ResponseCompleted.cost_usd_ticks`,
@@ -61,3 +71,25 @@ verify serially wastes time when a parallel CI build could be running.
   in-memory and restarts at reload, so a replayed total is not adopted and the
   scrollback sum stops being a valid fallback once anything priced is replayed
   (`AcpUpdateTracker::scrollback_sum_is_this_run`).
+
+## Why build-test is not on the self-hosted runner
+
+Pointing `build-test` at `vars.CI_RUNNER` turns ~20 tests red, because they
+assert on host semantics the org's lean image does not provide. Measured on
+that runner, with unmodified test sources:
+
+- no PID 1 that reaps orphans and no process-group signal delivery — every
+  `*_grandchild*` case across `xai-grok-shell`, `xai-grok-test-support`,
+  `xai-tty-utils` and the pager PTY harness (`PTY grandchild leaked after
+  controller Drop`), plus `scope_teardown_kills_a_background_grandchild`,
+  which hangs to the 60s timeout instead of failing;
+- overlayfs reports `st_blocks=2` for every file, so `disk_usage_cmd` and
+  `fs_size` measure ~1 KiB for anything;
+- no UTF-8 locale by default, so `xai-grok-sandbox`'s
+  `fails_closed_on_non_utf8_*` hit errno 84.
+
+Every one of those is the test doing its job. Making them pass there means
+weakening what they check, so the fix belongs to the runner image (an
+init/reaper, a real filesystem for `/tmp`) and that image is the fleet's,
+not this repo's. Revisit the runner once it has one; until then this job is
+`runs-on: ubuntu-latest`, which is what `master` builds green on.

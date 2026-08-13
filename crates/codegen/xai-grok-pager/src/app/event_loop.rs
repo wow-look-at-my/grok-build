@@ -1567,6 +1567,14 @@ pub(crate) async fn run(
     const GATE_POLL_INTERVAL: Duration = Duration::from_secs(30);
     let mut gate_poll_at: Option<Instant> = None;
 
+    // CI-status dot: the render path refreshes it only on frames it draws, and
+    // a session watching its own CI draws none, so this timer is what keeps
+    // polling. The channel is the other half — an off-thread poll that lands
+    // on a different color asks for the one repaint that shows it.
+    let mut ci_poll_at: Option<Instant> = Some(Instant::now() + crate::ci_status::CI_POLL_INTERVAL);
+    let (ci_change_tx, mut ci_change_rx) = tokio::sync::mpsc::unbounded_channel();
+    crate::ci_status::set_change_notifier(ci_change_tx);
+
     // Free→paid subscription watch (see `app::subscription`).
     let mut subscription_watch_at: Option<Instant> = if app.subscription_watch_wanted() {
         app.subscription_watch_interval()
@@ -2094,6 +2102,13 @@ pub(crate) async fn run(
             }
         };
 
+        let ci_poll = async {
+            match ci_poll_at {
+                Some(at) => sleep_until(at).await,
+                None => std::future::pending().await,
+            }
+        };
+
         let subscription_watch = async {
             match subscription_watch_at {
                 Some(at) => sleep_until(at).await,
@@ -2442,6 +2457,24 @@ pub(crate) async fn run(
                 if !app.has_access() {
                     gate_poll_at = Some(Instant::now() + GATE_POLL_INTERVAL);
                 }
+            }
+
+            // Keep the branch's CI dot polling with no frames in flight. The
+            // poll itself is throttled and off-thread; this arm draws nothing,
+            // because a result that matches what is already on screen must not
+            // wake an idle terminal. The repaint comes from `ci_change` below.
+            _ = ci_poll => {
+                ci_poll_at = Some(Instant::now() + crate::ci_status::CI_POLL_INTERVAL);
+                if let Some((cwd, branch)) = ci_dot_target(&app) {
+                    crate::ci_status::refresh_ci_status(&cwd, &branch);
+                }
+            }
+
+            Some(()) = ci_change_rx.recv() => {
+                presenter.request(false);
+                // A run that just started pulses; `tick_demand` reports that
+                // from the freshly-stored color, so re-arm the tick here.
+                schedule_tick(&mut animation_tick_at, &app, tick_interval);
             }
 
             _ = subscription_watch => {
@@ -3034,6 +3067,27 @@ fn after_task_complete_dispatch(
         *gate_poll_at = None;
     }
     presenter.request(false);
+}
+
+/// The `(repo cwd, branch)` whose CI dot the status bar is showing, or `None`
+/// when no dot is drawn: another view is up, or the cwd has no branch (not a
+/// repo, or detached HEAD, which renders as `detached` with no dot).
+///
+/// Resolved exactly as the renderer resolves it — the agent's own branch
+/// first, then the cwd's cached git info — so the timer can never poll a
+/// branch the dot isn't reporting.
+fn ci_dot_target(app: &AppView) -> Option<(std::path::PathBuf, String)> {
+    let ActiveView::Agent(id) = app.active_view else {
+        return None;
+    };
+    let agent = app.agents.get(&id)?;
+    let branch = agent.current_branch.clone().or_else(|| {
+        crate::git_info::cwd_git_info_lazy(&agent.session.cwd).and_then(|info| info.branch)
+    })?;
+    if branch.is_empty() {
+        return None;
+    }
+    Some((agent.session.cwd.clone(), branch))
 }
 
 /// Schedule the next animation tick when demanded and none is pending.
@@ -3987,6 +4041,38 @@ fn process_effects(
 mod tests {
     use super::*;
     use crossterm::event::{KeyEvent, KeyEventState};
+
+    /// The CI poll timer fires with no frame in flight, so what it polls comes
+    /// from here rather than from the renderer. It must agree with the
+    /// renderer about which branch the dot is reporting — and report nothing
+    /// wherever the renderer draws no dot.
+    #[test]
+    fn ci_dot_target_follows_the_branch_the_dot_reports() {
+        use crate::app::agent::AgentId;
+        use crate::app::app_view::tests::test_app_with_agent;
+
+        let mut app = test_app_with_agent();
+        let id = AgentId(0);
+        let cwd = std::path::PathBuf::from("/ci-dot/poll-target");
+        {
+            let agent = app.agents.get_mut(&id).expect("agent");
+            agent.session.cwd = cwd.clone();
+            agent.current_branch = Some("feature/x".into());
+        }
+        assert_eq!(
+            ci_dot_target(&app),
+            Some((cwd.clone(), "feature/x".to_string()))
+        );
+
+        // Detached HEAD renders as `detached` with no dot, so there is nothing
+        // to poll for.
+        app.agents.get_mut(&id).expect("agent").current_branch = Some(String::new());
+        assert_eq!(ci_dot_target(&app), None);
+
+        // No agent view up: no status bar, no dot.
+        app.active_view = ActiveView::Welcome;
+        assert_eq!(ci_dot_target(&app), None);
+    }
 
     #[cfg(feature = "local-workspace")]
     #[test]
