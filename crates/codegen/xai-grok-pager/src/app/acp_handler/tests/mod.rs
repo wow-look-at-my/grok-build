@@ -751,6 +751,35 @@ pub(super) fn make_agent_chunk_meta(
         response_tx: tx,
     })
 }
+/// Chunk stamped with `streamStartMs`, which the shell resets on every model
+/// call. A change in it is what splits a turn's tool loop into one
+/// agent-message block per response, so a cost-per-message test must drive it.
+pub(super) fn make_agent_chunk_for_response(
+    session_id: &str,
+    text: &str,
+    prompt_id: &str,
+    stream_start_ms: i64,
+) -> AcpClientMessage {
+    let meta = serde_json::json!({
+        "promptId": prompt_id,
+        "isReplay": false,
+        "streamStartMs": stream_start_ms,
+    });
+    let (tx, _rx) = tokio::sync::oneshot::channel();
+    let request = acp::SessionNotification::new(
+            acp::SessionId::new(session_id),
+            acp::SessionUpdate::AgentMessageChunk(
+                acp::ContentChunk::new(
+                    acp::ContentBlock::Text(acp::TextContent::new(text)),
+                ),
+            ),
+        )
+        .meta(meta.as_object().cloned());
+    AcpClientMessage::SessionNotification(xai_acp_lib::AcpArgs {
+        request,
+        response_tx: tx,
+    })
+}
 /// `promptId`-tagged chunk (no `eventId`) — drives the viewer live-delta path.
 pub(super) fn make_agent_chunk_message_with_prompt(
     session_id: &str,
@@ -993,8 +1022,48 @@ pub(super) fn xai_turn_completed_notif_with_cost(
                 num_turns: 1,
                 usage_is_incomplete: false,
             }),
+            // No agent-reported session total: exercises the turn-level
+            // attribution an agent that only prices whole turns produces.
+            session_cost_usd_ticks: None,
         },
         meta: Some(serde_json::json!({ "isReplay": false })),
+    };
+    acp::ExtNotification::new(
+        "x.ai/session/update",
+        std::sync::Arc::from(serde_json::value::to_raw_value(&payload).unwrap()),
+    )
+}
+/// A `ResponseCompleted` closing one model call, carrying that call's own cost
+/// and the agent's session-cumulative total. Built through the typed
+/// `SessionNotification` so the two cost fields the handler reads cannot drift
+/// from the wire shape the shell emits.
+pub(super) fn xai_response_completed_notif_with_cost(
+    session_id: &str,
+    cost_usd_ticks: Option<i64>,
+    session_cost_usd_ticks: Option<i64>,
+) -> acp::ExtNotification {
+    xai_response_completed_notif(session_id, cost_usd_ticks, session_cost_usd_ticks, false)
+}
+/// [`xai_response_completed_notif_with_cost`] with the `isReplay` stamp a
+/// reload puts on a persisted `ResponseCompleted`.
+pub(super) fn xai_response_completed_notif(
+    session_id: &str,
+    cost_usd_ticks: Option<i64>,
+    session_cost_usd_ticks: Option<i64>,
+    is_replay: bool,
+) -> acp::ExtNotification {
+    let payload = SessionNotification {
+        session_id: acp::SessionId::new(session_id),
+        update: XaiSessionUpdate::ResponseCompleted {
+            message_id: None,
+            stop_reason: Some("tool_use".into()),
+            usage: None,
+            signature: None,
+            stop_sequence: None,
+            cost_usd_ticks,
+            session_cost_usd_ticks,
+        },
+        meta: Some(serde_json::json!({ "isReplay": is_replay })),
     };
     acp::ExtNotification::new(
         "x.ai/session/update",
@@ -1017,6 +1086,7 @@ pub(super) fn xai_turn_completed_notif(
             stop_reason: stop_reason.into(),
             agent_result: None,
             usage: None,
+            session_cost_usd_ticks: None,
         },
         meta: Some(serde_json::json!({ "isReplay": is_replay })),
     };
@@ -1039,6 +1109,7 @@ pub(super) fn xai_turn_completed_notif_with_cancel_trigger(
             stop_reason: stop_reason.into(),
             agent_result: None,
             usage: None,
+            session_cost_usd_ticks: None,
         },
         meta: Some(
             serde_json::json!({
@@ -1070,6 +1141,7 @@ pub(super) fn xai_wake_turn_completed_notif(
             stop_reason: "end_turn".into(),
             agent_result: None,
             usage: None,
+            session_cost_usd_ticks: None,
         },
         meta: Some(meta),
     };

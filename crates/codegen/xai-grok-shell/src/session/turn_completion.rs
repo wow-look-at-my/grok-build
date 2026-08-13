@@ -15,11 +15,15 @@ use crate::extensions::notification::SessionUpdate;
 /// `stop_reason` is always a JSON string; `agent_result` is a string or null.
 /// Non-string inputs fall back to their JSON text so a terminal is never
 /// dropped for a shape mismatch.
+///
+/// `session_cost_usd_ticks` is the session ledger's cumulative reported cost
+/// at the terminal, which `usage` (prompt-scoped) cannot express.
 pub(crate) fn build_turn_completed(
     prompt_id: String,
     stop_reason: serde_json::Value,
     agent_result: serde_json::Value,
     usage: Option<crate::extensions::notification::PromptUsage>,
+    session_cost_usd_ticks: Option<i64>,
 ) -> SessionUpdate {
     SessionUpdate::TurnCompleted {
         prompt_id,
@@ -29,6 +33,9 @@ pub(crate) fn build_turn_completed(
             other => Some(json_to_string(other)),
         },
         usage,
+        session_cost_usd_ticks: xai_grok_sampling_types::reported_cost_ticks(
+            session_cost_usd_ticks,
+        ),
     }
 }
 
@@ -53,6 +60,7 @@ mod tests {
             serde_json::json!("end_turn"),
             serde_json::Value::Null,
             None,
+            None,
         );
         assert_eq!(
             update,
@@ -61,6 +69,7 @@ mod tests {
                 stop_reason: "end_turn".into(),
                 agent_result: None,
                 usage: None,
+                session_cost_usd_ticks: None,
             }
         );
     }
@@ -73,6 +82,7 @@ mod tests {
             serde_json::json!("error"),
             serde_json::json!("connection reset"),
             None,
+            None,
         );
         assert_eq!(
             update,
@@ -81,6 +91,7 @@ mod tests {
                 stop_reason: "error".into(),
                 agent_result: Some("connection reset".into()),
                 usage: None,
+                session_cost_usd_ticks: None,
             }
         );
     }
@@ -91,6 +102,7 @@ mod tests {
             "p-3".into(),
             serde_json::json!("cancelled"),
             serde_json::Value::Null,
+            None,
             None,
         );
         assert!(matches!(
@@ -103,6 +115,43 @@ mod tests {
     }
 
     #[test]
+    fn session_cost_rides_the_terminal_and_is_normalized() {
+        // A reported session total rides through untouched, so a client's idle
+        // total is the ledger's, not a sum of the turns it happened to see.
+        let update = build_turn_completed(
+            "p-5".into(),
+            serde_json::json!("end_turn"),
+            serde_json::Value::Null,
+            None,
+            Some(24_000),
+        );
+        assert!(matches!(
+            update,
+            SessionUpdate::TurnCompleted {
+                session_cost_usd_ticks: Some(24_000),
+                ..
+            }
+        ));
+        // Non-positive ticks are "not reported", never a fabricated $0.00.
+        for raw in [Some(0), Some(-5), None] {
+            let update = build_turn_completed(
+                "p-6".into(),
+                serde_json::json!("end_turn"),
+                serde_json::Value::Null,
+                None,
+                raw,
+            );
+            assert!(matches!(
+                update,
+                SessionUpdate::TurnCompleted {
+                    session_cost_usd_ticks: None,
+                    ..
+                }
+            ));
+        }
+    }
+
+    #[test]
     fn non_string_values_fall_back_to_json_text() {
         // Defensive: a non-string stop_reason / object agent_result still
         // produces a best-effort terminal rather than being dropped.
@@ -110,6 +159,7 @@ mod tests {
             "p-4".into(),
             serde_json::json!(42),
             serde_json::json!({ "k": "v" }),
+            None,
             None,
         );
         assert_eq!(
@@ -119,6 +169,7 @@ mod tests {
                 stop_reason: "42".into(),
                 agent_result: Some("{\"k\":\"v\"}".into()),
                 usage: None,
+                session_cost_usd_ticks: None,
             }
         );
     }

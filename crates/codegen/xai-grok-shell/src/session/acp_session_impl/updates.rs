@@ -205,6 +205,14 @@ impl SessionActor {
     ///   because the canonical `acp::SessionUpdate::ToolCall` (with
     ///   assembled `raw_input`) is persisted at end-of-turn and is the
     ///   source of truth for replay; (2) no hook dispatch.
+    /// - **xAI** (`ResponseCompleted`) -> forwarded AND persisted: it is the
+    ///   only carrier of a message's cost, and nothing else records it, so
+    ///   without persistence every message loses its cost on reload. It stays
+    ///   on this rail (rather than `send_xai_notification`) because ordering
+    ///   against its own response's chunks is what makes the cost attributable
+    ///   at all. No `_meta` is stamped: this rail mints no `eventId`, and one
+    ///   minted here would be out of order against the chunk rail's, which the
+    ///   client's dedup highwater would read as a reason to drop live updates.
     pub(super) async fn emit_buffered(&self, notification: SessionNotification) {
         match notification {
             SessionNotification::Acp(n) => {
@@ -212,6 +220,11 @@ impl SessionActor {
             }
             SessionNotification::Xai(n) => {
                 self.log_outbound_xai_buffered(&n);
+                if matches!(n.update, XaiSessionUpdate::ResponseCompleted { .. }) {
+                    let _ = self.notifications.persistence_tx.send(PersistenceMsg::Update(
+                        crate::session::storage::SessionUpdate::Xai(Box::new((*n).clone())),
+                    ));
+                }
                 if self
                     .notifications
                     .gateway_enabled
@@ -750,9 +763,15 @@ impl SessionActor {
     }
     /// Build the per-response boundary update, projecting the response's usage
     /// into the Messages API `message.usage` shape (uncached `input_tokens`).
+    ///
+    /// `cost_usd_ticks` is the cost this exact call was billed at (as recorded
+    /// into the ledgers by `record_response_token_usage`) and
+    /// `session_cost_usd_ticks` the session ledger's running total after it.
     pub(super) fn response_completed_update(
         &self,
         response: &xai_grok_sampling_types::ConversationResponse,
+        cost_usd_ticks: Option<i64>,
+        session_cost_usd_ticks: Option<i64>,
     ) -> XaiSessionUpdate {
         let usage =
             response
@@ -778,6 +797,10 @@ impl SessionActor {
             usage,
             signature,
             stop_sequence: response.stop_sequence.clone(),
+            cost_usd_ticks: xai_grok_sampling_types::reported_cost_ticks(cost_usd_ticks),
+            session_cost_usd_ticks: xai_grok_sampling_types::reported_cost_ticks(
+                session_cost_usd_ticks,
+            ),
         }
     }
     /// [`Self::send_xai_notification`] with caller-supplied `_meta` keys merged

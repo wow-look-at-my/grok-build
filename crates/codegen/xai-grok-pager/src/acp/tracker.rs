@@ -206,6 +206,10 @@ pub struct PendingCompaction {
     pub elapsed_ms: Option<i64>,
     pub last_used: Option<u64>,
 }
+/// How many recent prompts the cost-attribution maps keep. A `TurnCompleted`
+/// can only lag its turn by a notification or two, so a handful of turns is
+/// ample; past that, an unattributable cost is dropped rather than guessed.
+const PROMPT_COST_HISTORY: usize = 8;
 /// Tracks in-flight streaming state for one agent's turn.
 ///
 /// Converts ACP `SessionUpdate` variants into scrollback entry mutations.
@@ -301,6 +305,23 @@ pub struct AcpUpdateTracker {
     /// block, while a stale one for a *different* prompt cannot land on a newer
     /// turn. Bounded to the last few turns.
     finished_prompt_costs: Vec<(String, EntryId)>,
+    /// Prompts that already had at least one per-response cost attributed to a
+    /// message block. `TurnCompleted` carries the whole turn's cost as one sum,
+    /// which is the RIGHT number only when no per-response cost was seen: once
+    /// the shell prices each response, stamping the turn sum onto the last
+    /// block as well would show that block spending the whole turn's money.
+    /// Bounded like [`Self::finished_prompt_costs`].
+    priced_response_prompts: Vec<String>,
+    /// Session-cumulative cost (USD ticks) as last reported by the agent's own
+    /// session ledger — every model call and subagent fold, including spend
+    /// whose message was rewound or never rendered. This is the session total,
+    /// not the visible-scrollback sum. `None` until the agent reports one.
+    reported_session_cost_usd_ticks: Option<i64>,
+    /// A reload replayed at least one message that carries a cost from an
+    /// earlier run. Those costs are true of their messages but are NOT this
+    /// run's spend, so summing the scrollback would report the wrong quantity —
+    /// see [`Self::scrollback_sum_is_this_run`].
+    replayed_cost_seen: bool,
 
     /// Pending agent toolset from the most recent `AvailableCommandsUpdate.meta`.
     /// Format on the wire: `{"tools": ["read_file", ...]}`.
@@ -861,7 +882,7 @@ impl AcpUpdateTracker {
             if let Some(prompt) = prompt_id.filter(|p| !p.is_empty()) {
                 self.finished_prompt_costs.retain(|(p, _)| p != prompt);
                 self.finished_prompt_costs.push((prompt.to_string(), agent_id));
-                if self.finished_prompt_costs.len() > 8 {
+                if self.finished_prompt_costs.len() > PROMPT_COST_HISTORY {
                     self.finished_prompt_costs.remove(0);
                 }
             }
@@ -933,6 +954,11 @@ impl AcpUpdateTracker {
             return;
         };
         let prompt = prompt_id.filter(|p| !p.is_empty());
+        // Per-response costs already priced this turn's messages individually;
+        // the turn sum would overstate whichever block it landed on.
+        if prompt.is_some_and(|p| self.priced_response_prompts.iter().any(|seen| seen == p)) {
+            return;
+        }
         // (1) The turn is still streaming (healthy driver order: TurnCompleted
         // before PromptResponse). Attach only if the `TurnCompleted`'s prompt
         // is the run currently in flight — a stale notification for an older
@@ -978,6 +1004,77 @@ impl AcpUpdateTracker {
         {
             entry.cost_usd_ticks = entry.cost_usd_ticks.or(Some(cost));
         }
+    }
+    /// Attach one model call's cost to the message block that call produced,
+    /// from the `ResponseCompleted` that closes it.
+    ///
+    /// A turn is a tool loop of several model calls, each rendering its own
+    /// agent-message block, and each one is priced here as it lands — this is
+    /// what puts a cost beside every message's timestamp instead of only the
+    /// turn's last one. `TurnCompleted` cannot do this job: it reports the
+    /// turn's total as one number, with no way to split it back apart.
+    ///
+    /// `prompt_id` is the client's own in-flight prompt (the buffered chunk
+    /// rail carries no `_meta`), recorded so the turn-level fallback stands
+    /// down for this prompt. A response that streamed no text has no block to
+    /// decorate; its cost still rides the session total.
+    ///
+    /// `is_replay` marks a cost reloaded from an earlier run: still true of its
+    /// message, but not this run's spend (see [`Self::replayed_cost_seen`]).
+    pub fn set_response_cost(
+        &mut self,
+        scrollback: &mut ScrollbackState,
+        prompt_id: Option<&str>,
+        cost_usd_ticks: Option<i64>,
+        is_replay: bool,
+    ) -> bool {
+        let Some(cost) = cost_usd_ticks.filter(|&t| t > 0) else {
+            return false;
+        };
+        if let Some(prompt) = prompt_id.filter(|p| !p.is_empty())
+            && !self.priced_response_prompts.iter().any(|p| p == prompt)
+        {
+            self.priced_response_prompts.push(prompt.to_string());
+            if self.priced_response_prompts.len() > PROMPT_COST_HISTORY {
+                self.priced_response_prompts.remove(0);
+            }
+        }
+        let Some(entry) = self
+            .current_agent_msg
+            .and_then(|id| scrollback.get_by_id_mut(id))
+        else {
+            return false;
+        };
+        if entry.cost_usd_ticks.is_some() {
+            return false;
+        }
+        entry.cost_usd_ticks = Some(cost);
+        self.replayed_cost_seen |= is_replay;
+        true
+    }
+    /// Whether summing the scrollback's per-message costs would measure THIS
+    /// run's spend. False once a reload has replayed a priced message: those
+    /// costs belong to an earlier run, and the agent's ledger (which the
+    /// indicator prefers) counts only the current one. Mixing the two reads as
+    /// a total that falls when the next live call arrives.
+    pub fn scrollback_sum_is_this_run(&self) -> bool {
+        !self.replayed_cost_seen
+    }
+    /// Record the agent's own session-cumulative cost (USD ticks). See
+    /// [`Self::reported_session_cost_usd_ticks`].
+    pub fn set_reported_session_cost(&mut self, cost_usd_ticks: Option<i64>) -> bool {
+        let Some(cost) = cost_usd_ticks.filter(|&t| t > 0) else {
+            return false;
+        };
+        let changed = self.reported_session_cost_usd_ticks != Some(cost);
+        self.reported_session_cost_usd_ticks = Some(cost);
+        changed
+    }
+    /// The agent-reported session total (USD ticks), or `None` if the agent has
+    /// never reported one — an agent too old to send it, or a session where no
+    /// call was priced.
+    pub fn reported_session_cost_usd_ticks(&self) -> Option<i64> {
+        self.reported_session_cost_usd_ticks
     }
     /// Finish the current thinking block, passing elapsed time to the entry.
     ///

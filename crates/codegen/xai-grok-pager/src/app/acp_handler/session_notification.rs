@@ -226,15 +226,29 @@ pub(super) fn handle_session_notification(notif: &acp::ExtNotification, app: &mu
             stop_reason,
             agent_result,
             usage,
+            session_cost_usd_ticks,
         } => {
             // The ACP text chunk rail never carries cost; the durable
             // `TurnCompleted` notification carries the per-turn usage (incl.
             // exact `cost_usd_ticks`, already scrubbed when partial/incomplete)
             // alongside the terminal outcome. Attribute that reported cost to
-            // the agent-message block this turn rendered.
+            // the agent-message block this turn rendered — unless
+            // `ResponseCompleted` already priced this turn's messages one by
+            // one, which `set_last_turn_cost` checks for.
             let reported_cost = usage
                 .as_ref()
                 .and_then(|u| u.totals.cost_usd_ticks);
+            // Terminal refresh of the session total: a subagent fold can land
+            // after this turn's last model call, so this is the last chance to
+            // be exact before the session goes idle. Skipped on replay — that
+            // total belongs to the run that wrote it, and the agent's ledger
+            // starts fresh on reload.
+            if !meta.is_replay {
+                agent
+                    .session
+                    .tracker
+                    .set_reported_session_cost(session_cost_usd_ticks);
+            }
             // Snapshot the run currently in flight *before* any turn-finish
             // path clears it, so cost attribution can decide whether this
             // `TurnCompleted` (keyed by `prompt_id`) belongs to the live block.
@@ -1123,6 +1137,35 @@ pub(super) fn handle_session_notification(notif: &acp::ExtNotification, app: &mu
         XaiSessionUpdate::InteractionResolved { tool_call_id } => {
             agent.dismiss_resolved_interaction(&tool_call_id)
         }
+        XaiSessionUpdate::ResponseCompleted {
+            cost_usd_ticks,
+            session_cost_usd_ticks,
+            ..
+        } => {
+            // One model call just closed. It rides the buffered chunk rail, so
+            // it arrives after that call's own agent-message chunks and before
+            // the next call's — which is exactly the block its cost belongs to.
+            // On replay the same ordering holds against the replayed chunks, so
+            // a reloaded transcript keeps its per-message costs.
+            let running_prompt_id = agent.session.current_prompt_id.clone();
+            let priced = agent.session.tracker.set_response_cost(
+                &mut agent.scrollback,
+                running_prompt_id.as_deref(),
+                cost_usd_ticks,
+                meta.is_replay,
+            );
+            // A REPLAYED total belongs to the run that wrote it. The agent's
+            // ledger is in-memory and starts fresh on reload, so adopting the
+            // old run's total would make the indicator jump BACKWARD at the
+            // first live call. The indicator counts this run's spend; a
+            // replayed message still shows what it cost when it ran.
+            let total_changed = !meta.is_replay
+                && agent
+                    .session
+                    .tracker
+                    .set_reported_session_cost(session_cost_usd_ticks);
+            priced || total_changed
+        }
         _ => {
             tracing::trace!(
                 "Ignoring {}: {:?}",
@@ -1210,6 +1253,32 @@ pub(super) fn handle_child_session_notification(
                 }
             }
             changed
+        }
+        XaiSessionUpdate::ResponseCompleted {
+            cost_usd_ticks,
+            session_cost_usd_ticks,
+            ..
+        } => {
+            // A subagent's transcript is read the same way as the parent's, so
+            // its messages carry their own costs, priced off the child's own
+            // session ledger.
+            let Some(child_view) = agent.subagent_views.get_mut(child_sid) else {
+                return false;
+            };
+            let is_replay = child_view.session.loading_replay;
+            let prompt_id = child_view.session.current_prompt_id.clone();
+            let priced = child_view.session.tracker.set_response_cost(
+                &mut child_view.scrollback,
+                prompt_id.as_deref(),
+                cost_usd_ticks,
+                is_replay,
+            );
+            let total_changed = !is_replay
+                && child_view
+                    .session
+                    .tracker
+                    .set_reported_session_cost(session_cost_usd_ticks);
+            priced || total_changed
         }
         ref update @ (XaiSessionUpdate::MemoryFlushCompleted { .. }
         | XaiSessionUpdate::MemoryDreamCompleted { .. }
