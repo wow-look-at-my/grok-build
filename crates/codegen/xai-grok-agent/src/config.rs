@@ -673,9 +673,9 @@ where
 /// are defined in exactly one place. The enum covers all built-in
 /// agents for centralized name management and `by_name()` dispatch.
 ///
-/// `subagent_variants()` returns only the 3 that are exposed to the LLM
-/// via the `TaskTool` description. The remaining 6 are top-level agent
-/// profiles resolvable by name but not advertised as subagent types.
+/// `subagent_variants()` returns the subset exposed to the LLM via the
+/// `TaskTool` description. Every other variant is a top-level agent
+/// profile, resolvable by name but not advertised as a subagent type.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Hash, Display, EnumString, EnumIter, AsRefStr, IntoStaticStr,
 )]
@@ -727,6 +727,13 @@ impl BuiltinAgentName {
     /// Built-in agents available as subagents via the Task tool.
     pub fn subagent_variants() -> &'static [Self] {
         &[Self::GeneralPurpose, Self::Explore, Self::Plan]
+    }
+    /// Built-in agent identities the pager's Shift+Tab ring can cycle
+    /// through live, in ring order. Selecting one triggers a full agent
+    /// rebuild (tool registry + prompt), not just a prompt swap — see
+    /// `SessionActor::handle_session_mode`.
+    pub fn shift_tab_variants() -> &'static [Self] {
+        &[Self::GrokBuildOrchestrator, Self::Explore]
     }
 }
 /// Portable agent identity — parsed from .grok/agents/*.md.

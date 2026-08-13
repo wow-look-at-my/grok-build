@@ -700,7 +700,7 @@ pub(super) async fn run_session(
                             let _ = responds_to.send(updated_model_id);
                         }
                         SessionCommand::RebuildAgentForDefinition { definition, responds_to } => {
-                            let outcome = session.handle_rebuild_agent_for_definition(definition).await;
+                            let outcome = session.handle_rebuild_agent_for_definition(definition, true).await;
                             let _ = responds_to.send(outcome);
                         }
                         SessionCommand::OverrideModelName { model_name, extra_headers, context_window } => {
