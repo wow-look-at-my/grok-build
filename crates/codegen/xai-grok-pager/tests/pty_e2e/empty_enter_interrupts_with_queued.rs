@@ -3,18 +3,18 @@
 use super::common::*;
 
 /// Mid-turn: queue a follow-up with Enter, then bare Enter on the empty
-/// composer sends that top row now — cancel-and-send: the running turn is
-/// cancelled silently and the row runs as its own next turn, arriving on the
-/// wire as a standard `<user_query>` prompt with no interjection preamble.
+/// composer interrupts — the in-flight model stream is cancelled and the row is
+/// handed to the SAME turn as an interjection (the wire carries the mid-turn
+/// preamble), rather than waiting for the turn or running as its own.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore]
-async fn empty_enter_force_sends_top_queued() {
+async fn empty_enter_interrupts_with_queued() {
     let content = ContentController::start().await.expect("start content");
     let mut turn_one = content
-        .expect_agent_turn_blocked("running turn before send-now", slow_turn_text("TURNONE"));
-    let mut turn_two = content.expect_agent_turn(
-        "promoted queued follow-up",
-        "TURNTWO reply to the promoted follow-up.",
+        .expect_agent_turn_blocked("running turn before the interrupt", slow_turn_text("TURNONE"));
+    let mut resubmitted = content.expect_agent_turn(
+        "resubmitted request carrying the interjection",
+        "TURNTWO reply after the interrupt.",
     );
 
     let binary = pager_binary().expect("resolve pager binary");
@@ -42,48 +42,48 @@ async fn empty_enter_force_sends_top_queued() {
         .wait_for_text("please also check the logs", Duration::from_secs(10))
         .expect("queued text visible");
 
-    // Composer is empty after queue; bare Enter sends the top row now. The
-    // shell cancels turn 1 (the abort beats the held completion) and promotes
-    // the row to run as turn 2.
-    harness.inject_keys(b"\r").expect("empty Enter send-now");
-    turn_one.release();
-    // The promoted row renders as a standard "❯ " prompt block via the
-    // turn-start adoption (the arrow prefix distinguishes the committed block
-    // from the prefix-less queue row).
+    // Composer is empty after queue; bare Enter interrupts. The shell cancels
+    // the in-flight stream, drains the row as an interjection, and resubmits.
+    harness.inject_keys(b"\r").expect("empty Enter interrupt");
+    // The delivered row renders as a "❯ " user block (interjections use the
+    // standard prompt chrome), replacing the prefix-less queue row. Wait for it
+    // BEFORE releasing the completion barrier: the shell harvests into a
+    // RUNNING turn, so releasing first would race the interrupt against turn
+    // end and let the row drain as its own turn instead.
     harness
         .wait_for_text(
             "\u{276F} please also check the logs",
-            Duration::from_secs(15),
+            Duration::from_secs(30),
         )
-        .expect("promoted prompt scrollback chrome");
+        .expect("delivered prompt scrollback chrome");
+    turn_one.release();
 
     harness
         .wait_for_text("TURNTWO", Duration::from_secs(40))
-        .expect("promoted turn reply");
-    tokio::time::timeout(Duration::from_secs(10), turn_two.wait_satisfied())
+        .expect("resubmitted turn reply");
+    tokio::time::timeout(Duration::from_secs(10), resubmitted.wait_satisfied())
         .await
-        .expect("promoted turn expectation satisfied");
+        .expect("resubmitted turn expectation satisfied");
 
-    // The send-now cancel is silent: no cancelled marker between the partial
-    // turn-1 output and the promoted prompt.
+    // Interrupting is not cancelling: the turn continues, so no marker.
     assert!(
         !harness.contains_text("Turn cancelled by user"),
-        "send-now cancel must not render a cancelled marker\nscreen:\n{}",
+        "an interrupt must not render a cancelled marker\nscreen:\n{}",
         harness.screen_contents()
     );
 
     let users = all_user_message_blobs(&content);
-    let promoted = users
+    let delivered = users
         .iter()
         .find(|u| u.contains("please also check the logs"))
         .unwrap_or_else(|| panic!("queued follow-up never reached the wire: {users:#?}"));
     assert!(
-        !promoted.contains(INTERJECTION_WIRE_PREFIX),
-        "send-now must not use the interjection preamble: {promoted}"
+        delivered.contains(INTERJECTION_WIRE_PREFIX),
+        "the row must arrive as a mid-turn interjection: {delivered}"
     );
     assert!(
-        promoted.contains("<user_query>"),
-        "send-now must arrive as a standard user_query prompt: {promoted}"
+        delivered.contains("<user_query>"),
+        "the interjection still wraps the user's text: {delivered}"
     );
 
     assert!(

@@ -678,6 +678,14 @@ pub enum SessionCommand {
         /// no-ops the whole thing, edited text included).
         new_text: Option<String>,
     },
+    /// Deliver every deliverable queued prompt into the running turn NOW and
+    /// cancel the in-flight model stream so the turn loop drains them before
+    /// its next request instead of at its next natural safe point. The user
+    /// gesture behind it is "stop what you are saying and read this".
+    /// A benign no-op when no turn is running or nothing queued is
+    /// deliverable (see `SessionActor::deliverable_mid_turn`); those rows stay
+    /// queued and run as their own turns.
+    DeliverQueuedPromptsNow,
     Cancel(CancelOptions),
     Shutdown(ShutdownKind),
     /// Force-trigger a feedback request notification for local client testing.

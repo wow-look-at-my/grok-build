@@ -38,20 +38,36 @@ impl AgentView {
         prompt
     }
 
-    /// Force-send a queued follow-up mid-turn from the prompt (empty composer).
+    /// Interrupt the running turn with everything queued, from the prompt
+    /// (empty composer).
     ///
-    /// Always the **top** visible row (first under the server-then-local merge
-    /// order — the next item that would drain). Bare Enter and the send-now
-    /// chord share this path; queue-pane selection / mouse "Send now" keep
-    /// intentional selection. Returns `None` when there is nothing to send.
-    pub(super) fn try_send_now_queued_from_prompt(&mut self) -> Option<InputOutcome> {
+    /// The model stops mid-response and reads the queue instead of finishing
+    /// what it was saying — see [`Action::InterruptWithQueuedPrompts`]. Bare
+    /// Enter and the send-now chord share this path; queue-pane selection /
+    /// mouse "Send now" keep intentional single-row semantics. Returns `None`
+    /// when there is nothing queued to send.
+    ///
+    /// Two exceptions keep the older cancel-and-send route for the top row:
+    ///
+    /// - A **sendable wait**: the turn is parked in a blocking tool call, so
+    ///   there is no model stream to interrupt and an interjection would sit in
+    ///   the buffer until the wait ends. Send-now aborts the wait, which is
+    ///   what "now" means while parked.
+    /// - **Nothing interjectable queued**: a bash row is executed from its
+    ///   block meta, never folded into a turn as user text, so an interrupt has
+    ///   nothing to hand over. Send-now runs it as its own turn instead.
+    pub(super) fn try_interrupt_with_queued_from_prompt(&mut self) -> Option<InputOutcome> {
         if !self.session.state.is_turn_running() {
             return None;
         }
         self.sync_queue_pane();
         let ids = self.queue.entry_ids();
         let id = *ids.first()?;
-        let outcome = self.force_interject_queue_row(id);
+        let outcome = if self.is_parked_on_sendable_wait() || !self.queue_has_interjectable_row() {
+            self.force_interject_queue_row(id)
+        } else {
+            InputOutcome::Action(Action::InterruptWithQueuedPrompts)
+        };
         // Acting on the prompt-path send-now while its tip is up is the user
         // accepting the hint — mirrors the undo / image-input funnels so the
         // send_now `shown → accepted` conversion is measurable.
@@ -66,6 +82,26 @@ impl AgentView {
                 .clear(crate::tips::send_now::SEND_NOW_TIP_KEY);
         }
         Some(outcome)
+    }
+
+    /// Whether any queued row can be folded into the running turn as user text
+    /// — the shell's `deliverable_mid_turn` rule, evaluated on what this client
+    /// can see: a plain prompt row, server-owned or local. Bash and
+    /// client-expanded slash rows own their turn and never qualify.
+    pub(crate) fn queue_has_interjectable_row(&self) -> bool {
+        use crate::app::agent::QueueEntryKind;
+
+        let running = self.session.current_prompt_id.as_deref();
+        let server = self.shared_queue.iter().any(|e| {
+            Some(e.id.as_str()) != running
+                && crate::views::queue_pane::kind_from_wire(&e.kind) == QueueEntryKind::Prompt
+        });
+        server
+            || self
+                .session
+                .pending_prompts
+                .iter()
+                .any(|p| p.kind == QueueEntryKind::Prompt && p.wire_matches_display())
     }
 
     /// The turn is parked in a wait the shell aborts as soon as the user
@@ -558,6 +594,10 @@ impl AgentView {
                         }
                         return InputOutcome::Changed;
                     }
+                    if self.at_queue_origin_boundary(id) {
+                        self.explain_queue_origin_boundary();
+                        return InputOutcome::Changed;
+                    }
                     self.session.swap_prompt_up(id);
                 }
                 QueueEvent::SwapDown { id } => {
@@ -566,6 +606,9 @@ impl AgentView {
                             return InputOutcome::Action(Action::QueueReorderShared {
                                 ordered_ids,
                             });
+                        }
+                        if self.at_queue_origin_boundary(id) {
+                            self.explain_queue_origin_boundary();
                         }
                         return InputOutcome::Changed;
                     }
@@ -617,6 +660,41 @@ impl AgentView {
         if self.active_pane == AgentPane::Queue {
             self.set_active_pane(AgentPane::Scrollback, false);
         }
+    }
+
+    /// Whether the one-step move this row was asked to make would have to cross
+    /// the shell/client boundary in the merged pane — up for a client row, down
+    /// for a shell row. The pane draws every shell row first because the drain
+    /// runs them first (`maybe_drain_queue` holds every local row while any
+    /// non-running shell row exists), so that move cannot be honored: rendering
+    /// it would promise a run order the queue will not follow.
+    fn at_queue_origin_boundary(&self, selection_id: u64) -> bool {
+        use crate::views::queue_pane::QueueRowOrigin;
+
+        let origin = |row_id: u64| self.queue.row_ref(row_id).map(|row| row.origin);
+        let ids = self.queue.entry_ids();
+        let Some(pos) = ids.iter().position(|row_id| *row_id == selection_id) else {
+            return false;
+        };
+        let selection_is_server = match origin(selection_id) {
+            Some(origin) => origin == QueueRowOrigin::Server,
+            None => return false,
+        };
+        let neighbor = if selection_is_server {
+            ids.get(pos + 1)
+        } else {
+            pos.checked_sub(1).and_then(|above| ids.get(above))
+        };
+        // Crossing means the neighbor sits on the other side of the boundary.
+        neighbor
+            .and_then(|row_id| origin(*row_id))
+            .is_some_and(|neighbor| (neighbor == QueueRowOrigin::Server) != selection_is_server)
+    }
+
+    /// Say why a boundary-crossing reorder did nothing. Without this the key
+    /// looks broken: the row simply does not move.
+    fn explain_queue_origin_boundary(&mut self) {
+        self.show_toast("The agent's queued rows always run first — can't reorder across them");
     }
 
     /// Reorder payload for `x.ai/queue/reorder`. Omit only running; include
@@ -691,6 +769,67 @@ mod queue_edit_routing_tests {
 
     fn delete_key() -> KeyEvent {
         KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE)
+    }
+
+    /// Bare Enter on an empty composer mid-turn interrupts with the WHOLE
+    /// queue: no row is consumed here (dispatch owns that), and the top row is
+    /// not singled out.
+    #[test]
+    fn prompt_path_interrupts_with_the_queue_instead_of_sending_the_top_row() {
+        let mut agent = make_running_agent();
+
+        let outcome = agent
+            .try_interrupt_with_queued_from_prompt()
+            .expect("a queued row makes this a send gesture");
+
+        assert!(
+            matches!(
+                outcome,
+                InputOutcome::Action(Action::InterruptWithQueuedPrompts)
+            ),
+            "expected the interrupt action, got {outcome:?}"
+        );
+        assert_eq!(
+            agent.session.pending_prompts.len(),
+            1,
+            "rows leave the queue in dispatch, not in the key handler"
+        );
+        assert_eq!(agent.shared_queue.len(), 1);
+    }
+
+    /// Nothing queued: not a send gesture at all, so Enter falls through to its
+    /// normal empty-composer no-op.
+    #[test]
+    fn prompt_path_interrupt_declines_an_empty_queue() {
+        let mut agent = make_running_agent();
+        agent.session.pending_prompts.clear();
+        agent.shared_queue.clear();
+
+        assert!(agent.try_interrupt_with_queued_from_prompt().is_none());
+    }
+
+    /// Parked in a sendable wait there is no model stream to interrupt, and an
+    /// interjection would sit in the buffer until the wait ends — so the top
+    /// row still send-nows, which aborts the wait.
+    #[test]
+    fn prompt_path_send_nows_the_top_row_while_parked_on_a_sendable_wait() {
+        let mut agent = make_running_agent();
+        crate::app::agent_view::test_fixtures::simulate_wait_all(&mut agent);
+        assert!(
+            agent.is_parked_on_sendable_wait(),
+            "fixture must park the turn in a sendable wait"
+        );
+
+        let outcome = agent
+            .try_interrupt_with_queued_from_prompt()
+            .expect("a queued row makes this a send gesture");
+
+        match outcome {
+            InputOutcome::Action(Action::QueueInterjectShared { id, .. }) => {
+                assert_eq!(id, "p1", "the top (server) row is the one sent now");
+            }
+            other => panic!("expected the parked send-now route, got {other:?}"),
+        }
     }
 
     #[test]
@@ -1127,25 +1266,27 @@ mod queue_edit_routing_tests {
         assert!(agent.toast.is_some(), "guard must explain itself");
     }
 
-    /// The reported bug: empty-Enter send-now on a queued raw skill row
-    /// (`/find-session` queued as a mid-turn follow-up) must interject it
-    /// instead of toasting "Can't send this mid-turn".
+    /// A queued raw skill row (`/find-session`, wire payload == display text)
+    /// is deliverable, so empty Enter interrupts with it — it must not fall
+    /// back to the bash route's guarded "Can't send this now" toast.
     #[test]
-    fn enter_empty_from_prompt_sends_raw_skill_top_row() {
+    fn enter_empty_from_prompt_interrupts_with_raw_skill_row() {
         let mut agent = running_agent_with_local_skill("/find-session", "/find-session");
         agent.active_pane = AgentPane::Prompt;
         agent.queue.overlay.focused = false;
         agent.prompt.set_text("");
 
+        assert!(agent.queue_has_interjectable_row());
         let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
         let outcome = agent.handle_prompt_key_for_test(&enter);
-        match outcome {
-            InputOutcome::Action(Action::SendPromptNow { text, .. }) => {
-                assert_eq!(text, "/find-session")
-            }
-            other => panic!("expected SendPromptNow action, got {other:?}"),
-        }
-        assert!(agent.session.pending_prompts.is_empty());
+        assert!(
+            matches!(
+                outcome,
+                InputOutcome::Action(Action::InterruptWithQueuedPrompts)
+            ),
+            "expected the interrupt action, got {outcome:?}"
+        );
+        assert!(agent.toast.is_none(), "no guarded-refusal toast");
     }
 
     /// Composer interject carries pasted images on the action — no
@@ -1278,6 +1419,33 @@ mod queue_edit_routing_tests {
         );
     }
 
+    fn swap_up_key() -> KeyEvent {
+        KeyEvent::new(KeyCode::Char('K'), KeyModifiers::SHIFT)
+    }
+
+    /// A client row cannot climb above a shell row: the drain runs every shell
+    /// row first, so the pane must not paint an order it will not follow. The
+    /// row holds its place and the refusal says why.
+    #[test]
+    fn swap_up_across_the_origin_boundary_refuses_and_explains() {
+        let mut agent = make_running_agent();
+        let registry = ActionRegistry::defaults();
+        let before = agent.queue.entry_ids();
+        assert_eq!(before.len(), 2, "fixture: one shell row, one client row");
+        agent.queue.list_state.select_by_id(before[1]);
+
+        let outcome = agent.handle_queue_key(&swap_up_key(), &registry);
+
+        assert!(matches!(outcome, InputOutcome::Changed));
+        assert_eq!(
+            agent.queue.entry_ids(),
+            before,
+            "the refused move must not reorder the pane"
+        );
+        let toast = agent.toast.as_ref().expect("refusal must explain itself");
+        assert!(toast.0.contains("run first"), "toast was: {}", toast.0);
+    }
+
     /// Normal-mode interject: the InterjectPrompt arm owns the composer
     /// clear — the text came from the composer, so it is cleared at the
     /// call site (dispatch never touches the composer).
@@ -1336,38 +1504,34 @@ mod queue_edit_routing_tests {
         );
     }
 
-    /// Empty composer + mid-turn queue: send-now from the *prompt* force-sends
-    /// the top queued follow-up (no need to focus the queue pane) and keeps
-    /// Prompt focus even when the pane hides.
+    /// Empty composer + mid-turn queue: the chord interrupts from the *prompt*
+    /// (no need to focus the queue pane) and keeps Prompt focus.
     #[test]
-    fn interject_key_from_prompt_force_sends_top_queued_when_empty() {
+    fn interject_key_from_prompt_interrupts_when_empty() {
         let mut agent = running_agent_local_only();
         agent.active_pane = AgentPane::Prompt;
         agent.queue.overlay.focused = false;
         agent.prompt.set_text("");
 
         let outcome = agent.handle_prompt_key_for_test(&force_interject_key());
-        match outcome {
-            InputOutcome::Action(Action::SendPromptNow { text, .. }) => {
-                assert_eq!(text, "local one");
-            }
-            other => panic!("expected Interject of queued follow-up, got {other:?}"),
-        }
         assert!(
-            agent.session.pending_prompts.is_empty(),
-            "queued row must be consumed"
+            matches!(
+                outcome,
+                InputOutcome::Action(Action::InterruptWithQueuedPrompts)
+            ),
+            "expected the interrupt action, got {outcome:?}"
         );
         assert_eq!(
             agent.active_pane,
             AgentPane::Prompt,
-            "prompt-path send-now must not steal focus to scrollback"
+            "the prompt path must not steal focus to scrollback"
         );
     }
 
-    /// Bare Enter on an empty prompt mid-turn force-sends the top queued row
-    /// (same path as the interject chord with an empty composer).
+    /// Bare Enter on an empty prompt mid-turn interrupts with the queue (same
+    /// path as the interject chord with an empty composer).
     #[test]
-    fn enter_empty_from_prompt_force_sends_top_queued() {
+    fn enter_empty_from_prompt_interrupts_with_queue() {
         let mut agent = running_agent_local_only();
         agent.active_pane = AgentPane::Prompt;
         agent.queue.overlay.focused = false;
@@ -1375,27 +1539,24 @@ mod queue_edit_routing_tests {
 
         let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
         let outcome = agent.handle_prompt_key_for_test(&enter);
-        match outcome {
-            InputOutcome::Action(Action::SendPromptNow { text, .. }) => {
-                assert_eq!(text, "local one");
-            }
-            other => panic!("expected Interject of top queued follow-up, got {other:?}"),
-        }
         assert!(
-            agent.session.pending_prompts.is_empty(),
-            "queued row must be consumed"
+            matches!(
+                outcome,
+                InputOutcome::Action(Action::InterruptWithQueuedPrompts)
+            ),
+            "expected the interrupt action, got {outcome:?}"
         );
         assert_eq!(
             agent.active_pane,
             AgentPane::Prompt,
-            "empty-Enter send-now must not steal focus to scrollback"
+            "the prompt path must not steal focus to scrollback"
         );
     }
 
-    /// Multiline mode: empty bare Enter still send-nows (does not insert a
+    /// Multiline mode: empty bare Enter still interrupts (does not insert a
     /// blank line). Enter-with-text remains newline-only in multiline.
     #[test]
-    fn multiline_enter_empty_from_prompt_force_sends_top_queued() {
+    fn multiline_enter_empty_from_prompt_interrupts() {
         let mut agent = running_agent_local_only();
         agent.multiline_mode = true;
         agent.active_pane = AgentPane::Prompt;
@@ -1404,20 +1565,17 @@ mod queue_edit_routing_tests {
 
         let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
         let outcome = agent.handle_prompt_key_for_test(&enter);
-        match outcome {
-            InputOutcome::Action(Action::SendPromptNow { text, .. }) => {
-                assert_eq!(text, "local one");
-            }
-            other => panic!("multiline empty Enter must send-now top queued row, got {other:?}"),
-        }
         assert!(
-            agent.session.pending_prompts.is_empty(),
-            "queued row must be consumed"
+            matches!(
+                outcome,
+                InputOutcome::Action(Action::InterruptWithQueuedPrompts)
+            ),
+            "multiline empty Enter must interrupt, got {outcome:?}"
         );
         assert_eq!(
             agent.prompt.text(),
             "",
-            "send-now must not leave a blank line in the composer"
+            "the interrupt must not leave a blank line in the composer"
         );
     }
 
@@ -1470,10 +1628,11 @@ mod queue_edit_routing_tests {
         );
     }
 
-    /// Prompt-path send-now always takes the top visible row (merge order),
-    /// even if a later row is selected in the queue pane.
+    /// The prompt path ignores queue-pane selection entirely: the interrupt
+    /// takes the whole queue, so a selected row is neither privileged nor
+    /// singled out.
     #[test]
-    fn interject_key_from_prompt_ignores_selection_sends_top() {
+    fn interject_key_from_prompt_ignores_selection_and_interrupts() {
         let mut agent = make_running_agent();
         agent.active_pane = AgentPane::Prompt;
         agent.queue.overlay.focused = false;
@@ -1484,21 +1643,19 @@ mod queue_edit_routing_tests {
         agent.queue.list_state.select_by_id(*ids.last().unwrap());
 
         let outcome = agent.handle_prompt_key_for_test(&force_interject_key());
-        match outcome {
-            InputOutcome::Action(Action::QueueInterjectShared { id, .. }) => {
-                assert_eq!(
-                    id, "p1",
-                    "prompt-path must send top (server), not selected local"
-                );
-            }
-            other => panic!("expected QueueInterjectShared of top server row, got {other:?}"),
-        }
+        assert!(
+            matches!(
+                outcome,
+                InputOutcome::Action(Action::InterruptWithQueuedPrompts)
+            ),
+            "expected the interrupt action, got {outcome:?}"
+        );
     }
 
-    /// Bare Enter empty with multi-row queue also sends the top row, not the
-    /// last or selected one.
+    /// Bare Enter empty with a multi-row queue interrupts with all of it —
+    /// neither the top nor the selected row is singled out.
     #[test]
-    fn enter_empty_from_prompt_sends_top_not_last() {
+    fn enter_empty_from_prompt_interrupts_with_multi_row_queue() {
         let mut agent = make_running_agent();
         agent.active_pane = AgentPane::Prompt;
         agent.queue.overlay.focused = false;
@@ -1506,12 +1663,15 @@ mod queue_edit_routing_tests {
 
         let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
         let outcome = agent.handle_prompt_key_for_test(&enter);
-        match outcome {
-            InputOutcome::Action(Action::QueueInterjectShared { id, .. }) => {
-                assert_eq!(id, "p1", "empty Enter must send top (server) row");
-            }
-            other => panic!("expected QueueInterjectShared of top server row, got {other:?}"),
-        }
+        assert!(
+            matches!(
+                outcome,
+                InputOutcome::Action(Action::InterruptWithQueuedPrompts)
+            ),
+            "expected the interrupt action, got {outcome:?}"
+        );
+        assert_eq!(agent.shared_queue.len(), 1, "rows leave in dispatch");
+        assert_eq!(agent.session.pending_prompts.len(), 1);
     }
 
     /// Backslash continuation mid-turn must only insert the newline — it must

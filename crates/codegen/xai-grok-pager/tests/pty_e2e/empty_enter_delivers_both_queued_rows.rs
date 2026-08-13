@@ -2,23 +2,21 @@
 #[allow(unused_imports)]
 use super::common::*;
 
-/// With two mid-turn queued rows, empty Enter sends the **top** (first) row
-/// now — not the most recently typed one. Cancel-and-send: the running turn
-/// is cancelled silently, alpha runs as its own next turn (no interjection
-/// preamble), and bravo stays queued to promote afterwards.
+/// With two mid-turn queued rows, empty Enter delivers **both** into the
+/// running turn, in queue order — the interrupt is "take everything I have",
+/// not "take the top one". The resubmitted request carries the original prompt
+/// followed by alpha then bravo, each with the mid-turn preamble.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore]
-async fn empty_enter_sends_top_not_last_of_two() {
+async fn empty_enter_delivers_both_queued_rows() {
     let content = ContentController::start().await.expect("start content");
     let mut turn_one = content.expect_agent_turn_blocked(
-        "running turn before top-row send-now",
+        "running turn before the interrupt",
         slow_turn_text("TURNONE"),
     );
-    let mut turn_two =
-        content.expect_agent_turn("top queued row", "TURNTWO top-row send-now acknowledged.");
-    let mut turn_three = content.expect_agent_turn(
-        "remaining queued row",
-        "TURNTHREE remaining queue promoted.",
+    let mut resubmitted = content.expect_agent_turn(
+        "resubmitted request carrying both rows",
+        "TURNTWO both queued rows acknowledged.",
     );
 
     let binary = pager_binary().expect("resolve pager binary");
@@ -52,19 +50,20 @@ async fn empty_enter_sends_top_not_last_of_two() {
         .wait_for_text("queue-bravo-later", Duration::from_secs(20))
         .expect("bravo visible");
 
+    harness.inject_keys(b"\r").expect("empty Enter interrupt");
+    // Hold turn 1 open until the delivery is observable. The shell harvests
+    // into a RUNNING turn, so releasing the completion barrier first would race
+    // the interrupt against turn end and let the rows drain as their own turns
+    // instead. Each delivered row is broadcast as an interjection and painted
+    // as a "❯ " block before the resubmitted request goes out.
     harness
-        .inject_keys(b"\r")
-        .expect("empty Enter send-now top");
+        .wait_for_text("\u{276F} queue-alpha-top", Duration::from_secs(30))
+        .expect("alpha delivered into the running turn");
     turn_one.release();
-    // Alpha (the promoted TOP row) then bravo drain back-to-back after the
-    // completion release. Each promoted "❯ …" block and every reply —
-    // including the final TURNTHREE — can scroll above the viewport before a
-    // 100ms poll observes it, so gating on any on-screen marker is inherently
-    // racy (a flaky observation, not a real failure — same rationale as
-    // `removed_queued_prompt_never_sent`). Gate on the WIRE instead: wait
-    // until bravo's request has been sent, which is the authoritative record
-    // that both queued rows drained in order. Pump the event loop while
-    // waiting so the queued rows actually promote.
+    // Both rows land on the resubmitted request. Blocks can scroll above the
+    // viewport before a 100ms poll observes them, so gate on the WIRE — the
+    // authoritative record — rather than on-screen markers. Pump the event loop
+    // while waiting so the delivery actually happens.
     let deadline = std::time::Instant::now() + Duration::from_secs(90);
     while !all_user_messages(&content)
         .iter()
@@ -72,22 +71,19 @@ async fn empty_enter_sends_top_not_last_of_two() {
     {
         assert!(
             std::time::Instant::now() < deadline,
-            "queued rows never drained through to the final turn\nscreen:\n{}",
+            "queued rows never reached the model\nscreen:\n{}",
             harness.screen_contents()
         );
         harness.update(Duration::from_millis(100));
     }
-    tokio::time::timeout(Duration::from_secs(10), turn_two.wait_satisfied())
+    tokio::time::timeout(Duration::from_secs(10), resubmitted.wait_satisfied())
         .await
-        .expect("top queued row expectation satisfied");
-    tokio::time::timeout(Duration::from_secs(10), turn_three.wait_satisfied())
-        .await
-        .expect("remaining queued row expectation satisfied");
+        .expect("resubmitted turn expectation satisfied");
 
-    // The send-now cancel of turn 1 is silent.
+    // Interrupting is not cancelling: the turn continues, so no marker.
     assert!(
         !harness.contains_text("Turn cancelled by user"),
-        "send-now cancel must not render a cancelled marker\nscreen:\n{}",
+        "an interrupt must not render a cancelled marker\nscreen:\n{}",
         harness.screen_contents()
     );
 
@@ -97,16 +93,12 @@ async fn empty_enter_sends_top_not_last_of_two() {
         .find(|u| u.contains("queue-alpha-top"))
         .unwrap_or_else(|| panic!("top row never on wire: {users:#?}"));
     assert!(
-        !alpha.contains(INTERJECTION_WIRE_PREFIX),
-        "send-now must not use the interjection preamble: {alpha}"
-    );
-    assert!(
-        alpha.contains("<user_query>"),
-        "send-now must arrive as a standard user_query prompt: {alpha}"
+        alpha.contains(INTERJECTION_WIRE_PREFIX),
+        "delivered rows arrive as mid-turn interjections; wire was: {users:#?}"
     );
 
-    // The final request's user sequence proves the order: prompt, then the
-    // TOP row (alpha), then bravo — never bravo before alpha.
+    // The final request's user sequence proves the order: prompt, then alpha,
+    // then bravo — never bravo before alpha.
     let bodies = content.request_bodies();
     let last = bodies.last().expect("final request recorded");
     let finals: Vec<String> = last["messages"]

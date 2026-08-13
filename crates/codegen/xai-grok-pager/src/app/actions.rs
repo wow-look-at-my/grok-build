@@ -275,6 +275,13 @@ pub enum Action {
         /// live on [`Effect::QueueInterject`].
         new_text: Option<String>,
     },
+    /// Interrupt the running turn with everything the user has queued: bare
+    /// Enter on an empty composer while the session is busy. Server-owned rows
+    /// ride [`Effect::QueueDeliverNow`]; local rows the shell has never seen
+    /// are sent as interjections in the same dispatch. Both paths cancel the
+    /// in-flight model stream shell-side, so the model stops mid-response and
+    /// reads the queue instead of finishing what it was saying.
+    InterruptWithQueuedPrompts,
     /// Focus the prompt pane.
     FocusPrompt,
     /// Focus the scrollback pane (leave prompt).
@@ -1737,6 +1744,14 @@ pub enum Effect {
         expected_version: u64,
         new_text: Option<String>,
     },
+    /// Deliver every server-owned queued prompt into the running turn NOW:
+    /// fire-and-forget `x.ai/queue/deliver_now`. The session actor harvests
+    /// the queue into the running turn's interjection buffer and cancels the
+    /// in-flight model stream so the turn drains them before its next request
+    /// instead of at its next natural gap. Rows that own their turn (bash,
+    /// send-now, synthetic) stay queued; the agent rebroadcasts the
+    /// authoritative queue either way.
+    QueueDeliverNow { session_id: acp::SessionId },
     /// Set the session mode via ACP `session/set_mode`.
     SetSessionMode {
         session_id: acp::SessionId,

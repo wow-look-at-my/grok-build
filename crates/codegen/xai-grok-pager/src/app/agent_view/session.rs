@@ -338,6 +338,7 @@ impl AgentView {
             front_message_committed: true,
             optimistic_queue_ids: std::collections::HashSet::new(),
             send_now_awaiting_confirm: None,
+            deliver_now_awaiting_confirm: false,
             send_now_painted_blocks: std::collections::HashMap::new(),
             follow_without_jump_prompt_id: None,
             plugin_cta: PluginCtaState::default(),
@@ -430,6 +431,7 @@ impl AgentView {
         self.front_message_committed = true;
         self.optimistic_queue_ids.clear();
         self.send_now_awaiting_confirm = None;
+        self.deliver_now_awaiting_confirm = false;
         self.send_now_painted_blocks.clear();
         self.workflow_blocks.clear();
         self.workflow_run_revisions.clear();

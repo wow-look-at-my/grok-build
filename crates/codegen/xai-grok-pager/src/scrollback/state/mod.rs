@@ -1081,9 +1081,13 @@ impl ScrollbackState {
     }
 
     /// Sum of the API-reported per-message costs (in USD ticks, 1e10 per USD)
-    /// across every entry currently in the scrollback — i.e. this session's
-    /// running total cost, derived purely from the API-reported
-    /// `ConversationResponse.cost_usd_ticks` values stored on the entries.
+    /// across every entry currently in the scrollback.
+    ///
+    /// This is a floor on session spend, not the session total: spend behind a
+    /// rewound message, a response that streamed no text, or a subagent has no
+    /// entry here to be counted. The indicator prefers the agent's own ledger
+    /// (`AcpUpdateTracker::reported_session_cost_usd_ticks`) and falls back to
+    /// this only for an agent that reports no total.
     ///
     /// Normalization means no entry ever carries a fabricated `0` cost, so this
     /// sum is `None` only while *no* entry has reported a cost (it is never a

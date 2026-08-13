@@ -2051,7 +2051,7 @@ impl SessionActor {
             // to steer yet, and a row queued in that window is picked up on the
             // pass after it.
             if loop_index > 1 {
-                self.harvest_queued_prompts_into_interjections().await;
+                self.harvest_queued_prompts_into_interjections(false).await;
             }
             if identical_tool_calls.take_nudge() {
                 let run_len = identical_tool_calls.run_len;
@@ -2438,8 +2438,19 @@ impl SessionActor {
                     },
                 );
             }
-            self.record_response_token_usage(&response, Some(model_duration_ms));
-            let response_completed = self.response_completed_update(&response);
+            let response_cost_ticks =
+                self.record_response_token_usage(&response, Some(model_duration_ms));
+            // Read the session ledger AFTER the fold above so the client's
+            // running total moves on every call, not once per turn. Both ride
+            // the same actor channel, so this query is ordered after the fold.
+            let session_cost_ticks = self
+                .chat_state_handle
+                .try_get_session_usage()
+                .await
+                .ok()
+                .and_then(|l| l.totals.cost_usd_ticks);
+            let response_completed =
+                self.response_completed_update(&response, response_cost_ticks, session_cost_ticks);
             if let Some(pt) = prompt_timing.take() {
                 let mcp_count = self.mcp_state.lock().await.configs.len() as u32;
                 let mcp_tools = self
