@@ -501,9 +501,12 @@ fn fetch_timeout_kills_process_group_with_grandchild() {
         .trim()
         .parse()
         .expect("grandchild pid");
-    assert!(!pid_alive(leader), "leader {leader} must not remain live");
     assert!(
-        !pid_alive(grandchild),
+        pid_gone_within_deadline(leader),
+        "leader {leader} must not remain live"
+    );
+    assert!(
+        pid_gone_within_deadline(grandchild),
         "grandchild {grandchild} must be killed via killpg"
     );
 }
@@ -526,6 +529,29 @@ fn pid_alive(pid: u32) -> bool {
     use nix::unistd::Pid;
 
     kill(Pid::from_raw(pid as i32), None::<Signal>).is_ok()
+}
+
+/// Whether `pid` is gone, waiting up to [`REAP_DEADLINE`] for it.
+///
+/// A kill is asynchronous: the kernel marks the signal pending and the process
+/// dies when it is next scheduled. Reading `pid_alive` the instant the fetch
+/// returns races that, and loses it on a loaded machine — which is what CI is,
+/// running a test per core. The property these tests are about is that the
+/// tree dies, not that it dies within one scheduler tick; a process that never
+/// got the signal sleeps for 30s and is still live at the deadline.
+#[cfg(unix)]
+fn pid_gone_within_deadline(pid: u32) -> bool {
+    const REAP_DEADLINE: Duration = Duration::from_secs(5);
+    const POLL: Duration = Duration::from_millis(10);
+
+    let start = std::time::Instant::now();
+    while pid_alive(pid) {
+        if start.elapsed() >= REAP_DEADLINE {
+            return false;
+        }
+        std::thread::sleep(POLL);
+    }
+    true
 }
 
 #[cfg(unix)]
@@ -601,7 +627,10 @@ fn fetch_child_drop_tears_down_process() {
         start.elapsed() < Duration::from_secs(5),
         "Drop teardown must not hang"
     );
-    assert!(!pid_alive(pid), "dropped fetch child must die");
+    assert!(
+        pid_gone_within_deadline(pid),
+        "dropped fetch child must die"
+    );
 }
 
 #[cfg(unix)]
@@ -636,7 +665,7 @@ fn fetch_timeout_sigkills_term_immune_grandchild() {
     assert!(err.to_string().contains("timed out"), "got: {err}");
     assert!(start.elapsed() < Duration::from_secs(5));
     assert!(
-        !pid_alive(leader),
+        pid_gone_within_deadline(leader),
         "TERM-ignoring leader {leader} must die on SIGKILL"
     );
     let grandchild: u32 = std::fs::read_to_string(&pidfile)
@@ -645,7 +674,7 @@ fn fetch_timeout_sigkills_term_immune_grandchild() {
         .parse()
         .expect("pid");
     assert!(
-        !pid_alive(grandchild),
+        pid_gone_within_deadline(grandchild),
         "grandchild {grandchild} must not remain live"
     );
 }
