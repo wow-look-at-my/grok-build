@@ -594,6 +594,10 @@ impl AgentView {
                         }
                         return InputOutcome::Changed;
                     }
+                    if self.at_queue_origin_boundary(id) {
+                        self.explain_queue_origin_boundary();
+                        return InputOutcome::Changed;
+                    }
                     self.session.swap_prompt_up(id);
                 }
                 QueueEvent::SwapDown { id } => {
@@ -602,6 +606,9 @@ impl AgentView {
                             return InputOutcome::Action(Action::QueueReorderShared {
                                 ordered_ids,
                             });
+                        }
+                        if self.at_queue_origin_boundary(id) {
+                            self.explain_queue_origin_boundary();
                         }
                         return InputOutcome::Changed;
                     }
@@ -653,6 +660,41 @@ impl AgentView {
         if self.active_pane == AgentPane::Queue {
             self.set_active_pane(AgentPane::Scrollback, false);
         }
+    }
+
+    /// Whether the one-step move this row was asked to make would have to cross
+    /// the shell/client boundary in the merged pane — up for a client row, down
+    /// for a shell row. The pane draws every shell row first because the drain
+    /// runs them first (`maybe_drain_queue` holds every local row while any
+    /// non-running shell row exists), so that move cannot be honored: rendering
+    /// it would promise a run order the queue will not follow.
+    fn at_queue_origin_boundary(&self, selection_id: u64) -> bool {
+        use crate::views::queue_pane::QueueRowOrigin;
+
+        let origin = |row_id: u64| self.queue.row_ref(row_id).map(|row| row.origin);
+        let ids = self.queue.entry_ids();
+        let Some(pos) = ids.iter().position(|row_id| *row_id == selection_id) else {
+            return false;
+        };
+        let selection_is_server = match origin(selection_id) {
+            Some(origin) => origin == QueueRowOrigin::Server,
+            None => return false,
+        };
+        let neighbor = if selection_is_server {
+            ids.get(pos + 1)
+        } else {
+            pos.checked_sub(1).and_then(|above| ids.get(above))
+        };
+        // Crossing means the neighbor sits on the other side of the boundary.
+        neighbor
+            .and_then(|row_id| origin(*row_id))
+            .is_some_and(|neighbor| (neighbor == QueueRowOrigin::Server) != selection_is_server)
+    }
+
+    /// Say why a boundary-crossing reorder did nothing. Without this the key
+    /// looks broken: the row simply does not move.
+    fn explain_queue_origin_boundary(&mut self) {
+        self.show_toast("The agent's queued rows always run first — can't reorder across them");
     }
 
     /// Reorder payload for `x.ai/queue/reorder`. Omit only running; include
@@ -1375,6 +1417,33 @@ mod queue_edit_routing_tests {
             ],
             "send-now must stay front-most among queueable server rows"
         );
+    }
+
+    fn swap_up_key() -> KeyEvent {
+        KeyEvent::new(KeyCode::Char('K'), KeyModifiers::SHIFT)
+    }
+
+    /// A client row cannot climb above a shell row: the drain runs every shell
+    /// row first, so the pane must not paint an order it will not follow. The
+    /// row holds its place and the refusal says why.
+    #[test]
+    fn swap_up_across_the_origin_boundary_refuses_and_explains() {
+        let mut agent = make_running_agent();
+        let registry = ActionRegistry::defaults();
+        let before = agent.queue.entry_ids();
+        assert_eq!(before.len(), 2, "fixture: one shell row, one client row");
+        agent.queue.list_state.select_by_id(before[1]);
+
+        let outcome = agent.handle_queue_key(&swap_up_key(), &registry);
+
+        assert!(matches!(outcome, InputOutcome::Changed));
+        assert_eq!(
+            agent.queue.entry_ids(),
+            before,
+            "the refused move must not reorder the pane"
+        );
+        let toast = agent.toast.as_ref().expect("refusal must explain itself");
+        assert!(toast.0.contains("run first"), "toast was: {}", toast.0);
     }
 
     /// Normal-mode interject: the InterjectPrompt arm owns the composer
