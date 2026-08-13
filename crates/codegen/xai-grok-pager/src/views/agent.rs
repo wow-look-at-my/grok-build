@@ -1005,7 +1005,7 @@ pub fn build_hints(
                 } else if prompt.can_send() {
                     hints.push(HintItem::new(key, submit_label));
                 } else if is_turn_running && has_queued_follow_up {
-                    hints.push(HintItem::new(key, "send now"));
+                    hints.push(HintItem::new(key, "interrupt & send"));
                 }
             }
             if shift_enter_unavailable && !multiline_mode && prompt.can_send() {
@@ -1701,10 +1701,11 @@ mod tests {
             "mid-turn with composer text must advertise the send-now (interject) chord; got {labels:?}"
         );
     }
-    /// Empty composer + mid-turn queue: bare Enter is send-now in both normal
-    /// and multiline modes (multiline only inserts newline when there is text).
+    /// Empty composer + mid-turn queue: bare Enter interrupts the turn with the
+    /// queue in both normal and multiline modes (multiline only inserts newline
+    /// when there is text).
     #[test]
-    fn prompt_empty_mid_turn_queue_advertises_send_now_including_multiline() {
+    fn prompt_empty_mid_turn_queue_advertises_interrupt_including_multiline() {
         for multiline in [false, true] {
             let prompt = PromptWidget::default();
             let registry = ActionRegistry::defaults();
@@ -1737,8 +1738,8 @@ mod tests {
             );
             let labels: Vec<&str> = hints.iter().map(|h| h.label.as_ref()).collect();
             assert!(
-                labels.contains(&"send now"),
-                "empty composer mid-turn with queue must advertise Enter:send now \
+                labels.contains(&"interrupt & send"),
+                "empty composer mid-turn with queue must advertise Enter:interrupt & send \
                  (multiline={multiline}); got {labels:?}"
             );
         }

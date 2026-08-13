@@ -114,13 +114,20 @@ impl SessionActor {
     ///
     /// Rows listed in [`SessionActor::queued_at_turn_start`] were next in line
     /// before this turn existed — each is its own task, not a note about this
-    /// turn's work — so they are left to run as their own turns.
+    /// turn's work — so the turn loop's own harvest
+    /// (`include_queued_at_turn_start = false`) leaves them to run as their own
+    /// turns. The explicit "deliver the queue now" gesture passes `true`: the
+    /// user asked for everything they can see, and waiting for a row's own turn
+    /// is exactly what they are cutting short.
     ///
     /// Returns whether anything moved. A harvested row never runs as its own
     /// turn: its RPC resolves [`PromptCompletionKind::RemovedFromQueue`], the
     /// same completion an explicit dequeue produces, and the drain injects its
     /// text as a standalone user message.
-    pub(super) async fn harvest_queued_prompts_into_interjections(&self) -> bool {
+    pub(super) async fn harvest_queued_prompts_into_interjections(
+        &self,
+        include_queued_at_turn_start: bool,
+    ) -> bool {
         let harvested = {
             let mut state = self.state.lock().await;
             let queued_at_turn_start = self.queued_at_turn_start.borrow();
@@ -147,7 +154,8 @@ impl SessionActor {
             let holds = state.combine_edit_holds.clone();
             let dropped = state.sweep_pending_inputs(|item| {
                 item.prompt_mode == running_mode
-                    && !queued_at_turn_start.contains(&item.prompt_id)
+                    && (include_queued_at_turn_start
+                        || !queued_at_turn_start.contains(&item.prompt_id))
                     && Self::deliverable_mid_turn(item, &holds)
             });
             if dropped.is_empty() {
@@ -200,6 +208,20 @@ impl SessionActor {
             self.pending_interjections.push(entry);
         }
         true
+    }
+
+    /// Cancel the in-flight model stream so the turn loop iterates now, drains
+    /// `pending_interjections`, and resubmits — instead of waiting out a stream
+    /// that can run for minutes. A no-op between requests (inside a tool call),
+    /// where the drain happens at the next loop boundary anyway.
+    pub(super) fn cancel_in_flight_stream_for_interjection(&self) {
+        let Some(req_id) = self.in_flight_sampler_request_id.lock().take() else {
+            return;
+        };
+        self.interjection_cancel_requested
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        self.sampler_handle.cancel(req_id);
+        tracing::info!("Cancelled in-flight model stream for asap interjection");
     }
 
     /// Whether a queued row can be folded into another turn as user text.
