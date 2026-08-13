@@ -2546,6 +2546,24 @@ impl AgentView {
                 bold: false,
             });
         }
+        // Shift+Tab agent-identity ring stop (Orchestrator/Explore): the
+        // mode-switch banner only shows for a few seconds, so the flag row
+        // is what persists to remind the user they're off the base agent.
+        if let Some(idx) = self.shift_tab_ring_agent_index {
+            use xai_grok_agent::config::BuiltinAgentName;
+            let text = match BuiltinAgentName::shift_tab_variants().get(idx as usize) {
+                Some(BuiltinAgentName::GrokBuildOrchestrator) => Some("orchestrator"),
+                Some(BuiltinAgentName::Explore) => Some("explore"),
+                _ => None,
+            };
+            if let Some(text) = text {
+                mode_flags_vec.push(PromptFlag {
+                    text,
+                    color: Some(theme.accent_system),
+                    bold: false,
+                });
+            }
+        }
         let mode_flags: &[PromptFlag] = &mode_flags_vec;
         let multiline = self.multiline_mode;
         let warning = self.credit_balance.as_ref().and_then(|bal| {
