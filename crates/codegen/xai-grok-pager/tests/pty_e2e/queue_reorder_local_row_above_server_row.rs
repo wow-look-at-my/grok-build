@@ -2,7 +2,10 @@
 #[allow(unused_imports)]
 use super::common::*;
 
-/// A slash command is a client row and the pane draws every shell row first, so moving one up must cross that boundary.
+/// A slash command is a client row and the pane draws every shell row first,
+/// because the drain runs them first. Moving one up would have to cross that
+/// boundary, which the queue cannot honor — so the row holds its place and the
+/// pane says why instead of silently ignoring the key.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore]
 async fn queue_reorder_local_row_above_server_row() {
@@ -50,7 +53,7 @@ async fn queue_reorder_local_row_above_server_row() {
         .inject_keys(CTRL_SEMICOLON)
         .expect("focus queue pane");
     harness.update(Duration::from_millis(300));
-    // Select the last row (the slash command) and move it to the top.
+    // Select the last row (the slash command) and try to move it to the top.
     harness.inject_keys(b"j").expect("select the second row");
     harness.update(Duration::from_millis(200));
     for _ in 0..3 {
@@ -66,8 +69,12 @@ async fn queue_reorder_local_row_above_server_row() {
         .unwrap_or_else(|| panic!("prompt row on screen:\n{screen}"))
         .0;
     assert!(
-        slash_row < prompt_row,
-        "the slash command must move above the queued prompt; slash at row {slash_row}, prompt at row {prompt_row}\nscreen:\n{screen}"
+        slash_row > prompt_row,
+        "a client row cannot move above a shell row: slash at row {slash_row}, prompt at row {prompt_row}\nscreen:\n{screen}"
+    );
+    assert!(
+        harness.contains_text("run first"),
+        "the refused move must explain itself\nscreen:\n{screen}"
     );
 
     turn_one.release();
