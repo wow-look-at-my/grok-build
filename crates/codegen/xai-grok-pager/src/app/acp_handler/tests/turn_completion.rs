@@ -303,6 +303,141 @@
     }
 
     #[test]
+    fn every_response_in_a_tool_loop_prices_its_own_message() {
+        // One turn, two model calls (the shape of any turn that uses a tool).
+        // Each call closes with its own `ResponseCompleted`, so each rendered
+        // message must carry ITS call's cost — not one cost on the last message
+        // and nothing on the rest.
+        let mut app = make_app_with_agent("sess-per-msg");
+        {
+            let agent = app.agents.get_mut(&AgentId(0)).unwrap();
+            agent.session.start_turn(&mut agent.scrollback);
+            agent.session.current_prompt_id = Some("pid-loop".into());
+            agent.turn_started_at = Some(std::time::Instant::now());
+        }
+
+        // Call 1: streams a message, then closes at $0.10 (session total $0.10).
+        let _ = handle(
+            make_agent_chunk_for_response("sess-per-msg", "calling a tool", "pid-loop", 1_000),
+            &mut app,
+        );
+        let affected = handle_ext_notification(
+            &xai_response_completed_notif_with_cost(
+                "sess-per-msg",
+                Some(1_000_000_000),
+                Some(1_000_000_000),
+            ),
+            &mut app,
+        );
+        assert!(affected, "pricing a visible message must redraw");
+
+        // Call 2: a new `streamStartMs` opens the second message block; it
+        // closes at $0.20. The session total reported alongside it ($0.50) is
+        // deliberately MORE than the two messages sum to — a subagent's spend
+        // is real money with no message of its own, and the indicator must
+        // follow the agent's ledger rather than re-deriving from what it drew.
+        let _ = handle(
+            make_agent_chunk_for_response("sess-per-msg", "here is the answer", "pid-loop", 2_000),
+            &mut app,
+        );
+        let _ = handle_ext_notification(
+            &xai_response_completed_notif_with_cost(
+                "sess-per-msg",
+                Some(2_000_000_000),
+                Some(5_000_000_000),
+            ),
+            &mut app,
+        );
+
+        // The turn terminal reports the whole turn's $0.30. It must NOT stack
+        // onto the last message, which already carries its own $0.20.
+        let _ = handle_ext_notification(
+            &xai_turn_completed_notif_with_cost("sess-per-msg", "pid-loop", Some(3_000_000_000)),
+            &mut app,
+        );
+
+        let agent = app.agents.get_mut(&AgentId(0)).unwrap();
+        let costs: Vec<Option<i64>> = agent
+            .scrollback
+            .entries_mut()
+            .filter(|e| e.block.is_agent_message())
+            .map(|e| e.cost_usd_ticks)
+            .collect();
+        assert_eq!(
+            costs,
+            vec![Some(1_000_000_000), Some(2_000_000_000)],
+            "each message must carry its own model call's cost"
+        );
+        assert_eq!(
+            agent.session.tracker.reported_session_cost_usd_ticks(),
+            Some(5_000_000_000),
+            "the session total is the agent's ledger, not the sum of drawn messages"
+        );
+        assert_eq!(
+            agent.scrollback.session_total_cost_usd_ticks(),
+            Some(3_000_000_000),
+            "the scrollback sum under-counts here, which is why it is only the \
+             fallback for an agent that reports no total"
+        );
+    }
+
+    #[test]
+    fn turn_cost_still_lands_when_no_response_priced_the_turn() {
+        // An agent that prices only whole turns (no per-response cost) must keep
+        // the old behavior: the turn's cost lands on the message it rendered.
+        // The per-response path stands down only for prompts it actually priced.
+        let mut app = make_app_with_agent("sess-mixed");
+        {
+            let agent = app.agents.get_mut(&AgentId(0)).unwrap();
+            agent.session.start_turn(&mut agent.scrollback);
+            agent.session.current_prompt_id = Some("pid-a".into());
+            agent.turn_started_at = Some(std::time::Instant::now());
+        }
+        let _ = handle(
+            make_agent_chunk_for_response("sess-mixed", "priced per response", "pid-a", 1_000),
+            &mut app,
+        );
+        let _ = handle_ext_notification(
+            &xai_response_completed_notif_with_cost("sess-mixed", Some(1_000_000_000), None),
+            &mut app,
+        );
+        let _ = handle_ext_notification(
+            &xai_turn_completed_notif_with_cost("sess-mixed", "pid-a", Some(9_000_000_000)),
+            &mut app,
+        );
+
+        // Second turn: no ResponseCompleted at all, so the turn cost attaches.
+        {
+            let agent = app.agents.get_mut(&AgentId(0)).unwrap();
+            agent.session.start_turn(&mut agent.scrollback);
+            agent.session.current_prompt_id = Some("pid-b".into());
+            agent.turn_started_at = Some(std::time::Instant::now());
+        }
+        let _ = handle(
+            make_agent_chunk_for_response("sess-mixed", "priced per turn", "pid-b", 2_000),
+            &mut app,
+        );
+        let _ = handle_ext_notification(
+            &xai_turn_completed_notif_with_cost("sess-mixed", "pid-b", Some(4_000_000_000)),
+            &mut app,
+        );
+
+        let agent = app.agents.get_mut(&AgentId(0)).unwrap();
+        let costs: Vec<Option<i64>> = agent
+            .scrollback
+            .entries_mut()
+            .filter(|e| e.block.is_agent_message())
+            .map(|e| e.cost_usd_ticks)
+            .collect();
+        assert_eq!(
+            costs,
+            vec![Some(1_000_000_000), Some(4_000_000_000)],
+            "a per-response cost wins for its own turn; an unpriced turn still \
+             takes the turn-level cost"
+        );
+    }
+
+    #[test]
     fn driver_turn_completed_cost_lands_on_running_entry_before_prompt_finish() {
         // DRIVER path (attached_as_viewer=false, the pager's own prompted turns
         // — the primary interactive flow). On the driver the `PromptResponse`
@@ -747,6 +882,7 @@
                 stop_reason: "rate_limit".into(),
                 agent_result: Some(rate_limit_copy.into()),
                 usage: None,
+                session_cost_usd_ticks: None,
             },
             meta: Some(serde_json::json!({ "isReplay": false })),
         };

@@ -149,6 +149,7 @@ async fn test_turn_completed_round_trips_through_storage() {
             stop_reason: "end_turn".to_string(),
             agent_result: Some("all done".to_string()),
             usage: None,
+            session_cost_usd_ticks: Some(24_000),
         },
         meta: None,
     };
@@ -174,11 +175,13 @@ async fn test_turn_completed_round_trips_through_storage() {
                     prompt_id,
                     stop_reason,
                     agent_result,
+                    session_cost_usd_ticks,
                     ..
                 } => {
                     assert_eq!(prompt_id, "prompt-1");
                     assert_eq!(stop_reason, "end_turn");
                     assert_eq!(agent_result.as_deref(), Some("all done"));
+                    assert_eq!(*session_cost_usd_ticks, Some(24_000));
                 }
                 _ => panic!("Expected TurnCompleted, got different update type"),
             }

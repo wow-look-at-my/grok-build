@@ -1241,6 +1241,29 @@ pub(super) fn handle_child_session_notification(
             }
             changed
         }
+        XaiSessionUpdate::ResponseCompleted {
+            cost_usd_ticks,
+            session_cost_usd_ticks,
+            ..
+        } => {
+            // A subagent's transcript is read the same way as the parent's, so
+            // its messages carry their own costs, priced off the child's own
+            // session ledger.
+            let Some(child_view) = agent.subagent_views.get_mut(child_sid) else {
+                return false;
+            };
+            let prompt_id = child_view.session.current_prompt_id.clone();
+            let priced = child_view.session.tracker.set_response_cost(
+                &mut child_view.scrollback,
+                prompt_id.as_deref(),
+                cost_usd_ticks,
+            );
+            let total_changed = child_view
+                .session
+                .tracker
+                .set_reported_session_cost(session_cost_usd_ticks);
+            priced || total_changed
+        }
         ref update @ (XaiSessionUpdate::MemoryFlushCompleted { .. }
         | XaiSessionUpdate::MemoryDreamCompleted { .. }
         | XaiSessionUpdate::MemorySessionSaved { .. }) => {
