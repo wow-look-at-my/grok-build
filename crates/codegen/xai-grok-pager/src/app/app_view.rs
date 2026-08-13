@@ -4647,6 +4647,26 @@ impl AppView {
                         self.welcome_announcement.truncated = result.announcement_truncated;
                         self.welcome_announcement.rect = result.announcement_rect;
                         self.session_picker_state.hit_areas = result.session_picker_hit_areas;
+                        // Wrap the build-commit hash text with an OSC 8 hyperlink
+                        // when the terminal supports it. The hash rect was
+                        // computed by `render_version_badge`; the link target
+                        // uses the full commit hash for an unambiguous GitHub URL.
+                        if let Some(hash_rect) = result.commit_hash_link_rect {
+                            let route = crate::hyperlink_route::hyperlink_route();
+                            if route.emit_osc8
+                                && let Some(url) = xai_grok_version::commit_github_url(
+                                    xai_grok_version::BUILD_COMMIT,
+                                )
+                            {
+                                link_spans.push(xai_ratatui_inline::LinkSpan {
+                                    row: hash_rect.y,
+                                    col_start: hash_rect.x,
+                                    col_end: hash_rect.x.saturating_add(hash_rect.width),
+                                    url: url.into(),
+                                    id: if route.emit_id { Some(0) } else { None },
+                                });
+                            }
+                        }
                         if let Some(modal) = self.import_claude_modal.as_mut() {
                             let theme = crate::theme::Theme::current();
                             crate::views::import_claude_modal::render_import_claude_modal(
