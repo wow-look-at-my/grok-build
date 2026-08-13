@@ -1042,6 +1042,16 @@ pub(super) fn xai_response_completed_notif_with_cost(
     cost_usd_ticks: Option<i64>,
     session_cost_usd_ticks: Option<i64>,
 ) -> acp::ExtNotification {
+    xai_response_completed_notif(session_id, cost_usd_ticks, session_cost_usd_ticks, false)
+}
+/// [`xai_response_completed_notif_with_cost`] with the `isReplay` stamp a
+/// reload puts on a persisted `ResponseCompleted`.
+pub(super) fn xai_response_completed_notif(
+    session_id: &str,
+    cost_usd_ticks: Option<i64>,
+    session_cost_usd_ticks: Option<i64>,
+    is_replay: bool,
+) -> acp::ExtNotification {
     let payload = SessionNotification {
         session_id: acp::SessionId::new(session_id),
         update: XaiSessionUpdate::ResponseCompleted {
@@ -1053,7 +1063,7 @@ pub(super) fn xai_response_completed_notif_with_cost(
             cost_usd_ticks,
             session_cost_usd_ticks,
         },
-        meta: Some(serde_json::json!({ "isReplay": false })),
+        meta: Some(serde_json::json!({ "isReplay": is_replay })),
     };
     acp::ExtNotification::new(
         "x.ai/session/update",

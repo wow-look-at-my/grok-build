@@ -382,6 +382,58 @@
     }
 
     #[test]
+    fn reloaded_transcript_keeps_message_costs_without_resurrecting_an_old_total() {
+        // `ResponseCompleted` is persisted, so a reload replays it after its own
+        // message's chunks and the message keeps the cost it was priced at.
+        // The session total is a different question: the agent's ledger is
+        // in-memory and restarts at reload, so the replayed total must NOT be
+        // adopted — and neither may the scrollback sum stand in for it, or the
+        // indicator would show the old run's spend and then FALL to this run's
+        // at the first live call.
+        let mut app = make_app_with_agent("sess-reload");
+        {
+            let agent = app.agents.get_mut(&AgentId(0)).unwrap();
+            agent.session.loading_replay = true;
+        }
+        let _ = handle(
+            make_agent_chunk_message_with_prompt("sess-reload", "from last run", "pid-old", true),
+            &mut app,
+        );
+        let _ = handle_ext_notification(
+            &xai_response_completed_notif(
+                "sess-reload",
+                Some(1_000_000_000),
+                Some(9_000_000_000),
+                true,
+            ),
+            &mut app,
+        );
+
+        let agent = app.agents.get_mut(&AgentId(0)).unwrap();
+        let replayed_cost = agent
+            .scrollback
+            .entries_mut()
+            .find(|e| e.block.is_agent_message())
+            .expect("the replayed message is in scrollback")
+            .cost_usd_ticks;
+        assert_eq!(
+            replayed_cost,
+            Some(1_000_000_000),
+            "a reloaded message must keep what it cost when it ran"
+        );
+        assert_eq!(
+            agent.session.tracker.reported_session_cost_usd_ticks(),
+            None,
+            "the previous run's total must not be adopted as this run's"
+        );
+        assert!(
+            !agent.session.tracker.scrollback_sum_is_this_run(),
+            "with a replayed cost in scrollback, its sum no longer measures \
+             this run — the indicator must not fall back to it"
+        );
+    }
+
+    #[test]
     fn turn_cost_still_lands_when_no_response_priced_the_turn() {
         // An agent that prices only whole turns (no per-response cost) must keep
         // the old behavior: the turn's cost lands on the message it rendered.

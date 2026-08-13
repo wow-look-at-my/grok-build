@@ -55,3 +55,9 @@ verify serially wastes time when a parallel CI build could be running.
   (`ResponseCompleted`/`TurnCompleted.session_cost_usd_ticks`), not a sum over
   scrollback: rewound and never-rendered spend is real. The scrollback sum
   survives only as the fallback for an agent that reports no total.
+- `ResponseCompleted` is the one buffered xAI update that is persisted — it is
+  the only carrier of a message's cost, so a reload replays it and each message
+  keeps its price. The indicator counts THIS run's spend: the agent's ledger is
+  in-memory and restarts at reload, so a replayed total is not adopted and the
+  scrollback sum stops being a valid fallback once anything priced is replayed
+  (`AcpUpdateTracker::scrollback_sum_is_this_run`).

@@ -205,6 +205,14 @@ impl SessionActor {
     ///   because the canonical `acp::SessionUpdate::ToolCall` (with
     ///   assembled `raw_input`) is persisted at end-of-turn and is the
     ///   source of truth for replay; (2) no hook dispatch.
+    /// - **xAI** (`ResponseCompleted`) -> forwarded AND persisted: it is the
+    ///   only carrier of a message's cost, and nothing else records it, so
+    ///   without persistence every message loses its cost on reload. It stays
+    ///   on this rail (rather than `send_xai_notification`) because ordering
+    ///   against its own response's chunks is what makes the cost attributable
+    ///   at all. No `_meta` is stamped: this rail mints no `eventId`, and one
+    ///   minted here would be out of order against the chunk rail's, which the
+    ///   client's dedup highwater would read as a reason to drop live updates.
     pub(super) async fn emit_buffered(&self, notification: SessionNotification) {
         match notification {
             SessionNotification::Acp(n) => {
@@ -212,6 +220,11 @@ impl SessionActor {
             }
             SessionNotification::Xai(n) => {
                 self.log_outbound_xai_buffered(&n);
+                if matches!(n.update, XaiSessionUpdate::ResponseCompleted { .. }) {
+                    let _ = self.notifications.persistence_tx.send(PersistenceMsg::Update(
+                        crate::session::storage::SessionUpdate::Xai(Box::new((*n).clone())),
+                    ));
+                }
                 if self
                     .notifications
                     .gateway_enabled

@@ -317,6 +317,11 @@ pub struct AcpUpdateTracker {
     /// whose message was rewound or never rendered. This is the session total,
     /// not the visible-scrollback sum. `None` until the agent reports one.
     reported_session_cost_usd_ticks: Option<i64>,
+    /// A reload replayed at least one message that carries a cost from an
+    /// earlier run. Those costs are true of their messages but are NOT this
+    /// run's spend, so summing the scrollback would report the wrong quantity —
+    /// see [`Self::scrollback_sum_is_this_run`].
+    replayed_cost_seen: bool,
 
     /// Pending agent toolset from the most recent `AvailableCommandsUpdate.meta`.
     /// Format on the wire: `{"tools": ["read_file", ...]}`.
@@ -1013,11 +1018,15 @@ impl AcpUpdateTracker {
     /// rail carries no `_meta`), recorded so the turn-level fallback stands
     /// down for this prompt. A response that streamed no text has no block to
     /// decorate; its cost still rides the session total.
+    ///
+    /// `is_replay` marks a cost reloaded from an earlier run: still true of its
+    /// message, but not this run's spend (see [`Self::replayed_cost_seen`]).
     pub fn set_response_cost(
         &mut self,
         scrollback: &mut ScrollbackState,
         prompt_id: Option<&str>,
         cost_usd_ticks: Option<i64>,
+        is_replay: bool,
     ) -> bool {
         let Some(cost) = cost_usd_ticks.filter(|&t| t > 0) else {
             return false;
@@ -1040,7 +1049,16 @@ impl AcpUpdateTracker {
             return false;
         }
         entry.cost_usd_ticks = Some(cost);
+        self.replayed_cost_seen |= is_replay;
         true
+    }
+    /// Whether summing the scrollback's per-message costs would measure THIS
+    /// run's spend. False once a reload has replayed a priced message: those
+    /// costs belong to an earlier run, and the agent's ledger (which the
+    /// indicator prefers) counts only the current one. Mixing the two reads as
+    /// a total that falls when the next live call arrives.
+    pub fn scrollback_sum_is_this_run(&self) -> bool {
+        !self.replayed_cost_seen
     }
     /// Record the agent's own session-cumulative cost (USD ticks). See
     /// [`Self::reported_session_cost_usd_ticks`].
