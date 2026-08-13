@@ -1434,6 +1434,16 @@ pub struct AgentView {
     pub(crate) timeline_hover_preview: Option<(usize, String)>,
     /// Running agent definition for this session (`x.ai/session/info` `agentName`).
     pub session_agent_name: Option<String>,
+    /// Index into `BuiltinAgentName::shift_tab_variants()` for the Shift+Tab
+    /// ring's current agent-identity stop; `None` when the ring is outside
+    /// that part (Normal/Plan/Auto/Always-Approve). Optimistic, set
+    /// immediately on dispatch — mirrors `plan_mode_pending` vs
+    /// `plan_mode_active`.
+    pub shift_tab_ring_agent_index: Option<u8>,
+    /// The agent name to restore when the ring wraps back past the last
+    /// agent-identity stop to Plan. Captured once on entering the ring
+    /// (`Always-Approve → <first agent-identity stop>`), cleared on exit.
+    pub shift_tab_base_agent: Option<String>,
     /// Map of child session IDs to subagent metadata. Populated on
     /// `SubagentSpawned` notifications, used for permission routing
     /// (which agent owns a session) and provenance display.

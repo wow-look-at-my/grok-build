@@ -309,6 +309,8 @@ impl AgentView {
             timeline_hover: None,
             timeline_hover_preview: None,
             session_agent_name: None,
+            shift_tab_ring_agent_index: None,
+            shift_tab_base_agent: None,
             subagent_sessions: HashMap::new(),
             subagent_views: HashMap::new(),
             active_subagent: None,
