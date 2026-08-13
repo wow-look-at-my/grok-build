@@ -1508,6 +1508,26 @@ pub(crate) fn execute(
                     TaskResult::CancelComplete
                 });
         }
+        Effect::SetModeThenMode {
+            session_id,
+            first_mode_id,
+            second_mode_id,
+        } => {
+            let tx = acp_tx.clone();
+            tasks
+                .spawn(async move {
+                    let first_req =
+                        acp::SetSessionModeRequest::new(session_id.clone(), first_mode_id);
+                    if let Err(e) = acp_send(first_req, &tx).await {
+                        tracing::warn!("Failed to set session mode (first of two): {e}");
+                    }
+                    let second_req = acp::SetSessionModeRequest::new(session_id, second_mode_id);
+                    if let Err(e) = acp_send(second_req, &tx).await {
+                        tracing::warn!("Failed to set session mode (second of two): {e}");
+                    }
+                    TaskResult::CancelComplete
+                });
+        }
         Effect::SetModeThenPrompt {
             session_id,
             mode_id,

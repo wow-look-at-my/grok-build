@@ -623,7 +623,22 @@ pub(super) fn active_agent_plan_nudge_state(app: &AppView) -> (bool, bool) {
     }
 }
 
-/// Cycle session mode: Normal → Plan → Always-Approve → Normal.
+/// Display label for a Shift+Tab agent-identity ring stop
+/// (`BuiltinAgentName::shift_tab_variants()`).
+fn shift_tab_agent_label(variant: xai_grok_agent::config::BuiltinAgentName) -> &'static str {
+    use xai_grok_agent::config::BuiltinAgentName;
+    match variant {
+        BuiltinAgentName::GrokBuildOrchestrator => "Orchestrator",
+        BuiltinAgentName::Explore => "Explore",
+        // Every current `shift_tab_variants()` entry is matched above; this
+        // covers any future addition without a second edit site.
+        other => other.into(),
+    }
+}
+
+/// Cycle session mode: Plan → Auto → Always-Approve → Orchestrator →
+/// Explore → Plan (Normal is the pre-cycle starting state; the ring never
+/// lands back on it — see the with-session match's `(false, _, true)` arm).
 ///
 /// Uses `plan_mode_pending` (optimistic) when available, falling back to
 /// `plan_mode_active` (confirmed by ACP). This prevents double-sends when
@@ -769,6 +784,47 @@ fn dispatch_cycle_mode_inner(app: &mut AppView) -> Vec<Effect> {
         return effects;
     };
 
+    // Shift+Tab ring: the agent-identity stops (Orchestrator, Explore) sit
+    // after Always-Approve and are checked first, ahead of the Normal/Plan/
+    // Auto/Approve match below — ring position here is state the
+    // `(in_plan, in_auto, in_yolo)` tuple cannot express.
+    if let Some(idx) = agent.shift_tab_ring_agent_index {
+        let variants = xai_grok_agent::config::BuiltinAgentName::shift_tab_variants();
+        let next_idx = idx as usize + 1;
+        if let Some(&next) = variants.get(next_idx) {
+            agent.shift_tab_ring_agent_index = Some(next_idx as u8);
+            let label = shift_tab_agent_label(next);
+            agent.show_mode_switch_banner(label);
+            refresh_open_settings_modals(app);
+            tracing::info!("Mode cycle: → {label}");
+            return vec![Effect::SetSessionMode {
+                session_id,
+                mode_id: acp::SessionModeId::new(next.as_ref()),
+            }];
+        }
+        // Past the last agent-identity stop: restore the base agent and
+        // re-enter Plan, closing the ring. Two ACP mode-set calls that MUST
+        // land in order, so this is `SetModeThenMode`, not two
+        // `SetSessionMode` effects (those race — each is its own spawned
+        // task on the pager side).
+        let base_agent = agent
+            .shift_tab_base_agent
+            .take()
+            .unwrap_or_else(|| "grok-build".to_string());
+        agent.shift_tab_ring_agent_index = None;
+        agent.plan_mode_pending = Some(true);
+        agent.show_mode_switch_banner("Plan");
+        refresh_open_settings_modals(app);
+        tracing::info!("Mode cycle: → Plan (restoring {base_agent})");
+        return vec![Effect::SetModeThenMode {
+            session_id,
+            first_mode_id: acp::SessionModeId::new(base_agent),
+            second_mode_id: acp::SessionModeId::new(
+                xai_grok_tools::types::SessionMode::Plan.as_id(),
+            ),
+        }];
+    }
+
     // Effective plan state: prefer optimistic pending over confirmed active.
     let in_plan = agent.plan_mode_pending.unwrap_or(agent.plan_mode_active);
     let in_yolo = agent.session.is_yolo();
@@ -889,20 +945,45 @@ fn dispatch_cycle_mode_inner(app: &mut AppView) -> Vec<Effect> {
                 persist: crate::app::actions::PermissionModePersist::BestEffort,
             }]
         }
-        // Always-Approve → Normal
+        // Always-Approve → the first agent-identity ring stop (Orchestrator),
+        // or Normal if no stops are configured.
         (false, _, true) => {
             set_yolo_mode_inner(app, false);
             app.current_ui.permission_mode = Some("ask".into());
             refresh_open_settings_modals(app);
+            let variants = xai_grok_agent::config::BuiltinAgentName::shift_tab_variants();
+            let Some(&first) = variants.first() else {
+                if let Some(a) = app.agents.get_mut(&id) {
+                    a.show_mode_switch_banner("Normal");
+                }
+                tracing::info!(
+                    "Mode cycle: Always-Approve → Normal (no shift-tab agents configured)"
+                );
+                return vec![Effect::PersistPermissionMode {
+                    canonical: "ask",
+                    session_id: Some(session_id),
+                    persist: crate::app::actions::PermissionModePersist::BestEffort,
+                }];
+            };
+            let label = shift_tab_agent_label(first);
             if let Some(a) = app.agents.get_mut(&id) {
-                a.show_mode_switch_banner("Normal");
+                a.shift_tab_base_agent =
+                    Some(a.session_agent_name.clone().unwrap_or_else(|| "grok-build".to_string()));
+                a.shift_tab_ring_agent_index = Some(0);
+                a.show_mode_switch_banner(label);
             }
-            tracing::info!("Mode cycle: Always-Approve → Normal");
-            vec![Effect::PersistPermissionMode {
-                canonical: "ask",
-                session_id: Some(session_id),
-                persist: crate::app::actions::PermissionModePersist::BestEffort,
-            }]
+            tracing::info!("Mode cycle: Always-Approve → {label}");
+            vec![
+                Effect::PersistPermissionMode {
+                    canonical: "ask",
+                    session_id: Some(session_id.clone()),
+                    persist: crate::app::actions::PermissionModePersist::BestEffort,
+                },
+                Effect::SetSessionMode {
+                    session_id,
+                    mode_id: acp::SessionModeId::new(first.as_ref()),
+                },
+            ]
         }
 
         // Plan + Auto → Auto: exit plan but keep the classifier. Without this

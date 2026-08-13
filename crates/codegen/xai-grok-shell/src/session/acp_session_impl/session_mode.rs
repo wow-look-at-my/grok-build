@@ -121,7 +121,7 @@ impl SessionActor {
                 xai_grok_agent::discovery::by_name_in_cwd(name, cwd)
             }
         };
-        if let Some(ref def) = agent_def {
+        if let Some(def) = agent_def {
             tracing::info!(
                 session_id = %self.session_info.id.0,
                 agent_name = %def.name,
@@ -129,24 +129,23 @@ impl SessionActor {
                 prompt_mode = ?def.prompt_mode,
                 has_completion_req = def.completion_requirement.is_some(),
                 tool_configs = def.tool_config.tools.len(),
-                "Resolved AgentDefinition for session mode"
+                "Resolved AgentDefinition for session mode: rebuilding agent"
             );
-            self.agent
-                .borrow()
-                .update_policies_from_definition(def)
-                .await;
-            *self.active_agent_type.lock() = Some(def.name.clone());
-        }
-        if let Some(ref def) = agent_def {
-            let new_prompt = self.agent.borrow().render_prompt_for_definition(def).await;
-            let mut conversation = self.chat_state_handle.get_conversation().await;
-            for item in conversation.iter_mut() {
-                if let ConversationItem::System(sys) = item {
-                    sys.content = std::sync::Arc::<str>::from(new_prompt);
-                    break;
-                }
+            // A full rebuild (tool registry + prompt), not a prompt-only
+            // swap: the previous prompt-only swap left the tool registry on
+            // whatever the prior agent had, so switching to e.g. `explore`
+            // showed its "no editing tools" prompt while edit/bash tools
+            // were still live in the registry. `zero_turn: false` — this is
+            // a live, mid-session switch, so the zero-turn-only prefix/
+            // reminder conversation surgery must NOT run.
+            if let Err(e) = self.handle_rebuild_agent_for_definition(def, false).await {
+                tracing::warn!(
+                    session_id = %self.session_info.id.0,
+                    mode_id = %session_mode_id.0,
+                    error = ?e,
+                    "handle_session_mode: agent rebuild for mode failed, keeping current agent"
+                );
             }
-            self.chat_state_handle.replace_conversation(conversation);
         }
     }
     /// Settle the mode a turn runs in, applying the prompt's declaration when

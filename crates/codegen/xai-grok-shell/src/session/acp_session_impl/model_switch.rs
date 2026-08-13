@@ -131,9 +131,19 @@ impl SessionActor {
     /// model's `agent_type` differs from the session's current
     /// `active_agent_type` AND `turn_count == 0` (no user message has
     /// been sent yet). Defense-in-depth: rejects if a turn is in flight.
+    ///
+    /// `zero_turn` gates the zero-turn-only conversation surgery
+    /// (`rewrite_zero_turn_prefix`, the project-instructions/skill-reminder
+    /// insertion): those assume `conversation[1]` is the synthetic
+    /// zero-turn user-info prefix slot, which is only true before any real
+    /// turn has run. Pass `true` only from the zero-turn model-switch path;
+    /// every other caller (e.g. a live mid-session agent swap) must pass
+    /// `false`, or it will silently overwrite the session's real first user
+    /// message.
     pub(super) async fn handle_rebuild_agent_for_definition(
         &self,
         definition: xai_grok_agent::AgentDefinition,
+        zero_turn: bool,
     ) -> Result<(), acp::Error> {
         {
             let state = self.state.lock().await;
@@ -259,11 +269,11 @@ impl SessionActor {
             }
         }
         self.re_register_mcp_tools_on_rebuilt_bridge().await;
-        if let Some(old_handle) = self.deferred_prefix.take() {
-            old_handle.abort();
-        }
-        let new_user_prefix = self.build_user_message_prefix().await;
-        {
+        if zero_turn {
+            if let Some(old_handle) = self.deferred_prefix.take() {
+                old_handle.abort();
+            }
+            let new_user_prefix = self.build_user_message_prefix().await;
             let mut conversation = self.chat_state_handle.get_conversation().await;
             let _ = replace_or_insert_system_head(&mut conversation, &new_system_prompt);
             let drop_startup_skill_reminder = false;
@@ -282,6 +292,13 @@ impl SessionActor {
                 );
             }
             self.inject_baseline_skill_reminder(&mut conversation).await;
+            self.chat_state_handle.replace_conversation(conversation);
+        } else {
+            // Mid-session: only the system-message head is safe to touch.
+            // `conversation[1]` is a real turn by now, not the zero-turn
+            // prefix slot — leave every other conversation item alone.
+            let mut conversation = self.chat_state_handle.get_conversation().await;
+            let _ = replace_or_insert_system_head(&mut conversation, &new_system_prompt);
             self.chat_state_handle.replace_conversation(conversation);
         }
         save_prompt_context(&self.session_info, &new_prompt_context);

@@ -7,7 +7,9 @@ use super::common::*;
 /// 15. **In-session Shift+Tab cycles permission mode.**
 /// Routes BackTab through the agent view's `resolve_action`, the path that
 /// previously dropped `CycleMode`; test 2b only covers the welcome screen.
-/// With the auto gate on (client default): Normal → Plan → Auto → Always-Approve → Normal.
+/// With the auto gate on (client default): Normal → Plan → Auto →
+/// Always-Approve → Orchestrator → Explore → Plan (the ring never lands
+/// back on bare Normal once cycling has started).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore]
 async fn shift_tab_in_session_cycles_mode() {
@@ -47,8 +49,18 @@ async fn shift_tab_in_session_cycles_mode() {
 
     harness.inject_keys(b"\x1b[Z").expect("inject BackTab");
     harness
-        .wait_for_text("Switched to mode: Normal", Duration::from_secs(10))
-        .expect("fourth cycle: Always-Approve -> Normal (full loop)");
+        .wait_for_text("Switched to mode: Orchestrator", Duration::from_secs(10))
+        .expect("fourth cycle: Always-Approve -> Orchestrator");
+
+    harness.inject_keys(b"\x1b[Z").expect("inject BackTab");
+    harness
+        .wait_for_text("Switched to mode: Explore", Duration::from_secs(10))
+        .expect("fifth cycle: Orchestrator -> Explore");
+
+    harness.inject_keys(b"\x1b[Z").expect("inject BackTab");
+    harness
+        .wait_for_text("Switched to mode: Plan", Duration::from_secs(10))
+        .expect("sixth cycle: Explore -> Plan (ring closes)");
 
     assert!(
         !harness.contains_text("panicked"),
