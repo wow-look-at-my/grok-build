@@ -82,6 +82,126 @@ pub(super) fn dispatch_interject(
     }]
 }
 
+/// Interrupt the running turn with the whole queue (bare Enter on an empty
+/// composer while busy).
+///
+/// Server-owned rows ride one `x.ai/queue/deliver_now`: the shell harvests
+/// them into the running turn and cancels the in-flight model stream, so the
+/// model stops mid-response and reads them. Local rows the shell has never
+/// seen (image prompts, skill-expanded slash rows, anything queued before the
+/// session bound) are sent as interjections here, which cancels the same
+/// stream shell-side.
+///
+/// Rows that own their own turn — bash commands, client-expanded slash
+/// payloads — cannot be folded into another turn as user text, so they stay
+/// queued and run when this turn ends. That is named in the toast rather than
+/// left for the user to notice.
+pub(super) fn dispatch_interrupt_with_queued_prompts(app: &mut AppView) -> Vec<Effect> {
+    let ActiveView::Agent(id) = app.active_view else {
+        return vec![];
+    };
+    let (session_id, server_rows, stuck_server, deliverable, stuck_local, awaiting_confirm) = {
+        use crate::app::agent::QueueEntryKind;
+        use crate::views::queue_pane::kind_from_wire;
+
+        let Some(agent) = app.agents.get(&id) else {
+            return vec![];
+        };
+        if !agent.session.state.is_turn_running() {
+            return vec![];
+        }
+        let session_id = agent.session.session_id.clone();
+        let running = agent.session.current_prompt_id.clone();
+        // The shell folds only plain prompts into a running turn; a queued bash
+        // row is executed from its block meta, so it keeps its own turn.
+        let (server_rows, stuck_server) = agent
+            .shared_queue
+            .iter()
+            .filter(|e| Some(e.id.as_str()) != running.as_deref())
+            .fold((0usize, 0usize), |(deliverable, stuck), e| {
+                if kind_from_wire(&e.kind) == QueueEntryKind::Prompt {
+                    (deliverable + 1, stuck)
+                } else {
+                    (deliverable, stuck + 1)
+                }
+            });
+        // Front-to-back so the shell sees the user's own order.
+        let local_ids: Vec<u64> = agent.session.pending_prompts.iter().map(|p| p.id).collect();
+        let (deliverable, stuck_local): (Vec<u64>, Vec<u64>) = local_ids
+            .into_iter()
+            .partition(|row| agent.queue_row_prompt_like(*row) == Some(true));
+        // A row whose own `session/prompt` RPC is still in flight may not exist
+        // shell-side yet, so a deliver-now fired now could harvest nothing. Park
+        // it for the confirming broadcast (see `deliver_now_awaiting_confirm`).
+        let awaiting_confirm = !agent.optimistic_queue_ids.is_empty();
+        (
+            session_id,
+            server_rows,
+            stuck_server,
+            deliverable,
+            stuck_local,
+            awaiting_confirm,
+        )
+    };
+    let Some(session_id) = session_id else {
+        if let Some(agent) = app.agents.get_mut(&id) {
+            agent.show_toast("No active session");
+        }
+        return vec![];
+    };
+
+    let mut effects = Vec::new();
+    if server_rows > 0 {
+        if awaiting_confirm {
+            if let Some(agent) = app.agents.get_mut(&id) {
+                agent.deliver_now_awaiting_confirm = true;
+            }
+        } else {
+            effects.push(Effect::QueueDeliverNow {
+                session_id: session_id.clone(),
+            });
+        }
+    }
+
+    let mut sent_local = 0usize;
+    for row in deliverable {
+        let Some(prompt) = app
+            .agents
+            .get_mut(&id)
+            .and_then(|agent| agent.remove_local_queue_row(row))
+        else {
+            continue;
+        };
+        sent_local += 1;
+        effects.extend(dispatch_interject(app, prompt.text, prompt.images));
+    }
+
+    let delivered_any = server_rows > 0 || sent_local > 0;
+    let stuck_any = stuck_server > 0 || !stuck_local.is_empty();
+    if let Some(agent) = app.agents.get_mut(&id) {
+        agent.show_toast(match (delivered_any, stuck_any) {
+            (true, false) => "Interrupting — sending queued messages",
+            (true, true) => {
+                "Interrupting — messages sent; bash/command rows run when this turn ends"
+            }
+            // Only rows that own their turn are queued: nothing can be folded
+            // into this turn, so say that instead of claiming an interrupt.
+            (false, _) => "Nothing to send now — bash/command rows run when this turn ends",
+        });
+    }
+    crate::unified_log::info(
+        "prompt.interrupt_with_queue",
+        Some(session_id.0.as_ref()),
+        Some(serde_json::json!({
+            "server_rows": server_rows,
+            "server_stuck": stuck_server,
+            "local_sent": sent_local,
+            "local_stuck": stuck_local.len(),
+        })),
+    );
+    effects
+}
+
 /// Cancel-and-send: send `text` (+ images) as a fresh `sendNow` prompt so the
 /// shell cancels the running turn and runs it next. The user block paints at
 /// dispatch (the arm hides the queue echo; the adoption reuses the block).

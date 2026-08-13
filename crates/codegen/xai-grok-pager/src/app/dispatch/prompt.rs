@@ -461,7 +461,6 @@ pub(super) fn dispatch_send_prompt_inner(
     let voice_stt_language_from_app = app.voice_config.language.clone();
     let scheduler_background_loops_seed = app.scheduler_background_loops_seed;
     let login_method_id_from_app = app.login_method_id.as_ref().map(|id| id.0.to_string());
-    let leader_mode = app.leader_mode;
     let Some(agent) = app.agents.get_mut(&id) else {
         return vec![];
     };
@@ -783,7 +782,7 @@ pub(super) fn dispatch_send_prompt_inner(
             .recognized_token_ranges(&text, &agent.session.models);
 
         let immediate_server_send =
-            immediate_server_send_eligible(agent, leader_mode) && agent.prompt.images.is_empty();
+            immediate_server_send_eligible(agent) && agent.prompt.images.is_empty();
         tracing::debug!(
             target: "qtrace",
             pid = std::process::id(),
@@ -805,7 +804,7 @@ pub(super) fn dispatch_send_prompt_inner(
 
         // Images can't ride immediate server-send; empty-held park still send-nows.
         if !immediate_server_send
-            && immediate_server_send_eligible(agent, leader_mode)
+            && immediate_server_send_eligible(agent)
             && !agent.prompt.images.is_empty()
             && parked_sendable_wait
             && !hold_behind_existing_queue
@@ -947,7 +946,6 @@ pub(super) fn dispatch_send_bash_command(app: &mut AppView, command: String) -> 
     let ActiveView::Agent(id) = app.active_view else {
         return vec![];
     };
-    let leader_mode = app.leader_mode;
     let Some(agent) = app.agents.get_mut(&id) else {
         return vec![];
     };
@@ -971,7 +969,7 @@ pub(super) fn dispatch_send_bash_command(app: &mut AppView, command: String) -> 
     // into the shared queue with `kind="bash"`. On `running_prompt_id`
     // adoption the turn-start shim sets `bash_turn` (no user block). The IDLE
     // case is unchanged: enqueue locally + drain instantly.
-    let bash_immediate = immediate_server_send_eligible(agent, leader_mode);
+    let bash_immediate = immediate_server_send_eligible(agent);
     tracing::debug!(
         target: "qtrace",
         pid = std::process::id(),
