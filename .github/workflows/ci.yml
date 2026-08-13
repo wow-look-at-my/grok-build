@@ -256,14 +256,17 @@ jobs:
   # in for them: a model picker whose rows rendered blank had passing tests
   # over the width function the whole time.
   #
-  # Its own job, running beside build-test rather than after it, which takes
-  # the suite's ~5 minutes off that job's critical path. The duplicated setup
-  # is not free -- it recompiles the pager here -- so what makes the trade work
-  # is that this compile is the CHEAP one: `--test <name>` builds the pager lib
+  # Its own job, running beside build-test rather than after it. Measured on
+  # the first run of the split: 29m44 for build-test against 33m21 before, and
+  # 16m52 here -- so the saving is real but modest, and 706s of this job is
+  # recompiling the pager. That duplicate is NOT cheap, and anyone tempted to
+  # split another suite off should weigh it at roughly that price.
+  #
+  # What it does avoid is the RAM peak: `--test <name>` builds the pager lib
   # without `--cfg test` plus three integration binaries, never the `--lib`
-  # harness whose 8,468 in-lib tests are what cold-peak at ~7.4 GiB. The RAM
-  # pathology build-test's guard defends against is not reachable from here,
-  # and sccache serves the shared crate graph to both jobs from one bucket.
+  # harness whose 8,468 in-lib tests cold-peak at ~7.4 GiB. Nothing here can
+  # reach the pathology build-test's guard defends against, and sccache serves
+  # the shared crate graph to both jobs out of one bucket.
   pty-e2e:
     name: Test (PTY end-to-end)
     # Hosted for the same reason as build-test: these need a real /bin/bash.
