@@ -271,7 +271,7 @@ pub struct AgentsModalState {
 /// Built-in agent names that should be shown to the user.
 /// Skips internal variants (GrokBuildConcise, GrokBuildPlan,
 /// GrokBuildPlanNoSubagents, GrokBuildAskUser, Codex, Opencode,
-/// CursorExtended, GrokBuildOrchestrator).
+/// GrokBuildOrchestrator).
 fn user_visible_builtins() -> &'static [BuiltinAgentName] {
     &[
         BuiltinAgentName::GrokBuild,
@@ -279,6 +279,7 @@ fn user_visible_builtins() -> &'static [BuiltinAgentName] {
         BuiltinAgentName::Explore,
         BuiltinAgentName::Plan,
         BuiltinAgentName::BrowserUse,
+        BuiltinAgentName::Coordinator,
     ]
 }
 impl AgentsModalState {
@@ -2516,6 +2517,19 @@ pub fn handle_agents_mouse(state: &mut AgentsModalState, mouse: &MouseEvent) -> 
 mod tests {
     use super::*;
     use xai_grok_shell::agent::config::DEFAULT_AGENT_TYPE;
+    #[test]
+    fn build_agent_list_includes_coordinator_and_explore() {
+        let tmp = tempfile::tempdir().unwrap();
+        let agents = build_agent_list(tmp.path(), &HashMap::new());
+        for name in ["coordinator", "explore"] {
+            let entry = agents
+                .iter()
+                .find(|e| e.name == name)
+                .unwrap_or_else(|| panic!("'{name}' must be in the user-visible agent list"));
+            assert!(entry.is_builtin, "'{name}' must be builtin");
+            assert!(entry.enabled, "'{name}' must be enabled by default");
+        }
+    }
     #[test]
     fn agents_tab_next_cycles() {
         assert_eq!(AgentsTab::Agents.next(), AgentsTab::Personas);

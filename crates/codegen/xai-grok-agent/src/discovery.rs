@@ -1088,6 +1088,45 @@ mod tests {
     }
 
     #[test]
+    fn test_coordinator_from_str_resolves() {
+        use std::str::FromStr;
+        let variant =
+            BuiltinAgentName::from_str("coordinator").expect("from_str must resolve coordinator");
+        assert_eq!(variant, BuiltinAgentName::Coordinator);
+        let def = variant.definition();
+        assert_eq!(def.name, "coordinator");
+        assert!(def.prompt_body.is_some(), "coordinator must have prompt_body");
+        let body = def.prompt_body.as_deref().unwrap();
+        assert!(
+            body.contains("Coordinator Mode"),
+            "prompt_body must contain Coordinator Mode"
+        );
+        let tool_ids: Vec<&str> = def.tool_config.tools.iter().map(|t| t.id.as_str()).collect();
+        for direct_work_tool in ["GrokBuild:read_file", "GrokBuild:grep", "GrokBuild:search_replace"] {
+            assert!(
+                !tool_ids.contains(&direct_work_tool),
+                "coordinator must not carry direct-work tool '{direct_work_tool}'; got {tool_ids:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_coordinator_by_name_in_cwd() {
+        let tmp = tempfile::tempdir().unwrap();
+        let def = by_name_in_cwd("coordinator", tmp.path())
+            .expect("by_name_in_cwd must find coordinator");
+        assert_eq!(def.name, "coordinator");
+        assert!(def.prompt_body.is_some());
+    }
+
+    #[test]
+    fn test_coordinator_is_user_visible_but_not_a_subagent_type() {
+        // Coordinator is primary-only (opencode `"mode": "primary"`): resolvable
+        // by name, but never advertised to the model as a Task-tool spawn target.
+        assert!(!BuiltinAgentName::subagent_variants().contains(&BuiltinAgentName::Coordinator));
+    }
+
+    #[test]
     fn test_merge_returns_3_builtins_when_no_user_agents() {
         let entries = merge_subagents(vec![], &HashMap::new());
         assert_eq!(entries.len(), 3);
