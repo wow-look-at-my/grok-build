@@ -1711,6 +1711,12 @@ pub struct Config {
     /// Not remotely gated.
     #[serde(skip)]
     pub subagents_enabled: bool,
+    /// How strongly system-prompt/tool wording nudges the model toward
+    /// spawning subagents. Independent of `subagents_enabled` — wording only,
+    /// never a capability gate. See
+    /// [`crate::config::SubagentsConfig::resolve_usage_frequency`].
+    #[serde(skip)]
+    pub subagent_usage_frequency: xai_tool_types::AgentUsageFrequency,
     /// Resolved max subagent nesting depth (see
     /// [`crate::config::SubagentsConfig::resolve_max_depth`]).
     #[serde(skip)]
@@ -2044,6 +2050,7 @@ impl Default for Config {
             cli_agents: Vec::new(),
             cli_agent_overrides: CliAgentOverrides::default(),
             subagents_enabled: true,
+            subagent_usage_frequency: Default::default(),
             subagents_max_depth: crate::config::SubagentsConfig::DEFAULT_MAX_DEPTH,
             subagents_max_concurrent:
                 xai_grok_tools::implementations::grok_build::task::admission::DEFAULT_MAX_CONCURRENT,
@@ -2400,6 +2407,10 @@ impl Config {
             env(SubagentsConfig::ENV_WORKFLOW_MAX_CONCURRENT).as_deref(),
             sa.workflow_max_concurrent,
             remote.and_then(|r| r.workflow_max_concurrent_agents),
+        );
+        self.subagent_usage_frequency = SubagentsConfig::resolve_usage_frequency(
+            env(SubagentsConfig::ENV_USAGE_FREQUENCY).as_deref(),
+            sa.usage_frequency.as_deref(),
         );
     }
     /// Resolve all `#[serde(skip)]` runtime fields that have resolver functions.

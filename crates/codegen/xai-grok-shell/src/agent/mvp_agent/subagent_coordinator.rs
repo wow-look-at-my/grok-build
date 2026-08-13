@@ -426,6 +426,7 @@ impl MvpAgent {
             subagent_event_tx: self.subagent_event_tx.clone(),
             parent_depth,
             subagents_max_depth: self.cfg.borrow().subagents_max_depth,
+            subagent_usage_frequency: self.cfg.borrow().subagent_usage_frequency,
             workflow_max_concurrent_agents: self.cfg.borrow().workflow_max_concurrent_agents,
             inference_idle_timeout_secs,
             auto_compact_threshold_tiers:

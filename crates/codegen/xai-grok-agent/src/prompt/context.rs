@@ -149,6 +149,11 @@ pub struct PromptContext {
     /// Not the UI picker name. Defaults to [`DEFAULT_SYSTEM_PROMPT_LABEL`].
     #[serde(default = "default_system_prompt_label")]
     pub system_prompt_label: String,
+    /// How strongly the system prompt nudges the model toward spawning
+    /// subagents via the `task` tool. Rendered as the `<agent_usage>` block
+    /// (see `prompt.md`); `AgentUsageFrequency::Default` renders nothing.
+    #[serde(default)]
+    pub agent_usage_frequency: xai_tool_types::AgentUsageFrequency,
 }
 /// Default identity on trim-tool-descriptions (`You are Grok released by xAI`).
 pub const DEFAULT_SYSTEM_PROMPT_LABEL: &str = "Grok";
@@ -193,6 +198,7 @@ impl Default for PromptContext {
             current_date: None,
             is_non_interactive: false,
             system_prompt_label: default_system_prompt_label(),
+            agent_usage_frequency: xai_tool_types::AgentUsageFrequency::default(),
         }
     }
 }
@@ -248,6 +254,7 @@ impl PromptContext {
             "current_date": self.current_date.as_deref().unwrap_or(""),
             "is_non_interactive": self.is_non_interactive,
             "system_prompt_label": self.system_prompt_label.as_str(),
+            "agent_usage_note": self.agent_usage_frequency.system_prompt_note().unwrap_or(""),
         })
     }
     /// Render the full system prompt via `ToolBridge`.
@@ -326,6 +333,7 @@ mod tests {
             current_date: None,
             is_non_interactive: false,
             system_prompt_label: default_system_prompt_label(),
+            agent_usage_frequency: xai_tool_types::AgentUsageFrequency::default(),
         }
     }
     #[test]
@@ -611,6 +619,7 @@ mod tests {
             current_date: None,
             is_non_interactive: false,
             system_prompt_label: default_system_prompt_label(),
+            agent_usage_frequency: xai_tool_types::AgentUsageFrequency::default(),
         }
     }
     #[test]

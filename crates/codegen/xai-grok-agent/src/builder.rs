@@ -99,6 +99,10 @@ pub struct AgentBuilder {
         xai_grok_tools::implementations::grok_build::deploy_app::AppBuilderDeployerConfig,
     write_file_enabled: bool,
     subagents_enabled: bool,
+    /// How strongly system-prompt/tool wording nudges the model toward
+    /// spawning subagents via the `task` tool. Independent of
+    /// `subagents_enabled`, which gates the tool's presence entirely.
+    subagent_usage_frequency: xai_tool_types::AgentUsageFrequency,
     background_workflows_enabled: bool,
     ask_user_question_enabled: bool,
     subagent_toggle: HashMap<String, bool>,
@@ -239,6 +243,7 @@ impl AgentBuilder {
             app_builder_deployer_config: Default::default(),
             write_file_enabled: true,
             subagents_enabled: false,
+            subagent_usage_frequency: xai_tool_types::AgentUsageFrequency::default(),
             background_workflows_enabled: false,
             ask_user_question_enabled: true,
             subagent_toggle: HashMap::new(),
@@ -552,6 +557,17 @@ impl AgentBuilder {
         self.subagents_enabled = enabled;
         self
     }
+    /// Set how strongly system-prompt/tool wording nudges the model toward
+    /// spawning subagents via the `task` tool (default: `AgentUsageFrequency::Default`,
+    /// i.e. no added nudge). Purely a wording knob — it never changes whether
+    /// the tool itself is available; see `with_subagents_enabled` for that.
+    pub fn with_subagent_usage_frequency(
+        mut self,
+        frequency: xai_tool_types::AgentUsageFrequency,
+    ) -> Self {
+        self.subagent_usage_frequency = frequency;
+        self
+    }
     pub fn with_background_workflows_enabled(mut self, enabled: bool) -> Self {
         self.background_workflows_enabled = enabled;
         self
@@ -821,7 +837,11 @@ impl AgentBuilder {
                 .find(|tc| tc.id == task_tool_id)
             {
                 task_tc.description_override =
-                    Some(build_task_description(&subagents, &self.task_model_slugs));
+                    Some(build_task_description(
+                        &subagents,
+                        &self.task_model_slugs,
+                        self.subagent_usage_frequency,
+                    ));
             }
         }
         if task_stripped {
@@ -1184,6 +1204,7 @@ impl AgentBuilder {
             ),
             is_non_interactive: self.is_non_interactive,
             system_prompt_label: self.system_prompt_label,
+            agent_usage_frequency: self.subagent_usage_frequency,
         };
         let system_prompt = prompt_context
             .render(&tool_bridge)
@@ -1307,6 +1328,7 @@ fn task_model_guidance(model_slugs: &[String]) -> String {
 pub(crate) fn build_task_description(
     subagents: &[SubagentEntry],
     model_slugs: &[String],
+    usage_frequency: xai_tool_types::AgentUsageFrequency,
 ) -> String {
     let descriptors: Vec<xai_tool_types::SubagentDescriptor> = subagents
         .iter()
@@ -1324,6 +1346,9 @@ pub(crate) fn build_task_description(
         .collect();
     let mut description = xai_tool_types::build_task_description(&descriptors, &TASK_TOOL_NAMING);
     description.push_str(&task_model_guidance(model_slugs));
+    if let Some(note) = usage_frequency.task_tool_note() {
+        description.push_str(note);
+    }
     description
 }
 /// Resolve the shell name for the system prompt.
@@ -1369,7 +1394,7 @@ mod tests {
                 SubagentSource::Builtin(BuiltinAgentName::Explore),
             ),
         ];
-        let desc = build_task_description(&subagents, &[]);
+        let desc = build_task_description(&subagents, &[], xai_tool_types::AgentUsageFrequency::Default);
         assert!(
             desc.contains(xai_tool_types::GENERAL_PURPOSE_SUBAGENT.tools_template),
             "should include general-purpose tool names"
@@ -1392,7 +1417,7 @@ mod tests {
                 scope: AgentScope::Project,
             },
         )];
-        let desc = build_task_description(&subagents, &[]);
+        let desc = build_task_description(&subagents, &[], xai_tool_types::AgentUsageFrequency::Default);
         assert!(desc.contains("- **code-reviewer**: Reviews code for bugs and style issues."));
         assert!(
             !desc.contains("Has access to all tools:"),
@@ -1408,7 +1433,7 @@ mod tests {
                 scope: AgentScope::User,
             },
         )];
-        let desc = build_task_description(&subagents, &[]);
+        let desc = build_task_description(&subagents, &[], xai_tool_types::AgentUsageFrequency::Default);
         assert!(
             desc.contains("${{ some.template }}"),
             "template-like syntax in user descriptions should be rendered verbatim"
@@ -1427,7 +1452,7 @@ mod tests {
                 path: std::path::PathBuf::new(),
             },
         }];
-        let desc = build_task_description(&subagents, &[]);
+        let desc = build_task_description(&subagents, &[], xai_tool_types::AgentUsageFrequency::Default);
         assert!(
             desc.contains("- **explore**: My custom explore agent."),
             "shadowed built-in should use user description"
@@ -1444,7 +1469,7 @@ mod tests {
             "Explore.",
             SubagentSource::Builtin(BuiltinAgentName::Explore),
         )];
-        let desc = build_task_description(&subagents, &[]);
+        let desc = build_task_description(&subagents, &[], xai_tool_types::AgentUsageFrequency::Default);
         assert!(
             desc.contains("Start a subagent that works on a task independently"),
             "should contain header"
@@ -1461,7 +1486,7 @@ mod tests {
             "Explore.",
             SubagentSource::Builtin(BuiltinAgentName::Explore),
         )];
-        let desc = build_task_description(&subagents, &[]);
+        let desc = build_task_description(&subagents, &[], xai_tool_types::AgentUsageFrequency::Default);
         assert!(
             desc.contains("${{ tools.by_kind.task }}"),
             "should use tools.by_kind.task template variable"
@@ -1489,6 +1514,7 @@ mod tests {
         let desc = build_task_description(
             &subagents,
             &["zeta".to_string(), "alpha".to_string(), "alpha".to_string()],
+            xai_tool_types::AgentUsageFrequency::Default,
         );
         assert!(desc.contains(
             "If the user explicitly asks for the model of a subagent/task, you may ONLY use model slugs from this list:\n\
@@ -1508,7 +1534,7 @@ mod tests {
             "Explore.",
             SubagentSource::Builtin(BuiltinAgentName::Explore),
         )];
-        let desc = build_task_description(&subagents, &[]);
+        let desc = build_task_description(&subagents, &[], xai_tool_types::AgentUsageFrequency::Default);
         assert!(desc.contains("No explicit model slugs are currently available."));
         assert!(desc.contains("Omit `${{ params.task.model }}` to inherit the parent model."));
         assert!(!desc.contains(concat!("grok", " models")));
@@ -1557,7 +1583,7 @@ mod tests {
             "GP agent.",
             SubagentSource::Builtin(BuiltinAgentName::GeneralPurpose),
         )];
-        let desc = build_task_description(&subagents, &[]);
+        let desc = build_task_description(&subagents, &[], xai_tool_types::AgentUsageFrequency::Default);
         assert!(
             desc.contains("Resuming a previous agent (resume_from)"),
             "should contain resume_from section header"
@@ -1574,6 +1600,46 @@ mod tests {
             desc.contains("same subagent_type"),
             "should state the resumed agent must match subagent_type"
         );
+    }
+    #[test]
+    fn build_task_description_default_frequency_has_no_usage_note() {
+        let subagents = vec![entry(
+            "general-purpose",
+            "GP agent.",
+            SubagentSource::Builtin(BuiltinAgentName::GeneralPurpose),
+        )];
+        let desc = build_task_description(&subagents, &[], xai_tool_types::AgentUsageFrequency::Default);
+        assert!(!desc.contains("## Usage frequency"));
+    }
+    #[test]
+    fn build_task_description_explicit_only_tells_model_not_to_use_it_unasked() {
+        let subagents = vec![entry(
+            "general-purpose",
+            "GP agent.",
+            SubagentSource::Builtin(BuiltinAgentName::GeneralPurpose),
+        )];
+        let desc = build_task_description(
+            &subagents,
+            &[],
+            xai_tool_types::AgentUsageFrequency::ExplicitOnly,
+        );
+        assert!(desc.contains("## Usage frequency"));
+        assert!(desc.contains("Do not use this tool unless the user has explicitly asked"));
+    }
+    #[test]
+    fn build_task_description_very_often_tells_model_to_default_to_delegating() {
+        let subagents = vec![entry(
+            "general-purpose",
+            "GP agent.",
+            SubagentSource::Builtin(BuiltinAgentName::GeneralPurpose),
+        )];
+        let desc = build_task_description(
+            &subagents,
+            &[],
+            xai_tool_types::AgentUsageFrequency::VeryOften,
+        );
+        assert!(desc.contains("## Usage frequency"));
+        assert!(desc.contains("Default to delegating"));
     }
     /// The bridge's full-discovery snapshot must record every discovered
     /// skill name — including `paths:`-gated and preloaded skills that the
