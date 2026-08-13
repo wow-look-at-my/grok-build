@@ -130,6 +130,10 @@ pub(crate) struct SubagentSpawnContext {
     pub subagent_event_tx: mpsc::UnboundedSender<SubagentEvent>,
     pub parent_depth: u32,
     pub subagents_max_depth: u32,
+    /// How strongly system-prompt/tool wording nudges the child toward
+    /// spawning its own subagents. Inherited from the parent's resolved
+    /// config, same as `subagents_max_depth`.
+    pub subagent_usage_frequency: xai_tool_types::AgentUsageFrequency,
     pub workflow_max_concurrent_agents: usize,
     /// Inference idle timeout (secs), resolved from the parent's model config at spawn-context creation time.
     pub inference_idle_timeout_secs: u64,

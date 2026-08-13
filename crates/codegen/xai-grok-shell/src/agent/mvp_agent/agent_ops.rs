@@ -4392,6 +4392,7 @@ impl MvpAgent {
         let background_workflows_enabled = self.cfg.borrow().resolve_workflows().value;
         let subagents_enabled = self.cfg.borrow().subagents_enabled;
         let subagents_max_depth = self.cfg.borrow().subagents_max_depth;
+        let subagent_usage_frequency = self.cfg.borrow().subagent_usage_frequency;
         let workflow_max_concurrent_agents = self
             .cfg
             .borrow()
@@ -4633,6 +4634,7 @@ impl MvpAgent {
                     background_workflows_enabled,
                     subagents_enabled,
                     subagents_max_depth,
+                    subagent_usage_frequency,
                     workflow_max_concurrent_agents,
                     ask_user_question_enabled,
                     client_hooks,
