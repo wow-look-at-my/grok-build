@@ -7905,8 +7905,8 @@ pub(crate) mod tests {
     /// path would silently no-op, so Ctrl+O must open the transcript — this was
     /// the "Ctrl+O appears dead on Mac" report. With a running turn and text in
     /// the composer the same key must send-now (cancel-and-send). With a running
-    /// turn, empty composer, and a queued follow-up it must force-send that row
-    /// (send-now).
+    /// turn, empty composer, and a queued follow-up it must interrupt the turn
+    /// with the queue.
     #[test]
     fn minimal_ctrl_o_on_apple_terminal_transcript_at_idle_interject_with_payload() {
         let mut app = test_app_with_agent();
@@ -7935,16 +7935,13 @@ pub(crate) mod tests {
         }
         let out = app.handle_input(&key_event(KeyCode::Char('o'), KeyModifiers::CONTROL));
         assert!(
-            matches!(
-                out,
-                InputOutcome::Action(Action::SendPromptNow { ref text, .. })
-                    if text == "queued follow-up"
-            ),
-            "running + empty + queue: Apple-Terminal Ctrl+O must send-now, got {out:?}"
+            matches!(out, InputOutcome::Action(Action::InterruptWithQueuedPrompts)),
+            "running + empty + queue: Apple-Terminal Ctrl+O must interrupt with the queue, \
+             got {out:?}"
         );
         assert!(
-            app.agents[&id].session.pending_prompts.is_empty(),
-            "queued row must be consumed by prompt-path send-now"
+            !app.agents[&id].session.pending_prompts.is_empty(),
+            "the row leaves the queue in dispatch, not in the key handler"
         );
     }
     fn assert_background_routing_for_mode(
