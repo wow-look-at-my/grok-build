@@ -1008,7 +1008,12 @@ mod tests {
                 let (gateway, _) = recording_gateway();
                 let pty_id = create_test_pty(gateway).await;
 
-                write_pty_input(&pty_id, b"(trap '' HUP; sleep 300) & echo pid=$!\n")
+                // It has to outlive the runtime drop below, which is what this
+                // covers, and killing it here would close the slave and hide
+                // that. Nothing reaps a job that ignores the hangup, so it ends
+                // itself instead of leaking one sleeper per run: 60s is far
+                // longer than the drop needs and short enough not to litter.
+                write_pty_input(&pty_id, b"(trap '' HUP; sleep 60) & echo pid=$!\n")
                     .await
                     .expect("write command");
                 let immune = wait_for_reported_pid(&pty_id).await;
@@ -1019,9 +1024,6 @@ mod tests {
                     0,
                     "the job should have survived the hangup it ignores"
                 );
-                // Left running deliberately, holding the slave: reaping it here
-                // would close the fd and hide exactly what this test covers. The
-                // process scope takes it at exit.
             })
             .await;
     }
