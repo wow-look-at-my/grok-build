@@ -234,6 +234,17 @@ pub struct SubagentsConfig {
     pub limit_behavior: Option<String>,
     #[serde(default)]
     pub workflow_max_concurrent: Option<i64>,
+    /// How strongly system-prompt/tool wording nudges the model toward
+    /// spawning subagents. One of: `"explicit-only"`, `"very-rare"`,
+    /// `"rare"`, `"default"`, `"often"`, `"very-often"`. Purely a wording
+    /// knob — never gates the tool itself (see `enabled`).
+    ///
+    /// ```toml
+    /// [subagents]
+    /// usage_frequency = "often"
+    /// ```
+    #[serde(default)]
+    pub usage_frequency: Option<String>,
     /// Per-subagent model ID overrides.
     /// Keys are agent names, values are model IDs that must exist in the
     /// available models registry. Parsed from `[subagents.models]` in config.toml.
@@ -495,6 +506,7 @@ impl SubagentsConfig {
     pub const ENV_MAX_CONCURRENT: &'static str = "GROK_MAX_CONCURRENT_SUBAGENTS";
     pub const ENV_LIMIT_BEHAVIOR: &'static str = "GROK_SUBAGENT_LIMIT_BEHAVIOR";
     pub const ENV_WORKFLOW_MAX_CONCURRENT: &'static str = "GROK_WORKFLOW_MAX_CONCURRENT_AGENTS";
+    pub const ENV_USAGE_FREQUENCY: &'static str = "GROK_SUBAGENTS_USAGE_FREQUENCY";
     /// Clamp to `1..`; a limit can be adjusted but never disabled.
     fn clamp_count(value: i64, source: &str, name: &str) -> usize {
         if value < 1 {
@@ -579,6 +591,33 @@ impl SubagentsConfig {
             );
         }
         LimitBehavior::Queue
+    }
+    /// Resolve how strongly system-prompt/tool wording nudges the model
+    /// toward spawning subagents. Precedence: env > TOML `[subagents]
+    /// usage_frequency` > default (`AgentUsageFrequency::Default`, no added
+    /// nudge). Deliberately not remotely gated, matching `enabled` — this is
+    /// wording only, not a capability toggle, so only explicit local intent
+    /// changes it. An unparseable value at any layer warns and falls
+    /// through to the next.
+    pub(crate) fn resolve_usage_frequency(
+        env: Option<&str>,
+        config: Option<&str>,
+    ) -> xai_tool_types::AgentUsageFrequency {
+        for (source, value) in [("env", env), ("config", config)] {
+            let Some(value) = value else { continue };
+            match xai_tool_types::AgentUsageFrequency::parse(value) {
+                Some(level) => return level,
+                None => {
+                    tracing::warn!(
+                        source,
+                        %value,
+                        "invalid subagents usage_frequency (expected explicit-only, very-rare, \
+                         rare, default, often, or very-often); ignoring"
+                    );
+                }
+            }
+        }
+        xai_tool_types::AgentUsageFrequency::default()
     }
     /// Resolve the final subagents config from all sources (in priority order):
     /// 1. CLI flag `--subagents` (absolute highest — always enables)
