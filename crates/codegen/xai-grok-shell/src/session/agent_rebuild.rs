@@ -99,6 +99,7 @@ pub(crate) struct AgentRebuildSpec {
     pub app_builder_deployer_config: AppBuilderDeployerConfig,
     pub write_file_enabled: bool,
     pub subagents_enabled: bool,
+    pub subagent_usage_frequency: xai_tool_types::AgentUsageFrequency,
     pub subagent_toggle: HashMap<String, bool>,
     pub background_workflows_enabled: bool,
     pub ask_user_question_enabled: bool,
@@ -202,6 +203,7 @@ impl AgentRebuildSpec {
             app_builder_deployer_config,
             write_file_enabled,
             subagents_enabled,
+            subagent_usage_frequency,
             subagent_toggle,
             background_workflows_enabled,
             ask_user_question_enabled,
@@ -262,6 +264,7 @@ impl AgentRebuildSpec {
         .with_write_file_enabled(*write_file_enabled)
         .with_fs(fs_backend.clone())
         .with_subagents_enabled(*subagents_enabled)
+        .with_subagent_usage_frequency(*subagent_usage_frequency)
         .with_subagent_toggle(subagent_toggle.clone())
         .with_background_workflows_enabled(*background_workflows_enabled)
         .with_task_model_slugs(
@@ -428,6 +431,7 @@ pub(crate) fn test_rebuild_spec_default() -> Arc<AgentRebuildSpec> {
         app_builder_deployer_config: AppBuilderDeployerConfig::default(),
         write_file_enabled: true,
         subagents_enabled: false,
+        subagent_usage_frequency: xai_tool_types::AgentUsageFrequency::default(),
         subagent_toggle: HashMap::new(),
         background_workflows_enabled: false,
         ask_user_question_enabled: true,
