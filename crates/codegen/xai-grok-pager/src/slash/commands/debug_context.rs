@@ -18,8 +18,8 @@ use std::path::{Path, PathBuf};
 pub enum BinaryFreshness {
     /// The process is running the installed binary.
     Current,
-    /// The installed binary is a different file: grok was updated after this
-    /// process started.
+    /// The installed binary is a different file — an update swapped the symlink
+    /// after exec, or this process came from another install.
     Stale { installed: PathBuf },
     /// No binary at `$GROK_HOME/bin/grok` — a dev build or a vendored install.
     Unmanaged,
@@ -255,9 +255,11 @@ impl DebugContext {
              - Check the numbers against what this process actually resolved (model \
              id, context window, effort above) rather than what the model or the docs \
              are supposed to say. When those two disagree, that gap IS the bug.\n\
-             - Run things. `grok --version`, listing the binary's directory, grepping \
-             the log, reading config — you have shell and file tools here and they \
-             answer these questions in seconds.\n\
+             - Run things. The binary path above with `--version`, a listing of its \
+             directory, a grep over the log, a read of the config — you have shell and \
+             file tools here and they answer these questions in seconds. If the log is \
+             empty the firehose was off: say so and ask for a relaunch with \
+             GROK_DEBUG_LOG=1 rather than inventing an answer from nothing.\n\
              - If a source checkout of grok is available, verify against the source \
              for this commit; otherwise reason from the binary, the config, and the \
              log, and say which one you used.\n\
@@ -377,9 +379,11 @@ impl DebugContext {
                 self.installed_link.display()
             ),
             BinaryFreshness::Stale { installed } => format!(
-                "{} -> {} — STALE: you are NOT running this. grok was updated after \
-                 this process started, so what is on disk can already differ from \
-                 what you observe here. Check this before blaming the code you read.",
+                "{} -> {} — STALE: you are NOT running this one. Either an update \
+                 swapped the symlink after this process started, or this process was \
+                 launched from a different install. Either way the code on disk can \
+                 differ from the code running here, so check that before blaming what \
+                 you read.",
                 self.installed_link.display(),
                 installed.display()
             ),
