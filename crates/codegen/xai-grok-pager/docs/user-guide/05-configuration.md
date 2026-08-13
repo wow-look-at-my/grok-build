@@ -317,6 +317,7 @@ dimensions = 1024                     # vector dimensions
 ```toml
 [subagents]
 enabled = true
+usage_frequency = "default"           # explicit-only, very-rare, rare, default, often, very-often
 
 [subagents.toggle]
 explore = true                        # enable/disable specific types
@@ -326,7 +327,7 @@ plan = false
 explore = "grok-build"               # route to different models
 ```
 
-To pin the model a subagent uses, set its entry under `[subagents.models]`.
+To pin the model a subagent uses, set its entry under `[subagents.models]`. `usage_frequency` doesn't gate the tool -- it tunes how strongly the system prompt and tool wording nudge the model toward delegating; see [Subagents and Personas](16-subagents.md#usage-frequency).
 
 ### Goal mode and background workflows
 

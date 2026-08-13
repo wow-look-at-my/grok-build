@@ -11,7 +11,8 @@ pub use serde_lenient::{
     deserialize_lenient_bool, deserialize_lenient_option_bool, lenient_bool_from_json,
 };
 pub use task::{
-    BACKGROUND_SUBAGENT_CONTINUE_PARENT_WORK, BUILTIN_SUBAGENTS, BuiltinSubagent, EXPLORE_PROMPT,
+    AgentUsageFrequency, BACKGROUND_SUBAGENT_CONTINUE_PARENT_WORK, BUILTIN_SUBAGENTS,
+    BuiltinSubagent, EXPLORE_PROMPT,
     EXPLORE_SUBAGENT, GENERAL_PURPOSE_PROMPT, GENERAL_PURPOSE_SUBAGENT, KillTaskOutput,
     KillTaskResult, KillTaskToolInput, KillTaskToolNaming, MAX_MULTI_WAIT_IDS,
     MAX_WAIT_BLOCK_MS_DEFAULT, MAX_WAIT_MS_PLACEHOLDER, MultiTaskOutputResult, PLAN_PROMPT,

@@ -5,6 +5,164 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 // ───────────────────────────────────────────────────────────────────────────
+// Agent usage frequency — how strongly system-prompt/tool wording nudges the
+// model toward spawning subagents
+// ───────────────────────────────────────────────────────────────────────────
+
+/// How strongly system-prompt and tool-description wording nudges the model
+/// toward using the `task` tool to spawn subagents.
+///
+/// This never gates the tool itself — that is `subagents_enabled` (see the
+/// host's own subagents config). It only varies the surrounding wording, from
+/// telling the model to leave delegation to explicit user request, up to
+/// telling it to default to delegating independent work.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum AgentUsageFrequency {
+    /// Never spawn a subagent unless the user explicitly asks for an agent,
+    /// subagent, or the task tool in the current conversation.
+    ExplicitOnly,
+    VeryRare,
+    Rare,
+    /// Baseline wording — no added nudge either way.
+    #[default]
+    Default,
+    Often,
+    VeryOften,
+}
+
+impl AgentUsageFrequency {
+    /// Canonical wire string (matches the serde `kebab-case` representation).
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::ExplicitOnly => "explicit-only",
+            Self::VeryRare => "very-rare",
+            Self::Rare => "rare",
+            Self::Default => "default",
+            Self::Often => "often",
+            Self::VeryOften => "very-often",
+        }
+    }
+
+    /// Parse a config/env string into a level.
+    ///
+    /// Accepts the canonical kebab-case form plus common variants (`snake_case`,
+    /// spaces, mixed case) so a hand-typed `config.toml` value or env var isn't
+    /// rejected over punctuation. Returns `None` on no match; the caller decides
+    /// how to report an invalid value (config resolution warns and falls back
+    /// to the default — see `SubagentsConfig::resolve_usage_frequency`).
+    pub fn parse(raw: &str) -> Option<Self> {
+        let normalized = raw.trim().to_ascii_lowercase().replace(['_', ' '], "-");
+        Some(match normalized.as_str() {
+            "explicit-only" | "explicit-user-instruction-only" | "explicit" => Self::ExplicitOnly,
+            "very-rare" | "veryrare" => Self::VeryRare,
+            "rare" => Self::Rare,
+            "default" | "normal" => Self::Default,
+            "often" => Self::Often,
+            "very-often" | "veryoften" => Self::VeryOften,
+            _ => return None,
+        })
+    }
+
+    /// A short paragraph nudging the model's use of the `task` tool at this
+    /// level, appended to the tool's model-facing description. `None` for
+    /// [`Self::Default`] — the tool's baseline wording already carries no
+    /// nudge either way, so there is nothing to add.
+    pub fn task_tool_note(&self) -> Option<&'static str> {
+        match self {
+            Self::ExplicitOnly => Some(
+                "\n\n## Usage frequency\n\
+                 Do not use this tool unless the user has explicitly asked you, in this \
+                 conversation, to use an agent, a subagent, or the task tool. Do the work \
+                 yourself otherwise, even when a sub-task looks delegable.",
+            ),
+            Self::VeryRare => Some(
+                "\n\n## Usage frequency\n\
+                 Reserve this tool for the rare case where a sub-task is unmistakably \
+                 independent and would otherwise crowd out your own context (e.g. a broad, \
+                 open-ended search you would not want to read through yourself). Default to \
+                 doing the work directly.",
+            ),
+            Self::Rare => Some(
+                "\n\n## Usage frequency\n\
+                 Prefer doing work yourself. Reach for this tool only when a sub-task is \
+                 clearly independent and delegating it is a genuinely better use of the \
+                 conversation than doing it inline.",
+            ),
+            Self::Default => None,
+            Self::Often => Some(
+                "\n\n## Usage frequency\n\
+                 Look for opportunities to delegate. When a piece of work is independent \
+                 — a broad search, an isolated investigation, one parallelizable slice of a \
+                 larger task — spawn it with this tool rather than doing it inline, so your \
+                 own context stays free for synthesis and decisions.",
+            ),
+            Self::VeryOften => Some(
+                "\n\n## Usage frequency\n\
+                 Default to delegating. Break multi-part work into independent pieces and \
+                 spawn them with this tool in parallel whenever the pieces don't depend on \
+                 each other's output. Do the work directly only when delegating would clearly \
+                 cost more than it saves.",
+            ),
+        }
+    }
+
+    /// A short `<agent_usage>` system-prompt fragment for this level, or
+    /// `None` for [`Self::Default`] (no added nudge). Mirrors
+    /// [`Self::task_tool_note`] but phrased for the top-level system prompt
+    /// rather than appended to one tool's description.
+    pub fn system_prompt_note(&self) -> Option<&'static str> {
+        match self {
+            Self::ExplicitOnly => Some(
+                "Do not spawn a subagent (the task tool) unless the user explicitly asks you \
+                 to use an agent or subagent in this conversation. Do the work yourself.",
+            ),
+            Self::VeryRare => Some(
+                "Reserve subagents (the task tool) for the rare case where a task is \
+                 unmistakably independent, long-running, and would otherwise crowd out your \
+                 own context. Default to doing the work directly.",
+            ),
+            Self::Rare => Some(
+                "Prefer doing work yourself. Reach for subagents (the task tool) only when a \
+                 sub-task is clearly independent and delegating it is a genuinely better use \
+                 of the conversation's context.",
+            ),
+            Self::Default => None,
+            Self::Often => Some(
+                "Look for opportunities to delegate independent work — a broad search, an \
+                 isolated investigation, a parallelizable chunk of a larger task — to \
+                 subagents (the task tool) rather than doing it inline, so your own context \
+                 stays free for synthesis and decisions.",
+            ),
+            Self::VeryOften => Some(
+                "Default to delegating: break multi-part work into independent pieces and \
+                 spawn them with subagents (the task tool) in parallel whenever the pieces \
+                 don't depend on each other's output. Do the work directly yourself only when \
+                 delegating would clearly cost more than it saves.",
+            ),
+        }
+    }
+}
+
+impl std::str::FromStr for AgentUsageFrequency {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::parse(s).ok_or_else(|| {
+            format!(
+                "invalid agent usage frequency \"{s}\", must be one of: \
+                 explicit-only, very-rare, rare, default, often, very-often"
+            )
+        })
+    }
+}
+
+impl std::fmt::Display for AgentUsageFrequency {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+// ───────────────────────────────────────────────────────────────────────────
 // `task` (spawn) tool — Input
 // ───────────────────────────────────────────────────────────────────────────
 
@@ -1247,6 +1405,98 @@ pub fn build_wait_tasks_description(naming: &WaitTasksToolNaming) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn agent_usage_frequency_default_is_default_variant() {
+        assert_eq!(AgentUsageFrequency::default(), AgentUsageFrequency::Default);
+    }
+
+    #[test]
+    fn agent_usage_frequency_round_trips_canonical_strings() {
+        for level in [
+            AgentUsageFrequency::ExplicitOnly,
+            AgentUsageFrequency::VeryRare,
+            AgentUsageFrequency::Rare,
+            AgentUsageFrequency::Default,
+            AgentUsageFrequency::Often,
+            AgentUsageFrequency::VeryOften,
+        ] {
+            assert_eq!(AgentUsageFrequency::parse(level.as_str()), Some(level));
+        }
+    }
+
+    #[test]
+    fn agent_usage_frequency_parse_is_lenient() {
+        assert_eq!(
+            AgentUsageFrequency::parse("Explicit_Only"),
+            Some(AgentUsageFrequency::ExplicitOnly)
+        );
+        assert_eq!(
+            AgentUsageFrequency::parse("VERY OFTEN"),
+            Some(AgentUsageFrequency::VeryOften)
+        );
+        assert_eq!(AgentUsageFrequency::parse("normal"), Some(AgentUsageFrequency::Default));
+        assert_eq!(AgentUsageFrequency::parse("not-a-level"), None);
+    }
+
+    #[test]
+    fn agent_usage_frequency_default_has_no_notes() {
+        assert!(AgentUsageFrequency::Default.task_tool_note().is_none());
+        assert!(AgentUsageFrequency::Default.system_prompt_note().is_none());
+    }
+
+    #[test]
+    fn agent_usage_frequency_non_default_levels_have_notes() {
+        for level in [
+            AgentUsageFrequency::ExplicitOnly,
+            AgentUsageFrequency::VeryRare,
+            AgentUsageFrequency::Rare,
+            AgentUsageFrequency::Often,
+            AgentUsageFrequency::VeryOften,
+        ] {
+            assert!(level.task_tool_note().is_some(), "{level:?} should have a task tool note");
+            assert!(
+                level.system_prompt_note().is_some(),
+                "{level:?} should have a system prompt note"
+            );
+        }
+    }
+
+    #[test]
+    fn agent_usage_frequency_explicit_only_note_says_not_unless_asked() {
+        let note = AgentUsageFrequency::ExplicitOnly.task_tool_note().unwrap();
+        assert!(note.contains("Do not use this tool unless the user has explicitly asked"));
+    }
+
+    #[test]
+    fn agent_usage_frequency_serde_round_trip() {
+        for level in [
+            AgentUsageFrequency::ExplicitOnly,
+            AgentUsageFrequency::VeryRare,
+            AgentUsageFrequency::Rare,
+            AgentUsageFrequency::Default,
+            AgentUsageFrequency::Often,
+            AgentUsageFrequency::VeryOften,
+        ] {
+            let json = serde_json::to_string(&level).unwrap();
+            let back: AgentUsageFrequency = serde_json::from_str(&json).unwrap();
+            assert_eq!(level, back);
+        }
+        assert_eq!(
+            serde_json::to_string(&AgentUsageFrequency::VeryOften).unwrap(),
+            "\"very-often\""
+        );
+    }
+
+    #[test]
+    fn agent_usage_frequency_from_str() {
+        use std::str::FromStr;
+        assert_eq!(
+            AgentUsageFrequency::from_str("rare").unwrap(),
+            AgentUsageFrequency::Rare
+        );
+        assert!(AgentUsageFrequency::from_str("bogus").is_err());
+    }
 
     fn result_with_status(status: &str) -> TaskOutputOutput {
         TaskOutputOutput::Result(TaskOutputResult {
