@@ -2099,12 +2099,9 @@ mod tests {
         state.push(
             ScrollbackEntry::new(RenderBlock::agent_message("b")).with_cost_usd_ticks(Some(23_456)),
         );
-        state.push(
-            ScrollbackEntry::new(RenderBlock::agent_message("c")).with_cost_usd_ticks(None),
-        );
-        state.push(
-            ScrollbackEntry::new(RenderBlock::user_prompt("d")).with_cost_usd_ticks(Some(5)),
-        );
+        state.push(ScrollbackEntry::new(RenderBlock::agent_message("c")).with_cost_usd_ticks(None));
+        state
+            .push(ScrollbackEntry::new(RenderBlock::user_prompt("d")).with_cost_usd_ticks(Some(5)));
 
         // Exact sum of every API-reported cost; unreported rows contribute 0.
         assert_eq!(state.session_total_cost_usd_ticks(), Some(24_461));
@@ -2116,12 +2113,15 @@ mod tests {
         // is unreported, so it must not contribute a fake "free" zero.
         let e0 = ScrollbackEntry::new(RenderBlock::agent_message("a")).with_cost_usd_ticks(Some(0));
         assert_eq!(e0.cost_usd_ticks, None);
-        let neg = ScrollbackEntry::new(RenderBlock::agent_message("a")).with_cost_usd_ticks(Some(-5));
+        let neg =
+            ScrollbackEntry::new(RenderBlock::agent_message("a")).with_cost_usd_ticks(Some(-5));
         assert_eq!(neg.cost_usd_ticks, None);
         // Non-positive rows are simply absent from the session sum.
         let mut state = ScrollbackState::new();
         state.push(e0);
-        state.push(ScrollbackEntry::new(RenderBlock::agent_message("b")).with_cost_usd_ticks(Some(7)));
+        state.push(
+            ScrollbackEntry::new(RenderBlock::agent_message("b")).with_cost_usd_ticks(Some(7)),
+        );
         assert_eq!(state.session_total_cost_usd_ticks(), Some(7));
     }
 

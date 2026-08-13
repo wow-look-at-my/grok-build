@@ -1645,11 +1645,7 @@ impl AgentView {
                             0.25,
                             0.80,
                         );
-                        Some(ratatui::style::Color::Rgb(
-                            dyn_col.0,
-                            dyn_col.1,
-                            dyn_col.2,
-                        ))
+                        Some(ratatui::style::Color::Rgb(dyn_col.0, dyn_col.1, dyn_col.2))
                     }
                     crate::ci_status::CiStatus::Green => Some(theme.accent_success),
                     crate::ci_status::CiStatus::Off => None,

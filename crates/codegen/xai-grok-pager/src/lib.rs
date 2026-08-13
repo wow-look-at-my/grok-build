@@ -5,6 +5,7 @@
 pub mod acp;
 pub mod actions;
 pub mod app;
+pub mod ci_status;
 pub mod client_identity;
 pub mod completions_cmd;
 mod config_toml_edit;
@@ -15,7 +16,6 @@ pub mod docs;
 pub mod doctor_cmd;
 pub mod export_cmd;
 pub(crate) mod fs_size;
-pub mod ci_status;
 pub mod git_info;
 pub mod headless;
 pub mod hyperlink_route;

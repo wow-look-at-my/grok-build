@@ -28,9 +28,8 @@ pub mod registry;
 
 pub use registry::{
     CodingDataSharingLock, DynamicEnumSource, EnumChoice, OpenAiCompatibleSnapshot,
-    OwnedEnumChoice, PagerLocalSnapshot,
-    SettingCategory, SettingKey, SettingKind, SettingMeta, SettingOwner, SettingValue,
-    SettingsRegistry, StringValidator, canonical_hunk_tracker_mode, canonical_screen_mode,
-    canonical_voice_capture_mode, canonical_voice_stt_language, current_value_for,
-    default_value_for, dynamic_enum_choices, is_consent_chooser,
+    OwnedEnumChoice, PagerLocalSnapshot, SettingCategory, SettingKey, SettingKind, SettingMeta,
+    SettingOwner, SettingValue, SettingsRegistry, StringValidator, canonical_hunk_tracker_mode,
+    canonical_screen_mode, canonical_voice_capture_mode, canonical_voice_stt_language,
+    current_value_for, default_value_for, dynamic_enum_choices, is_consent_chooser,
 };

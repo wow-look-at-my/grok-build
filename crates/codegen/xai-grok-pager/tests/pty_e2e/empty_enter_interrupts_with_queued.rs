@@ -10,8 +10,10 @@ use super::common::*;
 #[ignore]
 async fn empty_enter_interrupts_with_queued() {
     let content = ContentController::start().await.expect("start content");
-    let mut turn_one = content
-        .expect_agent_turn_blocked("running turn before the interrupt", slow_turn_text("TURNONE"));
+    let mut turn_one = content.expect_agent_turn_blocked(
+        "running turn before the interrupt",
+        slow_turn_text("TURNONE"),
+    );
     let mut resubmitted = content.expect_agent_turn(
         "resubmitted request carrying the interjection",
         "TURNTWO reply after the interrupt.",

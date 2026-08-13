@@ -463,8 +463,7 @@ pub(super) fn render_version_badge(
     // outside a git worktree (`"unknown"`), and in the HeroFooter mode (the
     // hero-box layout already shows the hash inline inside the box).
     let commit_short = xai_grok_version::BUILD_COMMIT_SHORT;
-    let show_hash = commit_short != "unknown"
-        && !matches!(mode, VersionBadgeMode::HeroFooter);
+    let show_hash = commit_short != "unknown" && !matches!(mode, VersionBadgeMode::HeroFooter);
 
     match &mode {
         VersionBadgeMode::Full { .. } => {
@@ -524,9 +523,7 @@ pub(super) fn render_version_badge(
     // to `align`; for right-aligned lines the line starts at
     // `area.x + area.width - line_width`.
     let mut hash_link_rect = None;
-    if show_hash
-        && let Some(hash_span) = spans.last()
-    {
+    if show_hash && let Some(hash_span) = spans.last() {
         let total_width: usize = spans.iter().map(|s| s.content.width()).sum();
         let hash_width = hash_span.content.width() as u16;
         let hash_offset: usize = spans[..spans.len().saturating_sub(1)]
@@ -2156,7 +2153,8 @@ fn render_welcome_done(
             VersionBadgeMode::Full {
                 subscription_tier: p.subscription_tier,
             },
-        ).map(|r| commit_hash_link_rect = Some(r));
+        )
+        .map(|r| commit_hash_link_rect = Some(r));
         (None, None)
     } else {
         // Privacy banner owns the tip slot when visible (above the prompt),
@@ -2886,7 +2884,11 @@ mod tests {
 
         // Verify the cells under the rect actually contain the hash text.
         let painted: String = (rect.x..rect.x + rect.width)
-            .map(|x| buf.cell((x, rect.y)).map_or(" ", |c| c.symbol()).to_string())
+            .map(|x| {
+                buf.cell((x, rect.y))
+                    .map_or(" ", |c| c.symbol())
+                    .to_string()
+            })
             .collect();
         assert_eq!(
             painted, hash,
