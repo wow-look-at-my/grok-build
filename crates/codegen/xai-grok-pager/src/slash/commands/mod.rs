@@ -15,6 +15,7 @@ pub mod context;
 pub mod copy;
 pub mod dashboard;
 pub mod debug;
+pub mod debug_context;
 pub mod delete;
 pub mod docs;
 pub mod doctor;
@@ -150,7 +151,7 @@ pub fn builtin_commands() -> Vec<Arc<dyn SlashCommand>> {
         Arc::new(gboom::GboomCommand),
         // Hidden diagnostic: never listed, toggles the scroll-debug HUD.
         Arc::new(scroll_debug::ScrollDebugCommand),
-        // Debug toggles: always registered, listed only on debug binaries.
+        // Self-debugging skill (and the overlay toggles it fronts).
         Arc::new(debug::DebugCommand),
     ]
 }
