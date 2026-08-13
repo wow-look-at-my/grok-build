@@ -3,20 +3,20 @@
 use crate::common::*;
 
 /// Minimal + Apple Terminal: Ctrl+O is the send-now chord. With an empty
-/// composer and a mid-turn queued follow-up it must send that row now —
-/// cancel-and-send: turn 1 is cancelled silently and the row runs as its own
-/// next turn (no interjection preamble) — not open the transcript pager remap.
+/// composer and a mid-turn queued follow-up it must interrupt — the in-flight
+/// stream is cancelled and the row is delivered into the SAME turn as an
+/// interjection — not open the transcript pager remap.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore]
-async fn minimal_ctrl_o_send_now_queued_apple_terminal() {
+async fn minimal_ctrl_o_interrupts_queued_apple_terminal() {
     let content = ContentController::start().await.expect("start content");
     let mut turn_one = content.expect_agent_turn_blocked(
-        "running turn before minimal Ctrl+O send-now",
+        "running turn before the minimal Ctrl+O interrupt",
         slow_turn_text("STEPONE"),
     );
-    let _turn_two = content.expect_agent_turn(
-        "minimal Ctrl+O sent-now prompt",
-        "STEPTWO send-now via Ctrl+O acknowledged.",
+    let _resubmitted = content.expect_agent_turn(
+        "resubmitted request carrying the interjection",
+        "STEPTWO interrupt via Ctrl+O acknowledged.",
     );
 
     let binary = pager_binary().expect("resolve pager binary");
@@ -53,51 +53,48 @@ async fn minimal_ctrl_o_send_now_queued_apple_terminal() {
         .expect("turn 1 reached completion barrier");
 
     harness
-        .inject_keys(b"minimal send-now payload\r")
+        .inject_keys(b"minimal interrupt payload\r")
         .expect("queue follow-up");
     harness
         .wait_for_text("1 queued", Duration::from_secs(10))
         .expect("queue indicator");
 
-    // Empty composer + queue: Ctrl+O must yield to send-now, not transcript.
-    // Cancel-and-send: the shell silently cancels turn 1 (its held completion
-    // is irrelevant — the abort wins) and the row commits as a standard "❯ "
-    // prompt block for its own turn. Turn 1 is still gated open here, so the
-    // queued row cannot have promoted FIFO.
-    harness.inject_keys(CTRL_O).expect("Ctrl+O send-now");
-    // Generous deadline: with turn 1 gated open there is no promotion race
-    // left to mask — this wait is pure render latency, which under heavy
+    // Empty composer + queue: Ctrl+O must yield to the interrupt, not the
+    // transcript. The shell cancels the in-flight stream, drains the row as an
+    // interjection, and resubmits; the row commits as a standard "❯ " block.
+    harness.inject_keys(CTRL_O).expect("Ctrl+O interrupt");
+    // Generous deadline: this wait is pure render latency, which under heavy
     // parallel-suite load can exceed the old 15s budget.
     harness
-        .wait_for_text("\u{276F} minimal send-now payload", Duration::from_secs(60))
-        .expect("send-now chrome (not a silent transcript open)");
+        .wait_for_text("\u{276F} minimal interrupt payload", Duration::from_secs(60))
+        .expect("delivered-row chrome (not a silent transcript open)");
 
-    // Let the mock's gate go so the promoted turn streams its reply.
+    // Let the mock's gate go; the cancelled request's completion is moot.
     turn_one.release();
     harness
         .wait_for_text("STEPTWO", Duration::from_secs(40))
-        .expect("send-now turn reply");
+        .expect("resubmitted turn reply");
 
-    // The send-now cancel of turn 1 is silent (scrollback-aware check:
-    // minimal commits blocks into native history).
+    // Interrupting is not cancelling: the turn continues, so no marker
+    // (scrollback-aware check: minimal commits blocks into native history).
     assert!(
         !harness.contains_full_text("Turn cancelled by user"),
-        "send-now cancel must not render a cancelled marker\nfull contents:\n{}",
+        "an interrupt must not render a cancelled marker\nfull contents:\n{}",
         harness.full_text()
     );
 
     let users = all_user_message_blobs(&content);
     let sent = users
         .iter()
-        .find(|u| u.contains("minimal send-now payload"))
+        .find(|u| u.contains("minimal interrupt payload"))
         .unwrap_or_else(|| panic!("queued follow-up never on wire: {users:#?}"));
     assert!(
-        !sent.contains(INTERJECTION_WIRE_PREFIX),
-        "send-now must not use the interjection preamble: {sent}"
+        sent.contains(INTERJECTION_WIRE_PREFIX),
+        "the row must arrive as a mid-turn interjection: {sent}"
     );
     assert!(
         sent.contains("<user_query>"),
-        "send-now must arrive as a standard user_query prompt: {sent}"
+        "the interjection still wraps the user's text: {sent}"
     );
 
     assert!(

@@ -576,9 +576,9 @@ impl AgentView {
                     //  - slash_accepted_send: slash dropdown Enter accepted a no-arg
                     //    command and fell through — must send, not insert newline.
                     //  - bash mode: Enter should always send.
-                    //  - empty composer + mid-turn queue: force-send the top row
-                    //    (send-now discoverability). Inserting a blank line on an
-                    //    empty prompt is never useful here; same path as normal mode.
+                    //  - empty composer + mid-turn queue: interrupt the turn with
+                    //    the queue. Inserting a blank line on an empty prompt is
+                    //    never useful here; same path as normal mode.
                     if self.multiline_mode
                         && self.prompt_input_mode != PromptInputMode::Bash
                         && !slash_accepted_send
@@ -586,7 +586,7 @@ impl AgentView {
                         if matches!(self.prompt_mode, PromptMode::Normal)
                             && self.prompt.text().trim().is_empty()
                             && self.session.state.is_turn_running()
-                            && let Some(outcome) = self.try_send_now_queued_from_prompt()
+                            && let Some(outcome) = self.try_interrupt_with_queued_from_prompt()
                         {
                             return outcome;
                         }
@@ -608,8 +608,9 @@ impl AgentView {
                         return InputOutcome::Action(action);
                     }
                     // Empty (or backslash continuation). Mid-turn + a queued
-                    // follow-up: bare Enter force-sends the top queue row so
-                    // users discover send-now without learning a chord.
+                    // follow-up: bare Enter interrupts the running turn and
+                    // hands the model everything queued, so the interrupt needs
+                    // no chord.
                     // Skip while editing a queued row (edit-mode Enter is
                     // handled earlier for non-empty; empty must stay a no-op).
                     // Guard on an actually-empty composer: try_send() also
@@ -619,7 +620,7 @@ impl AgentView {
                     if matches!(self.prompt_mode, PromptMode::Normal)
                         && self.prompt.text().trim().is_empty()
                         && self.session.state.is_turn_running()
-                        && let Some(outcome) = self.try_send_now_queued_from_prompt()
+                        && let Some(outcome) = self.try_interrupt_with_queued_from_prompt()
                     {
                         return outcome;
                     }
@@ -641,7 +642,7 @@ impl AgentView {
                     // 1) Non-empty composer → cancel the running turn and send
                     //    that text as the next prompt.
                     // 2) Empty composer + a visible follow-up in the queue →
-                    //    same as bare Enter: send the top row now.
+                    //    same as bare Enter: interrupt with the queue.
                     // 3) Idle / nothing to send → no-op (not send-like-Enter).
                     let text = self.prompt.text().trim().to_string();
                     let turn_running = self.session.state.is_turn_running();
@@ -661,7 +662,7 @@ impl AgentView {
                         self.prompt.set_text("");
                         return InputOutcome::Action(Action::SendPromptNow { text, images });
                     }
-                    if turn_running && let Some(outcome) = self.try_send_now_queued_from_prompt() {
+                    if turn_running && let Some(outcome) = self.try_interrupt_with_queued_from_prompt() {
                         return outcome;
                     }
                     return InputOutcome::Changed;

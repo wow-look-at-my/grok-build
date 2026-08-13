@@ -2051,7 +2051,7 @@ impl SessionActor {
             // to steer yet, and a row queued in that window is picked up on the
             // pass after it.
             if loop_index > 1 {
-                self.harvest_queued_prompts_into_interjections().await;
+                self.harvest_queued_prompts_into_interjections(false).await;
             }
             if identical_tool_calls.take_nudge() {
                 let run_len = identical_tool_calls.run_len;

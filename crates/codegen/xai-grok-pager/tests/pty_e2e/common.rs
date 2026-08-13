@@ -394,9 +394,10 @@ pub(crate) const CTRL_L: &[u8] = b"\x0c";
 /// interject would no-op.
 pub(crate) const CTRL_O: &[u8] = b"\x0f";
 
-/// Suffix of the mid-turn send-now tip: `Queued · Enter to send now` (or the
-/// interject chord in multiline). Chord-agnostic like [`UNDO_TIP_SENTINEL`].
-pub(crate) const SEND_NOW_TIP_SENTINEL: &str = "to send now";
+/// Suffix of the mid-turn send-now tip: `Queued · Enter to interrupt & send`
+/// (or the interject chord in multiline). Chord-agnostic like
+/// [`UNDO_TIP_SENTINEL`].
+pub(crate) const SEND_NOW_TIP_SENTINEL: &str = "to interrupt & send";
 
 // NOTE: The SessionStart hook exactly-once e2e test is deferred.
 // The core fix (deduplication in load_hooks_from_sources) is verified by
