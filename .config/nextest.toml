@@ -25,3 +25,16 @@ retries = 0
 # would find a new one each time. fail-fast = false means nextest runs
 # every test regardless of individual failures.
 fail-fast = false
+
+# The curated scroll-matrix cells are host-paced PTY sessions: they measure
+# real scroll timing against a live pager, so running several at once stretches
+# the gesture gaps they assert on. The suite serializes them with a static
+# mutex, which works under `cargo test` (one process, many threads) and NOT
+# under nextest, which gives every test its own process. This group restores
+# that guarantee — without it the mutex is a no-op and the cells go flaky.
+[test-groups]
+scroll-matrix = { max-threads = 1 }
+
+[[profile.default.overrides]]
+filter = 'binary(scroll_matrix_curated)'
+test-group = 'scroll-matrix'
