@@ -349,12 +349,22 @@ impl SessionActor {
                 .into_iter()
                 .collect()
         });
+        // Session-cumulative cost at the terminal: this is the last point in a
+        // turn where a subagent fold can still land after the final model call,
+        // so a client's idle total is only exact if it is refreshed here.
+        let session_cost_usd_ticks = self
+            .chat_state_handle
+            .try_get_session_usage()
+            .await
+            .ok()
+            .and_then(|l| l.totals.cost_usd_ticks);
         self.send_xai_notification_with_extra_meta(
             crate::session::turn_completion::build_turn_completed(
                 prompt_id,
                 stop_reason,
                 agent_result,
                 usage,
+                session_cost_usd_ticks,
             ),
             extra_meta,
         )

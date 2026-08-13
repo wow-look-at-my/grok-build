@@ -43,6 +43,7 @@ verify serially wastes time when a parallel CI build could be running.
   into the session status bar in `src/app/agent_view/render.rs`.
 - The yellow "in progress" dot animates its HSV value in a sine wave between
   25% and 80% (see `ci_status::animate_value`).
+
 - The dot is only realtime because three things outside the render path keep
   it moving; drop any one and it freezes at its last color, silently, on
   exactly the idle session that is watching CI:
@@ -52,6 +53,24 @@ verify serially wastes time when a parallel CI build could be running.
     only when the color actually changed;
   - `ci_dot_animating` makes `tick_demand` report Slow while a run is in
     flight, which is what supplies the frames the pulse animates over.
+
+## Cost-indicator feature notes
+
+- Per-message cost rides `XaiSessionUpdate::ResponseCompleted.cost_usd_ticks`,
+  one per model call, and the pager attaches it to the message that call
+  streamed (`AcpUpdateTracker::set_response_cost`). `TurnCompleted`'s
+  prompt-scoped cost is the fallback for an agent that prices only whole turns;
+  it stands down for any prompt a response already priced.
+- The session total is the agent's own ledger
+  (`ResponseCompleted`/`TurnCompleted.session_cost_usd_ticks`), not a sum over
+  scrollback: rewound and never-rendered spend is real. The scrollback sum
+  survives only as the fallback for an agent that reports no total.
+- `ResponseCompleted` is the one buffered xAI update that is persisted — it is
+  the only carrier of a message's cost, so a reload replays it and each message
+  keeps its price. The indicator counts THIS run's spend: the agent's ledger is
+  in-memory and restarts at reload, so a replayed total is not adopted and the
+  scrollback sum stops being a valid fallback once anything priced is replayed
+  (`AcpUpdateTracker::scrollback_sum_is_this_run`).
 
 ## Why build-test is not on the self-hosted runner
 
