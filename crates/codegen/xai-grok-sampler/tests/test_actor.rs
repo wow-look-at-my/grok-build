@@ -260,6 +260,57 @@ async fn submit_and_collect_returns_response() {
     assert_eq!(a.content.as_ref(), "collected response");
 }
 
+/// A stream shaped the way Bifrost shapes one: the trailing usage chunk has no
+/// choices, and the gateway writes an unset slice as `"choices": null`. Failing
+/// that parse turned every turn on every model behind the gateway into
+/// "Couldn't read the response", so this drives the whole SSE path, not just
+/// the chunk type.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn null_choices_usage_chunk_completes_the_turn() {
+    let app = Router::new().route(
+        "/v1/chat/completions",
+        post(|| async {
+            let usage_chunk = json!({
+                "id": "chatcmpl-test",
+                "object": "chat.completion.chunk",
+                "created": 0,
+                "model": "test-model",
+                "choices": null,
+                "system_fingerprint": "",
+                "usage": {
+                    "prompt_tokens": 18,
+                    "completion_tokens": 10,
+                    "total_tokens": 28
+                }
+            });
+            let events = vec![
+                text_chunk_event("hello from the gateway", false),
+                text_chunk_event("", true),
+                Event::default().data(usage_chunk.to_string()),
+            ];
+            Sse::new(stream::iter(
+                events.into_iter().map(Ok::<_, std::convert::Infallible>),
+            ))
+        }),
+    );
+    let server = MockServer::spawn(app).await;
+    let (event_tx, _event_rx) = mpsc::unbounded_channel();
+    let cfg = test_config(server.base_url(), "test-model");
+    let handle = SamplerActor::spawn(cfg, RetryPolicy::default(), event_tx);
+
+    let result = handle
+        .submit_and_collect(RequestId::from("req-null-choices"), user_request("hi"))
+        .await
+        .expect("a null-choices usage chunk must not fail the turn");
+    server.shutdown();
+
+    let (response, _metrics) = result;
+    let a = response.assistant().expect("assistant item present");
+    assert_eq!(a.content.as_ref(), "hello from the gateway");
+    // The usage on that chunk is what the turn would otherwise lose.
+    assert_eq!(response.usage.map(|u| u.total_tokens), Some(28));
+}
+
 // ---------------------------------------------------------------------------
 // Cancellation
 // ---------------------------------------------------------------------------
