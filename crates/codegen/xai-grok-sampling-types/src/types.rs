@@ -1,4 +1,4 @@
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::num::NonZeroU64;
 
@@ -50,15 +50,7 @@ impl Clone for Box<dyn TraceContext> {
     }
 }
 
-/// Deserialize a field that may be `null` as the default value.
-/// This is useful for fields like `Vec<T>` where `null` should become `vec![]`.
-fn deserialize_null_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
-where
-    D: Deserializer<'de>,
-    T: Default + Deserialize<'de>,
-{
-    Option::<T>::deserialize(deserializer).map(|opt| opt.unwrap_or_default())
-}
+use crate::serde_helpers::null_as_default as deserialize_null_default;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ChatCompletionRequest {
@@ -462,6 +454,10 @@ pub struct ChatCompletionResponse {
     pub object: String,
     pub created: u64,
     pub model: String,
+    /// `null` reads as no choices: a gateway written in Go marshals an unset
+    /// slice as `null`, and rejecting the response loses the usage that rides
+    /// with it.
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub choices: Vec<ChatChoice>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub usage: Option<Usage>,
@@ -499,7 +495,12 @@ pub struct ChatResponseMessage {
     pub content: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_content: Option<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    /// `null` reads as no tool calls, matching [`ChatChunkDelta::tool_calls`].
+    #[serde(
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        deserialize_with = "deserialize_null_default"
+    )]
     pub tool_calls: Vec<ToolCallResponse>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_call_id: Option<String>,
@@ -676,6 +677,11 @@ pub struct ChatCompletionChunk {
     pub object: String,
     pub created: u64,
     pub model: String,
+    /// `null` reads as no choices. Bifrost's `BifrostChatResponse.Choices` has
+    /// no `omitempty`, so every chunk it builds without choices -- the trailing
+    /// usage chunk among them -- arrives as `"choices": null`, and failing the
+    /// parse kills the whole turn with a serialization error.
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub choices: Vec<ChatChunkChoice>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub usage: Option<Usage>,
@@ -1612,6 +1618,51 @@ mod tests {
         assert_eq!(delta.role, Some(Role::Assistant));
         assert_eq!(delta.content, Some("".to_string()));
         assert!(delta.tool_calls.is_empty());
+    }
+
+    /// The exact chunk Bifrost sends to close a stream: usage arrives with no
+    /// choices, and Go marshals the unset slice as `null`. Rejecting it failed
+    /// every turn on every model behind the gateway with "Couldn't read the
+    /// response -- serialization error: invalid type: null, expected a sequence".
+    #[test]
+    fn chat_completion_chunk_deserializes_null_choices() {
+        let chunk: ChatCompletionChunk = serde_json::from_str(
+            r#"{
+                "id": "chatcmpl-1",
+                "object": "chat.completion.chunk",
+                "created": 1,
+                "model": "grok-4",
+                "choices": null,
+                "system_fingerprint": "",
+                "usage": {"prompt_tokens": 18, "completion_tokens": 10, "total_tokens": 28}
+            }"#,
+        )
+        .expect("a null `choices` must not fail the chunk");
+
+        assert!(chunk.choices.is_empty());
+        // The usage riding on that chunk is the whole reason to keep it.
+        assert_eq!(chunk.usage.map(|u| u.total_tokens), Some(28));
+    }
+
+    #[test]
+    fn chat_completion_response_deserializes_null_choices_and_tool_calls() {
+        let response: ChatCompletionResponse = serde_json::from_str(
+            r#"{
+                "id": "chatcmpl-2",
+                "object": "chat.completion",
+                "created": 1,
+                "model": "grok-4",
+                "choices": null
+            }"#,
+        )
+        .expect("a null `choices` must not fail the response");
+        assert!(response.choices.is_empty());
+
+        let message: ChatResponseMessage = serde_json::from_str(
+            r#"{"role": "assistant", "content": "hi", "tool_calls": null}"#,
+        )
+        .expect("a null `tool_calls` must not fail the message");
+        assert!(message.tool_calls.is_empty());
     }
 
     /// Regression test: cloning `Box<dyn TraceContext>` must not infinitely recurse.
