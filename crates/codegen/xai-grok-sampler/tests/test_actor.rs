@@ -829,6 +829,46 @@ fn responses_config(base_url: String, doom_loop: Option<DoomLoopRecoveryPolicy>)
     cfg
 }
 
+/// The Responses-surface twin of `null_choices_usage_chunk_completes_the_turn`:
+/// `response.created` carries an empty output list, which a Go gateway writes
+/// as `"output": null`, and `tools` arrives the same way when the request sent
+/// none. Both land on the very first event of every turn.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn responses_null_lists_on_created_complete_the_turn() {
+    let app = Router::new().route(
+        "/v1/responses",
+        post(|| async {
+            let mut events = sse::responses_api_script_exact("an answer", "test-model");
+            let created: &mut SseEvent = &mut events[0];
+            let mut value: serde_json::Value = serde_json::from_str(&created.data).unwrap();
+            value["response"]["output"] = serde_json::Value::Null;
+            value["response"]["tools"] = serde_json::Value::Null;
+            created.data = value.to_string();
+            Sse::new(stream::iter(
+                sse_events_to_axum(events)
+                    .into_iter()
+                    .map(Ok::<_, std::convert::Infallible>),
+            ))
+        }),
+    );
+    let server = MockServer::spawn(app).await;
+    let (event_tx, _event_rx) = mpsc::unbounded_channel();
+    let handle = SamplerActor::spawn(
+        responses_config(server.base_url(), None),
+        RetryPolicy::default(),
+        event_tx,
+    );
+
+    let result = handle
+        .submit_and_collect(RequestId::from("req-null-output"), user_request("hi"))
+        .await
+        .expect("null lists on response.created must not fail the turn");
+    server.shutdown();
+
+    let (response, _metrics) = result;
+    assert_eq!(response.assistant_text(), "an answer");
+}
+
 /// Server-reported doom-loop triggers flow through the actor rung onto the
 /// completed response, without retries. The trigger is non-confident
 /// (`@response` channel), so the recovery — which resamples only confident
