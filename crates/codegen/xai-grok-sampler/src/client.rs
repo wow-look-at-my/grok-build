@@ -107,6 +107,7 @@ fn deserialize_response_event(data: &str) -> Result<rs::ResponseStreamEvent> {
         Err(first_err) => {
             // Try sanitizing: parse as Value, strip unknown tools, retry.
             if let Ok(mut value) = serde_json::from_str::<serde_json::Value>(data) {
+                null_lists_as_empty(&mut value);
                 // Strip tools that async_openai's rs::Tool can't deserialize
                 // (e.g., xAI-specific "x_search"). Instead of maintaining a
                 // hardcoded allowlist, try deserializing each tool entry —
@@ -132,6 +133,36 @@ fn deserialize_response_event(data: &str) -> Result<rs::ResponseStreamEvent> {
     };
     apply_terminal_event_overrides(&mut event, data);
     Ok(event)
+}
+
+/// Keys the Responses schema types as a required list, so `null` there is a
+/// producer bug rather than a value we would lose by rewriting it.
+const NULL_TOLERANT_LIST_KEYS: &[&str] = &["output", "content", "summary", "annotations", "tools"];
+
+/// Rewrite `null` to `[]` at [`NULL_TOLERANT_LIST_KEYS`], recursively.
+///
+/// A gateway written in Go marshals an unset slice as `null`, so
+/// `response.created` -- whose output list is empty by definition -- arrives as
+/// `"output": null` and fails the parse. Because serde buffers the internally
+/// tagged event, that failure carries no line or column: it reads as a bare
+/// "invalid type: null, expected a sequence" and takes the whole turn with it.
+///
+/// Only reached after the strict parse already failed, so a well-formed server
+/// never meets this.
+fn null_lists_as_empty(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Object(map) => {
+            for (key, child) in map.iter_mut() {
+                if child.is_null() && NULL_TOLERANT_LIST_KEYS.contains(&key.as_str()) {
+                    *child = serde_json::Value::Array(Vec::new());
+                } else {
+                    null_lists_as_empty(child);
+                }
+            }
+        }
+        serde_json::Value::Array(items) => items.iter_mut().for_each(null_lists_as_empty),
+        _ => {}
+    }
 }
 
 /// On terminal Responses API events (`response.completed` /

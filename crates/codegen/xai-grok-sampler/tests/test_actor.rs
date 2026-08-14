@@ -260,6 +260,57 @@ async fn submit_and_collect_returns_response() {
     assert_eq!(a.content.as_ref(), "collected response");
 }
 
+/// A stream shaped the way Bifrost shapes one: the trailing usage chunk has no
+/// choices, and the gateway writes an unset slice as `"choices": null`. Failing
+/// that parse turned every turn on every model behind the gateway into
+/// "Couldn't read the response", so this drives the whole SSE path, not just
+/// the chunk type.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn null_choices_usage_chunk_completes_the_turn() {
+    let app = Router::new().route(
+        "/v1/chat/completions",
+        post(|| async {
+            let usage_chunk = json!({
+                "id": "chatcmpl-test",
+                "object": "chat.completion.chunk",
+                "created": 0,
+                "model": "test-model",
+                "choices": null,
+                "system_fingerprint": "",
+                "usage": {
+                    "prompt_tokens": 18,
+                    "completion_tokens": 10,
+                    "total_tokens": 28
+                }
+            });
+            let events = vec![
+                text_chunk_event("hello from the gateway", false),
+                text_chunk_event("", true),
+                Event::default().data(usage_chunk.to_string()),
+            ];
+            Sse::new(stream::iter(
+                events.into_iter().map(Ok::<_, std::convert::Infallible>),
+            ))
+        }),
+    );
+    let server = MockServer::spawn(app).await;
+    let (event_tx, _event_rx) = mpsc::unbounded_channel();
+    let cfg = test_config(server.base_url(), "test-model");
+    let handle = SamplerActor::spawn(cfg, RetryPolicy::default(), event_tx);
+
+    let result = handle
+        .submit_and_collect(RequestId::from("req-null-choices"), user_request("hi"))
+        .await
+        .expect("a null-choices usage chunk must not fail the turn");
+    server.shutdown();
+
+    let (response, _metrics) = result;
+    let a = response.assistant().expect("assistant item present");
+    assert_eq!(a.content.as_ref(), "hello from the gateway");
+    // The usage on that chunk is what the turn would otherwise lose.
+    assert_eq!(response.usage.map(|u| u.total_tokens), Some(28));
+}
+
 // ---------------------------------------------------------------------------
 // Cancellation
 // ---------------------------------------------------------------------------
@@ -776,6 +827,46 @@ fn responses_config(base_url: String, doom_loop: Option<DoomLoopRecoveryPolicy>)
     cfg.api_backend = ApiBackend::Responses;
     cfg.doom_loop_recovery = doom_loop;
     cfg
+}
+
+/// The Responses-surface twin of `null_choices_usage_chunk_completes_the_turn`:
+/// `response.created` carries an empty output list, which a Go gateway writes
+/// as `"output": null`, and `tools` arrives the same way when the request sent
+/// none. Both land on the very first event of every turn.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn responses_null_lists_on_created_complete_the_turn() {
+    let app = Router::new().route(
+        "/v1/responses",
+        post(|| async {
+            let mut events = sse::responses_api_script_exact("an answer", "test-model");
+            let created: &mut SseEvent = &mut events[0];
+            let mut value: serde_json::Value = serde_json::from_str(&created.data).unwrap();
+            value["response"]["output"] = serde_json::Value::Null;
+            value["response"]["tools"] = serde_json::Value::Null;
+            created.data = value.to_string();
+            Sse::new(stream::iter(
+                sse_events_to_axum(events)
+                    .into_iter()
+                    .map(Ok::<_, std::convert::Infallible>),
+            ))
+        }),
+    );
+    let server = MockServer::spawn(app).await;
+    let (event_tx, _event_rx) = mpsc::unbounded_channel();
+    let handle = SamplerActor::spawn(
+        responses_config(server.base_url(), None),
+        RetryPolicy::default(),
+        event_tx,
+    );
+
+    let result = handle
+        .submit_and_collect(RequestId::from("req-null-output"), user_request("hi"))
+        .await
+        .expect("null lists on response.created must not fail the turn");
+    server.shutdown();
+
+    let (response, _metrics) = result;
+    assert_eq!(response.assistant_text(), "an answer");
 }
 
 /// Server-reported doom-loop triggers flow through the actor rung onto the
