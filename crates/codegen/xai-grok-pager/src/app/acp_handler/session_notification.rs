@@ -235,9 +235,7 @@ pub(super) fn handle_session_notification(notif: &acp::ExtNotification, app: &mu
             // the agent-message block this turn rendered — unless
             // `ResponseCompleted` already priced this turn's messages one by
             // one, which `set_last_turn_cost` checks for.
-            let reported_cost = usage
-                .as_ref()
-                .and_then(|u| u.totals.cost_usd_ticks);
+            let reported_cost = usage.as_ref().and_then(|u| u.totals.cost_usd_ticks);
             // Terminal refresh of the session total: a subagent fold can land
             // after this turn's last model call, so this is the last chance to
             // be exact before the session goes idle. Skipped on replay — that
@@ -349,20 +347,16 @@ pub(super) fn handle_session_notification(notif: &acp::ExtNotification, app: &mu
                         cancel_trigger,
                     ));
                 false
-            }
-            ;
+            };
             // Attribute this turn's reported cost to the agent block it
             // rendered, keyed by prompt so out-of-order notifications land on
             // the correct turn (and a stale one never corrupts a newer turn).
-            agent
-                .session
-                .tracker
-                .set_last_turn_cost(
-                    &mut agent.scrollback,
-                    Some(&prompt_id),
-                    running_prompt_id.as_deref(),
-                    reported_cost,
-                );
+            agent.session.tracker.set_last_turn_cost(
+                &mut agent.scrollback,
+                Some(&prompt_id),
+                running_prompt_id.as_deref(),
+                reported_cost,
+            );
             result
         }
         XaiSessionUpdate::SubagentSpawned {
@@ -401,9 +395,12 @@ pub(super) fn handle_session_notification(notif: &acp::ExtNotification, app: &mu
             // bar, tasks pane) shows the same friendly name the dashboard
             // peek resolves. Models unknown to the catalog fall back to the
             // raw id via `display_name_for`.
-            let model_display = model
-                .as_deref()
-                .map(|m| agent.session.models.display_name_for(&acp::ModelId::new(Arc::from(m))));
+            let model_display = model.as_deref().map(|m| {
+                agent
+                    .session
+                    .models
+                    .display_name_for(&acp::ModelId::new(Arc::from(m)))
+            });
             agent.subagent_sessions.insert(
                 child_session_id.clone(),
                 SubagentInfo {

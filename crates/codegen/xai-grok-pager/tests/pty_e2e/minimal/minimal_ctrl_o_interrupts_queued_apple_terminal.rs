@@ -66,7 +66,10 @@ async fn minimal_ctrl_o_interrupts_queued_apple_terminal() {
     // Generous deadline: this wait is pure render latency, which under heavy
     // parallel-suite load can exceed the old 15s budget.
     harness
-        .wait_for_text("\u{276F} minimal interrupt payload", Duration::from_secs(60))
+        .wait_for_text(
+            "\u{276F} minimal interrupt payload",
+            Duration::from_secs(60),
+        )
         .expect("delivered-row chrome (not a silent transcript open)");
 
     // Let the mock's gate go; the cancelled request's completion is moot.

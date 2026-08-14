@@ -881,7 +881,8 @@ impl AcpUpdateTracker {
             // `TurnCompleted` can still attribute its cost to this exact turn.
             if let Some(prompt) = prompt_id.filter(|p| !p.is_empty()) {
                 self.finished_prompt_costs.retain(|(p, _)| p != prompt);
-                self.finished_prompt_costs.push((prompt.to_string(), agent_id));
+                self.finished_prompt_costs
+                    .push((prompt.to_string(), agent_id));
                 if self.finished_prompt_costs.len() > PROMPT_COST_HISTORY {
                     self.finished_prompt_costs.remove(0);
                 }
@@ -983,7 +984,8 @@ impl AcpUpdateTracker {
         // (2) Prompt-keyed finished entry (viewer order, or a late TurnCompleted
         // for an already-finished turn after a newer turn began streaming).
         if let Some(prompt) = prompt
-            && let Some((_, entry_id)) = self.finished_prompt_costs.iter().find(|(p, _)| p == prompt)
+            && let Some((_, entry_id)) =
+                self.finished_prompt_costs.iter().find(|(p, _)| p == prompt)
             && let Some(entry) = scrollback.get_by_id_mut(*entry_id)
         {
             entry.cost_usd_ticks = entry.cost_usd_ticks.or(Some(cost));
@@ -6942,7 +6944,13 @@ mod tests {
 
     fn agent_costs(sb: &mut ScrollbackState) -> Vec<Option<i64>> {
         sb.entries_mut()
-            .map(|e| if e.block.is_agent_message() { e.cost_usd_ticks } else { None })
+            .map(|e| {
+                if e.block.is_agent_message() {
+                    e.cost_usd_ticks
+                } else {
+                    None
+                }
+            })
             .collect()
     }
 
@@ -7022,7 +7030,12 @@ mod tests {
         // Simulate the running turn: stream once, then a new stream with the
         // running prompt active (as the shipped driver flow does).
         tracker.handle_update(agent_chunk("response"), &meta(), &mut sb);
-        tracker.set_last_turn_cost(&mut sb, Some("running-1"), Some("running-1"), Some(3_000_000_000));
+        tracker.set_last_turn_cost(
+            &mut sb,
+            Some("running-1"),
+            Some("running-1"),
+            Some(3_000_000_000),
+        );
         assert_eq!(
             agent_costs(&mut sb),
             vec![Some(3_000_000_000)],

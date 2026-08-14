@@ -344,6 +344,16 @@ Open the MCP servers management modal.
 
 Check the current session for terminal, clipboard, color, input, notification, and sandbox issues. Doctor shows what it found and how to resolve each issue. Run `/doctor fix` to list available automatic fixes; other findings include manual steps. `/terminal-setup`, `/terminal-check`, and `/terminal-info` remain aliases.
 
+### `/debug [what is wrong]`
+
+Turn Grok on itself. The question goes to the model along with this session's execution context: the binary that is running and whether it is still the installed one, version and commit, the config directory and every config layer, the debug-log path for this session and whether logging is on, the working directory, the current model with the context window and reasoning effort it actually resolved, and the `GROK_*`/`XAI_*` environment (credential-shaped values are named but never printed).
+
+```
+/debug why was the context size defaulted to 256k? this model is supposed to be 1m context
+```
+
+With no question it injects the context alone and debugs whatever you say next. `/debug scroll`, `/debug fps`, and `/debug log` are unrelated developer overlays: the scroll-diagnostics HUD, the FPS overlay, and the scroll flight recorder.
+
 ### `/release-notes`
 
 View release notes for the current version. Alias: `/changelog`.

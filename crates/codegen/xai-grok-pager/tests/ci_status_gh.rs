@@ -53,11 +53,7 @@ fn real_gh_run_list_parses_and_reduces_to_tri_state() {
     );
 
     // Human-readable evidence for the verification log.
-    eprintln!(
-        "REAL_GH master: {} runs parsed -> {:?}",
-        runs.len(),
-        status
-    );
+    eprintln!("REAL_GH master: {} runs parsed -> {:?}", runs.len(), status);
     for r in runs.iter().take(5) {
         eprintln!("  run status={} conclusion={}", r.status, r.conclusion);
     }

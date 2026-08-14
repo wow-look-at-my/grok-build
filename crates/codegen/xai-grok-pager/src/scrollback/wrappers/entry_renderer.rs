@@ -1611,15 +1611,30 @@ mod tests {
     #[test]
     fn cost_ticks_to_display_formats_representative_inputs() {
         // Small fractional USD: 1e10 ticks = $1. 1_234_500_000 → $0.12345.
-        assert_eq!(cost_ticks_to_display(Some(1_234_500_000)).as_deref(), Some("$0.12345"));
+        assert_eq!(
+            cost_ticks_to_display(Some(1_234_500_000)).as_deref(),
+            Some("$0.12345")
+        );
         // Cents exactly: 100_000_000 ticks → $0.01.
-        assert_eq!(cost_ticks_to_display(Some(100_000_000)).as_deref(), Some("$0.01"));
+        assert_eq!(
+            cost_ticks_to_display(Some(100_000_000)).as_deref(),
+            Some("$0.01")
+        );
         // Whole dollars trim trailing zeros: 5e12 ticks → $500.
-        assert_eq!(cost_ticks_to_display(Some(5_000_000_000_000)).as_deref(), Some("$500"));
+        assert_eq!(
+            cost_ticks_to_display(Some(5_000_000_000_000)).as_deref(),
+            Some("$500")
+        );
         // Mixed whole + fraction: 342_000_000_000 ticks → $34.2 → "34.2".
-        assert_eq!(cost_ticks_to_display(Some(342_000_000_000)).as_deref(), Some("$34.2"));
+        assert_eq!(
+            cost_ticks_to_display(Some(342_000_000_000)).as_deref(),
+            Some("$34.2")
+        );
         // A tiny-but-real reported cost (3e-6 USD) must NOT collapse to $0.
-        assert_eq!(cost_ticks_to_display(Some(30_000)).as_deref(), Some("$0.000003"));
+        assert_eq!(
+            cost_ticks_to_display(Some(30_000)).as_deref(),
+            Some("$0.000003")
+        );
     }
 
     #[test]
@@ -1728,7 +1743,10 @@ mod tests {
         renderer.render(area, &mut buf);
 
         let row = collect_row_symbols(&buf, 0, 0, width);
-        assert!(!row.contains('$'), "no cost token when none is reported: {row:?}");
+        assert!(
+            !row.contains('$'),
+            "no cost token when none is reported: {row:?}"
+        );
         assert!(has_ampm_timestamp(&buf, 0, width), "timestamp still shown");
     }
 
@@ -1749,7 +1767,10 @@ mod tests {
         renderer.render(area, &mut buf);
 
         let row = collect_row_symbols(&buf, 0, 0, width);
-        assert!(!row.contains('$'), "thinking block must not render a cost token");
+        assert!(
+            !row.contains('$'),
+            "thinking block must not render a cost token"
+        );
     }
 
     #[test]
