@@ -85,6 +85,14 @@ verify serially wastes time when a parallel CI build could be running.
   scrollback sum stops being a valid fallback once anything priced is replayed
   (`AcpUpdateTracker::scrollback_sum_is_this_run`).
 
+- The Messages backend takes a price off the wire when one is there:
+  `MessagesUsage`/`MessageDeltaUsage` carry `cost_in_usd_ticks` (alias
+  `cost_usd_ticks`) and the USD-float `cost`, read on `message_start` and every
+  `message_delta` with the Chat Completions precedence — ticks over float, a
+  zero is unbilled, and a later silent event never erases a reported price.
+  Anthropic itself prices nothing, so that path stays `None` and the shell's
+  `compute_cost_ticks` fallback derives one from the model's pricing.
+
 ## Thinking-signature notes
 
 - The Messages API verifies a thinking block's `signature` against the model
