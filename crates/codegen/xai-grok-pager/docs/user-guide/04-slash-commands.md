@@ -336,6 +336,16 @@ Send an aside to the agent without interrupting the current task. In minimal mod
 /btw also check the error handling
 ```
 
+### `/todo <what to add>`
+
+Put something on the agent's todo list without interrupting what it is doing. A separate lightweight agent forks off the session, spends a few read-only tool calls working out what the item should say, and appends it. It shares the session's context but is a different instance, so the running turn is untouched.
+
+```
+/todo add a way to push changes to 2 git repos
+```
+
+Appending is the only change it can make. Edits, shell commands, and subagents are refused before they run, and its write appends: it cannot complete, reword, reorder, or drop items the agent is already working through. Captured items appear on the list prefixed `capture-`, and the agent picks them up like any other todo. The command is hidden for agents without a `todo_write` tool.
+
 ### `/mcps`
 
 Open the MCP servers management modal.
