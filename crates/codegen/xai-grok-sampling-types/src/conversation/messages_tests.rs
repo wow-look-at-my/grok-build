@@ -778,3 +778,104 @@ fn todo_capture_loop_strips_reasoning_and_keeps_the_tool_pair() {
         "the tool result the loop fed back must survive: {json:#}"
     );
 }
+
+/// A switch between two models that reason in plain text keeps the thinking.
+/// Only a signature is model-bound, and there is none on either side here, so
+/// dropping the block would throw away context nothing was going to reject.
+#[test]
+fn unsigned_thinking_rides_a_switch_between_two_models_that_do_not_sign() {
+	let req = ConversationRequest::from_items(vec![
+		ConversationItem::user("q1"),
+		reasoning_sibling("r1", "weighing the options", None),
+		ConversationItem::Assistant(AssistantItem {
+			content: "The answer.".into(),
+			tool_calls: vec![],
+			model_id: Some("grok-4-fast".into()),
+			model_fingerprint: None,
+			reasoning_effort: None,
+		}),
+		ConversationItem::user("q2"),
+	])
+	.with_model("grok-code-fast");
+
+	assert_eq!(
+		thinking_blocks(&req),
+		vec![("weighing the options".to_string(), String::new())],
+		"unsigned thinking has nothing to verify, so a switch must replay it",
+	);
+}
+
+/// The other unsigned case: the model being called does sign its thinking, and
+/// it rejects a block that arrives without a signature just as hard as one
+/// signed by somebody else. What says so is the conversation itself — this
+/// model already signed a block earlier in it.
+#[test]
+fn unsigned_thinking_is_dropped_at_a_model_that_signs_its_own() {
+	let req = ConversationRequest::from_items(vec![
+		ConversationItem::user("q1"),
+		reasoning_sibling("r1", "the signing model's own thinking", Some("sig-1")),
+		ConversationItem::Assistant(AssistantItem {
+			content: "First answer.".into(),
+			tool_calls: vec![],
+			model_id: Some("claude-opus-5".into()),
+			model_fingerprint: None,
+			reasoning_effort: None,
+		}),
+		ConversationItem::user("q2"),
+		reasoning_sibling("r2", "the other model's thinking", None),
+		ConversationItem::Assistant(AssistantItem {
+			content: "Second answer.".into(),
+			tool_calls: vec![],
+			model_id: Some("grok-4-fast".into()),
+			model_fingerprint: None,
+			reasoning_effort: None,
+		}),
+		ConversationItem::user("q3"),
+	])
+	.with_model("claude-opus-5");
+
+	assert_eq!(
+		thinking_blocks(&req),
+		vec![(
+			"the signing model's own thinking".to_string(),
+			"sig-1".to_string()
+		)],
+		"the signing model keeps its own block and must not be handed an unsigned one",
+	);
+}
+
+/// Mid-tool-loop, the same way round: the turn being continued kept its
+/// thinking across the switch, so there is a block to lead with and thinking
+/// stays on. Turning it off here would cost the loop its reasoning for no 400
+/// that was ever going to happen.
+#[test]
+fn a_tool_loop_that_kept_its_unsigned_thinking_keeps_thinking_on() {
+	let mut req = ConversationRequest::from_items(vec![
+		ConversationItem::user("q1"),
+		reasoning_sibling("r1", "planning the call", None),
+		ConversationItem::Assistant(AssistantItem {
+			content: String::new().into(),
+			tool_calls: vec![ToolCall {
+				id: "call_1".into(),
+				name: "read_file".to_string(),
+				arguments: r#"{"path":"src/main.rs"}"#.into(),
+			}],
+			model_id: Some("grok-4-fast".into()),
+			model_fingerprint: None,
+			reasoning_effort: None,
+		}),
+		ConversationItem::tool_result("call_1", "fn main() {}"),
+	])
+	.with_model("grok-code-fast");
+	req.reasoning_effort = Some(crate::ReasoningEffort::High);
+
+	let msgs = build_messages_request(&req);
+	assert!(
+		msgs.thinking.is_some(),
+		"the loop still leads with a thinking block, so thinking stays on",
+	);
+	assert_eq!(
+		thinking_blocks(&req),
+		vec![("planning the call".to_string(), String::new())],
+	);
+}

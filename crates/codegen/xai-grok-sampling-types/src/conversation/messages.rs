@@ -117,6 +117,46 @@ fn reasoning_origin_model(items: &[ConversationItem], reasoning_idx: usize) -> O
         .flatten()
 }
 
+/// Whether a reasoning item carries a signature, which is what makes it a
+/// block only its own model can take back.
+fn is_signed(r: &crate::rs::ReasoningItem) -> bool {
+    r.encrypted_content
+        .as_deref()
+        .is_some_and(|sig| !sig.is_empty())
+}
+
+/// Whether `target` signs its thinking, judged by what it has already put in
+/// this conversation. An unsigned block is only rejected by a model that
+/// verifies signatures, and nothing in the request declares which models
+/// those are, so this is the one piece of evidence there is. No evidence
+/// reads as unsigned, and the sampler's strip-and-retry covers a wrong guess.
+fn target_signs_thinking(items: &[ConversationItem], target: &str) -> bool {
+    items.iter().enumerate().any(|(idx, item)| {
+        matches!(item, ConversationItem::Reasoning(r) if is_signed(r))
+            && reasoning_origin_model(items, idx).is_some_and(|origin| same_model(origin, target))
+    })
+}
+
+/// Whether the reasoning at `idx` has to be left behind when the request goes
+/// to `target`. Only a signature is at stake: it is verified against the model
+/// that minted it, so a signed block cannot cross a switch, and a model that
+/// verifies signatures rejects an unsigned block just as hard. Thinking that
+/// is plain text on both sides is nothing either end validates, so a switch
+/// between two such models replays it untouched. Provenance the history never
+/// recorded is replayed as before.
+fn thinking_is_foreign(
+    items: &[ConversationItem],
+    idx: usize,
+    r: &crate::rs::ReasoningItem,
+    target: Option<&str>,
+    target_signs: bool,
+) -> bool {
+    let (Some(target), Some(origin)) = (target, reasoning_origin_model(items, idx)) else {
+        return false;
+    };
+    !same_model(origin, target) && (is_signed(r) || target_signs)
+}
+
 /// Whether the conversation ends mid-tool-loop on a turn whose thinking block
 /// another model minted. A provider validates the thinking of a tool-calling
 /// turn it is being asked to continue ("thinking blocks cannot be modified",
@@ -140,24 +180,24 @@ fn open_tool_loop_lost_its_thinking(req: &ConversationRequest) -> bool {
         }
     }
     let Some(open) = open else { return false };
-    let ConversationItem::Assistant(assistant) = &req.items[open] else {
-        return false;
-    };
-    let Some(origin) = assistant.model_id.as_deref() else {
-        return false;
-    };
+    let target_signs = target_signs_thinking(&req.items, target);
 
-    !same_model(origin, target)
-        && req.items[..open]
-            .iter()
-            .rev()
-            .take_while(|item| {
-                matches!(
-                    item,
-                    ConversationItem::Reasoning(_) | ConversationItem::BackendToolCall(_)
-                )
-            })
-            .any(|item| matches!(item, ConversationItem::Reasoning(_)))
+    req.items[..open]
+        .iter()
+        .enumerate()
+        .rev()
+        .take_while(|(_, item)| {
+            matches!(
+                item,
+                ConversationItem::Reasoning(_) | ConversationItem::BackendToolCall(_)
+            )
+        })
+        .any(|(idx, item)| match item {
+            ConversationItem::Reasoning(r) => {
+                thinking_is_foreign(&req.items, idx, r, Some(target), target_signs)
+            }
+            _ => false,
+        })
 }
 
 /// Convert a `ConversationRequest` into a Messages API request.
@@ -257,6 +297,10 @@ pub fn build_messages_request(req: &ConversationRequest) -> crate::messages::Mes
     // Thinking off for this request takes its blocks with it: a block sent
     // without the top-level config is rejected in turn.
     let thinking_off = open_tool_loop_lost_its_thinking(req);
+    let target_signs = req
+        .model
+        .as_deref()
+        .is_some_and(|target| target_signs_thinking(&req.items, target));
 
     for (idx, item) in req.items.iter().enumerate() {
         match item {
@@ -361,19 +405,8 @@ pub fn build_messages_request(req: &ConversationRequest) -> crate::messages::Mes
                 if thinking.is_empty() && signature.is_empty() {
                     continue;
                 }
-                // A signature is only valid for the model that minted it, so a
-                // conversation carried onto another model has to leave its
-                // thinking behind rather than have every turn 400. Provenance
-                // the history never recorded is replayed as before; the
-                // strip-and-retry in the sampler covers a server that
-                // disagrees.
-                let foreign = matches!(
-                    (
-                        req.model.as_deref(),
-                        reasoning_origin_model(&req.items, idx),
-                    ),
-                    (Some(target), Some(origin)) if !same_model(origin, target)
-                );
+                let foreign =
+                    thinking_is_foreign(&req.items, idx, r, req.model.as_deref(), target_signs);
                 if foreign || thinking_off {
                     dropped_foreign_thinking += 1;
                     continue;
