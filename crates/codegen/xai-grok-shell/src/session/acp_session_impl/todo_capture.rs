@@ -229,6 +229,26 @@ fn capture_action(
     CaptureAction::Read
 }
 
+/// The items one model response contributes to the next turn's request: the
+/// response echoed the way the main turn records it (`turn.rs` pushes every
+/// item, assistant and otherwise), not a synthesized assistant message.
+///
+/// Reasoning items are what make this worth a function. The Responses API
+/// rejects a continuation whose reasoning is missing from the call it belongs
+/// to, and hosted-search items have to ride along for the next request to make
+/// sense — but the Messages API rejects thinking blocks it was not configured
+/// for, which is the one backend that strips.
+fn echoed_response_items(
+    items: Vec<ConversationItem>,
+    strip_reasoning: bool,
+) -> Vec<ConversationItem> {
+    if strip_reasoning {
+        xai_chat_state::compaction_utils::strip_reasoning_blocks(items)
+    } else {
+        items
+    }
+}
+
 /// The one nudge a run spends when the model answers with prose instead of
 /// calling the todo tool. Cheaper models do this; a second empty answer is
 /// taken as "this model will not call it" rather than nudged again.
@@ -338,17 +358,7 @@ impl SessionActor {
             log_prompt_cache_hit("todo", sampling_client.api_backend(), &response);
 
             let calls: Vec<ToolCall> = response.tool_calls().to_vec();
-            // Feed the response back the way the main turn records it — every
-            // item, in order, not a synthesized assistant message. The Responses
-            // API rejects a continuation whose reasoning items are missing, and
-            // a hosted search's own items have to ride along for the next
-            // request to make sense at all.
-            let echoed = if strip_reasoning {
-                xai_chat_state::compaction_utils::strip_reasoning_blocks(response.items)
-            } else {
-                response.items
-            };
-            items.extend(echoed);
+            items.extend(echoed_response_items(response.items, strip_reasoning));
 
             if calls.is_empty() {
                 // A model that answered in prose gets exactly one correction.
@@ -651,6 +661,44 @@ mod tests {
             capture_action(TODO_WRITE, None, "TodoWrite", 0),
             CaptureAction::Refuse(_)
         ));
+    }
+
+    /// A capture turn continues a tool call it made itself, so what the model
+    /// returned has to go back verbatim. Dropping the reasoning that came with
+    /// a call is what the Responses API rejects the continuation over; dropping
+    /// a hosted search's items leaves the next request describing a search that
+    /// never happened.
+    #[test]
+    fn a_response_is_echoed_whole_unless_the_backend_strips() {
+        let response = vec![
+            ConversationItem::Reasoning(xai_grok_sampling_types::synthesized_reasoning_item(
+                "which file owns the push",
+            )),
+            ConversationItem::assistant_tool_calls(vec![ToolCall {
+                id: "call_todo_1".into(),
+                name: "grep".to_string(),
+                arguments: r#"{"pattern":"git push"}"#.into(),
+            }]),
+        ];
+
+        let kept = echoed_response_items(response.clone(), false);
+        assert_eq!(kept.len(), 2, "every item rides along by default");
+        assert!(matches!(kept[0], ConversationItem::Reasoning(_)));
+
+        // Messages is the one backend that cannot take the reasoning.
+        let stripped = echoed_response_items(response, true);
+        assert!(
+            !stripped
+                .iter()
+                .any(|i| matches!(i, ConversationItem::Reasoning(_))),
+            "reasoning must be stripped where the backend rejects it"
+        );
+        assert!(
+            stripped
+                .iter()
+                .any(|i| matches!(i, ConversationItem::Assistant(a) if !a.tool_calls.is_empty())),
+            "stripping reasoning must not take the call with it"
+        );
     }
 
     /// What models actually emit for arguments: nothing, a run of concatenated
