@@ -509,3 +509,41 @@ fn upgrade_legacy_reasoning_singular_anthropic_no_id() {
     assert_eq!(r.id, "");
     assert_eq!(r.encrypted_content.as_deref(), Some("signature-bytes-here"));
 }
+
+/// The Messages API is the one backend that rejects thinking blocks it was not
+/// configured for, so the capture loop strips reasoning from its own turns
+/// there too — and the tool_use / tool_result pair it built by hand still maps.
+#[test]
+fn todo_capture_loop_strips_reasoning_and_keeps_the_tool_pair() {
+    let request = build_messages_request(
+        &ConversationRequest::from_items(todo_capture_loop_items(true))
+            .with_model("messages-compatible-model"),
+    );
+    let json = serde_json::to_value(&request).unwrap();
+    let blocks: Vec<&serde_json::Value> = json["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|m| m["content"].as_array())
+        .flatten()
+        .collect();
+
+    assert!(
+        !blocks
+            .iter()
+            .any(|b| b["type"] == "thinking" || b["type"] == "redacted_thinking"),
+        "no thinking blocks may reach the Messages API here: {json:#}"
+    );
+    assert!(
+        blocks
+            .iter()
+            .any(|b| b["type"] == "tool_use" && b["id"] == "call_todo_1"),
+        "the loop's own tool_use must survive: {json:#}"
+    );
+    assert!(
+        blocks
+            .iter()
+            .any(|b| b["type"] == "tool_result" && b["tool_use_id"] == "call_todo_1"),
+        "the tool result the loop fed back must survive: {json:#}"
+    );
+}

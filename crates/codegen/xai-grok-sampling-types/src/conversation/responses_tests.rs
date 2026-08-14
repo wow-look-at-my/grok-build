@@ -1707,3 +1707,38 @@ fn serialized_body_contains_no_placeholder_strings() {
         "both reasoning siblings must be present"
     );
 }
+
+/// A `/todo` capture continues a tool call it made itself, so the reasoning
+/// that came with that call has to ride along: the Responses API rejects a
+/// continuation whose reasoning items are missing. Synthesizing the assistant
+/// message instead of echoing the response dropped them.
+#[test]
+fn todo_capture_loop_keeps_reasoning_with_its_function_call() {
+    let req = ConversationRequest::from_items(todo_capture_loop_items(false));
+    let resp: rs::CreateResponse = (&req).into();
+    let rs::InputParam::Items(input_items) = &resp.input else {
+        panic!("Expected InputParam::Items");
+    };
+
+    let reasoning_at = input_items
+        .iter()
+        .position(|item| matches!(item, rs::InputItem::Item(rs::Item::Reasoning(_))))
+        .expect("the echoed reasoning item must survive into the request");
+    let call_at = input_items
+        .iter()
+        .position(|item| {
+            matches!(item, rs::InputItem::Item(rs::Item::FunctionCall(fc)) if fc.call_id == "call_todo_1")
+        })
+        .expect("the loop's own function call must survive");
+    let output_at = input_items
+        .iter()
+        .position(|item| {
+            matches!(item, rs::InputItem::Item(rs::Item::FunctionCallOutput(fco)) if fco.call_id == "call_todo_1")
+        })
+        .expect("the tool result the loop fed back must survive");
+    assert!(
+        reasoning_at < call_at && call_at < output_at,
+        "reasoning must precede its call, which must precede its output; \
+         got {reasoning_at} / {call_at} / {output_at}"
+    );
+}

@@ -14,7 +14,7 @@ use super::cta::{
     handle_plugin_cta_mcps_loaded,
 };
 use super::ctx::{find_agent_by_session_id, get_active_agent_mut};
-use super::notes::{handle_btw_response, handle_memory_note_saved};
+use super::notes::{handle_btw_response, handle_memory_note_saved, handle_todo_captured};
 use super::prompt::{
     defer_to_open_reload_window, handle_compact_complete, handle_prompt_response,
     handle_suggestion_debounce_expired,
@@ -1209,6 +1209,11 @@ pub(super) fn dispatch_task_result(result: TaskResult, app: &mut AppView) -> Vec
             result,
             minimal_request_id,
         } => handle_btw_response(app, agent_id, result, minimal_request_id),
+        TaskResult::TodoCaptured {
+            agent_id,
+            request,
+            result,
+        } => handle_todo_captured(app, agent_id, request, result),
         TaskResult::InterjectQueued { .. } => vec![],
         TaskResult::RecapRequested {
             session_id,
