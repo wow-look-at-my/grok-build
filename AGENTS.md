@@ -99,6 +99,11 @@ verify serially wastes time when a parallel CI build could be running.
 - That last case is why the sampler also treats the 400 as recoverable:
   `RetryDecision::RetryWithReasoningStrip` drops the replayed reasoning and
   retries once, so history predating the check is not dead-ended.
+- A conversation that ends mid-tool-loop on a turn the switch stripped goes out
+  with thinking off entirely (`open_tool_loop_lost_its_thinking`): a provider
+  validates the thinking of the tool-calling turn it is continuing, and a
+  config-less thinking block is rejected in turn. Reasoning effort is untouched
+  and the next turn pairs normally.
 
 ## Why build-test is not on the self-hosted runner
 
