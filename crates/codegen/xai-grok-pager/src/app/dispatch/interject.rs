@@ -23,7 +23,6 @@ pub(super) fn dispatch_interject(
     app: &mut AppView,
     text: String,
     images: Vec<crate::prompt_images::PastedImage>,
-    interrupt: bool,
 ) -> Vec<Effect> {
     // Hard-reset only — `text` may not be from the composer.
     let _ = voice_stop_on_submit(app);
@@ -59,11 +58,7 @@ pub(super) fn dispatch_interject(
     // text (the InterjectPrompt registry arm) clears it at the call site;
     // every other producer (Send now, edit-interject, plan review comments)
     // carries non-composer text and must keep the user's draft/stash.
-    agent.show_toast(if interrupt {
-        "Interjection sent"
-    } else {
-        "Sending at the next step"
-    });
+    agent.show_toast("Interjection sent");
 
     // Image-bearing interjection: build text + image content blocks via the
     // same helper as the queued-prompt drain path (orphan-placeholder
@@ -84,26 +79,24 @@ pub(super) fn dispatch_interject(
         text,
         interjection_id,
         blocks,
-        interrupt,
     }]
 }
 
-/// Promote the whole queue to as-soon-as-possible delivery (bare Enter on an
-/// empty composer while busy).
+/// Interrupt the running turn with the whole queue (bare Enter on an empty
+/// composer while busy).
 ///
-/// Server-owned rows ride one `x.ai/queue/deliver_now`: the shell moves them
-/// into the running turn's interjection buffer, which it drains before its
-/// next model request. Local rows the shell has never seen (image prompts,
-/// skill-expanded slash rows, anything queued before the session bound) are
-/// sent as interjections here, with `interrupt: false` so they land the same
-/// way. The response in flight finishes either way — this gesture reorders
-/// when a queued row is read, it does not stop the model talking.
+/// Server-owned rows ride one `x.ai/queue/deliver_now`: the shell harvests
+/// them into the running turn and cancels the in-flight model stream, so the
+/// model stops mid-response and reads them. Local rows the shell has never
+/// seen (image prompts, skill-expanded slash rows, anything queued before the
+/// session bound) are sent as interjections here, which cancels the same
+/// stream shell-side.
 ///
 /// Rows that own their own turn — bash commands, client-expanded slash
 /// payloads — cannot be folded into another turn as user text, so they stay
 /// queued and run when this turn ends. That is named in the toast rather than
 /// left for the user to notice.
-pub(super) fn dispatch_deliver_queued_prompts_asap(app: &mut AppView) -> Vec<Effect> {
+pub(super) fn dispatch_interrupt_with_queued_prompts(app: &mut AppView) -> Vec<Effect> {
     let ActiveView::Agent(id) = app.active_view else {
         return vec![];
     };
@@ -180,26 +173,24 @@ pub(super) fn dispatch_deliver_queued_prompts_asap(app: &mut AppView) -> Vec<Eff
             continue;
         };
         sent_local += 1;
-        // `false`: promotion, not interruption — a local row must not cut the
-        // stream short when the identical server-owned row would not.
-        effects.extend(dispatch_interject(app, prompt.text, prompt.images, false));
+        effects.extend(dispatch_interject(app, prompt.text, prompt.images));
     }
 
     let delivered_any = server_rows > 0 || sent_local > 0;
     let stuck_any = stuck_server > 0 || !stuck_local.is_empty();
     if let Some(agent) = app.agents.get_mut(&id) {
         agent.show_toast(match (delivered_any, stuck_any) {
-            (true, false) => "Sending queued messages at the next step",
+            (true, false) => "Interrupting — sending queued messages",
             (true, true) => {
-                "Queued messages sent at the next step; bash/command rows run when this turn ends"
+                "Interrupting — messages sent; bash/command rows run when this turn ends"
             }
             // Only rows that own their turn are queued: nothing can be folded
-            // into this turn, so say that instead of claiming a delivery.
+            // into this turn, so say that instead of claiming an interrupt.
             (false, _) => "Nothing to send now — bash/command rows run when this turn ends",
         });
     }
     crate::unified_log::info(
-        "prompt.deliver_queue_asap",
+        "prompt.interrupt_with_queue",
         Some(session_id.0.as_ref()),
         Some(serde_json::json!({
             "server_rows": server_rows,

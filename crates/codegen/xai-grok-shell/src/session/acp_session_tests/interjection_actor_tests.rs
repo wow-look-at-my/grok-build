@@ -675,7 +675,7 @@ async fn harvest_leaves_rows_queued_before_the_turn_started() {
         .await;
 }
 
-/// `DeliverQueuedPromptsAsap` (bare Enter on an empty composer) means "every
+/// `DeliverQueuedPromptsNow` (bare Enter on an empty composer) means "every
 /// message I can see, as soon as you can": the pre-turn row that the turn
 /// loop's own harvest leaves alone is delivered too. Rows that own their turn still stay queued —
 /// forcing does not make a bash row model-visible.
@@ -718,7 +718,7 @@ async fn forced_harvest_delivers_rows_queued_before_the_turn_started() {
 /// running is picked up by the turn loop's OWN harvest — the one it runs
 /// before each model request, with no user gesture behind it — and lands in
 /// the interjection buffer the next request drains. No second Enter, and no
-/// `DeliverQueuedPromptsAsap`, is involved anywhere in this path.
+/// `DeliverQueuedPromptsNow`, is involved anywhere in this path.
 #[tokio::test]
 async fn a_row_arriving_mid_turn_reaches_the_asap_buffer_unprompted() {
     let local = tokio::task::LocalSet::new();

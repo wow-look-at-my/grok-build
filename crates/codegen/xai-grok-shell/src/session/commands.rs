@@ -678,17 +678,14 @@ pub enum SessionCommand {
         /// no-ops the whole thing, edited text included).
         new_text: Option<String>,
     },
-    /// Promote every deliverable queued prompt into the running turn's
-    /// interjection buffer, so the turn loop hands them to the model at its
-    /// next request instead of holding them for their own turns. The user
-    /// gesture behind it is "read this as soon as you come up for air", NOT
-    /// "stop talking": the in-flight model stream is left alone and finishes
-    /// normally. Cancelling mid-stream is the separate, explicit send-now
-    /// gesture ([`Self::InterjectQueuedPrompt`]).
+    /// Deliver every deliverable queued prompt into the running turn NOW and
+    /// cancel the in-flight model stream so the turn loop drains them before
+    /// its next request instead of at its next natural safe point. The user
+    /// gesture behind it is "stop what you are saying and read this".
     /// A benign no-op when no turn is running or nothing queued is
     /// deliverable (see `SessionActor::deliverable_mid_turn`); those rows stay
     /// queued and run as their own turns.
-    DeliverQueuedPromptsAsap,
+    DeliverQueuedPromptsNow,
     Cancel(CancelOptions),
     Shutdown(ShutdownKind),
     /// Force-trigger a feedback request notification for local client testing.
@@ -781,10 +778,10 @@ pub enum SessionCommand {
         context_summary: String,
         respond_to: oneshot::Sender<Result<String, String>>,
     },
-    /// Inject a user message into the active turn. The text is queued in
-    /// `pending_interjections` and drained at the next safe point in
-    /// `process_conversation_turn`.  Fire-and-forget: no response channel
-    /// needed since the command just pushes to a Mutex.
+    /// Inject a user message into the active turn without canceling it.
+    /// The text is queued in `pending_interjections` and drained at the
+    /// next safe point in `process_conversation_turn`.  Fire-and-forget:
+    /// no response channel needed since the command just pushes to a Mutex.
     Interject {
         text: String,
         /// Client-minted id echoed back on the broadcast
@@ -794,14 +791,6 @@ pub enum SessionCommand {
         /// Pasted images riding along with the interjection. Empty from
         /// text-only / older clients.
         images: Vec<acp::ImageContent>,
-        /// Whether to cancel the in-flight model stream so the text lands
-        /// immediately instead of at the next model request. True for the
-        /// explicit interject gesture (the user typed this AT the running
-        /// turn); false when a queued row is merely being promoted to
-        /// as-soon-as-possible delivery, where interrupting is the bug this
-        /// flag exists to prevent. Absent on the wire = true, which is the
-        /// pre-flag behaviour of every older client.
-        interrupt: bool,
     },
     /// Trigger a model turn so the model can print a visible goal progress
     /// summary.  The goal orchestrator injects a system reminder into context

@@ -974,15 +974,14 @@ pub(super) async fn run_session(
                             }
                             SessionActor::maybe_start_running_task(session.clone(), completion_tx.clone()).await;
                         }
-                        SessionCommand::DeliverQueuedPromptsAsap => {
-                            // Promotion, not interruption: the harvest alone
-                            // moves these rows onto the next model request,
-                            // which is the earliest the model can read them
-                            // without throwing away the response it is already
-                            // streaming. Cancelling here is what made a queued
-                            // follow-up truncate the answer it was following up
-                            // on.
-                            session.harvest_queued_prompts_into_interjections(true).await;
+                        SessionCommand::DeliverQueuedPromptsNow => {
+                            // The user asked for the queue NOW, so the stream
+                            // the model is mid-way through is what they are
+                            // interrupting. Harvest first: the cancel only pays
+                            // off if there is something to drain after it.
+                            if session.harvest_queued_prompts_into_interjections(true).await {
+                                session.cancel_in_flight_stream_for_interjection();
+                            }
                         }
                         SessionCommand::Cancel(options) => {
                             // Flush the actor-owned replay buffer before tearing
@@ -1945,7 +1944,7 @@ pub(super) async fn run_session(
                                 let _ = respond_to.send(result);
                             });
                         }
-                        SessionCommand::Interject { text, id, images, interrupt } => {
+                        SessionCommand::Interject { text, id, images } => {
                             // Broadcast to every attached client so all panes
                             // viewing this session render the interjection block
                             // — not just the originating client. The originator
@@ -1977,10 +1976,8 @@ pub(super) async fn run_session(
                                     text,
                                     attachments: images,
                                 });
-                                tracing::info!(interrupt, "Queued mid-turn interjection");
-                                if interrupt {
-                                    session.cancel_in_flight_stream_for_interjection();
-                                }
+                                tracing::info!("Queued mid-turn interjection");
+                                session.cancel_in_flight_stream_for_interjection();
                             } else {
                                 session
                                     .queue_interjection_fallback_prompt(text, images, true)

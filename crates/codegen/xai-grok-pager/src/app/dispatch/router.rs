@@ -83,9 +83,9 @@ use super::settings::setters::{
     set_display_refresh_auto_cadence, set_fork_secondary_model, set_group_tool_verbs,
     set_hunk_tracker_mode, set_invert_scroll, set_keep_text_selection, set_max_thoughts_width,
     set_multiline_mode, set_openai_compatible_api_backend, set_openai_compatible_api_key,
-    set_openai_compatible_base_url, set_openai_compatible_enabled,
-    set_openai_compatible_make_default, set_openai_compatible_model, set_page_flip_on_send,
-    set_prompt_suggestions, set_remember_tool_approvals, set_render_mermaid,
+    set_openai_compatible_base_url,
+    set_openai_compatible_enabled, set_openai_compatible_make_default, set_openai_compatible_model,
+    set_page_flip_on_send, set_prompt_suggestions, set_remember_tool_approvals, set_render_mermaid,
     set_respect_manual_folds, set_screen_mode, set_scroll_lines, set_scroll_mode, set_scroll_speed,
     set_show_thinking_blocks, set_show_tips, set_simple_mode, set_theme, set_timeline,
     set_timestamps, set_vim_mode, set_voice_capture_mode, set_voice_keybind_enabled,
@@ -381,7 +381,7 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
         Action::SendPrompt(text) => {
             // Hand any stuck local rows to the shell first, so this prompt is
             // eligible for the shell's queue — the only queue the running turn
-            // harvests. Ordering holds: these rows are older, and they land
+            // harvests. Ordering holds: those rows are older, and they land
             // ahead of this one. See `migrate_local_rows_to_server_queue`.
             let mut effects = queue::migrate_local_rows_to_server_queue(app);
             effects.extend(dispatch_send_prompt(app, text));
@@ -391,8 +391,7 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
         Action::SendSlashCommandPreservingDraft(text) => {
             dispatch_send_prompt_inner(app, text, false, false, false)
         }
-        // The user typed this AT the running turn, so it interrupts.
-        Action::Interject { text, images } => dispatch_interject(app, text, images, true),
+        Action::Interject { text, images } => dispatch_interject(app, text, images),
         Action::SendPromptNow { text, images } => {
             super::interject::dispatch_send_prompt_now(app, text, images)
         }
@@ -452,8 +451,8 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
             expected_version,
             new_text,
         } => queue::dispatch_queue_interject_shared(app, id, expected_version, new_text),
-        Action::DeliverQueuedPromptsAsap => {
-            super::interject::dispatch_deliver_queued_prompts_asap(app)
+        Action::InterruptWithQueuedPrompts => {
+            super::interject::dispatch_interrupt_with_queued_prompts(app)
         }
         Action::FocusPrompt => {
             with_active_agent(app, |agent| {

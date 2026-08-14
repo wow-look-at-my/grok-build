@@ -21,16 +21,6 @@ struct InterjectRequest {
     /// clients; absent = legacy text-only wire shape (empty after default).
     #[serde(default)]
     content: Vec<acp::ContentBlock>,
-    /// Whether to cut the in-flight model stream short so this text lands
-    /// now. Absent = true, the behaviour every client had before the field
-    /// existed; a client sends false to queue the text for the next model
-    /// request instead (see [`SessionCommand::Interject`]).
-    #[serde(default = "default_interrupt")]
-    interrupt: bool,
-}
-
-fn default_interrupt() -> bool {
-    true
 }
 
 /// Split a `content` array into the model-safe text and the image blocks.
@@ -65,7 +55,6 @@ pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
         text: text_override.unwrap_or(req.text),
         id: req.interjection_id,
         images,
-        interrupt: req.interrupt,
     });
 
     super::to_ext_response(Ok(serde_json::json!({

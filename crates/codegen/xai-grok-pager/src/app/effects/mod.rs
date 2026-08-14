@@ -3734,7 +3734,6 @@ pub(crate) fn execute(
             text,
             interjection_id,
             blocks,
-            interrupt,
         } => {
             let tx = acp_tx.clone();
             tasks
@@ -3744,7 +3743,6 @@ pub(crate) fn execute(
                         &text,
                         &interjection_id,
                         blocks.as_deref(),
-                        interrupt,
                     );
                     let request = acp::ExtRequest::new(
                         "x.ai/interject",
@@ -4709,20 +4707,12 @@ fn build_interject_params(
     text: &str,
     interjection_id: &str,
     blocks: Option<&[acp::ContentBlock]>,
-    interrupt: bool,
 ) -> serde_json::Value {
     let mut params = serde_json::json!({
         "sessionId": session_id.0.to_string(),
         "text": text,
         "interjectionId": interjection_id,
     });
-    // Absent means "cancel the stream" on the shell, so the interrupting case
-    // is the legacy shape byte-for-byte and only the quiet one says so. A
-    // shell too old to read the field cancels either way — the behaviour this
-    // client had before the field existed.
-    if !interrupt {
-        params["interrupt"] = serde_json::Value::Bool(false);
-    }
     if let Some(blocks) = blocks {
         params["content"] = serde_json::to_value(blocks)
             .expect("serialize interject content");

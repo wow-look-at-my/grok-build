@@ -3908,7 +3908,7 @@ async fn ext_notification_forwards_each_queue_method_to_session_actor() {
                 assert_eq!(owner.as_deref(), Some("grok-tui"));
                 assert_eq!(new_text.as_deref(), Some("now"));
             }
-            ("x.ai/queue/deliver_now", SessionCommand::DeliverQueuedPromptsAsap) => {}
+            ("x.ai/queue/deliver_now", SessionCommand::DeliverQueuedPromptsNow) => {}
             ("x.ai/queue/hold_edit", SessionCommand::HoldCombineEdit { id }) => {
                 assert_eq!(id, "p-hold");
             }

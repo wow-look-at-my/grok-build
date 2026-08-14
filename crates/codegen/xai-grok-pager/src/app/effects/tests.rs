@@ -115,15 +115,11 @@ fn prompt_request_meta_omits_screen_mode_when_unset() {
 #[test]
 fn interject_params_omit_content_when_no_blocks() {
     let sid = acp::SessionId::new("s1");
-    let params = build_interject_params(&sid, "steer", "i1", None, true);
+    let params = build_interject_params(&sid, "steer", "i1", None);
     let obj = params.as_object().unwrap();
     assert!(!obj.contains_key("content"), "content key must be absent");
     assert_eq!(obj["sessionId"], "s1");
     assert_eq!(obj["text"], "steer");
-    assert!(
-        !obj.contains_key("interrupt"),
-        "interrupting IS the legacy shape — absent already means cancel"
-    );
     assert_eq!(obj["interjectionId"], "i1");
     assert_eq!(obj.len(), 3, "no extra keys on the legacy shape");
 }
@@ -400,11 +396,6 @@ fn interject_params_carry_content_when_blocks_present() {
         "look at [Image #1]",
         "i1",
         Some(blocks.as_slice()),
-        false,
-    );
-    assert_eq!(
-        params["interrupt"], false,
-        "a promoted queue row rides the same wire without cancelling the stream"
     );
     let content = params["content"].as_array().expect("content array");
     assert_eq!(content.len(), 1);

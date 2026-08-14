@@ -7995,10 +7995,7 @@ pub(crate) mod tests {
         }
         let out = app.handle_input(&key_event(KeyCode::Char('o'), KeyModifiers::CONTROL));
         assert!(
-            matches!(
-                out,
-                InputOutcome::Action(Action::DeliverQueuedPromptsAsap)
-            ),
+            matches!(out, InputOutcome::Action(Action::InterruptWithQueuedPrompts)),
             "running + empty + queue: Apple-Terminal Ctrl+O must interrupt with the queue, \
              got {out:?}"
         );
@@ -10081,9 +10078,9 @@ pub(crate) mod tests {
         let id = super::super::agent::AgentId(0);
         let agent = app.agents.get_mut(&id).unwrap();
         agent.scrollback.push(
-            crate::scrollback::ScrollbackEntry::new(crate::scrollback::RenderBlock::agent_message(
-                "priced message",
-            ))
+            crate::scrollback::ScrollbackEntry::new(
+                crate::scrollback::RenderBlock::agent_message("priced message"),
+            )
             .with_cost_usd_ticks(Some(1_000_000_000)),
         );
         agent
