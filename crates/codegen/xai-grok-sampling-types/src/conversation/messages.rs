@@ -117,6 +117,49 @@ fn reasoning_origin_model(items: &[ConversationItem], reasoning_idx: usize) -> O
         .flatten()
 }
 
+/// Whether the conversation ends mid-tool-loop on a turn whose thinking block
+/// another model minted. A provider validates the thinking of a tool-calling
+/// turn it is being asked to continue ("thinking blocks cannot be modified",
+/// and thinking-on requires that turn to lead with one), and the block is
+/// exactly what a model switch takes away. Neither half is recoverable, so the
+/// whole request goes out with thinking off; the next turn is this model's own
+/// and pairs normally.
+fn open_tool_loop_lost_its_thinking(req: &ConversationRequest) -> bool {
+    let Some(target) = req.model.as_deref() else {
+        return false;
+    };
+    // The last tool-calling assistant with nothing but its results behind it.
+    let mut open = None;
+    for (idx, item) in req.items.iter().enumerate() {
+        match item {
+            ConversationItem::Assistant(a) if !a.tool_calls.is_empty() => open = Some(idx),
+            ConversationItem::Assistant(_)
+            | ConversationItem::User(_)
+            | ConversationItem::System(_) => open = None,
+            _ => {}
+        }
+    }
+    let Some(open) = open else { return false };
+    let ConversationItem::Assistant(assistant) = &req.items[open] else {
+        return false;
+    };
+    let Some(origin) = assistant.model_id.as_deref() else {
+        return false;
+    };
+
+    !same_model(origin, target)
+        && req.items[..open]
+            .iter()
+            .rev()
+            .take_while(|item| {
+                matches!(
+                    item,
+                    ConversationItem::Reasoning(_) | ConversationItem::BackendToolCall(_)
+                )
+            })
+            .any(|item| matches!(item, ConversationItem::Reasoning(_)))
+}
+
 /// Convert a `ConversationRequest` into a Messages API request.
 pub fn build_messages_request(req: &ConversationRequest) -> crate::messages::MessagesRequest {
     use crate::messages::{
@@ -211,6 +254,9 @@ pub fn build_messages_request(req: &ConversationRequest) -> crate::messages::Mes
     };
 
     let mut dropped_foreign_thinking = 0usize;
+    // Thinking off for this request takes its blocks with it: a block sent
+    // without the top-level config is rejected in turn.
+    let thinking_off = open_tool_loop_lost_its_thinking(req);
 
     for (idx, item) in req.items.iter().enumerate() {
         match item {
@@ -321,11 +367,14 @@ pub fn build_messages_request(req: &ConversationRequest) -> crate::messages::Mes
                 // the history never recorded is replayed as before; the
                 // strip-and-retry in the sampler covers a server that
                 // disagrees.
-                if let (Some(target), Some(origin)) = (
-                    req.model.as_deref(),
-                    reasoning_origin_model(&req.items, idx),
-                ) && !same_model(origin, target)
-                {
+                let foreign = matches!(
+                    (
+                        req.model.as_deref(),
+                        reasoning_origin_model(&req.items, idx),
+                    ),
+                    (Some(target), Some(origin)) if !same_model(origin, target)
+                );
+                if foreign || thinking_off {
                     dropped_foreign_thinking += 1;
                     continue;
                 }
@@ -344,6 +393,7 @@ pub fn build_messages_request(req: &ConversationRequest) -> crate::messages::Mes
         tracing::warn!(
             dropped = dropped_foreign_thinking,
             model = req.model.as_deref().unwrap_or_default(),
+            thinking_off,
             "dropped thinking block(s) minted by another model; this model cannot verify their signatures"
         );
     }
@@ -398,6 +448,7 @@ pub fn build_messages_request(req: &ConversationRequest) -> crate::messages::Mes
     // thinking is driven by reasoning_effort only, not by json_schema.
     let thinking = effort
         .as_ref()
+        .filter(|_| !thinking_off)
         .map(|_| crate::messages::ThinkingConfig::Adaptive {
             display: Some(crate::messages::ThinkingDisplay::Summarized),
         });
