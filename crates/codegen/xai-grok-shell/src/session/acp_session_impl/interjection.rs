@@ -116,9 +116,12 @@ impl SessionActor {
     /// before this turn existed — each is its own task, not a note about this
     /// turn's work — so the turn loop's own harvest
     /// (`include_queued_at_turn_start = false`) leaves them to run as their own
-    /// turns. The explicit "deliver the queue now" gesture passes `true`: the
-    /// user asked for everything they can see, and waiting for a row's own turn
-    /// is exactly what they are cutting short.
+    /// turns. The explicit "deliver the queue" gesture passes `true`: the user
+    /// asked for everything they can see, and waiting for a row's own turn is
+    /// exactly what they are cutting short.
+    ///
+    /// Harvesting never cancels anything. The rows ride the next model request,
+    /// whenever the turn loop reaches one.
     ///
     /// Returns whether anything moved. A harvested row never runs as its own
     /// turn: its RPC resolves [`PromptCompletionKind::RemovedFromQueue`], the

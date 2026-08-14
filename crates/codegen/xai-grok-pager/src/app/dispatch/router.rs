@@ -383,7 +383,8 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
         Action::SendSlashCommandPreservingDraft(text) => {
             dispatch_send_prompt_inner(app, text, false, false, false)
         }
-        Action::Interject { text, images } => dispatch_interject(app, text, images),
+        // The user typed this AT the running turn, so it interrupts.
+        Action::Interject { text, images } => dispatch_interject(app, text, images, true),
         Action::SendPromptNow { text, images } => {
             super::interject::dispatch_send_prompt_now(app, text, images)
         }
@@ -443,8 +444,8 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
             expected_version,
             new_text,
         } => queue::dispatch_queue_interject_shared(app, id, expected_version, new_text),
-        Action::InterruptWithQueuedPrompts => {
-            super::interject::dispatch_interrupt_with_queued_prompts(app)
+        Action::DeliverQueuedPromptsAsap => {
+            super::interject::dispatch_deliver_queued_prompts_asap(app)
         }
         Action::FocusPrompt => {
             with_active_agent(app, |agent| {

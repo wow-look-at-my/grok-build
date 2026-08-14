@@ -7995,7 +7995,7 @@ pub(crate) mod tests {
         }
         let out = app.handle_input(&key_event(KeyCode::Char('o'), KeyModifiers::CONTROL));
         assert!(
-            matches!(out, InputOutcome::Action(Action::InterruptWithQueuedPrompts)),
+            matches!(out, InputOutcome::Action(Action::DeliverQueuedPromptsAsap)),
             "running + empty + queue: Apple-Terminal Ctrl+O must interrupt with the queue, \
              got {out:?}"
         );

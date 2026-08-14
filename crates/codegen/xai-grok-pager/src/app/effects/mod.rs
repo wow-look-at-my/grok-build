@@ -3734,6 +3734,7 @@ pub(crate) fn execute(
             text,
             interjection_id,
             blocks,
+            interrupt,
         } => {
             let tx = acp_tx.clone();
             tasks
@@ -3743,6 +3744,7 @@ pub(crate) fn execute(
                         &text,
                         &interjection_id,
                         blocks.as_deref(),
+                        interrupt,
                     );
                     let request = acp::ExtRequest::new(
                         "x.ai/interject",
@@ -4707,11 +4709,15 @@ fn build_interject_params(
     text: &str,
     interjection_id: &str,
     blocks: Option<&[acp::ContentBlock]>,
+    interrupt: bool,
 ) -> serde_json::Value {
     let mut params = serde_json::json!({
         "sessionId": session_id.0.to_string(),
         "text": text,
         "interjectionId": interjection_id,
+        // A shell too old to read this cancels regardless — the pre-flag
+        // behaviour, and the reason the field defaults to true there.
+        "interrupt": interrupt,
     });
     if let Some(blocks) = blocks {
         params["content"] = serde_json::to_value(blocks)

@@ -4692,7 +4692,7 @@ fn empty_enter_mid_turn_interrupts_with_every_queued_row() {
         }];
     crate::app::dispatch::tests::enqueue_local(&mut app, id, "local-owned");
 
-    let effects = dispatch(Action::InterruptWithQueuedPrompts, &mut app);
+    let effects = dispatch(Action::DeliverQueuedPromptsAsap, &mut app);
 
     assert!(
         matches!(&effects[0], Effect::QueueDeliverNow { .. }),
@@ -4715,6 +4715,6 @@ fn interrupt_without_a_queue_sends_nothing() {
     let mut app = test_app_with_agent();
     dispatch(Action::SendPrompt("first".into()), &mut app);
 
-    let effects = dispatch(Action::InterruptWithQueuedPrompts, &mut app);
+    let effects = dispatch(Action::DeliverQueuedPromptsAsap, &mut app);
     assert!(effects.is_empty(), "nothing to deliver: {effects:?}");
 }

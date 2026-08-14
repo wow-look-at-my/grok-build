@@ -69,7 +69,7 @@ pub(super) fn parse_queue_edit_command(
                 new_text,
             })
         }
-        "x.ai/queue/deliver_now" => Some(SessionCommand::DeliverQueuedPromptsNow),
+        "x.ai/queue/deliver_now" => Some(SessionCommand::DeliverQueuedPromptsAsap),
         "x.ai/queue/edit" => {
             let id = params.get("id").and_then(|v| v.as_str())?.to_string();
             let new_text = params.get("newText").and_then(|v| v.as_str())?.to_string();

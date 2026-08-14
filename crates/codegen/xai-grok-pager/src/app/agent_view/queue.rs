@@ -38,25 +38,25 @@ impl AgentView {
         prompt
     }
 
-    /// Interrupt the running turn with everything queued, from the prompt
-    /// (empty composer).
+    /// Promote everything queued to as-soon-as-possible delivery, from the
+    /// prompt (empty composer).
     ///
-    /// The model stops mid-response and reads the queue instead of finishing
-    /// what it was saying — see [`Action::InterruptWithQueuedPrompts`]. Bare
-    /// Enter and the send-now chord share this path; queue-pane selection /
-    /// mouse "Send now" keep intentional single-row semantics. Returns `None`
-    /// when there is nothing queued to send.
+    /// The model finishes the response it is streaming and reads the queue at
+    /// its next request — see [`Action::DeliverQueuedPromptsAsap`]. Bare Enter
+    /// and the send-now chord share this path; queue-pane selection / mouse
+    /// "Send now" keep intentional single-row semantics. Returns `None` when
+    /// there is nothing queued to send.
     ///
-    /// Two exceptions keep the older cancel-and-send route for the top row:
+    /// Two exceptions keep the cancel-and-send route for the top row:
     ///
     /// - A **sendable wait**: the turn is parked in a blocking tool call, so
-    ///   there is no model stream to interrupt and an interjection would sit in
+    ///   there is no next model request coming and an interjection would sit in
     ///   the buffer until the wait ends. Send-now aborts the wait, which is
-    ///   what "now" means while parked.
+    ///   what "as soon as possible" means while parked.
     /// - **Nothing interjectable queued**: a bash row is executed from its
-    ///   block meta, never folded into a turn as user text, so an interrupt has
-    ///   nothing to hand over. Send-now runs it as its own turn instead.
-    pub(super) fn try_interrupt_with_queued_from_prompt(&mut self) -> Option<InputOutcome> {
+    ///   block meta, never folded into a turn as user text, so there is nothing
+    ///   to hand over. Send-now runs it as its own turn instead.
+    pub(super) fn try_deliver_queued_asap_from_prompt(&mut self) -> Option<InputOutcome> {
         if !self.session.state.is_turn_running() {
             return None;
         }
@@ -66,7 +66,7 @@ impl AgentView {
         let outcome = if self.is_parked_on_sendable_wait() || !self.queue_has_interjectable_row() {
             self.force_interject_queue_row(id)
         } else {
-            InputOutcome::Action(Action::InterruptWithQueuedPrompts)
+            InputOutcome::Action(Action::DeliverQueuedPromptsAsap)
         };
         // Acting on the prompt-path send-now while its tip is up is the user
         // accepting the hint — mirrors the undo / image-input funnels so the
@@ -779,13 +779,13 @@ mod queue_edit_routing_tests {
         let mut agent = make_running_agent();
 
         let outcome = agent
-            .try_interrupt_with_queued_from_prompt()
+            .try_deliver_queued_asap_from_prompt()
             .expect("a queued row makes this a send gesture");
 
         assert!(
             matches!(
                 outcome,
-                InputOutcome::Action(Action::InterruptWithQueuedPrompts)
+                InputOutcome::Action(Action::DeliverQueuedPromptsAsap)
             ),
             "expected the interrupt action, got {outcome:?}"
         );
@@ -805,7 +805,7 @@ mod queue_edit_routing_tests {
         agent.session.pending_prompts.clear();
         agent.shared_queue.clear();
 
-        assert!(agent.try_interrupt_with_queued_from_prompt().is_none());
+        assert!(agent.try_deliver_queued_asap_from_prompt().is_none());
     }
 
     /// Parked in a sendable wait there is no model stream to interrupt, and an
@@ -821,7 +821,7 @@ mod queue_edit_routing_tests {
         );
 
         let outcome = agent
-            .try_interrupt_with_queued_from_prompt()
+            .try_deliver_queued_asap_from_prompt()
             .expect("a queued row makes this a send gesture");
 
         match outcome {
@@ -1282,7 +1282,7 @@ mod queue_edit_routing_tests {
         assert!(
             matches!(
                 outcome,
-                InputOutcome::Action(Action::InterruptWithQueuedPrompts)
+                InputOutcome::Action(Action::DeliverQueuedPromptsAsap)
             ),
             "expected the interrupt action, got {outcome:?}"
         );
@@ -1517,7 +1517,7 @@ mod queue_edit_routing_tests {
         assert!(
             matches!(
                 outcome,
-                InputOutcome::Action(Action::InterruptWithQueuedPrompts)
+                InputOutcome::Action(Action::DeliverQueuedPromptsAsap)
             ),
             "expected the interrupt action, got {outcome:?}"
         );
@@ -1542,7 +1542,7 @@ mod queue_edit_routing_tests {
         assert!(
             matches!(
                 outcome,
-                InputOutcome::Action(Action::InterruptWithQueuedPrompts)
+                InputOutcome::Action(Action::DeliverQueuedPromptsAsap)
             ),
             "expected the interrupt action, got {outcome:?}"
         );
@@ -1568,7 +1568,7 @@ mod queue_edit_routing_tests {
         assert!(
             matches!(
                 outcome,
-                InputOutcome::Action(Action::InterruptWithQueuedPrompts)
+                InputOutcome::Action(Action::DeliverQueuedPromptsAsap)
             ),
             "multiline empty Enter must interrupt, got {outcome:?}"
         );
@@ -1646,7 +1646,7 @@ mod queue_edit_routing_tests {
         assert!(
             matches!(
                 outcome,
-                InputOutcome::Action(Action::InterruptWithQueuedPrompts)
+                InputOutcome::Action(Action::DeliverQueuedPromptsAsap)
             ),
             "expected the interrupt action, got {outcome:?}"
         );
@@ -1666,7 +1666,7 @@ mod queue_edit_routing_tests {
         assert!(
             matches!(
                 outcome,
-                InputOutcome::Action(Action::InterruptWithQueuedPrompts)
+                InputOutcome::Action(Action::DeliverQueuedPromptsAsap)
             ),
             "expected the interrupt action, got {outcome:?}"
         );

@@ -275,13 +275,13 @@ pub enum Action {
         /// live on [`Effect::QueueInterject`].
         new_text: Option<String>,
     },
-    /// Interrupt the running turn with everything the user has queued: bare
-    /// Enter on an empty composer while the session is busy. Server-owned rows
-    /// ride [`Effect::QueueDeliverNow`]; local rows the shell has never seen
-    /// are sent as interjections in the same dispatch. Both paths cancel the
-    /// in-flight model stream shell-side, so the model stops mid-response and
-    /// reads the queue instead of finishing what it was saying.
-    InterruptWithQueuedPrompts,
+    /// Promote everything the user has queued to as-soon-as-possible delivery:
+    /// bare Enter on an empty composer while the session is busy. Server-owned
+    /// rows ride [`Effect::QueueDeliverNow`]; local rows the shell has never
+    /// seen are sent as non-interrupting interjections in the same dispatch.
+    /// Neither path cancels the in-flight model stream: the rows join the
+    /// turn's next model request, so the answer in progress still finishes.
+    DeliverQueuedPromptsAsap,
     /// Focus the prompt pane.
     FocusPrompt,
     /// Focus the scrollback pane (leave prompt).
@@ -2031,6 +2031,11 @@ pub enum Effect {
         /// Structured text + image content blocks. `None` for text-only
         /// interjections — the wire shape stays byte-identical to legacy.
         blocks: Option<Vec<acp::ContentBlock>>,
+        /// Whether the shell should cancel the in-flight model stream to land
+        /// this text now. True for text the user aimed at the running turn;
+        /// false for a queued row being promoted to ASAP delivery, which must
+        /// not truncate the response it is following up on.
+        interrupt: bool,
     },
     /// Log out via `x.ai/auth/logout` (shell clears auth.json + in-memory state).
     Logout,
