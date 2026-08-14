@@ -680,6 +680,37 @@ async fn messages_upgrade_drops_a_thinking_block_minted_by_another_model() {
     );
 }
 
+/// End to end on the Messages backend: a gateway that prices the call must
+/// have that price land on the response, so the shell bills the turn at what
+/// was actually charged instead of an estimate off the model's configured
+/// pricing. Anthropic itself sends no price, and the same path must leave the
+/// cost honestly absent rather than reading silence as free.
+#[tokio::test]
+async fn messages_backend_receives_a_gateway_reported_cost() {
+    for (ticks, expected) in [(Some(4_160_000_i64), Some(4_160_000_i64)), (None, None)] {
+        let server = MockInferenceServer::start().await.unwrap();
+        server.set_response("ok");
+        server.set_messages_cost_usd_ticks(ticks);
+        let client = create_test_client(&server.url(), ApiBackend::Messages);
+
+        let response = client
+            .conversation_collect(ConversationRequest::from_items(vec![
+                ConversationItem::user("q1"),
+            ]))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            response.cost_usd_ticks, expected,
+            "wire cost {ticks:?} must reach ConversationResponse"
+        );
+        assert!(
+            response.usage.is_some(),
+            "the usage the price rides beside must survive too"
+        );
+    }
+}
+
 // ============================================================================
 // Responses API Tests
 // ============================================================================

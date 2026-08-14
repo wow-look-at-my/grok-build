@@ -4,13 +4,38 @@
 //! validated against the real sampling client.
 
 use axum::response::sse::Event;
-use serde_json::json;
+use serde_json::{Value, json};
 
 use crate::scripted::SseEvent;
 
 /// Generate Anthropic Messages SSE events: one text block streamed as a
 /// single delta, terminated by a `message_delta` carrying `stop_reason`.
 pub fn messages_api_events(text: &str, model: &str, stop_reason: &str) -> Vec<Event> {
+    messages_api_events_with_cost(text, model, stop_reason, None)
+}
+
+/// Like [`messages_api_events`] but the terminal `message_delta` also prices
+/// the call, the way a gateway speaking this protocol does (Anthropic itself
+/// sends no price).
+pub fn messages_api_events_with_cost(
+    text: &str,
+    model: &str,
+    stop_reason: &str,
+    cost_usd_ticks: Option<i64>,
+) -> Vec<Event> {
+    let mut delta_usage = json!({"output_tokens":5,"input_tokens":10});
+    if let Some(ticks) = cost_usd_ticks {
+        delta_usage["cost_in_usd_ticks"] = json!(ticks);
+    }
+    messages_api_events_inner(text, model, stop_reason, delta_usage)
+}
+
+fn messages_api_events_inner(
+    text: &str,
+    model: &str,
+    stop_reason: &str,
+    delta_usage: Value,
+) -> Vec<Event> {
     vec![
         Event::default().data(
             json!({
@@ -36,7 +61,7 @@ pub fn messages_api_events(text: &str, model: &str, stop_reason: &str) -> Vec<Ev
         ),
         Event::default().data(json!({"type":"content_block_stop","index":0}).to_string()),
         Event::default().data(
-            json!({"type":"message_delta","delta":{"stop_reason":stop_reason},"usage":{"output_tokens":5,"input_tokens":10}})
+            json!({"type":"message_delta","delta":{"stop_reason":stop_reason},"usage":delta_usage})
                 .to_string(),
         ),
         Event::default().data(json!({"type":"message_stop"}).to_string()),
