@@ -67,6 +67,7 @@ pub mod toggle_mouse_reporting;
 pub mod transcript;
 pub mod tutorial;
 pub mod usage;
+pub mod version;
 pub mod view_plan;
 pub mod vim_mode;
 pub mod voice;
@@ -144,6 +145,7 @@ pub fn builtin_commands() -> Vec<Arc<dyn SlashCommand>> {
         Arc::new(queue::QueueCommand),
         Arc::new(tasks::TasksCommand),
         Arc::new(release_notes::ReleaseNotesCommand),
+        Arc::new(version::VersionCommand),
         Arc::new(tutorial::TutorialCommand),
         Arc::new(config_agents::ConfigAgentsCommand),
         Arc::new(personas::PersonasCommand),
