@@ -36,7 +36,7 @@ use super::modes::{
 use super::notes::{
     dispatch_enter_remember_mode, dispatch_open_feedback_pane,
     dispatch_save_remember_note_from_modal, dispatch_send_btw, dispatch_send_feedback,
-    dispatch_send_recap, dispatch_send_remember_note,
+    dispatch_send_recap, dispatch_send_remember_note, dispatch_send_todo,
 };
 use super::permissions::{
     dispatch_permission_cancel, dispatch_permission_followup, dispatch_permission_select,
@@ -1039,6 +1039,7 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
         Action::SendRememberNote(text) => dispatch_send_remember_note(app, text),
         Action::SaveRememberNoteFromModal => dispatch_save_remember_note_from_modal(app),
         Action::SendBtw(question) => dispatch_send_btw(app, question),
+        Action::SendTodo(request) => dispatch_send_todo(app, request),
         Action::SendRecap { auto } => dispatch_send_recap(app, auto),
         Action::SetCodingDataSharing { opted_in } => set_coding_data_sharing(
             app,
