@@ -85,6 +85,21 @@ verify serially wastes time when a parallel CI build could be running.
   scrollback sum stops being a valid fallback once anything priced is replayed
   (`AcpUpdateTracker::scrollback_sum_is_this_run`).
 
+## Thinking-signature notes
+
+- The Messages API verifies a thinking block's `signature` against the model
+  that minted it, so replaying one to any other model is a 400
+  ("Invalid `signature` in `thinking` block") on every turn the block stays in
+  history. It cannot be re-minted, so the block is what gives.
+- `build_messages_request` reads a `Reasoning` sibling's origin off the
+  `Assistant` item behind it (`model_id`) and drops the thinking block when
+  that is not the model being called. An alias, the dated snapshot it answers
+  as, and a gateway's routing prefix are one model (`same_model`); an item with
+  no recorded `model_id` is replayed as before.
+- That last case is why the sampler also treats the 400 as recoverable:
+  `RetryDecision::RetryWithReasoningStrip` drops the replayed reasoning and
+  retries once, so history predating the check is not dead-ended.
+
 ## Why build-test is not on the self-hosted runner
 
 Pointing `build-test` at `vars.CI_RUNNER` turns ~20 tests red, because they
