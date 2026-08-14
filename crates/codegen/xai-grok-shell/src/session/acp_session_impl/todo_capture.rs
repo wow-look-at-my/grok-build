@@ -104,10 +104,11 @@ fn contents_from_todo_write_args(args: &serde_json::Value) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// Append-only `todo_write` arguments for `contents`. Ids are minted here (the
-/// `capture-` prefix marks provenance on the list and cannot collide with an
-/// id the main agent is using), status is pending, and `merge` is on — a merge
-/// of ids that exist nowhere in the state can only append.
+/// Append-only `todo_write` arguments for `contents`. Ids are minted here,
+/// status is pending, and `merge` is on — a merge of ids that are not in the
+/// state can only append, so the random suffix is what keeps the write off an
+/// item the main agent is working through. The `capture-` prefix is provenance,
+/// visible on the list and in the model's view of it.
 fn add_only_todo_args(contents: &[String]) -> serde_json::Value {
     let todos: Vec<serde_json::Value> = contents
         .iter()
@@ -131,6 +132,30 @@ enum CaptureAction {
     Append,
     /// Never run it; feed this sentence back instead.
     Refuse(String),
+}
+
+/// What one dispatched call did.
+struct CaptureToolOutcome {
+    /// The tool result text the capture agent sees next turn.
+    result_text: String,
+    /// Contents that actually landed on the todo list.
+    appended: Vec<String>,
+    /// Whether this call came out of the read-only budget.
+    spent_a_read: bool,
+    /// Why the append failed, when one was attempted and refused.
+    append_error: Option<String>,
+}
+
+impl CaptureToolOutcome {
+    /// The common case: the call changed nothing and only produced text.
+    fn said(result_text: String) -> Self {
+        Self {
+            result_text,
+            appended: Vec::new(),
+            spent_a_read: false,
+            append_error: None,
+        }
+    }
 }
 
 /// Classify one tool call. This is the enforcement: a call that is neither the
@@ -208,6 +233,10 @@ impl SessionActor {
 
         let mut added: Vec<String> = Vec::new();
         let mut tools_used = 0usize;
+        // Why the last append attempt failed, if one did. A run that ends with
+        // nothing on the list must say which of the two happened: the tool
+        // refused the write, or the agent never asked for one.
+        let mut append_error: Option<String> = None;
 
         for _ in 0..MAX_MODEL_CALLS {
             let model_request = self.parent_cached_request(AuxCall {
@@ -229,15 +258,17 @@ impl SessionActor {
             }
             items.push(ConversationItem::assistant_tool_calls(calls.clone()));
             for call in &calls {
-                let (result_text, appended, ran_read) =
-                    self.run_capture_tool(call, tools_used).await;
-                if ran_read {
+                let outcome = self.run_capture_tool(call, tools_used).await;
+                if outcome.spent_a_read {
                     tools_used += 1;
                 }
-                added.extend(appended);
+                if outcome.append_error.is_some() {
+                    append_error = outcome.append_error;
+                }
+                added.extend(outcome.appended);
                 items.push(ConversationItem::tool_result(
                     call.id.to_string(),
-                    result_text,
+                    outcome.result_text,
                 ));
             }
             // The append is the end of the job. Finish the batch that produced
@@ -249,7 +280,10 @@ impl SessionActor {
         }
 
         if added.is_empty() {
-            return Err(TodoCaptureError::NothingAdded);
+            return Err(match append_error {
+                Some(reason) => TodoCaptureError::TodoWriteFailed(reason),
+                None => TodoCaptureError::NothingAdded,
+            });
         }
         tracing::info!(
             added = added.len(),
@@ -295,55 +329,54 @@ impl SessionActor {
     }
 
     /// Dispatch one tool call from the capture loop.
-    ///
-    /// Returns the text the model sees, the contents of anything appended, and
-    /// whether a read-only call was spent.
-    async fn run_capture_tool(
-        &self,
-        call: &ToolCall,
-        tools_used: usize,
-    ) -> (String, Vec<String>, bool) {
+    async fn run_capture_tool(&self, call: &ToolCall, tools_used: usize) -> CaptureToolOutcome {
         let args: serde_json::Value =
             serde_json::from_str(&call.arguments).unwrap_or(serde_json::Value::Null);
         let kind = self.agent.borrow().tool_bridge().tool_kind(&call.name);
         match capture_action(&call.name, kind, tools_used) {
-            CaptureAction::Refuse(message) => (message, Vec::new(), false),
+            CaptureAction::Refuse(message) => CaptureToolOutcome::said(message),
             CaptureAction::Append => {
                 let contents = contents_from_todo_write_args(&args);
                 if contents.is_empty() {
-                    return (
-                        format!(
-                            "No item to add: the `{TODO_WRITE}` call carried no todo content. \
-                             Send `todos: [{{\"content\": \"...\"}}]`."
-                        ),
-                        Vec::new(),
-                        false,
-                    );
+                    return CaptureToolOutcome::said(format!(
+                        "No item to add: the `{TODO_WRITE}` call carried no todo content. \
+                         Send `todos: [{{\"content\": \"...\"}}]`."
+                    ));
                 }
                 match self
                     .append_capture_todos(&call.id, add_only_todo_args(&contents))
                     .await
                 {
-                    Ok(text) => (text, contents, false),
+                    Ok(text) => CaptureToolOutcome {
+                        appended: contents,
+                        ..CaptureToolOutcome::said(text)
+                    },
                     Err(e) => {
                         tracing::warn!(error = %e, "todo capture: append failed");
-                        (format!("Adding the todo failed: {e}"), Vec::new(), false)
+                        CaptureToolOutcome {
+                            append_error: Some(e.to_string()),
+                            ..CaptureToolOutcome::said(format!("Adding the todo failed: {e}"))
+                        }
                     }
                 }
             }
             CaptureAction::Read => {
-                match self
+                let text = match self
                     .workspace_ops
                     .call_tool(&call.name, args, &call.id, Some(&self.session_info.id.0))
                     .await
                 {
-                    Ok(result) => (
+                    Ok(result) => {
                         xai_grok_tools::util::truncate_str(&result.prompt_text, TOOL_RESULT_BUDGET)
-                            .to_owned(),
-                        Vec::new(),
-                        true,
-                    ),
-                    Err(e) => (format!("`{}` failed: {e}", call.name), Vec::new(), true),
+                            .to_owned()
+                    }
+                    // A failed read still cost the budget it was given, and the
+                    // model needs the error to pick a different angle.
+                    Err(e) => format!("`{}` failed: {e}", call.name),
+                };
+                CaptureToolOutcome {
+                    spent_a_read: true,
+                    ..CaptureToolOutcome::said(text)
                 }
             }
         }
