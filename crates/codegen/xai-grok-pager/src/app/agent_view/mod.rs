@@ -1519,6 +1519,12 @@ pub struct AgentView {
     /// summary and stops the animation. `None` when no manual recap is
     /// pending (auto recaps never show a loading block).
     pub(crate) pending_recap_entry: Option<EntryId>,
+    /// Entry ID of the in-flight `/todo` capture block (rendered with the
+    /// animated "running" sidebar). Taken by the `TodoCaptured` handler, which
+    /// removes it and pushes what the capture agent appended. Cleared on
+    /// reload alongside `pending_recap_entry` — the capture runs in the shell,
+    /// so a spinner left behind by a reload would never stop on its own.
+    pub(crate) pending_todo_entry: Option<EntryId>,
     /// The manually-chosen session title (`/rename` or the dashboard
     /// rename flow), as distinct from the auto-generated
     /// `generated_session_title` below. Set optimistically at dispatch,
