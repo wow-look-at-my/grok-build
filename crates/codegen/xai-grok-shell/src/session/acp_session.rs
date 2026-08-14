@@ -1915,6 +1915,9 @@ mod disk_full_tests;
 #[path = "acp_session_tests/turn/asap_injection_tests.rs"]
 mod asap_injection_tests;
 #[cfg(test)]
+#[path = "acp_session_tests/todo_capture_e2e_tests.rs"]
+mod todo_capture_e2e_tests;
+#[cfg(test)]
 #[path = "acp_session_tests/feedback_turn_lookup_tests.rs"]
 mod feedback_turn_lookup_tests;
 #[cfg(test)]

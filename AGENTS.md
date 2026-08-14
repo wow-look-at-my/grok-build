@@ -104,6 +104,11 @@ verify serially wastes time when a parallel CI build could be running.
   have to ride along for the next request to make sense. Reasoning is stripped
   only where the backend requires it (Messages), on the loop's turns as well as
   the snapshot.
+- The append-only guarantee is covered end to end, not just at the sanitizer:
+  `acp_session_tests/todo_capture_e2e_tests.rs` runs the real loop against a
+  scripted model whose `todo_write` call asks for a replace, over the main
+  agent's own id, marking it completed. Verified red without
+  `add_only_todo_args` (the seeded item comes back `Completed`).
 - Provider-shaped failures the loop absorbs rather than dying on: transient 5xx
   and overloads (the `/btw` retry budget, now shared in `side_call.rs`), empty
   or concatenated-JSON tool arguments (`parse_tool_arguments`, mirroring the
