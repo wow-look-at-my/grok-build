@@ -67,6 +67,25 @@ verify serially wastes time when a parallel CI build could be running.
 - `GROK_*`/`XAI_*` values whose NAME looks like a credential are withheld —
   the prompt leaves the session and lands in the model's transcript.
 
+## Shift+Tab mode ring notes
+
+- The ring is Plan → Auto → Always-Approve → Orchestrator → Explore → Plan
+  (`dispatch_cycle_mode_inner` in `app/dispatch/modes.rs`). Its last two stops
+  are agent IDENTITIES, not permission modes: they rebuild the agent
+  (`handle_session_mode` → `handle_rebuild_agent_for_definition`) and must
+  leave the permission mode exactly as they found it.
+- Entering Orchestrator used to call `set_yolo_mode_inner(app, false)`, so
+  cycling to it silently re-armed the approval prompt while the banner only
+  said "Orchestrator". A subagent inherits `ctx.yolo_mode` from its parent, so
+  that also re-armed it for everything the orchestrator delegates — the exact
+  work nobody is watching.
+- Closing the ring (past the last identity stop) DOES drop yolo before
+  entering Plan. Plan+yolo matches no arm of the `(in_plan, in_auto, in_yolo)`
+  match, so leaving it set sends the next press into the catch-all and lands on
+  Normal instead of Auto.
+- The composer flag row is additive, so an orchestrating yolo session correctly
+  reads `always-approve · orchestrator` (`agent_view/render.rs`).
+
 ## Cost-indicator feature notes
 
 - Per-message cost rides `XaiSessionUpdate::ResponseCompleted.cost_usd_ticks`,
