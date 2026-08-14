@@ -916,7 +916,7 @@ fn last_system_text(app: &AppView, id: AgentId) -> String {
             RenderBlock::System(b) => Some(b.text.clone()),
             _ => None,
         })
-        .next_back()
+        .last()
         .expect("a system block")
 }
 
