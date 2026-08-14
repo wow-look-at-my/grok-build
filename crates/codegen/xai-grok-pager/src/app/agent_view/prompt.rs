@@ -662,7 +662,9 @@ impl AgentView {
                         self.prompt.set_text("");
                         return InputOutcome::Action(Action::SendPromptNow { text, images });
                     }
-                    if turn_running && let Some(outcome) = self.try_deliver_queued_asap_from_prompt() {
+                    if turn_running
+                        && let Some(outcome) = self.try_deliver_queued_asap_from_prompt()
+                    {
                         return outcome;
                     }
                     return InputOutcome::Changed;

@@ -19,7 +19,6 @@ use crate::views::suggestion_controller::{CompletionDropdownState, CompletionIte
 /// Maximum visible rows in the completion dropdown.
 pub const MAX_VISIBLE_ROWS: u16 = 6;
 
-
 /// Gap between label and description columns.
 const LABEL_DESC_GAP: usize = 2;
 

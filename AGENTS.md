@@ -54,6 +54,19 @@ verify serially wastes time when a parallel CI build could be running.
   - `ci_dot_animating` makes `tick_demand` report Slow while a run is in
     flight, which is what supplies the frames the pulse animates over.
 
+## `/debug` feature notes
+
+- `/debug <question>` injects the question plus an execution-context snapshot
+  (`slash/commands/debug_context.rs`) through `CommandResult::InjectSkill`. Only
+  `scroll`, `fps` and `log` are reserved; everything else is free text, so a
+  question must never come back as an "unknown option" error again.
+- Staleness is `current_exe()` versus a canonicalized `$GROK_HOME/bin/grok`.
+  `current_exe()` resolves the symlink at exec time, so after an update the two
+  disagree and the block says the running process is not what is on disk. Both
+  sides must stay canonicalized or every symlinked install reads as stale.
+- `GROK_*`/`XAI_*` values whose NAME looks like a credential are withheld —
+  the prompt leaves the session and lands in the model's transcript.
+
 ## Cost-indicator feature notes
 
 - Per-message cost rides `XaiSessionUpdate::ResponseCompleted.cost_usd_ticks`,

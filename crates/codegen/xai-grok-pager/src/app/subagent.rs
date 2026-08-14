@@ -317,10 +317,10 @@ pub(crate) fn finalize_finished_child_view(
     child_view: &mut crate::app::agent_view::AgentView,
     elapsed: std::time::Duration,
 ) {
-    child_view
-        .session
-        .tracker
-        .finish_turn(&mut child_view.scrollback, child_view.session.current_prompt_id.as_deref());
+    child_view.session.tracker.finish_turn(
+        &mut child_view.scrollback,
+        child_view.session.current_prompt_id.as_deref(),
+    );
     child_view.scrollback.finish_all_running();
     child_view
         .scrollback

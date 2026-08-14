@@ -1086,7 +1086,12 @@ mod tests {
         let sandbox = TestSandbox::new();
         let ready_file = sandbox.temp_dir().join("term-ready.pid");
         let mut process = TestProcess::spawn(
-            shell("trap 'exit 0' TERM; echo $$ > \"$READY_FILE\"; while :; do sleep 1; done"),
+            // Sleep in short hops: a shell runs a pending TERM trap only once
+            // its foreground child returns, and a `sleep` forked after the
+            // group signal never receives it. A one-second hop therefore
+            // delays the handler past the 500 ms grace, and the child is
+            // SIGKILLed for a trap it was about to run.
+            shell("trap 'exit 0' TERM; echo $$ > \"$READY_FILE\"; while :; do sleep 0.05; done"),
             &sandbox,
             TestProcessConfig::new()
                 .label("handle-term")
@@ -1096,7 +1101,13 @@ mod tests {
         wait_for_pid_file(&ready_file).await;
 
         let status = process.close().await.expect("graceful close");
-        assert!(status.success());
+        assert!(
+            status.success(),
+            "TERM-handling child must exit itself: status={:?} reason={:?} summary={}",
+            status,
+            process.termination_reason(),
+            process.diagnostic_summary()
+        );
         assert_eq!(
             process.termination_reason(),
             Some(TestProcessTermination::GracefulTerminate)
