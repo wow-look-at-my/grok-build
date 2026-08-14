@@ -378,7 +378,15 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
             }
             vec![]
         }
-        Action::SendPrompt(text) => dispatch_send_prompt(app, text),
+        Action::SendPrompt(text) => {
+            // Hand any stuck local rows to the shell first, so this prompt is
+            // eligible for the shell's queue — the only queue the running turn
+            // harvests. Ordering holds: these rows are older, and they land
+            // ahead of this one. See `migrate_local_rows_to_server_queue`.
+            let mut effects = queue::migrate_local_rows_to_server_queue(app);
+            effects.extend(dispatch_send_prompt(app, text));
+            effects
+        }
         Action::SubmitFollowUp(text) => dispatch_send_prompt_inner(app, text, false, true, true),
         Action::SendSlashCommandPreservingDraft(text) => {
             dispatch_send_prompt_inner(app, text, false, false, false)

@@ -1085,14 +1085,19 @@ fn send_prompt_while_running_queues_without_drain() {
 }
 
 /// Regression (queue reorder race): a plain prompt typed while a turn is
-/// running must NOT jump onto the server queue when an older prompt is still
-/// waiting in the local drip-feed queue — e.g. prompts queued during
-/// "Starting session…" before the turn began, where the first drains to
-/// start the turn and the rest are stranded locally. If the new prompt
-/// immediate-sent onto the server queue it would render/run AHEAD of the
-/// older local prompt (the merge is server-rows-first), so `[2, 3]` showed
-/// up as `[3, 2]`. The new prompt must instead join the local queue behind
-/// the older one, preserving FIFO.
+/// running must never overtake an older prompt still waiting in the local
+/// drip-feed queue — e.g. prompts queued during "Starting session…" before the
+/// turn began, where the first drains to start the turn and the rest are
+/// stranded locally. Immediate-sending the new prompt onto the server queue
+/// while the old one stayed local ran them AHEAD of it (the merge is
+/// server-rows-first), so `[2, 3]` showed up as `[3, 2]`.
+///
+/// The order is now held by moving the older row to the server queue FIRST
+/// rather than by holding the newer one back
+/// (`migrate_local_rows_to_server_queue`) — leaving it stranded is what
+/// latched mid-turn delivery off for the rest of a never-idle session. What
+/// must never happen is unchanged: "three" reaching the shell before "two", or
+/// at all while "two" is still stuck locally.
 #[test]
 fn send_while_running_with_pending_local_prompt_preserves_fifo() {
     let mut app = test_app_with_agent();
@@ -1107,33 +1112,41 @@ fn send_while_running_with_pending_local_prompt_preserves_fifo() {
         assert_eq!(agent.session.pending_prompts.len(), 1);
     }
 
-    // Send "3" while the queue still holds "2": it must route LOCALLY.
+    // Send "3" while the queue still holds "2".
     let effects = dispatch(Action::SendPrompt("three".into()), &mut app);
 
-    // No immediate server-authoritative send (no SendPrompt effect, and no
-    // drain since the turn is running).
-    assert!(
-        effects.is_empty(),
-        "must not immediate-send while a local prompt is pending, got {effects:?}"
+    let sent: Vec<&str> = effects
+        .iter()
+        .filter_map(|e| match e {
+            Effect::SendPrompt { text, .. } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        sent,
+        vec!["two", "three"],
+        "the older prompt goes first, and the newer one never travels alone: {effects:?}"
     );
-    // "3" joined the LOCAL queue behind "2" (FIFO preserved).
-    let agent = &app.agents[&id];
-    let order: Vec<&str> = agent
+    // Whatever is left local stays in submission order behind it.
+    let order: Vec<&str> = app.agents[&id]
         .session
         .pending_prompts
         .iter()
         .map(|p| p.text.as_str())
         .collect();
-    assert_eq!(
-        order,
-        vec!["two", "three"],
-        "new prompt must queue behind the older local prompt"
-    );
-    // No optimistic shared-queue echo was created (nothing went server-side).
     assert!(
-        app.shared_prompt_queue("test-session")
-            .is_none_or(|q| q.is_empty()),
-        "no server-queue echo while routing locally"
+        order.is_empty(),
+        "both rows went server-side together, so nothing is stranded: {order:?}"
+    );
+    // The echoes render in the same order the user typed them.
+    let echoed: Vec<String> = app
+        .shared_prompt_queue("test-session")
+        .map(|q| q.iter().map(|e| e.text.clone()).collect())
+        .unwrap_or_default();
+    assert_eq!(
+        echoed,
+        vec!["two".to_string(), "three".to_string()],
+        "the merged view must not show the newer prompt first"
     );
 }
 
@@ -4722,4 +4735,100 @@ fn asap_delivery_without_a_queue_sends_nothing() {
 
     let effects = dispatch(Action::DeliverQueuedPromptsAsap, &mut app);
     assert!(effects.is_empty(), "nothing to deliver: {effects:?}");
+}
+
+/// A row stuck in the local queue during a turn used to latch mid-turn
+/// delivery off for the rest of the session: the local queue drains only at
+/// idle, and a non-empty local queue makes every later prompt local too, where
+/// the running turn's harvest can never see it. Sending a prompt now hands the
+/// stuck rows to the shell first, oldest first, so both reach the queue the
+/// turn actually harvests.
+#[test]
+fn sending_mid_turn_migrates_stuck_local_rows_to_the_shell() {
+    let mut app = test_app_with_agent();
+    let id = AgentId(0);
+    dispatch(Action::SendPrompt("first".into()), &mut app);
+    {
+        let agent = app.agents.get_mut(&id).unwrap();
+        agent.session.state = AgentState::TurnRunning;
+        agent.session.enqueue_prompt("stuck".into());
+        assert!(
+            !crate::app::dispatch::queue::immediate_server_send_eligible(agent),
+            "precondition: a local row blocks the shell-queue route"
+        );
+    }
+
+    let effects = dispatch(Action::SendPrompt("follow-up".into()), &mut app);
+
+    let sent: Vec<&str> = effects
+        .iter()
+        .filter_map(|e| match e {
+            Effect::SendPrompt { text, .. } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        sent,
+        vec!["stuck", "follow-up"],
+        "both rows reach the shell, and the older one goes first: {effects:?}"
+    );
+    assert!(
+        app.agents[&id].session.pending_prompts.is_empty(),
+        "the local queue is empty, so the next prompt is eligible too"
+    );
+}
+
+/// Migration stops at the first row it cannot re-send losslessly: an image
+/// prompt's images do not fit `Effect::SendPrompt`. Moving the row behind it
+/// would hoist a newer prompt above an older one in the merged view, so that
+/// row — and everything after it — stays local.
+#[test]
+fn migration_stops_at_a_row_it_cannot_carry() {
+    let mut app = test_app_with_agent();
+    let id = AgentId(0);
+    dispatch(Action::SendPrompt("first".into()), &mut app);
+    {
+        let agent = app.agents.get_mut(&id).unwrap();
+        agent.session.state = AgentState::TurnRunning;
+        agent.session.enqueue_prompt("with-image".into());
+        agent
+            .session
+            .pending_prompts
+            .front_mut()
+            .unwrap()
+            .images
+            .push(crate::prompt_images::PastedImage {
+                element_id: xai_ratatui_textarea::ElementId::from_raw(0),
+                display_number: 1,
+                mime_type: "image/png".into(),
+                dimensions: Some((10, 10)),
+                byte_len: 16,
+                encoded_bytes: Some(vec![0u8; 16].into()),
+                source_path: None,
+                staged_temp_path: None,
+                session_image_path: None,
+                preview: crate::prompt_images::PromptImagePreview::default(),
+            });
+        agent.session.enqueue_prompt("behind-it".into());
+    }
+
+    let effects = dispatch(Action::SendPrompt("newest".into()), &mut app);
+
+    assert!(
+        !effects
+            .iter()
+            .any(|e| matches!(e, Effect::SendPrompt { text, .. } if text != "newest")),
+        "nothing may jump the image row: {effects:?}"
+    );
+    let queued: Vec<&str> = app.agents[&id]
+        .session
+        .pending_prompts
+        .iter()
+        .map(|p| p.text.as_str())
+        .collect();
+    assert_eq!(
+        queued,
+        vec!["with-image", "behind-it", "newest"],
+        "order is preserved and the newest prompt stays behind them"
+    );
 }

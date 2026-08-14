@@ -120,9 +120,9 @@ fn interject_params_omit_content_when_no_blocks() {
     assert!(!obj.contains_key("content"), "content key must be absent");
     assert_eq!(obj["sessionId"], "s1");
     assert_eq!(obj["text"], "steer");
-    assert_eq!(
-        obj["interrupt"], true,
-        "text the user aimed at the running turn cuts the stream short"
+    assert!(
+        !obj.contains_key("interrupt"),
+        "interrupting IS the legacy shape — absent already means cancel"
     );
     assert_eq!(obj["interjectionId"], "i1");
     assert_eq!(obj.len(), 3, "no extra keys on the legacy shape");

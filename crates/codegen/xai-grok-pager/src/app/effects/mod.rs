@@ -4715,10 +4715,14 @@ fn build_interject_params(
         "sessionId": session_id.0.to_string(),
         "text": text,
         "interjectionId": interjection_id,
-        // A shell too old to read this cancels regardless — the pre-flag
-        // behaviour, and the reason the field defaults to true there.
-        "interrupt": interrupt,
     });
+    // Absent means "cancel the stream" on the shell, so the interrupting case
+    // is the legacy shape byte-for-byte and only the quiet one says so. A
+    // shell too old to read the field cancels either way — the behaviour this
+    // client had before the field existed.
+    if !interrupt {
+        params["interrupt"] = serde_json::Value::Bool(false);
+    }
     if let Some(blocks) = blocks {
         params["content"] = serde_json::to_value(blocks)
             .expect("serialize interject content");
