@@ -86,6 +86,56 @@ verify serially wastes time when a parallel CI build could be running.
 - The composer flag row is additive, so an orchestrating yolo session correctly
   reads `always-approve · orchestrator` (`agent_view/render.rs`).
 
+## `/todo` capture feature notes
+
+- `/todo <request>` rides the `/btw` path, not the prompt queue: `Action::SendTodo`
+  → `x.ai/todo` → `SessionCommand::TodoCapture`, spawned on the session's
+  LocalSet (`session/acp_session_impl/todo_capture.rs`). The running turn is
+  never interrupted, and the parent conversation is never mutated — the capture
+  agent works from a snapshot of it.
+- Appending to the todo list is its only permitted mutation, and the prompt is
+  not what enforces that. Every tool call goes through `capture_action`: only
+  read kinds run, and `todo_write` is rewritten by `add_only_todo_args` before
+  dispatch — fresh `capture-`-prefixed ids, status pending, `merge` forced on.
+  A `merge: false` replace, a status flip, and an edit of an existing item all
+  arrive as content and leave as an append.
+- It ships the main turn's full tool list even though it honors a fraction of
+  it. The list serializes into the cached prefix, so trimming it would cost the
+  whole conversation's prompt cache and buy nothing the dispatch gate does not
+  already guarantee.
+- The append runs through the session's own `todo_write` rather than writing
+  `TodoState` directly, which is what makes the item persist, reach the client
+  as a `Plan` update, and show up in the next turn's todo-gate reminder the same
+  way one the main agent wrote does. That path is `todo_write`-specific:
+  another harness's task-list tool (opencode's `todowrite`) replaces the list
+  instead of merging, so the run fails loudly with `UnsupportedTodoTool`
+  instead of writing through semantics that cannot express an append.
+- Nothing in the loop compares against the literal `todo_write`. A harness
+  preset renames tools per provider (`name_override`), and the model calls the
+  renamed one, so the tool is resolved by kind and identified by NAMESPACE
+  (`resolve_capture_todo_tool`) — the namespace is what separates the
+  merge-capable grok_build tool from opencode's replace-only one, and it
+  survives a rename. Item contents come back through `bridge.try_parse`, which
+  reverse-maps renamed parameters too.
+- Each turn appends `response.items` verbatim, the way the main turn records a
+  response, never a synthesized assistant message: the Responses API rejects a
+  continuation whose reasoning items are missing, and a hosted search's items
+  have to ride along for the next request to make sense. Reasoning is stripped
+  only where the backend requires it (Messages), on the loop's turns as well as
+  the snapshot.
+- The append-only guarantee is covered end to end, not just at the sanitizer:
+  `acp_session_tests/todo_capture_e2e_tests.rs` runs the real loop against a
+  scripted model whose `todo_write` call asks for a replace, over the main
+  agent's own id, marking it completed. Verified red without
+  `add_only_todo_args` (the seeded item comes back `Completed`).
+- Provider-shaped failures the loop absorbs rather than dying on: transient 5xx
+  and overloads (the `/btw` retry budget, now shared in `side_call.rs`), empty
+  or concatenated-JSON tool arguments (`parse_tool_arguments`, mirroring the
+  main turn), a model answering in prose instead of calling the tool (one
+  nudge), and a context window too small for the conversation
+  (`budget_instruction_items` fits the snapshot, with `LOOP_GROWTH_RESERVE_TOKENS`
+  held back for the loop's own turns).
+
 ## Cost-indicator feature notes
 
 - Per-message cost rides `XaiSessionUpdate::ResponseCompleted.cost_usd_ticks`,

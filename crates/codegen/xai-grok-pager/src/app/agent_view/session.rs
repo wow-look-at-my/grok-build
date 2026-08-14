@@ -327,6 +327,7 @@ impl AgentView {
             pending_fork_banner: None,
             loading_placeholder_id: None,
             pending_recap_entry: None,
+            pending_todo_entry: None,
             display_name: None,
             generated_session_title: None,
             last_turn_summary: None,
@@ -465,6 +466,9 @@ impl AgentView {
         }
         if let Some(rid) = self.pending_recap_entry.take() {
             self.scrollback.remove_entry(rid);
+        }
+        if let Some(tid) = self.pending_todo_entry.take() {
+            self.scrollback.remove_entry(tid);
         }
         self.session.model_switch_pending = false;
         self.pending_adoption_updates.clear();
@@ -763,6 +767,9 @@ impl AgentView {
         self.session.finish_turn(&mut self.scrollback);
         self.scrollback.finish_all_running();
         if let Some(id) = self.pending_recap_entry.take() {
+            self.scrollback.remove_entry(id);
+        }
+        if let Some(id) = self.pending_todo_entry.take() {
             self.scrollback.remove_entry(id);
         }
         self.mark_turn_finished();
