@@ -4671,11 +4671,12 @@ fn mid_turn_enter_routes_to_the_shell_queue_for_gap_delivery() {
     );
 }
 
-/// Bare Enter on an empty composer mid-turn interrupts: server-owned rows ride
-/// one `queue/deliver_now`, and local rows the shell never saw are sent as
-/// interjections. Both cancel the in-flight model stream shell-side.
+/// Bare Enter on an empty composer mid-turn promotes every queued row to ASAP
+/// delivery: server-owned rows ride one `queue/deliver_now`, and local rows the
+/// shell never saw are sent as interjections. Neither cancels the in-flight
+/// model stream — the rows join the turn's next model request.
 #[test]
-fn empty_enter_mid_turn_interrupts_with_every_queued_row() {
+fn empty_enter_mid_turn_delivers_every_queued_row_asap() {
     let mut app = test_app_with_agent();
     let id = AgentId(0);
     dispatch(Action::SendPrompt("first".into()), &mut app);
@@ -4699,8 +4700,12 @@ fn empty_enter_mid_turn_interrupts_with_every_queued_row() {
         "the shell's own rows are delivered by the queue effect: {effects:?}"
     );
     assert!(
-        matches!(&effects[1], Effect::SendInterject { text, .. } if text == "local-owned"),
-        "a local row the shell never saw rides the interjection path: {effects:?}"
+        matches!(
+            &effects[1],
+            Effect::SendInterject { text, interrupt: false, .. } if text == "local-owned"
+        ),
+        "a local row rides the interjection path, and must not cancel the stream \
+         the identical server-owned row leaves running: {effects:?}"
     );
     assert!(
         app.agents[&id].session.pending_prompts.is_empty(),
@@ -4708,10 +4713,10 @@ fn empty_enter_mid_turn_interrupts_with_every_queued_row() {
     );
 }
 
-/// Nothing queued: the interrupt is a no-op rather than a bare cancel — the
-/// gesture is "send my messages now", not "stop".
+/// Nothing queued: the gesture is a no-op rather than a bare cancel — it means
+/// "send my messages as soon as you can", not "stop".
 #[test]
-fn interrupt_without_a_queue_sends_nothing() {
+fn asap_delivery_without_a_queue_sends_nothing() {
     let mut app = test_app_with_agent();
     dispatch(Action::SendPrompt("first".into()), &mut app);
 

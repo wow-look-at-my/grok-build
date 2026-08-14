@@ -675,9 +675,9 @@ async fn harvest_leaves_rows_queued_before_the_turn_started() {
         .await;
 }
 
-/// `DeliverQueuedPromptsNow` (bare Enter on an empty composer) means "every
-/// message I can see, now": the pre-turn row that the turn loop's own harvest
-/// leaves alone is delivered too. Rows that own their turn still stay queued —
+/// `DeliverQueuedPromptsAsap` (bare Enter on an empty composer) means "every
+/// message I can see, as soon as you can": the pre-turn row that the turn
+/// loop's own harvest leaves alone is delivered too. Rows that own their turn still stay queued —
 /// forcing does not make a bash row model-visible.
 #[tokio::test]
 async fn forced_harvest_delivers_rows_queued_before_the_turn_started() {
