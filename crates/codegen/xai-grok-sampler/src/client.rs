@@ -102,7 +102,7 @@ impl GrokRequestHeaders<'_> {
 /// the API doesn't emit `context_details` (older deployments) `total_tokens`
 /// passes through unchanged.
 fn deserialize_response_event(data: &str) -> Result<rs::ResponseStreamEvent> {
-    let mut event = match serde_json::from_str::<rs::ResponseStreamEvent>(data) {
+    let mut event = match from_sse_payload::<rs::ResponseStreamEvent>(data) {
         Ok(event) => event,
         Err(first_err) => {
             // Try sanitizing: parse as Value, strip unknown tools, retry.
@@ -128,41 +128,163 @@ fn deserialize_response_event(data: &str) -> Result<rs::ResponseStreamEvent> {
                 raw_data = %data,
                 "Failed to deserialize ResponseStreamEvent from stream"
             );
-            return Err(SamplingError::Serialization(first_err));
+            return Err(first_err);
         }
     };
     apply_terminal_event_overrides(&mut event, data);
     Ok(event)
 }
 
-/// Keys the Responses schema types as a required list, so `null` there is a
-/// producer bug rather than a value we would lose by rewriting it.
-const NULL_TOLERANT_LIST_KEYS: &[&str] = &["output", "content", "summary", "annotations", "tools"];
+/// Keys the wire schemas type as a list, so `null` there is a producer bug
+/// rather than a value we would lose by rewriting it.
+///
+/// Every entry is a slice field Bifrost declares without `omitempty` (Go
+/// marshals an unset slice as `null`), across its chat-completions, Responses
+/// and Anthropic surfaces. The list must stay keys-that-are-lists only: the
+/// same payloads carry plenty of legitimately-null pointer fields (`error`,
+/// `instructions`, `reasoning`, …) that a blanket null-to-`[]` rewrite would
+/// corrupt into a parse failure of its own.
+const NULL_TOLERANT_LIST_KEYS: &[&str] = &[
+    "annotations",
+    "bytes",
+    "choices",
+    "command",
+    "content",
+    "data",
+    "env",
+    "filters",
+    "logprobs",
+    "outputs",
+    "output",
+    "queries",
+    "summary",
+    "tool_calls",
+    "tools",
+    "top_logprobs",
+    "vector_store_ids",
+];
 
-/// Rewrite `null` to `[]` at [`NULL_TOLERANT_LIST_KEYS`], recursively.
+/// Rewrite `null` to `[]` at [`NULL_TOLERANT_LIST_KEYS`], recursively. Reports
+/// whether anything changed, so a caller can skip a retry that cannot differ.
 ///
 /// A gateway written in Go marshals an unset slice as `null`, so
 /// `response.created` -- whose output list is empty by definition -- arrives as
 /// `"output": null` and fails the parse. Because serde buffers the internally
-/// tagged event, that failure carries no line or column: it reads as a bare
-/// "invalid type: null, expected a sequence" and takes the whole turn with it.
+/// tagged event, that failure carries no line or column AND no field path: it
+/// reads as a bare "invalid type: null, expected a sequence" and takes the whole
+/// turn with it.
 ///
 /// Only reached after the strict parse already failed, so a well-formed server
 /// never meets this.
-fn null_lists_as_empty(value: &mut serde_json::Value) {
+fn null_lists_as_empty(value: &mut serde_json::Value) -> bool {
     match value {
         serde_json::Value::Object(map) => {
+            let mut changed = false;
             for (key, child) in map.iter_mut() {
                 if child.is_null() && NULL_TOLERANT_LIST_KEYS.contains(&key.as_str()) {
                     *child = serde_json::Value::Array(Vec::new());
+                    changed = true;
                 } else {
-                    null_lists_as_empty(child);
+                    changed |= null_lists_as_empty(child);
+                }
+            }
+            changed
+        }
+        serde_json::Value::Array(items) => items.iter_mut().fold(false, |changed, item| {
+            null_lists_as_empty(item) || changed
+        }),
+        _ => false,
+    }
+}
+
+/// Dotted paths of every `null` in the payload, for a failure that named no
+/// field of its own. Keys only, never values: this text reaches the user's
+/// screen, and the payload is their generated content.
+fn null_key_paths(value: &serde_json::Value, prefix: &str, out: &mut Vec<String>) {
+    const MAX: usize = 8;
+    if out.len() >= MAX {
+        return;
+    }
+    match value {
+        serde_json::Value::Object(map) => {
+            for (key, child) in map {
+                let path = if prefix.is_empty() {
+                    key.clone()
+                } else {
+                    format!("{prefix}.{key}")
+                };
+                if child.is_null() {
+                    out.push(path);
+                    if out.len() >= MAX {
+                        return;
+                    }
+                } else {
+                    null_key_paths(child, &path, out);
                 }
             }
         }
-        serde_json::Value::Array(items) => items.iter_mut().for_each(null_lists_as_empty),
+        serde_json::Value::Array(items) => {
+            for (index, item) in items.iter().enumerate() {
+                null_key_paths(item, &format!("{prefix}[{index}]"), out);
+            }
+        }
         _ => {}
     }
+}
+
+/// Deserialize an SSE payload, naming the field that failed.
+///
+/// serde_json alone renders a rejected payload as "invalid type: null, expected
+/// a sequence" — and for a buffered (internally tagged) event it carries no
+/// line/column either, so the message names neither the field nor the offset.
+/// That is the whole error a user gets, and there is nothing in it to act on.
+///
+/// `serde_path_to_error` supplies the field path on a derived struct
+/// (`choices[0].delta.content`). It cannot on a `#[serde(tag = "type")]` event,
+/// because serde buffers the content before the variant is known and the
+/// tracker never sees those keys — measured, not assumed. That is exactly the
+/// shape gateways break, so for an empty path the message falls back to listing
+/// where the payload's nulls are.
+fn from_sse_payload<T: serde::de::DeserializeOwned>(data: &str) -> Result<T> {
+    let deserializer = &mut serde_json::Deserializer::from_str(data);
+    serde_path_to_error::deserialize(deserializer).map_err(|err| {
+        let path = err.path().to_string();
+        let inner = err.into_inner();
+        if !path.is_empty() && path != "." {
+            return SamplingError::serialization_message(format!("{path}: {inner}"));
+        }
+        let mut nulls = Vec::new();
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(data) {
+            null_key_paths(&value, "", &mut nulls);
+        }
+        if nulls.is_empty() {
+            SamplingError::Serialization(inner)
+        } else {
+            SamplingError::serialization_message(format!(
+                "{inner} (null in this payload: {})",
+                nulls.join(", ")
+            ))
+        }
+    })
+}
+
+/// Strict parse, then one retry with the payload's null lists read as empty.
+///
+/// The retry only runs when the strict parse failed and there was something to
+/// rewrite, and a retry that also fails reports the STRICT error — so a
+/// malformed payload is never described in terms of the rewrite.
+fn parse_sse_event<T: serde::de::DeserializeOwned>(data: &str) -> Result<T> {
+    let strict = match from_sse_payload::<T>(data) {
+        Ok(event) => return Ok(event),
+        Err(err) => err,
+    };
+    if let Ok(mut value) = serde_json::from_str::<serde_json::Value>(data)
+        && null_lists_as_empty(&mut value)
+        && let Ok(event) = serde_json::from_value::<T>(value)
+    {
+        return Ok(event);
+    }
+    Err(strict)
 }
 
 /// On terminal Responses API events (`response.completed` /
@@ -1165,16 +1287,14 @@ impl SamplingClient {
                         if let Some(stream_error) = try_parse_stream_error(data) {
                             Some(Err(stream_error))
                         } else {
-                            Some(
-                                serde_json::from_str::<ChatCompletionChunk>(data).map_err(|e| {
-                                    tracing::error!(
-                                        error = %e,
-                                        raw_data = %data,
-                                        "Failed to deserialize ChatCompletionChunk from stream"
-                                    );
-                                    SamplingError::Serialization(e)
-                                }),
-                            )
+                            Some(parse_sse_event::<ChatCompletionChunk>(data).map_err(|e| {
+                                tracing::error!(
+                                    error = %e,
+                                    raw_data = %data,
+                                    "Failed to deserialize ChatCompletionChunk from stream"
+                                );
+                                e
+                            }))
                         }
                     }
                     Err(e) => {
@@ -1858,14 +1978,14 @@ impl SamplingClient {
                             Some(Err(stream_error))
                         } else {
                             Some(
-                                serde_json::from_str::<messages::MessageStreamEvent>(data).map_err(
+                                parse_sse_event::<messages::MessageStreamEvent>(data).map_err(
                                     |e| {
                                         tracing::error!(
                                             error = %e,
                                             raw_data = %data,
                                             "Failed to deserialize MessageStreamEvent from stream"
                                         );
-                                        SamplingError::Serialization(e)
+                                        e
                                     },
                                 ),
                             )
@@ -2154,6 +2274,74 @@ mod tests {
     use super::*;
     use indexmap::IndexMap;
     use xai_grok_sampling_types::types::ChatRequestMessage;
+
+    /// The banner a user actually reads is this message, so a rejected payload
+    /// has to say WHICH field it rejected. Both wire surfaces are covered: a
+    /// chunk (derived struct, positioned error) and a Responses event
+    /// (internally tagged, so serde buffers it and drops the position).
+    #[test]
+    fn a_rejected_payload_names_the_field_that_failed() {
+        let chunk = from_sse_payload::<ChatCompletionChunk>(
+            r#"{"id":"c","object":"chat.completion.chunk","created":0,"model":"m",
+                "choices":[{"index":0,"delta":{"content":[]}}]}"#,
+        )
+        .expect_err("an array where content wants a string must be rejected");
+        assert!(
+            chunk.to_string().contains("choices[0].delta.content"),
+            "chunk error must name the field: {chunk}"
+        );
+
+        // An internally tagged event gets no path from serde, so the message
+        // falls back to where the payload's nulls are — the one thing that
+        // makes a bare "expected a sequence" actionable.
+        let event = from_sse_payload::<rs::ResponseStreamEvent>(
+            r#"{"type":"response.created","sequence_number":0,
+                "response":{"id":"r","object":"response","created_at":0,"model":"m",
+                            "status":"in_progress","output":null}}"#,
+        )
+        .expect_err("a null output list must be rejected by the strict parse");
+        let event = event.to_string();
+        assert!(
+            event.contains("response.output"),
+            "event error must locate the null: {event}"
+        );
+        assert!(
+            event.contains("invalid type: null"),
+            "and must keep serde's own reason: {event}"
+        );
+    }
+
+    /// The same event the strict parse rejects above must come back alive from
+    /// the retry, so naming the failure never replaces surviving it.
+    #[test]
+    fn a_null_list_is_rescued_on_every_surface() {
+        let event = parse_sse_event::<rs::ResponseStreamEvent>(
+            r#"{"type":"response.created","sequence_number":0,
+                "response":{"id":"r","object":"response","created_at":0,"model":"m",
+                            "status":"in_progress","output":null,"tools":null}}"#,
+        )
+        .expect("responses: a null output list must be rescued");
+        assert!(matches!(event, rs::ResponseStreamEvent::ResponseCreated(_)));
+
+        let chunk = parse_sse_event::<ChatCompletionChunk>(
+            r#"{"id":"c","object":"chat.completion.chunk","created":0,"model":"m",
+                "choices":null,"usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}}"#,
+        )
+        .expect("chat completions: a null choices list must be rescued");
+        assert!(chunk.choices.is_empty());
+        assert_eq!(chunk.usage.map(|u| u.total_tokens), Some(3));
+
+        let start = parse_sse_event::<messages::MessageStreamEvent>(
+            r#"{"type":"message_start","message":{"id":"m","type":"message","role":"assistant",
+                "content":null,"model":"m","stop_reason":null,
+                "usage":{"input_tokens":1,"output_tokens":0}}}"#,
+        )
+        .expect("messages: a null content list must be rescued");
+        assert!(matches!(
+            start,
+            messages::MessageStreamEvent::MessageStart { .. }
+        ));
+    }
 
     #[test]
     fn stream_collect_error_preserves_should_retry() {
