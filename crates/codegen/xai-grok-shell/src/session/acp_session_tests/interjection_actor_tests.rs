@@ -713,3 +713,62 @@ async fn forced_harvest_delivers_rows_queued_before_the_turn_started() {
         })
         .await;
 }
+
+/// The first-Enter contract, shell side: a row that arrives while a turn is
+/// running is picked up by the turn loop's OWN harvest — the one it runs
+/// before each model request, with no user gesture behind it — and lands in
+/// the interjection buffer the next request drains. No second Enter, and no
+/// `DeliverQueuedPromptsAsap`, is involved anywhere in this path.
+#[tokio::test]
+async fn a_row_arriving_mid_turn_reaches_the_asap_buffer_unprompted() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (actor, _rx) = build_actor().await;
+            {
+                let mut state = actor.state.lock().await;
+                state.pending_inputs.push_back(user_item("running", "A"));
+                state.running_task = Some(running_task_stub("running"));
+            }
+            // The turn is under way and nothing else is queued yet.
+            *actor.queued_at_turn_start.borrow_mut() = ["running".to_string()].into();
+            assert!(
+                !actor.harvest_queued_prompts_into_interjections(false).await,
+                "precondition: nothing to deliver before the user types"
+            );
+
+            // First Enter: the prompt lands on the shell's queue mid-turn.
+            {
+                let mut state = actor.state.lock().await;
+                state.pending_inputs.push_back(user_item("typed-while-streaming", "A"));
+            }
+
+            assert!(
+                actor.harvest_queued_prompts_into_interjections(false).await,
+                "the turn loop's own harvest must take it, unprompted"
+            );
+
+            let buffered: Vec<String> = actor
+                .pending_interjections
+                .drain_all()
+                .into_iter()
+                .map(|entry| entry.text)
+                .collect();
+            assert_eq!(
+                buffered.len(),
+                1,
+                "the row is in the ASAP buffer the next model request drains: {buffered:?}"
+            );
+            let state = actor.state.lock().await;
+            assert_eq!(
+                state
+                    .pending_inputs
+                    .iter()
+                    .map(|i| i.prompt_id.as_str())
+                    .collect::<Vec<_>>(),
+                vec!["running"],
+                "and it no longer waits to run as its own turn afterwards"
+            );
+        })
+        .await;
+}
