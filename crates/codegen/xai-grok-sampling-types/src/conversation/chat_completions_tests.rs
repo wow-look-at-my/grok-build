@@ -618,3 +618,34 @@ fn upgrade_then_fold_through_conversation_to_chat_messages() {
         "reconstructed sibling folded onto assistant.reasoning_content"
     );
 }
+
+/// Chat Completions is the widest provider surface (every OpenAI-compatible
+/// gateway), so the loop's hand-built turn has to land as an assistant message
+/// carrying the call plus a matching `tool` message.
+#[test]
+fn todo_capture_loop_maps_to_assistant_call_and_tool_message() {
+    let request: ChatCompletionRequest = ConversationRequest::from_items(
+        todo_capture_loop_items(false),
+    )
+    .with_model("chat-completions-model")
+    .into();
+    let json = serde_json::to_value(&request).unwrap();
+    let messages = json["messages"].as_array().unwrap();
+
+    let call_at = messages
+        .iter()
+        .position(|m| {
+            m["tool_calls"]
+                .as_array()
+                .is_some_and(|calls| calls.iter().any(|c| c["id"] == "call_todo_1"))
+        })
+        .unwrap_or_else(|| panic!("the loop's own tool call must survive: {json:#}"));
+    let result_at = messages
+        .iter()
+        .position(|m| m["role"] == "tool" && m["tool_call_id"] == "call_todo_1")
+        .unwrap_or_else(|| panic!("the tool result the loop fed back must survive: {json:#}"));
+    assert!(
+        call_at < result_at,
+        "the call must precede its result; got {call_at} / {result_at}"
+    );
+}

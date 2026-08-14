@@ -1,9 +1,40 @@
 //! Shared cache-aligned side-call plumbing for recap-style auxiliary model
-//! calls (recap, turn summary). `/btw` reuses the request skeleton.
+//! calls (recap, turn summary). `/btw` and `/todo` reuse the request skeleton
+//! and the transient-failure retry policy.
 
 use super::*;
 
 use crate::remote::DEFAULT_CONTEXT_WINDOW;
+
+/// Retry policy for a one-shot auxiliary model call (`/btw`, `/todo`): 3
+/// attempts total (1 try + 2 retries), 500ms → 1s jittered backoff.
+/// Deliberately short — nothing like the sampler actor's budget — so a
+/// fleet-wide capacity event can't multiply side-call traffic into a retry
+/// storm.
+pub(crate) fn aux_retry_policy() -> backon::ExponentialBuilder {
+    backon::ExponentialBuilder::default()
+        .with_max_times(2)
+        .with_min_delay(std::time::Duration::from_millis(500))
+        .with_max_delay(std::time::Duration::from_secs(1))
+        .with_jitter()
+}
+
+/// Retry transient failures per the canonical [`SamplingError::is_retryable`]
+/// rule (5xx incl. Cloudflare 52x, stream/connect glitches), minus the shared
+/// vetoes (`x-should-retry: false`, context length) and rate limits — a 429
+/// needs `Retry-After`-scale waits, not this sub-second budget.
+pub(crate) fn should_retry_aux_call(e: &xai_grok_sampling_types::SamplingError) -> bool {
+    e.is_retryable() && !e.is_rate_limited() && !e.is_retry_vetoed()
+}
+
+/// Clone an auxiliary request and stamp a fresh `req_id`, so retried attempts
+/// never collide in logs. Everything else is byte-identical, which is what
+/// keeps a retry on the same cached prefix.
+pub(crate) fn fresh_req_id(base: &ConversationRequest, label: &str) -> ConversationRequest {
+    let mut request = base.clone();
+    request.x_grok_req_id = Some(format!("xai-{label}-{}", uuid::Uuid::new_v4()));
+    request
+}
 
 /// Cache numbers for an auxiliary call. `cache_key_forwarded` separates backends that never send the key from real cache misses.
 pub(crate) fn log_prompt_cache_hit(
@@ -149,5 +180,116 @@ impl SessionActor {
     pub(crate) fn invalidate_side_calls_for_new_prompt(&self) {
         self.recap_epoch.set(self.recap_epoch.get().wrapping_add(1));
         self.abort_turn_summary();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use xai_grok_sampling_types::SamplingError;
+
+    fn api(status: u16, message: &str, should_retry: Option<bool>) -> SamplingError {
+        SamplingError::Api {
+            status: reqwest::StatusCode::from_u16(status).unwrap(),
+            message: message.into(),
+            model_metadata: None,
+            retry_after_secs: None,
+            should_retry,
+        }
+    }
+
+    #[test]
+    fn aux_calls_retry_transient_failures_only() {
+        // Transient: overload (stream + proxy-wrapped 500 + 529), generic
+        // 5xx, and Cloudflare edge 52x (SEV-576: /btw died on a 522).
+        assert!(should_retry_aux_call(&SamplingError::StreamError {
+            error_type: "overloaded_error".into(),
+            message: "Overloaded".into(),
+        }));
+        assert!(should_retry_aux_call(&api(
+            500,
+            "stream error (overloaded_error): Overloaded",
+            None
+        )));
+        for code in [503u16, 522, 529] {
+            assert!(
+                should_retry_aux_call(&api(code, "transient", None)),
+                "{code} must retry"
+            );
+        }
+
+        // Server veto (`x-should-retry: false`) wins over any retryable status.
+        assert!(!should_retry_aux_call(&api(522, "timed out", Some(false))));
+        // Deterministic context-length failures never retry, even on 529.
+        assert!(!should_retry_aux_call(&api(
+            529,
+            "invalid_request_error: prompt is too long: 300000 tokens > 200000 maximum",
+            None
+        )));
+        // Rate limits need Retry-After-scale waits, not this sub-second
+        // budget; origin TLS and client errors never clear on retry.
+        for code in [429u16, 525, 526, 400] {
+            assert!(
+                !should_retry_aux_call(&api(code, "not transient", None)),
+                "{code} must NOT retry"
+            );
+        }
+    }
+
+    /// The wired policy: 3 attempts total, backoff within the configured
+    /// bounds (500ms + 1s base, jitter adds up to the current delay), and a
+    /// fresh request id stamped per attempt.
+    #[tokio::test(start_paused = true)]
+    async fn aux_retry_wiring_caps_attempts_and_bounds_backoff() {
+        use backon::Retryable as _;
+
+        let calls = std::cell::Cell::new(0u32);
+        let start = tokio::time::Instant::now();
+        let result: Result<(), SamplingError> = (|| async {
+            calls.set(calls.get() + 1);
+            Err(SamplingError::StreamError {
+                error_type: "overloaded_error".into(),
+                message: "Overloaded".into(),
+            })
+        })
+        .retry(aux_retry_policy())
+        .when(should_retry_aux_call)
+        .await;
+
+        assert!(result.is_err());
+        assert_eq!(calls.get(), 3, "1 try + 2 retries");
+        // Base delays 500ms + 1s; jitter adds (0, delay) per sleep.
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed >= std::time::Duration::from_millis(1_500),
+            "elapsed {elapsed:?} below minimum backoff"
+        );
+        assert!(
+            elapsed <= std::time::Duration::from_millis(3_100),
+            "elapsed {elapsed:?} above maximum backoff"
+        );
+    }
+
+    /// Each attempt is byte-identical but for its request id, and the label
+    /// keeps `/btw` and `/todo` attempts apart in logs.
+    #[test]
+    fn attempts_get_fresh_labelled_request_ids() {
+        let base = ConversationRequest {
+            x_grok_conv_id: Some("btw-test".into()),
+            ..Default::default()
+        };
+        let a = fresh_req_id(&base, "btw");
+        let b = fresh_req_id(&base, "btw");
+        let (a_id, b_id) = (a.x_grok_req_id.unwrap(), b.x_grok_req_id.unwrap());
+        assert!(a_id.starts_with("xai-btw-"));
+        assert_ne!(a_id, b_id, "each attempt must get a fresh req_id");
+        // Everything except the request id is byte-identical to the base.
+        assert_eq!(a.x_grok_conv_id, base.x_grok_conv_id);
+        assert!(
+            fresh_req_id(&base, "todo")
+                .x_grok_req_id
+                .unwrap()
+                .starts_with("xai-todo-")
+        );
     }
 }

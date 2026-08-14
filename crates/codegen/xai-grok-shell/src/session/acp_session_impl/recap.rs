@@ -3,39 +3,14 @@
 //! Shared cache-aligned request setup lives in [`super::side_call`].
 //! Per-turn dashboard summary lifecycle lives in [`super::turn_summary`].
 
-use super::side_call::{AuxCall, log_prompt_cache_hit};
+use super::side_call::{
+    AuxCall, aux_retry_policy, fresh_req_id, log_prompt_cache_hit, should_retry_aux_call,
+};
 use super::*;
 
 use crate::session::SideQuestionError;
 use xai_grok_sampling_types::SamplingError;
 
-/// Retry policy for the one-shot `/btw` model call: 3 attempts total
-/// (1 try + 2 retries), 500ms → 1s jittered backoff. Deliberately short —
-/// nothing like the sampler actor's budget — so a fleet-wide capacity event
-/// can't multiply side-question traffic into a retry storm.
-fn side_question_retry_policy() -> backon::ExponentialBuilder {
-    backon::ExponentialBuilder::default()
-        .with_max_times(2)
-        .with_min_delay(std::time::Duration::from_millis(500))
-        .with_max_delay(std::time::Duration::from_secs(1))
-        .with_jitter()
-}
-
-/// Retry transient failures per the canonical [`SamplingError::is_retryable`]
-/// rule (5xx incl. Cloudflare 52x, stream/connect glitches), minus the shared
-/// vetoes (`x-should-retry: false`, context length) and rate limits — a 429
-/// needs `Retry-After`-scale waits, not this sub-second budget.
-fn should_retry_side_question(e: &SamplingError) -> bool {
-    e.is_retryable() && !e.is_rate_limited() && !e.is_retry_vetoed()
-}
-
-/// Clone the base `/btw` request and stamp a fresh `req_id`, so retried
-/// attempts never collide in logs. Everything else is byte-identical.
-fn build_side_question_attempt(base: &ConversationRequest) -> ConversationRequest {
-    let mut request = base.clone();
-    request.x_grok_req_id = Some(format!("xai-btw-{}", uuid::Uuid::new_v4()));
-    request
-}
 impl SessionActor {
     /// Answers a `/btw` side question with one model call over the parent session's context, and saves it to `btw_history.jsonl` under a new
     /// btw session ID. Client tool calls are dropped rather than run, hosted search still runs, and transient failures retry on a short budget.
@@ -105,9 +80,9 @@ impl SessionActor {
         use backon::Retryable as _;
         let attempts = std::cell::Cell::new(1u32);
         let result =
-            (|| sampling_client.conversation_collect(build_side_question_attempt(&base_request)))
-                .retry(side_question_retry_policy())
-                .when(should_retry_side_question)
+            (|| sampling_client.conversation_collect(fresh_req_id(&base_request, "btw")))
+                .retry(aux_retry_policy())
+                .when(should_retry_aux_call)
                 .notify(|e: &SamplingError, backoff: std::time::Duration| {
                     attempts.set(attempts.get() + 1);
                     tracing::warn!(
@@ -698,108 +673,3 @@ impl SessionActor {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn api(status: u16, message: &str, should_retry: Option<bool>) -> SamplingError {
-        SamplingError::Api {
-            status: reqwest::StatusCode::from_u16(status).unwrap(),
-            message: message.into(),
-            model_metadata: None,
-            retry_after_secs: None,
-            should_retry,
-        }
-    }
-
-    #[test]
-    fn side_question_retries_transient_failures_only() {
-        // Transient: overload (stream + proxy-wrapped 500 + 529), generic
-        // 5xx, and Cloudflare edge 52x (SEV-576: /btw died on a 522).
-        assert!(should_retry_side_question(&SamplingError::StreamError {
-            error_type: "overloaded_error".into(),
-            message: "Overloaded".into(),
-        }));
-        assert!(should_retry_side_question(&api(
-            500,
-            "stream error (overloaded_error): Overloaded",
-            None
-        )));
-        for code in [503u16, 522, 529] {
-            assert!(
-                should_retry_side_question(&api(code, "transient", None)),
-                "{code} must retry"
-            );
-        }
-
-        // Server veto (`x-should-retry: false`) wins over any retryable status.
-        assert!(!should_retry_side_question(&api(
-            522,
-            "timed out",
-            Some(false)
-        )));
-        // Deterministic context-length failures never retry, even on 529.
-        assert!(!should_retry_side_question(&api(
-            529,
-            "invalid_request_error: prompt is too long: 300000 tokens > 200000 maximum",
-            None
-        )));
-        // Rate limits need Retry-After-scale waits, not this sub-second
-        // budget; origin TLS and client errors never clear on retry.
-        for code in [429u16, 525, 526, 400] {
-            assert!(
-                !should_retry_side_question(&api(code, "not transient", None)),
-                "{code} must NOT retry"
-            );
-        }
-    }
-
-    /// The wired policy: 3 attempts total, backoff within the configured
-    /// bounds (500ms + 1s base, jitter adds up to the current delay), and a
-    /// fresh request id stamped per attempt.
-    #[tokio::test(start_paused = true)]
-    async fn side_question_retry_wiring_caps_attempts_and_bounds_backoff() {
-        use backon::Retryable as _;
-
-        let calls = std::cell::Cell::new(0u32);
-        let start = tokio::time::Instant::now();
-        let result: Result<(), SamplingError> = (|| async {
-            calls.set(calls.get() + 1);
-            Err(SamplingError::StreamError {
-                error_type: "overloaded_error".into(),
-                message: "Overloaded".into(),
-            })
-        })
-        .retry(side_question_retry_policy())
-        .when(should_retry_side_question)
-        .await;
-
-        assert!(result.is_err());
-        assert_eq!(calls.get(), 3, "1 try + 2 retries");
-        // Base delays 500ms + 1s; jitter adds (0, delay) per sleep.
-        let elapsed = start.elapsed();
-        assert!(
-            elapsed >= std::time::Duration::from_millis(1_500),
-            "elapsed {elapsed:?} below minimum backoff"
-        );
-        assert!(
-            elapsed <= std::time::Duration::from_millis(3_100),
-            "elapsed {elapsed:?} above maximum backoff"
-        );
-    }
-
-    #[test]
-    fn side_question_attempts_get_fresh_request_ids() {
-        let base = ConversationRequest {
-            x_grok_conv_id: Some("btw-test".into()),
-            ..Default::default()
-        };
-        let a = build_side_question_attempt(&base);
-        let b = build_side_question_attempt(&base);
-        let (a_id, b_id) = (a.x_grok_req_id.unwrap(), b.x_grok_req_id.unwrap());
-        assert!(a_id.starts_with("xai-btw-"));
-        assert_ne!(a_id, b_id, "each attempt must get a fresh req_id");
-        // Everything except the request id is byte-identical to the base.
-        assert_eq!(a.x_grok_conv_id, base.x_grok_conv_id);
-    }
-}

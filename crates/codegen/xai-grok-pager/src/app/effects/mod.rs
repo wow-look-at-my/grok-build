@@ -3695,6 +3695,55 @@ pub(crate) fn execute(
                     }
                 });
         }
+        Effect::SendTodo { agent_id, session_id, request } => {
+            let tx = acp_tx.clone();
+            let is_api_key_auth = session_flags.is_api_key_auth;
+            tasks
+                .spawn(async move {
+                    let ext = acp::ExtRequest::new(
+                        "x.ai/todo",
+                        serde_json::value::to_raw_value(
+                                &serde_json::json!({
+                        "sessionId": session_id.0.to_string(),
+                        "request": &request,
+                    }),
+                            )
+                            .expect("serialize todo params")
+                            .into(),
+                    );
+                    let result = match acp_send(ext, &tx).await {
+                        Ok(resp) => {
+                            let parsed: serde_json::Value = serde_json::from_str(
+                                    resp.0.get(),
+                                )
+                                .unwrap_or_default();
+                            let added = parsed
+                                .get("result")
+                                .and_then(|r| r.get("added"))
+                                .or_else(|| parsed.get("added"))
+                                .and_then(|a| a.as_array())
+                                .map(|items| {
+                                    items
+                                        .iter()
+                                        .filter_map(|i| i.as_str().map(String::from))
+                                        .collect::<Vec<_>>()
+                                })
+                                .unwrap_or_default();
+                            if added.is_empty() {
+                                Err("the capture agent added no todo".to_string())
+                            } else {
+                                Ok(added)
+                            }
+                        }
+                        Err(e) => Err(format_acp_error(&e, is_api_key_auth)),
+                    };
+                    TaskResult::TodoCaptured {
+                        agent_id,
+                        request,
+                        result,
+                    }
+                });
+        }
         Effect::SendRecap { session_id, auto } => {
             let tx = acp_tx.clone();
             tasks
