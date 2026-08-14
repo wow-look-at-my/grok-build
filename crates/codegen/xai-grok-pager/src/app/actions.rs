@@ -756,6 +756,8 @@ pub enum Action {
     SaveRememberNoteFromModal,
     /// Send a /btw side question (bypasses queue, works while agent is busy).
     SendBtw(String),
+    /// Send a /todo capture request (bypasses queue, works while agent is busy).
+    SendTodo(String),
     /// Request a session recap ("where was I" summary). `auto` is `true` for
     /// the automatic return-from-away recap, `false` for an explicit `/recap`.
     /// Bypasses the prompt queue (works while the agent is busy).
@@ -2014,6 +2016,12 @@ pub enum Effect {
         /// Correlates minimal responses; fullscreen leaves this unset.
         minimal_request_id: Option<uuid::Uuid>,
     },
+    /// Fire a /todo capture via the x.ai/todo ext method.
+    SendTodo {
+        agent_id: AgentId,
+        session_id: acp::SessionId,
+        request: String,
+    },
     /// Request a session recap via the x.ai/recap ext method. Fire-and-forget:
     /// the recap arrives later as a `SessionRecap` notification.
     SendRecap {
@@ -2792,6 +2800,12 @@ pub enum TaskResult {
         result: Result<String, String>,
         /// Correlates minimal responses; fullscreen leaves this unset.
         minimal_request_id: Option<uuid::Uuid>,
+    },
+    /// `/todo` capture finished: the items it appended, or why it appended none.
+    TodoCaptured {
+        agent_id: AgentId,
+        request: String,
+        result: Result<Vec<String>, String>,
     },
     /// `x.ai/recap` request acknowledged (fire-and-forget). The recap itself
     /// arrives separately as a `SessionRecap` notification; this only carries

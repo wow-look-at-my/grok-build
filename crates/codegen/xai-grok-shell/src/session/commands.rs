@@ -735,6 +735,16 @@ pub enum SessionCommand {
         question: String,
         respond_to: oneshot::Sender<Result<String, SideQuestionError>>,
     },
+    /// Capture a `/todo` request as items on the session's todo list.
+    /// The session snapshots the conversation and runs a short side agent
+    /// whose only permitted mutation is appending to that list; the running
+    /// turn is not interrupted.
+    TodoCapture {
+        request: String,
+        respond_to: oneshot::Sender<
+            Result<super::acp_session::TodoCaptureOutcome, super::acp_session::TodoCaptureError>,
+        >,
+    },
     /// Generate a session recap (a short "where was I" summary) and broadcast
     /// it to clients via `SessionUpdate::SessionRecap`.
     ///

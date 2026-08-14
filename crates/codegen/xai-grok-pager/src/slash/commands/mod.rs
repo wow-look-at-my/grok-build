@@ -63,6 +63,7 @@ pub mod tasks;
 pub mod theme;
 pub mod timeline;
 pub mod timestamps;
+pub mod todo;
 pub mod toggle_mouse_reporting;
 pub mod transcript;
 pub mod tutorial;
@@ -125,6 +126,7 @@ pub fn builtin_commands() -> Vec<Arc<dyn SlashCommand>> {
         Arc::new(mcps::McpsCommand),
         Arc::new(workflows::WorkflowsCommand),
         Arc::new(btw::BtwCommand),
+        Arc::new(todo::TodoCommand),
         Arc::new(recap::RecapCommand),
         Arc::new(doctor::DoctorCommand),
         Arc::new(voice::VoiceCommand),

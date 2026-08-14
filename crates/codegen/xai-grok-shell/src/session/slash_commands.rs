@@ -519,6 +519,7 @@ pub const PAGER_COMMAND_KEYS: &[&str] = &[
     "timeline",
     "timestamps",
     "title",
+    "todo",
     "toggle-mouse-reporting",
     "tour",
     "transcript",
