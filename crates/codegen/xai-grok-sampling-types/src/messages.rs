@@ -222,6 +222,11 @@ pub struct MessagesResponse {
     #[serde(rename = "type")]
     pub r#type: String, // "message"
     pub role: String, // "assistant"
+    /// `null` reads as no content blocks. `message_start` carries an empty
+    /// content list by definition, and a gateway written in Go marshals that
+    /// unset slice as `null` -- which would fail the opening event of every
+    /// stream it relays.
+    #[serde(default, deserialize_with = "crate::serde_helpers::null_as_default")]
     pub content: Vec<ContentBlock>,
     pub model: String,
     pub stop_reason: Option<StopReason>,
@@ -350,6 +355,38 @@ pub struct StreamError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `message_start` opens every stream with an empty content list, so a
+    /// gateway that writes an unset slice as `null` puts this shape on the
+    /// wire for every turn it relays. The event is internally tagged, so serde
+    /// buffers it and the failure arrives without a line/column -- exactly the
+    /// bare "invalid type: null, expected a sequence" users see.
+    #[test]
+    fn message_start_deserializes_null_content() {
+        let event: MessageStreamEvent = serde_json::from_str(
+            r#"{
+                "type": "message_start",
+                "message": {
+                    "id": "msg_1",
+                    "type": "message",
+                    "role": "assistant",
+                    "content": null,
+                    "model": "test-model",
+                    "stop_reason": null,
+                    "usage": {"input_tokens": 18, "output_tokens": 0}
+                }
+            }"#,
+        )
+        .expect("a null `content` must not fail message_start");
+
+        match event {
+            MessageStreamEvent::MessageStart { message } => {
+                assert!(message.content.is_empty());
+                assert_eq!(message.usage.input_tokens, 18);
+            }
+            other => panic!("expected MessageStart, got {other:?}"),
+        }
+    }
 
     #[test]
     fn stop_reason_deserializes_all_known_values_and_catches_unknown() {
