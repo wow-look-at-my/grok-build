@@ -1,4 +1,4 @@
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::num::NonZeroU64;
 
@@ -50,15 +50,7 @@ impl Clone for Box<dyn TraceContext> {
     }
 }
 
-/// Deserialize a field that may be `null` as the default value.
-/// This is useful for fields like `Vec<T>` where `null` should become `vec![]`.
-fn deserialize_null_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
-where
-    D: Deserializer<'de>,
-    T: Default + Deserialize<'de>,
-{
-    Option::<T>::deserialize(deserializer).map(|opt| opt.unwrap_or_default())
-}
+use crate::serde_helpers::null_as_default as deserialize_null_default;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ChatCompletionRequest {
