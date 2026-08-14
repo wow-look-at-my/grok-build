@@ -185,6 +185,9 @@ mod run_loop;
 mod session_setup;
 #[path = "acp_session_impl/side_call.rs"]
 mod side_call;
+#[path = "acp_session_impl/todo_capture.rs"]
+mod todo_capture;
+pub use todo_capture::{TodoCaptureError, TodoCaptureOutcome};
 #[path = "acp_session_impl/turn_end.rs"]
 mod turn_end;
 #[path = "acp_session_impl/turn_summary.rs"]

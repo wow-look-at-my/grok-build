@@ -67,6 +67,31 @@ verify serially wastes time when a parallel CI build could be running.
 - `GROK_*`/`XAI_*` values whose NAME looks like a credential are withheld —
   the prompt leaves the session and lands in the model's transcript.
 
+## `/todo` capture feature notes
+
+- `/todo <request>` rides the `/btw` path, not the prompt queue: `Action::SendTodo`
+  → `x.ai/todo` → `SessionCommand::TodoCapture`, spawned on the session's
+  LocalSet (`session/acp_session_impl/todo_capture.rs`). The running turn is
+  never interrupted, and the parent conversation is never mutated — the capture
+  agent works from a snapshot of it.
+- Appending to the todo list is its only permitted mutation, and the prompt is
+  not what enforces that. Every tool call goes through `capture_action`: only
+  read kinds run, and `todo_write` is rewritten by `add_only_todo_args` before
+  dispatch — fresh `capture-`-prefixed ids, status pending, `merge` forced on.
+  A `merge: false` replace, a status flip, and an edit of an existing item all
+  arrive as content and leave as an append.
+- It ships the main turn's full tool list even though it honors a fraction of
+  it. The list serializes into the cached prefix, so trimming it would cost the
+  whole conversation's prompt cache and buy nothing the dispatch gate does not
+  already guarantee.
+- The append runs through the session's own `todo_write` rather than writing
+  `TodoState` directly, which is what makes the item persist, reach the client
+  as a `Plan` update, and show up in the next turn's todo-gate reminder the same
+  way one the main agent wrote does. That path is `todo_write`-specific:
+  another harness's task-list tool (opencode's `todowrite`) replaces the list
+  instead of merging, so the run fails loudly with `UnsupportedTodoTool`
+  instead of writing through semantics that cannot express an append.
+
 ## Cost-indicator feature notes
 
 - Per-message cost rides `XaiSessionUpdate::ResponseCompleted.cost_usd_ticks`,

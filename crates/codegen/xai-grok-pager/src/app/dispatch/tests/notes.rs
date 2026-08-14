@@ -906,3 +906,135 @@ fn send_feedback_preserves_composer_draft() {
         "composer draft must survive SendFeedback"
     );
 }
+
+/// Text of the newest system block, for the `/todo` capture assertions.
+fn last_system_text(app: &AppView, id: AgentId) -> String {
+    app.agents[&id]
+        .scrollback
+        .iter_entries()
+        .filter_map(|(_, entry)| match &entry.block {
+            RenderBlock::System(b) => Some(b.text.clone()),
+            _ => None,
+        })
+        .next_back()
+        .expect("a system block")
+}
+
+#[test]
+fn todo_capture_requests_and_shows_a_running_block() {
+    let mut app = test_app_with_agent();
+    let id = AgentId(0);
+    app.agents
+        .get_mut(&id)
+        .unwrap()
+        .prompt
+        .set_text("/todo ...");
+
+    let effects = dispatch(Action::SendTodo("push to 2 git repos".into()), &mut app);
+
+    assert!(
+        matches!(
+            effects.as_slice(),
+            [Effect::SendTodo { request, .. }] if request == "push to 2 git repos"
+        ),
+        "expected SendTodo effect, got {effects:?}"
+    );
+    let agent = app.agents.get(&id).unwrap();
+    let entry_id = agent
+        .pending_todo_entry
+        .expect("capture shows a running block while it runs");
+    assert!(
+        agent
+            .scrollback
+            .get_by_id(entry_id)
+            .is_some_and(|e| e.is_running),
+        "the capture block animates until the response lands"
+    );
+    assert_eq!(agent.prompt.text(), "", "slash command text is cleared");
+}
+
+#[test]
+fn captured_todos_replace_the_running_block_with_what_landed() {
+    let mut app = test_app_with_agent();
+    let id = AgentId(0);
+    dispatch(Action::SendTodo("push to 2 git repos".into()), &mut app);
+    let spinner = app.agents[&id].pending_todo_entry.unwrap();
+
+    dispatch(
+        Action::TaskComplete(TaskResult::TodoCaptured {
+            agent_id: id,
+            request: "push to 2 git repos".into(),
+            result: Ok(vec![
+                "Add a second remote to the push script".into(),
+                "Cover the two-remote push in ci/push.sh".into(),
+            ]),
+        }),
+        &mut app,
+    );
+
+    let agent = app.agents.get(&id).unwrap();
+    assert!(agent.pending_todo_entry.is_none());
+    assert!(
+        agent.scrollback.get_by_id(spinner).is_none(),
+        "the running block is gone, not left spinning"
+    );
+    let text = last_system_text(&app, id);
+    assert!(
+        text.starts_with("Added 2 todos to the todo list:"),
+        "{text}"
+    );
+    assert!(
+        text.contains("Add a second remote to the push script"),
+        "{text}"
+    );
+    assert!(
+        text.contains("Cover the two-remote push in ci/push.sh"),
+        "{text}"
+    );
+}
+
+/// A capture that adds nothing must say so in the transcript. A silent
+/// disappearing spinner would read as "it worked".
+#[test]
+fn a_failed_capture_reports_instead_of_vanishing() {
+    let mut app = test_app_with_agent();
+    let id = AgentId(0);
+    dispatch(
+        Action::SendTodo("look into the flaky test".into()),
+        &mut app,
+    );
+    let spinner = app.agents[&id].pending_todo_entry.unwrap();
+
+    dispatch(
+        Action::TaskComplete(TaskResult::TodoCaptured {
+            agent_id: id,
+            request: "look into the flaky test".into(),
+            result: Err("the capture agent added no todo".into()),
+        }),
+        &mut app,
+    );
+
+    let agent = app.agents.get(&id).unwrap();
+    assert!(agent.pending_todo_entry.is_none());
+    assert!(agent.scrollback.get_by_id(spinner).is_none());
+    let text = last_system_text(&app, id);
+    assert!(text.contains("look into the flaky test"), "{text}");
+    assert!(text.contains("the capture agent added no todo"), "{text}");
+}
+
+#[test]
+fn todo_capture_without_a_session_says_so_and_fires_nothing() {
+    let mut app = test_app_with_agent();
+    let id = AgentId(0);
+    app.agents.get_mut(&id).unwrap().session.session_id = None;
+
+    let effects = dispatch(Action::SendTodo("anything".into()), &mut app);
+
+    assert!(effects.is_empty(), "no session, no ext call: {effects:?}");
+    let agent = app.agents.get(&id).unwrap();
+    assert!(agent.pending_todo_entry.is_none());
+    assert_eq!(
+        agent.toast.as_ref().map(|(s, _)| s.as_str()),
+        Some("No active session")
+    );
+}
