@@ -91,6 +91,26 @@ verify serially wastes time when a parallel CI build could be running.
   another harness's task-list tool (opencode's `todowrite`) replaces the list
   instead of merging, so the run fails loudly with `UnsupportedTodoTool`
   instead of writing through semantics that cannot express an append.
+- Nothing in the loop compares against the literal `todo_write`. A harness
+  preset renames tools per provider (`name_override`), and the model calls the
+  renamed one, so the tool is resolved by kind and identified by NAMESPACE
+  (`resolve_capture_todo_tool`) — the namespace is what separates the
+  merge-capable grok_build tool from opencode's replace-only one, and it
+  survives a rename. Item contents come back through `bridge.try_parse`, which
+  reverse-maps renamed parameters too.
+- Each turn appends `response.items` verbatim, the way the main turn records a
+  response, never a synthesized assistant message: the Responses API rejects a
+  continuation whose reasoning items are missing, and a hosted search's items
+  have to ride along for the next request to make sense. Reasoning is stripped
+  only where the backend requires it (Messages), on the loop's turns as well as
+  the snapshot.
+- Provider-shaped failures the loop absorbs rather than dying on: transient 5xx
+  and overloads (the `/btw` retry budget, now shared in `side_call.rs`), empty
+  or concatenated-JSON tool arguments (`parse_tool_arguments`, mirroring the
+  main turn), a model answering in prose instead of calling the tool (one
+  nudge), and a context window too small for the conversation
+  (`budget_instruction_items` fits the snapshot, with `LOOP_GROWTH_RESERVE_TOKENS`
+  held back for the loop's own turns).
 
 ## Cost-indicator feature notes
 

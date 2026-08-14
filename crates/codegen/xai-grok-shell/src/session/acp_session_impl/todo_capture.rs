@@ -9,9 +9,12 @@
 //!
 //! see AGENTS.md, "`/todo` capture feature notes"
 
-use super::side_call::{AuxCall, log_prompt_cache_hit};
+use super::side_call::{
+    AuxCall, aux_retry_policy, fresh_req_id, log_prompt_cache_hit, should_retry_aux_call,
+};
 use super::*;
 
+use backon::Retryable as _;
 use xai_grok_sampling_types::ToolCall;
 use xai_grok_tools::types::tool::ToolKind;
 
@@ -23,9 +26,17 @@ const MAX_TOOL_CALLS: usize = 8;
 /// Bytes of a read-only tool's output it sees. Its job is to name the work,
 /// not to read a file into a todo item.
 const TOOL_RESULT_BUDGET: usize = 4_000;
+/// Room the loop's own turns need on top of the conversation snapshot: up to
+/// [`MAX_TOOL_CALLS`] results of [`TOOL_RESULT_BUDGET`] bytes each, plus the
+/// assistant and reasoning items echoed alongside them. Reserved by shrinking
+/// the window the snapshot is fitted to, so on a small-window model the last
+/// turn still has somewhere to put the write.
+const LOOP_GROWTH_RESERVE_TOKENS: u64 = 16_000;
 
-/// The only task-list tool `/todo` can append through — see
-/// [`TodoCaptureError::UnsupportedTodoTool`].
+/// The canonical name of the append-capable task-list tool. What a session
+/// advertises it as can differ (a `name_override` renames it per harness), so
+/// this is the name in messages and tests, never the one compared against a
+/// model's call — see [`SessionActor::resolve_capture_todo_tool`].
 const TODO_WRITE: &str = "todo_write";
 
 /// What a `/todo` run put on the list.
@@ -47,7 +58,9 @@ pub enum TodoCaptureError {
     Sampling(#[from] SamplingError),
     #[error("failed to prepare client: {0}")]
     PrepareClient(String),
-    #[error("/todo needs the `todo_write` tool; this session's task-list tool is `{0}`")]
+    #[error(
+        "/todo needs an append-capable task-list tool (`todo_write`); this session's is `{0}`, which replaces the list instead"
+    )]
     UnsupportedTodoTool(String),
     #[error("the capture agent finished without adding a todo")]
     NothingAdded,
@@ -102,6 +115,29 @@ fn contents_from_todo_write_args(args: &serde_json::Value) -> Vec<String> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+/// Tool-call arguments as JSON, tolerating what models actually emit.
+///
+/// Mirrors the main turn's `prepare_tool_call`: empty arguments mean `{}`, and
+/// a run of concatenated objects (`{...}{...}`, which several models produce
+/// under load) yields the first one rather than nothing. Anything still
+/// unparseable becomes `{"raw": ...}` — the same shape the main turn hands a
+/// tool, so the failure is the tool's to report, not a silent drop here.
+fn parse_tool_arguments(arguments: &str) -> serde_json::Value {
+    use crate::session::helpers::tool_input_parsing::{
+        normalize_empty_arguments, try_extract_concatenated_json_objects,
+    };
+    let normalized = normalize_empty_arguments(arguments);
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(normalized) {
+        return value;
+    }
+    if let Some(objects) = try_extract_concatenated_json_objects(arguments)
+        && let Some(first) = objects.into_iter().next()
+    {
+        return first;
+    }
+    serde_json::json!({ "raw": arguments })
 }
 
 /// Append-only `todo_write` arguments for `contents`. Ids are minted here,
@@ -162,26 +198,46 @@ impl CaptureToolOutcome {
 /// todo tool nor a readable one never reaches dispatch. The refusals are
 /// written to steer the next turn toward the write, because a refusal the model
 /// cannot act on just burns the turn budget.
-fn capture_action(name: &str, kind: Option<ToolKind>, tools_used: usize) -> CaptureAction {
+///
+/// `todo_tool` is the name the todo tool is advertised under in THIS session,
+/// which is the name the model calls it by — not the canonical `todo_write`,
+/// which a `name_override` can rename out from under both.
+fn capture_action(
+    name: &str,
+    kind: Option<ToolKind>,
+    todo_tool: &str,
+    tools_used: usize,
+) -> CaptureAction {
     // The append is always available: it is the one thing the run exists to do,
     // so a spent read budget must not strand the agent with nothing to call.
-    if name == TODO_WRITE {
+    if name == todo_tool {
         return CaptureAction::Append;
     }
     if !kind.is_some_and(is_capture_readable) {
         return CaptureAction::Refuse(format!(
             "`{name}` was not run: adding todo items is the todo-capture agent's only \
              permitted mutation, and read-only tools are the only others it may call. \
-             Put the work in a todo item with `{TODO_WRITE}` instead."
+             Put the work in a todo item with `{todo_tool}` instead."
         ));
     }
     if tools_used >= MAX_TOOL_CALLS {
         return CaptureAction::Refuse(format!(
-            "Read-only budget spent ({MAX_TOOL_CALLS} calls). Call `{TODO_WRITE}` now \
+            "Read-only budget spent ({MAX_TOOL_CALLS} calls). Call `{todo_tool}` now \
              with what you have."
         ));
     }
     CaptureAction::Read
+}
+
+/// The one nudge a run spends when the model answers with prose instead of
+/// calling the todo tool. Cheaper models do this; a second empty answer is
+/// taken as "this model will not call it" rather than nudged again.
+fn no_tool_call_nudge(tag: &str, todo_tool: &str) -> ConversationItem {
+    ConversationItem::user(format!(
+        "<{tag}>Nothing was added: a todo only lands on the list through a \
+         `{todo_tool}` call, and prose is not one. Call `{todo_tool}` now with the \
+         item(s), and reply with nothing else.</{tag}>"
+    ))
 }
 
 impl SessionActor {
@@ -193,36 +249,50 @@ impl SessionActor {
         request: &str,
     ) -> Result<TodoCaptureOutcome, TodoCaptureError> {
         let bridge = self.agent.borrow().tool_bridge().clone();
-        // Other harnesses' task-list tools replace the whole list rather than
-        // merging into it (opencode's `todowrite` has no `merge`), so an
-        // append cannot be expressed through them. Say so instead of writing
-        // through a tool whose semantics are wrong for this.
-        match bridge.tool_for_kind(ToolKind::Plan).await {
-            Some(name) if name == TODO_WRITE => {}
-            Some(name) => return Err(TodoCaptureError::UnsupportedTodoTool(name)),
-            None => return Err(TodoCaptureError::UnsupportedTodoTool("none".into())),
-        }
+        let todo_tool = self.resolve_capture_todo_tool(&bridge).await?;
 
         let sampling_client = self
             .prepare_chat_completion(false)
             .await
             .map_err(|e| TodoCaptureError::PrepareClient(e.to_string()))?;
 
-        let conversation = self.chat_state_handle.get_conversation().await;
-        let mut items: Vec<ConversationItem> =
-            if sampling_client.api_backend().requires_reasoning_strip() {
-                xai_chat_state::compaction_utils::strip_reasoning_blocks(conversation)
-            } else {
-                conversation
-            };
-        // `/todo` fires mid-turn, so the snapshot may end with an assistant
-        // message whose tool_calls have no matching ToolResult yet.
-        crate::session::helpers::session_recap::pop_trailing_tool_run(&mut items);
-        items.push(self.todo_capture_instruction(request));
-
+        // Only the Messages backend rejects thinking blocks it was not
+        // configured for; every other backend keeps reasoning verbatim, which
+        // is what the provider's prefix cache and its own tool-call
+        // continuations expect. Applies to the loop's own turns too.
+        let strip_reasoning = sampling_client.api_backend().requires_reasoning_strip();
         let sampling_config = self.chat_state_handle.get_sampling_config().await;
         let reasoning_effort = sampling_config.as_ref().and_then(|c| c.reasoning_effort);
+        let context_window = sampling_config
+            .as_ref()
+            .map(|c| c.context_window.get())
+            .unwrap_or(crate::remote::DEFAULT_CONTEXT_WINDOW);
         let model = sampling_config.map(|c| c.model).unwrap_or_default();
+
+        let tag = self.reminder_wrapper_tag();
+        let conversation = self.chat_state_handle.get_conversation().await;
+        // Fit the snapshot to THIS model's window rather than sending the
+        // conversation whole: a small-window model would otherwise fail the
+        // capture with a context-length error, which is deterministic and
+        // never retried. The helper also strips reasoning where required and
+        // pops a trailing tool run — `/todo` fires mid-turn, so the snapshot
+        // can end with an assistant message whose tool calls have no result
+        // yet.
+        let mut items = crate::session::helpers::session_recap::budget_instruction_items(
+            conversation,
+            self.todo_capture_instruction(&todo_tool, request),
+            strip_reasoning,
+            context_window.saturating_sub(LOOP_GROWTH_RESERVE_TOKENS),
+        );
+        if items.len() == 1 {
+            // Only the instruction survived the budget. The capture still runs,
+            // but off the request text alone — say so rather than let a
+            // context-free item look like a considered one.
+            tracing::warn!(
+                context_window,
+                "todo capture: no conversation fit this model's window; capturing from the request alone"
+            );
+        }
         // Same tools as the main turn: they serialize into the cached prefix,
         // so trimming the list to the ones the loop honors would cost the whole
         // conversation's prompt cache to save nothing. What the agent may
@@ -237,9 +307,10 @@ impl SessionActor {
         // nothing on the list must say which of the two happened: the tool
         // refused the write, or the agent never asked for one.
         let mut append_error: Option<String> = None;
+        let mut nudges_left = 1usize;
 
         for _ in 0..MAX_MODEL_CALLS {
-            let model_request = self.parent_cached_request(AuxCall {
+            let base_request = self.parent_cached_request(AuxCall {
                 items: items.clone(),
                 tools: tool_specs.clone(),
                 hosted_tools: hosted_tools.clone(),
@@ -249,16 +320,47 @@ impl SessionActor {
                 conv_id: conv_id.clone(),
                 req_id: format!("xai-todo-{}", uuid::Uuid::new_v4()),
             });
-            let response = sampling_client.conversation_collect(model_request).await?;
+            // One capture is several model calls, so a transient failure on any
+            // of them would otherwise throw away the whole run's work. Same
+            // bounded budget `/btw` uses.
+            let response =
+                (|| sampling_client.conversation_collect(fresh_req_id(&base_request, "todo")))
+                    .retry(aux_retry_policy())
+                    .when(should_retry_aux_call)
+                    .notify(|e: &SamplingError, backoff: std::time::Duration| {
+                        tracing::warn!(
+                            backoff_ms = backoff.as_millis() as u64,
+                            error = %e,
+                            "todo capture transient failure; retrying"
+                        );
+                    })
+                    .await?;
             log_prompt_cache_hit("todo", sampling_client.api_backend(), &response);
 
             let calls: Vec<ToolCall> = response.tool_calls().to_vec();
+            // Feed the response back the way the main turn records it — every
+            // item, in order, not a synthesized assistant message. The Responses
+            // API rejects a continuation whose reasoning items are missing, and
+            // a hosted search's own items have to ride along for the next
+            // request to make sense at all.
+            let echoed = if strip_reasoning {
+                xai_chat_state::compaction_utils::strip_reasoning_blocks(response.items)
+            } else {
+                response.items
+            };
+            items.extend(echoed);
+
             if calls.is_empty() {
-                break;
+                // A model that answered in prose gets exactly one correction.
+                if nudges_left == 0 {
+                    break;
+                }
+                nudges_left -= 1;
+                items.push(no_tool_call_nudge(tag, &todo_tool));
+                continue;
             }
-            items.push(ConversationItem::assistant_tool_calls(calls.clone()));
             for call in &calls {
-                let outcome = self.run_capture_tool(call, tools_used).await;
+                let outcome = self.run_capture_tool(call, &todo_tool, tools_used).await;
                 if outcome.spent_a_read {
                     tools_used += 1;
                 }
@@ -293,10 +395,35 @@ impl SessionActor {
         Ok(TodoCaptureOutcome { added, tools_used })
     }
 
-    /// The capture agent's instruction turn.
-    fn todo_capture_instruction(&self, request: &str) -> ConversationItem {
+    /// The name this session advertises the append-capable todo tool under, or
+    /// why `/todo` cannot run here.
+    ///
+    /// Kind alone is not enough: opencode's `todowrite` is also
+    /// [`ToolKind::Plan`] and replaces the whole list instead of merging into
+    /// it, so an append cannot be expressed through it. The namespace is what
+    /// identifies the implementation, and it survives a `name_override` —
+    /// which is exactly what a harness preset uses to rename tools per
+    /// provider, and why nothing here may compare against the literal
+    /// `todo_write`.
+    async fn resolve_capture_todo_tool(
+        &self,
+        bridge: &xai_grok_tools::bridge::ToolBridge,
+    ) -> Result<String, TodoCaptureError> {
+        use xai_grok_tools::types::tool::ToolNamespace;
+        let Some(name) = bridge.tool_for_kind(ToolKind::Plan).await else {
+            return Err(TodoCaptureError::UnsupportedTodoTool("none".into()));
+        };
+        match bridge.tool_namespace(&name) {
+            Some(ToolNamespace::GrokBuild) => Ok(name),
+            _ => Err(TodoCaptureError::UnsupportedTodoTool(name)),
+        }
+    }
+
+    /// The capture agent's instruction, appended after the snapshot as the
+    /// run's one user turn.
+    fn todo_capture_instruction(&self, todo_tool: &str, request: &str) -> String {
         let tag = self.reminder_wrapper_tag();
-        ConversationItem::user(format!(
+        format!(
             "<{tag}>You are a todo-capture agent: a separate, lightweight agent \
              spawned to turn one request from the user into items on the shared \
              todo list.\n\n\
@@ -308,12 +435,12 @@ impl SessionActor {
              1. Spend a few READ-ONLY tool calls (read, search, list) if and only if \
              you need them to name the work concretely. Skip this entirely when the \
              request is already specific.\n\
-             2. Call `{TODO_WRITE}` with the item(s) to add, then stop.\n\n\
+             2. Call `{todo_tool}` with the item(s) to add, then stop.\n\n\
              CONSTRAINTS, enforced outside this prompt — a call that breaks one is \
              refused and never runs, so do not spend a turn on it:\n\
              - Adding todo items is your ONLY permitted mutation. Every edit, write, \
              shell command, and subagent call is refused.\n\
-             - Your `{TODO_WRITE}` call APPENDS: the ids you send are replaced with \
+             - Your `{todo_tool}` call APPENDS: the ids you send are replaced with \
              fresh ones, statuses are forced to pending, and existing items are \
              untouched. You cannot complete, reword, reorder, or drop the main \
              agent's work.\n\
@@ -325,26 +452,30 @@ impl SessionActor {
              checklist.\n\n\
              The user's request follows.</{tag}>\n\n\
              {request}"
-        ))
+        )
     }
 
     /// Dispatch one tool call from the capture loop.
-    async fn run_capture_tool(&self, call: &ToolCall, tools_used: usize) -> CaptureToolOutcome {
-        let args: serde_json::Value =
-            serde_json::from_str(&call.arguments).unwrap_or(serde_json::Value::Null);
+    async fn run_capture_tool(
+        &self,
+        call: &ToolCall,
+        todo_tool: &str,
+        tools_used: usize,
+    ) -> CaptureToolOutcome {
+        let args = parse_tool_arguments(&call.arguments);
         let kind = self.agent.borrow().tool_bridge().tool_kind(&call.name);
-        match capture_action(&call.name, kind, tools_used) {
+        match capture_action(&call.name, kind, todo_tool, tools_used) {
             CaptureAction::Refuse(message) => CaptureToolOutcome::said(message),
             CaptureAction::Append => {
-                let contents = contents_from_todo_write_args(&args);
+                let contents = self.capture_todo_contents(todo_tool, &args).await;
                 if contents.is_empty() {
                     return CaptureToolOutcome::said(format!(
-                        "No item to add: the `{TODO_WRITE}` call carried no todo content. \
+                        "No item to add: the `{todo_tool}` call carried no todo content. \
                          Send `todos: [{{\"content\": \"...\"}}]`."
                     ));
                 }
                 match self
-                    .append_capture_todos(&call.id, add_only_todo_args(&contents))
+                    .append_capture_todos(todo_tool, &call.id, add_only_todo_args(&contents))
                     .await
                 {
                     Ok(text) => CaptureToolOutcome {
@@ -382,17 +513,55 @@ impl SessionActor {
         }
     }
 
+    /// The item contents in a todo-tool call, whatever the model spelled them.
+    ///
+    /// Parses through the bridge first, which reverse-maps client-facing
+    /// parameter names to canonical ones — a harness may rename `todos` the
+    /// same way it renames the tool — and yields the typed input the tool
+    /// itself would see. Falls back to reading the JSON directly, so a call
+    /// the strict parser rejects (an extra field, a status the schema does not
+    /// know) still contributes its content instead of being dropped.
+    async fn capture_todo_contents(&self, todo_tool: &str, args: &serde_json::Value) -> Vec<String> {
+        use xai_grok_tools::types::tool_io::ToolInput;
+        let bridge = self.agent.borrow().tool_bridge().clone();
+        if let Ok(ToolInput::TodoWrite(input)) = bridge.try_parse(todo_tool, args.clone()).await {
+            let contents: Vec<String> = input
+                .todos
+                .iter()
+                .filter_map(|t| {
+                    let text = t
+                        .content
+                        .as_deref()
+                        .filter(|s| !s.trim().is_empty())
+                        .unwrap_or(&t.id);
+                    let text = text.trim();
+                    (!text.is_empty()).then(|| text.to_owned())
+                })
+                .collect();
+            if !contents.is_empty() {
+                return contents;
+            }
+        }
+        contents_from_todo_write_args(args)
+    }
+
     /// Run the sanitized append through the session's own todo tool, so the
     /// list, its persisted state, and the client's plan view all move the way
     /// they do when the main agent writes a todo.
+    ///
+    /// Dispatch is by the session's advertised name with canonical parameter
+    /// names: the registry reverse-maps client names onto canonical ones and
+    /// leaves everything else alone, so canonical keys arrive as themselves
+    /// under any rename.
     async fn append_capture_todos(
         &self,
+        todo_tool: &str,
         call_id: &str,
         args: serde_json::Value,
     ) -> Result<String, xai_tool_runtime::ToolError> {
         let result = self
             .workspace_ops
-            .call_tool(TODO_WRITE, args, call_id, Some(&self.session_info.id.0))
+            .call_tool(todo_tool, args, call_id, Some(&self.session_info.id.0))
             .await?;
         if let Some(plan) = crate::session::acp_conversion::acp_plan_update(&result.output) {
             self.send_update(acp::SessionUpdate::Plan(plan), None).await;
@@ -457,8 +626,55 @@ mod tests {
     #[test]
     fn the_append_is_reachable_even_with_the_read_budget_spent() {
         assert_eq!(
-            capture_action(TODO_WRITE, Some(ToolKind::Plan), MAX_TOOL_CALLS + 3),
+            capture_action(
+                TODO_WRITE,
+                Some(ToolKind::Plan),
+                TODO_WRITE,
+                MAX_TOOL_CALLS + 3
+            ),
             CaptureAction::Append
+        );
+    }
+
+    /// A harness that renames the todo tool renames it for the model too, so
+    /// the append is recognized by the session's advertised name. Comparing
+    /// against the canonical `todo_write` instead would refuse the one call
+    /// the run exists to make.
+    #[test]
+    fn the_append_is_recognized_under_a_renamed_todo_tool() {
+        assert_eq!(
+            capture_action("TodoWrite", Some(ToolKind::Plan), "TodoWrite", 0),
+            CaptureAction::Append
+        );
+        // And the canonical name is then just another unknown tool.
+        assert!(matches!(
+            capture_action(TODO_WRITE, None, "TodoWrite", 0),
+            CaptureAction::Refuse(_)
+        ));
+    }
+
+    /// What models actually emit for arguments: nothing, a run of concatenated
+    /// objects, or something that is not JSON at all. The main turn tolerates
+    /// all three; a capture that dropped them would silently lose the write.
+    #[test]
+    fn tool_arguments_survive_what_models_emit() {
+        assert_eq!(parse_tool_arguments(""), serde_json::json!({}));
+        assert_eq!(parse_tool_arguments("   "), serde_json::json!({}));
+        assert_eq!(
+            parse_tool_arguments(r#"{"todos":[{"content":"a"}]}"#),
+            serde_json::json!({"todos": [{"content": "a"}]})
+        );
+        // Concatenated objects: the first one is the call, the rest are the
+        // model repeating itself.
+        assert_eq!(
+            parse_tool_arguments(r#"{"todos":[{"content":"a"}]}{"todos":[{"content":"b"}]}"#),
+            serde_json::json!({"todos": [{"content": "a"}]})
+        );
+        // Unparseable arguments reach the tool as `raw`, the same shape the
+        // main turn hands it, so the tool reports the failure.
+        assert_eq!(
+            parse_tool_arguments("not json"),
+            serde_json::json!({"raw": "not json"})
         );
     }
 
@@ -474,7 +690,7 @@ mod tests {
             // this session does not have) fails closed.
             ("definitely_not_a_tool", None),
         ] {
-            match capture_action(name, kind, 0) {
+            match capture_action(name, kind, TODO_WRITE, 0) {
                 CaptureAction::Refuse(message) => {
                     assert!(
                         message.contains(name),
@@ -493,11 +709,16 @@ mod tests {
     #[test]
     fn reads_run_until_the_budget_is_spent_then_are_refused() {
         assert_eq!(
-            capture_action("read_file", Some(ToolKind::Read), MAX_TOOL_CALLS - 1),
+            capture_action(
+                "read_file",
+                Some(ToolKind::Read),
+                TODO_WRITE,
+                MAX_TOOL_CALLS - 1
+            ),
             CaptureAction::Read
         );
         assert!(matches!(
-            capture_action("read_file", Some(ToolKind::Read), MAX_TOOL_CALLS),
+            capture_action("read_file", Some(ToolKind::Read), TODO_WRITE, MAX_TOOL_CALLS),
             CaptureAction::Refuse(_)
         ));
     }
