@@ -70,6 +70,53 @@ fn apply_cache_breakpoints(
     }
 }
 
+/// Whether a thinking block minted by `origin` can be replayed to `target`.
+/// The signature is verified against the model that produced it, so anything
+/// else is a 400. An alias and the dated snapshot it answers as are one model
+/// (`claude-opus-5` / `claude-opus-5-20260101`), and a gateway's routing
+/// prefix (`anthropic/claude-opus-5`) is not part of the name.
+fn same_model(origin: &str, target: &str) -> bool {
+    fn normalize(model: &str) -> &str {
+        let model = model.rsplit('/').next().unwrap_or(model);
+        model.strip_suffix("-latest").unwrap_or(model)
+    }
+
+    let (origin, target) = (normalize(origin), normalize(target));
+    if origin.eq_ignore_ascii_case(target) {
+        return true;
+    }
+    let (long, short) = if origin.len() > target.len() {
+        (origin, target)
+    } else {
+        (target, origin)
+    };
+    let Some(prefix) = long.as_bytes().get(..short.len()) else {
+        return false;
+    };
+    if !prefix.eq_ignore_ascii_case(short.as_bytes()) {
+        return false;
+    }
+    match long.as_bytes()[short.len()..].split_first() {
+        Some((b'-', date)) => !date.is_empty() && date.iter().all(u8::is_ascii_digit),
+        _ => false,
+    }
+}
+
+/// The model behind a reasoning item: the streaming layer emits each
+/// `Reasoning` as the sibling of the `Assistant` item that follows it. A
+/// `User` or `System` item closes the turn, so reasoning with no assistant
+/// behind it has no recorded origin.
+fn reasoning_origin_model(items: &[ConversationItem], reasoning_idx: usize) -> Option<&str> {
+    items[reasoning_idx + 1..]
+        .iter()
+        .find_map(|item| match item {
+            ConversationItem::Assistant(a) => Some(a.model_id.as_deref()),
+            ConversationItem::User(_) | ConversationItem::System(_) => Some(None),
+            _ => None,
+        })
+        .flatten()
+}
+
 /// Convert a `ConversationRequest` into a Messages API request.
 pub fn build_messages_request(req: &ConversationRequest) -> crate::messages::MessagesRequest {
     use crate::messages::{
@@ -163,7 +210,9 @@ pub fn build_messages_request(req: &ConversationRequest) -> crate::messages::Mes
         }
     };
 
-    for item in &req.items {
+    let mut dropped_foreign_thinking = 0usize;
+
+    for (idx, item) in req.items.iter().enumerate() {
         match item {
             ConversationItem::System(s) => {
                 flush_assistant(&mut pending_assistant, &mut messages);
@@ -263,18 +312,41 @@ pub fn build_messages_request(req: &ConversationRequest) -> crate::messages::Mes
                     .as_deref()
                     .map(str::to_owned)
                     .unwrap_or_default();
-                if !thinking.is_empty() || !signature.is_empty() {
-                    pending_assistant.push(ContentBlock::Thinking {
-                        thinking,
-                        signature,
-                    });
+                if thinking.is_empty() && signature.is_empty() {
+                    continue;
                 }
+                // A signature is only valid for the model that minted it, so a
+                // conversation carried onto another model has to leave its
+                // thinking behind rather than have every turn 400. Provenance
+                // the history never recorded is replayed as before; the
+                // strip-and-retry in the sampler covers a server that
+                // disagrees.
+                if let (Some(target), Some(origin)) = (
+                    req.model.as_deref(),
+                    reasoning_origin_model(&req.items, idx),
+                ) && !same_model(origin, target)
+                {
+                    dropped_foreign_thinking += 1;
+                    continue;
+                }
+                pending_assistant.push(ContentBlock::Thinking {
+                    thinking,
+                    signature,
+                });
             }
         }
     }
 
     flush_assistant(&mut pending_assistant, &mut messages);
     flush_tool_results(&mut pending_tool_results, &mut messages);
+
+    if dropped_foreign_thinking > 0 {
+        tracing::warn!(
+            dropped = dropped_foreign_thinking,
+            model = req.model.as_deref().unwrap_or_default(),
+            "dropped thinking block(s) minted by another model; this model cannot verify their signatures"
+        );
+    }
 
     apply_cache_breakpoints(&mut system_blocks, &mut messages);
 

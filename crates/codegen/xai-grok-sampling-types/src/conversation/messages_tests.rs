@@ -509,3 +509,129 @@ fn upgrade_legacy_reasoning_singular_anthropic_no_id() {
     assert_eq!(r.id, "");
     assert_eq!(r.encrypted_content.as_deref(), Some("signature-bytes-here"));
 }
+
+/// Conversation items for one completed turn: a reasoning sibling and the
+/// assistant that `model` produced, then a follow-up prompt.
+fn switched_model_conversation(model: Option<&str>) -> Vec<ConversationItem> {
+    vec![
+        ConversationItem::user("q1"),
+        reasoning_sibling(
+            "r1",
+            "weighing the options",
+            Some("sig-from-the-first-model"),
+        ),
+        ConversationItem::Assistant(AssistantItem {
+            content: "The answer.".into(),
+            tool_calls: vec![],
+            model_id: model.map(str::to_owned),
+            model_fingerprint: None,
+            reasoning_effort: None,
+        }),
+        ConversationItem::user("q2"),
+    ]
+}
+
+fn thinking_blocks(req: &ConversationRequest) -> Vec<(String, String)> {
+    build_messages_request(req)
+        .messages
+        .iter()
+        .flat_map(|m| match &m.content {
+            crate::messages::MessageContent::Blocks(blocks) => blocks.clone(),
+            crate::messages::MessageContent::Text(_) => Vec::new(),
+        })
+        .filter_map(|b| match b {
+            crate::messages::ContentBlock::Thinking {
+                thinking,
+                signature,
+            } => Some((thinking, signature)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Switching an in-flight conversation onto another model used to resend that
+/// conversation's thinking blocks, which the Messages API answers with
+/// "Invalid `signature` in `thinking` block" — a 400 on every later turn, since
+/// the blocks stay in history. The signature cannot be re-minted, so the block
+/// is what gives; the rest of the turn stays.
+#[test]
+fn thinking_minted_by_another_model_is_left_off_the_wire() {
+    let req = ConversationRequest::from_items(switched_model_conversation(Some("grok-4-fast")))
+        .with_model("claude-opus-5");
+
+    assert!(
+        thinking_blocks(&req).is_empty(),
+        "a thinking block from grok-4-fast must not be replayed to claude-opus-5",
+    );
+
+    let json = serde_json::to_value(build_messages_request(&req)).unwrap();
+    assert_eq!(
+        json["messages"][1]["content"][0]["text"], "The answer.",
+        "only the thinking block goes, not the turn it belongs to: {json:#}",
+    );
+}
+
+/// The model answers as the dated snapshot its alias resolves to, and a
+/// gateway prefixes its own routing namespace. Neither is a model switch, so
+/// both must keep replaying their signatures.
+#[test]
+fn thinking_survives_a_snapshot_date_and_a_gateway_prefix() {
+    for (origin, target) in [
+        ("claude-opus-5-20260101", "claude-opus-5"),
+        ("claude-opus-5", "claude-opus-5-20260101"),
+        ("claude-opus-5", "anthropic/claude-opus-5"),
+        ("claude-opus-5", "claude-opus-5-latest"),
+    ] {
+        let req = ConversationRequest::from_items(switched_model_conversation(Some(origin)))
+            .with_model(target);
+        assert_eq!(
+            thinking_blocks(&req),
+            vec![(
+                "weighing the options".to_string(),
+                "sig-from-the-first-model".to_string()
+            )],
+            "{origin} -> {target} is the same model; its thinking must be replayed",
+        );
+    }
+}
+
+/// A near-miss must not read as the same lineage: the shared prefix is not a
+/// snapshot date, so the signature is another model's.
+#[test]
+fn thinking_from_a_sibling_model_is_left_off_the_wire() {
+    let req = ConversationRequest::from_items(switched_model_conversation(Some("claude-opus-5")))
+        .with_model("claude-opus-5-mini");
+    assert!(
+        thinking_blocks(&req).is_empty(),
+        "claude-opus-5-mini is not claude-opus-5",
+    );
+}
+
+/// History that never recorded which model produced a turn (`model_id` absent)
+/// is replayed as before. Dropping it would strip thinking from every
+/// same-model session whose items were synthesized rather than streamed; the
+/// sampler's strip-and-retry is what covers a server that rejects it.
+#[test]
+fn thinking_without_a_recorded_origin_is_replayed() {
+    let req = ConversationRequest::from_items(switched_model_conversation(None))
+        .with_model("claude-opus-5");
+    assert_eq!(thinking_blocks(&req).len(), 1);
+}
+
+/// The recovery the sampler applies when the server rejects a signature
+/// anyway: the reasoning goes, the turn it belongs to stays.
+#[test]
+fn strip_reasoning_drops_only_the_reasoning_siblings() {
+    let mut req = ConversationRequest::from_items(switched_model_conversation(Some("grok-4-fast")))
+        .with_model("claude-opus-5");
+
+    assert_eq!(req.strip_reasoning(), 1);
+    assert_eq!(req.strip_reasoning(), 0, "nothing left to strip");
+    assert!(thinking_blocks(&req).is_empty());
+    assert_eq!(
+        req.items.len(),
+        3,
+        "user, assistant and follow-up survive: {:?}",
+        req.items
+    );
+}
