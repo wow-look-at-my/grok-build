@@ -2662,6 +2662,6 @@ base_url = "https://gateway.example.com/v1"
         .collect();
     assert!(
         blank.is_empty(),
-        "these rows would render blank in the model picker: {blank:?}
+        "these rows would render blank in the model picker: {blank:?}"
     );
 }
