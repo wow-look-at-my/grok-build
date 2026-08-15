@@ -879,3 +879,128 @@ fn a_tool_loop_that_kept_its_unsigned_thinking_keeps_thinking_on() {
 		vec![("planning the call".to_string(), String::new())],
 	);
 }
+
+fn legacy_dialect_request(model: &str) -> ConversationRequest {
+    let mut req = ConversationRequest::from_items(vec![ConversationItem::user("go")])
+        .with_model(model)
+        .with_max_output_tokens(32_000);
+    req.reasoning_effort = Some(crate::ReasoningEffort::High);
+    req
+}
+
+/// The 400 this rule exists for: "Input tag 'adaptive' found using 'type' does
+/// not match any of the expected tags: 'disabled', 'enabled'". A pre-4.6 Claude
+/// sizes its thinking in tokens, and rejects the effort word alongside it.
+#[test]
+fn a_pre_4_6_claude_gets_a_token_budget_instead_of_adaptive_thinking() {
+    let msgs = build_messages_request(&legacy_dialect_request("claude-haiku-4-5"));
+
+    assert!(
+        matches!(
+            msgs.thinking,
+            Some(crate::messages::ThinkingConfig::Enabled {
+                budget_tokens: 16_384
+            })
+        ),
+        "expected an enabled/budget_tokens thinking config, got {:?}",
+        msgs.thinking,
+    );
+    assert!(
+        msgs.output_config.is_none(),
+        "output_config.effort is 4.6-and-later too, so nothing is left to send: {:?}",
+        msgs.output_config,
+    );
+}
+
+#[test]
+fn a_4_6_model_keeps_adaptive_thinking_and_the_effort_word() {
+    for model in ["claude-opus-4-6", "claude-sonnet-5", "claude-opus-5"] {
+        let msgs = build_messages_request(&legacy_dialect_request(model));
+
+        assert!(
+            matches!(
+                msgs.thinking,
+                Some(crate::messages::ThinkingConfig::Adaptive { .. })
+            ),
+            "{model} speaks the adaptive dialect, got {:?}",
+            msgs.thinking,
+        );
+        assert_eq!(
+            msgs.output_config.and_then(|oc| oc.effort).as_deref(),
+            Some("high"),
+            "{model} takes the effort word",
+        );
+    }
+}
+
+/// Structured outputs are not what 4.6 changed, so the legacy dialect keeps
+/// `output_config.format` while losing only the effort beside it.
+#[test]
+fn structured_output_survives_the_legacy_thinking_dialect() {
+    let schema = serde_json::json!({ "type": "object" });
+    let req = legacy_dialect_request("claude-haiku-4-5").with_json_schema(schema);
+
+    let oc = build_messages_request(&req)
+        .output_config
+        .expect("format still goes out");
+    assert!(oc.format.is_some());
+    assert_eq!(oc.effort, None);
+}
+
+/// The budget has to clear the API's 1024 floor and stay under `max_tokens`.
+/// A ceiling that cannot house both leaves thinking off rather than sending a
+/// budget the API rejects.
+#[test]
+fn a_budget_that_cannot_clear_the_api_floor_turns_thinking_off() {
+    let mut req = legacy_dialect_request("claude-haiku-4-5");
+    req.max_output_tokens = Some(900);
+    assert!(build_messages_request(&req).thinking.is_none());
+
+    req.max_output_tokens = Some(2_000);
+    assert!(
+        matches!(
+            build_messages_request(&req).thinking,
+            Some(crate::messages::ThinkingConfig::Enabled {
+                budget_tokens: 1_999
+            })
+        ),
+        "the budget gives way to max_tokens, not the other way round",
+    );
+}
+
+#[test]
+fn the_thinking_dialect_is_read_off_every_spelling_of_a_model_id() {
+    let speaks_adaptive = |model: &str| {
+        matches!(
+            build_messages_request(&legacy_dialect_request(model)).thinking,
+            Some(crate::messages::ThinkingConfig::Adaptive { .. })
+        )
+    };
+
+    for adaptive in [
+        "claude-opus-4-6",
+        "claude-opus-4-6-20260122",
+        "anthropic/claude-sonnet-5",
+        "claude-fable-5",
+        "claude-opus-4-8",
+        // Not a Claude at all: a gateway's own model keeps the request it has
+        // always been sent.
+        "grok-4-fast",
+        "gemini-3-pro",
+    ] {
+        assert!(speaks_adaptive(adaptive), "{adaptive}");
+    }
+
+    for legacy in [
+        "claude-haiku-4-5",
+        "claude-haiku-4-5-20251001",
+        "claude-sonnet-4-5",
+        "claude-opus-4-5-20250929",
+        "claude-opus-4-20250514",
+        "claude-3-7-sonnet-20250219",
+        "us.anthropic.claude-haiku-4-5-v1:0",
+        "claude-haiku-4-5@20251001",
+    ] {
+        assert!(!speaks_adaptive(legacy), "{legacy}");
+    }
+}

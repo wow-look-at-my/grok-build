@@ -191,6 +191,25 @@ verify serially wastes time when a parallel CI build could be running.
   config-less thinking block is rejected in turn. Reasoning effort is untouched
   and the next turn pairs normally.
 
+## Messages thinking-dialect notes
+
+- Claude 4.6 replaced `thinking: {type:"adaptive"}` for
+  `{type:"enabled", budget_tokens:N}`, and each generation rejects the other's
+  spelling outright ("Input tag 'adaptive' ... does not match any of the
+  expected tags"), so `build_messages_request` picks by model id
+  (`speaks_adaptive_thinking`).
+- The generation is parsed off the id itself (`claude_version`), because
+  nothing else in the request carries it: both spellings the family has used
+  are read (`claude-haiku-4-5`, `claude-3-7-sonnet`), through a gateway prefix
+  and a snapshot stamp. A name that is not a Claude is a gateway's own model
+  and keeps the adaptive request it has always been sent.
+- `output_config.effort` is 4.6-and-later too, so the older dialect sends the
+  effort as `budget_tokens` instead and nothing beside it. `output_config.format`
+  is untouched — structured outputs are not what 4.6 changed.
+- A budget must clear the API's 1024 floor and stay under `max_tokens`. One
+  that cannot do both leaves thinking off with a warning, rather than sending a
+  request the API answers with a 400.
+
 ## Why build-test is not on the self-hosted runner
 
 Pointing `build-test` at `vars.CI_RUNNER` turns ~20 tests red, because they
