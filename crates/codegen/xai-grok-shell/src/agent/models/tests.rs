@@ -2556,6 +2556,69 @@ fn production_resolve_model_list_backfills_window_per_slugs_into_compaction() {
     );
 }
 
+/// BYOK / custom-provider gap, driven through the SHIPPED `resolve_model_list`
+/// choke point.
+///
+/// A model that carries its OWN `base_url` + API key (e.g.
+/// `openrouter/deepseek/deepseek-v4-flash-0731` at `https://gateway.pazer.ai/v1`)
+/// is never present in the xAI-proxy `/v1/models` prefetch listing, so the
+/// sibling-based backfill has no non-default source to copy from and the model
+/// stays at a hardcoded default (200k/256k). The backfill must instead ask the
+/// model's OWN provider `/v1/models` for the real window.
+///
+/// Here the "own provider" is a loopback axum mock serving `/v1/models` with a
+/// 1M window for the byok slug; the catalog entry starts at the 256k DEFAULT
+/// sentinel with its own key, and `resolve_model_list` must raise it to 1M by
+/// fetching from the model's own base.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn resolve_model_list_backfills_byok_window_from_models_own_provider_base() {
+    use axum::routing::get;
+
+    // Host an OpenAI-compatible `/v1/models` listing on a loopback mock. The
+    // BYOK model answers with its own real 1M window.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let app = axum::Router::new().route(
+        "/v1/models",
+        get(move || async move {
+            axum::Json(serde_json::json!({
+                "data": [{
+                    "model": "openrouter/deepseek/deepseek-byok-test",
+                    "name": "DeepSeek BYOK Test",
+                    "context_window": 1_000_000,
+                    "base_url": format!("http://{addr}/v1"),
+                }]
+            }))
+        }),
+    );
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+    // A BYOK entry at the DEFAULT sentinel, carrying its own base + API key.
+    let mut byok = make_model_entry("deepseek-byok");
+    byok.info.model = "openrouter/deepseek/deepseek-byok-test".to_owned();
+    byok.info.base_url = format!("http://{addr}/v1");
+    byok.api_key = Some("test-byok-key".to_owned());
+    byok.info.context_window =
+        std::num::NonZeroU64::new(crate::remote::DEFAULT_CONTEXT_WINDOW).unwrap();
+
+    let mut prefetched = IndexMap::new();
+    prefetched.insert("deepseek-byok".to_owned(), byok);
+
+    let cfg = crate::agent::config::Config::default();
+    let resolved = tokio::task::spawn_blocking(move || {
+        crate::agent::config::resolve_model_list(&cfg, Some(prefetched))
+    })
+    .await
+    .unwrap();
+    server.abort();
+
+    assert_eq!(
+        resolved["deepseek-byok"].info.context_window.get(),
+        1_000_000,
+        "a BYOK model at the default window must resolve its real window from its OWN /v1/models base"
+    );
+}
+
 /// A config-declared model must show up in the picker with a visible label.
 ///
 /// The wire `name` is what every row renders, and it is the only thing that

@@ -35,6 +35,69 @@ fn should_warn_missing_session(ctx: MissingSessionCtx) -> bool {
         None => ctx.is_session_based_auth,
     }
 }
+/// Resolve a BYOK / custom-provider model's context window from its OWN
+/// `/v1/models` endpoint on the request path, returning a model whose window
+/// has been backfilled when resolution succeeds.
+///
+/// This is the per-request counterpart to the catalog-build resolution in
+/// `resolve_model_list`: a model carrying its own credential and a non-xAI,
+/// non-cli-chat-proxy base_url is never in the xAI proxy listing, so its
+/// window stays at the hardcoded sentinel (`CONFIG_DEFAULT_CONTEXT_WINDOW` =
+/// 200k from config, or `DEFAULT_CONTEXT_WINDOW` = 256k). Ask the provider the
+/// request is actually going to — not a sibling, not config — for the exact
+/// slug's window.
+///
+/// Returns `Cow::Owned(model_with_resolved_window)` on success, or
+/// `Cow::Borrowed(model)` when the window is already real, the model is not
+/// BYOK, the base is xAI/proxy (already resolved elsewhere), or the provider
+/// listing yields nothing (cold/unreachable provider: best-effort, sentinel is
+/// kept).
+fn resolve_byok_context_window_on_request_path<'a>(
+    model: &'a ModelEntry,
+    credentials: &crate::agent::config::ResolvedCredentials,
+) -> std::borrow::Cow<'a, ModelEntry> {
+    use crate::agent::config::CONFIG_DEFAULT_CONTEXT_WINDOW;
+    let default_cw = crate::remote::DEFAULT_CONTEXT_WINDOW;
+    let current = model.info().context_window.get();
+    let is_sentinel = current == default_cw
+        || current == CONFIG_DEFAULT_CONTEXT_WINDOW;
+    if !is_sentinel {
+        return std::borrow::Cow::Borrowed(model);
+    }
+    // The resolution is driven by the model's OWN credential, mirroring the
+    // catalog-build gate in `resolve_model_list`: a model with its own
+    // api_key/env_key is BYOK by definition, and bundled/xAI models never carry
+    // one, so only BYOK models are re-queried. `credentials.api_key` may be a
+    // session JWT (session-based auth), which must not be used to query the
+    // model's own provider; gate on `own_credential()` (static api_key/env_key)
+    // instead. Deliberately no xAI-host check here — `is_xai_api_url` treats
+    // loopback as cli-chat-proxy/xAI, which would wrongly skip a local BYOK
+    // test/mock base (see the same note in `resolve_model_list`).
+    let Some(own_key) = model.own_credential() else {
+        return std::borrow::Cow::Borrowed(model);
+    };
+    let base_url = &credentials.base_url;
+    let resolved = crate::agent::models::resolve_context_window_from_provider(
+        &model.info().model,
+        base_url,
+        Some(&own_key),
+    );
+    match resolved {
+        Some(cw) if cw != model.info().context_window => {
+            tracing::info!(
+                model = %model.info().model,
+                base = %base_url,
+                from = model.info().context_window.get(),
+                to = cw.get(),
+                "context_window resolved on request path from model's own provider /v1/models"
+            );
+            let mut updated = model.clone();
+            updated.info.context_window = cw;
+            std::borrow::Cow::Owned(updated)
+        }
+        _ => std::borrow::Cow::Borrowed(model),
+    }
+}
 impl MvpAgent {
     /// Announce a session's new title over ACP. ACP scopes `session/update` to
     /// sessions the client established, and a rename can name a history row it
@@ -2085,8 +2148,18 @@ impl MvpAgent {
             .current_or_expired()
             .filter(|a| a.is_xai_auth())
             .map(|a| a.user_id);
+        // Per-request own-provider context-window resolution. A BYOK / custom
+        // provider model (its own api_key/env_key + a non-xAI, non-proxy
+        // base_url) may still carry the hardcoded sentinel window because it is
+        // never present in the xAI proxy listing. Resolve the real window from
+        // the model's OWN `/v1/models` endpoint right here, on the request
+        // path, so the very provider we are about to call answers for the
+        // exact slug being requested. Resolution is best-effort: an
+        // unreachable/unlisted provider leaves the sentinel untouched.
+        let effective_model: std::borrow::Cow<'_, ModelEntry> =
+            resolve_byok_context_window_on_request_path(model, &credentials);
         let mut config = crate::agent::config::sampling_config_for_model(
-            model,
+            effective_model.as_ref(),
             credentials,
             alpha_test_key,
             client_version,
@@ -4834,5 +4907,64 @@ impl Drop for LocalWorkspaceReapGuard {
                 handle.shutdown().await;
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A sentinel-window BYOK model served by a non-xAI base. Drives the real
+    /// request-path helper `resolve_byok_context_window_on_request_path` against
+    /// a loopback OpenRouter-style `/v1/models` server and asserts the returned
+    /// model's window is backfilled from the provider's `context_length`.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn request_path_backfills_sentinel_window_from_own_provider() {
+        use axum::routing::get;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let base = format!("http://{addr}/v1");
+        let body = serde_json::json!({
+            "data": [
+                {
+                    "id": "deepseek/deepseek-v4-pro-0813",
+                    "object": "model",
+                    "context_length": 1_000_000,
+                    "top_provider": { "context_length": 1_000_000 }
+                }
+            ]
+        });
+        let app = axum::Router::new()
+            .route("/v1/models", get(move || { let b = body.clone(); async move { axum::Json(b) } }));
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+        // Sentinel context window (the DEFAULT_CONTEXT_WINDOW), own api_key, non-xAI base.
+        let mut model = ModelEntry::fallback("deepseek/deepseek-v4-pro-0813", &Default::default());
+        model.info.base_url = base.clone();
+        model.info.context_window =
+            std::num::NonZeroU64::new(crate::remote::DEFAULT_CONTEXT_WINDOW).unwrap();
+        model.api_key = Some("sk-or-v1-test".to_owned());
+        let credentials = crate::agent::config::ResolvedCredentials {
+            api_key: Some("sk-or-v1-test".to_owned()),
+            base_url: base.clone(),
+            auth_type: xai_chat_state::AuthType::ApiKey,
+            auth_scheme: xai_grok_sampler::AuthScheme::Bearer,
+        };
+
+        // The fetch runs blocking on a dedicated thread inside the resolver; run
+        // it off the async runtime the same way the shipped call sites do.
+        let updated = tokio::task::spawn_blocking(move || {
+            resolve_byok_context_window_on_request_path(&model, &credentials)
+                .into_owned()
+        })
+        .await
+        .unwrap();
+        server.abort();
+
+        assert_eq!(
+            updated.info.context_window.get(),
+            1_000_000,
+            "request-path resolution must backfill the sentinel from the model's own /v1/models"
+        );
     }
 }

@@ -854,6 +854,52 @@ pub(crate) fn fetch_models_blocking(
     }
     Ok(FetchModelsResult { models, etag })
 }
+/// Fetch and parse a `/v1/models` listing from an arbitrary OpenAI-compatible
+/// base (BYOK / custom provider, e.g. `https://gateway.pazer.ai/v1`), using a
+/// Bearer API key when supplied.
+///
+/// This is the per-model counterpart to [`fetch_models_blocking`]: that fetch
+/// is driven by `EndpointsConfig` (so it only ever queries the configured
+/// xAI proxy or the single `[endpoints].models_base_url`), whereas a BYOK
+/// model carries its own `api_base_url` and API key that the generic prefetch
+/// never targets. Without this primitive the fork can never auto-detect a
+/// BYOK model's real context window (e.g. 1M) when the model's own provider
+/// lists it.
+pub(crate) fn fetch_models_for_api_base_blocking(
+    base_url: &str,
+    api_key: Option<&str>,
+) -> Result<Vec<crate::agent::config::ModelEntryConfig>, BackendError> {
+    let client = crate::http::shared_startup_blocking_client();
+    let url = models_list_url_for_base(base_url.trim_end_matches('/'));
+    tracing::debug!(models_url = %url, "Fetching models for BYOK/custom API base");
+    let mut request = client.get(&url);
+    if let Some(key) = api_key
+        && !key.is_empty()
+    {
+        request = request.header("Authorization", format!("Bearer {key}"));
+    }
+    let response = request.send()?;
+    if !response.status().is_success() {
+        let status = response.status().as_u16();
+        let body = response.text().unwrap_or_default();
+        tracing::warn!("Failed to fetch models for base: {} - {}", status, body);
+        return Err(BackendError::RequestFailed { status, body });
+    }
+    let models_response: ModelsResponse = response.json()?;
+    let mut models = Vec::with_capacity(models_response.data.len());
+    for (idx, value) in models_response.data.into_iter().enumerate() {
+        match parse_remote_model_value(&value, base_url) {
+            Some(model) => models.push(model),
+            None => {
+                tracing::warn!(
+                    "Skipping model at index {} (BYOK base): missing required field ('model' or 'context_window') or invalid types",
+                    idx
+                )
+            }
+        }
+    }
+    Ok(models)
+}
 
 /// Fetch the advertised model list from a user-managed OpenAI-compatible
 /// endpoint's `{base_url}/models`.
@@ -932,10 +978,20 @@ pub(crate) fn parse_remote_model_value(
     // window. A `0` (e.g. docs placeholder) is ignored so the non-zero entry
     // isn't dropped; a positive value wins only when no OpenAI-style field is
     // present.
+    // OpenRouter exposes the per-model context window in `/models` as
+    // `context_length` (top-level, and mirrored under `top_provider`), e.g.
+    // `{"id":"deepseek/deepseek-v4-pro-0813","context_length":1000000,
+    //   "top_provider":{"context_length":1000000}}`. Read it after the
+    // OpenAI-style fields but before the Anthropic `max_input_tokens` fallback,
+    // so a listing that emits only `context_length` still resolves a real
+    // window instead of `DEFAULT_CONTEXT_WINDOW`.
+    let top_provider = obj.get("top_provider").and_then(|v| v.as_object());
     let context_window = get_u64(obj, "contextWindow")
         .or_else(|| get_u64(obj, "context_window"))
         .or_else(|| meta.and_then(|m| get_u64(m, "contextWindow")))
         .or_else(|| meta.and_then(|m| get_u64(m, "totalContextTokens")))
+        .or_else(|| get_u64(obj, "context_length"))
+        .or_else(|| top_provider.and_then(|tp| get_u64(tp, "context_length")))
         .or_else(|| get_u64(obj, "max_input_tokens"))
         .or_else(|| get_u64(obj, "maxInputTokens"))
         .filter(|&v| v > 0)
@@ -1631,6 +1687,75 @@ mod tests {
             result.context_window.get(),
             crate::remote::DEFAULT_CONTEXT_WINDOW
         );
+    }
+    #[test]
+    fn parse_openrouter_style_listing_context_length_resolves_context_window() {
+        // OpenRouter's `/models` endpoint exposes the per-model context window
+        // as `context_length`, NOT `contextWindow`/`context_window`/`max_input_tokens`.
+        // This drives the real shipped parse path and asserts the value lands in
+        // `context_window` (not `DEFAULT_CONTEXT_WINDOW`).
+        let value = serde_json::json!({
+            "id": "deepseek/deepseek-v4-pro-0813",
+            "object": "model",
+            "created": 1750000000,
+            "owned_by": "deepseek",
+            "context_length": 1_000_000,
+            "architecture": { "modality": "text+image->text", "tokenizer": "DeepSeek",
+                              "instruct_type": null },
+            "top_provider": {
+                "context_length": 1_000_000,
+                "max_completion_tokens": 64_000,
+                "is_moderated": false
+            }
+        });
+        let result = parse_remote_model_value(&value, "https://openrouter.ai/api/v1").unwrap();
+        assert_eq!(result.model, "deepseek/deepseek-v4-pro-0813");
+        assert_eq!(result.base_url, "https://openrouter.ai/api/v1");
+        assert_eq!(result.context_window.get(), 1_000_000);
+    }
+    #[test]
+    fn parse_openrouter_context_length_only_under_top_provider_resolves() {
+        // Some OpenRouter listings carry `context_length` only under
+        // `top_provider`, with no top-level window field at all. The parser must
+        // still resolve the real window rather than the 256k default.
+        let value = serde_json::json!({
+            "id": "x-ai/grok-4.6",
+            "object": "model",
+            "created": 1750000000,
+            "owned_by": "x-ai",
+            "top_provider": { "context_length": 1_048_576, "max_completion_tokens": 65_536 }
+        });
+        let result = parse_remote_model_value(&value, "https://openrouter.ai/api/v1").unwrap();
+        assert_eq!(result.model, "x-ai/grok-4.6");
+        assert_eq!(result.context_window.get(), 1_048_576);
+    }
+    #[test]
+    fn parse_openrouter_context_length_zero_falls_back_to_default() {
+        // A `context_length: 0` placeholder must not drop the entry; it falls
+        // back to the documented default, mirroring the existing `0` handling
+        // for `max_input_tokens`.
+        let value = serde_json::json!({
+            "id": "deepseek/deepseek-v4-flash-0731",
+            "context_length": 0
+        });
+        let result = parse_remote_model_value(&value, "https://openrouter.ai/api/v1").unwrap();
+        assert_eq!(
+            result.context_window.get(),
+            crate::remote::DEFAULT_CONTEXT_WINDOW
+        );
+    }
+    #[test]
+    fn parse_openai_style_field_wins_over_openrouter_context_length() {
+        // Consistency with the existing precedence rules: an explicit
+        // OpenAI-style `context_window` wins when present alongside
+        // `context_length`.
+        let value = serde_json::json!({
+            "id": "deepseek/deepseek-v4-pro-0813",
+            "context_window": 350_000,
+            "context_length": 1_000_000
+        });
+        let result = parse_remote_model_value(&value, "https://openrouter.ai/api/v1").unwrap();
+        assert_eq!(result.context_window.get(), 350_000);
     }
     #[test]
     fn parse_model_field_takes_priority_over_id() {
@@ -2381,5 +2506,145 @@ mod tests {
             let count = request.headers().get_all(name).iter().count();
             assert_eq!(count, 1, "duplicate header {name}");
         }
+    }
+
+    /// Drive `fetch_models_for_api_base_blocking` (the BYOK /v1/models fetch
+    /// primitive) against a loopback OpenAI-compatible listing. Proves the
+    /// shipped fetch parses per-model `context_window` and matches the routing
+    /// slug, and that a `0`/missing window falls back to the sentinel.
+    async fn start_models_listing_server(
+        body: serde_json::Value,
+    ) -> (String, tokio::task::JoinHandle<()>) {
+        use axum::routing::get;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base =
+            format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+        let app = axum::Router::new().route("/v1/models", get(move || async move {
+            axum::Json(body)
+        }));
+        let handle = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        (base, handle)
+    }
+    /// The blocking /v1/models fetch parses per-model `context_window` and the
+    /// Anthropic `max_input_tokens` form, matching the routing slug.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn fetch_models_for_api_base_blocking_parses_per_model_windows() {
+        let (base, server) = start_models_listing_server(serde_json::json!({
+            "data": [
+                {
+                    "model": "openrouter/deepseek/deepseek-test",
+                    "contextWindow": 1_000_000,
+                },
+                {
+                    "model": "vendor-2",
+                    "max_input_tokens": 700_000,
+                },
+            ]
+        }))
+        .await;
+        let mock_url = format!("{base}/v1");
+
+        let entries = tokio::task::spawn_blocking(move || {
+            fetch_models_for_api_base_blocking(&mock_url, Some("test-key"))
+                .expect("mock /v1/models should be reachable")
+        })
+        .await
+        .unwrap();
+        server.abort();
+
+        let deepseek =
+            entries.iter().find(|m| m.model == "openrouter/deepseek/deepseek-test").unwrap();
+        assert_eq!(
+            deepseek.context_window.get(), 1_000_000,
+            "per-model contextWindow must parse from the model's own provider listing"
+        );
+        let vendor2 = entries.iter().find(|m| m.model == "vendor-2").unwrap();
+        assert_eq!(
+            vendor2.context_window.get(), 700_000,
+            "Anthropic max_input_tokens form must parse too"
+        );
+    }
+
+    /// Drive `resolve_context_window_from_provider` (the per-request own-provider
+    /// resolution primitive) against a loopback OpenRouter-style `/v1/models`
+    /// listing whose entries expose only `context_length`. Proves the shipped
+    /// resolver fetches from the model's OWN base URL and returns the exact
+    /// slug's `context_length` — not `DEFAULT_CONTEXT_WINDOW`.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn resolve_context_window_from_provider_reads_openrouter_context_length() {
+        let (base, server) = start_models_listing_server(serde_json::json!({
+            "data": [
+                {
+                    "id": "deepseek/deepseek-v4-pro-0813",
+                    "object": "model",
+                    "created": 1750000000,
+                    "owned_by": "deepseek",
+                    "context_length": 1_000_000,
+                    "top_provider": { "context_length": 1_000_000, "max_completion_tokens": 64_000 }
+                },
+                {
+                    "id": "x-ai/grok-4.6",
+                    "object": "model",
+                    "context_length": 1_048_576
+                },
+                {
+                    "id": "moonshotai/kimi-k3",
+                    "object": "model",
+                    "top_provider": { "context_length": 128_000 }
+                }
+            ]
+        }))
+        .await;
+        let api_base = format!("{base}/v1");
+
+        // Run the shipped resolver exactly as the request path does: it spawns a
+        // dedicated OS thread and does a blocking reqwest fetch against the model's
+        // own base, then matches the requested slug.
+        let resolved = {
+            let api_base = api_base.clone();
+            tokio::task::spawn_blocking(move || {
+                crate::agent::models::resolve_context_window_from_provider(
+                    "deepseek/deepseek-v4-pro-0813",
+                    &api_base,
+                    Some("sk-or-v1-test"),
+                )
+            })
+            .await
+            .unwrap()
+        };
+        server.abort();
+
+        let cw = resolved.expect("own-provider listing must resolve the slug");
+        assert_eq!(
+            cw.get(),
+            1_000_000,
+            "resolve_context_window_from_provider must return the OpenRouter context_length"
+        );
+    }
+
+    /// The per-request resolver returns `None` when the model's own listing
+    /// does not carry the requested slug, matching the cold/unlisted fallback
+    /// contract (best-effort, sentinel kept by the caller).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn resolve_context_window_from_provider_absent_slug_returns_none() {
+        let (base, server) = start_models_listing_server(serde_json::json!({
+            "data": [ { "id": "some/other-model", "context_length": 500_000 } ]
+        }))
+        .await;
+        let api_base = format!("{base}/v1");
+        let resolved = {
+            let api_base = api_base.clone();
+            tokio::task::spawn_blocking(move || {
+                crate::agent::models::resolve_context_window_from_provider(
+                    "deepseek/deepseek-v4-pro-0813",
+                    &api_base,
+                    Some("sk-or-v1-test"),
+                )
+            })
+            .await
+            .unwrap()
+        };
+        server.abort();
+        assert!(resolved.is_none());
     }
 }
