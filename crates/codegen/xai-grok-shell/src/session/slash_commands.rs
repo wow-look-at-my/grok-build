@@ -424,6 +424,7 @@ pub(crate) fn build_tools_meta(tool_names: &[String]) -> acp::Meta {
 /// `pager_blocked_acp_names_are_reserved_in_shell`). Add names here when adding
 /// a pager builtin or a pager-blocked shell command.
 pub const PAGER_COMMAND_KEYS: &[&str] = &[
+    "about",
     "agents",
     "agents-dashboard",
     "always-approve",
@@ -526,6 +527,7 @@ pub const PAGER_COMMAND_KEYS: &[&str] = &[
     "t",
     "undo",
     "usage",
+    "version",
     "view-plan",
     "vim-mode",
     "voice",
