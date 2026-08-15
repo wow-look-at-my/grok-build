@@ -2020,13 +2020,13 @@ fn dispatch_cycle_mode_and_sync_always_approve_with_nudge_takes_ring_to_orchestr
         "shared body must not enter Plan when nudge is showing"
     );
     assert!(
-        !app.agents[&AgentId(0)].session.is_yolo(),
-        "Always-Approve → Orchestrator must still clear yolo"
+        app.agents[&AgentId(0)].session.is_yolo(),
+        "Orchestrator is an agent identity, not a permission mode: it must not clear yolo"
     );
     assert_eq!(
         app.current_ui.permission_mode.as_deref(),
-        Some("ask"),
-        "ring lands on ask permission"
+        Some("always-approve"),
+        "ring stop carries the permission mode through"
     );
     assert_eq!(
         app.agents[&AgentId(0)].shift_tab_ring_agent_index,
@@ -2047,22 +2047,19 @@ fn dispatch_cycle_mode_and_sync_always_approve_with_nudge_takes_ring_to_orchestr
         "expected SetSessionMode(grok-build-orchestrator), got {effects:?}"
     );
     assert!(
-        effects.iter().any(|e| matches!(
-            e,
-            Effect::PersistPermissionMode {
-                canonical: "ask",
-                ..
-            }
-        )),
-        "expected PersistPermissionMode(ask), got {effects:?}"
+        !effects
+            .iter()
+            .any(|e| matches!(e, Effect::PersistPermissionMode { .. })),
+        "entering Orchestrator must not persist a permission mode, got {effects:?}"
     );
 }
 
-/// Always-Approve → Orchestrator: cycle_mode delegates the YOLO OFF
-/// transition through `set_yolo_mode_inner`, then enters the first
-/// agent-identity ring stop instead of landing on Normal.
+/// Always-Approve → Orchestrator switches WHO the agent is and nothing else.
+/// The permission mode rides through: revoking always-approve here re-armed
+/// the approval prompt on an unattended session, under a banner that said
+/// "Orchestrator" and never mentioned approvals.
 #[test]
-fn dispatch_cycle_mode_always_approve_to_orchestrator_delegates_yolo_off() {
+fn dispatch_cycle_mode_always_approve_to_orchestrator_keeps_yolo() {
     let mut app = test_app_with_agent();
     // Enter Always-Approve state via the typed setter (sets up
     // the lock-step properly).
@@ -2075,16 +2072,15 @@ fn dispatch_cycle_mode_always_approve_to_orchestrator_delegates_yolo_off() {
 
     let effects = dispatch(Action::CycleMode, &mut app);
 
-    // YOLO OFF via delegation.
     assert!(
-        !app.agents[&AgentId(0)].session.is_yolo(),
-        "Always-Approve → Orchestrator must flip yolo_mode off through the inner",
+        app.agents[&AgentId(0)].session.is_yolo(),
+        "entering Orchestrator must leave always-approve on",
     );
-    assert!(!app.default_yolo, "default_yolo must flip in lock-step");
+    assert!(app.default_yolo, "default_yolo must stay in lock-step");
     assert_eq!(
         app.current_ui.permission_mode.as_deref(),
-        Some("ask"),
-        "current_ui.permission_mode must update to 'ask'",
+        Some("always-approve"),
+        "current_ui.permission_mode must still read always-approve",
     );
     assert_eq!(
         app.agents[&AgentId(0)].shift_tab_ring_agent_index,
@@ -2092,19 +2088,8 @@ fn dispatch_cycle_mode_always_approve_to_orchestrator_delegates_yolo_off() {
         "ring must enter the first agent-identity stop (Orchestrator)"
     );
 
-    // Two effects: PersistPermissionMode{BestEffort} + SetSessionMode(orchestrator).
-    assert_eq!(effects.len(), 2, "got {effects:?}");
-    assert!(
-        effects.iter().any(|e| matches!(
-            e,
-            Effect::PersistPermissionMode {
-                persist: crate::app::actions::PermissionModePersist::BestEffort,
-                canonical: "ask",
-                ..
-            }
-        )),
-        "expected PersistPermissionMode(ask, BestEffort), got {effects:?}"
-    );
+    // One effect: the identity switch. No permission mode is written.
+    assert_eq!(effects.len(), 1, "got {effects:?}");
     assert!(
         effects.iter().any(|e| matches!(
             e,
@@ -2112,6 +2097,48 @@ fn dispatch_cycle_mode_always_approve_to_orchestrator_delegates_yolo_off() {
                 if mode_id.0.as_ref() == "grok-build-orchestrator"
         )),
         "expected SetSessionMode(grok-build-orchestrator), got {effects:?}"
+    );
+}
+
+/// The whole ring with always-approve on: Orchestrator and Explore both carry
+/// it, and closing the ring back to Plan drops it, so the next press resolves
+/// to Auto through the `(true, false, false)` arm rather than falling into the
+/// mixed-state catch-all and landing on Normal.
+#[test]
+fn dispatch_cycle_mode_ring_carries_yolo_then_clears_it_on_close() {
+    let mut app = test_app_with_agent();
+    let _ = dispatch(Action::SetYoloMode(true), &mut app);
+
+    // Always-Approve → Orchestrator
+    let _ = dispatch(Action::CycleMode, &mut app);
+    assert_eq!(app.agents[&AgentId(0)].shift_tab_ring_agent_index, Some(0));
+    assert!(app.agents[&AgentId(0)].session.is_yolo(), "Orchestrator keeps yolo");
+
+    // Orchestrator → Explore
+    let _ = dispatch(Action::CycleMode, &mut app);
+    assert_eq!(app.agents[&AgentId(0)].shift_tab_ring_agent_index, Some(1));
+    assert!(app.agents[&AgentId(0)].session.is_yolo(), "Explore keeps yolo");
+
+    // Explore → Plan, closing the ring and restoring the base agent.
+    let effects = dispatch(Action::CycleMode, &mut app);
+    assert_eq!(app.agents[&AgentId(0)].shift_tab_ring_agent_index, None);
+    assert_eq!(app.agents[&AgentId(0)].plan_mode_pending, Some(true));
+    assert!(
+        !app.agents[&AgentId(0)].session.is_yolo(),
+        "closing the ring on Plan must drop yolo: Plan+yolo has no tuple arm"
+    );
+    assert!(
+        effects
+            .iter()
+            .any(|e| matches!(e, Effect::SetModeThenMode { .. })),
+        "expected SetModeThenMode restoring the base agent, got {effects:?}"
+    );
+    assert!(
+        effects.iter().any(|e| matches!(
+            e,
+            Effect::PersistPermissionMode { canonical: "ask", .. }
+        )),
+        "closing the ring must persist the dropped yolo, got {effects:?}"
     );
 }
 
