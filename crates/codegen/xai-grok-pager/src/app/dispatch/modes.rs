@@ -813,16 +813,34 @@ fn dispatch_cycle_mode_inner(app: &mut AppView) -> Vec<Effect> {
             .unwrap_or_else(|| "grok-build".to_string());
         agent.shift_tab_ring_agent_index = None;
         agent.plan_mode_pending = Some(true);
+        // The agent-identity stops carried the permission mode through
+        // untouched, so always-approve can still be on here. Plan+yolo is not
+        // one of the tuple arms below, so leaving it set would drop the next
+        // press into the catch-all and close the ring on Normal instead of
+        // Auto. Clearing it also keeps "a full ring lands on plain Plan".
+        let leaving_yolo = agent.session.is_yolo();
         agent.show_mode_switch_banner("Plan");
+        if leaving_yolo {
+            set_yolo_mode_inner(app, false);
+        }
+        app.current_ui.permission_mode = Some("ask".into());
         refresh_open_settings_modals(app);
         tracing::info!("Mode cycle: → Plan (restoring {base_agent})");
-        return vec![Effect::SetModeThenMode {
-            session_id,
+        let mut effects = vec![Effect::SetModeThenMode {
+            session_id: session_id.clone(),
             first_mode_id: acp::SessionModeId::new(base_agent),
             second_mode_id: acp::SessionModeId::new(
                 xai_grok_tools::types::SessionMode::Plan.as_id(),
             ),
         }];
+        if leaving_yolo {
+            effects.push(Effect::PersistPermissionMode {
+                canonical: "ask",
+                session_id: Some(session_id),
+                persist: crate::app::actions::PermissionModePersist::BestEffort,
+            });
+        }
+        return effects;
     }
 
     // Effective plan state: prefer optimistic pending over confirmed active.
@@ -948,11 +966,13 @@ fn dispatch_cycle_mode_inner(app: &mut AppView) -> Vec<Effect> {
         // Always-Approve → the first agent-identity ring stop (Orchestrator),
         // or Normal if no stops are configured.
         (false, _, true) => {
-            set_yolo_mode_inner(app, false);
-            app.current_ui.permission_mode = Some("ask".into());
-            refresh_open_settings_modals(app);
             let variants = xai_grok_agent::config::BuiltinAgentName::shift_tab_variants();
             let Some(&first) = variants.first() else {
+                // No agent-identity stops: this really is Always-Approve →
+                // Normal, a permission-mode transition, so it still drops yolo.
+                set_yolo_mode_inner(app, false);
+                app.current_ui.permission_mode = Some("ask".into());
+                refresh_open_settings_modals(app);
                 if let Some(a) = app.agents.get_mut(&id) {
                     a.show_mode_switch_banner("Normal");
                 }
@@ -965,25 +985,24 @@ fn dispatch_cycle_mode_inner(app: &mut AppView) -> Vec<Effect> {
                     persist: crate::app::actions::PermissionModePersist::BestEffort,
                 }];
             };
+            // Orchestrator and Explore say WHO the agent is, not how much it
+            // asks, so the permission mode rides through untouched. Revoking
+            // always-approve here silently re-armed the permission prompt on an
+            // unattended session whose whole point was not having one, and the
+            // banner said "Orchestrator" while the change was to approvals.
             let label = shift_tab_agent_label(first);
+            refresh_open_settings_modals(app);
             if let Some(a) = app.agents.get_mut(&id) {
                 a.shift_tab_base_agent =
                     Some(a.session_agent_name.clone().unwrap_or_else(|| "grok-build".to_string()));
                 a.shift_tab_ring_agent_index = Some(0);
                 a.show_mode_switch_banner(label);
             }
-            tracing::info!("Mode cycle: Always-Approve → {label}");
-            vec![
-                Effect::PersistPermissionMode {
-                    canonical: "ask",
-                    session_id: Some(session_id.clone()),
-                    persist: crate::app::actions::PermissionModePersist::BestEffort,
-                },
-                Effect::SetSessionMode {
-                    session_id,
-                    mode_id: acp::SessionModeId::new(first.as_ref()),
-                },
-            ]
+            tracing::info!("Mode cycle: Always-Approve → {label} (always-approve kept)");
+            vec![Effect::SetSessionMode {
+                session_id,
+                mode_id: acp::SessionModeId::new(first.as_ref()),
+            }]
         }
 
         // Plan + Auto → Auto: exit plan but keep the classifier. Without this
