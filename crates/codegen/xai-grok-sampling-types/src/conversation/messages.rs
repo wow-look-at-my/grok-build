@@ -70,6 +70,136 @@ fn apply_cache_breakpoints(
     }
 }
 
+/// Whether a thinking block minted by `origin` can be replayed to `target`.
+/// The signature is verified against the model that produced it, so anything
+/// else is a 400. An alias and the dated snapshot it answers as are one model
+/// (`claude-opus-5` / `claude-opus-5-20260101`), and a gateway's routing
+/// prefix (`anthropic/claude-opus-5`) is not part of the name.
+fn same_model(origin: &str, target: &str) -> bool {
+    fn normalize(model: &str) -> &str {
+        let model = model.rsplit('/').next().unwrap_or(model);
+        model.strip_suffix("-latest").unwrap_or(model)
+    }
+
+    let (origin, target) = (normalize(origin), normalize(target));
+    if origin.eq_ignore_ascii_case(target) {
+        return true;
+    }
+    let (long, short) = if origin.len() > target.len() {
+        (origin, target)
+    } else {
+        (target, origin)
+    };
+    let Some(prefix) = long.as_bytes().get(..short.len()) else {
+        return false;
+    };
+    if !prefix.eq_ignore_ascii_case(short.as_bytes()) {
+        return false;
+    }
+    match long.as_bytes()[short.len()..].split_first() {
+        Some((b'-', date)) => !date.is_empty() && date.iter().all(u8::is_ascii_digit),
+        _ => false,
+    }
+}
+
+/// The model behind a reasoning item: the streaming layer emits each
+/// `Reasoning` as the sibling of the `Assistant` item that follows it. A
+/// `User` or `System` item closes the turn, so reasoning with no assistant
+/// behind it has no recorded origin.
+fn reasoning_origin_model(items: &[ConversationItem], reasoning_idx: usize) -> Option<&str> {
+    items[reasoning_idx + 1..]
+        .iter()
+        .find_map(|item| match item {
+            ConversationItem::Assistant(a) => Some(a.model_id.as_deref()),
+            ConversationItem::User(_) | ConversationItem::System(_) => Some(None),
+            _ => None,
+        })
+        .flatten()
+}
+
+/// Whether a reasoning item carries a signature, which is what makes it a
+/// block only its own model can take back.
+fn is_signed(r: &crate::rs::ReasoningItem) -> bool {
+    r.encrypted_content
+        .as_deref()
+        .is_some_and(|sig| !sig.is_empty())
+}
+
+/// Whether `target` signs its thinking, judged by what it has already put in
+/// this conversation. An unsigned block is only rejected by a model that
+/// verifies signatures, and nothing in the request declares which models
+/// those are, so this is the one piece of evidence there is. No evidence
+/// reads as unsigned, and the sampler's strip-and-retry covers a wrong guess.
+fn target_signs_thinking(items: &[ConversationItem], target: &str) -> bool {
+    items.iter().enumerate().any(|(idx, item)| {
+        matches!(item, ConversationItem::Reasoning(r) if is_signed(r))
+            && reasoning_origin_model(items, idx).is_some_and(|origin| same_model(origin, target))
+    })
+}
+
+/// Whether the reasoning at `idx` has to be left behind when the request goes
+/// to `target`. Only a signature is at stake: it is verified against the model
+/// that minted it, so a signed block cannot cross a switch, and a model that
+/// verifies signatures rejects an unsigned block just as hard. Thinking that
+/// is plain text on both sides is nothing either end validates, so a switch
+/// between two such models replays it untouched. Provenance the history never
+/// recorded is replayed as before.
+fn thinking_is_foreign(
+    items: &[ConversationItem],
+    idx: usize,
+    r: &crate::rs::ReasoningItem,
+    target: Option<&str>,
+    target_signs: bool,
+) -> bool {
+    let (Some(target), Some(origin)) = (target, reasoning_origin_model(items, idx)) else {
+        return false;
+    };
+    !same_model(origin, target) && (is_signed(r) || target_signs)
+}
+
+/// Whether the conversation ends mid-tool-loop on a turn whose thinking block
+/// another model minted. A provider validates the thinking of a tool-calling
+/// turn it is being asked to continue ("thinking blocks cannot be modified",
+/// and thinking-on requires that turn to lead with one), and the block is
+/// exactly what a model switch takes away. Neither half is recoverable, so the
+/// whole request goes out with thinking off; the next turn is this model's own
+/// and pairs normally.
+fn open_tool_loop_lost_its_thinking(req: &ConversationRequest) -> bool {
+    let Some(target) = req.model.as_deref() else {
+        return false;
+    };
+    // The last tool-calling assistant with nothing but its results behind it.
+    let mut open = None;
+    for (idx, item) in req.items.iter().enumerate() {
+        match item {
+            ConversationItem::Assistant(a) if !a.tool_calls.is_empty() => open = Some(idx),
+            ConversationItem::Assistant(_)
+            | ConversationItem::User(_)
+            | ConversationItem::System(_) => open = None,
+            _ => {}
+        }
+    }
+    let Some(open) = open else { return false };
+    let target_signs = target_signs_thinking(&req.items, target);
+
+    req.items[..open]
+        .iter()
+        .enumerate()
+        .rev()
+        .take_while(|(_, item)| {
+            matches!(
+                item,
+                ConversationItem::Reasoning(_) | ConversationItem::BackendToolCall(_)
+            )
+        })
+        .any(|(idx, item)| match item {
+            ConversationItem::Reasoning(r) => {
+                thinking_is_foreign(&req.items, idx, r, Some(target), target_signs)
+            }
+            _ => false,
+        })
+}
+
 /// Convert a `ConversationRequest` into a Messages API request.
 pub fn build_messages_request(req: &ConversationRequest) -> crate::messages::MessagesRequest {
     use crate::messages::{
@@ -163,7 +293,16 @@ pub fn build_messages_request(req: &ConversationRequest) -> crate::messages::Mes
         }
     };
 
-    for item in &req.items {
+    let mut dropped_foreign_thinking = 0usize;
+    // Thinking off for this request takes its blocks with it: a block sent
+    // without the top-level config is rejected in turn.
+    let thinking_off = open_tool_loop_lost_its_thinking(req);
+    let target_signs = req
+        .model
+        .as_deref()
+        .is_some_and(|target| target_signs_thinking(&req.items, target));
+
+    for (idx, item) in req.items.iter().enumerate() {
         match item {
             ConversationItem::System(s) => {
                 flush_assistant(&mut pending_assistant, &mut messages);
@@ -263,18 +402,34 @@ pub fn build_messages_request(req: &ConversationRequest) -> crate::messages::Mes
                     .as_deref()
                     .map(str::to_owned)
                     .unwrap_or_default();
-                if !thinking.is_empty() || !signature.is_empty() {
-                    pending_assistant.push(ContentBlock::Thinking {
-                        thinking,
-                        signature,
-                    });
+                if thinking.is_empty() && signature.is_empty() {
+                    continue;
                 }
+                let foreign =
+                    thinking_is_foreign(&req.items, idx, r, req.model.as_deref(), target_signs);
+                if foreign || thinking_off {
+                    dropped_foreign_thinking += 1;
+                    continue;
+                }
+                pending_assistant.push(ContentBlock::Thinking {
+                    thinking,
+                    signature,
+                });
             }
         }
     }
 
     flush_assistant(&mut pending_assistant, &mut messages);
     flush_tool_results(&mut pending_tool_results, &mut messages);
+
+    if dropped_foreign_thinking > 0 {
+        tracing::warn!(
+            dropped = dropped_foreign_thinking,
+            model = req.model.as_deref().unwrap_or_default(),
+            thinking_off,
+            "dropped thinking block(s) minted by another model; this model cannot verify their signatures"
+        );
+    }
 
     apply_cache_breakpoints(&mut system_blocks, &mut messages);
 
@@ -326,6 +481,7 @@ pub fn build_messages_request(req: &ConversationRequest) -> crate::messages::Mes
     // thinking is driven by reasoning_effort only, not by json_schema.
     let thinking = effort
         .as_ref()
+        .filter(|_| !thinking_off)
         .map(|_| crate::messages::ThinkingConfig::Adaptive {
             display: Some(crate::messages::ThinkingDisplay::Summarized),
         });

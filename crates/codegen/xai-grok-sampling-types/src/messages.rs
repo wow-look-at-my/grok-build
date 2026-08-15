@@ -260,6 +260,20 @@ pub struct MessagesUsage {
     pub cache_creation_input_tokens: u32,
     #[serde(default)]
     pub cache_read_input_tokens: u32,
+    /// What the call cost, in USD ticks (1 USD = 1e10). Anthropic itself
+    /// reports no price; a gateway speaking this protocol does, and without
+    /// these two fields its real number is thrown away for an estimate off
+    /// the model's configured pricing. Ticks win over the float when a
+    /// gateway sends both.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        alias = "cost_usd_ticks"
+    )]
+    pub cost_in_usd_ticks: Option<i64>,
+    /// The same price as a USD float, the shape OpenRouter and Bifrost use.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost: Option<crate::UsageCost>,
 }
 
 // ============================================================================
@@ -333,6 +347,16 @@ pub struct MessageDeltaUsage {
     pub cache_read_input_tokens: Option<u32>,
     #[serde(default)]
     pub cache_creation_input_tokens: Option<u32>,
+    /// The terminal delta is where a gateway settles the price of the call —
+    /// see [`MessagesUsage::cost_in_usd_ticks`].
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        alias = "cost_usd_ticks"
+    )]
+    pub cost_in_usd_ticks: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost: Option<crate::UsageCost>,
 }
 
 /// Content delta within a content_block_delta event
@@ -520,6 +544,49 @@ mod tests {
             serde_json::to_value(ContentBlock::RedactedThinking { data: "abc".into() }).unwrap();
         assert_eq!(json["type"], "redacted_thinking");
         assert_eq!(json["data"], "abc");
+    }
+
+    /// Every wire shape a gateway prices a call with has to parse, and an
+    /// Anthropic response that prices nothing has to stay priceless rather
+    /// than read as free.
+    #[test]
+    fn usage_parses_every_cost_shape_a_gateway_sends() {
+        let cases = [
+            (r#""cost_in_usd_ticks":4160000"#, Some(4_160_000), None),
+            (r#""cost_usd_ticks":4160000"#, Some(4_160_000), None),
+            (r#""cost":0.0000416"#, None, Some(0.0000416)),
+            (
+                r#""cost":{"total_cost":0.0000416,"input_tokens_cost":0.00001}"#,
+                None,
+                Some(0.0000416),
+            ),
+            (r#""cache_read_input_tokens":0"#, None, None),
+        ];
+
+        for (field, ticks, cost) in cases {
+            let event: MessageStreamEvent = serde_json::from_str(&format!(
+                r#"{{"type":"message_delta","delta":{{"stop_reason":"end_turn"}},"usage":{{"output_tokens":5,{field}}}}}"#
+            ))
+            .unwrap_or_else(|e| panic!("message_delta with {field} must deserialize: {e}"));
+            let MessageStreamEvent::MessageDelta { usage, .. } = event else {
+                panic!("expected MessageDelta for {field}");
+            };
+            assert_eq!(usage.cost_in_usd_ticks, ticks, "{field}");
+            assert_eq!(
+                usage.cost.map(|c| c.as_usd_float()),
+                cost,
+                "{field}"
+            );
+
+            let start: MessageStreamEvent = serde_json::from_str(&format!(
+                r#"{{"type":"message_start","message":{{"id":"msg_1","type":"message","role":"assistant","content":[],"model":"m","usage":{{"input_tokens":10,"output_tokens":0,{field}}}}}}}"#
+            ))
+            .unwrap_or_else(|e| panic!("message_start with {field} must deserialize: {e}"));
+            let MessageStreamEvent::MessageStart { message } = start else {
+                panic!("expected MessageStart for {field}");
+            };
+            assert_eq!(message.usage.cost_in_usd_ticks, ticks, "{field}");
+        }
     }
 
     /// Anthropic-compatible providers without prompt caching / extended

@@ -510,6 +510,237 @@ fn upgrade_legacy_reasoning_singular_anthropic_no_id() {
     assert_eq!(r.encrypted_content.as_deref(), Some("signature-bytes-here"));
 }
 
+/// Conversation items for one completed turn: a reasoning sibling and the
+/// assistant that `model` produced, then a follow-up prompt.
+fn switched_model_conversation(model: Option<&str>) -> Vec<ConversationItem> {
+    vec![
+        ConversationItem::user("q1"),
+        reasoning_sibling(
+            "r1",
+            "weighing the options",
+            Some("sig-from-the-first-model"),
+        ),
+        ConversationItem::Assistant(AssistantItem {
+            content: "The answer.".into(),
+            tool_calls: vec![],
+            model_id: model.map(str::to_owned),
+            model_fingerprint: None,
+            reasoning_effort: None,
+        }),
+        ConversationItem::user("q2"),
+    ]
+}
+
+fn thinking_blocks(req: &ConversationRequest) -> Vec<(String, String)> {
+    build_messages_request(req)
+        .messages
+        .iter()
+        .flat_map(|m| match &m.content {
+            crate::messages::MessageContent::Blocks(blocks) => blocks.clone(),
+            crate::messages::MessageContent::Text(_) => Vec::new(),
+        })
+        .filter_map(|b| match b {
+            crate::messages::ContentBlock::Thinking {
+                thinking,
+                signature,
+            } => Some((thinking, signature)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Switching an in-flight conversation onto another model used to resend that
+/// conversation's thinking blocks, which the Messages API answers with
+/// "Invalid `signature` in `thinking` block" — a 400 on every later turn, since
+/// the blocks stay in history. The signature cannot be re-minted, so the block
+/// is what gives; the rest of the turn stays.
+#[test]
+fn thinking_minted_by_another_model_is_left_off_the_wire() {
+    let req = ConversationRequest::from_items(switched_model_conversation(Some("grok-4-fast")))
+        .with_model("claude-opus-5");
+
+    assert!(
+        thinking_blocks(&req).is_empty(),
+        "a thinking block from grok-4-fast must not be replayed to claude-opus-5",
+    );
+
+    let json = serde_json::to_value(build_messages_request(&req)).unwrap();
+    assert_eq!(
+        json["messages"][1]["content"][0]["text"], "The answer.",
+        "only the thinking block goes, not the turn it belongs to: {json:#}",
+    );
+}
+
+/// The model answers as the dated snapshot its alias resolves to, and a
+/// gateway prefixes its own routing namespace. Neither is a model switch, so
+/// both must keep replaying their signatures.
+#[test]
+fn thinking_survives_a_snapshot_date_and_a_gateway_prefix() {
+    for (origin, target) in [
+        ("claude-opus-5-20260101", "claude-opus-5"),
+        ("claude-opus-5", "claude-opus-5-20260101"),
+        ("claude-opus-5", "anthropic/claude-opus-5"),
+        ("claude-opus-5", "claude-opus-5-latest"),
+    ] {
+        let req = ConversationRequest::from_items(switched_model_conversation(Some(origin)))
+            .with_model(target);
+        assert_eq!(
+            thinking_blocks(&req),
+            vec![(
+                "weighing the options".to_string(),
+                "sig-from-the-first-model".to_string()
+            )],
+            "{origin} -> {target} is the same model; its thinking must be replayed",
+        );
+    }
+}
+
+/// A near-miss must not read as the same lineage: the shared prefix is not a
+/// snapshot date, so the signature is another model's.
+#[test]
+fn thinking_from_a_sibling_model_is_left_off_the_wire() {
+    let req = ConversationRequest::from_items(switched_model_conversation(Some("claude-opus-5")))
+        .with_model("claude-opus-5-mini");
+    assert!(
+        thinking_blocks(&req).is_empty(),
+        "claude-opus-5-mini is not claude-opus-5",
+    );
+}
+
+/// History that never recorded which model produced a turn (`model_id` absent)
+/// is replayed as before. Dropping it would strip thinking from every
+/// same-model session whose items were synthesized rather than streamed; the
+/// sampler's strip-and-retry is what covers a server that rejects it.
+#[test]
+fn thinking_without_a_recorded_origin_is_replayed() {
+    let req = ConversationRequest::from_items(switched_model_conversation(None))
+        .with_model("claude-opus-5");
+    assert_eq!(thinking_blocks(&req).len(), 1);
+}
+
+/// The recovery the sampler applies when the server rejects a signature
+/// anyway: the reasoning goes, the turn it belongs to stays.
+#[test]
+fn strip_reasoning_drops_only_the_reasoning_siblings() {
+    let mut req = ConversationRequest::from_items(switched_model_conversation(Some("grok-4-fast")))
+        .with_model("claude-opus-5");
+
+    assert_eq!(req.strip_reasoning(), 1);
+    assert_eq!(req.strip_reasoning(), 0, "nothing left to strip");
+    assert!(thinking_blocks(&req).is_empty());
+    assert_eq!(
+        req.items.len(),
+        3,
+        "user, assistant and follow-up survive: {:?}",
+        req.items
+    );
+}
+
+/// Switching models mid-tool-loop: the turn the provider is being asked to
+/// continue made tool calls, and its thinking went with the switch. A provider
+/// validates that turn's thinking — thinking-on requires it to lead with one —
+/// and it cannot be re-minted, so the request goes out with thinking off
+/// rather than trading one 400 for another. The tool loop itself survives.
+#[test]
+fn a_tool_loop_that_lost_its_thinking_turns_thinking_off() {
+	let mut req = ConversationRequest::from_items(vec![
+		ConversationItem::user("q1"),
+		reasoning_sibling("r1", "planning the call", Some("sig-from-the-first-model")),
+		ConversationItem::Assistant(AssistantItem {
+			content: String::new().into(),
+			tool_calls: vec![ToolCall {
+				id: "call_1".into(),
+				name: "read_file".to_string(),
+				arguments: r#"{"path":"src/main.rs"}"#.into(),
+			}],
+			model_id: Some("grok-4-fast".into()),
+			model_fingerprint: None,
+			reasoning_effort: None,
+		}),
+		ConversationItem::tool_result("call_1", "fn main() {}"),
+	])
+	.with_model("claude-opus-5");
+	req.reasoning_effort = Some(crate::ReasoningEffort::High);
+
+	let msgs = build_messages_request(&req);
+	assert!(
+		msgs.thinking.is_none(),
+		"a tool loop the model cannot lead with a thinking block must go out with thinking off",
+	);
+	assert!(thinking_blocks(&req).is_empty());
+
+	let json = serde_json::to_value(&msgs).unwrap();
+	assert_eq!(
+		json["messages"][1]["content"][0]["type"], "tool_use",
+		"the tool call still has to reach the model: {json:#}",
+	);
+	assert_eq!(
+		json["messages"][2]["content"][0]["type"], "tool_result",
+		"and so does its result: {json:#}",
+	);
+	assert_eq!(
+		json.pointer("/output_config/effort").and_then(|v| v.as_str()),
+		Some("high"),
+		"the caller's effort is untouched; only the thinking pairing stands down: {json:#}",
+	);
+}
+
+/// The control: the same open tool loop, same model. Nothing was lost, so
+/// thinking stays on and the block is replayed.
+#[test]
+fn a_tool_loop_that_kept_its_thinking_keeps_thinking_on() {
+	let mut req = ConversationRequest::from_items(vec![
+		ConversationItem::user("q1"),
+		reasoning_sibling("r1", "planning the call", Some("sig-from-this-model")),
+		ConversationItem::Assistant(AssistantItem {
+			content: String::new().into(),
+			tool_calls: vec![ToolCall {
+				id: "call_1".into(),
+				name: "read_file".to_string(),
+				arguments: r#"{"path":"src/main.rs"}"#.into(),
+			}],
+			model_id: Some("claude-opus-5-20260101".into()),
+			model_fingerprint: None,
+			reasoning_effort: None,
+		}),
+		ConversationItem::tool_result("call_1", "fn main() {}"),
+	])
+	.with_model("claude-opus-5");
+	req.reasoning_effort = Some(crate::ReasoningEffort::High);
+
+	assert!(build_messages_request(&req).thinking.is_some());
+	assert_eq!(thinking_blocks(&req).len(), 1);
+}
+
+/// A closed loop — its results answered and the user back with a follow-up —
+/// is not the turn the model is being asked to continue, so only the foreign
+/// thinking goes; thinking itself stays on for the new turn.
+#[test]
+fn a_closed_tool_loop_leaves_thinking_on() {
+	let mut req = ConversationRequest::from_items(vec![
+		ConversationItem::user("q1"),
+		reasoning_sibling("r1", "planning the call", Some("sig-from-the-first-model")),
+		ConversationItem::Assistant(AssistantItem {
+			content: String::new().into(),
+			tool_calls: vec![ToolCall {
+				id: "call_1".into(),
+				name: "read_file".to_string(),
+				arguments: r#"{"path":"src/main.rs"}"#.into(),
+			}],
+			model_id: Some("grok-4-fast".into()),
+			model_fingerprint: None,
+			reasoning_effort: None,
+		}),
+		ConversationItem::tool_result("call_1", "fn main() {}"),
+		ConversationItem::user("q2"),
+	])
+	.with_model("claude-opus-5");
+	req.reasoning_effort = Some(crate::ReasoningEffort::High);
+
+	assert!(build_messages_request(&req).thinking.is_some());
+	assert!(thinking_blocks(&req).is_empty());
+}
+
 /// The Messages API is the one backend that rejects thinking blocks it was not
 /// configured for, so the capture loop strips reasoning from its own turns
 /// there too — and the tool_use / tool_result pair it built by hand still maps.
@@ -546,4 +777,105 @@ fn todo_capture_loop_strips_reasoning_and_keeps_the_tool_pair() {
             .any(|b| b["type"] == "tool_result" && b["tool_use_id"] == "call_todo_1"),
         "the tool result the loop fed back must survive: {json:#}"
     );
+}
+
+/// A switch between two models that reason in plain text keeps the thinking.
+/// Only a signature is model-bound, and there is none on either side here, so
+/// dropping the block would throw away context nothing was going to reject.
+#[test]
+fn unsigned_thinking_rides_a_switch_between_two_models_that_do_not_sign() {
+	let req = ConversationRequest::from_items(vec![
+		ConversationItem::user("q1"),
+		reasoning_sibling("r1", "weighing the options", None),
+		ConversationItem::Assistant(AssistantItem {
+			content: "The answer.".into(),
+			tool_calls: vec![],
+			model_id: Some("grok-4-fast".into()),
+			model_fingerprint: None,
+			reasoning_effort: None,
+		}),
+		ConversationItem::user("q2"),
+	])
+	.with_model("grok-code-fast");
+
+	assert_eq!(
+		thinking_blocks(&req),
+		vec![("weighing the options".to_string(), String::new())],
+		"unsigned thinking has nothing to verify, so a switch must replay it",
+	);
+}
+
+/// The other unsigned case: the model being called does sign its thinking, and
+/// it rejects a block that arrives without a signature just as hard as one
+/// signed by somebody else. What says so is the conversation itself — this
+/// model already signed a block earlier in it.
+#[test]
+fn unsigned_thinking_is_dropped_at_a_model_that_signs_its_own() {
+	let req = ConversationRequest::from_items(vec![
+		ConversationItem::user("q1"),
+		reasoning_sibling("r1", "the signing model's own thinking", Some("sig-1")),
+		ConversationItem::Assistant(AssistantItem {
+			content: "First answer.".into(),
+			tool_calls: vec![],
+			model_id: Some("claude-opus-5".into()),
+			model_fingerprint: None,
+			reasoning_effort: None,
+		}),
+		ConversationItem::user("q2"),
+		reasoning_sibling("r2", "the other model's thinking", None),
+		ConversationItem::Assistant(AssistantItem {
+			content: "Second answer.".into(),
+			tool_calls: vec![],
+			model_id: Some("grok-4-fast".into()),
+			model_fingerprint: None,
+			reasoning_effort: None,
+		}),
+		ConversationItem::user("q3"),
+	])
+	.with_model("claude-opus-5");
+
+	assert_eq!(
+		thinking_blocks(&req),
+		vec![(
+			"the signing model's own thinking".to_string(),
+			"sig-1".to_string()
+		)],
+		"the signing model keeps its own block and must not be handed an unsigned one",
+	);
+}
+
+/// Mid-tool-loop, the same way round: the turn being continued kept its
+/// thinking across the switch, so there is a block to lead with and thinking
+/// stays on. Turning it off here would cost the loop its reasoning for no 400
+/// that was ever going to happen.
+#[test]
+fn a_tool_loop_that_kept_its_unsigned_thinking_keeps_thinking_on() {
+	let mut req = ConversationRequest::from_items(vec![
+		ConversationItem::user("q1"),
+		reasoning_sibling("r1", "planning the call", None),
+		ConversationItem::Assistant(AssistantItem {
+			content: String::new().into(),
+			tool_calls: vec![ToolCall {
+				id: "call_1".into(),
+				name: "read_file".to_string(),
+				arguments: r#"{"path":"src/main.rs"}"#.into(),
+			}],
+			model_id: Some("grok-4-fast".into()),
+			model_fingerprint: None,
+			reasoning_effort: None,
+		}),
+		ConversationItem::tool_result("call_1", "fn main() {}"),
+	])
+	.with_model("grok-code-fast");
+	req.reasoning_effort = Some(crate::ReasoningEffort::High);
+
+	let msgs = build_messages_request(&req);
+	assert!(
+		msgs.thinking.is_some(),
+		"the loop still leads with a thinking block, so thinking stays on",
+	);
+	assert_eq!(
+		thinking_blocks(&req),
+		vec![("planning the call".to_string(), String::new())],
+	);
 }

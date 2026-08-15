@@ -23,6 +23,8 @@
 //! - 413 / image processing errors → strip images and retry once
 //! - model-takes-no-image-input errors (any of 400/404/415/422/500,
 //!   provider-worded) → strip images and retry once
+//! - 400 on a `thinking` block's `signature` → drop replayed reasoning and
+//!   retry once
 //!
 //! **Not retried** (Fatal immediately):
 //! - 400, 401, 403, 404, 408, 422 (client errors)
@@ -148,6 +150,10 @@ pub enum RetryDecision {
     /// Payload Too Large or image processing rejection).
     RetryWithImageStrip,
 
+    /// Retry after dropping replayed reasoning from the request (a thinking
+    /// block whose signature this model cannot verify).
+    RetryWithReasoningStrip,
+
     /// Retry after rebuilding the HTTP client with HTTP/1.1 (transport
     /// error, first retry only).
     RetryWithClientRebuild { backoff: Duration },
@@ -208,6 +214,14 @@ pub fn classify_error(
     // session.
     if err.is_image_input_unsupported_error() {
         return RetryDecision::RetryWithImageStrip;
+    }
+
+    // A thinking block signed by another model. Like the image arms it has to
+    // come before the status-code arms below, which would call this 400 fatal:
+    // the blocks are in conversation history, so every following turn on the
+    // same history fails the same way with no way out but a new session.
+    if err.is_thinking_signature_error() {
+        return RetryDecision::RetryWithReasoningStrip;
     }
 
     // Shared retry vetoes (`SamplingError::is_retry_vetoed`, also used by
@@ -585,6 +599,38 @@ mod tests {
             RetryDecision::EmitToSession(_) => {}
             other => panic!("expected EmitToSession, got {other:?}"),
         }
+    }
+
+    /// A rejected thinking signature is a 400, which every other rule calls
+    /// fatal. It has to strip instead: the blocks sit in conversation history,
+    /// so a fatal here fails every later turn on the same history too.
+    #[test]
+    fn classify_thinking_signature_strips_reasoning() {
+        let err = api_err(
+            StatusCode::BAD_REQUEST,
+            "messages.1.content.0: Invalid `signature` in `thinking` block",
+        );
+        assert!(matches!(
+            classify_error(&err, 0, 5, RATE_LIMIT_RETRY_THRESHOLD),
+            RetryDecision::RetryWithReasoningStrip
+        ));
+    }
+
+    /// The server's "don't retry" hint is about the request it saw; dropping
+    /// the reasoning makes a different request, so the strip must outrank it.
+    #[test]
+    fn classify_thinking_signature_outranks_should_retry_veto() {
+        let err = SamplingError::Api {
+            status: StatusCode::BAD_REQUEST,
+            message: "Invalid `signature` in `thinking` block".to_string(),
+            model_metadata: None,
+            retry_after_secs: None,
+            should_retry: Some(false),
+        };
+        assert!(matches!(
+            classify_error(&err, 0, 5, RATE_LIMIT_RETRY_THRESHOLD),
+            RetryDecision::RetryWithReasoningStrip
+        ));
     }
 
     #[test]

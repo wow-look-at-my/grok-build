@@ -253,6 +253,8 @@ pub struct MockInferenceServer {
     agent_turns: Arc<std::sync::Mutex<VecDeque<String>>>,
     /// `stop_reason` on the `/v1/messages` terminal `message_delta`.
     messages_stop_reason: Arc<std::sync::RwLock<String>>,
+    /// The price a gateway puts on the call, on that same `message_delta`.
+    messages_cost_usd_ticks: Arc<std::sync::RwLock<Option<i64>>>,
     chunk_delay: Arc<std::sync::RwLock<Option<Duration>>>,
     storage: Arc<StorageState>,
     /// When set, `/v1/models` and `/v1/settings` never respond.
@@ -291,6 +293,7 @@ impl MockInferenceServer {
         let overrides = InferenceOverrides::new(required_token);
         let agent_turns = Arc::new(std::sync::Mutex::new(VecDeque::new()));
         let messages_stop_reason = Arc::new(std::sync::RwLock::new("end_turn".to_string()));
+        let messages_cost_usd_ticks = Arc::new(std::sync::RwLock::new(None::<i64>));
         let chunk_delay = Arc::new(std::sync::RwLock::new(None::<Duration>));
         let storage = Arc::new(StorageState::default());
         let hang = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -303,6 +306,7 @@ impl MockInferenceServer {
             overrides.clone(),
             agent_turns.clone(),
             messages_stop_reason.clone(),
+            messages_cost_usd_ticks.clone(),
             chunk_delay.clone(),
             storage.clone(),
             hang.clone(),
@@ -343,6 +347,7 @@ impl MockInferenceServer {
             overrides,
             agent_turns,
             messages_stop_reason,
+            messages_cost_usd_ticks,
             chunk_delay,
             storage,
             hang,
@@ -422,6 +427,13 @@ impl MockInferenceServer {
     /// Defaults to `"end_turn"`.
     pub fn set_messages_stop_reason(&self, stop_reason: impl Into<String>) {
         *self.messages_stop_reason.write().unwrap() = stop_reason.into();
+    }
+
+    /// Price the `/v1/messages` call, as a gateway speaking that protocol
+    /// does. `None` (the default) is Anthropic's own behavior: no price on
+    /// the wire at all.
+    pub fn set_messages_cost_usd_ticks(&self, ticks: Option<i64>) {
+        *self.messages_cost_usd_ticks.write().unwrap() = ticks;
     }
 
     /// Emit each SSE event after `delay`, so a test can hold a turn visibly
@@ -643,6 +655,7 @@ impl MockInferenceServer {
         overrides: InferenceOverrides,
         agent_turns: Arc<std::sync::Mutex<VecDeque<String>>>,
         messages_stop_reason: Arc<std::sync::RwLock<String>>,
+        messages_cost_usd_ticks: Arc<std::sync::RwLock<Option<i64>>>,
         chunk_delay: Arc<std::sync::RwLock<Option<Duration>>>,
         storage: Arc<StorageState>,
         hang: Arc<std::sync::atomic::AtomicBool>,
@@ -821,6 +834,7 @@ impl MockInferenceServer {
                     let overrides = overrides_msg.clone();
                     let agent_turns = agent_turns_msg.clone();
                     let stop_reason = messages_stop_reason.clone();
+                    let cost_ticks = messages_cost_usd_ticks.clone();
                     let delay = delay_msg.clone();
                     async move {
                         let auth = Self::extract_auth(&headers);
@@ -877,16 +891,20 @@ impl MockInferenceServer {
                             .unwrap_or("test-model");
 
                         let stop = stop_reason.read().unwrap().clone();
+                        let cost = *cost_ticks.read().unwrap();
                         let events = match Self::pop_agent_turn(&agent_turns, &request) {
-                            Some(text) => sse::messages_api_events(&text, model, &stop),
+                            Some(text) => {
+                                sse::messages_api_events_with_cost(&text, model, &stop, cost)
+                            }
                             None => match &*mode.read().unwrap() {
-                                ResponseMode::Echo => sse::messages_api_events(
+                                ResponseMode::Echo => sse::messages_api_events_with_cost(
                                     &format!("Echo: {user_msg}"),
                                     model,
                                     &stop,
+                                    cost,
                                 ),
                                 ResponseMode::Fixed(text) => {
-                                    sse::messages_api_events(text, model, &stop)
+                                    sse::messages_api_events_with_cost(text, model, &stop, cost)
                                 }
                             },
                         };
