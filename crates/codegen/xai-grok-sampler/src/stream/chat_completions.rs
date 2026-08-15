@@ -688,6 +688,7 @@ mod tests {
                     name: Some("do_thing".into()),
                     arguments: Some("{\"x\":".into()),
                 }),
+                vendor: Default::default(),
             }],
             tool_call_id: None,
         }]);
@@ -704,6 +705,7 @@ mod tests {
                     name: None,
                     arguments: Some("1}".into()),
                 }),
+                vendor: Default::default(),
             }],
             tool_call_id: None,
         }]);

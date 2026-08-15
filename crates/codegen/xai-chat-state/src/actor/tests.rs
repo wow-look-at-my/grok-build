@@ -1512,6 +1512,7 @@ async fn build_request_repairs_dangling_tool_calls() {
             id: "call_1".into(),
             name: "my_tool".to_string(),
             arguments: "{}".into(),
+            vendor: Default::default(),
         }]),
         // No ToolResult for call_1 — repaired by ChatState::new() before any command.
     ]);
@@ -1664,11 +1665,13 @@ async fn build_request_with_multiple_tool_calls_and_results() {
                 id: "call_1".into(),
                 name: "tool_a".to_string(),
                 arguments: "{}".into(),
+                vendor: Default::default(),
             },
             ToolCall {
                 id: "call_2".into(),
                 name: "tool_b".to_string(),
                 arguments: "{}".into(),
+                vendor: Default::default(),
             },
         ]),
         ConversationItem::tool_result("call_1", "result a"),
@@ -1738,16 +1741,19 @@ async fn parallel_tool_calls_accept_first_reject_second_skip_third() {
                     id: "call_1".into(),
                     name: "read_file".to_string(),
                     arguments: r#"{"target_file":"src/main.rs"}"#.into(),
+                    vendor: Default::default(),
                 },
                 ToolCall {
                     id: "call_2".into(),
                     name: "edit_file".to_string(),
                     arguments: r#"{"target_file":"src/main.rs","new_string":"fixed"}"#.into(),
+                    vendor: Default::default(),
                 },
                 ToolCall {
                     id: "call_3".into(),
                     name: "run_terminal_cmd".to_string(),
                     arguments: r#"{"command":"cargo test"}"#.into(),
+                    vendor: Default::default(),
                 },
             ],
             model_id: Some("grok-3".to_string()),
@@ -1882,16 +1888,19 @@ async fn parallel_tool_calls_with_rejection_has_no_dangling_calls() {
                 id: "call_1".into(),
                 name: "read_file".to_string(),
                 arguments: "{}".into(),
+                vendor: Default::default(),
             },
             ToolCall {
                 id: "call_2".into(),
                 name: "edit_file".to_string(),
                 arguments: "{}".into(),
+                vendor: Default::default(),
             },
             ToolCall {
                 id: "call_3".into(),
                 name: "run_terminal_cmd".to_string(),
                 arguments: "{}".into(),
+                vendor: Default::default(),
             },
         ]));
 
@@ -1958,16 +1967,19 @@ async fn parallel_tool_calls_with_rejection_persists_all_items() {
                 id: "call_1".into(),
                 name: "read_file".to_string(),
                 arguments: "{}".into(),
+                vendor: Default::default(),
             },
             ToolCall {
                 id: "call_2".into(),
                 name: "edit_file".to_string(),
                 arguments: "{}".into(),
+                vendor: Default::default(),
             },
             ToolCall {
                 id: "call_3".into(),
                 name: "run_terminal_cmd".to_string(),
                 arguments: "{}".into(),
+                vendor: Default::default(),
             },
         ]));
     h.handle
@@ -2024,16 +2036,19 @@ async fn dangling_tool_calls_after_crash_are_repaired_on_load() {
                     id: "call_1".into(),
                     name: "read_file".to_string(),
                     arguments: r#"{"target_file":"src/main.rs"}"#.into(),
+                    vendor: Default::default(),
                 },
                 ToolCall {
                     id: "call_2".into(),
                     name: "edit_file".to_string(),
                     arguments: r#"{"target_file":"src/main.rs","new_string":"fixed"}"#.into(),
+                    vendor: Default::default(),
                 },
                 ToolCall {
                     id: "call_3".into(),
                     name: "run_terminal_cmd".to_string(),
                     arguments: r#"{"command":"cargo test"}"#.into(),
+                    vendor: Default::default(),
                 },
             ],
             model_id: Some("grok-3".to_string()),
@@ -2128,11 +2143,13 @@ async fn dangling_tool_calls_repair_is_consistent_between_state_and_request() {
                 id: "call_1".into(),
                 name: "read_file".to_string(),
                 arguments: "{}".into(),
+                vendor: Default::default(),
             },
             ToolCall {
                 id: "call_2".into(),
                 name: "edit_file".to_string(),
                 arguments: "{}".into(),
+                vendor: Default::default(),
             },
         ]),
         // Only call_1 has a result — call_2 is dangling
@@ -2177,16 +2194,19 @@ async fn all_tool_calls_dangling_after_crash() {
                 id: "call_1".into(),
                 name: "read_file".to_string(),
                 arguments: "{}".into(),
+                vendor: Default::default(),
             },
             ToolCall {
                 id: "call_2".into(),
                 name: "edit_file".to_string(),
                 arguments: "{}".into(),
+                vendor: Default::default(),
             },
             ToolCall {
                 id: "call_3".into(),
                 name: "run_terminal_cmd".to_string(),
                 arguments: "{}".into(),
+                vendor: Default::default(),
             },
         ]),
         // NO tool results at all — complete crash right after assistant was persisted
@@ -2273,16 +2293,19 @@ async fn live_cancel_before_any_tool_execution_repairs_on_next_user_message() {
                 id: "call_1".into(),
                 name: "read_file".to_string(),
                 arguments: r#"{"target_file":"src/main.rs"}"#.into(),
+                vendor: Default::default(),
             },
             ToolCall {
                 id: "call_2".into(),
                 name: "edit_file".to_string(),
                 arguments: "{}".into(),
+                vendor: Default::default(),
             },
             ToolCall {
                 id: "call_3".into(),
                 name: "run_terminal_cmd".to_string(),
                 arguments: r#"{"command":"cargo test"}"#.into(),
+                vendor: Default::default(),
             },
         ]));
 
@@ -2371,16 +2394,19 @@ async fn live_cancel_after_partial_tool_results_repairs_remaining() {
                 id: "call_1".into(),
                 name: "read_file".to_string(),
                 arguments: "{}".into(),
+                vendor: Default::default(),
             },
             ToolCall {
                 id: "call_2".into(),
                 name: "edit_file".to_string(),
                 arguments: "{}".into(),
+                vendor: Default::default(),
             },
             ToolCall {
                 id: "call_3".into(),
                 name: "run_terminal_cmd".to_string(),
                 arguments: "{}".into(),
+                vendor: Default::default(),
             },
         ]));
 
@@ -2491,6 +2517,7 @@ async fn harness_trace_items_ride_own_turn_not_the_live_capture() {
             id: "verifier-1".into(),
             name: "spawn_subagent".into(),
             arguments: "{}".into(),
+            vendor: Default::default(),
         }]),
         ConversationItem::tool_result("verifier-1", "Refuted"),
     ]);
@@ -2543,6 +2570,7 @@ async fn harness_trace_recorded_before_capture_seals_into_own_turn() {
             id: "planner-1".into(),
             name: "spawn_subagent".into(),
             arguments: "{}".into(),
+            vendor: Default::default(),
         }]),
         ConversationItem::tool_result("planner-1", "Done"),
     ]);
@@ -2590,6 +2618,7 @@ async fn harness_trace_turns_separate_per_flush_and_drain_clears() {
                 id: id.into(),
                 name: "spawn_subagent".into(),
                 arguments: "{}".into(),
+                vendor: Default::default(),
             }]),
             ConversationItem::tool_result(id, "Refuted"),
         ]
@@ -2777,6 +2806,7 @@ async fn turn_capture_survives_integrity_repair_prefix_shrink() {
         id: id.into(),
         name: "t".into(),
         arguments: "{}".into(),
+        vendor: Default::default(),
     };
     h.handle
         .push_assistant_response(ConversationItem::assistant_tool_calls(vec![
@@ -2938,6 +2968,7 @@ async fn has_dangling_tool_calls_reflects_unanswered_calls() {
             id: "call_1".into(),
             name: "my_tool".to_string(),
             arguments: "{}".into(),
+            vendor: Default::default(),
         }]));
     assert!(h.handle.has_dangling_tool_calls().await);
 
@@ -4730,6 +4761,7 @@ async fn repair_history_command_strips_orphan_and_persists() {
             id: "call_OK".into(),
             name: "read_file".to_string(),
             arguments: "{}".into(),
+            vendor: Default::default(),
         }]),
         ConversationItem::tool_result("call_OK", "fine"),
     ];

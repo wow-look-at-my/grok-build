@@ -766,6 +766,7 @@ mod tests {
             id: "t".into(),
             name: name.to_string(),
             arguments: args.into(),
+            vendor: Default::default(),
         };
         let items = vec![
             user("Fix the bug"),
