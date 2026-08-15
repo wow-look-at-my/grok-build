@@ -154,6 +154,43 @@ verify serially wastes time when a parallel CI build could be running.
   scrollback sum stops being a valid fallback once anything priced is replayed
   (`AcpUpdateTracker::scrollback_sum_is_this_run`).
 
+- The Messages backend takes a price off the wire when one is there:
+  `MessagesUsage`/`MessageDeltaUsage` carry `cost_in_usd_ticks` (alias
+  `cost_usd_ticks`) and the USD-float `cost`, read on `message_start` and every
+  `message_delta` with the Chat Completions precedence — ticks over float, a
+  zero is unbilled, and a later silent event never erases a reported price.
+  Anthropic itself prices nothing, so that path stays `None` and the shell's
+  `compute_cost_ticks` fallback derives one from the model's pricing.
+
+## Thinking-signature notes
+
+- The Messages API verifies a thinking block's `signature` against the model
+  that minted it, so replaying one to any other model is a 400
+  ("Invalid `signature` in `thinking` block") on every turn the block stays in
+  history. It cannot be re-minted, so the block is what gives.
+- `build_messages_request` reads a `Reasoning` sibling's origin off the
+  `Assistant` item behind it (`model_id`). An alias, the dated snapshot it
+  answers as, and a gateway's routing prefix are one model (`same_model`); an
+  item with no recorded `model_id` is replayed as before.
+- A switch only costs the thinking when a signature is in play
+  (`thinking_is_foreign`): a signed block cannot cross one, and a model that
+  signs rejects an unsigned block just as hard. Thinking that is plain text on
+  both sides is nothing either end verifies, so it is replayed untouched.
+  Whether the target signs is read off the conversation — a block it signed
+  earlier in this one (`target_signs_thinking`) — and no evidence reads as
+  unsigned.
+- That guess, and history predating the check, are why the sampler also
+  treats the 400 as recoverable:
+  `RetryDecision::RetryWithReasoningStrip` drops the replayed reasoning and
+  retries once, so history predating the check is not dead-ended.
+- A conversation that ends mid-tool-loop on a turn that lost its thinking to
+  the rule above goes out with thinking off entirely
+  (`open_tool_loop_lost_its_thinking` asks the same predicate, so a loop that
+  kept its thinking keeps thinking on): a provider
+  validates the thinking of the tool-calling turn it is continuing, and a
+  config-less thinking block is rejected in turn. Reasoning effort is untouched
+  and the next turn pairs normally.
+
 ## Why build-test is not on the self-hosted runner
 
 Pointing `build-test` at `vars.CI_RUNNER` turns ~20 tests red, because they

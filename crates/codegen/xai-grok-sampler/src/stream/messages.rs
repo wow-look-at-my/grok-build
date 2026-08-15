@@ -50,6 +50,18 @@ pub(crate) fn messages_event_has_meaningful_content(event: &MessageStreamEvent) 
     }
 }
 
+/// The price a gateway put on this call, in USD ticks. Integer ticks are
+/// authoritative when both shapes arrive, and a reported zero is unbilled
+/// rather than free — the same precedence the Chat Completions path applies.
+fn wire_cost_ticks(
+    ticks: Option<i64>,
+    cost: Option<&xai_grok_sampling_types::UsageCost>,
+) -> Option<i64> {
+    xai_grok_sampling_types::reported_cost_ticks(ticks).or_else(|| {
+        xai_grok_sampling_types::usd_float_to_ticks(cost.map(|c| c.as_usd_float()))
+    })
+}
+
 /// Per-block streaming accumulator. The Anthropic Messages API reports
 /// content as a sequence of indexed blocks (text / thinking /
 /// tool_use), each with start / delta / stop events. We accumulate
@@ -113,6 +125,9 @@ pub fn stream_messages<'a>(
         let mut final_cache_read_input_tokens: u32 = 0;
         let mut final_cache_creation_input_tokens: u32 = 0;
         let mut final_output_tokens: u32 = 0;
+        // Cumulative for the response, so last-write-wins — but a later event
+        // that omits the price must never erase one already reported.
+        let mut final_cost_usd_ticks: Option<i64> = None;
         let mut final_stop_reason: Option<StopReason> = None;
         let mut final_stop_message: Option<String> = None;
         let mut final_message_id: Option<String> = None;
@@ -179,6 +194,11 @@ pub fn stream_messages<'a>(
                     final_input_tokens = message.usage.input_tokens;
                     final_cache_read_input_tokens = message.usage.cache_read_input_tokens;
                     final_cache_creation_input_tokens = message.usage.cache_creation_input_tokens;
+                    final_cost_usd_ticks = wire_cost_ticks(
+                        message.usage.cost_in_usd_ticks,
+                        message.usage.cost.as_ref(),
+                    )
+                    .or(final_cost_usd_ticks);
                     // Surface the real id/model/input-usage in order, before any
                     // content, so partial-mode framing emits them on the real
                     // `message_start` instead of a synthesized placeholder.
@@ -473,6 +493,9 @@ pub fn stream_messages<'a>(
                     if let Some(cache_creation) = usage.cache_creation_input_tokens {
                         final_cache_creation_input_tokens = cache_creation;
                     }
+                    final_cost_usd_ticks =
+                        wire_cost_ticks(usage.cost_in_usd_ticks, usage.cost.as_ref())
+                            .or(final_cost_usd_ticks);
                 }
 
                 MessageStreamEvent::MessageStop => {
@@ -574,8 +597,10 @@ pub fn stream_messages<'a>(
             items,
             stop_reason,
             usage,
-            // Anthropic Messages API carries no cost on the wire.
-            cost_usd_ticks: None,
+            // Absent unless a gateway priced the call: Anthropic itself sends
+            // no price, and the shell derives one from the model's configured
+            // pricing rather than this reporting a number nobody quoted.
+            cost_usd_ticks: final_cost_usd_ticks,
             message_chunks_emitted: message_chunk_count,
             doom_loop_signals: Vec::new(),
             stop_message: final_stop_message,

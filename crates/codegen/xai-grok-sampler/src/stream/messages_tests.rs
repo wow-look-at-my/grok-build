@@ -29,6 +29,7 @@ fn message_start() -> MessageStreamEvent {
                 output_tokens: 0,
                 cache_creation_input_tokens: 0,
                 cache_read_input_tokens: 0,
+                ..Default::default()
             },
         },
     }
@@ -67,6 +68,7 @@ fn message_delta_with_stop(stop: messages::StopReason) -> MessageStreamEvent {
             input_tokens: Some(10),
             cache_read_input_tokens: None,
             cache_creation_input_tokens: None,
+            ..Default::default()
         },
     }
 }
@@ -89,6 +91,7 @@ fn message_delta_refusal_with_explanation(explanation: &str) -> MessageStreamEve
             input_tokens: Some(10),
             cache_read_input_tokens: None,
             cache_creation_input_tokens: None,
+            ..Default::default()
         },
     }
 }
@@ -715,6 +718,7 @@ fn message_start_with_cache(
                 output_tokens: 0,
                 cache_creation_input_tokens: cache_creation,
                 cache_read_input_tokens: cache_read,
+                ..Default::default()
             },
         },
     }
@@ -737,6 +741,7 @@ fn message_delta_with_cache(
             input_tokens: input,
             cache_read_input_tokens: cache_read,
             cache_creation_input_tokens: cache_creation,
+            ..Default::default()
         },
     }
 }
@@ -813,4 +818,107 @@ async fn pure_cache_hit_with_zero_uncached_still_emits_usage() {
     assert_eq!(usage.prompt_tokens, 2500);
     assert_eq!(usage.cached_prompt_tokens, 2500);
     assert_eq!(usage.total_tokens, 2501);
+}
+
+/// A terminal `message_delta` that also settles the price of the call, the
+/// way a gateway speaking this protocol reports it.
+fn message_delta_with_cost(
+    ticks: Option<i64>,
+    cost: Option<f64>,
+) -> MessageStreamEvent {
+    MessageStreamEvent::MessageDelta {
+        delta: MessageDeltaBody {
+            stop_reason: Some(messages::StopReason::EndTurn),
+            stop_sequence: None,
+            stop_details: None,
+        },
+        usage: MessageDeltaUsage {
+            output_tokens: 5,
+            input_tokens: Some(10),
+            cache_read_input_tokens: None,
+            cache_creation_input_tokens: None,
+            cost_in_usd_ticks: ticks,
+            cost: cost.map(xai_grok_sampling_types::UsageCost::from),
+        },
+    }
+}
+
+async fn priced_response(events: Vec<MessageStreamEvent>) -> Option<i64> {
+    let raw = stream::iter(events.into_iter().map(Ok::<_, SamplingError>)).boxed();
+    let evs = collect(stream_messages(raw, None, rid(), Duration::from_secs(60))).await;
+    match evs.last().expect("stream yields a terminal event") {
+        SamplingEvent::Completed { response, .. } => response.cost_usd_ticks,
+        other => panic!("expected Completed, got {other:?}"),
+    }
+}
+
+/// The whole point: a gateway that prices the call gets that price onto the
+/// response, instead of the shell falling back to an estimate off the model's
+/// configured pricing.
+#[tokio::test]
+async fn a_gateway_reported_price_reaches_the_completed_response() {
+    for (ticks, cost, expected, what) in [
+        (Some(4_160_000), None, Some(4_160_000), "integer ticks"),
+        (None, Some(0.0000416), Some(416_000), "USD float"),
+        (
+            Some(4_160_000),
+            Some(9.9),
+            Some(4_160_000),
+            "ticks win when a gateway sends both",
+        ),
+        (None, None, None, "Anthropic itself prices nothing"),
+        (Some(0), None, None, "a zero is unbilled, not free"),
+        (None, Some(0.0), None, "and so is a zero float"),
+    ] {
+        let events = vec![
+            message_start(),
+            text_block_start(0),
+            text_delta(0, "hi"),
+            block_stop(0),
+            message_delta_with_cost(ticks, cost),
+            MessageStreamEvent::MessageStop,
+        ];
+        assert_eq!(priced_response(events).await, expected, "{what}");
+    }
+}
+
+/// `message_start` can carry the price too. A later event that omits it is
+/// silent about the price, not a correction to zero — losing it here would
+/// bill the turn at an estimate while the real number was already on the wire.
+#[tokio::test]
+async fn a_price_from_message_start_survives_a_silent_delta() {
+    let mut start = message_start();
+    if let MessageStreamEvent::MessageStart { message } = &mut start {
+        message.usage.cost_in_usd_ticks = Some(2_500_000);
+    }
+
+    let events = vec![
+        start,
+        text_block_start(0),
+        text_delta(0, "hi"),
+        block_stop(0),
+        message_delta_with_stop(messages::StopReason::EndTurn),
+        MessageStreamEvent::MessageStop,
+    ];
+    assert_eq!(priced_response(events).await, Some(2_500_000));
+}
+
+/// The terminal delta is where the final number lands, so it overwrites the
+/// running one rather than losing to it.
+#[tokio::test]
+async fn the_terminal_delta_settles_the_price() {
+    let mut start = message_start();
+    if let MessageStreamEvent::MessageStart { message } = &mut start {
+        message.usage.cost_in_usd_ticks = Some(2_500_000);
+    }
+
+    let events = vec![
+        start,
+        text_block_start(0),
+        text_delta(0, "hi"),
+        block_stop(0),
+        message_delta_with_cost(Some(7_000_000), None),
+        MessageStreamEvent::MessageStop,
+    ];
+    assert_eq!(priced_response(events).await, Some(7_000_000));
 }
