@@ -684,6 +684,18 @@ impl ConversationRequest {
         }
         stripped
     }
+
+    /// Drop every replayed `Reasoning` sibling, returning how many went.
+    ///
+    /// Recovery path for a server that rejects a thinking block's signature.
+    /// A signature cannot be re-minted for another model, so the block is the
+    /// only thing that can give.
+    pub fn strip_reasoning(&mut self) -> usize {
+        let before = self.items.len();
+        self.items
+            .retain(|item| !matches!(item, ConversationItem::Reasoning(_)));
+        before - self.items.len()
+    }
 }
 
 /// Tool choice options
