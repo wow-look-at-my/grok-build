@@ -13873,6 +13873,7 @@ dependencies = [
  "reqwest 0.12.24",
  "serde",
  "serde_json",
+ "serde_path_to_error",
  "tokio",
  "tokio-util",
  "tracing",
