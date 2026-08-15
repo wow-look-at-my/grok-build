@@ -25,6 +25,59 @@ pub(crate) fn resolve_context_window(
         })
 }
 
+/// Resolve a model's context window directly from its **own** provider base
+/// (`/v1/models` at `api_base_url`, OpenAI-compatible), authenticated with the
+/// model's own API key.
+///
+/// This closes the BYOK/custom-base gap that [`resolve_context_window`]
+/// cannot: the generic `/v1/models` prefetch is driven by `EndpointsConfig`
+/// and only ever queries the configured xAI proxy (or a single global
+/// `[endpoints].models_base_url`). A model that ships its own
+/// `api_base_url` + API key on the catalog entry (e.g.
+/// `openrouter/deepseek/...` served by `https://gateway.pazer.ai/v1`) is never
+/// in that listing, so its window stays at a hardcoded default. Here we ask
+/// the model's own provider for the real value.
+///
+/// The listing is fetched **on a dedicated OS thread** (`reqwest::blocking`
+/// constructs an inner tokio runtime, which panics if the caller happens to be
+/// running inside an async tokio context — e.g. `resolve_model_list` reached
+/// from `SessionActor::model_auth_state`). Offloading the network I/O to a
+/// `std::thread` keeps this call safe from both sync and async callers.
+///
+/// Returns `None` when the listing can't be fetched, doesn't carry the slug,
+/// or the listed window is itself a default sentinel — so a cold/unreachable
+/// provider never aborts the catalog build.
+pub(crate) fn resolve_context_window_from_provider(
+    model: &str,
+    api_base_url: &str,
+    api_key: Option<&str>,
+) -> Option<std::num::NonZeroU64> {
+    use crate::remote::DEFAULT_CONTEXT_WINDOW;
+    let default = std::num::NonZeroU64::new(DEFAULT_CONTEXT_WINDOW).expect("non-zero");
+    // Bound the fetch: a BYOK provider that never answers (or a slow /v1/models)
+    // must not stall the resolution that owns the catalog build. The network
+    // call runs on a dedicated OS thread (`reqwest::blocking` builds an inner
+    // tokio runtime that panics if it is created inside an async context), and
+    // we wait for the result with a deadline.
+    const FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+    let (model, base, key) = (model.to_owned(), api_base_url.to_owned(), api_key.map(str::to_owned));
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(crate::remote::fetch_models_for_api_base_blocking(&base, key.as_deref()));
+    });
+    let listing = rx
+        .recv_timeout(FETCH_TIMEOUT)
+        .ok()
+        .and_then(|res| res.ok())
+        .unwrap_or_default();
+    let listed = listing
+        .iter()
+        .find(|entry| entry.model == model || entry.id.as_deref() == Some(&model))?;
+    let cw = listed.context_window;
+    (cw != default).then_some(cw)
+}
+
+
 /// Map a model id (catalog key or routing slug) to its catalog key.
 pub(crate) fn resolve_catalog_key(
     models: &IndexMap<String, ModelEntry>,

@@ -380,7 +380,59 @@ impl SessionActor {
         };
         let current_model = &current_config.model;
         let base_url = &current_config.base_url;
+        // BYOK / custom-provider base (e.g. `https://gateway.pazer.ai/v1`):
+        // the cli-chat-proxy `/models-v2` listing below will never contain it,
+        // so refresh the model metadata from the model's OWN `/v1/models`
+        // listing, authenticated with the model's own key. Without this a BYOK
+        // model (e.g. deepseek-v4-flash with a 1M window) stays at a hardcoded
+        // default forever, because the generic prefetch only ever queries the
+        // xAI proxy.
         if !crate::util::is_cli_chat_proxy_url(base_url) {
+            if crate::util::is_xai_api_url(base_url) {
+                // xAI endpoints are served by the proxy listing; don't re-ask a
+                // bare api.x.ai for BYOK-style metadata here.
+                return;
+            }
+            let own_key = self.chat_state_handle.get_credentials().await.api_key;
+            let refreshed = match own_key {
+                Some(ref key) if !key.trim().is_empty() => {
+                    crate::agent::models::resolve_context_window_from_provider(
+                        current_model,
+                        base_url,
+                        Some(key),
+                    )
+                }
+                _ => {
+                    tracing::debug!(
+                        model = %current_model,
+                        base = %base_url,
+                        "BYOK model metadata refresh: no own API key; skipped"
+                    );
+                    None
+                }
+            };
+            if let Some(cw) = refreshed {
+                if current_config.context_window != cw
+                    && self.compaction.context_window_override.is_none()
+                {
+                    tracing::info!(
+                        model = %current_model,
+                        base = %base_url,
+                        old_context_window = current_config.context_window.get(),
+                        new_context_window = cw.get(),
+                        "Context window updated on BYOK model metadata refresh (own /v1/models)"
+                    );
+                    let mut updated_config = current_config.clone();
+                    updated_config.context_window = cw;
+                    self.chat_state_handle.update_sampling_config(updated_config);
+                }
+            } else {
+                tracing::debug!(
+                    model = %current_model,
+                    base = %base_url,
+                    "BYOK model metadata refresh: no /v1/models window for this model; skipped"
+                );
+            }
             return;
         }
         tracing::info!(
