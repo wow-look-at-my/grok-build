@@ -4,6 +4,11 @@ use crate::agent::model_providers::{
 };
 use crate::auth::{AuthManager, GrokComConfig, OidcAuthConfig};
 use crate::remote::DEFAULT_CONTEXT_WINDOW;
+/// Config/`[model.*]`/bundled-JSON fallback context window applied when a model
+/// entry carries no explicit `context_window` (distinct from the remote
+/// `DEFAULT_CONTEXT_WINDOW` of 256k). A BYOK model left at this sentinel is a
+/// candidate for the per-model provider resolution (`resolve_context_window_from_provider`).
+pub(crate) const CONFIG_DEFAULT_CONTEXT_WINDOW: u64 = 200_000;
 use crate::{config::StorageMode, sampling::ApiBackend, tools::config::ShellToolsetConfig};
 use agent_client_protocol as acp;
 use indexmap::IndexMap;
@@ -3822,7 +3827,7 @@ pub(crate) fn resolve_model_list(
             if model_override.context_window.is_none() {
                 tracing::debug!(
                     model_key = %key,
-                    default = 200_000,
+                    default = CONFIG_DEFAULT_CONTEXT_WINDOW,
                     "new model missing context_window, defaulting to 200000 — set context_window in [model.{}] to override",
                     key,
                 );
@@ -3912,6 +3917,42 @@ pub(crate) fn resolve_model_list(
                         "context_window resolved per exact slug from sibling model-listing entry"
                     );
                     entry.info.context_window = resolved_cw;
+                }
+            }
+            // BYOK/custom-base gap: the sibling resolve above (and the generic
+            // /v1/models prefetch) only ever sees the xAI proxy listing, never a
+            // model that ships its OWN api_base_url + API key (e.g.
+            // `openrouter/deepseek/...` at `https://gateway.pazer.ai/v1`). When
+            // such a model is still at a hardcoded default (200k config or the
+            // 256k fallback), ask its own provider for the real window.
+            //
+            // Gated on `own_credential()` alone: an entry with its own API key
+            // is BYOK by definition, and bundled/xAI models never carry one, so
+            // they are never re-queried. Deliberately no xAI-host check here —
+            // `is_xai_api_url` treats loopback as cli-chat-proxy/xAI, which
+            // would also classify a local BYOK test/mock base as xAI and skip
+            // the real path we're exercising. Any unreachable provider leaves
+            // the default untouched (best-effort). `resolve_context_window_from_provider`
+            // runs its fetch on a dedicated OS thread, so this is safe even when
+            // `resolve_model_list` is reached from an async context.
+            let still_default = entry.info.context_window.get() == default_cw
+                || entry.info.context_window.get() == CONFIG_DEFAULT_CONTEXT_WINDOW;
+            if still_default && entry.own_credential().is_some() {
+                let api_key = entry.own_credential();
+                let base_url = entry.info.base_url.clone();
+                if let Some(cw) = crate::agent::models::resolve_context_window_from_provider(
+                    &entry.info.model,
+                    &base_url,
+                    api_key.as_deref(),
+                ) {
+                    tracing::info!(
+                        model = %entry.info.model,
+                        base = %base_url,
+                        from = entry.info.context_window.get(),
+                        to = cw.get(),
+                        "context_window resolved from the model's own provider /v1/models listing"
+                    );
+                    entry.info.context_window = cw;
                 }
             }
             if entry.info.api_backend == ApiBackend::default()
@@ -4109,7 +4150,9 @@ fn default_models(endpoints: &EndpointsConfig) -> IndexMap<String, ModelEntryCon
             let key = m.id.clone().unwrap_or_else(|| m.model.clone());
             let context_window = m
                 .context_window
-                .unwrap_or_else(|| NonZeroU64::new(200_000).expect("200000 is non-zero"));
+                .unwrap_or_else(|| {
+                    NonZeroU64::new(CONFIG_DEFAULT_CONTEXT_WINDOW).expect("200000 is non-zero")
+                });
             let config = ModelEntryConfig {
                 id: m.id,
                 model: m.model,

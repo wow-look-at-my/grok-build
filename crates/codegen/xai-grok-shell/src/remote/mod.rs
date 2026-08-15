@@ -29,7 +29,8 @@ pub use client::{
     fetch_login_device_flow, fetch_settings_blocking, fetch_subagent_bundle, share_url,
 };
 pub(crate) use client::{
-    DEFAULT_CONTEXT_WINDOW, fetch_models_blocking, models_list_url, models_list_url_for_base,
+    DEFAULT_CONTEXT_WINDOW, fetch_models_blocking, fetch_models_for_api_base_blocking,
+    models_list_url, models_list_url_for_base,
 };
 pub use conversations_client::{
     ConvError, ConvQuery, Conversation, ConversationsClient, ListConversationsPage,
