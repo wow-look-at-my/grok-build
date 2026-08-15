@@ -14,6 +14,7 @@ pub use responses::{
     extra_tool_entries, patch_reasoning_text_types, response_to_conversation_items,
 };
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 const STRUCTURED_OUTPUT_SCHEMA_NAME: &str = "structured_output";
@@ -511,6 +512,11 @@ pub struct ToolCall {
     pub name: String,
     /// JSON-encoded arguments
     pub arguments: Arc<str>,
+    /// The provider's own fields on this call, relayed unread when it is
+    /// replayed; see [`crate::TOOL_CALL_VENDOR_KEYS`]. A history written before
+    /// this existed, and every provider that sends none, read as empty.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub vendor: BTreeMap<String, serde_json::Value>,
 }
 
 /// Tool/function definition for the model

@@ -609,6 +609,7 @@ impl From<crate::messages::MessagesResponse> for ConversationItem {
                         arguments: Arc::<str>::from(
                             serde_json::to_string(&input).unwrap_or_default(),
                         ),
+                        vendor: Default::default(),
                     });
                 }
                 // Thinking dropped — see doc comment above.
