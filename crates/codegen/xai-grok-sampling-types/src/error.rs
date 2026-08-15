@@ -299,6 +299,26 @@ impl SamplingError {
         )
     }
 
+    /// The server rejected a replayed `thinking` block's signature, e.g.
+    /// "messages.1.content.0: Invalid `signature` in `thinking` block". The
+    /// signature is verified against the model that minted it, so a
+    /// conversation carried onto another model fails this way on every turn
+    /// until the blocks are dropped. Recovered by stripping reasoning and
+    /// retrying — the signature cannot be re-minted.
+    pub fn is_thinking_signature_error(&self) -> bool {
+        let SamplingError::Api {
+            status, message, ..
+        } = self
+        else {
+            return false;
+        };
+        if *status != StatusCode::BAD_REQUEST {
+            return false;
+        }
+        let message = message.to_ascii_lowercase();
+        message.contains("signature") && message.contains("thinking")
+    }
+
     /// The API rejected the request because an inline image could not be
     /// processed. Matches both direct 400 and proxy-wrapped 500 responses.
     /// Exact-case match — consistent with `is_encrypted_content_error`.
@@ -1232,6 +1252,43 @@ mod tests {
             SamplingError::IdleTimeout { elapsed_secs: 10 }.retry_after(),
             None
         );
+    }
+
+    #[test]
+    fn thinking_signature_400_is_detected() {
+        let err = SamplingError::Api {
+            status: StatusCode::BAD_REQUEST,
+            message: "messages.1.content.0: Invalid `signature` in `thinking` block".into(),
+            model_metadata: None,
+            retry_after_secs: None,
+            should_retry: None,
+        };
+        assert!(err.is_thinking_signature_error());
+        assert!(
+            !err.is_encrypted_content_error(),
+            "a thinking signature is not the Responses API's encrypted_content"
+        );
+    }
+
+    #[test]
+    fn unrelated_signature_400_is_not_a_thinking_signature_error() {
+        for message in [
+            "Invalid `signature` in `redacted_thinking` block", // still ours
+            "request signature verification failed",            // not ours
+        ] {
+            let err = SamplingError::Api {
+                status: StatusCode::BAD_REQUEST,
+                message: message.into(),
+                model_metadata: None,
+                retry_after_secs: None,
+                should_retry: None,
+            };
+            assert_eq!(
+                err.is_thinking_signature_error(),
+                message.contains("thinking"),
+                "{message}"
+            );
+        }
     }
 
     #[test]

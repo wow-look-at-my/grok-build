@@ -537,6 +537,11 @@ async fn responses_upgrade_roundtrips_reconstructed_reasoning_as_typed_input() {
 /// encrypted = signature) must, on load, reconstruct a sibling Reasoning
 /// item that emits a Anthropic Messages `thinking` content block (with `thinking`
 /// + `signature`) on the outgoing `/v1/messages` request.
+///
+/// The legacy assistant records the model the client here calls, because a
+/// signature only replays to the model that minted it — see
+/// `messages_upgrade_drops_a_thinking_block_minted_by_another_model` for the
+/// other half.
 #[tokio::test]
 async fn messages_upgrade_emits_reconstructed_reasoning_as_thinking_block() {
     // 1. Seed a legacy Anthropic Messages-origin chat_history.jsonl. Anthropic Messages
@@ -550,7 +555,7 @@ async fn messages_upgrade_emits_reconstructed_reasoning_as_thinking_block() {
             "\n",
             r#"{"type":"user","content":[{"type":"text","text":"q1"}]}"#,
             "\n",
-            r#"{"type":"assistant","content":"a1","reasoning":{"text":"legacy anthropic thinking","encrypted":"SIGNATURE_abc","id":""},"model_id":"grok-4.5"}"#,
+            r#"{"type":"assistant","content":"a1","reasoning":{"text":"legacy anthropic thinking","encrypted":"SIGNATURE_abc","id":""},"model_id":"test-model"}"#,
             "\n",
         ),
     )
@@ -605,6 +610,105 @@ async fn messages_upgrade_emits_reconstructed_reasoning_as_thinking_block() {
         Some("SIGNATURE_abc"),
         "signature (encrypted) preserved — required to reuse the thought server-side"
     );
+}
+
+/// The same upgrade, carried onto another model: the reconstructed sibling is
+/// still there, but its signature was minted by `grok-4.5` and this client
+/// calls `test-model`, which the Messages API answers with
+/// "Invalid `signature` in `thinking` block" — on this turn and every later one,
+/// since the block stays in history. The block must not reach the wire; the
+/// turn it belongs to must.
+#[tokio::test]
+async fn messages_upgrade_drops_a_thinking_block_minted_by_another_model() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("chat_history.jsonl"),
+        concat!(
+            r#"{"type":"system","content":"You are helpful."}"#,
+            "\n",
+            r#"{"type":"user","content":[{"type":"text","text":"q1"}]}"#,
+            "\n",
+            r#"{"type":"assistant","content":"a1","reasoning":{"text":"legacy anthropic thinking","encrypted":"SIGNATURE_abc","id":""},"model_id":"grok-4.5"}"#,
+            "\n",
+        ),
+    )
+    .unwrap();
+
+    let adapter = JsonlStorageAdapter::with_root(dir.path().to_path_buf());
+    let mut items = adapter.load_chat_history_from_dir(dir.path()).unwrap();
+    assert!(
+        items
+            .iter()
+            .any(|i| matches!(i, ConversationItem::Reasoning(_))),
+        "the sibling is still reconstructed on load; the wire is where it stops, got {items:?}"
+    );
+    items.push(ConversationItem::user("q2"));
+
+    let server = MockInferenceServer::start().await.unwrap();
+    server.set_response("ok");
+    let client = create_test_client(&server.url(), ApiBackend::Messages);
+
+    let _ = client
+        .conversation_collect(ConversationRequest::from_items(items))
+        .await
+        .unwrap();
+
+    let body = server.request_bodies().pop().unwrap();
+    let messages = body.get("messages").unwrap().as_array().unwrap();
+    let assistant_blocks: Vec<Value> = messages
+        .iter()
+        .filter(|m| m.get("role").and_then(Value::as_str) == Some("assistant"))
+        .flat_map(|m| {
+            m.get("content")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default()
+        })
+        .collect();
+
+    assert!(
+        !assistant_blocks
+            .iter()
+            .any(|b| b.get("type").and_then(Value::as_str) == Some("thinking")),
+        "grok-4.5's signature cannot be replayed to test-model; blocks: {assistant_blocks:#?}"
+    );
+    assert!(
+        assistant_blocks
+            .iter()
+            .any(|b| b.get("text").and_then(Value::as_str) == Some("a1")),
+        "only the thinking block goes, not the turn it belongs to; blocks: {assistant_blocks:#?}"
+    );
+}
+
+/// End to end on the Messages backend: a gateway that prices the call must
+/// have that price land on the response, so the shell bills the turn at what
+/// was actually charged instead of an estimate off the model's configured
+/// pricing. Anthropic itself sends no price, and the same path must leave the
+/// cost honestly absent rather than reading silence as free.
+#[tokio::test]
+async fn messages_backend_receives_a_gateway_reported_cost() {
+    for (ticks, expected) in [(Some(4_160_000_i64), Some(4_160_000_i64)), (None, None)] {
+        let server = MockInferenceServer::start().await.unwrap();
+        server.set_response("ok");
+        server.set_messages_cost_usd_ticks(ticks);
+        let client = create_test_client(&server.url(), ApiBackend::Messages);
+
+        let response = client
+            .conversation_collect(ConversationRequest::from_items(vec![
+                ConversationItem::user("q1"),
+            ]))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            response.cost_usd_ticks, expected,
+            "wire cost {ticks:?} must reach ConversationResponse"
+        );
+        assert!(
+            response.usage.is_some(),
+            "the usage the price rides beside must survive too"
+        );
+    }
 }
 
 // ============================================================================
