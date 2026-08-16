@@ -1336,6 +1336,18 @@ impl SessionActor {
             tracing::debug!("goal planner: no subagent coordinator channel; skipping");
             return PlannerAttemptStep::Stop;
         };
+        // A previous user Stop (`ESC`/Ctrl-C with cancel_subagents) latches this
+        // session in the coordinator's `spawn_blocked_sessions` until an
+        // `OpenSpawnAdmission` is sent, and the only send site (turn start) runs
+        // AFTER the goal slash-command dispatch — so a `/goal` set or resume
+        // issued after a Stop would have every planner spawn rejected instantly
+        // and the goal paused with "Planning failed"; the resume path's
+        // early return then skips the next turn start, wedging the session
+        // until restart. Setting/resuming a goal IS explicit user re-engagement,
+        // so opening admission here (before we actually spawn) is the same
+        // intent as the next turn's reopen, and heals both the paused-goal
+        // resume and a fresh-goal-created-after-Stop.
+        self.open_subagent_spawn_admission();
         let (goal_id, plan_file, attempt_plan_file) = {
             let tracker = self.goal_tracker.lock();
             match tracker.snapshot() {
