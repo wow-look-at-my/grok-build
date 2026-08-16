@@ -39,6 +39,15 @@ enum SpawnBehaviour {
     NoWriteThenDone,
     /// Reply with subagent runtime failure.
     Runtime { message: String, cancelled: bool },
+    /// Mimic the real coordinator after a user Stop with `cancel_subagents`:
+    /// every Task spawn is rejected as cancelled — `"parent session is
+    /// stopped"` — until an `OpenSpawnAdmission` arrives, and accept=True
+    /// afterwards (writes `body` to the plan file). Records whether admission
+    /// was ever opened, so a test can prove the planner asked to reopen it.
+    AdmissionGatedThenWrite {
+        opened: StdArc<std::sync::atomic::AtomicBool>,
+        body: &'static [u8],
+    },
 }
 
 /// Captured planner spawn flags (harness-internal `SubagentRequest` fields).
@@ -80,6 +89,12 @@ fn spawn_planner_coordinator_capturing(
     let model_log = StdArc::clone(&capture.model);
     tokio::task::spawn_local(async move {
         while let Some(ev) = rx.recv().await {
+            if let SubagentEvent::OpenSpawnAdmission { .. } = ev {
+                if let SpawnBehaviour::AdmissionGatedThenWrite { opened, .. } = &behaviour {
+                    opened.store(true, SeqOrd::SeqCst);
+                }
+                continue;
+            }
             if let SubagentEvent::Spawn(req) = ev {
                 count_task.fetch_add(1, SeqOrd::SeqCst);
                 fork_log.lock().unwrap().push(req.fork_context);
@@ -154,6 +169,34 @@ fn spawn_planner_coordinator_capturing(
                         child_session_id: req.id.clone(),
                         ..Default::default()
                     },
+                    SpawnBehaviour::AdmissionGatedThenWrite { opened, body } => {
+                        if !opened.load(SeqOrd::SeqCst) {
+                            // The real coordinator's spawn_blocked_sessions
+                            // rejection: instant cancel, no attempt.
+                            SubagentResult {
+                                success: false,
+                                error: Some("parent session is stopped".into()),
+                                cancelled: true,
+                                subagent_id: req.id.clone(),
+                                child_session_id: req.id.clone(),
+                                ..Default::default()
+                            }
+                        } else {
+                            if let Some(p) = plan_path.as_deref() {
+                                let _ = std::fs::create_dir_all(
+                                    std::path::Path::new(p).parent().unwrap(),
+                                );
+                                let _ = std::fs::write(p, body);
+                            }
+                            SubagentResult {
+                                success: true,
+                                output: StdArc::from("Done"),
+                                subagent_id: req.id.clone(),
+                                child_session_id: req.id.clone(),
+                                ..Default::default()
+                            }
+                        }
+                    }
                 };
                 let _ = req.result_tx.send(result);
             }
@@ -802,6 +845,47 @@ async fn planner_runtime_failure_pauses_goal_with_canonical_message() {
                 snap.pause_message.as_deref(),
                 Some(planner_failure_pause_message().as_str()),
             );
+        })
+        .await;
+}
+
+/// Regression: after a user Stop (ESC / Ctrl-C) the real coordinator latches
+/// the session in `spawn_blocked_sessions`, and every Task spawn — the goal
+/// planner included — is rejected as cancelled until an `OpenSpawnAdmission`
+/// arrives. The only reopen site runs after the goal-slash dispatch, and the
+/// resume path early-returns before it, which wedged goals until restart.
+/// Setting/resuming a goal is user re-engagement, so the planner must open
+/// admission itself before spawning.
+#[tokio::test(flavor = "current_thread")]
+#[serial]
+async fn planner_reopens_spawn_admission_blocked_by_prior_cancel() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let opened = StdArc::new(std::sync::atomic::AtomicBool::new(false));
+            let (tx, spawn_count) =
+                spawn_planner_coordinator(SpawnBehaviour::AdmissionGatedThenWrite {
+                    opened: StdArc::clone(&opened),
+                    body: b"# Plan\n",
+                });
+            let (actor, _tmp) = make_planner_actor(Some(tx), true).await;
+            create_test_goal(&actor);
+
+            actor.maybe_run_goal_planner("do X").await;
+
+            assert!(
+                opened.load(SeqOrd::SeqCst),
+                "the planner must reopen spawn admission before spawning — \
+                 without it the coordinator rejects the spawn as cancelled and \
+                 the goal fails closed (\"Planning failed; resume with /goal to retry.\")",
+            );
+            assert_eq!(spawn_count.load(SeqOrd::SeqCst), 1);
+            let snap = actor.goal_tracker.lock().snapshot().cloned().unwrap();
+            assert!(
+                snap.plan_file.is_some(),
+                "with admission reopened the planner run must succeed; got {snap:?}",
+            );
+            assert_eq!(snap.status, crate::session::goal_tracker::GoalStatus::Active);
         })
         .await;
 }
