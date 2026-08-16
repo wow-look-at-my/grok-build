@@ -334,6 +334,7 @@ pub(crate) mod chat_rebuild {
                 id: std::sync::Arc::<str>::from(id),
                 name: tc.title.clone(),
                 arguments: std::sync::Arc::<str>::from(args),
+                vendor: Default::default(),
             });
 
             Vec::new()

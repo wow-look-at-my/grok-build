@@ -128,6 +128,7 @@ fn test_chat_response_message_to_conversation_item() {
                 name: "read_file".to_string(),
                 arguments: r#"{"path": "/foo.txt"}"#.to_string(),
             },
+        	vendor: Default::default(),
         }],
         tool_call_id: None,
         citations: None,
@@ -148,6 +149,7 @@ fn test_tool_calls_roundtrip_to_chat_request() {
         id: "call_abc123".into(),
         name: "read_file".to_string(),
         arguments: r#"{"path": "/foo.txt", "limit": 100}"#.into(),
+    	vendor: Default::default(),
     };
 
     let item = ConversationItem::assistant_tool_calls(vec![tool_call.clone()]);
@@ -181,16 +183,19 @@ fn test_multiple_tool_calls_roundtrip() {
             id: "call_1".into(),
             name: "read_file".to_string(),
             arguments: r#"{"path": "/a.txt"}"#.into(),
+        	vendor: Default::default(),
         },
         ToolCall {
             id: "call_2".into(),
             name: "bash".to_string(),
             arguments: r#"{"command": "ls -la"}"#.into(),
+        	vendor: Default::default(),
         },
         ToolCall {
             id: "call_3".into(),
             name: "grep".to_string(),
             arguments: r#"{"pattern": "TODO", "path": "."}"#.into(),
+        	vendor: Default::default(),
         },
     ];
 
@@ -222,6 +227,7 @@ fn test_assistant_with_content_and_tool_calls() {
             id: "call_1".into(),
             name: "read_file".to_string(),
             arguments: r#"{"path": "/test.txt"}"#.into(),
+        	vendor: Default::default(),
         }],
         model_id: Some("grok-3".to_string()),
         model_fingerprint: None,
@@ -358,6 +364,7 @@ fn test_malformed_tool_arguments_sanitized_to_empty_object_in_chat_request() {
         id: "functions.search_replace:10".into(),
         name: "search_replace".to_string(),
         arguments: bad_args.into(),
+    	vendor: Default::default(),
     };
 
     let item = ConversationItem::assistant_tool_calls(vec![tool_call]);
@@ -382,6 +389,7 @@ fn test_valid_tool_arguments_pass_through_unchanged_in_chat_request() {
         id: "call_1".into(),
         name: "search_replace".to_string(),
         arguments: valid_args.into(),
+    	vendor: Default::default(),
     };
 
     let item = ConversationItem::assistant_tool_calls(vec![tool_call]);
@@ -508,6 +516,7 @@ fn test_sanitize_non_ascii_args_preview_does_not_panic() {
         id: "call_1".into(),
         name: "search_replace".to_string(),
         arguments: malformed.clone().into(),
+    	vendor: Default::default(),
     };
     // Must not panic.
     let item = ConversationItem::assistant_tool_calls(vec![tool_call]);
@@ -521,6 +530,7 @@ fn test_sanitize_non_ascii_args_preview_does_not_panic() {
         id: "call_2".into(),
         name: "search_replace".to_string(),
         arguments: bad_args.clone().into(),
+    	vendor: Default::default(),
     };
     let item_valid = ConversationItem::assistant_tool_calls(vec![tool_call_valid]);
     let chat_msg_valid = conversation_item_to_chat_message(item_valid);
@@ -647,5 +657,63 @@ fn todo_capture_loop_maps_to_assistant_call_and_tool_message() {
     assert!(
         call_at < result_at,
         "the call must precede its result; got {call_at} / {result_at}"
+    );
+}
+
+/// Gemini 3 rejects a replayed function call whose thought signature is
+/// missing, and the signature only ever reaches an OpenAI-shaped client on the
+/// call itself. Whatever spelling it arrived in has to go back out unchanged.
+#[test]
+fn a_tool_calls_provider_fields_survive_the_round_trip() {
+    for key in ["extra_content", "provider_specific_fields"] {
+        let wire = serde_json::json!({
+            "role": "assistant",
+            "content": null,
+            "tool_calls": [{
+                "id": "call_1",
+                "type": "function",
+                "function": { "name": "get_weather", "arguments": "{\"city\":\"Tokyo\"}" },
+                key: { "google": { "thought_signature": "CpcHAdHtim9" } },
+            }],
+        });
+        let msg: crate::types::ChatResponseMessage = serde_json::from_value(wire).unwrap();
+        let item = ConversationItem::from(msg);
+
+        let replayed = serde_json::to_value(conversation_item_to_chat_message(item)).unwrap();
+        assert_eq!(
+            replayed["tool_calls"][0][key],
+            serde_json::json!({ "google": { "thought_signature": "CpcHAdHtim9" } }),
+            "{key} must ride the replay: {replayed:#}",
+        );
+    }
+}
+
+/// The passthrough is only for the keys a provider reads back. Response-shaped
+/// bookkeeping is not one of them, and a call that arrived with nothing extra
+/// must serialize exactly as it did before any of this existed.
+#[test]
+fn a_tool_call_without_provider_fields_replays_unchanged() {
+    let wire = serde_json::json!({
+        "role": "assistant",
+        "content": null,
+        "tool_calls": [{
+            "id": "call_1",
+            "type": "function",
+            "index": 0,
+            "function": { "name": "get_weather", "arguments": "{}" },
+        }],
+    });
+    let msg: crate::types::ChatResponseMessage = serde_json::from_value(wire).unwrap();
+    let item = ConversationItem::from(msg);
+
+    let replayed = serde_json::to_value(conversation_item_to_chat_message(item)).unwrap();
+    assert_eq!(
+        replayed["tool_calls"][0],
+        serde_json::json!({
+            "id": "call_1",
+            "type": "function",
+            "function": { "name": "get_weather", "arguments": "{}" },
+        }),
+        "an untouched call must go out untouched: {replayed:#}",
     );
 }

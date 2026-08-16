@@ -140,6 +140,7 @@ async fn pre_tool_use_resolves_meta_dispatch_tool_name_end_to_end() {
                     "use_tool",
                     r#"{"tool_name":"linear__save_issue","tool_input":{}}"#,
                 ),
+                vendor: Default::default(),
             };
 
             let mut deferred = Vec::new();
@@ -226,6 +227,7 @@ async fn subagent_inherits_parent_pre_tool_use_client_hook() {
                     "run_terminal_command",
                     "{}",
                 ),
+                vendor: Default::default(),
             };
             let tool_call_id = acp::ToolCallId::new("call_1");
             let envelope = subagent.make_hook_envelope(
@@ -315,6 +317,7 @@ async fn pre_tool_use_slow_callback_does_not_starve_a_deny() {
                     "run_terminal_command",
                     "{}",
                 ),
+                vendor: Default::default(),
             };
             let tool_call_id = acp::ToolCallId::new("call_1");
             let envelope = actor.make_hook_envelope(
@@ -399,6 +402,7 @@ async fn post_tool_use_and_failure_never_double_fire() {
                     "todo_write",
                     r#"{"todos":[{"id":"t1","content":"do","status":"completed"}]}"#,
                 ),
+                vendor: Default::default(),
             };
 
             // Failure: no workspace session is bound, so the dispatch hard-errors.
@@ -469,6 +473,7 @@ async fn pre_tool_use_deny_feeds_reason_back_and_continues_turn() {
                     "todo_write",
                     r#"{"todos":[{"id":"t1","content":"do","status":"completed"}]}"#,
                 ),
+                vendor: Default::default(),
             };
 
             let result = tokio::time::timeout(
