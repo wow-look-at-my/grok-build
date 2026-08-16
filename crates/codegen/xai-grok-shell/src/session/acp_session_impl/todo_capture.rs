@@ -678,6 +678,7 @@ mod tests {
                 id: "call_todo_1".into(),
                 name: "grep".to_string(),
                 arguments: r#"{"pattern":"git push"}"#.into(),
+                vendor: Default::default(),
             }]),
         ];
 

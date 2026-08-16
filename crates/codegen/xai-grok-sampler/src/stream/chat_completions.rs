@@ -12,6 +12,7 @@ use futures_util::stream::{BoxStream, Stream};
 use xai_grok_sampling_types::{
     AssistantItem, ChatCompletionChunk, ConversationItem, ConversationResponse,
     ResponseModelMetadata, SamplingError, StopReason, TokenUsage, ToolCall,
+    tool_call_vendor_fields,
 };
 
 use crate::events::{SamplingChannel, SamplingErrorInfo, SamplingEvent};
@@ -70,10 +71,13 @@ pub fn stream_chat_completions<'a>(
         let mut content_acc = String::new();
         let mut reasoning_acc = String::new();
         // Tool call deltas keyed by positional index. Each entry is
-        // (id, name, arguments_buffer); the first chunk for an index
-        // carries id+name and starts the arguments buffer, subsequent
+        // (id, name, arguments_buffer, vendor fields); the first chunk for an
+        // index carries id+name and starts the arguments buffer, subsequent
         // chunks append to arguments only.
-        let mut tool_call_acc: BTreeMap<u32, (String, String, String)> = BTreeMap::new();
+        let mut tool_call_acc: BTreeMap<
+            u32,
+            (String, String, String, BTreeMap<String, serde_json::Value>),
+        > = BTreeMap::new();
 
         // Index counter spanning text + reasoning chunks (matches the
         // shell's chunk_index used for notification correlation).
@@ -207,7 +211,14 @@ pub fn stream_chat_completions<'a>(
 
                     let entry = tool_call_acc
                         .entry(tc_delta.index)
-                        .or_insert_with(|| (String::new(), String::new(), String::new()));
+                        .or_insert_with(|| {
+                            (String::new(), String::new(), String::new(), BTreeMap::new())
+                        });
+
+                    // Gemini's thought signature rides the chunk that opens the
+                    // call, and replaying the call without it is a 400 on every
+                    // turn after it.
+                    entry.3.extend(tool_call_vendor_fields(&tc_delta.vendor));
 
                     let mut id_for_event: Option<String> = None;
                     let mut name_for_event: Option<String> = None;
@@ -255,10 +266,11 @@ pub fn stream_chat_completions<'a>(
         // ── Build the final response ─────────────────────────────────
         let tool_calls: Vec<ToolCall> = tool_call_acc
             .into_values()
-            .map(|(id, name, arguments)| ToolCall {
+            .map(|(id, name, arguments, vendor)| ToolCall {
                 id: std::sync::Arc::<str>::from(id),
                 name,
                 arguments: std::sync::Arc::<str>::from(arguments),
+                vendor,
             })
             .collect();
 
@@ -676,6 +688,7 @@ mod tests {
                     name: Some("do_thing".into()),
                     arguments: Some("{\"x\":".into()),
                 }),
+                vendor: Default::default(),
             }],
             tool_call_id: None,
         }]);
@@ -692,6 +705,7 @@ mod tests {
                     name: None,
                     arguments: Some("1}".into()),
                 }),
+                vendor: Default::default(),
             }],
             tool_call_id: None,
         }]);

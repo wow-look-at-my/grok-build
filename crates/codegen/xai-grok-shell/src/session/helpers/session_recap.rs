@@ -449,6 +449,7 @@ mod tests {
                 id: Arc::from("c1"),
                 name: "read_file".into(),
                 arguments: Arc::from("{}"),
+                vendor: Default::default(),
             }]),
             ConversationItem::tool_result("c1".to_string(), "ok".to_string()),
             ConversationItem::assistant("done".to_string()),
@@ -632,6 +633,7 @@ mod tests {
             id: Arc::from(id),
             name: "read_file".into(),
             arguments: Arc::from(args),
+            vendor: Default::default(),
         }
     }
 

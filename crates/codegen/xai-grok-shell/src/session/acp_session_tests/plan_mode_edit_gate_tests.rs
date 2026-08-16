@@ -49,6 +49,7 @@ fn search_replace_call(id: &str, path: &str) -> ToolCallResponse {
             "search_replace",
             format!(r#"{{"file_path":"{path}","old_string":"a","new_string":"b"}}"#),
         ),
+        vendor: Default::default(),
     }
 }
 async fn prepare(

@@ -928,6 +928,15 @@ pub(crate) fn planner_failure_pause_message() -> String {
     "Planning failed; resume with /goal to retry.".to_string()
 }
 
+/// The pause for a planner the USER stopped. Kept apart from
+/// [`planner_failure_pause_message`] because the two ask for different things:
+/// a failure invites a retry, a cancel was the retry being declined. Reading
+/// "Planning failed" after clicking stop sends the reader looking for a broken
+/// planner that is working exactly as asked.
+pub(crate) fn planner_cancelled_pause_message() -> String {
+    "Planning cancelled; resume with /goal to plan again.".to_string()
+}
+
 pub(crate) fn goal_slash_and_harness_available(goal_enabled: bool, tool_names: &[String]) -> bool {
     use xai_grok_tools::implementations::grok_build::UPDATE_GOAL_TOOL_NAME;
     goal_enabled && tool_names.iter().any(|n| n == UPDATE_GOAL_TOOL_NAME)
@@ -1093,6 +1102,12 @@ impl SessionActor {
         let _planner_state = GoalPlannerStateGuard {
             tracker: &self.goal_tracker,
         };
+        // A user Stop latches this session's Task spawns closed until a turn
+        // reopens them, and the planner runs off a slash command, not a turn.
+        // Without this, `/goal resume` after a Stop is rejected before a
+        // subagent is ever created — a fail-closed at latency 0 that repeats
+        // for every message the session has left.
+        self.open_subagent_spawn_admission();
         let mut attempt = 0u32;
         loop {
             // Exhausting the retry cap pauses the goal with the canonical
@@ -1232,13 +1247,32 @@ impl SessionActor {
                         }
                     }
                 }
-                crate::session::goal_planner::GoalPlannerOutcome::Interrupted => continue,
-                crate::session::goal_planner::GoalPlannerOutcome::FailClosed { .. } => {
+                // Only steering replans, and `run_goal_planner_attempt` has
+                // already returned `Steered` when there was any. What is left
+                // is a bare cancel: the user asked for the planner to stop, so
+                // spawning another one is doing the opposite of what was asked,
+                // onto a session whose spawns the same Stop just latched shut.
+                crate::session::goal_planner::GoalPlannerOutcome::Interrupted => {
                     let _ = self
                         .auto_pause_goal_if_matches_with_message(
                             &goal_id,
                             crate::session::goal_tracker::GoalPauseReason::User,
-                            planner_failure_pause_message(),
+                            planner_cancelled_pause_message(),
+                        )
+                        .await;
+                }
+                crate::session::goal_planner::GoalPlannerOutcome::FailClosed { reason, .. } => {
+                    let message = match reason {
+                        crate::session::events::GoalPlannerFailClosedReason::Aborted => {
+                            planner_cancelled_pause_message()
+                        }
+                        _ => planner_failure_pause_message(),
+                    };
+                    let _ = self
+                        .auto_pause_goal_if_matches_with_message(
+                            &goal_id,
+                            crate::session::goal_tracker::GoalPauseReason::User,
+                            message,
                         )
                         .await;
                 }

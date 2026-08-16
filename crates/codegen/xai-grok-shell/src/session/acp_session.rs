@@ -1742,6 +1742,7 @@ mod tool_meta_stamp_tests {
                 name: "read_file".to_string(),
                 arguments: r#"{"target_file":"/tmp/stamp.txt"}"#.to_string(),
             },
+            vendor: Default::default(),
         }
     }
     /// The `x.ai/tool` object from an event's `_meta`, if present.

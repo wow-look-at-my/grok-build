@@ -1146,6 +1146,7 @@ mod tests {
                 id: "call_1".into(),
                 name: "read_file".to_string(),
                 arguments: "{\"target_file\":\"x\"}".into(),
+                vendor: Default::default(),
             }],
             model_id: None,
             model_fingerprint: None,

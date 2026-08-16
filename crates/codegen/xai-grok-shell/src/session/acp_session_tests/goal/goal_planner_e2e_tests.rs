@@ -1471,3 +1471,99 @@ async fn goal_resume_reminder_is_plan_aware_when_planner_enabled() {
         })
         .await;
 }
+
+/// The [X]/Stop shape: the plan writer is cancelled mid-stream with nothing
+/// steering the replan. Spawning another planner is doing the opposite of what
+/// was asked, and every one after the first is dead on arrival anyway — the
+/// same Stop latched the session's spawns shut.
+#[tokio::test(flavor = "current_thread")]
+#[serial]
+async fn a_cancelled_planner_pauses_instead_of_respawning() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (started_tx, mut started_rx) = tokio::sync::mpsc::unbounded_channel();
+            let objectives = StdArc::new(std::sync::Mutex::new(Vec::new()));
+            let (tx, spawn_count) =
+                spawn_planner_coordinator(SpawnBehaviour::WaitForCancelsThenWrite {
+                    cancels: 1,
+                    started: started_tx,
+                    objectives: StdArc::clone(&objectives),
+                    body: b"# Plan\n",
+                });
+            let (actor, _tmp) = make_planner_actor(Some(tx), true).await;
+            create_test_goal(&actor);
+
+            let planner = {
+                let actor = StdArc::clone(&actor);
+                tokio::task::spawn_local(async move { actor.maybe_run_goal_planner("do X").await })
+            };
+
+            assert_eq!(
+                tokio::time::timeout(std::time::Duration::from_secs(5), started_rx.recv())
+                    .await
+                    .expect("planner spawn"),
+                Some(1),
+            );
+            // A cancel with no steering behind it — what a Stop leaves.
+            actor
+                .goal_tracker
+                .lock()
+                .take_planner_run()
+                .expect("planner run registered")
+                .cancel
+                .cancel();
+
+            tokio::time::timeout(std::time::Duration::from_secs(5), planner)
+                .await
+                .expect("planner completion")
+                .unwrap();
+
+            assert_eq!(
+                spawn_count.load(SeqOrd::SeqCst),
+                1,
+                "a cancel is terminal: no second planner",
+            );
+            let snap = actor.goal_tracker.lock().snapshot().cloned().unwrap();
+            assert!(snap.plan_file.is_none(), "no plan written");
+            assert!(
+                snap.status.is_paused(),
+                "no plan means the goal cannot run; got {:?}",
+                snap.status,
+            );
+            assert_eq!(
+                snap.pause_message.as_deref(),
+                Some(planner_cancelled_pause_message().as_str()),
+                "a plan the user stopped is not a planner that failed",
+            );
+        })
+        .await;
+}
+
+/// The same distinction one layer down: the subagent itself came back
+/// cancelled, which `Aborted` already records — the pause has to say so too.
+#[tokio::test(flavor = "current_thread")]
+#[serial]
+async fn a_cancelled_subagent_pauses_as_cancelled_not_failed() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (tx, spawn_count) = spawn_planner_coordinator(SpawnBehaviour::Runtime {
+                message: "Subagent was cancelled".into(),
+                cancelled: true,
+            });
+            let (actor, _tmp) = make_planner_actor(Some(tx), true).await;
+            create_test_goal(&actor);
+
+            actor.maybe_run_goal_planner("do X").await;
+
+            assert_eq!(spawn_count.load(SeqOrd::SeqCst), 1);
+            let snap = actor.goal_tracker.lock().snapshot().cloned().unwrap();
+            assert!(snap.status.is_paused());
+            assert_eq!(
+                snap.pause_message.as_deref(),
+                Some(planner_cancelled_pause_message().as_str()),
+            );
+        })
+        .await;
+}
