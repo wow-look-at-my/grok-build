@@ -470,6 +470,7 @@ pub(crate) fn build_subagent_trace_items(
         id: std::sync::Arc::from(subagent_id),
         name: task_tool_name.to_string(),
         arguments: std::sync::Arc::from(arguments),
+        vendor: Default::default(),
     }]);
     let footer = xai_tool_types::format_resume_footer(subagent_id, subagent_type, None);
     let result = ConversationItem::tool_result(subagent_id, format!("{output}\n\n{footer}"));

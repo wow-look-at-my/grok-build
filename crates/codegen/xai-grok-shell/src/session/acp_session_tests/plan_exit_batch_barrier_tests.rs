@@ -27,6 +27,7 @@ fn search_replace_plan(id: &str, plan_path: &str) -> ToolCallResponse {
             })
             .to_string(),
         ),
+        vendor: Default::default(),
     }
 }
 
@@ -35,6 +36,7 @@ fn exit_plan_mode_call(id: &str) -> ToolCallResponse {
         id: id.to_string(),
         kind: "function".to_string(),
         function: crate::sampling::types::ToolCallFunction::new("exit_plan_mode", "{}"),
+        vendor: Default::default(),
     }
 }
 
@@ -190,6 +192,7 @@ fn bash_call(id: &str) -> ToolCallResponse {
             "run_terminal_cmd",
             r#"{"command":"echo mixed-batch-reject","description":"probe mixed-batch permission cancel"}"#,
         ),
+        vendor: Default::default(),
     }
 }
 

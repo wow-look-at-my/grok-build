@@ -696,6 +696,7 @@ fn over_budget_recap_serializes_to_well_formed_messages_request() {
         id: std::sync::Arc::from(id),
         name: "read_file".into(),
         arguments: std::sync::Arc::from("{}"),
+        vendor: Default::default(),
     };
 
     // Over-budget (window 8_000) conversation that ENDS in a tool run and carries
@@ -1368,6 +1369,7 @@ async fn side_question_trims_reasoning_orphaned_by_mid_turn_truncation() {
                         id: "tc1".into(),
                         name: "read_file".into(),
                         arguments: "{}".into(),
+                        vendor: Default::default(),
                     }],
                     model_id: None,
                     model_fingerprint: None,
