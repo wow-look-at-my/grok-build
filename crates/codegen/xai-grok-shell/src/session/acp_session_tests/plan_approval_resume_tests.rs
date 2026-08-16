@@ -226,6 +226,7 @@ async fn real_exit_plan_mode_disconnect_keeps_awaiting_persisted() {
                 id: "call-exit".to_string(),
                 kind: "function".to_string(),
                 function: crate::sampling::types::ToolCallFunction::new("exit_plan_mode", "{}"),
+                vendor: Default::default(),
             };
             let mut deferred = Vec::new();
             let outcome = actor
@@ -282,6 +283,7 @@ async fn real_exit_plan_mode_no_client_executes_tool() {
                 id: "call-exit-headless".to_string(),
                 kind: "function".to_string(),
                 function: crate::sampling::types::ToolCallFunction::new("exit_plan_mode", "{}"),
+                vendor: Default::default(),
             };
             let mut deferred = Vec::new();
             let outcome = actor

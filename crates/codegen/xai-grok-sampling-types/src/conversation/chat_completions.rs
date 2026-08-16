@@ -41,6 +41,7 @@ impl From<ChatRequestMessage> for ConversationItem {
                         id: Arc::<str>::from(tc.id.unwrap_or_default()),
                         name: tc.function.name,
                         arguments: Arc::<str>::from(tc.function.arguments),
+                        vendor: tc.vendor,
                     })
                     .collect();
 
@@ -124,6 +125,7 @@ pub fn conversation_item_to_chat_message(item: ConversationItem) -> ChatRequestM
                     let arguments = sanitize_tool_arguments(&tc.id, &tc.name, tc.arguments.clone());
                     ToolCallRequest::function(tc.name, arguments.as_ref().to_owned())
                         .with_id(tc.id.as_ref().to_owned())
+                        .with_vendor(tc.vendor)
                 })
                 .collect();
 
@@ -236,6 +238,7 @@ impl From<ChatResponseMessage> for ConversationItem {
                 id: Arc::<str>::from(tc.id),
                 name: tc.function.name,
                 arguments: Arc::<str>::from(tc.function.arguments),
+                vendor: crate::types::tool_call_vendor_fields(&tc.vendor),
             })
             .collect();
 

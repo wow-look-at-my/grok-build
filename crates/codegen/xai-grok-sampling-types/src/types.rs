@@ -424,6 +424,28 @@ pub struct ToolChoiceFunction {
     pub name: String,
 }
 
+/// Keys a tool call carries through an OpenAI-shaped API that this client only
+/// relays. Gemini 3 rejects a replayed function call whose thought signature is
+/// missing ("Function call is missing a thought_signature in functionCall
+/// parts"), and that signature reaches an OpenAI-shaped client only inside one
+/// of these: `extra_content` is Google's own spelling, `provider_specific_fields`
+/// the one a translating gateway uses. Nothing in here is read — what arrives on
+/// a tool call goes back out unchanged, which is the only form the provider
+/// accepts it in.
+pub const TOOL_CALL_VENDOR_KEYS: [&str; 2] = ["extra_content", "provider_specific_fields"];
+
+/// The [`TOOL_CALL_VENDOR_KEYS`] out of everything a tool call arrived with.
+/// The rest is response-shaped bookkeeping (`index` and the like) that a
+/// request has no place for.
+pub fn tool_call_vendor_fields(
+    all: &std::collections::BTreeMap<String, serde_json::Value>,
+) -> std::collections::BTreeMap<String, serde_json::Value> {
+    TOOL_CALL_VENDOR_KEYS
+        .iter()
+        .filter_map(|key| Some(((*key).to_string(), all.get(*key)?.clone())))
+        .collect()
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ToolCallRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -431,6 +453,10 @@ pub struct ToolCallRequest {
     #[serde(rename = "type")]
     pub kind: ToolType,
     pub function: ToolCallFunction,
+    /// Relayed verbatim; see [`TOOL_CALL_VENDOR_KEYS`]. Empty flattens to
+    /// nothing, so a provider that never sent one sees the same request as before.
+    #[serde(flatten, default)]
+    pub vendor: std::collections::BTreeMap<String, serde_json::Value>,
 }
 
 impl ToolCallRequest {
@@ -439,7 +465,18 @@ impl ToolCallRequest {
             id: None,
             kind: ToolType::Function,
             function: ToolCallFunction::new(name, arguments),
+            vendor: Default::default(),
         }
+    }
+
+    /// Carry a provider's own per-call fields back to it; see
+    /// [`TOOL_CALL_VENDOR_KEYS`].
+    pub fn with_vendor(
+        mut self,
+        vendor: std::collections::BTreeMap<String, serde_json::Value>,
+    ) -> Self {
+        self.vendor = vendor;
+        self
     }
 
     pub fn with_id(mut self, id: impl Into<String>) -> Self {
@@ -514,6 +551,10 @@ pub struct ToolCallResponse {
     #[serde(rename = "type")]
     pub kind: String,
     pub function: ToolCallFunction,
+    /// Everything else the provider put on the call, kept so
+    /// [`tool_call_vendor_fields`] can pick the part a replay has to carry back.
+    #[serde(flatten, default)]
+    pub vendor: std::collections::BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -723,6 +764,11 @@ pub struct ToolCallDelta {
     /// The function name and/or argument fragment.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub function: Option<ToolCallFunctionDelta>,
+    /// Everything else the provider put on the call. Gemini's thought signature
+    /// rides the chunk that opens the call, which is why this is captured on the
+    /// delta and not only on the whole response.
+    #[serde(flatten, default)]
+    pub vendor: std::collections::BTreeMap<String, serde_json::Value>,
 }
 
 /// Streaming delta for function name/arguments within a tool call.

@@ -426,6 +426,7 @@ pub fn stream_messages<'a>(
                                     id: std::sync::Arc::<str>::from(state.tool_id),
                                     name: state.tool_name,
                                     arguments: std::sync::Arc::<str>::from(state.args_acc),
+                                    vendor: Default::default(),
                                 });
                             }
                         }

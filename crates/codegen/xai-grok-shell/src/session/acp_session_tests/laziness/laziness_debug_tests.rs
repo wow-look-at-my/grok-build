@@ -41,6 +41,7 @@ fn assistant_with_tool_call(text: &str, name: &str, args: &str) -> ConversationI
             id: "call-1".into(),
             name: name.to_string(),
             arguments: args.into(),
+            vendor: Default::default(),
         }],
         model_id: None,
         model_fingerprint: None,
@@ -273,6 +274,7 @@ fn flatten_orders_reasoning_before_content_and_tools() {
             id: "call-1".into(),
             name: "read_file".into(),
             arguments: "{\"path\":\"x\"}".into(),
+            vendor: Default::default(),
         }],
     );
     let out = flatten_transcript_for_classifier(&items, true);
@@ -331,6 +333,7 @@ fn flatten_drops_reasoning_when_include_reasoning_is_false() {
             id: "call-1".into(),
             name: "read_file".into(),
             arguments: "{\"path\":\"x\"}".into(),
+            vendor: Default::default(),
         }],
     );
     let out = flatten_transcript_for_classifier(&items, false);
@@ -355,6 +358,7 @@ fn flatten_keeps_reasoning_when_include_reasoning_is_true() {
             id: "call-1".into(),
             name: "read_file".into(),
             arguments: "{\"path\":\"x\"}".into(),
+            vendor: Default::default(),
         }],
     );
     let out = flatten_transcript_for_classifier(&items, true);
@@ -538,6 +542,7 @@ fn window_assistant_text_pin_skips_empty_assistant_turns() {
             id: "c".into(),
             name: "read_file".into(),
             arguments: "{}".into(),
+            vendor: Default::default(),
         }],
         model_id: None,
         model_fingerprint: None,

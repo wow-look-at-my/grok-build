@@ -2912,6 +2912,7 @@ mod exit_plan_tail_predicate_tests {
             id: format!("call_{name}"),
             kind: "function".into(),
             function: crate::sampling::types::ToolCallFunction::new(name, args),
+            vendor: Default::default(),
         }
     }
     /// Wire name does not matter — only [`ToolKind::ExitPlan`].
