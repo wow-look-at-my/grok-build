@@ -1234,6 +1234,66 @@ async fn queue_input_send_now_during_goal_turn_merges_as_interjections_fifo() {
         .await;
 }
 
+/// DIAGNOSTIC (not a regression guard yet): the automatic ASAP path — a
+/// plain queued row with no `send_now` — reaches `queue_input` and
+/// `harvest_queued_prompts_into_interjections` exactly the same way whether
+/// or not a goal is active. Confirms the harvest function itself carries no
+/// goal-awareness, so if goal mode really blocks ASAP delivery the gate must
+/// live in how often turn.rs's loop *calls* the harvest during a goal round,
+/// not in the harvest or the enqueue path.
+#[tokio::test]
+async fn plain_queue_during_goal_turn_is_harvested_like_any_other_turn() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (actor, _rx) = build_actor().await;
+            {
+                let mut state = actor.state.lock().await;
+                state.pending_inputs.push_back(user_item("running", "A"));
+                state.running_task = Some(running_task_stub("running"));
+            }
+            *actor
+                .current_prompt_id
+                .lock()
+                .expect("current_prompt_id mutex poisoned") = Some("running".into());
+            actor.goal_tracker.lock().create_goal(
+                "goal".into(),
+                "objective".into(),
+                None,
+                0,
+                "2026-01-01T00:00:00Z".into(),
+                None,
+            );
+
+            // The pager's automatic ASAP path: plain enqueue, no send_now.
+            let (respond_to, _prx) = oneshot::channel();
+            let cancel = actor
+                .queue_input(queue_input_request(
+                    vec![acp::ContentBlock::Text(acp::TextContent::new("asap"))],
+                    "asap-1",
+                    respond_to,
+                ))
+                .await;
+            assert!(!cancel, "a plain enqueue never cancels the running turn");
+
+            assert!(
+                actor
+                    .harvest_queued_prompts_into_interjections(false)
+                    .await,
+                "the plain row must be harvestable during an active goal, \
+                 exactly as it would be outside goal mode"
+            );
+            let interjections: Vec<String> = actor
+                .pending_interjections
+                .drain_all()
+                .into_iter()
+                .map(|entry| entry.text)
+                .collect();
+            assert_eq!(interjections, vec!["asap"]);
+        })
+        .await;
+}
+
 #[tokio::test]
 async fn queue_input_auto_send_now_only_inside_wait_window() {
     let local = tokio::task::LocalSet::new();
@@ -2368,4 +2428,29 @@ async fn rewind_if_pristine_never_pops_an_interjection_fallback_front() {
             );
         })
         .await;
+}
+
+/// Regression: the ASAP harvest's opening-pass skip must fire only on the
+/// true opening pass of the WHOLE turn, never on the opening pass of a later
+/// round within it (a goal round, an auto-recovery retry). `loop_index`
+/// alone cannot tell the two apart — each round calls
+/// `process_conversation_turn` fresh, resetting `loop_index` to 0 — so a
+/// `loop_index == 1` skip gated on nothing else silenced every automatic
+/// ASAP delivery for the rest of a goal turn: round 2 onward never harvested
+/// a single queued row, though manual send-now (a different code path)
+/// still worked. `first_round` carries the missing turn-scoped half.
+#[test]
+fn harvest_gate_skips_only_the_turns_true_opening_pass() {
+    use super::turn::should_harvest_before_request;
+
+    // Round 1, request 1: the turn has produced nothing yet — skip.
+    assert!(!should_harvest_before_request(1, true));
+    // Round 1, request 2+: later requests in the same round always harvest.
+    assert!(should_harvest_before_request(2, true));
+    assert!(should_harvest_before_request(3, true));
+    // Round 2+ (a goal continuation, or an auto-recovery retry): loop_index
+    // resets to 1, but the turn already produced output in round 1 — this is
+    // the exact case that was silently skipped before the fix.
+    assert!(should_harvest_before_request(1, false));
+    assert!(should_harvest_before_request(2, false));
 }
