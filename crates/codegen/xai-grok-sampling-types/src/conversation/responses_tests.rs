@@ -325,6 +325,7 @@ fn test_tool_calls_to_responses_api() {
             id: "call_1".into(),
             name: "bash".to_string(),
             arguments: r#"{"command": "ls"}"#.into(),
+        	vendor: Default::default(),
         }]),
     ]);
 
@@ -359,6 +360,7 @@ fn test_tool_result_to_responses_api() {
             id: "call_1".into(),
             name: "bash".to_string(),
             arguments: r#"{"command": "ls"}"#.into(),
+        	vendor: Default::default(),
         }]),
         ConversationItem::tool_result("call_1", "file1.txt\nfile2.txt\nfile3.txt"),
     ]);
@@ -399,11 +401,13 @@ fn test_multiple_tool_results_to_responses_api() {
                 id: "call_1".into(),
                 name: "bash".to_string(),
                 arguments: r#"{"command": "ls"}"#.into(),
+            	vendor: Default::default(),
             },
             ToolCall {
                 id: "call_2".into(),
                 name: "bash".to_string(),
                 arguments: r#"{"command": "pwd"}"#.into(),
+            	vendor: Default::default(),
             },
         ]),
         ConversationItem::tool_result("call_1", "output1"),
@@ -898,6 +902,7 @@ fn test_malformed_tool_arguments_sanitized_in_responses_api() {
         id: "call_bad".into(),
         name: "search_replace".to_string(),
         arguments: bad_args.into(),
+    	vendor: Default::default(),
     };
 
     let item = ConversationItem::assistant_tool_calls(vec![tool_call]);
@@ -1083,6 +1088,7 @@ fn test_tool_result_with_images_to_responses_api() {
             id: "call_1".into(),
             name: "read_file".to_string(),
             arguments: r#"{"target_file": "photo.png"}"#.into(),
+        	vendor: Default::default(),
         }]),
         ConversationItem::tool_result_with_images(
             "call_1",
@@ -1133,6 +1139,7 @@ fn test_tool_result_without_images_stays_text() {
             id: "call_1".into(),
             name: "bash".to_string(),
             arguments: r#"{"command": "ls"}"#.into(),
+        	vendor: Default::default(),
         }]),
         ConversationItem::tool_result("call_1", "file1.txt\nfile2.txt"),
     ]);
@@ -1629,6 +1636,7 @@ fn empty_content_assistant_with_tool_calls_and_reasoning() {
                 id: Arc::<str>::from("call_1"),
                 name: "read_file".to_string(),
                 arguments: Arc::<str>::from("{}"),
+            	vendor: Default::default(),
             }],
             model_id: None,
             model_fingerprint: None,
@@ -1705,5 +1713,40 @@ fn serialized_body_contains_no_placeholder_strings() {
         reasoning_items.len(),
         2,
         "both reasoning siblings must be present"
+    );
+}
+
+/// A `/todo` capture continues a tool call it made itself, so the reasoning
+/// that came with that call has to ride along: the Responses API rejects a
+/// continuation whose reasoning items are missing. Synthesizing the assistant
+/// message instead of echoing the response dropped them.
+#[test]
+fn todo_capture_loop_keeps_reasoning_with_its_function_call() {
+    let req = ConversationRequest::from_items(todo_capture_loop_items(false));
+    let resp: rs::CreateResponse = (&req).into();
+    let rs::InputParam::Items(input_items) = &resp.input else {
+        panic!("Expected InputParam::Items");
+    };
+
+    let reasoning_at = input_items
+        .iter()
+        .position(|item| matches!(item, rs::InputItem::Item(rs::Item::Reasoning(_))))
+        .expect("the echoed reasoning item must survive into the request");
+    let call_at = input_items
+        .iter()
+        .position(|item| {
+            matches!(item, rs::InputItem::Item(rs::Item::FunctionCall(fc)) if fc.call_id == "call_todo_1")
+        })
+        .expect("the loop's own function call must survive");
+    let output_at = input_items
+        .iter()
+        .position(|item| {
+            matches!(item, rs::InputItem::Item(rs::Item::FunctionCallOutput(fco)) if fco.call_id == "call_todo_1")
+        })
+        .expect("the tool result the loop fed back must survive");
+    assert!(
+        reasoning_at < call_at && call_at < output_at,
+        "reasoning must precede its call, which must precede its output; \
+         got {reasoning_at} / {call_at} / {output_at}"
     );
 }

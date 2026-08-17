@@ -1544,6 +1544,7 @@ actual user question";
                 id: "call_AAA".into(),
                 name: "search_replace".to_string(),
                 arguments: "{}".into(),
+                vendor: Default::default(),
             }]),
             ConversationItem::tool_result("call_AAA", "ok"),
             ConversationItem::system_reminder("⚠️ SYSTEM REMINDER"),
@@ -1551,6 +1552,7 @@ actual user question";
                 id: "call_BBB".into(),
                 name: "search_replace".to_string(),
                 arguments: "{}".into(),
+                vendor: Default::default(),
             }]),
             ConversationItem::tool_result("call_BBB", "cancelled"),
         ];
@@ -1601,6 +1603,7 @@ actual user question";
                 id: "call_X".into(),
                 name: "edit".to_string(),
                 arguments: "{}".into(),
+                vendor: Default::default(),
             }]),
             ConversationItem::tool_result("call_X", "done"),
             ConversationItem::system_reminder("⚠️ SYSTEM REMINDER"),
@@ -1608,6 +1611,7 @@ actual user question";
                 id: "call_Y".into(),
                 name: "edit".to_string(),
                 arguments: "{}".into(),
+                vendor: Default::default(),
             }]),
             ConversationItem::tool_result("call_Y", "cancelled"),
         ];
@@ -1754,12 +1758,14 @@ actual user question";
                 id: "tc1".into(),
                 name: "read_file".to_string(),
                 arguments: "{}".into(),
+                vendor: Default::default(),
             }]),
             ConversationItem::tool_result("tc1", "a".repeat(5000).as_str()),
             ConversationItem::assistant_tool_calls(vec![ToolCall {
                 id: "tc2".into(),
                 name: "search_replace".to_string(),
                 arguments: "{}".into(),
+                vendor: Default::default(),
             }]),
             ConversationItem::tool_result("tc2", "ok"),
             ConversationItem::assistant("done"),
@@ -2249,6 +2255,7 @@ actual user question";
                 id: "call_VALID".into(),
                 name: "read_file".to_string(),
                 arguments: "{}".into(),
+                vendor: Default::default(),
             }]),
             ConversationItem::tool_result("call_VALID", "ok"),
         ];
@@ -2271,6 +2278,7 @@ actual user question";
                 id: "call_UNANSWERED".into(),
                 name: "run_cmd".to_string(),
                 arguments: "{}".into(),
+                vendor: Default::default(),
             }]),
         ];
         let result = sanitize_compacted_history(items);
@@ -2287,6 +2295,7 @@ actual user question";
                 id: "call_X".into(),
                 name: "read_file".to_string(),
                 arguments: "{}".into(),
+                vendor: Default::default(),
             }]),
         ];
         let result = sanitize_compacted_history(items);
@@ -2306,6 +2315,7 @@ actual user question";
                 id: "call_X".into(),
                 name: "edit".to_string(),
                 arguments: "{}".into(),
+                vendor: Default::default(),
             }]),
         ];
         let invalid = validate_compacted_history(&items);
@@ -2320,6 +2330,7 @@ actual user question";
                 id: "call_A".into(),
                 name: "edit".to_string(),
                 arguments: "{}".into(),
+                vendor: Default::default(),
             }]),
             ConversationItem::tool_result("call_A", "done"),
         ];
@@ -2335,6 +2346,7 @@ actual user question";
                 id: "call_A".into(),
                 name: "edit".to_string(),
                 arguments: "{}".into(),
+                vendor: Default::default(),
             }]),
             ConversationItem::tool_result("call_A", "done"),
             ConversationItem::assistant("All done."),
@@ -2348,6 +2360,7 @@ actual user question";
             id: id.into(),
             name: "read_file".to_string(),
             arguments: "{}".into(),
+            vendor: Default::default(),
         }
     }
     /// The bricked-session shape: the assistant line owning a batch of tool
@@ -2703,11 +2716,13 @@ actual user question";
                         id: "call_1".into(),
                         name: "read_file".to_string(),
                         arguments: r#"{"target_file":"src/main.rs"}"#.into(),
+                        vendor: Default::default(),
                     },
                     ToolCall {
                         id: "call_2".into(),
                         name: "read_file".to_string(),
                         arguments: r#"{"target_file":"src/lib.rs"}"#.into(),
+                        vendor: Default::default(),
                     },
                 ],
                 model_id: Some("grok-3".to_string()),
@@ -2742,11 +2757,13 @@ actual user question";
                         name: "edit_file".to_string(),
                         arguments: r#"{"target_file":"src/main.rs","new_string":"Hello, world!"}"#
                             .into(),
+                        vendor: Default::default(),
                     },
                     ToolCall {
                         id: "call_4".into(),
                         name: "run_terminal_cmd".to_string(),
                         arguments: r#"{"command":"cargo test"}"#.into(),
+                        vendor: Default::default(),
                     },
                 ],
                 model_id: Some("grok-3".to_string()),
@@ -3158,6 +3175,7 @@ The user asked to read main.rs and lib.rs. main.rs prints hello world, lib.rs ha
                     id: "tc1".into(),
                     name: "grep".into(),
                     arguments: "{}".into(),
+                    vendor: Default::default(),
                 }],
                 model_id: None,
                 model_fingerprint: None,
@@ -3237,6 +3255,7 @@ The user asked to read main.rs and lib.rs. main.rs prints hello world, lib.rs ha
                     id: "tc1".into(),
                     name: "grep".into(),
                     arguments: "{}".into(),
+                    vendor: Default::default(),
                 }],
                 model_id: None,
                 model_fingerprint: None,
@@ -3325,6 +3344,7 @@ The user asked to read main.rs and lib.rs. main.rs prints hello world, lib.rs ha
                     id: "tc1".into(),
                     name: "ls".into(),
                     arguments: "{}".into(),
+                    vendor: Default::default(),
                 }],
                 model_id: None,
                 model_fingerprint: None,
@@ -3407,6 +3427,7 @@ The user asked to read main.rs and lib.rs. main.rs prints hello world, lib.rs ha
                 id: "c1".into(),
                 name: "read_file".to_string(),
                 arguments: r#"{"target_file":"a.rs"}"#.into(),
+                vendor: Default::default(),
             }]),
             ConversationItem::tool_result("c1", "fn main() {}"),
         ];
@@ -3448,6 +3469,7 @@ The user asked to read main.rs and lib.rs. main.rs prints hello world, lib.rs ha
                 id: "c1".into(),
                 name: "read_file".to_string(),
                 arguments: r#"{"target_file":"a.rs"}"#.into(),
+                vendor: Default::default(),
             }]),
             ConversationItem::tool_result("c1", "fn main() {}"),
         ];
@@ -3492,6 +3514,7 @@ The user asked to read main.rs and lib.rs. main.rs prints hello world, lib.rs ha
                     id: "c1".into(),
                     name: "grep".to_string(),
                     arguments: "{}".into(),
+                    vendor: Default::default(),
                 }]),
                 ConversationItem::tool_result("c1", "match"),
             ]
@@ -3527,6 +3550,7 @@ The user asked to read main.rs and lib.rs. main.rs prints hello world, lib.rs ha
                 id: "c1".into(),
                 name: "read_file".to_string(),
                 arguments: r#"{"target_file":"a.rs"}"#.into(),
+                vendor: Default::default(),
             }]),
             ConversationItem::tool_result("c1", "fn main() {}"),
             // Trailing, no matching ToolResult — results never arrived.
@@ -3534,6 +3558,7 @@ The user asked to read main.rs and lib.rs. main.rs prints hello world, lib.rs ha
                 id: "c2".into(),
                 name: "grep".to_string(),
                 arguments: "{}".into(),
+                vendor: Default::default(),
             }]),
         ];
         let result = prepare_conversation_for_verbatim_summarization(conv, false);
@@ -3557,6 +3582,7 @@ The user asked to read main.rs and lib.rs. main.rs prints hello world, lib.rs ha
                 id: "c1".into(),
                 name: "read_file".to_string(),
                 arguments: "{}".into(),
+                vendor: Default::default(),
             }]),
             ConversationItem::tool_result("c1", "ok"),
         ];
@@ -3610,6 +3636,7 @@ The user asked to read main.rs and lib.rs. main.rs prints hello world, lib.rs ha
                 id: "c1".into(),
                 name: "read_file".to_string(),
                 arguments: big.into(),
+                vendor: Default::default(),
             }]),
             ConversationItem::tool_result("c1", "result-old"),
             ConversationItem::user("recent"),
@@ -3635,6 +3662,7 @@ The user asked to read main.rs and lib.rs. main.rs prints hello world, lib.rs ha
                 id: "c1".into(),
                 name: "read_file".to_string(),
                 arguments: "{}".into(),
+                vendor: Default::default(),
             }]),
             ConversationItem::tool_result("c1", huge.as_str()), // triggering result
         ];

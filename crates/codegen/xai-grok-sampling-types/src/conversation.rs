@@ -14,6 +14,7 @@ pub use responses::{
     extra_tool_entries, patch_reasoning_text_types, response_to_conversation_items,
 };
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 const STRUCTURED_OUTPUT_SCHEMA_NAME: &str = "structured_output";
@@ -511,6 +512,11 @@ pub struct ToolCall {
     pub name: String,
     /// JSON-encoded arguments
     pub arguments: Arc<str>,
+    /// The provider's own fields on this call, relayed unread when it is
+    /// replayed; see [`crate::TOOL_CALL_VENDOR_KEYS`]. A history written before
+    /// this existed, and every provider that sends none, read as empty.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub vendor: BTreeMap<String, serde_json::Value>,
 }
 
 /// Tool/function definition for the model
@@ -683,6 +689,18 @@ impl ConversationRequest {
             }
         }
         stripped
+    }
+
+    /// Drop every replayed `Reasoning` sibling, returning how many went.
+    ///
+    /// Recovery path for a server that rejects a thinking block's signature.
+    /// A signature cannot be re-minted for another model, so the block is the
+    /// only thing that can give.
+    pub fn strip_reasoning(&mut self) -> usize {
+        let before = self.items.len();
+        self.items
+            .retain(|item| !matches!(item, ConversationItem::Reasoning(_)));
+        before - self.items.len()
     }
 }
 
@@ -2372,6 +2390,7 @@ mod compaction_item_bridge_tests {
             id: "tc1".into(),
             name: "read_file".into(),
             arguments: "{}".into(),
+        	vendor: Default::default(),
         }]);
         assert_eq!(CompactionItem::text(&tool_only), None);
     }
@@ -2382,6 +2401,7 @@ mod compaction_item_bridge_tests {
             id: "tc1".into(),
             name: "read_file".into(),
             arguments: "{}".into(),
+        	vendor: Default::default(),
         }]);
         assert!(CompactionItem::has_tool_requests(&with_tools));
         assert!(!CompactionItem::has_tool_requests(
@@ -2915,11 +2935,13 @@ mod tests {
                     id: "call_A".into(),
                     name: "grep".to_string(),
                     arguments: "{}".into(),
+                	vendor: Default::default(),
                 },
                 ToolCall {
                     id: "call_B".into(),
                     name: "read_file".to_string(),
                     arguments: "{}".into(),
+                	vendor: Default::default(),
                 },
             ]),
             // Only one of two tool results arrived
@@ -3000,6 +3022,7 @@ mod tests {
                 id: "call_1".into(),
                 name: "bash".to_string(),
                 arguments: "{}".into(),
+            	vendor: Default::default(),
             }]),
             ConversationItem::tool_result("call_1", "result"),
             ConversationItem::assistant("Done"),
@@ -3392,6 +3415,7 @@ mod tests {
                     id: "call_1".into(),
                     name: "read_file".to_string(),
                     arguments: format!(r#"{{"target_file":"{worktree}/src/main.rs"}}"#).into(),
+                	vendor: Default::default(),
                 },
                 ToolCall {
                     id: "call_2".into(),
@@ -3399,6 +3423,7 @@ mod tests {
                     arguments: format!(
                         r#"{{"file_path":"{worktree}/src/lib.rs","old_string":"foo","new_string":"bar"}}"#
                     ).into(),
+                	vendor: Default::default(),
                 },
                 ToolCall {
                     id: "call_3".into(),
@@ -3406,6 +3431,7 @@ mod tests {
                     arguments: format!(
                         r#"{{"command":"cargo test --manifest-path {worktree}/Cargo.toml"}}"#
                     ).into(),
+                	vendor: Default::default(),
                 },
             ],
             model_id: None,
@@ -3485,6 +3511,7 @@ mod tests {
                     arguments: format!(
                         r#"{{"file_path":"{worktree}/src/main.rs","old_string":"fn main() {{}}","new_string":"fn main() {{\n    println!(\"Hello\");\n}}"}}"#
                     ).into(),
+                	vendor: Default::default(),
                 }],
                 model_id: None,
                 model_fingerprint: None,
@@ -3536,6 +3563,7 @@ mod tests {
                     id: "call_1".into(),
                     name: "read_file".to_string(),
                     arguments: format!(r#"{{"target_file":"{root}/src/main.rs"}}"#).into(),
+                	vendor: Default::default(),
                 }],
                 model_id: None,
                 model_fingerprint: None,
@@ -3644,6 +3672,7 @@ mod tests {
                 id: "call_1".into(),
                 name: "run_terminal_cmd".to_string(),
                 arguments: r#"{"command":"echo hello"}"#.into(),
+            	vendor: Default::default(),
             }],
             model_id: None,
             model_fingerprint: None,
@@ -3671,11 +3700,13 @@ mod tests {
                 id: "call_1".into(),
                 name: "read_file".to_string(),
                 arguments: format!(r#"{{"target_file":"{worktree}/src/main.rs"}}"#).into(),
+            	vendor: Default::default(),
             },
             ToolCall {
                 id: "call_2".into(),
                 name: "grep".to_string(),
                 arguments: format!(r#"{{"pattern":"TODO","path":"{worktree}/src"}}"#).into(),
+            	vendor: Default::default(),
             },
         ])];
 
@@ -3747,6 +3778,7 @@ mod tests {
                 id: "1".into(),
                 name: "test".to_string(),
                 arguments: "{}".into(),
+            	vendor: Default::default(),
             }])],
             stop_reason: None,
             usage: None,
@@ -3820,6 +3852,7 @@ mod tests {
                     id: "call_1".into(),
                     name: "read_file".to_string(),
                     arguments: "{}".into(),
+                	vendor: Default::default(),
                 }],
                 model_id: None,
                 model_fingerprint: None,
@@ -3849,11 +3882,13 @@ mod tests {
                     id: "1".into(),
                     name: "read_file".to_string(),
                     arguments: "{}".into(),
+                	vendor: Default::default(),
                 },
                 ToolCall {
                     id: "2".into(),
                     name: "bash".to_string(),
                     arguments: "{}".into(),
+                	vendor: Default::default(),
                 },
             ])],
             stop_reason: Some(StopReason::ToolCalls),
@@ -3965,6 +4000,7 @@ mod tests {
                 id: "1".into(),
                 name: "read_file".to_string(),
                 arguments: "{}".into(),
+            	vendor: Default::default(),
             }])],
             stop_reason: Some(StopReason::ToolCalls),
             usage: None,
@@ -4088,6 +4124,7 @@ mod tests {
             id: "call_123".into(),
             name: "bash".to_string(),
             arguments: r#"{"command": "ls"}"#.into(),
+        	vendor: Default::default(),
         };
 
         let json = serde_json::to_string(&tool_call).expect("Should serialize");
@@ -5090,6 +5127,7 @@ mod tests {
             id: "tc1".into(),
             name: "read_file".into(),
             arguments: "{}".into(),
+        	vendor: Default::default(),
         }]));
         assert!(resp.empty_reason().is_none());
         assert!(!resp.is_empty());

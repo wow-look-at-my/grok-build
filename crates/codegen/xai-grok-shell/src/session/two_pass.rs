@@ -300,6 +300,7 @@ mod tests {
                 id: "tc1".into(),
                 name: "bash".into(),
                 arguments: "{}".into(),
+                vendor: Default::default(),
             });
         }
         let conv = vec![

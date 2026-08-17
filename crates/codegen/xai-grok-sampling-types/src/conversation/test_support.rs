@@ -29,6 +29,7 @@ pub(super) fn agent_turn(n: usize) -> Vec<ConversationItem> {
             id: id.as_str().into(),
             name: "read_file".to_string(),
             arguments: r#"{"path": "src/main.rs"}"#.into(),
+        	vendor: Default::default(),
         }]),
         ConversationItem::tool_result(id, "fn main() {}"),
     ]
@@ -87,6 +88,7 @@ pub(super) fn btw_mid_turn_conversation() -> Vec<ConversationItem> {
                 id: "call_1".into(),
                 name: "read_file".to_string(),
                 arguments: r#"{"path":"src/main.rs"}"#.into(),
+            	vendor: Default::default(),
             }],
             model_id: Some("messages-compatible-model".into()),
             model_fingerprint: None,
@@ -107,6 +109,7 @@ pub(super) fn btw_mid_turn_conversation() -> Vec<ConversationItem> {
                 id: "call_2".into(),
                 name: "search_replace".to_string(),
                 arguments: "{}".into(),
+            	vendor: Default::default(),
             }],
             model_id: Some("messages-compatible-model".into()),
             model_fingerprint: None,
@@ -124,6 +127,7 @@ pub(super) fn assistant_with_calls(calls: &[(&str, &str)]) -> ConversationItem {
                 id: (*id).into(),
                 name: (*name).into(),
                 arguments: "{}".into(),
+            	vendor: Default::default(),
             })
             .collect(),
         model_id: None,
@@ -239,4 +243,39 @@ pub(super) fn assert_prefix_stable(base: &ConversationRequest, extended: &Conver
             .position(|(a, b)| a != b)
             .unwrap_or(base_input.len()),
     );
+}
+
+/// The item list a `/todo` capture sends on its SECOND model call: the same
+/// prepared snapshot `/btw` sends, its instruction, then the first response
+/// echoed back verbatim (reasoning included) with the tool result that
+/// answered it.
+///
+/// The loop hand-builds this list instead of taking it from chat state, so
+/// each backend's mapping is asserted against the fixture directly
+/// (`todo_capture_*` tests). `strip_reasoning` mirrors the backend gate: only
+/// the Messages API drops reasoning.
+pub(super) fn todo_capture_loop_items(strip_reasoning: bool) -> Vec<ConversationItem> {
+    let mut items = btw_prepare_items(btw_mid_turn_conversation());
+    items.push(ConversationItem::user(
+        "<system-reminder>You are a todo-capture agent…</system-reminder>",
+    ));
+    let echoed = vec![
+        ConversationItem::Reasoning(synthesized_reasoning_item("which file owns the push")),
+        ConversationItem::assistant_tool_calls(vec![ToolCall {
+            id: "call_todo_1".into(),
+            name: "grep".to_string(),
+            arguments: r#"{"pattern":"git push"}"#.into(),
+        	vendor: Default::default(),
+        }]),
+    ];
+    items.extend(
+        echoed
+            .into_iter()
+            .filter(|i| !strip_reasoning || !matches!(i, ConversationItem::Reasoning(_))),
+    );
+    items.push(ConversationItem::tool_result(
+        "call_todo_1",
+        "ci/push.sh:12: git push origin HEAD",
+    ));
+    items
 }

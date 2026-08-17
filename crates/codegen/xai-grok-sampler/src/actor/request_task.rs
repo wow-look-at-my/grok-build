@@ -405,6 +405,24 @@ async fn apply_retry_decision(
             emit_retrying(event_tx, request_id, *retry_count, max_retries, err);
             true
         }
+        RetryDecision::RetryWithReasoningStrip => {
+            let stripped = request.strip_reasoning();
+            if stripped == 0 {
+                // Nothing left to strip; upgrade to fatal.
+                emit_failed(event_tx, request_id, err);
+                send_completion(completion_tx, Err(clone_error(err)));
+                return false;
+            }
+            tracing::warn!(
+                stripped,
+                model = %config.model,
+                reason = %err,
+                "model rejected a replayed thinking signature; dropped {stripped} reasoning item(s) for this turn"
+            );
+            *retry_count += 1;
+            emit_retrying(event_tx, request_id, *retry_count, max_retries, err);
+            true
+        }
         RetryDecision::RetryWithClientRebuild { backoff } => {
             *retry_count += 1;
             emit_retrying(event_tx, request_id, *retry_count, max_retries, err);

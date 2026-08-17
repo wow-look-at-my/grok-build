@@ -46,6 +46,28 @@ fn resolve(path: &Path) -> Option<PathBuf> {
     dunce::canonicalize(path).ok()
 }
 
+/// Which binary this process is, and whether it is the installed one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BinaryIdentity {
+    /// `current_exe()`, canonicalized. `None` when the call failed.
+    pub running: Option<PathBuf>,
+    pub installed_link: PathBuf,
+    pub freshness: BinaryFreshness,
+}
+
+/// Read the live binary identity. Shared with [`DebugContext::gather`] so
+/// `/version` and `/debug` can never disagree about which binary is running.
+pub fn binary_identity() -> BinaryIdentity {
+    let installed_link = xai_grok_config::grok_application_in(&xai_grok_config::grok_home());
+    let running = std::env::current_exe().ok().and_then(|p| resolve(&p));
+    let installed = resolve(&installed_link);
+    BinaryIdentity {
+        freshness: binary_freshness(running.as_deref(), installed.as_deref()),
+        running,
+        installed_link,
+    }
+}
+
 /// A config file the model may want to read, and whether it is actually there.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileFact {
@@ -197,9 +219,11 @@ impl DebugContext {
         model: ModelFacts,
     ) -> Self {
         let grok_home = xai_grok_config::grok_home();
-        let installed_link = xai_grok_config::grok_application_in(&grok_home);
-        let running = std::env::current_exe().ok().and_then(|p| resolve(&p));
-        let installed = resolve(&installed_link);
+        let BinaryIdentity {
+            running,
+            installed_link,
+            freshness,
+        } = binary_identity();
         let config_files = config_file_paths(&grok_home)
             .into_iter()
             .map(FileFact::stat)
@@ -208,7 +232,7 @@ impl DebugContext {
             version: xai_grok_version::installed(),
             commit: xai_grok_version::BUILD_COMMIT_SHORT.to_string(),
             pid: std::process::id(),
-            freshness: binary_freshness(running.as_deref(), installed.as_deref()),
+            freshness,
             running_binary: running,
             installed_link,
             grok_home_from_env: std::env::var_os("GROK_HOME").is_some(),

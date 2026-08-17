@@ -1,4 +1,4 @@
-//! Feedback, remember-note, btw, and recap dispatchers.
+//! Feedback, remember-note, btw, todo, and recap dispatchers.
 
 use super::ctx::with_active_agent;
 use crate::app::actions::Effect;
@@ -393,6 +393,83 @@ pub(super) fn dispatch_send_btw(app: &mut AppView, question: String) -> Vec<Effe
         question,
         minimal_request_id,
     }]
+}
+
+/// Send a `/todo` capture. Bypasses the prompt queue — works even while the
+/// agent is mid-turn. Fires an ACP ext method and leaves a running block in the
+/// transcript, which [`handle_todo_captured`] replaces with what landed on the
+/// list.
+pub(super) fn dispatch_send_todo(app: &mut AppView, request: String) -> Vec<Effect> {
+    let ActiveView::Agent(id) = app.active_view else {
+        return vec![];
+    };
+    let minimal = app.screen_mode.is_minimal();
+    let session_id = {
+        let Some(agent) = app.agents.get_mut(&id) else {
+            return vec![];
+        };
+        let Some(session_id) = agent.session.session_id.clone() else {
+            if minimal {
+                agent
+                    .scrollback
+                    .push_block(RenderBlock::system(NO_SESSION_NOTICE));
+            } else {
+                agent.show_toast(NO_SESSION_NOTICE);
+            }
+            return vec![];
+        };
+        agent.prompt.set_text("");
+        // Repeated `/todo`s are independent captures, so each gets its own
+        // block; only the newest id is tracked, and an older spinner is stopped
+        // by whichever response lands.
+        let entry_id = agent
+            .scrollback
+            .push(crate::scrollback::entry::ScrollbackEntry::running(
+                RenderBlock::system(format!("Capturing todo: {request}")),
+            ));
+        agent.pending_todo_entry = Some(entry_id);
+        session_id
+    };
+
+    vec![Effect::SendTodo {
+        agent_id: id,
+        session_id,
+        request,
+    }]
+}
+
+/// Replace the `/todo` running block with the items that were appended, or with
+/// why none were. Both outcomes are transcript blocks: a capture the user asked
+/// for and never sees the result of is the failure mode worth avoiding here.
+pub(super) fn handle_todo_captured(
+    app: &mut AppView,
+    agent_id: AgentId,
+    request: String,
+    result: Result<Vec<String>, String>,
+) -> Vec<Effect> {
+    let Some(agent) = app.agents.get_mut(&agent_id) else {
+        return vec![];
+    };
+    if let Some(entry_id) = agent.pending_todo_entry.take() {
+        agent.scrollback.remove_entry(entry_id);
+    }
+    let block = match result {
+        Ok(added) => {
+            let mut text = format!(
+                "Added {} {} to the todo list:",
+                added.len(),
+                if added.len() == 1 { "todo" } else { "todos" }
+            );
+            for item in &added {
+                text.push_str("\n  - ");
+                text.push_str(item);
+            }
+            RenderBlock::system(text)
+        }
+        Err(error) => RenderBlock::system(format!("Couldn't capture \"{request}\": {error}")),
+    };
+    agent.scrollback.push_block(block);
+    vec![]
 }
 
 /// Toast when a manual `/recap` produces no summary. Empty sessions get a clear

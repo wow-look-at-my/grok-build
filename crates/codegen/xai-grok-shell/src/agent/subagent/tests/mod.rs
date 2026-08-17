@@ -1033,6 +1033,7 @@ fn verbatim_fork_falls_back_to_summary_on_incomplete_tail() {
                     id: "tc1".into(),
                     name: "bash".into(),
                     arguments: "{}".into(),
+                    vendor: Default::default(),
                 }],
                 model_id: None,
                 model_fingerprint: None,
