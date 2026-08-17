@@ -117,15 +117,17 @@ fn row_is_plain_text(prompt: &crate::app::agent::QueuedPrompt) -> bool {
 /// single row parked locally during a turn — an image prompt, a prompt typed
 /// during the startup race — keeps every later prompt local as well, and a
 /// local row is never harvested into the running turn
-/// (`harvest_queued_prompts_into_interjections` reads the shell's queue). The
-/// session recovers at its next idle, so a session that never idles — one
-/// driving a goal — loses mid-turn delivery for good.
+/// (`harvest_queued_prompts_into_interjections` reads the shell's queue). A
+/// session that never idles — one driving a goal — never reaches the recovery
+/// in [`maybe_drain_queue`], so this function is the only rescue: it also runs
+/// on every inbound `session/update` (see `acp_handler::handle`), not only when
+/// the user submits a new prompt.
 ///
 /// Only a leading run of plain rows moves, and it stops at the first row that
 /// cannot: the merged view renders server rows ahead of local ones, so
 /// migrating a prefix keeps the user's order, while migrating past a stuck row
 /// would hoist a newer prompt above an older one.
-pub(super) fn migrate_local_rows_to_server_queue(app: &mut AppView) -> Vec<Effect> {
+pub(crate) fn migrate_local_rows_to_server_queue(app: &mut AppView) -> Vec<Effect> {
     let mut effects = Vec::new();
     let crate::app::app_view::ActiveView::Agent(agent_id) = app.active_view else {
         return effects;
