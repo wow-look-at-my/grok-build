@@ -408,6 +408,34 @@ impl<'a> EntryRenderer<'a> {
         }
     }
 
+    /// The per-message cache-hit-percent indicator shares the cost/timestamp
+    /// gating (message blocks only): it decorates the same blocks and never
+    /// thinking/tool/system rows.
+    fn should_show_cache_hit(&self) -> bool {
+        self.should_show_timestamp() && self.entry.cache_hit_percent.is_some()
+    }
+
+    /// The cache-hit string (if one is present), painted on its own row below
+    /// the content rather than sharing the first line's gutter — see
+    /// `cache_hit_reserved_rows`.
+    fn cache_hit_display(&self) -> Option<String> {
+        if !self.should_show_cache_hit() {
+            return None;
+        }
+        cache_hit_to_display(self.entry.cache_hit_percent)
+    }
+
+    /// Extra row reserved below the content for the cache-hit-percent line,
+    /// when this message block reports one. Unlike the cost indicator this
+    /// does NOT widen `timestamp_reserved()` (the content-wrap gutter): the
+    /// gutter already narrows every content line for the cost/timestamp
+    /// overlay, and a second label there would narrow it further. Reserving
+    /// a row instead — mirroring `inline_media_rows`'s additive reservation
+    /// in `assemble_height` — keeps content width untouched.
+    fn cache_hit_reserved_rows(&self) -> u16 {
+        if self.should_show_cache_hit() { 1 } else { 0 }
+    }
+
     /// Width reserved on the right side of content lines for the timestamp and
     /// (when present) the per-message cost indicator.
     ///
@@ -542,6 +570,7 @@ impl<'a> EntryRenderer<'a> {
         content_lines
             .saturating_add(vpad)
             .saturating_add(self.inline_media_rows(content_width))
+            .saturating_add(self.cache_hit_reserved_rows())
     }
 
     /// Rendered-row offset (from the entry top, including any top vpad row) of
@@ -668,6 +697,12 @@ pub(crate) fn cost_ticks_display_width(cost_usd_ticks: Option<i64>) -> u16 {
     cost_ticks_to_display(cost_usd_ticks)
         .map(|s| unicode_width::UnicodeWidthStr::width(s.as_str()) as u16)
         .unwrap_or(0)
+}
+
+/// Format a response's prompt cache-read hit rate for display. Pure — no
+/// terminal/theme/IO deps — so it is exactly assertable in unit tests.
+pub(crate) fn cache_hit_to_display(cache_hit_percent: Option<u8>) -> Option<String> {
+    cache_hit_percent.map(|p| format!("cache {p}%"))
 }
 
 /// Diamond chrome prefix every group header draws before its text — verb-run
@@ -1064,6 +1099,23 @@ impl Renderable for EntryRenderer<'_> {
                     let cost_style = Style::default().fg(self.theme.gray_dim);
                     buf.set_string_safe(cost_x, first_content_y, &cost, cost_style);
                 }
+            }
+        }
+
+        // Cache-hit-percent line: painted on its OWN reserved row directly
+        // below the content (`cache_hit_reserved_rows`) rather than sharing
+        // the first line's already-narrowed gutter with the cost/timestamp,
+        // so wrapped content never loses more width to fit a second label.
+        if content_skip == 0
+            && let Some(cache_str) = self.cache_hit_display()
+        {
+            let cache_y = max_row.saturating_sub(1);
+            let cache_width = cache_str.len() as u16;
+            if content_area.width > cache_width + 1 && cache_y >= content_area.y && cache_y < max_row
+            {
+                let cache_x = content_area.x + content_area.width - cache_width;
+                let cache_style = Style::default().fg(self.theme.gray_dim);
+                buf.set_string_safe(cache_x, cache_y, &cache_str, cache_style);
             }
         }
 
@@ -1771,6 +1823,91 @@ mod tests {
             !row.contains('$'),
             "thinking block must not render a cost token"
         );
+    }
+
+    #[test]
+    fn cache_hit_indicator_renders_on_the_row_below_cost_and_timestamp() {
+        // A one-line agent message has no vpad, so the cost/timestamp overlay
+        // sits on row 0 and the cache-hit line must land on the reserved row
+        // directly below it (row 1), right-aligned in the same gutter — not
+        // sharing row 0's already-narrowed width.
+        let theme = Theme::current();
+        let entry = ScrollbackEntry::new(RenderBlock::agent_message("hello"))
+            .with_cost_usd_ticks(Some(1_234_500_000)) // $0.12345
+            .with_cache_hit_percent(Some(87));
+        let renderer = EntryRenderer::new(&entry, &theme);
+
+        let width: u16 = 80;
+        let height = renderer.desired_height(width);
+        assert_eq!(
+            height, 2,
+            "a cache-hit response must reserve one extra row beyond the 1-line content"
+        );
+        let area = Rect::new(0, 0, width, height);
+        let mut buf = Buffer::empty(area);
+        renderer.render(area, &mut buf);
+
+        let row0 = collect_row_symbols(&buf, 0, 0, width);
+        assert!(row0.contains("$0.12345"), "cost still renders on row 0");
+        let row1 = collect_row_symbols(&buf, 1, 0, width);
+        let cache_str = "cache 87%";
+        let cache_pos = row1
+            .find(cache_str)
+            .expect("cache-hit token must render on the row below");
+        let gutter = gutter_band(&renderer, width);
+        assert!(
+            cache_pos >= gutter.start as usize,
+            "cache-hit token must be inside the reserved gutter (pos {cache_pos}, gutter {gutter:?})"
+        );
+        assert_eq!(
+            (gutter.end - cache_str.len() as u16) as usize,
+            cache_pos,
+            "cache-hit token must be right-aligned in the gutter"
+        );
+    }
+
+    #[test]
+    fn cache_hit_indicator_absent_when_not_reported() {
+        // No cache-hit value attached → no extra row, no token, ever.
+        let theme = Theme::current();
+        let entry = ScrollbackEntry::new(RenderBlock::agent_message("hello"))
+            .with_cost_usd_ticks(Some(1_234_500_000));
+        let renderer = EntryRenderer::new(&entry, &theme);
+
+        let width: u16 = 80;
+        let height = renderer.desired_height(width);
+        assert_eq!(height, 1, "no extra row without a reported cache-hit rate");
+        let area = Rect::new(0, 0, width, height);
+        let mut buf = Buffer::empty(area);
+        renderer.render(area, &mut buf);
+
+        let row0 = collect_row_symbols(&buf, 0, 0, width);
+        assert!(!row0.contains("cache"), "no cache-hit token when unreported");
+    }
+
+    #[test]
+    fn cache_hit_indicator_not_shown_on_non_message_blocks() {
+        // Thinking/tool rows don't carry timestamps, so they must not carry a
+        // cache-hit marker either, even if a value were attached.
+        crate::appearance::cache::set_show_thinking_blocks(true);
+        let theme = Theme::current();
+        let entry = ScrollbackEntry::new(RenderBlock::thinking("think"))
+            .with_cache_hit_percent(Some(87));
+        let renderer = EntryRenderer::new(&entry, &theme);
+
+        let width: u16 = 80;
+        let height = renderer.desired_height(width);
+        let area = Rect::new(0, 0, width, height);
+        let mut buf = Buffer::empty(area);
+        renderer.render(area, &mut buf);
+
+        for y in 0..height {
+            let row = collect_row_symbols(&buf, y, 0, width);
+            assert!(
+                !row.contains("cache"),
+                "thinking block must not render a cache-hit token (row {y}: {row:?})"
+            );
+        }
     }
 
     #[test]
