@@ -2739,6 +2739,11 @@ impl SessionActor {
                     },
                 )
                 .await;
+            // Re-resolve the live per-tool-call output cap from the current
+            // remaining context-window budget before these tools run, so a
+            // single tool result can't by itself hand back more than what's
+            // actually left of the window — see `reseed_context_budget_output_cap`.
+            self.reseed_context_budget_output_cap().await;
             let execute_tool_calls_result = self.execute_tool_calls(tool_call_responses).await;
             match execute_tool_calls_result {
                 Ok(ToolLoop::PermissionReject { tool_name, reason }) => {

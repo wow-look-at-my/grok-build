@@ -231,17 +231,56 @@ fn update_latest_symlink(dir: &Path, target: &Path) {
 #[cfg(not(unix))]
 fn update_latest_symlink(_dir: &Path, _target: &Path) {}
 
+/// Default per-file cap on a firehose sink (session or fallback file). A
+/// session with `GROK_DEBUG_LOG` on for a long time and a tool call that dumps
+/// a huge result (e.g. `grep` over a multi-GB file) has no other bound on this
+/// file's growth otherwise. Env-overridable via [`debug_log_max_bytes`], same
+/// convention as `GROK_MAX_FOREGROUND_BLOCK_MS`.
+const DEFAULT_MAX_SINK_BYTES: u64 = 100 * 1024 * 1024; // 100 MiB
+
+/// Resolve the per-file cap: `GROK_DEBUG_LOG_MAX_BYTES` env override, or
+/// [`DEFAULT_MAX_SINK_BYTES`].
+fn debug_log_max_bytes() -> u64 {
+    std::env::var("GROK_DEBUG_LOG_MAX_BYTES")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .filter(|&n| n > 0)
+        .unwrap_or(DEFAULT_MAX_SINK_BYTES)
+}
+
+/// One open firehose sink plus the running byte count that enforces
+/// [`RoutingLayer::max_bytes`] against it.
+struct Sink {
+    writer: NonBlocking,
+    bytes_written: u64,
+    /// Set once [`RoutingLayer::max_bytes`] is hit, so the one-line notice is
+    /// written exactly once and every later line is a silent no-op rather than
+    /// growing the file further.
+    capped: bool,
+}
+
+impl Sink {
+    fn new(writer: NonBlocking) -> Self {
+        Self {
+            writer,
+            bytes_written: 0,
+            capped: false,
+        }
+    }
+}
+
 /// Per-session sinks plus a single fallback sink, all behind the routing layer's
-/// mutex. There is no cap or eviction: each distinct session id opens one file +
-/// non-blocking worker + parked guard that persist for the process lifetime
-/// (reclaimed only when the process/leader restarts). That is acceptable for an
-/// opt-in, debug-only firehose; a long-lived `--debug` leader holds one fd per
-/// session it logs. The central guard parking (`appender`) is what lets
-/// `flush()` drain these at exit, so we do not reclaim per session.
+/// mutex. There is no cap on the NUMBER of sinks: each distinct session id opens
+/// one file + non-blocking worker + parked guard that persist for the process
+/// lifetime (reclaimed only when the process/leader restarts). That is
+/// acceptable for an opt-in, debug-only firehose; a long-lived `--debug` leader
+/// holds one fd per session it logs. The central guard parking (`appender`) is
+/// what lets `flush()` drain these at exit, so we do not reclaim per session.
+/// Each sink's own BYTE size is bounded — see [`RoutingLayer::max_bytes`].
 #[derive(Default)]
 struct SinkMap {
-    sessions: HashMap<String, NonBlocking>,
-    fallback: Option<NonBlocking>,
+    sessions: HashMap<String, Sink>,
+    fallback: Option<Sink>,
 }
 
 /// Routes the firehose per session: events under a `session` span go to
@@ -250,6 +289,8 @@ struct RoutingLayer {
     dir: PathBuf,
     role: String,
     pid: u32,
+    /// Hard per-file byte cap (see [`Sink`]); resolved once at construction.
+    max_bytes: u64,
     // The lock is scoped to map access ONLY — file opens (fs + a worker-thread
     // spawn + the appender's own mutex) run OUTSIDE it, so a tracing event
     // emitted on the open path can't re-enter and deadlock this non-reentrant
@@ -263,12 +304,42 @@ impl RoutingLayer {
             dir,
             role,
             pid,
+            max_bytes: debug_log_max_bytes(),
             sinks: Mutex::new(SinkMap::default()),
         }
     }
 
+    /// Test-only override so a cap can be exercised without writing
+    /// hundreds of megabytes or racing other tests over the shared env var.
+    #[cfg(test)]
+    fn with_max_bytes(mut self, max_bytes: u64) -> Self {
+        self.max_bytes = max_bytes;
+        self
+    }
+
     fn lock(&self) -> MutexGuard<'_, SinkMap> {
         self.sinks.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
+    // Write `line` to `sink`, enforcing `max_bytes`: once the cap is reached,
+    // write a one-time notice instead and mark the sink capped so every later
+    // line is silently dropped rather than growing the file further.
+    fn write_capped(&self, sink: &mut Sink, line: &[u8]) {
+        if sink.capped {
+            return;
+        }
+        if sink.bytes_written.saturating_add(line.len() as u64) > self.max_bytes {
+            sink.capped = true;
+            let notice = format!(
+                "... [debug log capped at {} bytes; further writes to this file are \
+                 suppressed for the rest of the session] ...\n",
+                self.max_bytes
+            );
+            let _ = sink.writer.write_all(notice.as_bytes());
+            return;
+        }
+        let _ = sink.writer.write_all(line);
+        sink.bytes_written += line.len() as u64;
     }
 
     // Append `line` to the session's file. `key` is already sanitized. Opens (and
@@ -279,41 +350,43 @@ impl RoutingLayer {
         // (non-blocking, channel-only) write.
         {
             let mut map = self.lock();
-            if let Some(writer) = map.sessions.get_mut(key) {
-                let _ = writer.write_all(line);
+            if let Some(sink) = map.sessions.get_mut(key) {
+                self.write_capped(sink, line);
                 return;
             }
         }
         // First event for this session: open OUTSIDE the lock.
         let path = self.dir.join(format!("{key}.txt"));
-        let Ok(mut writer) = crate::appender::non_blocking_file_writer(&path) else {
+        let Ok(writer) = crate::appender::non_blocking_file_writer(&path) else {
             return;
         };
         update_latest_symlink(&self.dir, &path);
-        let _ = writer.write_all(line);
+        let mut sink = Sink::new(writer);
+        self.write_capped(&mut sink, line);
         let mut map = self.lock();
         // If a concurrent event opened it first, keep that one and drop ours (the
         // line we wrote already reached the file via our worker).
-        map.sessions.entry(key.to_owned()).or_insert(writer);
+        map.sessions.entry(key.to_owned()).or_insert(sink);
     }
 
     // Append `line` to the `<role>-<pid>.txt` catch-all, opening it on first use.
     fn write_fallback(&self, line: &[u8]) {
         {
             let mut map = self.lock();
-            if let Some(writer) = map.fallback.as_mut() {
-                let _ = writer.write_all(line);
+            if let Some(sink) = map.fallback.as_mut() {
+                self.write_capped(sink, line);
                 return;
             }
         }
         let path = self.dir.join(format!("{}-{}.txt", self.role, self.pid));
-        let Ok(mut writer) = crate::appender::non_blocking_file_writer(&path) else {
+        let Ok(writer) = crate::appender::non_blocking_file_writer(&path) else {
             return;
         };
-        let _ = writer.write_all(line);
+        let mut sink = Sink::new(writer);
+        self.write_capped(&mut sink, line);
         let mut map = self.lock();
         if map.fallback.is_none() {
-            map.fallback = Some(writer);
+            map.fallback = Some(sink);
         }
     }
 }
@@ -787,6 +860,41 @@ mod tests {
             two.contains("two only") && !two.contains("one first"),
             "sid-two.txt: {two:?}"
         );
+    }
+
+    #[test]
+    fn write_session_caps_file_size_and_stops_growing() {
+        // Regression: a session's firehose file used to have no size bound at
+        // all (only age-based pruning), so a long `GROK_DEBUG_LOG` session with
+        // one huge tool result could grow a single file to gigabytes. With a
+        // small cap, writing far more than the cap must land a file only
+        // moderately larger than the cap (one notice line over), never
+        // unboundedly larger.
+        let _lock = flush_test_lock();
+        let dir = tempfile::tempdir().unwrap();
+        let layer = RoutingLayer::new(dir.path().to_path_buf(), "agent".to_owned(), 1)
+            .with_max_bytes(1_000);
+
+        let line = "x".repeat(100) + "\n";
+        // 20 lines of 101 bytes each = 2020 bytes, well past the 1000-byte cap.
+        for _ in 0..20 {
+            layer.write_session("capped-session", line.as_bytes());
+        }
+        crate::appender::flush_file_log_guards();
+
+        let contents = std::fs::read_to_string(dir.path().join("capped-session.txt")).unwrap();
+        assert!(
+            contents.len() < 2_000,
+            "file grew past the cap instead of stopping: {} bytes",
+            contents.len()
+        );
+        assert!(
+            contents.contains("debug log capped at 1000 bytes"),
+            "expected the one-time capped notice: {contents:?}"
+        );
+        // The notice must appear exactly once — later writes are silent no-ops,
+        // not repeated notices that would themselves grow the file.
+        assert_eq!(contents.matches("debug log capped").count(), 1);
     }
 
     #[cfg(unix)]
