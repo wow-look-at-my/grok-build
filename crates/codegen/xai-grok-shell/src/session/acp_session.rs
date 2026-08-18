@@ -1913,6 +1913,9 @@ mod chat_history_integrity_tests;
 #[path = "acp_session_tests/turn/disk_full_tests.rs"]
 mod disk_full_tests;
 #[cfg(test)]
+#[path = "acp_session_tests/turn/length_truncation_resume_tests.rs"]
+mod length_truncation_resume_tests;
+#[cfg(test)]
 #[path = "acp_session_tests/turn/asap_injection_tests.rs"]
 mod asap_injection_tests;
 #[cfg(test)]
