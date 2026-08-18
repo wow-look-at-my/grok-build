@@ -115,6 +115,13 @@ pub struct ScrollbackEntry {
     /// timestamp gutter without re-deriving it from token estimates.
     pub cost_usd_ticks: Option<i64>,
 
+    /// This response's prompt cache-read hit rate (0-100), rounded, derived
+    /// from `ResponseUsage.cache_read_input_tokens` over the total prompt
+    /// tokens (`input_tokens + cache_read_input_tokens +
+    /// cache_creation_input_tokens`). `None` when the response reported no
+    /// usage, or the total prompt token count was zero.
+    pub cache_hit_percent: Option<u8>,
+
     /// Cached output and its render key.
     /// Interior-mutable so EntryRenderer (which holds `&self`) can populate and
     /// read the cache without &mut self.
@@ -205,6 +212,7 @@ impl ScrollbackEntry {
             created_at: Some(Local::now()),
             finished_at: None,
             cost_usd_ticks: None,
+            cache_hit_percent: None,
             cached_output: RefCell::new(None),
             cached_truncated_height: RefCell::new(None),
             cached_estimate_lines: RefCell::new(None),
@@ -238,6 +246,7 @@ impl ScrollbackEntry {
             created_at: Some(Local::now()),
             finished_at: None,
             cost_usd_ticks: None,
+            cache_hit_percent: None,
             cached_output: RefCell::new(None),
             cached_truncated_height: RefCell::new(None),
             cached_estimate_lines: RefCell::new(None),
@@ -260,6 +269,12 @@ impl ScrollbackEntry {
     /// shows no fabricated `$0.00`.
     pub fn with_cost_usd_ticks(mut self, cost_usd_ticks: Option<i64>) -> Self {
         self.cost_usd_ticks = cost_usd_ticks.filter(|&t| t > 0);
+        self
+    }
+
+    /// Builder: set the response's prompt cache-read hit percent.
+    pub fn with_cache_hit_percent(mut self, cache_hit_percent: Option<u8>) -> Self {
+        self.cache_hit_percent = cache_hit_percent;
         self
     }
 

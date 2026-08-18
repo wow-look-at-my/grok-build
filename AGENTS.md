@@ -162,6 +162,12 @@ verify serially wastes time when a parallel CI build could be running.
   Anthropic itself prices nothing, so that path stays `None` and the shell's
   `compute_cost_ticks` fallback derives one from the model's pricing.
 
+- The per-message cache-hit-percent indicator reads the same
+  `ResponseCompleted.usage` the cost indicator does
+  (`AcpUpdateTracker::set_response_cache_hit`). It renders on its OWN
+  reserved row below the content instead of widening the cost/timestamp
+  gutter further (`EntryRenderer::cache_hit_reserved_rows`).
+
 ## Thinking-signature notes
 
 - The Messages API verifies a thinking block's `signature` against the model
