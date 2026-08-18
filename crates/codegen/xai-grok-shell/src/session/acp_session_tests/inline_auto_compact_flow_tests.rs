@@ -1740,3 +1740,56 @@ async fn compaction_at_tokens_fixed_and_disabled() {
         })
         .await;
 }
+/// `reseed_context_budget_output_cap` must derive the tool-output cap from
+/// what's actually left of the context window, not a static config value:
+/// regression for the reported failure where a single ~372K-token tool result
+/// overflowed a 524K window that had 365K tokens already in use.
+#[tokio::test(flavor = "current_thread")]
+async fn reseed_context_budget_output_cap_derives_from_remaining_window() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (gateway_tx, _g) = mpsc::unbounded_channel();
+            let (persistence_tx, _p) = mpsc::unbounded_channel();
+            // 90_000 of a 100_000 window used -> 10_000 tokens remaining.
+            let actor = create_test_actor(90_000, 100_000, 85, gateway_tx, persistence_tx).await;
+            actor.reseed_context_budget_output_cap().await;
+
+            let bridge = std::sync::Arc::clone(actor.agent.borrow().tool_bridge());
+            let toolset = bridge.toolset();
+            let resources = toolset.resources.lock().await;
+            let cfg = resources
+                .get::<xai_grok_tools::types::resources::TruncationCfg>()
+                .expect("cap should have been seeded")
+                .0
+                .clone();
+            // 10_000 remaining * 0.8 headroom = 8_000 tokens * 4 bytes/token = 32_000 bytes.
+            assert_eq!(cfg.context_budget_max_output_bytes, Some(32_000));
+        })
+        .await;
+}
+/// A near-full window must not shrink the cap to nothing: the floor keeps
+/// tool calls usable rather than failing every one outright.
+#[tokio::test(flavor = "current_thread")]
+async fn reseed_context_budget_output_cap_floors_near_a_full_window() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (gateway_tx, _g) = mpsc::unbounded_channel();
+            let (persistence_tx, _p) = mpsc::unbounded_channel();
+            // Only 100 tokens left of a 100_000 window.
+            let actor = create_test_actor(99_900, 100_000, 85, gateway_tx, persistence_tx).await;
+            actor.reseed_context_budget_output_cap().await;
+
+            let bridge = std::sync::Arc::clone(actor.agent.borrow().tool_bridge());
+            let toolset = bridge.toolset();
+            let resources = toolset.resources.lock().await;
+            let cfg = resources
+                .get::<xai_grok_tools::types::resources::TruncationCfg>()
+                .expect("cap should have been seeded")
+                .0
+                .clone();
+            assert_eq!(cfg.context_budget_max_output_bytes, Some(4_000));
+        })
+        .await;
+}

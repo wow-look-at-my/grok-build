@@ -67,6 +67,28 @@ verify serially wastes time when a parallel CI build could be running.
 - `GROK_*`/`XAI_*` values whose NAME looks like a credential are withheld —
   the prompt leaves the session and lands in the model's transcript.
 
+## Debug firehose / tool-output context-budget notes
+
+- The per-session `--debug`/`GROK_DEBUG_LOG=1` firehose (`xai-grok-telemetry/src/debug_log.rs`)
+  caps each session/fallback file at `GROK_DEBUG_LOG_MAX_BYTES` (default 100 MiB,
+  `debug_log_max_bytes()`). Before this, only 7-day age-based pruning existed, so a
+  long session with one huge tool result had no bound short of filling the disk.
+  Once a file's own cap is hit, one notice line is written and every later line
+  to that file is a silent no-op — the cap never rewrites or truncates the file
+  itself, it just stops it from growing further.
+- A tool's output byte cap (`TruncationConfig::max_output_bytes_for` /
+  `mcp_max_output_bytes_for`, `xai-grok-tools/src/types/context.rs`) is clamped
+  to `context_budget_max_output_bytes`, re-resolved from the session's actual
+  remaining context-window budget before every tool-dispatch step
+  (`SessionActor::reseed_context_budget_output_cap`, called from `turn.rs`
+  right before `execute_tool_calls`). Static/per-tool config caps still apply as
+  a floor — the budget only ever narrows the cap further, never widens it above
+  a deliberately small configured value. This is what stops a single tool call
+  (e.g. `run_terminal_cmd` piping a `grep` over a multi-GB file) from handing
+  back more tokens than the model's context window has left: auto-compact alone
+  can't catch this, because it only compacts *prior* history and cannot shrink
+  the fresh tool result the current step is about to send.
+
 ## Shift+Tab mode ring notes
 
 - The ring is Plan → Auto → Always-Approve → Orchestrator → Explore → Plan
