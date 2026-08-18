@@ -27,6 +27,16 @@ pub struct TruncationConfig {
     /// `[mcp] max_output_bytes`) never changes non-MCP readers like the
     /// opencode bash cap.
     pub mcp_max_output_bytes: Option<usize>,
+    /// Live ceiling derived from the model's remaining context-window budget
+    /// (see `SessionActor::reseed_context_budget_output_cap` in xai-grok-shell),
+    /// re-resolved before each tool-dispatch step. `None` when the host never
+    /// wires session budget in (e.g. tests, or a caller with no chat state).
+    ///
+    /// Every resolved cap — static config, per-tool override, MCP override —
+    /// is clamped to this so a single tool call can never by itself hand the
+    /// model a prompt bigger than what's actually left of its context window,
+    /// regardless of how a static byte limit was configured.
+    pub context_budget_max_output_bytes: Option<usize>,
 }
 
 impl TruncationConfig {
@@ -37,12 +47,24 @@ impl TruncationConfig {
 
     /// Resolve the max output bytes for a specific tool.
     ///
-    /// Precedence: per-tool override > default override > built-in fallback.
+    /// Precedence: per-tool override > default override > built-in fallback,
+    /// then clamped to [`Self::context_budget_max_output_bytes`] when set (see
+    /// its docs) so the live budget always wins over a static config value.
     pub fn max_output_bytes_for(&self, tool_name: &str, builtin_default: usize) -> usize {
-        if let Some(&per_tool) = self.per_tool_max_output_bytes.get(tool_name) {
-            return per_tool;
+        let resolved = if let Some(&per_tool) = self.per_tool_max_output_bytes.get(tool_name) {
+            per_tool
+        } else {
+            self.default_max_output_bytes.unwrap_or(builtin_default)
+        };
+        self.clamp_to_context_budget(resolved)
+    }
+
+    /// Clamp `resolved` to [`Self::context_budget_max_output_bytes`] when set.
+    fn clamp_to_context_budget(&self, resolved: usize) -> usize {
+        match self.context_budget_max_output_bytes {
+            Some(budget) => resolved.min(budget),
+            None => resolved,
         }
-        self.default_max_output_bytes.unwrap_or(builtin_default)
     }
 
     /// Resolve the max output bytes for an **MCP** payload.
@@ -54,12 +76,14 @@ impl TruncationConfig {
     /// non-MCP tools keep using [`Self::max_output_bytes_for`] so that an
     /// MCP-specific override never bleeds into their caps.
     pub fn mcp_max_output_bytes_for(&self, tool_name: &str, builtin_default: usize) -> usize {
-        if let Some(&per_tool) = self.per_tool_max_output_bytes.get(tool_name) {
-            return per_tool;
-        }
-        self.mcp_max_output_bytes
-            .or(self.default_max_output_bytes)
-            .unwrap_or(builtin_default)
+        let resolved = if let Some(&per_tool) = self.per_tool_max_output_bytes.get(tool_name) {
+            per_tool
+        } else {
+            self.mcp_max_output_bytes
+                .or(self.default_max_output_bytes)
+                .unwrap_or(builtin_default)
+        };
+        self.clamp_to_context_budget(resolved)
     }
 
     /// Replace template placeholders in a tool description with current config values.
@@ -287,6 +311,43 @@ mod tests {
             TruncationConfig::default().mcp_max_output_bytes_for("use_tool", 9_999),
             9_999
         );
+    }
+
+    #[test]
+    fn context_budget_clamps_a_static_default_and_a_per_tool_override() {
+        let cfg = TruncationConfig {
+            default_max_output_bytes: Some(40_000),
+            per_tool_max_output_bytes: HashMap::from([("run_terminal_cmd".to_string(), 500_000)]),
+            context_budget_max_output_bytes: Some(1_000),
+            ..Default::default()
+        };
+        // Static default is already above the budget: clamped down.
+        assert_eq!(cfg.max_output_bytes_for("grep", 20_000), 1_000);
+        // A generous per-tool override does not escape the live budget either.
+        assert_eq!(cfg.max_output_bytes_for("run_terminal_cmd", 20_000), 1_000);
+        // MCP resolution goes through the same clamp.
+        assert_eq!(cfg.mcp_max_output_bytes_for("use_tool", 20_000), 1_000);
+    }
+
+    #[test]
+    fn context_budget_never_widens_a_smaller_static_cap() {
+        // A generous remaining budget must not override a deliberately small
+        // static/per-tool cap — the budget is a ceiling, not a floor.
+        let cfg = TruncationConfig {
+            default_max_output_bytes: Some(2_000),
+            context_budget_max_output_bytes: Some(1_000_000),
+            ..Default::default()
+        };
+        assert_eq!(cfg.max_output_bytes_for("grep", 20_000), 2_000);
+    }
+
+    #[test]
+    fn context_budget_absent_is_a_no_op() {
+        let cfg = TruncationConfig {
+            default_max_output_bytes: Some(40_000),
+            ..Default::default()
+        };
+        assert_eq!(cfg.max_output_bytes_for("grep", 20_000), 40_000);
     }
 
     #[test]
