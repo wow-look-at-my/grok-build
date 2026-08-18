@@ -2068,6 +2068,7 @@ mod tests {
             Action::SendPromptNow {
                 text: "hurry".into(),
                 images: vec![],
+                wire_blocks: None,
             },
             &mut app,
         );

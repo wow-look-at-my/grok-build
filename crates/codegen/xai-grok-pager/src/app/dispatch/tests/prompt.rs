@@ -3538,6 +3538,7 @@ fn send_prompt_now_dispatch_arms_expectation_and_suppresses_marker() {
         Action::SendPromptNow {
             text: "run this instead".into(),
             images: vec![],
+            wire_blocks: None,
         },
         &mut app,
     );
@@ -3836,6 +3837,7 @@ fn send_now_during_active_goal_does_not_arm_expectation() {
         Action::SendPromptNow {
             text: "goal steer".into(),
             images: vec![],
+            wire_blocks: None,
         },
         &mut app,
     );
@@ -3886,6 +3888,7 @@ fn goal_send_now_painted_block_survives_removed_from_queue_response() {
         Action::SendPromptNow {
             text: "goal steer".into(),
             images: vec![],
+            wire_blocks: None,
         },
         &mut app,
     );
@@ -3951,6 +3954,7 @@ fn goal_send_now_painted_block_survives_queue_changed_removal() {
         Action::SendPromptNow {
             text: "goal steer".into(),
             images: vec![],
+            wire_blocks: None,
         },
         &mut app,
     );
@@ -4012,6 +4016,7 @@ fn send_prompt_now_during_reconnect_requeues_locally() {
         Action::SendPromptNow {
             text: "typed mid-outage".into(),
             images: vec![],
+            wire_blocks: None,
         },
         &mut app,
     );
@@ -4050,6 +4055,7 @@ fn failed_send_now_requeues_payload_and_retires_echo() {
         Action::SendPromptNow {
             text: "gets lost on the wire".into(),
             images: vec![],
+            wire_blocks: None,
         },
         &mut app,
     );

@@ -816,7 +816,7 @@ pub(super) fn dispatch_send_prompt_inner(
             // A new prompt is taking the wheel (same contract as the
             // immediate-send branch below).
             agent.clear_follow_ups();
-            return interject::dispatch_send_prompt_now(app, text, images);
+            return interject::dispatch_send_prompt_now(app, text, images, None);
         }
 
         if immediate_server_send {
