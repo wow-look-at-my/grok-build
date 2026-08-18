@@ -176,6 +176,7 @@ async fn create_test_actor_with_memory(
             prefire: crate::session::compaction_config::PrefireState::default(),
             prefix_released: std::sync::atomic::AtomicBool::new(false),
             cancel: Default::default(),
+            context_overflow_recovery: Default::default(),
         },
         memory: crate::session::memory_state::SessionMemory {
             flush_config: memory_config

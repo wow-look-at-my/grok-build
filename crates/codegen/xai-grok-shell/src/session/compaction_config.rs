@@ -177,6 +177,27 @@ impl PrefireState {
     }
 }
 
+/// Which recovery action `handle_sampling_failure` last took for a
+/// context-window-exceeded sampling error, reset to [`Self::None`] on the
+/// next successful sample. Read/set only from `handle_sampling_failure`;
+/// exists so two consecutive overflow failures never both attempt
+/// compaction — compaction cannot help a second time when the same content
+/// (e.g. one item alone at the window size) is still there after the first
+/// attempt, so the second attempt must deterministically shrink the sent
+/// conversation instead, and a third must give up rather than retry forever.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum ContextOverflowRecovery {
+    /// No overflow recovery attempted since the last successful sample.
+    #[default]
+    None,
+    /// The last attempt ran LLM-based compaction.
+    Compacted,
+    /// The last attempt deterministically shrank the conversation
+    /// (`fit_conversation_to_budget`) because compaction already ran once
+    /// for this overflow and did not fit.
+    Reduced,
+}
+
 pub(crate) struct CompactionConfig {
     /// Context window usage percentage (0-100) at which auto-compact triggers.
     ///
@@ -207,6 +228,8 @@ pub(crate) struct CompactionConfig {
     pub prefix_released: AtomicBool,
     /// User/stop cancel for the current compact generation.
     pub cancel: CompactCancelGate,
+    /// See [`ContextOverflowRecovery`].
+    pub context_overflow_recovery: Cell<ContextOverflowRecovery>,
 }
 
 #[cfg(test)]
