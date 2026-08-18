@@ -1242,6 +1242,9 @@ impl SessionActor {
     /// * `Ok(SamplerTurnOutcome::CancelledForInterjection)` - the
     ///    in-flight stream was cancelled for an asap injection; the outer
     ///    turn loop drains the interjection and `continue`s (resubmit).
+    /// * `Ok(SamplerTurnOutcome::MaxTokensTruncated)` - the response hit the
+    ///    output token cap; the outer turn loop commits the streamed partial
+    ///    and `continue`s (resubmit) instead of failing the turn.
     /// * `Err(acp::Error)` - terminal failure already reported via
     ///    `send_xai_notification(RetryState::Failed)`.
     pub(crate) async fn run_turn_via_sampler(
@@ -1327,6 +1330,23 @@ impl SessionActor {
                     return Ok(SamplerTurnOutcome::CancelledForInterjection { partial });
                 }
                 let info = xai_grok_sampler::SamplingErrorInfo::from(&rich_err);
+                // The transport retry loop refuses to resend an identical
+                // truncated request (it would truncate again), so this
+                // reaches here as a fatal `MaxTokensTruncation` rather than a
+                // normal `Completed` response. Preserve the streamed text the
+                // same way an asap-injection cancel does and resubmit with a
+                // continue reminder instead of failing the turn.
+                if matches!(
+                    info.kind,
+                    xai_grok_sampler::SamplingErrorKind::MaxTokensTruncation
+                ) {
+                    let partial = self.partial_assistant_from_capture().await;
+                    tracing::info!(
+                        has_partial = partial.is_some(),
+                        "response truncated at the output token cap; resubmitting"
+                    );
+                    return Ok(SamplerTurnOutcome::MaxTokensTruncated { partial });
+                }
                 match self.handle_sampling_failure(info).await? {
                     SamplerFailureRecovery::CompactAndResubmit => {
                         Ok(SamplerTurnOutcome::CompactAndResubmit)
@@ -1589,10 +1609,9 @@ impl SessionActor {
     }
 
     /// Build a partial assistant `ConversationItem` from the text the model
-    /// had already streamed before an asap-injection cancel, so the
-    /// resubmitted request sees `partial assistant turn + user interjection`
-    /// and the conversation stays consistent (no silent loss of streamed
-    /// text). Returns `None` when the model streamed nothing yet (clean
+    /// had already streamed, so a resubmit after an asap-injection cancel or
+    /// a max-tokens truncation sees the streamed text instead of silently
+    /// losing it. Returns `None` when the model streamed nothing yet (clean
     /// resubmit, nothing to preserve).
     ///
     /// Only the text channel is preserved: a tool call the model was still

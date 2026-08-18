@@ -2276,6 +2276,45 @@ impl SessionActor {
                     self.drain_pending_interjections().await;
                     continue;
                 }
+                Ok(SamplerTurnOutcome::MaxTokensTruncated { partial }) => {
+                    // The provider cut the response off at its output-token
+                    // cap. Bounded by the same max-turns counter a tool round
+                    // uses: an unbroken run of truncated responses is a
+                    // runaway generation, not a legitimate long answer.
+                    let next_turn = tool_turn_count + 1;
+                    if let Some(limit) = self.max_turns
+                        && next_turn > limit
+                    {
+                        tracing::info!(
+                            session_id = %self.session_info.id,
+                            tool_turn_count,
+                            limit,
+                            "max-turns limit reached while continuing a truncated response"
+                        );
+                        return Ok(TurnOutcome::MaxTurnsReached { limit });
+                    }
+                    tool_turn_count = next_turn;
+                    if let Some(partial) = partial {
+                        self.record_assistant_response(partial).await;
+                    }
+                    tracing::info!(
+                        session_id = %self.session_info.id,
+                        loop_index,
+                        "response hit the output token cap — continuing immediately"
+                    );
+                    xai_grok_telemetry::unified_log::info(
+                        "shell.turn.length_truncation_resumed",
+                        Some(self.session_info.id.0.as_ref()),
+                        Some(serde_json::json!({ "loop_index": loop_index })),
+                    );
+                    self.push_system_reminder(
+                        "Your previous response was cut off because it reached the \
+                         maximum output length. Continue immediately from exactly \
+                         where it left off. Do not repeat, restate, or summarize \
+                         anything already said — just keep going.",
+                    );
+                    continue;
+                }
                 Ok(SamplerTurnOutcome::RefreshAuthAndResubmit { credential, store }) => {
                     if auth_retry_schedule.reset_if_incident_spans_suspend() {
                         tracing::info!("auth 401 retry: incident spanned a suspend; budget reset");
