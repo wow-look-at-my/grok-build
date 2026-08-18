@@ -53,9 +53,12 @@ impl AgentView {
     ///   there is no model stream to interrupt and an interjection would sit in
     ///   the buffer until the wait ends. Send-now aborts the wait, which is
     ///   what "now" means while parked.
-    /// - **Nothing interjectable queued**: a bash row is executed from its
-    ///   block meta, never folded into a turn as user text, so an interrupt has
-    ///   nothing to hand over. Send-now runs it as its own turn instead.
+    /// - **Nothing interjectable queued**: send-now targets the first row
+    ///   that can actually go out (any server row, or a local Prompt-kind
+    ///   row — plain or an expanded skill, its wire_blocks riding along). A
+    ///   bash/command/cron row is executed from block meta this path has no
+    ///   field for, so if that is the only thing queued, send-now refuses it
+    ///   with a toast rather than folding it in wrong.
     pub(super) fn try_interrupt_with_queued_from_prompt(&mut self) -> Option<InputOutcome> {
         if !self.session.state.is_turn_running() {
             return None;
@@ -64,7 +67,16 @@ impl AgentView {
         let ids = self.queue.entry_ids();
         let id = *ids.first()?;
         let outcome = if self.is_parked_on_sendable_wait() || !self.queue_has_interjectable_row() {
-            self.force_interject_queue_row(id)
+            // Force the first row that will actually go out, not blindly the
+            // oldest: a bash/command/cron row parked ahead of real prompts
+            // would otherwise bounce every bare-Enter off "Can't send this
+            // now" while perfectly sendable rows sit right behind it.
+            let target = ids
+                .iter()
+                .copied()
+                .find(|&id| self.queue_row_force_sendable(id))
+                .unwrap_or(id);
+            self.force_interject_queue_row(target)
         } else {
             InputOutcome::Action(Action::InterruptWithQueuedPrompts)
         };
@@ -347,6 +359,26 @@ impl AgentView {
         Some(kind_from_wire(&wire.kind) == QueueEntryKind::Prompt)
     }
 
+    /// Whether [`Self::force_interject_queue_row`] will actually deliver
+    /// `id` rather than bounce it off the "Can't send this now" toast: any
+    /// server row (the shell folds any kind), or a local Prompt-kind row
+    /// (plain or an expanded skill — its wire_blocks rides along). A local
+    /// bash/command/cron row is neither: it runs from block meta this path
+    /// has no field for.
+    fn queue_row_force_sendable(&self, id: u64) -> bool {
+        let Some(row) = self.queue.row_ref(id) else {
+            return false;
+        };
+        if row.origin == crate::views::queue_pane::QueueRowOrigin::Server {
+            return true;
+        }
+        self.session
+            .pending_prompts
+            .iter()
+            .find(|p| p.id == id)
+            .is_some_and(|p| p.kind == crate::app::agent::QueueEntryKind::Prompt)
+    }
+
     /// Send one merged-queue row now (cancel-and-send), by selection id. The
     /// shell cancels the running turn and runs this row as the next turn.
     pub(in crate::app) fn force_interject_queue_row(&mut self, id: u64) -> InputOutcome {
@@ -383,8 +415,17 @@ impl AgentView {
             }
             return InputOutcome::Changed;
         }
-        // Local rows: only plain prompts / raw skill rows can re-send (others would send display text, not payload).
-        if self.queue_row_prompt_like(id) != Some(true) {
+        // Local rows: only Prompt-kind rows can re-send. Bash/command/cron
+        // rows run from block meta this action has no field for, so they
+        // stay queued — an expanded skill's wire_blocks rides along below,
+        // so it no longer needs the same refusal.
+        let is_prompt_kind = self
+            .session
+            .pending_prompts
+            .iter()
+            .find(|p| p.id == id)
+            .is_some_and(|p| p.kind == crate::app::agent::QueueEntryKind::Prompt);
+        if !is_prompt_kind {
             self.show_toast("Can't send this now — it runs when the current turn ends");
             return InputOutcome::Changed;
         }
@@ -392,6 +433,7 @@ impl AgentView {
             return InputOutcome::Action(Action::SendPromptNow {
                 text: prompt.text,
                 images: prompt.images,
+                wire_blocks: prompt.wire_blocks,
             });
         }
         InputOutcome::Changed
@@ -832,6 +874,69 @@ mod queue_edit_routing_tests {
         }
     }
 
+    /// Parked on a sendable wait with a bash row stuck ahead of a real
+    /// prompt: bare Enter must reach past the bash row to the sendable one
+    /// instead of always bouncing off the oldest entry's "Can't send this
+    /// now" toast while the later prompt sits right behind it.
+    #[test]
+    fn prompt_path_skips_a_stuck_bash_row_to_send_a_later_prompt_while_parked() {
+        let mut agent = running_agent_local_only();
+        agent.session.pending_prompts.clear();
+        agent.session.enqueue_bash_command("ls -la".to_string());
+        agent.session.enqueue_prompt("please continue".to_string());
+        agent.sync_queue_pane();
+        crate::app::agent_view::test_fixtures::simulate_wait_all(&mut agent);
+        assert!(agent.is_parked_on_sendable_wait());
+
+        let outcome = agent
+            .try_interrupt_with_queued_from_prompt()
+            .expect("queued rows make this a send gesture");
+
+        match outcome {
+            InputOutcome::Action(Action::SendPromptNow { text, .. }) => {
+                assert_eq!(
+                    text, "please continue",
+                    "the sendable row, not the stuck bash one"
+                );
+            }
+            other => panic!("expected SendPromptNow for the later prompt, got {other:?}"),
+        }
+        assert!(agent.toast.is_none(), "a sendable row was found; no refusal");
+        assert_eq!(
+            agent.session.pending_prompts.len(),
+            1,
+            "only the sent prompt leaves the queue; the bash row stays"
+        );
+        assert_eq!(agent.session.pending_prompts[0].text, "ls -la");
+    }
+
+
+    /// A bash-command row still has no promptable payload to carry — it owns
+    /// its own turn and runs from block meta, not from `SendPromptNow`'s
+    /// text/wire_blocks fields. It must keep the explanatory refusal rather
+    /// than silently doing nothing or sending the wrong thing.
+    #[test]
+    fn force_interject_queue_row_still_refuses_a_bash_command_row() {
+        let mut agent = running_agent_local_only();
+        agent.session.pending_prompts.clear();
+        let id = agent.session.enqueue_bash_command("ls -la".to_string());
+        agent.sync_queue_pane();
+
+        let outcome = agent.force_interject_queue_row(id);
+
+        assert!(
+            matches!(outcome, InputOutcome::Changed),
+            "expected the refusal no-op, got {outcome:?}"
+        );
+        let (toast, _) = agent.toast.as_ref().expect("refusal must explain itself");
+        assert!(toast.contains("Can't send this now"));
+        assert_eq!(
+            agent.session.pending_prompts.len(),
+            1,
+            "the bash row stays queued, not silently dropped"
+        );
+    }
+
     #[test]
     fn delete_routes_server_to_action_and_local_to_mutation() {
         let mut agent = make_running_agent();
@@ -1103,7 +1208,7 @@ mod queue_edit_routing_tests {
         agent.queue.list_state.select_by_id(ids[1]);
         let outcome = agent.handle_queue_key(&force_interject_key(), &registry);
         match outcome {
-            InputOutcome::Action(Action::SendPromptNow { text, images }) => {
+            InputOutcome::Action(Action::SendPromptNow { text, images, .. }) => {
                 assert_eq!(text, "local one");
                 assert_eq!(images.len(), 1, "row image must ride the interject");
             }
@@ -1247,10 +1352,13 @@ mod queue_edit_routing_tests {
     }
 
     /// A client-expanded row (`/imagine`-shaped: wire payload != display
-    /// text) stays queued — interjecting it would send the display text,
-    /// not the payload.
+    /// text) force-sends its wire_blocks verbatim, not the display text:
+    /// `SendPromptNow` carries the payload now, so there is no more risk of
+    /// sending the wrong thing, and the row need not stay stuck until the
+    /// turn ends on its own.
     #[test]
-    fn force_interject_local_expanded_row_keeps_it_queued() {
+    fn force_interject_local_expanded_row_sends_its_wire_blocks() {
+        use agent_client_protocol as acp;
         let mut agent =
             running_agent_with_local_skill("/imagine a cat", "<expanded imagine instructions>");
         let registry = non_vscode_registry();
@@ -1258,12 +1366,25 @@ mod queue_edit_routing_tests {
         let ids = agent.queue.entry_ids();
         agent.queue.list_state.select_by_id(ids[0]);
         let outcome = agent.handle_queue_key(&force_interject_key(), &registry);
+        match outcome {
+            InputOutcome::Action(Action::SendPromptNow {
+                text, wire_blocks, ..
+            }) => {
+                assert_eq!(text, "/imagine a cat", "display text is cosmetic only");
+                let blocks = wire_blocks.expect("the expanded payload must ride along");
+                assert!(
+                    matches!(&blocks[..], [acp::ContentBlock::Text(t)]
+                        if t.text == "<expanded imagine instructions>"),
+                    "the model must see the real skill payload, not the display text"
+                );
+            }
+            other => panic!("expected SendPromptNow carrying wire_blocks, got {other:?}"),
+        }
         assert!(
-            matches!(outcome, InputOutcome::Changed),
-            "expanded-payload force-send must be a guarded no-op, got {outcome:?}"
+            agent.session.pending_prompts.is_empty(),
+            "row must leave the queue"
         );
-        assert_eq!(agent.session.pending_prompts.len(), 1, "row must stay");
-        assert!(agent.toast.is_some(), "guard must explain itself");
+        assert!(agent.toast.is_none());
     }
 
     /// A queued raw skill row (`/find-session`, wire payload == display text)

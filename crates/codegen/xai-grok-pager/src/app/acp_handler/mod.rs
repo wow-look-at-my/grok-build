@@ -146,6 +146,18 @@ use workflow_ingest::*;
 /// background agent must still land in its own scrollback so the user sees
 /// the full turn after switching back.
 pub(crate) fn handle(msg: AcpClientMessage, app: &mut AppView) -> bool {
+    let state_changed = handle_inner(msg, app);
+    // Rescues a row stuck in the local queue on every inbound message, not
+    // only a fresh `Action::SendPrompt` — a goal round never round-trips
+    // through that action, so without this a row parked locally before the
+    // goal started stayed stuck for the goal's whole run. See
+    // `migrate_local_rows_to_server_queue`'s own doc comment.
+    let migrate_effects = super::dispatch::migrate_local_rows_to_server_queue(app);
+    app.pending_effects.extend(migrate_effects);
+    state_changed
+}
+
+fn handle_inner(msg: AcpClientMessage, app: &mut AppView) -> bool {
     match msg {
         AcpClientMessage::SessionNotification(notif) => {
             let mut meta = NotificationMeta::from_json(notif.request.meta.as_ref());

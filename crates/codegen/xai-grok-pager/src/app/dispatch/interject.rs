@@ -209,6 +209,7 @@ pub(super) fn dispatch_send_prompt_now(
     app: &mut AppView,
     text: String,
     images: Vec<crate::prompt_images::PastedImage>,
+    wire_blocks: Option<Vec<agent_client_protocol::ContentBlock>>,
 ) -> Vec<Effect> {
     // Hard-reset only — `text` may be a queue row, not the composer.
     let _ = voice_stop_on_submit(app);
@@ -231,6 +232,7 @@ pub(super) fn dispatch_send_prompt_now(
             .pending_prompts
             .push_front(crate::app::agent::QueuedPrompt {
                 images,
+                wire_blocks,
                 ..crate::app::agent::QueuedPrompt::plain(
                     queue_id,
                     &text,
@@ -258,11 +260,16 @@ pub(super) fn dispatch_send_prompt_now(
     // marker.
     super::queue::arm_send_now_and_paint_dispatched(agent, &prompt_id, &text);
 
-    let blocks = crate::prompt_images::build_content_blocks_with_workspace(
-        text.clone(),
-        images,
-        Some(std::path::Path::new(&agent.session.cwd)),
-    );
+    // A skill's expanded payload IS the send: build_content_blocks would send
+    // `text`, the display form, instead of what the model must actually see.
+    let blocks = match wire_blocks {
+        Some(blocks) => blocks,
+        None => crate::prompt_images::build_content_blocks_with_workspace(
+            text.clone(),
+            images,
+            Some(std::path::Path::new(&agent.session.cwd)),
+        ),
+    };
 
     // Optimistic queue-pane echo, reconciled by the shell's queue broadcast.
     let sid_str = session_id.0.to_string();
