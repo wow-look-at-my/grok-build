@@ -92,6 +92,100 @@ pub(super) fn immediate_server_send_eligible(agent: &AgentView) -> bool {
         && !agent.session.loading_replay
 }
 
+/// Whether a local row carries nothing but text, and so can be re-sent as a
+/// plain [`Effect::SendPrompt`] without losing anything.
+///
+/// Everything else a row can carry — a skill's wire payload, images, a cron
+/// task's framing, collapsed chips, combined display segments — has no place
+/// in that effect, so a row holding any of it stays local.
+fn row_is_plain_text(prompt: &crate::app::agent::QueuedPrompt) -> bool {
+    prompt.kind == crate::app::agent::QueueEntryKind::Prompt
+        && prompt.wire_blocks.is_none()
+        && prompt.images.is_empty()
+        && prompt.task_id.is_none()
+        && prompt.human_schedule.is_none()
+        && prompt.combined_texts.is_empty()
+        && prompt.chip_elements.is_empty()
+}
+
+/// Hand the local queue's leading plain-text rows to the shell while a turn is
+/// running, so ASAP delivery cannot latch off.
+///
+/// [`maybe_drain_queue`] only drains local rows once the session is idle, and
+/// [`immediate_server_send_eligible`] only lets a prompt onto the shell's queue
+/// while the local queue is empty. Together those two rules trap each other: a
+/// single row parked locally during a turn — an image prompt, a prompt typed
+/// during the startup race — keeps every later prompt local as well, and a
+/// local row is never harvested into the running turn
+/// (`harvest_queued_prompts_into_interjections` reads the shell's queue). A
+/// session that never idles — one driving a goal — never reaches the recovery
+/// in [`maybe_drain_queue`], so this function is the only rescue: it also runs
+/// on every inbound `session/update` (see `acp_handler::handle`), not only when
+/// the user submits a new prompt.
+///
+/// Only a leading run of plain rows moves, and it stops at the first row that
+/// cannot: the merged view renders server rows ahead of local ones, so
+/// migrating a prefix keeps the user's order, while migrating past a stuck row
+/// would hoist a newer prompt above an older one.
+pub(crate) fn migrate_local_rows_to_server_queue(app: &mut AppView) -> Vec<Effect> {
+    let mut effects = Vec::new();
+    let crate::app::app_view::ActiveView::Agent(agent_id) = app.active_view else {
+        return effects;
+    };
+    let Some(agent) = app.agents.get(&agent_id) else {
+        return effects;
+    };
+    // The same holds `immediate_server_send_eligible` applies, minus the empty
+    // local queue this exists to produce.
+    if !agent.session.state.is_turn_running()
+        || agent.session.model_switch_pending
+        || agent.session.loading_replay
+        || matches!(agent.prompt_mode, PromptMode::EditingQueued { .. })
+    {
+        return effects;
+    }
+    let Some(session_id) = agent.session.session_id.clone() else {
+        return effects;
+    };
+    let session_agent_id = agent.session.id;
+    let sid_str = session_id.0.to_string();
+
+    while app
+        .agents
+        .get(&agent_id)
+        .and_then(|agent| agent.session.pending_prompts.front())
+        .is_some_and(row_is_plain_text)
+    {
+        let Some(row) = app
+            .agents
+            .get_mut(&agent_id)
+            .and_then(|agent| agent.session.pending_prompts.pop_front())
+        else {
+            break;
+        };
+        let prompt_id = uuid::Uuid::new_v4().to_string();
+        if let Some(agent) = app.agents.get_mut(&agent_id) {
+            // Same contract as the immediate-send path: this client owns the
+            // turn these deltas belong to.
+            agent.note_self_originated_prompt(&prompt_id);
+        }
+        push_server_queue_echo(app, session_agent_id, &sid_str, &prompt_id, &row.text, "prompt");
+        crate::unified_log::info(
+            "prompt.migrated_to_server_queue",
+            Some(&sid_str),
+            Some(serde_json::json!({ "len": row.text.len() })),
+        );
+        effects.push(Effect::SendPrompt {
+            agent_id: session_agent_id,
+            session_id: session_id.clone(),
+            text: row.text,
+            prompt_id,
+            skill_token_ranges: row.skill_token_ranges,
+        });
+    }
+    effects
+}
+
 /// Push the optimistic shared-queue echo for an immediate server-authoritative
 /// send and mirror it into the owning agent so the queue pane renders it
 /// immediately, before the confirming `x.ai/queue/changed` broadcast.
@@ -1974,6 +2068,7 @@ mod tests {
             Action::SendPromptNow {
                 text: "hurry".into(),
                 images: vec![],
+                wire_blocks: None,
             },
             &mut app,
         );
