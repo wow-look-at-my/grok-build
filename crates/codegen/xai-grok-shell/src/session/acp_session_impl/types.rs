@@ -87,6 +87,16 @@ pub(crate) enum SamplerTurnOutcome {
     CancelledForInterjection {
         partial: Option<ConversationItem>,
     },
+    /// The provider cut the response off at its output-token cap
+    /// (`StopReason::Length`). The sampler treats this as fatal and
+    /// non-retryable at the transport layer (resending the identical
+    /// request would truncate again), so the turn loop resubmits with a
+    /// reminder to continue instead. `partial` is the text streamed before
+    /// the cutoff, preserved the same way as `CancelledForInterjection`;
+    /// `None` when nothing was streamed yet.
+    MaxTokensTruncated {
+        partial: Option<ConversationItem>,
+    },
 }
 
 /// Outcome of `process_conversation_turn`, distinguishing normal completion from cancellation.
