@@ -2253,6 +2253,10 @@ impl SessionActor {
                     auth_retry_schedule.reset_on_success();
                     continue;
                 }
+                Ok(SamplerTurnOutcome::ReduceAndResubmit) => {
+                    auth_retry_schedule.reset_on_success();
+                    continue;
+                }
                 Ok(SamplerTurnOutcome::CancelledForInterjection { partial }) => {
                     // ASAP injection: the in-flight stream was cancelled so the
                     // turn loop can drain the pending interjection NOW and

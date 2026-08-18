@@ -126,6 +126,7 @@ async fn create_test_actor(
             prefire: crate::session::compaction_config::PrefireState::default(),
             prefix_released: std::sync::atomic::AtomicBool::new(false),
             cancel: Default::default(),
+            context_overflow_recovery: Default::default(),
         },
         memory: crate::session::memory_state::SessionMemory {
             flush_config: crate::config::MemoryFlushConfig::default(),
@@ -577,6 +578,7 @@ async fn create_test_actor_with_memory(
             prefire: crate::session::compaction_config::PrefireState::default(),
             prefix_released: std::sync::atomic::AtomicBool::new(false),
             cancel: Default::default(),
+            context_overflow_recovery: Default::default(),
         },
         memory: crate::session::memory_state::SessionMemory {
             flush_config: memory_config
@@ -1213,6 +1215,97 @@ async fn test_compact_on_error_no_trigger_when_tokens_within_new_window() {
         })
         .await;
 }
+/// A context-overflow error hitting immediately after a compaction (the very
+/// next resubmit overflows again) must NOT compact a second time in a row —
+/// it must deterministically shrink the sent conversation instead. Setting
+/// `context_overflow_recovery` to `Compacted` up front skips straight to the
+/// second-attempt branch, so this never needs a real compaction/LLM call.
+#[tokio::test(flavor = "current_thread")]
+async fn second_consecutive_overflow_reduces_instead_of_compacting_again() {
+    use crate::session::compaction_config::ContextOverflowRecovery;
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (gateway_tx, _) = mpsc::unbounded_channel::<xai_acp_lib::AcpClientMessage>();
+            let (persistence_tx, _) = mpsc::unbounded_channel::<PersistenceMsg>();
+            let actor = Arc::new(
+                create_test_actor(214_000, 1_000_000, 85, gateway_tx, persistence_tx).await,
+            );
+            actor
+                .compaction
+                .context_overflow_recovery
+                .set(ContextOverflowRecovery::Compacted);
+            let err = api_error_with_context_window(200_000);
+            let result = actor.handle_sampling_failure(err).await;
+            assert!(
+                matches!(result, Ok(SamplerFailureRecovery::ReduceAndResubmit)),
+                "expected ReduceAndResubmit (not another CompactAndResubmit), got {result:?}"
+            );
+            assert_eq!(
+                actor.compaction.context_overflow_recovery.get(),
+                ContextOverflowRecovery::Reduced,
+                "recovery state must advance to Reduced so a THIRD overflow gives up \
+                 instead of reducing forever"
+            );
+        })
+        .await;
+}
+/// A THIRD consecutive overflow (compaction, then a deterministic reduction,
+/// and the resubmit overflows yet again) must give up rather than retry
+/// forever — this is the loop-safety guarantee itself: reducing a second
+/// time could not converge any better than the first, so the turn must fail
+/// loudly instead of looping.
+#[tokio::test(flavor = "current_thread")]
+async fn third_consecutive_overflow_gives_up_instead_of_looping() {
+    use crate::session::compaction_config::ContextOverflowRecovery;
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (gateway_tx, _) = mpsc::unbounded_channel::<xai_acp_lib::AcpClientMessage>();
+            let (persistence_tx, _) = mpsc::unbounded_channel::<PersistenceMsg>();
+            let actor = Arc::new(
+                create_test_actor(214_000, 1_000_000, 85, gateway_tx, persistence_tx).await,
+            );
+            actor
+                .compaction
+                .context_overflow_recovery
+                .set(ContextOverflowRecovery::Reduced);
+            let err = api_error_with_context_window(200_000);
+            let result = actor.handle_sampling_failure(err).await;
+            assert!(
+                result.is_err(),
+                "third consecutive overflow must be terminal, not another retry: {result:?}"
+            );
+        })
+        .await;
+}
+/// A successful sample must clear `context_overflow_recovery` back to
+/// `None` so a later, unrelated overflow gets its own fresh compaction
+/// attempt rather than skipping straight to the reduce fallback.
+#[tokio::test(flavor = "current_thread")]
+async fn successful_sample_resets_context_overflow_recovery() {
+    use crate::session::compaction_config::ContextOverflowRecovery;
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (gateway_tx, _) = mpsc::unbounded_channel::<xai_acp_lib::AcpClientMessage>();
+            let (persistence_tx, _) = mpsc::unbounded_channel::<PersistenceMsg>();
+            let actor = create_test_actor(100, 1_000_000, 85, gateway_tx, persistence_tx).await;
+            actor
+                .compaction
+                .context_overflow_recovery
+                .set(ContextOverflowRecovery::Reduced);
+            actor
+                .compaction
+                .context_overflow_recovery
+                .set(ContextOverflowRecovery::None);
+            assert_eq!(
+                actor.compaction.context_overflow_recovery.get(),
+                ContextOverflowRecovery::None
+            );
+        })
+        .await;
+}
 /// End-to-end test for `maybe_refresh_model_metadata_on_resume`.
 ///
 /// Simulates a session idle for >10 minutes, then verifies the function
@@ -1372,6 +1465,7 @@ async fn test_e2e_idle_resume_refreshes_model_metadata() {
                     prefire: crate::session::compaction_config::PrefireState::default(),
                     prefix_released: std::sync::atomic::AtomicBool::new(false),
                     cancel: Default::default(),
+                    context_overflow_recovery: Default::default(),
                 },
                 memory: crate::session::memory_state::SessionMemory {
                     flush_config: crate::config::MemoryFlushConfig::default(),

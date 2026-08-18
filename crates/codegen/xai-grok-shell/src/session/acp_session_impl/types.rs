@@ -29,10 +29,19 @@ pub(crate) enum RecoveredStore {
 /// Recovery decision returned by
 /// `SessionActor::handle_sampling_failure` for the sampler-based
 /// turn loop.
+#[derive(Debug)]
 pub(crate) enum SamplerFailureRecovery {
     /// Compaction ran. The turn loop should rebuild the request from
     /// the compacted conversation and resubmit.
     CompactAndResubmit,
+    /// A context-overflow error hit again immediately after a compaction
+    /// (`ContextOverflowRecovery::Compacted`), so compaction alone did not
+    /// fit the conversation. Rather than compact a second time in a row —
+    /// which cannot help when a single item alone accounts for the overflow
+    /// — the conversation was deterministically shrunk (oldest turns
+    /// dropped, the newest truncated in place) via
+    /// `fit_conversation_to_budget`. The turn loop should resubmit.
+    ReduceAndResubmit,
     /// Auth 401 recovery succeeded; the turn loop should resubmit with the
     /// fresh token. `credential` is the wire provenance of the rejected
     /// request: a 401 for a request that carried no credential at all (a
@@ -48,6 +57,7 @@ pub(crate) enum SamplerFailureRecovery {
 /// `CompactAndResubmit` short-circuits the outer turn loop with
 /// `continue` (the turn driver re-builds the request from the latest
 /// chat state).
+#[derive(Debug)]
 pub(crate) enum SamplerTurnOutcome {
     /// Model responded, with per-call latency stats for `shell.turn.inference_done`.
     Response(
@@ -55,6 +65,11 @@ pub(crate) enum SamplerTurnOutcome {
         Box<xai_grok_sampler::InferenceLatencyStats>,
     ),
     CompactAndResubmit,
+    /// Mirrors [`SamplerFailureRecovery::ReduceAndResubmit`]: the
+    /// conversation was deterministically shrunk (not re-compacted) because
+    /// a compaction already ran for this overflow and did not fit. The turn
+    /// loop resubmits the same as `CompactAndResubmit`.
+    ReduceAndResubmit,
     /// Auth recovery succeeded; the outer loop should retry. Mirrors
     /// [`SamplerFailureRecovery::RefreshAuthAndResubmit`].
     RefreshAuthAndResubmit {
