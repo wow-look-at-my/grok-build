@@ -266,3 +266,14 @@ weakening what they check, so the fix belongs to the runner image (an
 init/reaper, a real filesystem for `/tmp`) and that image is the fleet's,
 not this repo's. Revisit the runner once it has one; until then this job is
 `runs-on: ubuntu-latest`, which is what `master` builds green on.
+
+## Workflow agent-concurrency notes
+
+- `WorkflowHostParams.agent_slots` is a semaphore owned by `WorkflowManager`
+  and shared by every run it launches (`session/workflow/manager.rs`), not
+  one fresh semaphore per run. Up to `WORKFLOW_MAX_ACTIVE_RUNS_PER_SESSION`
+  runs can be active at once, so a per-run semaphore would let total live
+  agent-spawned LLM requests scale with active run count instead of staying
+  under the configured cap (`GROK_WORKFLOW_MAX_CONCURRENT_AGENTS` /
+  `workflow_max_concurrent_agents`) — the knob operators lower to stay under
+  a hard per-host concurrent-request limit.

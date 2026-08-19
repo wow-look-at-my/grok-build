@@ -68,6 +68,10 @@ pub(crate) struct WorkflowManager {
     active: HashMap<String, ActiveRun>,
     retiring: Vec<(String, oneshot::Receiver<()>)>,
     max_concurrent_agents: usize,
+    /// Agent slots shared by every run this manager launches, so the
+    /// session's OVERALL workflow-agent concurrency stays capped even when
+    /// several runs are active at once (see `WORKFLOW_MAX_ACTIVE_RUNS_PER_SESSION`).
+    agent_slots: Arc<tokio::sync::Semaphore>,
 }
 
 impl WorkflowManager {
@@ -87,6 +91,8 @@ impl WorkflowManager {
         templates: HashMap<String, String>,
         max_concurrent_agents: usize,
     ) -> Self {
+        let max_concurrent_agents =
+            super::host_service::workflow_max_concurrent_agents(max_concurrent_agents);
         Self {
             session_id,
             session_dir,
@@ -100,15 +106,15 @@ impl WorkflowManager {
             templates,
             active: HashMap::new(),
             retiring: Vec::new(),
-            max_concurrent_agents: super::host_service::workflow_max_concurrent_agents(
-                max_concurrent_agents,
-            ),
+            max_concurrent_agents,
+            agent_slots: Arc::new(tokio::sync::Semaphore::new(max_concurrent_agents)),
         }
     }
 
     #[cfg(test)]
     pub(crate) fn test_set_max_concurrent_agents(&mut self, n: usize) {
         self.max_concurrent_agents = n.max(1);
+        self.agent_slots = Arc::new(tokio::sync::Semaphore::new(self.max_concurrent_agents));
     }
 
     pub(crate) fn tracker(&self) -> Arc<parking_lot::Mutex<WorkflowTracker>> {
@@ -265,6 +271,7 @@ impl WorkflowManager {
             WorkflowHostParams {
                 run_id: run_id.clone(),
                 max_concurrent_agents: self.max_concurrent_agents,
+                agent_slots: self.agent_slots.clone(),
                 cwd: self.cwd.clone(),
                 scratch_dir,
                 tracker: self.tracker.clone(),
@@ -1738,6 +1745,56 @@ mod tests {
         match outcome_rx.await.unwrap() {
             WorkflowOutcome::Completed { result } => assert_eq!(result, serde_json::json!(N)),
             other => panic!("expected Completed, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn concurrency_cap_is_shared_across_concurrent_runs() {
+        const CAP: usize = 2;
+        const N: usize = 2;
+
+        let dir = tempfile::tempdir().unwrap();
+        let (mut manager, mut subagent_rx) = test_manager(Some(dir.path().to_path_buf()));
+        manager.test_set_max_concurrent_agents(CAP);
+
+        let (_run_a, outcome_a) = manager
+            .launch(resolve_inline(parallel_n_script(N)).unwrap(), spec())
+            .unwrap();
+        let (_run_b, outcome_b) = manager
+            .launch(resolve_inline(parallel_n_script(N)).unwrap(), spec())
+            .unwrap();
+
+        // Both runs together must never hold more than CAP live agents,
+        // even though each run alone would be allowed CAP of its own.
+        let mut live = Vec::new();
+        for _ in 0..CAP {
+            live.push(recv_spawn(&mut subagent_rx).await);
+        }
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(150), subagent_rx.recv())
+                .await
+                .is_err(),
+            "more than {CAP} agents were live across both runs combined"
+        );
+
+        let total = 2 * N;
+        let mut completed = 0usize;
+        while completed + live.len() < total {
+            complete_spawn(live.remove(0));
+            completed += 1;
+            live.push(recv_spawn(&mut subagent_rx).await);
+        }
+        for req in live {
+            complete_spawn(req);
+        }
+
+        for outcome in [outcome_a, outcome_b] {
+            match outcome.await.unwrap() {
+                WorkflowOutcome::Completed { result } => {
+                    assert_eq!(result, serde_json::json!(N));
+                }
+                other => panic!("expected Completed, got {other:?}"),
+            }
         }
     }
 
