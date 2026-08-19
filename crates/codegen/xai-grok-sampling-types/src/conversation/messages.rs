@@ -464,9 +464,15 @@ pub fn build_messages_request(req: &ConversationRequest) -> crate::messages::Mes
         ConversationToolChoice::None => ToolChoiceParam::Auto, // default
     });
 
-    let effort = req
-        .reasoning_effort
-        .and_then(|e| e.to_messages_api())
+    // The mandatory-reasoning remap happens BEFORE the Messages mapping: for
+    // a reasoning-mandatory target, `None`/`Minimal` must not be omitted from
+    // the wire, so they are lifted to the lowest supported non-disabled
+    // effort first. A request for such a target always carries
+    // `output_config.effort` (and its auto-paired `thinking`).
+    let effective_effort = wire_reasoning_effort(req.reasoning_mandatory, req.reasoning_effort);
+    let effort = effective_effort
+        .map(|e| e.to_messages_api())
+        .flatten()
         .map(|s| s.to_string());
 
     // A wire schema here suppresses tool calls, so the agent routes

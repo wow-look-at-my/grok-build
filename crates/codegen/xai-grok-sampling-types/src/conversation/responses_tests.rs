@@ -964,6 +964,31 @@ fn test_responses_request_omits_effort_when_unset() {
     );
 }
 
+/// The Responses backend is subject to the same invariant: a reasoning-
+/// mandatory target must carry a non-disabled `reasoning.effort`, so
+/// None/Minimal/unset are remapped to the lowest enabled tier.
+#[test]
+fn responses_mandatory_target_never_disables_reasoning_effort() {
+    for requested in [
+        Some(crate::ReasoningEffort::None),
+        Some(crate::ReasoningEffort::Minimal),
+        None,
+    ] {
+        let req = ConversationRequest {
+            reasoning_effort: requested,
+            reasoning_mandatory: true,
+            ..ConversationRequest::from_items(vec![ConversationItem::user("hi")]).with_model("test")
+        };
+        let resp: crate::rs::CreateResponse = (&req).into();
+        let json = serde_json::to_value(&resp).unwrap();
+        assert_eq!(
+            json.pointer("/reasoning/effort").and_then(|v| v.as_str()),
+            Some("low"),
+            "mandatory target with {requested:?} must remap to the lowest enabled effort; got: {json:#}",
+        );
+    }
+}
+
 #[test]
 fn test_btw_cross_api_responses_no_regressions() {
     let items = btw_prepare_items(btw_mid_turn_conversation());

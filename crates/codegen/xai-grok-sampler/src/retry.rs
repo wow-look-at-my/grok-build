@@ -25,6 +25,9 @@
 //!   provider-worded) → strip images and retry once
 //! - 400 on a `thinking` block's `signature` → drop replayed reasoning and
 //!   retry once
+//! - 400 "Reasoning is mandatory for this endpoint and cannot be disabled."
+//!   → mark the target reasoning-mandatory, remap a disabled/omitted
+//!   requested effort to the lowest non-disabled tier, and retry once
 //!
 //! **Not retried** (Fatal immediately):
 //! - 400, 401, 403, 404, 408, 422 (client errors)
@@ -154,6 +157,12 @@ pub enum RetryDecision {
     /// block whose signature this model cannot verify).
     RetryWithReasoningStrip,
 
+    /// Retry after marking the target reasoning-mandatory and remapping a
+    /// disabled/omitted requested effort to the lowest non-disabled tier (the
+    /// provider answered our disabling body with its "reasoning is mandatory"
+    /// 400). The wire builders then emit a supported non-disabled effort.
+    RetryWithReasoningEffortRemap,
+
     /// Retry after rebuilding the HTTP client with HTTP/1.1 (transport
     /// error, first retry only).
     RetryWithClientRebuild { backoff: Duration },
@@ -222,6 +231,15 @@ pub fn classify_error(
     // same history fails the same way with no way out but a new session.
     if err.is_thinking_signature_error() {
         return RetryDecision::RetryWithReasoningStrip;
+    }
+
+    // The provider mandates reasoning and we sent a disabling/omitting body
+    // ("Reasoning is mandatory for this endpoint and cannot be disabled.").
+    // Remap the requested effort to the lowest non-disabled tier and retry —
+    // the same disabling body would fail again, so this has to beat the
+    // status-code arms below, which would otherwise call this 400 fatal.
+    if err.is_reasoning_mandatory_error() {
+        return RetryDecision::RetryWithReasoningEffortRemap;
     }
 
     // Shared retry vetoes (`SamplingError::is_retry_vetoed`, also used by
@@ -614,6 +632,55 @@ mod tests {
             classify_error(&err, 0, 5, RATE_LIMIT_RETRY_THRESHOLD),
             RetryDecision::RetryWithReasoningStrip
         ));
+    }
+
+    /// OpenRouter's "reasoning is mandatory" is a 400, which every other rule
+    /// calls fatal. It has to remap instead: re-sending the same disabling
+    /// body always fails, and nothing about the target is fixed by stripping
+    /// history — the effort has to come back enabled.
+    #[test]
+    fn classify_reasoning_mandatory_400_remaps_effort() {
+        let err = api_err(
+            StatusCode::BAD_REQUEST,
+            "Reasoning is mandatory for this endpoint and cannot be disabled.",
+        );
+        assert!(matches!(
+            classify_error(&err, 0, 5, RATE_LIMIT_RETRY_THRESHOLD),
+            RetryDecision::RetryWithReasoningEffortRemap
+        ));
+    }
+
+    /// The server's "don't retry" hint is about the request it saw; remapping
+    /// to a non-disabled effort makes a different request, so the remap must
+    /// outrank the veto.
+    #[test]
+    fn classify_reasoning_mandatory_outranks_should_retry_veto() {
+        let err = SamplingError::Api {
+            status: StatusCode::BAD_REQUEST,
+            message: "Reasoning is mandatory for this endpoint and cannot be disabled.".to_string(),
+            model_metadata: None,
+            retry_after_secs: None,
+            should_retry: Some(false),
+        };
+        assert!(matches!(
+            classify_error(&err, 0, 5, RATE_LIMIT_RETRY_THRESHOLD),
+            RetryDecision::RetryWithReasoningEffortRemap
+        ));
+    }
+
+    #[test]
+    fn classify_reasoning_mandatory_requires_a_400() {
+        let err = api_err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Reasoning is mandatory for this endpoint and cannot be disabled.",
+        );
+        assert!(
+            !matches!(
+                classify_error(&err, 0, 5, RATE_LIMIT_RETRY_THRESHOLD),
+                RetryDecision::RetryWithReasoningEffortRemap
+            ),
+            "a 5xx with the same text must not take the reasoning-mandatory remap arm"
+        );
     }
 
     /// The server's "don't retry" hint is about the request it saw; dropping

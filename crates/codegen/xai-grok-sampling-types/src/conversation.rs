@@ -620,6 +620,17 @@ pub struct ConversationRequest {
     pub trace: Option<Box<dyn TraceContext>>,
     /// Reasoning effort level for reasoning models.
     pub reasoning_effort: Option<crate::ReasoningEffort>,
+    /// The routed model/endpoint **mandates** reasoning (e.g. an OpenRouter
+    /// endpoint that answers a disable/omit request with a 400
+    /// "Reasoning is mandatory for this endpoint and cannot be disabled.").
+    /// When set, the wire builders must never send a body that disables or
+    /// omits reasoning: an unset/`None`/`Minimal` requested effort is remapped
+    /// to the lowest supported non-disabled effort via
+    /// [`wire_reasoning_effort`](Self::wire_reasoning_effort). Set on retry
+    /// after the provider's mandatory-reasoning 400 tells us the target
+    /// demands it; the 400 is the reliable signal (model metadata alone
+    /// cannot tell which remote endpoints mandate reasoning).
+    pub reasoning_mandatory: bool,
     /// JSON Schema for structured output (strict mode).
     pub json_schema: Option<serde_json::Value>,
     /// Sticky routing key for prompt-cache reuse; overrides `x_grok_conv_id` for routing.
@@ -695,6 +706,42 @@ impl ConversationRequest {
         self.items
             .retain(|item| !matches!(item, ConversationItem::Reasoning(_)));
         before - self.items.len()
+    }
+}
+
+/// The lowest effort a wire body can carry for a reasoning-mandatory target.
+/// `None` and `Minimal` are the disabled/omit signals (both are dropped by
+/// [`crate::ReasoningEffort::to_messages_api`] and `None` serializes as a
+/// disable on the chat-completions wire), so the lowest *enabled* tier is
+/// `Low`.
+pub const LOWEST_ENABLED_REASONING_EFFORT: crate::ReasoningEffort =
+    crate::ReasoningEffort::Low;
+
+/// Resolve the reasoning effort a wire body must carry for a target.
+///
+/// A reasoning-mandatory target must never be sent a body that disables or
+/// omits reasoning: an unset (`None`), `None`, or `Minimal` requested effort
+/// is remapped to the lowest supported non-disabled effort
+/// ([`LOWEST_ENABLED_REASONING_EFFORT`]). Every other input — a supported
+/// effort, or any effort on a non-mandatory target — passes through
+/// unchanged.
+///
+/// Pure: no I/O, no knowledge of which remote models mandate reasoning —
+/// that decision (a provider's exact "reasoning is mandatory" 400, or an
+/// explicit flag) is the caller's. The wire builders consult this so the
+/// serialized request never disables/omits reasoning for a mandatory target.
+pub fn wire_reasoning_effort(
+    reasoning_mandatory: bool,
+    requested: Option<crate::ReasoningEffort>,
+) -> Option<crate::ReasoningEffort> {
+    if !reasoning_mandatory {
+        return requested;
+    }
+    match requested {
+        Some(crate::ReasoningEffort::None)
+            | Some(crate::ReasoningEffort::Minimal)
+            | None => Some(crate::ReasoningEffort::Low),
+        Some(effort) => Some(effort),
     }
 }
 

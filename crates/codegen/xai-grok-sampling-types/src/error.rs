@@ -319,6 +319,32 @@ impl SamplingError {
         message.contains("signature") && message.contains("thinking")
     }
 
+    /// The provider rejected the request because the routed model/endpoint
+    /// **mandates** reasoning and our body asked for it disabled or omitted,
+    /// e.g. OpenRouter's
+    /// "Reasoning is mandatory for this endpoint and cannot be disabled."
+    ///
+    /// This is a request-content error, not a transient one: re-sending the
+    /// same disabling body always fails. The recovery is to remap the
+    /// requested effort to the lowest non-disabled tier (via
+    /// [`wire_reasoning_effort`]) and retry.
+    ///
+    /// Matches the "reasoning is mandatory" fragment case-insensitively, so
+    /// provider wordings that keep that phrase (regardless of the trailing
+    /// "…for this endpoint and cannot be disabled.") are recognized.
+    pub fn is_reasoning_mandatory_error(&self) -> bool {
+        let SamplingError::Api {
+            status, message, ..
+        } = self
+        else {
+            return false;
+        };
+        if *status != StatusCode::BAD_REQUEST {
+            return false;
+        }
+        message.to_ascii_lowercase().contains("reasoning is mandatory")
+    }
+
     /// The API rejected the request because an inline image could not be
     /// processed. Matches both direct 400 and proxy-wrapped 500 responses.
     /// Exact-case match — consistent with `is_encrypted_content_error`.
@@ -1334,6 +1360,81 @@ mod tests {
         assert!(
             !err.is_encrypted_content_error(),
             "unrelated 400 errors must not match"
+        );
+    }
+
+    /// The reported trap: OpenRouter's "Reasoning is mandatory for this
+    /// endpoint and cannot be disabled." must be recognized as a
+    /// reasoning-mandatory signal, not left as an opaque 400. The message
+    /// fragment is matched case-insensitively.
+    #[test]
+    fn openrouter_reasoning_mandatory_400_is_detected() {
+        let err = SamplingError::Api {
+            status: StatusCode::BAD_REQUEST,
+            message: "Reasoning is mandatory for this endpoint and cannot be disabled.".into(),
+            model_metadata: None,
+            retry_after_secs: None,
+            should_retry: None,
+        };
+        assert!(
+            err.is_reasoning_mandatory_error(),
+            "the exact OpenRouter 400 must classify as reasoning-mandatory"
+        );
+    }
+
+    #[test]
+    fn reasoning_mandatory_matches_case_insensitively() {
+        let err = SamplingError::Api {
+            status: StatusCode::BAD_REQUEST,
+            message: "reasoning is mandatory for this endpoint and cannot be disabled.".into(),
+            model_metadata: None,
+            retry_after_secs: None,
+            should_retry: None,
+        };
+        assert!(err.is_reasoning_mandatory_error());
+    }
+
+    #[test]
+    fn reasoning_mandatory_wrong_status_not_detected() {
+        let err = SamplingError::Api {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            message: "Reasoning is mandatory for this endpoint and cannot be disabled.".into(),
+            model_metadata: None,
+            retry_after_secs: None,
+            should_retry: None,
+        };
+        assert!(
+            !err.is_reasoning_mandatory_error(),
+            "only a 400 should match, not a 5xx"
+        );
+    }
+
+    #[test]
+    fn reasoning_mandatory_requires_the_phrase() {
+        // A 400 that disables reasoning but is not the mandatory phrase must
+        // not be misclassified.
+        let err = SamplingError::Api {
+            status: StatusCode::BAD_REQUEST,
+            message: "reasoning_effort must be one of [minimal, low, medium]".into(),
+            model_metadata: None,
+            retry_after_secs: None,
+            should_retry: None,
+        };
+        assert!(
+            !err.is_reasoning_mandatory_error(),
+            "a 400 without the mandatory phrase must not match"
+        );
+    }
+
+    #[test]
+    fn reasoning_mandatory_stream_errors_not_detected() {
+        let err = SamplingError::StreamError {
+            error_type: "invalid_request_error".into(),
+            message: "Reasoning is mandatory for this endpoint and cannot be disabled.".into(),
+        };
+        assert!(
+            !err.is_reasoning_mandatory_error(),
+            "only Api errors classify; a stream error with the same text must not"
         );
     }
 

@@ -80,6 +80,72 @@ fn test_messages_request_omits_output_config_when_no_supported_effort() {
     }
 }
 
+/// A reasoning-mandatory messages-backend target must never be sent a body
+/// that omits `output_config.effort` (and its auto-paired `thinking`): a
+/// `None`/`Minimal`/unset request is lifted to the lowest supported
+/// non-disabled effort (`low`) so a supported effort is always carried.
+#[test]
+fn messages_mandatory_target_always_carries_a_non_disabled_effort() {
+    for requested in [
+        Some(crate::ReasoningEffort::None),
+        Some(crate::ReasoningEffort::Minimal),
+        None, // unset
+    ] {
+        let req = ConversationRequest {
+            reasoning_effort: requested,
+            reasoning_mandatory: true,
+            ..ConversationRequest::from_items(vec![ConversationItem::user("go")])
+                .with_model("messages-compatible-model")
+        };
+        let msgs = build_messages_request(&req);
+        // Inspect the wire and top-level fields before consuming anything.
+        let json = serde_json::to_value(&msgs).unwrap();
+        let oc = msgs
+            .output_config
+            .clone()
+            .unwrap_or_else(|| panic!("mandatory target with {requested:?} must carry output_config"));
+        assert_eq!(
+            oc.effort.as_deref(),
+            Some("low"),
+            "mandatory target with {requested:?} must remap to the lowest enabled effort; got: {json:#}"
+        );
+        assert!(
+            msgs.thinking.is_some(),
+            "mandatory target with {requested:?} must auto-pair thinking",
+        );
+        assert!(json.pointer("/output_config/effort").is_some(), "{json:#}");
+        // The disabled token never reaches the wire.
+        assert_ne!(oc.effort.as_deref(), Some("none"), "{json:#}");
+    }
+}
+
+/// A non-mandatory messages target is unchanged: None/Minimal/unset still
+/// omit `output_config` and do not auto-pair `thinking`.
+#[test]
+fn messages_non_mandatory_target_is_unchanged() {
+    for requested in [
+        None,
+        Some(crate::ReasoningEffort::None),
+        Some(crate::ReasoningEffort::Minimal),
+    ] {
+        let req = ConversationRequest {
+            reasoning_effort: requested,
+            reasoning_mandatory: false,
+            ..ConversationRequest::from_items(vec![ConversationItem::user("go")])
+                .with_model("messages-compatible-model")
+        };
+        let msgs = build_messages_request(&req);
+        assert!(
+            msgs.output_config.is_none(),
+            "non-mandatory target with {requested:?} must not produce output_config",
+        );
+        assert!(
+            msgs.thinking.is_none(),
+            "non-mandatory target with {requested:?} must not auto-pair thinking",
+        );
+    }
+}
+
 #[test]
 fn test_messages_request_thinking_carries_summarized_display() {
     let req = ConversationRequest {
