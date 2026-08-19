@@ -162,6 +162,12 @@ verify serially wastes time when a parallel CI build could be running.
   Anthropic itself prices nothing, so that path stays `None` and the shell's
   `compute_cost_ticks` fallback derives one from the model's pricing.
 
+- The per-message cache-hit-percent indicator reads the same
+  `ResponseCompleted.usage` the cost indicator does
+  (`AcpUpdateTracker::set_response_cache_hit`). It renders on its OWN
+  reserved row below the content instead of widening the cost/timestamp
+  gutter further (`EntryRenderer::cache_hit_reserved_rows`).
+
 ## Thinking-signature notes
 
 - The Messages API verifies a thinking block's `signature` against the model
@@ -190,6 +196,54 @@ verify serially wastes time when a parallel CI build could be running.
   validates the thinking of the tool-calling turn it is continuing, and a
   config-less thinking block is rejected in turn. Reasoning effort is untouched
   and the next turn pairs normally.
+
+## Tool-call provider-field notes
+
+- A tool call carries keys this client only relays: `extra_content` (Google's
+  spelling) and `provider_specific_fields` (a translating gateway's). Gemini 3
+  rejects a replayed function call whose thought signature is missing, and that
+  signature reaches an OpenAI-shaped client only inside one of them.
+- `ToolCall::vendor` holds them from the response — including off the streaming
+  chunk that opens the call, which is where Gemini puts the signature — and
+  `ToolCallRequest` flattens them back onto the replay. Nothing reads them:
+  verbatim is the only form the provider accepts.
+- The allowlist (`TOOL_CALL_VENDOR_KEYS`) is what keeps response-shaped
+  bookkeeping out of the request. A provider that sends none leaves the map
+  empty, and an empty map flattens to nothing, so its requests are unchanged.
+
+## Goal-planner cancellation notes
+
+- Only steering replans. `run_goal_planner_attempt` returns `Steered` whenever
+  there is any, so an `Interrupted` reaching the loop is a bare cancel and is
+  terminal — retrying one spawned four dead planners in 2.3 s before the
+  attempt cap paused the goal.
+- The planner runs off a slash command, not a turn, and a user Stop latches the
+  session's Task spawns closed until a turn reopens them
+  (`open_subagent_spawn_admission`). `maybe_run_goal_planner` reopens them
+  itself; without that, `/goal resume` after a Stop is rejected before a
+  subagent exists, at latency 0, for every message the session has left.
+- A pause the user asked for says so (`planner_cancelled_pause_message`).
+  "Planning failed" on a cancel sends the reader hunting a broken planner that
+  is doing exactly what it was told.
+
+## Messages thinking-dialect notes
+
+- Claude 4.6 replaced `thinking: {type:"adaptive"}` for
+  `{type:"enabled", budget_tokens:N}`, and each generation rejects the other's
+  spelling outright ("Input tag 'adaptive' ... does not match any of the
+  expected tags"), so `build_messages_request` picks by model id
+  (`speaks_adaptive_thinking`).
+- The generation is parsed off the id itself (`claude_version`), because
+  nothing else in the request carries it: both spellings the family has used
+  are read (`claude-haiku-4-5`, `claude-3-7-sonnet`), through a gateway prefix
+  and a snapshot stamp. A name that is not a Claude is a gateway's own model
+  and keeps the adaptive request it has always been sent.
+- `output_config.effort` is 4.6-and-later too, so the older dialect sends the
+  effort as `budget_tokens` instead and nothing beside it. `output_config.format`
+  is untouched — structured outputs are not what 4.6 changed.
+- A budget must clear the API's 1024 floor and stay under `max_tokens`. One
+  that cannot do both leaves thinking off with a warning, rather than sending a
+  request the API answers with a 400.
 
 ## Why build-test is not on the self-hosted runner
 

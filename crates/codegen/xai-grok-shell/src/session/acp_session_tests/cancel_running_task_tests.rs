@@ -174,6 +174,7 @@ async fn persist_ack_waits_for_disk_flush_before_success() {
                     prefire: crate::session::compaction_config::PrefireState::default(),
                     prefix_released: std::sync::atomic::AtomicBool::new(false),
                     cancel: Default::default(),
+                    context_overflow_recovery: Default::default(),
                 },
                 memory: crate::session::memory_state::SessionMemory {
                     flush_config: crate::config::MemoryFlushConfig::default(),
@@ -650,6 +651,7 @@ async fn first_turn_memory_injection_disabled_does_not_persist_to_chat_history()
                     prefire: crate::session::compaction_config::PrefireState::default(),
                     prefix_released: std::sync::atomic::AtomicBool::new(false),
                     cancel: Default::default(),
+                    context_overflow_recovery: Default::default(),
                 },
                 memory: crate::session::memory_state::SessionMemory {
                     flush_config: crate::config::MemoryFlushConfig::default(),
@@ -788,7 +790,7 @@ async fn first_turn_memory_injection_disabled_does_not_persist_to_chat_history()
                 trace_config_template: std::cell::RefCell::new(None),
             });
             let _ = actor
-                .process_conversation_turn_with_recovery("disabled-memory", None, None, None)
+                .process_conversation_turn_with_recovery("disabled-memory", None, None, None, true)
                 .await;
             let (flush_tx, flush_rx) = tokio::sync::oneshot::channel();
             persistence
@@ -945,6 +947,7 @@ async fn cancel_running_task_teardown_clears_running_and_pending_work() {
                     prefire: crate::session::compaction_config::PrefireState::default(),
                     prefix_released: std::sync::atomic::AtomicBool::new(false),
                     cancel: Default::default(),
+                    context_overflow_recovery: Default::default(),
                 },
                 memory: crate::session::memory_state::SessionMemory {
                     flush_config: crate::config::MemoryFlushConfig::default(),
@@ -1347,6 +1350,7 @@ async fn cancel_with_dangling_tool_call_skips_interrupt_reminder() {
                     id: "call-1".into(),
                     name: "run_terminal_cmd".into(),
                     arguments: "{}".into(),
+                    vendor: Default::default(),
                 }]),
             );
             *actor
@@ -2382,6 +2386,7 @@ async fn cancel_propagates_to_sampler_handle_so_no_further_emission() {
                     prefire: crate::session::compaction_config::PrefireState::default(),
                     prefix_released: std::sync::atomic::AtomicBool::new(false),
                     cancel: Default::default(),
+                    context_overflow_recovery: Default::default(),
                 },
                 memory: crate::session::memory_state::SessionMemory {
                     flush_config: crate::config::MemoryFlushConfig::default(),

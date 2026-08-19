@@ -1742,6 +1742,7 @@ mod tool_meta_stamp_tests {
                 name: "read_file".to_string(),
                 arguments: r#"{"target_file":"/tmp/stamp.txt"}"#.to_string(),
             },
+            vendor: Default::default(),
         }
     }
     /// The `x.ai/tool` object from an event's `_meta`, if present.
@@ -1911,6 +1912,9 @@ mod chat_history_integrity_tests;
 #[cfg(test)]
 #[path = "acp_session_tests/turn/disk_full_tests.rs"]
 mod disk_full_tests;
+#[cfg(test)]
+#[path = "acp_session_tests/turn/length_truncation_resume_tests.rs"]
+mod length_truncation_resume_tests;
 #[cfg(test)]
 #[path = "acp_session_tests/turn/asap_injection_tests.rs"]
 mod asap_injection_tests;

@@ -325,6 +325,7 @@ fn test_tool_calls_to_responses_api() {
             id: "call_1".into(),
             name: "bash".to_string(),
             arguments: r#"{"command": "ls"}"#.into(),
+        	vendor: Default::default(),
         }]),
     ]);
 
@@ -359,6 +360,7 @@ fn test_tool_result_to_responses_api() {
             id: "call_1".into(),
             name: "bash".to_string(),
             arguments: r#"{"command": "ls"}"#.into(),
+        	vendor: Default::default(),
         }]),
         ConversationItem::tool_result("call_1", "file1.txt\nfile2.txt\nfile3.txt"),
     ]);
@@ -399,11 +401,13 @@ fn test_multiple_tool_results_to_responses_api() {
                 id: "call_1".into(),
                 name: "bash".to_string(),
                 arguments: r#"{"command": "ls"}"#.into(),
+            	vendor: Default::default(),
             },
             ToolCall {
                 id: "call_2".into(),
                 name: "bash".to_string(),
                 arguments: r#"{"command": "pwd"}"#.into(),
+            	vendor: Default::default(),
             },
         ]),
         ConversationItem::tool_result("call_1", "output1"),
@@ -898,6 +902,7 @@ fn test_malformed_tool_arguments_sanitized_in_responses_api() {
         id: "call_bad".into(),
         name: "search_replace".to_string(),
         arguments: bad_args.into(),
+    	vendor: Default::default(),
     };
 
     let item = ConversationItem::assistant_tool_calls(vec![tool_call]);
@@ -1108,6 +1113,7 @@ fn test_tool_result_with_images_to_responses_api() {
             id: "call_1".into(),
             name: "read_file".to_string(),
             arguments: r#"{"target_file": "photo.png"}"#.into(),
+        	vendor: Default::default(),
         }]),
         ConversationItem::tool_result_with_images(
             "call_1",
@@ -1158,6 +1164,7 @@ fn test_tool_result_without_images_stays_text() {
             id: "call_1".into(),
             name: "bash".to_string(),
             arguments: r#"{"command": "ls"}"#.into(),
+        	vendor: Default::default(),
         }]),
         ConversationItem::tool_result("call_1", "file1.txt\nfile2.txt"),
     ]);
@@ -1654,6 +1661,7 @@ fn empty_content_assistant_with_tool_calls_and_reasoning() {
                 id: Arc::<str>::from("call_1"),
                 name: "read_file".to_string(),
                 arguments: Arc::<str>::from("{}"),
+            	vendor: Default::default(),
             }],
             model_id: None,
             model_fingerprint: None,

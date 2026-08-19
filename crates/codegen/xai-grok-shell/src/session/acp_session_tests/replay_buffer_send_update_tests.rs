@@ -128,6 +128,7 @@ pub(super) async fn make_replay_send_update_fixture() -> ReplaySendUpdateFixture
             prefire: crate::session::compaction_config::PrefireState::default(),
             prefix_released: std::sync::atomic::AtomicBool::new(false),
             cancel: Default::default(),
+            context_overflow_recovery: Default::default(),
         },
         memory: crate::session::memory_state::SessionMemory {
             flush_config: crate::config::MemoryFlushConfig::default(),

@@ -10,6 +10,18 @@ const STRUCTURED_OUTPUT_TOOL: &str = "StructuredOutput";
 /// Max times the model may re-call `StructuredOutput` with non-conforming args
 /// before the turn ends with the last validation error.
 const STRUCTURED_OUTPUT_MAX_RETRIES: u32 = 3;
+/// Whether the harvest that folds queued follow-ups into the running turn
+/// should run before this model request.
+///
+/// `loop_index` alone marks the opening pass of a call to
+/// `process_conversation_turn` — but a goal round or an auto-recovery retry
+/// calls that function fresh, resetting `loop_index` to 0, so its own
+/// `loop_index == 1` looks identical to the true start of the turn.
+/// `first_round` is the part of "opening pass of the WHOLE turn" that
+/// survives across those calls: only the very first round passes `true`.
+pub(crate) fn should_harvest_before_request(loop_index: u32, first_round: bool) -> bool {
+    loop_index > 1 || !first_round
+}
 /// What a `StructuredOutput` tool call means for the turn (see
 /// `handle_structured_output_tool_call`).
 enum StructuredOutputStep {
@@ -846,6 +858,13 @@ impl SessionActor {
             let mut round_trace = trace_gcs_config;
             let mut round_artifact = artifact_tracker;
             let mut stop_continuations_this_turn: u32 = 0;
+            // Each goal round and auto-recovery retry calls
+            // `process_conversation_turn_with_recovery` fresh, so its own
+            // opening-pass skip (via `loop_index`) cannot tell a later
+            // round's first request from the turn's own. `first_round` is the
+            // part of that check that must survive across those calls: true
+            // only for the very first round below.
+            let mut first_round = true;
             loop {
                 if self.goal_harness_enabled() {
                     let goal_loop_active = self.goal_tracker.lock().status()
@@ -858,8 +877,10 @@ impl SessionActor {
                         round_trace.take(),
                         round_artifact.take(),
                         json_schema.clone(),
+                        first_round,
                     )
                     .await;
+                first_round = false;
                 if !matches!(round, Ok(TurnOutcome::Completed { .. })) {
                     break round;
                 }
@@ -1525,6 +1546,7 @@ impl SessionActor {
         trace_gcs_config: Option<crate::session::repo_changes::TraceExportConfig>,
         artifact_tracker: Option<crate::upload::manifest::ArtifactTracker>,
         json_schema: Option<serde_json::Value>,
+        first_round: bool,
     ) -> Result<TurnOutcome, acp::Error> {
         let _ = self.compaction.auto_compact_suppressed.compare_exchange(
             crate::session::compaction_config::SUPPRESS_TURN,
@@ -1542,6 +1564,7 @@ impl SessionActor {
                         trace_gcs_config,
                         artifact_tracker.as_ref(),
                         json_schema,
+                        first_round,
                     )
                     .await;
             }
@@ -1555,6 +1578,7 @@ impl SessionActor {
                         trace_gcs_config,
                         artifact_tracker.as_ref(),
                         json_schema,
+                        first_round,
                     )
                     .await;
             }
@@ -1567,6 +1591,7 @@ impl SessionActor {
                 trace_gcs_config.clone(),
                 artifact_tracker.as_ref(),
                 json_schema.clone(),
+                first_round,
             )
             .await;
         if matches!(
@@ -1628,12 +1653,15 @@ impl SessionActor {
             sleep(delay).await;
             let recovery_message = ConversationItem::auto_recovery(recovery_prompt.clone());
             self.chat_state_handle.push_user_message(recovery_message);
+            // The main call above already ran, so a retry is never the
+            // turn's opening pass regardless of what `first_round` was.
             result = self
                 .process_conversation_turn(
                     req_id,
                     trace_gcs_config.clone(),
                     artifact_tracker.as_ref(),
                     None,
+                    false,
                 )
                 .await;
             if matches!(
@@ -1898,6 +1926,7 @@ impl SessionActor {
         trace_gcs_config: Option<crate::session::repo_changes::TraceExportConfig>,
         artifact_tracker: Option<&crate::upload::manifest::ArtifactTracker>,
         json_schema: Option<serde_json::Value>,
+        first_round: bool,
     ) -> Result<TurnOutcome, acp::Error> {
         let conv_turn_start = std::time::Instant::now();
         let conv_turn_clock = DualClock::now();
@@ -2047,10 +2076,15 @@ impl SessionActor {
             // Ahead of the drain, and so ahead of a model request: a follow-up
             // queued mid-turn reaches the model on the next request rather
             // than after the turn it was aimed at. Skipped on the opening pass
-            // (`loop_index` is already 1 there) — the turn has produced nothing
-            // to steer yet, and a row queued in that window is picked up on the
-            // pass after it.
-            if loop_index > 1 {
+            // of the WHOLE turn (`loop_index == 1` and `first_round`) — the
+            // turn has produced nothing to steer yet, and a row queued in that
+            // window is picked up on the pass after it. `loop_index` alone
+            // cannot tell the opening pass of the turn from the opening pass
+            // of a later round: a goal continuation and an auto-recovery retry
+            // both call this function fresh, resetting `loop_index` to 0, so
+            // `first_round` carries the turn-scoped half of the check across
+            // those calls.
+            if should_harvest_before_request(loop_index, first_round) {
                 self.harvest_queued_prompts_into_interjections(false).await;
             }
             if identical_tool_calls.take_nudge() {
@@ -2219,6 +2253,10 @@ impl SessionActor {
                     auth_retry_schedule.reset_on_success();
                     continue;
                 }
+                Ok(SamplerTurnOutcome::ReduceAndResubmit) => {
+                    auth_retry_schedule.reset_on_success();
+                    continue;
+                }
                 Ok(SamplerTurnOutcome::CancelledForInterjection { partial }) => {
                     // ASAP injection: the in-flight stream was cancelled so the
                     // turn loop can drain the pending interjection NOW and
@@ -2236,6 +2274,45 @@ impl SessionActor {
                     // chat state (partial assistant + interjection + prior
                     // history).
                     self.drain_pending_interjections().await;
+                    continue;
+                }
+                Ok(SamplerTurnOutcome::MaxTokensTruncated { partial }) => {
+                    // The provider cut the response off at its output-token
+                    // cap. Bounded by the same max-turns counter a tool round
+                    // uses: an unbroken run of truncated responses is a
+                    // runaway generation, not a legitimate long answer.
+                    let next_turn = tool_turn_count + 1;
+                    if let Some(limit) = self.max_turns
+                        && next_turn > limit
+                    {
+                        tracing::info!(
+                            session_id = %self.session_info.id,
+                            tool_turn_count,
+                            limit,
+                            "max-turns limit reached while continuing a truncated response"
+                        );
+                        return Ok(TurnOutcome::MaxTurnsReached { limit });
+                    }
+                    tool_turn_count = next_turn;
+                    if let Some(partial) = partial {
+                        self.record_assistant_response(partial).await;
+                    }
+                    tracing::info!(
+                        session_id = %self.session_info.id,
+                        loop_index,
+                        "response hit the output token cap — continuing immediately"
+                    );
+                    xai_grok_telemetry::unified_log::info(
+                        "shell.turn.length_truncation_resumed",
+                        Some(self.session_info.id.0.as_ref()),
+                        Some(serde_json::json!({ "loop_index": loop_index })),
+                    );
+                    self.push_system_reminder(
+                        "Your previous response was cut off because it reached the \
+                         maximum output length. Continue immediately from exactly \
+                         where it left off. Do not repeat, restate, or summarize \
+                         anything already said — just keep going.",
+                    );
                     continue;
                 }
                 Ok(SamplerTurnOutcome::RefreshAuthAndResubmit { credential, store }) => {
@@ -2692,6 +2769,7 @@ impl SessionActor {
                         name: tc.name,
                         arguments: tc.arguments.as_ref().to_owned(),
                     },
+                    vendor: tc.vendor,
                 })
                 .collect();
             self.emit_event(crate::session::events::Event::PhaseChanged {
@@ -2704,6 +2782,11 @@ impl SessionActor {
                     },
                 )
                 .await;
+            // Re-resolve the live per-tool-call output cap from the current
+            // remaining context-window budget before these tools run, so a
+            // single tool result can't by itself hand back more than what's
+            // actually left of the window — see `reseed_context_budget_output_cap`.
+            self.reseed_context_budget_output_cap().await;
             let execute_tool_calls_result = self.execute_tool_calls(tool_call_responses).await;
             match execute_tool_calls_result {
                 Ok(ToolLoop::PermissionReject { tool_name, reason }) => {

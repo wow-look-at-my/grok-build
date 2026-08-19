@@ -200,6 +200,57 @@ fn open_tool_loop_lost_its_thinking(req: &ConversationRequest) -> bool {
         })
 }
 
+/// The Claude generation a model id names, as `(major, minor)`. Both spellings
+/// the family has used are read: `claude-haiku-4-5` and `claude-3-7-sonnet`,
+/// each optionally behind a gateway prefix and ahead of a dated snapshot. The
+/// first one- or two-digit component is the major, which is what keeps a
+/// snapshot stamp from being read as a version.
+fn claude_version(model: &str) -> Option<(u32, u32)> {
+    let tail = model.to_ascii_lowercase();
+    let tail = tail.split("claude").nth(1)?;
+    let mut parts = tail
+        .split(['-', '.', '_', '@', ':'])
+        .filter(|p| !p.is_empty())
+        .skip_while(|p| !matches!(p.len(), 1 | 2) || !p.bytes().all(|b| b.is_ascii_digit()));
+
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts
+        .next()
+        .filter(|p| matches!(p.len(), 1 | 2))
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(0);
+    Some((major, minor))
+}
+
+/// Which `thinking` dialect a model speaks. Claude 4.6 replaced
+/// `{"type":"enabled","budget_tokens":N}` with `{"type":"adaptive"}` plus
+/// `output_config.effort`, and each generation rejects the other's spelling
+/// outright ("Input tag 'adaptive' ... does not match any of the expected
+/// tags"). A name that is not a Claude at all is a gateway's own model, which
+/// this cannot speak for: it keeps the request it has always been sent.
+fn speaks_adaptive_thinking(model: &str) -> bool {
+    claude_version(model).is_none_or(|version| version >= (4, 6))
+}
+
+/// The `budget_tokens` a pre-4.6 Claude sizes its thinking with, standing in
+/// for the effort word its dialect has no room for. The API's floor is 1024 and
+/// the budget must leave the answer room under `max_tokens`, so a ceiling that
+/// cannot house the floor yields no thinking rather than a 400.
+fn thinking_budget(effort: crate::ReasoningEffort, max_tokens: u32) -> Option<u32> {
+    use crate::ReasoningEffort as Effort;
+
+    let want = match effort {
+        Effort::None | Effort::Minimal => return None,
+        Effort::Low => 4_096,
+        Effort::Medium => 8_192,
+        Effort::High => 16_384,
+        Effort::Xhigh => 24_576,
+        Effort::Max => 32_768,
+    };
+    let budget = want.min(max_tokens.saturating_sub(1));
+    (budget >= 1_024).then_some(budget)
+}
+
 /// Convert a `ConversationRequest` into a Messages API request.
 pub fn build_messages_request(req: &ConversationRequest) -> crate::messages::MessagesRequest {
     use crate::messages::{
@@ -484,13 +535,35 @@ pub fn build_messages_request(req: &ConversationRequest) -> crate::messages::Mes
             schema: schema.clone(),
         });
 
+    let max_tokens = req.max_output_tokens.unwrap_or(0);
+    let adaptive = req.model.as_deref().is_none_or(speaks_adaptive_thinking);
+
     // thinking is driven by reasoning_effort only, not by json_schema.
-    let thinking = effort
-        .as_ref()
-        .filter(|_| !thinking_off)
-        .map(|_| crate::messages::ThinkingConfig::Adaptive {
-            display: Some(crate::messages::ThinkingDisplay::Summarized),
-        });
+    let thinking = if thinking_off {
+        None
+    } else if adaptive {
+        effort
+            .as_ref()
+            .map(|_| crate::messages::ThinkingConfig::Adaptive {
+                display: Some(crate::messages::ThinkingDisplay::Summarized),
+            })
+    } else {
+        let budget = req
+            .reasoning_effort
+            .and_then(|e| thinking_budget(e, max_tokens));
+        if budget.is_none() && effort.is_some() {
+            tracing::warn!(
+                model = req.model.as_deref().unwrap_or_default(),
+                max_tokens,
+                "thinking off: this model sizes it in tokens and max_tokens leaves no room for the API's 1024 floor"
+            );
+        }
+        budget.map(|budget_tokens| crate::messages::ThinkingConfig::Enabled { budget_tokens })
+    };
+
+    // `output_config.effort` is 4.6-and-later too; an older Claude 400s on it,
+    // and its `thinking` budget already carries the same intent.
+    let effort = effort.filter(|_| adaptive);
 
     let output_config = if effort.is_some() || format.is_some() {
         Some(OutputConfig { effort, format })
@@ -501,7 +574,7 @@ pub fn build_messages_request(req: &ConversationRequest) -> crate::messages::Mes
     MessagesRequest {
         model: req.model.clone().unwrap_or_default(),
         messages,
-        max_tokens: req.max_output_tokens.unwrap_or(0),
+        max_tokens,
         system,
         tools,
         tool_choice,
@@ -542,6 +615,7 @@ impl From<crate::messages::MessagesResponse> for ConversationItem {
                         arguments: Arc::<str>::from(
                             serde_json::to_string(&input).unwrap_or_default(),
                         ),
+                        vendor: Default::default(),
                     });
                 }
                 // Thinking dropped — see doc comment above.

@@ -868,33 +868,76 @@ impl SessionActor {
             return Err(acp::Error::internal_error().data(message));
         }
         if self.should_compact_on_error(&error).await {
+            use crate::session::compaction_config::ContextOverflowRecovery;
             let cw = error
                 .model_metadata
                 .as_ref()
                 .and_then(|m| m.context_window)
                 .expect("should_compact_on_error guarantees context_window");
+            let total_tokens = self.chat_state_handle.get_estimated_total_tokens().await;
+            let percentage = xai_token_estimation::usage_percentage_u8(total_tokens, cw);
+            if let Some(mut cfg) = self.chat_state_handle.get_sampling_config().await
+                && let Some(new_cw) = std::num::NonZeroU64::new(cw)
+                && self.compaction.context_window_override.is_none()
             {
-                let total_tokens = self.chat_state_handle.get_estimated_total_tokens().await;
-                let percentage = xai_token_estimation::usage_percentage_u8(total_tokens, cw);
-                if let Some(mut cfg) = self.chat_state_handle.get_sampling_config().await
-                    && let Some(new_cw) = std::num::NonZeroU64::new(cw)
-                    && self.compaction.context_window_override.is_none()
-                {
-                    cfg.context_window = new_cw;
-                    self.chat_state_handle.update_sampling_config(cfg);
-                }
-                let trigger_info = compaction::AutoCompactTriggerInfo {
-                    tokens_used: total_tokens,
-                    context_window: cw,
-                    percentage,
-                };
-                if let Err(e) = self.run_compact_only(trigger_info).await {
-                    if Self::is_auth_compact_error(&e) {
-                        return Err(self.surface_compact_auth_failure(e).await);
+                cfg.context_window = new_cw;
+                self.chat_state_handle.update_sampling_config(cfg);
+            }
+            // A context-window-exceeded error can recur immediately after a
+            // compaction (the very next resubmit overflows again) when
+            // whatever made the conversation too big survives compaction —
+            // e.g. a single recent item that alone is near the window size.
+            // Compacting a SECOND time in a row cannot fix that (there is
+            // nothing further for the summarizer to reduce), so the ladder
+            // below only ever compacts once per overflow: the next attempt
+            // deterministically shrinks the sent conversation instead, and a
+            // third gives up rather than retrying forever.
+            match self.compaction.context_overflow_recovery.get() {
+                ContextOverflowRecovery::None => {
+                    let trigger_info = compaction::AutoCompactTriggerInfo {
+                        tokens_used: total_tokens,
+                        context_window: cw,
+                        percentage,
+                    };
+                    if let Err(e) = self.run_compact_only(trigger_info).await {
+                        if Self::is_auth_compact_error(&e) {
+                            return Err(self.surface_compact_auth_failure(e).await);
+                        }
+                        return Err(e);
                     }
-                    return Err(e);
+                    self.compaction
+                        .context_overflow_recovery
+                        .set(ContextOverflowRecovery::Compacted);
+                    return Ok(SamplerFailureRecovery::CompactAndResubmit);
                 }
-                return Ok(SamplerFailureRecovery::CompactAndResubmit);
+                ContextOverflowRecovery::Compacted => {
+                    self.reduce_conversation_for_overflow(cw).await;
+                    self.compaction
+                        .context_overflow_recovery
+                        .set(ContextOverflowRecovery::Reduced);
+                    return Ok(SamplerFailureRecovery::ReduceAndResubmit);
+                }
+                ContextOverflowRecovery::Reduced => {
+                    let message = format!(
+                        "conversation still exceeds the model's context window ({cw} tokens) \
+                         after compaction and a deterministic size reduction; giving up rather \
+                         than retrying forever: {}",
+                        error.message
+                    );
+                    self.log_terminal_failure(
+                        "context_overflow_unrecoverable",
+                        error.status_code,
+                        &message,
+                    );
+                    self.send_xai_notification(XaiSessionUpdate::RetryState(
+                        crate::extensions::notification::RetryState::Failed {
+                            error_type: "context_overflow_unrecoverable".to_string(),
+                            message: message.clone(),
+                        },
+                    ))
+                    .await;
+                    return Err(acp::Error::internal_error().data(message));
+                }
             }
         }
         let detailed_message = error.message.clone();
@@ -1151,6 +1194,38 @@ impl SessionActor {
             )),
         )
     }
+    /// Deterministically shrink the session's conversation to fit
+    /// `context_window` tokens, without an LLM call: drop oldest whole turns,
+    /// then truncate the newest unit in place if it alone still exceeds the
+    /// budget (`xai_chat_state::compaction_utils::fit_conversation_to_budget`).
+    ///
+    /// Only reached from [`Self::handle_sampling_failure`] as the fallback
+    /// after a compaction already ran once for the current overflow and the
+    /// very next sample overflowed again — see `ContextOverflowRecovery`.
+    /// Targets 70% of the window (mirrors the compaction input ladder's own
+    /// `InputStage::Lossy` budget) so the resubmit has real headroom rather
+    /// than landing exactly on the edge.
+    async fn reduce_conversation_for_overflow(self: &Arc<Self>, context_window: u64) {
+        const REDUCE_BUDGET_PERCENT: u64 = 70;
+        let budget = context_window.saturating_mul(REDUCE_BUDGET_PERCENT) / 100;
+        let conversation = self.chat_state_handle.get_conversation().await;
+        let turns_before = conversation.len();
+        let reduced = xai_chat_state::compaction_utils::fit_conversation_to_budget(
+            conversation,
+            budget,
+        );
+        tracing::warn!(
+            session_id = %self.session_info.id.0,
+            context_window,
+            budget,
+            turns_before,
+            turns_after = reduced.len(),
+            "context overflow: compaction alone did not fit; deterministically \
+             shrinking the conversation instead of compacting a second time"
+        );
+        self.chat_state_handle
+            .replace_conversation_for_compaction(reduced);
+    }
     /// Drive a single turn through the sampler-based path.
     ///
     /// Calls `prepare_sampler_for_turn` first (auth refresh + config
@@ -1159,11 +1234,17 @@ impl SessionActor {
     /// * `Ok(SamplerTurnOutcome::Response(_))` - model responded.
     /// * `Ok(SamplerTurnOutcome::CompactAndResubmit)` - compaction
     ///    ran, the outer turn loop should `continue`.
+    /// * `Ok(SamplerTurnOutcome::ReduceAndResubmit)` - a second consecutive
+    ///    overflow deterministically shrank the conversation instead of
+    ///    compacting again; the outer turn loop should `continue`.
     /// * `Ok(SamplerTurnOutcome::RefreshAuthAndResubmit)` - auth 401
     ///    recovery succeeded, credentials refreshed, retry once.
     /// * `Ok(SamplerTurnOutcome::CancelledForInterjection)` - the
     ///    in-flight stream was cancelled for an asap injection; the outer
     ///    turn loop drains the interjection and `continue`s (resubmit).
+    /// * `Ok(SamplerTurnOutcome::MaxTokensTruncated)` - the response hit the
+    ///    output token cap; the outer turn loop commits the streamed partial
+    ///    and `continue`s (resubmit) instead of failing the turn.
     /// * `Err(acp::Error)` - terminal failure already reported via
     ///    `send_xai_notification(RetryState::Failed)`.
     pub(crate) async fn run_turn_via_sampler(
@@ -1190,6 +1271,13 @@ impl SessionActor {
         {
             Ok((response, metrics)) => {
                 *self.in_flight_sampler_request_id.lock() = None;
+                // A successful sample means whatever the last overflow
+                // recovery action did (compact, or deterministically shrink)
+                // was enough; a future overflow gets its own fresh compact
+                // attempt rather than inheriting this one's history.
+                self.compaction
+                    .context_overflow_recovery
+                    .set(crate::session::compaction_config::ContextOverflowRecovery::None);
                 // Clear a stale asap-injection flag: the cancel may have arrived
                 // after the stream already completed, in which case there is
                 // nothing to cancel — the interjection is drained at the next
@@ -1242,9 +1330,29 @@ impl SessionActor {
                     return Ok(SamplerTurnOutcome::CancelledForInterjection { partial });
                 }
                 let info = xai_grok_sampler::SamplingErrorInfo::from(&rich_err);
+                // The transport retry loop refuses to resend an identical
+                // truncated request (it would truncate again), so this
+                // reaches here as a fatal `MaxTokensTruncation` rather than a
+                // normal `Completed` response. Preserve the streamed text the
+                // same way an asap-injection cancel does and resubmit with a
+                // continue reminder instead of failing the turn.
+                if matches!(
+                    info.kind,
+                    xai_grok_sampler::SamplingErrorKind::MaxTokensTruncation
+                ) {
+                    let partial = self.partial_assistant_from_capture().await;
+                    tracing::info!(
+                        has_partial = partial.is_some(),
+                        "response truncated at the output token cap; resubmitting"
+                    );
+                    return Ok(SamplerTurnOutcome::MaxTokensTruncated { partial });
+                }
                 match self.handle_sampling_failure(info).await? {
                     SamplerFailureRecovery::CompactAndResubmit => {
                         Ok(SamplerTurnOutcome::CompactAndResubmit)
+                    }
+                    SamplerFailureRecovery::ReduceAndResubmit => {
+                        Ok(SamplerTurnOutcome::ReduceAndResubmit)
                     }
                     SamplerFailureRecovery::RefreshAuthAndResubmit { credential, store } => {
                         Ok(SamplerTurnOutcome::RefreshAuthAndResubmit { credential, store })
@@ -1501,10 +1609,9 @@ impl SessionActor {
     }
 
     /// Build a partial assistant `ConversationItem` from the text the model
-    /// had already streamed before an asap-injection cancel, so the
-    /// resubmitted request sees `partial assistant turn + user interjection`
-    /// and the conversation stays consistent (no silent loss of streamed
-    /// text). Returns `None` when the model streamed nothing yet (clean
+    /// had already streamed, so a resubmit after an asap-injection cancel or
+    /// a max-tokens truncation sees the streamed text instead of silently
+    /// losing it. Returns `None` when the model streamed nothing yet (clean
     /// resubmit, nothing to preserve).
     ///
     /// Only the text channel is preserved: a tool call the model was still

@@ -1135,6 +1135,7 @@ pub(super) fn handle_session_notification(notif: &acp::ExtNotification, app: &mu
             agent.dismiss_resolved_interaction(&tool_call_id)
         }
         XaiSessionUpdate::ResponseCompleted {
+            usage,
             cost_usd_ticks,
             session_cost_usd_ticks,
             ..
@@ -1151,6 +1152,10 @@ pub(super) fn handle_session_notification(notif: &acp::ExtNotification, app: &mu
                 cost_usd_ticks,
                 meta.is_replay,
             );
+            let cache_hit_set = agent
+                .session
+                .tracker
+                .set_response_cache_hit(&mut agent.scrollback, usage.as_ref());
             // A REPLAYED total belongs to the run that wrote it. The agent's
             // ledger is in-memory and starts fresh on reload, so adopting the
             // old run's total would make the indicator jump BACKWARD at the
@@ -1161,7 +1166,7 @@ pub(super) fn handle_session_notification(notif: &acp::ExtNotification, app: &mu
                     .session
                     .tracker
                     .set_reported_session_cost(session_cost_usd_ticks);
-            priced || total_changed
+            priced || cache_hit_set || total_changed
         }
         _ => {
             tracing::trace!(
@@ -1252,6 +1257,7 @@ pub(super) fn handle_child_session_notification(
             changed
         }
         XaiSessionUpdate::ResponseCompleted {
+            usage,
             cost_usd_ticks,
             session_cost_usd_ticks,
             ..
@@ -1270,12 +1276,16 @@ pub(super) fn handle_child_session_notification(
                 cost_usd_ticks,
                 is_replay,
             );
+            let cache_hit_set = child_view
+                .session
+                .tracker
+                .set_response_cache_hit(&mut child_view.scrollback, usage.as_ref());
             let total_changed = !is_replay
                 && child_view
                     .session
                     .tracker
                     .set_reported_session_cost(session_cost_usd_ticks);
-            priced || total_changed
+            priced || cache_hit_set || total_changed
         }
         ref update @ (XaiSessionUpdate::MemoryFlushCompleted { .. }
         | XaiSessionUpdate::MemoryDreamCompleted { .. }

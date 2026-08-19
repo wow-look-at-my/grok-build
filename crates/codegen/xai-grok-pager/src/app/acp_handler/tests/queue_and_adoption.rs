@@ -2625,3 +2625,52 @@
             "a row draining to running keeps its painted block for the adoption"
         );
     }
+
+    /// The local queue's rescue onto the shell's queue used to run only from
+    /// a fresh `Action::SendPrompt`, so a row stuck locally before a
+    /// never-idle turn (a goal) had no rescue until the user typed something
+    /// new. `handle` now runs the same rescue after every inbound message, so
+    /// an ordinary session/update carries the row over without a new
+    /// submission.
+    #[test]
+    fn inbound_session_update_migrates_a_stuck_local_row_without_a_new_prompt() {
+        let mut app = make_app_with_agent("sess-1");
+        let id = AgentId(0);
+        {
+            let agent = app.agents.get_mut(&id).unwrap();
+            agent.session.state = AgentState::TurnRunning;
+            agent.session.enqueue_prompt("stuck".into());
+            assert_eq!(
+                agent.session.pending_prompts.len(),
+                1,
+                "precondition: the row starts in the local queue"
+            );
+        }
+
+        let (tx, _rx) = tokio::sync::oneshot::channel();
+        let request = acp::SessionNotification::new(
+            acp::SessionId::new("sess-1"),
+            acp::SessionUpdate::AgentMessageChunk(acp::ContentChunk::new(
+                acp::ContentBlock::Text(acp::TextContent::new("thinking...")),
+            )),
+        );
+        handle(
+            AcpClientMessage::SessionNotification(xai_acp_lib::AcpArgs {
+                request,
+                response_tx: tx,
+            }),
+            &mut app,
+        );
+
+        assert!(
+            app.pending_effects
+                .iter()
+                .any(|e| matches!(e, Effect::SendPrompt { text, .. } if text == "stuck")),
+            "the stuck row must reach the shell without a new user submission: {:?}",
+            app.pending_effects
+        );
+        assert!(
+            app.agents[&id].session.pending_prompts.is_empty(),
+            "the local queue is empty once the row is rescued"
+        );
+    }

@@ -1054,6 +1054,50 @@ impl AcpUpdateTracker {
         self.replayed_cost_seen |= is_replay;
         true
     }
+    /// Attach one model call's prompt cache-read hit rate to the message
+    /// block that call produced, from the same `ResponseCompleted` that
+    /// closes it — see [`Self::set_response_cost`]'s doc comment for why
+    /// per-response attribution (not a turn total) is what puts a rate
+    /// beside every message instead of only the turn's last one.
+    ///
+    /// The rate is `cache_read_input_tokens / (input_tokens +
+    /// cache_read_input_tokens + cache_creation_input_tokens)`, rounded to
+    /// the nearest percent. `false` when the response reported no usage, or
+    /// its total prompt tokens were zero — a response with nothing to cache
+    /// has no rate to report, not a `0%`.
+    pub fn set_response_cache_hit(
+        &mut self,
+        scrollback: &mut ScrollbackState,
+        usage: Option<&xai_grok_shell::extensions::notification::ResponseUsage>,
+    ) -> bool {
+        let Some(usage) = usage else {
+            return false;
+        };
+        let total = usage
+            .input_tokens
+            .saturating_add(usage.cache_read_input_tokens)
+            .saturating_add(usage.cache_creation_input_tokens);
+        if total == 0 {
+            return false;
+        }
+        let percent = usage
+            .cache_read_input_tokens
+            .saturating_mul(100)
+            .saturating_add(total / 2)
+            / total;
+        let percent = percent.min(100) as u8;
+        let Some(entry) = self
+            .current_agent_msg
+            .and_then(|id| scrollback.get_by_id_mut(id))
+        else {
+            return false;
+        };
+        if entry.cache_hit_percent.is_some() {
+            return false;
+        }
+        entry.cache_hit_percent = Some(percent);
+        true
+    }
     /// Whether summing the scrollback's per-message costs would measure THIS
     /// run's spend. False once a reload has replayed a priced message: those
     /// costs belong to an earlier run, and the agent's ledger (which the

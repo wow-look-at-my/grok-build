@@ -43,6 +43,7 @@ pub fn response_to_conversation_items(response: rs::Response) -> Vec<Conversatio
                     id: Arc::<str>::from(fc.call_id),
                     name: fc.name,
                     arguments: Arc::<str>::from(fc.arguments),
+                    vendor: Default::default(),
                 });
             }
             rs::OutputItem::Reasoning(r) => {

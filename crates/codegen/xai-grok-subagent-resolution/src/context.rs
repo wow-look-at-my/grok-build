@@ -400,6 +400,7 @@ mod tests {
                     id: format!("tc-{name}").into(),
                     name: name.to_string(),
                     arguments: "{}".into(),
+                    vendor: Default::default(),
                 })
                 .collect();
         }
@@ -675,6 +676,7 @@ mod tests {
                 id: "tc-1".into(),
                 name: "read_file".to_string(),
                 arguments: long_args.clone().into(),
+                vendor: Default::default(),
             }];
         }
         let items = vec![system_item("System"), user_item("Go"), item];

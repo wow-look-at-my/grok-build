@@ -194,6 +194,11 @@ pub enum Action {
         text: String,
         /// Pasted images riding along with the prompt.
         images: Vec<crate::prompt_images::PastedImage>,
+        /// A queue row's expanded skill payload (differs from `text`, its
+        /// display form). `Some` sends this verbatim instead of deriving
+        /// blocks from `text` — losing it would send the display text in
+        /// place of the skill's real wire payload.
+        wire_blocks: Option<Vec<acp::ContentBlock>>,
     },
     /// Enable session voice mode and start recording (the Ctrl+Space
     /// hold-to-talk key-press, on terminals that report key releases).
