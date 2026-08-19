@@ -23,7 +23,13 @@ pub(crate) const WORKFLOW_MAX_AGENT_RUNS: u32 =
 pub(crate) const DEFAULT_WORKFLOW_MAX_CONCURRENT_AGENTS: usize = 32;
 
 /// The configured cap clamped to the machine's parallelism, so small hosts
-/// run fewer agents at once.
+/// run fewer agents at once. This is the session's OVERALL workflow-agent
+/// concurrency: `WorkflowManager` sizes one shared semaphore from it and
+/// every active run in the session draws its slots from that same pool, so
+/// several concurrent runs never push total live agents past this cap. An
+/// operator in an environment where too many concurrent requests trip a hard
+/// rate limit sets this (or `GROK_WORKFLOW_MAX_CONCURRENT_AGENTS`) low enough
+/// to stay under it.
 pub(crate) fn workflow_max_concurrent_agents(configured: usize) -> usize {
     workflow_max_concurrent_agents_from(
         configured,
@@ -73,8 +79,14 @@ pub(crate) struct WorkflowAgentStats {
 
 pub(crate) struct WorkflowHostParams {
     pub run_id: String,
-    /// Agents this run keeps live at once; wider fan-outs queue in order.
+    /// The configured cap, kept for logging/telemetry; the actual limit is
+    /// enforced by `agent_slots`, which this run's cap was sized into.
     pub max_concurrent_agents: usize,
+    /// Slots shared by every active run in the session (owned by
+    /// `WorkflowManager`), so wider fan-outs queue in order across runs too —
+    /// not just within one. This is what caps a workflow's OVERALL
+    /// concurrency, as opposed to any single run's.
+    pub agent_slots: Arc<tokio::sync::Semaphore>,
     pub cwd: PathBuf,
     pub scratch_dir: PathBuf,
     pub tracker: Arc<parking_lot::Mutex<WorkflowTracker>>,
@@ -111,7 +123,7 @@ pub(crate) fn spawn_workflow_host_service(
             agent_runs: AtomicU32::new(0),
             script_telemetry_events: AtomicU32::new(0),
             scratch_io: tokio::sync::Mutex::new(()),
-            agent_slots: tokio::sync::Semaphore::new(params.max_concurrent_agents.max(1)),
+            agent_slots: params.agent_slots.clone(),
             params,
         });
         loop {
@@ -162,7 +174,7 @@ struct HostService {
     agent_runs: AtomicU32,
     script_telemetry_events: AtomicU32,
     scratch_io: tokio::sync::Mutex<()>,
-    agent_slots: tokio::sync::Semaphore,
+    agent_slots: Arc<tokio::sync::Semaphore>,
     params: WorkflowHostParams,
 }
 
@@ -974,6 +986,29 @@ mod tests {
             xai_grok_tools::implementations::grok_build::task::types::SubagentEvent,
         >,
     ) -> (WorkflowHostParams, mpsc::UnboundedReceiver<PersistenceMsg>) {
+        test_host_params_with_slots(
+            run_id,
+            max_concurrent_agents,
+            Arc::new(tokio::sync::Semaphore::new(max_concurrent_agents.max(1))),
+            scratch_suffix,
+            tracker,
+            subagent_event_tx,
+        )
+    }
+
+    /// Like [`test_host_params`], but the caller supplies the agent-slot
+    /// semaphore, so two calls can share one pool the way two runs launched
+    /// from the same `WorkflowManager` do.
+    fn test_host_params_with_slots(
+        run_id: &str,
+        max_concurrent_agents: usize,
+        agent_slots: Arc<tokio::sync::Semaphore>,
+        scratch_suffix: &str,
+        tracker: Arc<parking_lot::Mutex<WorkflowTracker>>,
+        subagent_event_tx: mpsc::UnboundedSender<
+            xai_grok_tools::implementations::grok_build::task::types::SubagentEvent,
+        >,
+    ) -> (WorkflowHostParams, mpsc::UnboundedReceiver<PersistenceMsg>) {
         let (persist_tx, persist_rx) = mpsc::unbounded_channel::<PersistenceMsg>();
         let store = WorkflowRunStore::new(None, persist_tx.clone());
         let (gateway_tx, _gateway_rx) = mpsc::unbounded_channel();
@@ -987,6 +1022,7 @@ mod tests {
             WorkflowHostParams {
                 run_id: run_id.to_owned(),
                 max_concurrent_agents,
+                agent_slots,
                 cwd: std::env::temp_dir(),
                 scratch_dir: std::env::temp_dir().join(scratch_suffix),
                 tracker,
@@ -1223,5 +1259,126 @@ mod tests {
         drop(host_tx);
         cancel.cancel();
         let _ = tokio::time::timeout(Duration::from_secs(2), handle).await;
+    }
+
+    /// Two runs launched from the same `WorkflowManager` share its
+    /// `agent_slots` semaphore. This proves the cap is enforced OVERALL,
+    /// across both runs at once, not just within each run separately.
+    #[tokio::test]
+    async fn two_runs_share_the_session_wide_agent_slots() {
+        const CAP: usize = 1;
+        let shared_slots = Arc::new(tokio::sync::Semaphore::new(CAP));
+
+        let mut tracker = WorkflowTracker::default();
+        for run_id in ["wf_shared_a", "wf_shared_b"] {
+            tracker.start_run(
+                run_id.to_string(),
+                "demo".into(),
+                "objective".into(),
+                vec![],
+                Some(1000),
+                None,
+            );
+        }
+        let tracker = Arc::new(parking_lot::Mutex::new(tracker));
+        let (subagent_tx, mut subagent_rx) = mpsc::unbounded_channel();
+
+        let (params_a, _persist_rx_a) = test_host_params_with_slots(
+            "wf_shared_a",
+            CAP,
+            shared_slots.clone(),
+            "wf-scratch-shared-a",
+            tracker.clone(),
+            subagent_tx.clone(),
+        );
+        let (params_b, _persist_rx_b) = test_host_params_with_slots(
+            "wf_shared_b",
+            CAP,
+            shared_slots,
+            "wf-scratch-shared-b",
+            tracker,
+            subagent_tx,
+        );
+        let cancel_a = params_a.cancel.clone();
+        let cancel_b = params_b.cancel.clone();
+
+        let (host_tx_a, host_rx_a) = mpsc::unbounded_channel();
+        let (handle_a, _drained_a) = spawn_workflow_host_service(params_a, host_rx_a);
+        let (host_tx_b, host_rx_b) = mpsc::unbounded_channel();
+        let (handle_b, _drained_b) = spawn_workflow_host_service(params_b, host_rx_b);
+
+        let spawn_agent = |host_tx: &mpsc::UnboundedSender<WorkflowHostRequest>, prompt: &str| {
+            let (reply_tx, reply_rx) = oneshot::channel();
+            host_tx
+                .send(WorkflowHostRequest::SpawnAgent {
+                    opts: AgentOpts {
+                        prompt: prompt.to_owned(),
+                        ..Default::default()
+                    },
+                    reply: reply_tx,
+                })
+                .unwrap();
+            reply_rx
+        };
+        let succeed = |spawn: xai_grok_tools::implementations::grok_build::task::types::SubagentSpawnRequest| {
+            spawn
+                .respond_with(|request| {
+                    xai_grok_tools::implementations::grok_build::task::types::SubagentResult {
+                        success: true,
+                        output: Arc::from("done"),
+                        subagent_id: request.id.clone(),
+                        child_session_id: request.id.clone(),
+                        ..Default::default()
+                    }
+                })
+                .expect("agent result delivered");
+        };
+
+        let first = spawn_agent(&host_tx_a, "run-a agent");
+        let second = spawn_agent(&host_tx_b, "run-b agent");
+
+        let running = tokio::time::timeout(Duration::from_secs(5), subagent_rx.recv())
+            .await
+            .expect("one agent reaches the coordinator")
+            .expect("subagent channel open");
+        let SubagentEvent::Spawn(running) = running else {
+            panic!("expected a spawn event");
+        };
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), subagent_rx.recv())
+                .await
+                .is_err(),
+            "a second run must not spawn while the session-wide slot is held by the first"
+        );
+
+        succeed(running);
+        let queued = tokio::time::timeout(Duration::from_secs(5), subagent_rx.recv())
+            .await
+            .expect("the other run's agent starts once the shared slot frees")
+            .expect("subagent channel open");
+        let SubagentEvent::Spawn(queued) = queued else {
+            panic!("expected a spawn event");
+        };
+        succeed(queued);
+
+        assert!(
+            first.await.expect("first reply").expect("first result").success,
+            "run-a agent completes"
+        );
+        assert!(
+            second
+                .await
+                .expect("second reply")
+                .expect("second result")
+                .success,
+            "run-b agent completes"
+        );
+
+        drop(host_tx_a);
+        drop(host_tx_b);
+        cancel_a.cancel();
+        cancel_b.cancel();
+        let _ = tokio::time::timeout(Duration::from_secs(2), handle_a).await;
+        let _ = tokio::time::timeout(Duration::from_secs(2), handle_b).await;
     }
 }
