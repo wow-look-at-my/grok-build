@@ -140,9 +140,7 @@ pub enum ContentBlock {
     /// `data` blob (never plaintext). Added so a stream that includes one
     /// deserializes instead of failing the whole event parse; behavior-preserving
     /// for producers (never constructed by request-building or the sampler).
-    RedactedThinking {
-        data: String,
-    },
+    RedactedThinking { data: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -572,11 +570,7 @@ mod tests {
                 panic!("expected MessageDelta for {field}");
             };
             assert_eq!(usage.cost_in_usd_ticks, ticks, "{field}");
-            assert_eq!(
-                usage.cost.map(|c| c.as_usd_float()),
-                cost,
-                "{field}"
-            );
+            assert_eq!(usage.cost.map(|c| c.as_usd_float()), cost, "{field}");
 
             let start: MessageStreamEvent = serde_json::from_str(&format!(
                 r#"{{"type":"message_start","message":{{"id":"msg_1","type":"message","role":"assistant","content":[],"model":"m","usage":{{"input_tokens":10,"output_tokens":0,{field}}}}}}}"#

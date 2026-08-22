@@ -169,7 +169,14 @@ pub(crate) fn migrate_local_rows_to_server_queue(app: &mut AppView) -> Vec<Effec
             // turn these deltas belong to.
             agent.note_self_originated_prompt(&prompt_id);
         }
-        push_server_queue_echo(app, session_agent_id, &sid_str, &prompt_id, &row.text, "prompt");
+        push_server_queue_echo(
+            app,
+            session_agent_id,
+            &sid_str,
+            &prompt_id,
+            &row.text,
+            "prompt",
+        );
         crate::unified_log::info(
             "prompt.migrated_to_server_queue",
             Some(&sid_str),

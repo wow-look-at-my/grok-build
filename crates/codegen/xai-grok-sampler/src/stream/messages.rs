@@ -57,9 +57,8 @@ fn wire_cost_ticks(
     ticks: Option<i64>,
     cost: Option<&xai_grok_sampling_types::UsageCost>,
 ) -> Option<i64> {
-    xai_grok_sampling_types::reported_cost_ticks(ticks).or_else(|| {
-        xai_grok_sampling_types::usd_float_to_ticks(cost.map(|c| c.as_usd_float()))
-    })
+    xai_grok_sampling_types::reported_cost_ticks(ticks)
+        .or_else(|| xai_grok_sampling_types::usd_float_to_ticks(cost.map(|c| c.as_usd_float())))
 }
 
 /// Per-block streaming accumulator. The Anthropic Messages API reports

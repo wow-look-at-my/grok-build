@@ -2112,12 +2112,18 @@ fn dispatch_cycle_mode_ring_carries_yolo_then_clears_it_on_close() {
     // Always-Approve → Orchestrator
     let _ = dispatch(Action::CycleMode, &mut app);
     assert_eq!(app.agents[&AgentId(0)].shift_tab_ring_agent_index, Some(0));
-    assert!(app.agents[&AgentId(0)].session.is_yolo(), "Orchestrator keeps yolo");
+    assert!(
+        app.agents[&AgentId(0)].session.is_yolo(),
+        "Orchestrator keeps yolo"
+    );
 
     // Orchestrator → Explore
     let _ = dispatch(Action::CycleMode, &mut app);
     assert_eq!(app.agents[&AgentId(0)].shift_tab_ring_agent_index, Some(1));
-    assert!(app.agents[&AgentId(0)].session.is_yolo(), "Explore keeps yolo");
+    assert!(
+        app.agents[&AgentId(0)].session.is_yolo(),
+        "Explore keeps yolo"
+    );
 
     // Explore → Plan, closing the ring and restoring the base agent.
     let effects = dispatch(Action::CycleMode, &mut app);
@@ -2136,7 +2142,10 @@ fn dispatch_cycle_mode_ring_carries_yolo_then_clears_it_on_close() {
     assert!(
         effects.iter().any(|e| matches!(
             e,
-            Effect::PersistPermissionMode { canonical: "ask", .. }
+            Effect::PersistPermissionMode {
+                canonical: "ask",
+                ..
+            }
         )),
         "closing the ring must persist the dropped yolo, got {effects:?}"
     );

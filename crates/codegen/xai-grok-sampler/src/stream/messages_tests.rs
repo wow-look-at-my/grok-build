@@ -268,7 +268,10 @@ async fn reasoning_roundtrip_without_signature_survives_to_next_messages_request
     assert!(
         matches!(
             items.as_slice(),
-            [ConversationItem::Reasoning(_), ConversationItem::Assistant(_)]
+            [
+                ConversationItem::Reasoning(_),
+                ConversationItem::Assistant(_)
+            ]
         ),
         "expected [Reasoning, Assistant] from stream, got {:?}",
         items
@@ -822,10 +825,7 @@ async fn pure_cache_hit_with_zero_uncached_still_emits_usage() {
 
 /// A terminal `message_delta` that also settles the price of the call, the
 /// way a gateway speaking this protocol reports it.
-fn message_delta_with_cost(
-    ticks: Option<i64>,
-    cost: Option<f64>,
-) -> MessageStreamEvent {
+fn message_delta_with_cost(ticks: Option<i64>, cost: Option<f64>) -> MessageStreamEvent {
     MessageStreamEvent::MessageDelta {
         delta: MessageDeltaBody {
             stop_reason: Some(messages::StopReason::EndTurn),

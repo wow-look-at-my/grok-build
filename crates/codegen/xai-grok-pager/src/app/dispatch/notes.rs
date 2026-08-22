@@ -2,11 +2,11 @@
 
 use super::ctx::with_active_agent;
 use crate::app::actions::Effect;
-use crate::app::agent::AgentId;
+use crate::app::agent::{AgentId, BgTaskState, BgTaskStatus};
 use crate::app::agent_view::{AgentView, PromptInputMode};
 use crate::app::app_view::{ActiveView, AppView};
 use crate::scrollback::block::RenderBlock;
-use crate::scrollback::blocks::{SessionEvent, ToolCallBlock};
+use crate::scrollback::blocks::{OtherToolCallBlock, SessionEvent, ToolCallBlock};
 use crate::views::question_view::{LocalQuestionKind, QuestionViewState};
 use std::sync::atomic::{AtomicU64, Ordering};
 use xai_grok_tools::implementations::grok_build::ask_user_question::Question;
@@ -395,10 +395,69 @@ pub(super) fn dispatch_send_btw(app: &mut AppView, question: String) -> Vec<Effe
     }]
 }
 
+/// Prefix for the synthetic tasks-pane row that tracks an in-flight `/todo`
+/// capture. Kill requests for these ids are local-only (there is no shell
+/// bg-task to cancel); completion always removes the row.
+const TODO_CAPTURE_TASK_PREFIX: &str = "todo-capture:";
+
+fn begin_todo_capture_ui(agent: &mut AgentView, request: &str) {
+    if let Some(old_id) = agent.pending_todo_task_id.take() {
+        agent.session.bg_tasks.remove(&old_id);
+    }
+    // Same chrome as a running tool: name `/todo`, summary is the request.
+    // A system one-liner is easy to miss at the bottom of the transcript;
+    // a running tool stays in the live turn the way other in-flight work does.
+    let entry_id = agent
+        .scrollback
+        .push(crate::scrollback::entry::ScrollbackEntry::running(
+            RenderBlock::ToolCall(ToolCallBlock::Other(OtherToolCallBlock::new(
+                "/todo", request,
+            ))),
+        ));
+    agent.pending_todo_entry = Some(entry_id);
+    // Tasks pane sits at the top of the agent view and auto-opens on a new
+    // live running task — that is the "in-flight at the top" surface.
+    let task_id = format!("{TODO_CAPTURE_TASK_PREFIX}{}", uuid::Uuid::new_v4());
+    agent.session.bg_tasks.insert(
+        task_id.clone(),
+        BgTaskState {
+            task_id: task_id.clone(),
+            tool_call_id: String::new(),
+            command: format!("/todo {request}"),
+            description: Some(format!("/todo {request}")),
+            cwd: String::new(),
+            output_file: String::new(),
+            status: BgTaskStatus::Running,
+            start_time: std::time::SystemTime::now(),
+            end_time: None,
+            exit_code: None,
+            signal: None,
+            stdout: String::new(),
+            stdout_line_count: 0,
+            truncated: false,
+            pending_kill: false,
+            kill_requested_at: None,
+            scrollback_entry_id: Some(entry_id),
+            is_monitor: false,
+            restored_from_replay: false,
+        },
+    );
+    agent.pending_todo_task_id = Some(task_id);
+}
+
+fn finish_todo_capture_ui(agent: &mut AgentView) {
+    if let Some(entry_id) = agent.pending_todo_entry.take() {
+        agent.scrollback.remove_entry(entry_id);
+    }
+    if let Some(task_id) = agent.pending_todo_task_id.take() {
+        agent.session.bg_tasks.remove(&task_id);
+    }
+}
+
 /// Send a `/todo` capture. Bypasses the prompt queue — works even while the
-/// agent is mid-turn. Fires an ACP ext method and leaves a running block in the
-/// transcript, which [`handle_todo_captured`] replaces with what landed on the
-/// list.
+/// agent is mid-turn. Fires an ACP ext method and leaves a running tool in the
+/// transcript plus a tasks-pane row, which [`handle_todo_captured`] replaces
+/// with what landed on the list.
 pub(super) fn dispatch_send_todo(app: &mut AppView, request: String) -> Vec<Effect> {
     let ActiveView::Agent(id) = app.active_view else {
         return vec![];
@@ -422,12 +481,7 @@ pub(super) fn dispatch_send_todo(app: &mut AppView, request: String) -> Vec<Effe
         // Repeated `/todo`s are independent captures, so each gets its own
         // block; only the newest id is tracked, and an older spinner is stopped
         // by whichever response lands.
-        let entry_id = agent
-            .scrollback
-            .push(crate::scrollback::entry::ScrollbackEntry::running(
-                RenderBlock::system(format!("Capturing todo: {request}")),
-            ));
-        agent.pending_todo_entry = Some(entry_id);
+        begin_todo_capture_ui(agent, &request);
         session_id
     };
 
@@ -450,9 +504,7 @@ pub(super) fn handle_todo_captured(
     let Some(agent) = app.agents.get_mut(&agent_id) else {
         return vec![];
     };
-    if let Some(entry_id) = agent.pending_todo_entry.take() {
-        agent.scrollback.remove_entry(entry_id);
-    }
+    finish_todo_capture_ui(agent);
     let block = match result {
         Ok(added) => {
             let mut text = format!(
