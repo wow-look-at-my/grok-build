@@ -23,6 +23,7 @@ use crate::implementations::grok_build::image_edit::ImageEditInput;
 use crate::implementations::grok_build::image_gen::ImageGenInput;
 use crate::implementations::grok_build::list_dir::ListDirInput;
 use crate::implementations::grok_build::read_file::ReadFileInput;
+use crate::implementations::grok_build::copy_move::CopyMoveInput;
 use crate::implementations::grok_build::search_replace::SearchReplaceInput;
 use crate::implementations::grok_build::todo::TodoWriteInput;
 use crate::implementations::grok_build::update_goal::UpdateGoalInput;
@@ -60,6 +61,7 @@ pub struct MCPToolInput {
 pub enum ToolInput {
     ReadFile(ReadFileInput),
     SearchReplace(SearchReplaceInput),
+    CopyMove(CopyMoveInput),
     Bash(BashToolInput),
     Grep(GrepSearchInput),
     ListDir(ListDirInput),

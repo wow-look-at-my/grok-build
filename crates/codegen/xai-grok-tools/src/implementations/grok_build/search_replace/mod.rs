@@ -62,7 +62,8 @@ ${% if tools.by_kind.read -%}
 - `${{ tools.by_kind.read }}` prefixes each line with "LINE_NUMBER→". That prefix is not part of the file: match only what comes after the →, with its exact indentation.
 ${% endif -%}
 - `${{ params.edit.old_string }}` must match exactly one place in the file. If it appears more than once, add surrounding lines to make it unique, or set `${{ params.edit.replace_all }}` to change every occurrence (handy for renaming an identifier).
-- To create a new file, set `${{ params.edit.old_string }}` to an empty string. An empty `${{ params.edit.old_string }}` cannot overwrite an existing non-empty file."#;
+- To create a new file, set `${{ params.edit.old_string }}` to an empty string. An empty `${{ params.edit.old_string }}` cannot overwrite an existing non-empty file.
+- Do not use this tool to duplicate or relocate an existing file. Relocating code is `cp`/`git mv` (or the copy_file/move_file tools) plus a minimal edit — never rewriting the destination from the source."#;
 /// The overwrite-guard sentence in [`DESCRIPTION_FULL`]. Only accurate while
 /// `empty_old_string_does_not_override` is enabled (opt-in; the default is the
 /// legacy overwrite behavior); `versioned_definition` strips it unless a
@@ -312,6 +313,13 @@ async fn handle_new_file_creation(
         Ok(bytes) => Some(String::from_utf8_lossy(&bytes).to_string()),
         Err(_) => None,
     };
+    if let Some(msg) = crate::implementations::editor_infra::reject_duplicate_write(
+        cwd,
+        path,
+        input.new_string.as_bytes(),
+    ) {
+        return Ok(SearchReplaceOutput::InvalidInput(msg));
+    }
     if file_exists && empty_old_string_does_not_override {
         let old_string_name;
         {
@@ -946,6 +954,7 @@ mod tests {
     #[test]
     fn overwrite_guard_sentence_stays_in_sync_with_template() {
         assert!(DESCRIPTION_FULL.contains(EMPTY_OLD_STRING_GUARD_SENTENCE));
+        assert!(DESCRIPTION_FULL.contains("Do not use this tool to duplicate or relocate"));
     }
     #[test]
     fn overwrite_guard_sentence_is_conditional_on_param() {
@@ -971,6 +980,10 @@ mod tests {
         assert!(
             default_desc.contains("To create a new file"),
             "create-file guidance must remain:\n{default_desc}"
+        );
+        assert!(
+            default_desc.contains("Do not use this tool to duplicate or relocate"),
+            "relocate ban must be in the served description:\n{default_desc}"
         );
         let opt_in_def = ToolMetadata::versioned_definition(
             &SearchReplaceTool,

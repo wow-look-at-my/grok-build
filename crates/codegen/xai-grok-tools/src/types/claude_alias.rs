@@ -47,6 +47,7 @@ const CLAUDE_TOOLS: &[ClaudeTool] = &[
     k("Read",            Read,                 &["read_file", "hashline_read"]),
     k("Write",           Write,                &["write", "search_replace", "hashline_edit"]), // search_replace kept for back-compat
     k("Edit",            Edit,                 &["search_replace", "hashline_edit"]),
+    k("Move",            Move,                 &["move_file", "copy_file"]),
     k("MultiEdit",       Edit,                 &["search_replace", "hashline_edit"]), // legacy, superseded by Edit
     k("NotebookEdit",    Edit,                 &["search_replace", "hashline_edit"]),
     k("Bash",            Execute,              &["run_terminal_command"]),

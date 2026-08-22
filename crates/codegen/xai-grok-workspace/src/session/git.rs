@@ -2766,6 +2766,44 @@ async fn ensure_on_branch(git_root: &Path, expected: Option<&str>) -> Result<()>
     );
     Ok(())
 }
+/// Files currently deleted vs HEAD that were added in the HEAD commit.
+/// Amending those deletions would drop the files from history entirely.
+async fn files_amend_would_drop(git_root: &Path) -> Result<Vec<String>> {
+    // `git diff` exits 1 when differences exist; use raw so we still read names.
+    let (_ok, deleted) = git_cli_raw(
+        git_root,
+        &["diff", "HEAD", "--name-only", "--diff-filter=D"],
+    )
+    .await
+    .unwrap_or_else(|_| (false, String::new()));
+    if deleted.is_empty() {
+        return Ok(Vec::new());
+    }
+    let added = git_cli(
+        git_root,
+        &[
+            "diff-tree",
+            "--root",
+            "--no-commit-id",
+            "--name-only",
+            "--diff-filter=A",
+            "-r",
+            "HEAD",
+        ],
+    )
+    .await
+    .unwrap_or_else(|_| String::new());
+    let added: HashSet<&str> = added
+        .lines()
+        .filter(|l| !l.is_empty())
+        .collect();
+    Ok(deleted
+        .lines()
+        .filter(|l| !l.is_empty() && added.contains(l))
+        .map(str::to_owned)
+        .collect())
+}
+
 pub async fn commit(git_root: &Path, req: &GitCommitReq) -> Result<CommitResult> {
     let start = std::time::Instant::now();
     ensure_on_branch(git_root, req.expected_branch.as_deref()).await?;
@@ -2774,6 +2812,16 @@ pub async fn commit(git_root: &Path, req: &GitCommitReq) -> Result<CommitResult>
     }
     if req.stage_all {
         git_cli_mut(git_root, &["add", "-A"]).await?;
+    }
+    if req.amend {
+        let hidden = files_amend_would_drop(git_root).await?;
+        anyhow::ensure!(
+            hidden.is_empty(),
+            "Refusing git commit --amend: it would drop just-committed file(s) {} from history after a deletion. \
+             Leave the commit that added them, then `git rm` in a NEW commit. Do not amend, reset --hard, \
+             filter-branch, or force-push to hide a deletion.",
+            hidden.join(", ")
+        );
     }
     let clean = req.stage_all
         && !req.amend
@@ -5799,5 +5847,40 @@ mod restore_code_tests {
             .await
             .expect_err("dirty tree refused");
         assert!(err.to_string().contains("not clean"), "{err}");
+    }
+
+    #[tokio::test]
+    #[cfg_attr(
+        not(unix),
+        ignore = "test invokes git CLI which is not always available"
+    )]
+    async fn amend_after_git_rm_of_just_committed_file_is_refused() {
+        if skip_without_git_cli() {
+            return;
+        }
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        git_cli(root, &["init"]).await.unwrap();
+        git_cli(root, &["config", "user.email", "t@e.com"])
+            .await
+            .unwrap();
+        git_cli(root, &["config", "user.name", "t"]).await.unwrap();
+        std::fs::write(root.join("hide.rs"), "fn hide() {}\n").unwrap();
+        git_cli(root, &["add", "hide.rs"]).await.unwrap();
+        git_cli(root, &["commit", "-m", "add hide"]).await.unwrap();
+        git_cli(root, &["rm", "hide.rs"]).await.unwrap();
+        let err = commit(
+            root,
+            &GitCommitReq {
+                message: "nope".into(),
+                amend: true,
+                ..Default::default()
+            },
+        )
+        .await
+        .expect_err("amend that hides a just-committed file must fail");
+        let msg = err.to_string();
+        assert!(msg.contains("hide.rs"), "{msg}");
+        assert!(msg.contains("amend") || msg.contains("NEW commit"), "{msg}");
     }
 }

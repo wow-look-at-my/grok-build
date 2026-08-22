@@ -46,6 +46,7 @@ Operations (use the "op" field):
 
   "write" — Replace entire file content (no anchors needed).
     { "op": "write", "content": "full file content here" }
+    Do not use "write" to duplicate or relocate an existing file. Use git mv/cp (or copy_file/move_file) then a minimal edit.
 
 Batch edits: pass multiple operations in "${{ params.edit.edits }}". They are validated against the
 pre-edit snapshot and applied atomically bottom-up — if any anchor fails
@@ -331,6 +332,17 @@ impl xai_tool_runtime::Tool for HashlineEditTool {
                     if input.edits.len() == 1
                         && let HashlineOp::Write { ref content } = input.edits[0]
                     {
+                        if let Some(msg) =
+                            crate::implementations::editor_infra::reject_duplicate_write(
+                                &cwd,
+                                &joined_path,
+                                content.as_bytes(),
+                            )
+                        {
+                            return Ok(crate::types::output::SearchReplaceOutput::InvalidInput(
+                                msg,
+                            ));
+                        }
                         if let Err(e) = fs.write_file(&joined_path, content.as_bytes()).await {
                             let display_path = display_dcwd.join(&input.file_path);
                             return Ok(match e.io_error_kind() {
@@ -400,8 +412,19 @@ impl xai_tool_runtime::Tool for HashlineEditTool {
 
         let apply_result = apply::apply_edits(&old_content, &input.edits, &path, &*scheme);
 
-        if let Some(ref new_content) = apply_result.new_content
-            && let Err(e) = fs.write_file(&path, new_content.as_bytes()).await
+        if let Some(ref new_content) = apply_result.new_content {
+            let is_full_rewrite = input.edits.len() == 1
+                && matches!(input.edits[0], HashlineOp::Write { .. });
+            if is_full_rewrite
+                && let Some(msg) = crate::implementations::editor_infra::reject_duplicate_write(
+                    &cwd,
+                    &path,
+                    new_content.as_bytes(),
+                )
+            {
+                return Ok(crate::types::output::SearchReplaceOutput::InvalidInput(msg));
+            }
+            if let Err(e) = fs.write_file(&path, new_content.as_bytes()).await
         {
             let err_output = HashlineEditOutput::Error(types::HashlineEditError {
                 error: types::HashlineEditErrorKind::IoError,
@@ -421,6 +444,7 @@ impl xai_tool_runtime::Tool for HashlineEditTool {
                 None,
                 vec![],
             ));
+            }
         }
 
         let edit_details = apply_result.edit_details;
