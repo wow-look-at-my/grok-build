@@ -684,6 +684,8 @@ impl ToolRegistryBuilder {
                 grok_build::SearchReplaceTool,
                 grok_build::search_replace::SearchReplaceParams,
             >();
+        b.register::<grok_build::CopyFileTool>();
+        b.register::<grok_build::MoveFileTool>();
         b.register_with_params::<grok_build::ListDirTool, grok_build::list_dir::ListDirParams>();
         b.register_with_params::<grok_build::GrepTool, grok_build::grep::GrepParams>();
         b.register::<grok_build::KillTaskTool>();
@@ -2920,6 +2922,8 @@ mod tests {
             "GrokBuild:run_terminal_cmd",
             "GrokBuild:read_file",
             "GrokBuild:search_replace",
+            "GrokBuild:copy_file",
+            "GrokBuild:move_file",
             "GrokBuild:list_dir",
             "GrokBuild:grep",
             "GrokBuild:get_terminal_command_output",
@@ -2950,6 +2954,8 @@ mod tests {
             ("GrokBuild:run_terminal_cmd", ToolKind::Execute),
             ("GrokBuild:read_file", ToolKind::Read),
             ("GrokBuild:search_replace", ToolKind::Edit),
+            ("GrokBuild:copy_file", ToolKind::Move),
+            ("GrokBuild:move_file", ToolKind::Move),
             ("GrokBuild:grep", ToolKind::Search),
             ("GrokBuild:list_dir", ToolKind::List),
         ] {
@@ -3570,7 +3576,7 @@ mod tests {
           },
           {
             "name": "write",
-            "description": "Create or overwrite a file.\n\n- Writing to an existing path replaces the file.\n- Parent directories are created for you.",
+            "description": "Create or overwrite a file.\n\n- Writing to an existing path replaces the file.\n- Parent directories are created for you.\n- Do not use this tool to duplicate or relocate an existing file. Relocating code is `cp`/`git mv` (or the copy_file/move_file tools) plus a minimal edit — never a full rewrite of the destination. search_replace is not a relocate mechanism either.",
             "parameters": {
               "$schema": "http://json-schema.org/draft-07/schema#",
               "required": [

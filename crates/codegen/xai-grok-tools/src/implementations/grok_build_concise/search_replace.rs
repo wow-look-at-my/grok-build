@@ -7,7 +7,8 @@ const DESCRIPTION_CONCISE: &str = r#"Replace an exact string in a file.
 
 - Do not include the "LINE_NUMBER→" prefixes from file reads in ${{ params.edit.old_string }} or ${{ params.edit.new_string }}; keep the exact indentation.
 - ${{ params.edit.old_string }} must match exactly one place in the file. If it appears more than once, add surrounding lines to make it unique, or set ${{ params.edit.replace_all }} to change every occurrence (handy for renaming an identifier).
-- To create a new file, set ${{ params.edit.old_string }} to an empty string."#;
+- To create a new file, set ${{ params.edit.old_string }} to an empty string.
+- Do not use this tool to duplicate or relocate an existing file. Relocating code is `cp`/`git mv` (or copy_file/move_file) plus a minimal edit — never a full rewrite of the destination."#;
 use crate::types::output::SearchReplaceOutput;
 use crate::types::requirements::{Expr, ToolRequirement};
 use crate::types::tool::{ToolKind, ToolNamespace};

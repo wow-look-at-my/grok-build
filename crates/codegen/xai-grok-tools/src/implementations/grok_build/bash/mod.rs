@@ -46,6 +46,8 @@ use crate::types::resources::{
 use crate::types::template_renderer::TemplateRenderer;
 use crate::types::tool::{ToolKind, ToolNamespace};
 
+pub(crate) mod git_safety;
+
 #[derive(thiserror::Error, Debug)]
 pub enum BashError {
     #[error("Failed to spawn command: {0}")]
@@ -1486,7 +1488,9 @@ ${%- if shell_uses_semicolon %}
 ${%- endif %}
 ${%- if not has_unix_utilities %}
   - The Unix utilities `grep`, `head`, `tail`, `sed`, `awk`, and `find` are NOT available in this shell. Use the dedicated tools instead.
-${%- endif %}"#
+${%- endif %}
+  - Never `rm` a non-ignored file in a git repo (tracked or untracked). Commit first, then `git rm`. Do not hide a deletion with `git commit --amend` after `git rm`, `git reset --hard`, `git filter-branch`, or a force-push of rewritten history.
+  - Relocating an existing file is `git mv`/`cp` (or copy_file/move_file), never rewriting it with a write/edit tool."#
     }
 
     fn default_description_template_disabled() -> &'static str {
@@ -1501,7 +1505,8 @@ ${%- if shell_uses_semicolon %}
 ${%- endif %}
 ${%- if not has_unix_utilities %}
   - The Unix utilities `grep`, `head`, `tail`, `sed`, `awk`, and `find` are NOT available in this shell. Use the dedicated tools instead.
-${%- endif %}"#
+${%- endif %}
+  - Never `rm` a non-ignored file in a git repo (tracked or untracked). Commit first, then `git rm`. Do not hide a deletion with `git commit --amend` after `git rm`, `git reset --hard`, `git filter-branch`, or a force-push of rewritten history."#
     }
 
     fn background_operator_validation_message(
@@ -1948,6 +1953,10 @@ impl xai_tool_runtime::Tool for BashTool {
         // before the rest of the script runs. Reject obvious cases at
         // parse time. See `self_matching_pkill_pattern` for the precise
         // detection rules.
+        if let Some(msg) = git_safety::bash_command_violation(&input.command, &cwd) {
+            return Err(xai_tool_runtime::ToolError::invalid_arguments(msg));
+        }
+
         if let Some(hit) = self_matching_pkill_pattern(&input.command) {
             let SelfMatchingPkill { cmd, pattern } = hit;
             let message = format!(
@@ -4898,6 +4907,10 @@ mod tests {
             );
             // The OS-neutral contract (timeout/kill mechanics) is still present.
             assert!(out.contains("disables the wrapper timeout"));
+            assert!(
+                out.contains("Never `rm` a non-ignored file in a git repo"),
+                "git-rm policy must be in the bash description:\n{out}"
+            );
         }
 
         #[test]

@@ -166,6 +166,11 @@ pub static USER_GUIDE: &[Doc] = &[
         "Monitoring Usage (External OpenTelemetry)",
         "Export usage metrics to a customer OpenTelemetry collector"
     ),
+    guide!(
+        "25-file-and-git-safety.md",
+        "File Copy/Move and Git Deletion Safety",
+        "copy_file/move_file, no rewrite-to-relocate, commit then git rm, no history-hiding amend"
+    ),
 ];
 
 /// Non-user-guide reference docs. Separate from USER_GUIDE because they
