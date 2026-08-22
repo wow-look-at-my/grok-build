@@ -4128,20 +4128,18 @@ async fn reasoning_roundtrip_through_actor_reaches_next_messages_wire() {
         ConversationItem::system("You are a coding assistant."),
         ConversationItem::user("q1"),
     ]);
-    h.handle.push_tool_result(ConversationItem::Reasoning(
-        rs::ReasoningItem {
+    h.handle
+        .push_tool_result(ConversationItem::Reasoning(rs::ReasoningItem {
             id: String::new(),
-            summary: vec![rs::SummaryPart::SummaryText(
-                rs::SummaryTextContent {
-                    text: thinking_text.to_string(),
-                },
-            )],
+            summary: vec![rs::SummaryPart::SummaryText(rs::SummaryTextContent {
+                text: thinking_text.to_string(),
+            })],
             content: None,
             encrypted_content: None, // no signature — Anthropic-compatible third party
             status: None,
-        },
-    ));
-    h.handle.push_assistant_response(ConversationItem::assistant("The answer."));
+        }));
+    h.handle
+        .push_assistant_response(ConversationItem::assistant("The answer."));
     // Turn N+1: user asks a follow-up.
     h.handle.push_user_message(ConversationItem::user("q2"));
 

@@ -672,6 +672,12 @@ pub(super) fn dispatch_kill_bg_task(app: &mut AppView, task_id: String) -> Vec<E
         task.kill_requested_at = Some(Instant::now());
     }
 
+    // `/todo` capture rows are local UI only — there is no shell bg-task to
+    // cancel. Completing the capture removes the row.
+    if task_id.starts_with("todo-capture:") {
+        return vec![];
+    }
+
     vec![Effect::KillBgTask {
         session_id,
         task_id,

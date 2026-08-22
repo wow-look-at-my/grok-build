@@ -523,8 +523,8 @@ mod tests {
     /// assistant message.
     #[tokio::test]
     async fn reasoning_roundtrip_reaches_next_request_reasoning_content() {
-        use xai_grok_sampling_types::conversation_to_chat_messages;
         use xai_grok_sampling_types::conversation::ConversationRequest;
+        use xai_grok_sampling_types::conversation_to_chat_messages;
 
         let mut thinking_chunk = make_chunk(vec![ChatChunkDelta {
             role: Some(Role::Assistant),
@@ -557,7 +557,10 @@ mod tests {
         assert!(
             matches!(
                 response.items.as_slice(),
-                [ConversationItem::Reasoning(_), ConversationItem::Assistant(_)]
+                [
+                    ConversationItem::Reasoning(_),
+                    ConversationItem::Assistant(_)
+                ]
             ),
             "expected [Reasoning, Assistant], got {:?}",
             response.items
@@ -594,8 +597,8 @@ mod tests {
     /// reasoning through the real `conversation_to_chat_messages` to `reasoning_content`.
     #[tokio::test]
     async fn reasoning_field_alias_captures_and_roundtrips() {
-        use xai_grok_sampling_types::conversation_to_chat_messages;
         use xai_grok_sampling_types::conversation::ConversationRequest;
+        use xai_grok_sampling_types::conversation_to_chat_messages;
 
         // The exact wire shape synthetic.new emits: `delta.reasoning` with no
         // `reasoning_content` key. Deserializing raw JSON exercises the serde
@@ -651,7 +654,9 @@ mod tests {
             })
             .collect();
         assert!(
-            reasoning_text.iter().any(|t| t.contains("Synthetic reasoning")),
+            reasoning_text
+                .iter()
+                .any(|t| t.contains("Synthetic reasoning")),
             "delta.reasoning must be captured into a Reasoning sibling; got: {reasoning_text:?}"
         );
 
