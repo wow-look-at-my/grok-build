@@ -413,8 +413,8 @@ impl xai_tool_runtime::Tool for HashlineEditTool {
         let apply_result = apply::apply_edits(&old_content, &input.edits, &path, &*scheme);
 
         if let Some(ref new_content) = apply_result.new_content {
-            let is_full_rewrite = input.edits.len() == 1
-                && matches!(input.edits[0], HashlineOp::Write { .. });
+            let is_full_rewrite =
+                input.edits.len() == 1 && matches!(input.edits[0], HashlineOp::Write { .. });
             if is_full_rewrite
                 && let Some(msg) = crate::implementations::editor_infra::reject_duplicate_write(
                     &cwd,
@@ -424,26 +424,25 @@ impl xai_tool_runtime::Tool for HashlineEditTool {
             {
                 return Ok(crate::types::output::SearchReplaceOutput::InvalidInput(msg));
             }
-            if let Err(e) = fs.write_file(&path, new_content.as_bytes()).await
-        {
-            let err_output = HashlineEditOutput::Error(types::HashlineEditError {
-                error: types::HashlineEditErrorKind::IoError,
-                message: format!("Edits validated but failed to write file: {e}."),
-                requested_anchor: None,
-                current: None,
-                context: None,
-                context_start_line: None,
-                shifted_to: None,
-                shifted_anchor: None,
-                ambiguous_candidates: vec![],
-            });
-            return Ok(to_search_replace(
-                err_output,
-                &path,
-                &old_content,
-                None,
-                vec![],
-            ));
+            if let Err(e) = fs.write_file(&path, new_content.as_bytes()).await {
+                let err_output = HashlineEditOutput::Error(types::HashlineEditError {
+                    error: types::HashlineEditErrorKind::IoError,
+                    message: format!("Edits validated but failed to write file: {e}."),
+                    requested_anchor: None,
+                    current: None,
+                    context: None,
+                    context_start_line: None,
+                    shifted_to: None,
+                    shifted_anchor: None,
+                    ambiguous_candidates: vec![],
+                });
+                return Ok(to_search_replace(
+                    err_output,
+                    &path,
+                    &old_content,
+                    None,
+                    vec![],
+                ));
             }
         }
 

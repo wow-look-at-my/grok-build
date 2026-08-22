@@ -430,11 +430,18 @@ mod tests {
             destination: tmp.path().join("b.rs").to_string_lossy().into_owned(),
             overwrite: false,
         };
-        let result = xai_tool_runtime::Tool::run(&tool, test_ctx(test_resources(tmp.path()).into_shared()), input)
-            .await
-            .unwrap();
+        let result = xai_tool_runtime::Tool::run(
+            &tool,
+            test_ctx(test_resources(tmp.path()).into_shared()),
+            input,
+        )
+        .await
+        .unwrap();
         assert!(result.message.contains("Copied"), "{}", result.message);
-        assert_eq!(std::fs::read_to_string(tmp.path().join("b.rs")).unwrap(), "fn a() {}\n");
+        assert_eq!(
+            std::fs::read_to_string(tmp.path().join("b.rs")).unwrap(),
+            "fn a() {}\n"
+        );
         assert!(src.exists());
     }
 
@@ -449,9 +456,13 @@ mod tests {
             destination: tmp.path().join("b.rs").to_string_lossy().into_owned(),
             overwrite: false,
         };
-        let err = xai_tool_runtime::Tool::run(&tool, test_ctx(test_resources(tmp.path()).into_shared()), input)
-            .await
-            .unwrap_err();
+        let err = xai_tool_runtime::Tool::run(
+            &tool,
+            test_ctx(test_resources(tmp.path()).into_shared()),
+            input,
+        )
+        .await
+        .unwrap_err();
         assert!(err.to_string().contains("already exists"), "{err}");
     }
 
@@ -467,9 +478,13 @@ mod tests {
             destination: dest.to_string_lossy().into_owned(),
             overwrite: false,
         };
-        let result = xai_tool_runtime::Tool::run(&tool, test_ctx(test_resources(tmp.path()).into_shared()), input)
-            .await
-            .unwrap();
+        let result = xai_tool_runtime::Tool::run(
+            &tool,
+            test_ctx(test_resources(tmp.path()).into_shared()),
+            input,
+        )
+        .await
+        .unwrap();
         assert!(result.message.contains("Moved"), "{}", result.message);
         assert!(!src.exists());
         assert_eq!(std::fs::read_to_string(&dest).unwrap(), "fn old() {}\n");
@@ -519,9 +534,13 @@ mod tests {
             destination: dest.to_string_lossy().into_owned(),
             overwrite: false,
         };
-        xai_tool_runtime::Tool::run(&tool, test_ctx(test_resources(tmp.path()).into_shared()), input)
-            .await
-            .unwrap();
+        xai_tool_runtime::Tool::run(
+            &tool,
+            test_ctx(test_resources(tmp.path()).into_shared()),
+            input,
+        )
+        .await
+        .unwrap();
         assert!(!src.exists());
         assert!(dest.exists());
         let status = Command::new("git")

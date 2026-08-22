@@ -2793,10 +2793,7 @@ async fn files_amend_would_drop(git_root: &Path) -> Result<Vec<String>> {
     )
     .await
     .unwrap_or_else(|_| String::new());
-    let added: HashSet<&str> = added
-        .lines()
-        .filter(|l| !l.is_empty())
-        .collect();
+    let added: HashSet<&str> = added.lines().filter(|l| !l.is_empty()).collect();
     Ok(deleted
         .lines()
         .filter(|l| !l.is_empty() && added.contains(l))

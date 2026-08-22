@@ -748,9 +748,13 @@ fn git_is_history_rewrite(inner: &[String]) -> bool {
         .map(String::as_str)
         .unwrap_or("");
     match verb {
-        "reset" => inner.iter().any(|w| w == "--hard" || w.starts_with("--hard=")),
+        "reset" => inner
+            .iter()
+            .any(|w| w == "--hard" || w.starts_with("--hard=")),
         "filter-branch" | "filter-repo" => true,
-        "commit" => inner.iter().any(|w| w == "--amend" || w.starts_with("--amend=")),
+        "commit" => inner
+            .iter()
+            .any(|w| w == "--amend" || w.starts_with("--amend=")),
         "push" => inner.iter().any(|w| {
             w == "--force"
                 || w == "-f"

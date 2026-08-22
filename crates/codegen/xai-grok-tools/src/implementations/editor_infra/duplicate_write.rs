@@ -197,8 +197,9 @@ mod tests {
                 .unwrap()
                 .success()
         );
-        let err = reject_duplicate_write(tmp.path(), &tmp.path().join("cli/lib.rs"), BODY.as_bytes())
-            .expect("must reject");
+        let err =
+            reject_duplicate_write(tmp.path(), &tmp.path().join("cli/lib.rs"), BODY.as_bytes())
+                .expect("must reject");
         assert!(err.contains("src/lib.rs"), "{err}");
         assert!(err.contains("git mv") || err.contains("copy_file"), "{err}");
     }

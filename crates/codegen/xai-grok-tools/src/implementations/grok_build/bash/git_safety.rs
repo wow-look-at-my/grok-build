@@ -61,10 +61,7 @@ fn amend_hides_just_committed(cwd: &Path) -> Option<String> {
     if hidden.is_empty() {
         None
     } else {
-        Some(format!(
-            "{AMEND_HIDE_MESSAGE} Files: {}",
-            hidden.join(", ")
-        ))
+        Some(format!("{AMEND_HIDE_MESSAGE} Files: {}", hidden.join(", ")))
     }
 }
 
@@ -74,12 +71,7 @@ fn amend_hides_just_committed(cwd: &Path) -> Option<String> {
 pub fn files_amend_would_drop(git_root: &Path) -> Vec<String> {
     let deleted = git_stdout(
         git_root,
-        &[
-            "diff",
-            "HEAD",
-            "--name-only",
-            "--diff-filter=D",
-        ],
+        &["diff", "HEAD", "--name-only", "--diff-filter=D"],
     );
     if deleted.is_empty() {
         return Vec::new();
@@ -162,11 +154,7 @@ fn git_is_ignored(git_root: &Path, path: &Path) -> bool {
 
 fn resolve_operand(cwd: &Path, raw: &str) -> PathBuf {
     let p = PathBuf::from(raw);
-    if p.is_absolute() {
-        p
-    } else {
-        cwd.join(p)
-    }
+    if p.is_absolute() { p } else { cwd.join(p) }
 }
 
 fn rm_command_index(words: &[String]) -> Option<usize> {
@@ -190,7 +178,9 @@ fn git_verb_index(words: &[String]) -> Option<usize> {
 
 fn flag_present(words: &[String], flags: &[&str]) -> bool {
     words.iter().any(|w| {
-        flags.iter().any(|f| w == f || w.starts_with(&format!("{f}=")))
+        flags
+            .iter()
+            .any(|f| w == f || w.starts_with(&format!("{f}=")))
     })
 }
 
@@ -241,7 +231,7 @@ fn split_statements(command: &str) -> Vec<&str> {
     while i < bytes.len() {
         let b = bytes[i];
         if let Some(q) = quote {
-            if b == q && (q != b'\\' ) {
+            if b == q && (q != b'\\') {
                 quote = None;
             }
             if b == b'\\' && i + 1 < bytes.len() {
@@ -310,10 +300,9 @@ fn tokenize(stmt: &str) -> Vec<String> {
         words.push(cur);
     }
     // Drop VAR=value prefixes.
-    while words
-        .first()
-        .is_some_and(|w| w.contains('=') && !w.starts_with('-') && !w.starts_with('/') && !w.starts_with('.'))
-    {
+    while words.first().is_some_and(|w| {
+        w.contains('=') && !w.starts_with('-') && !w.starts_with('/') && !w.starts_with('.')
+    }) {
         let name = words[0].split('=').next().unwrap_or("");
         if name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') && !name.is_empty() {
             words.remove(0);
