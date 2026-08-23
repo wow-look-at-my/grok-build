@@ -115,7 +115,10 @@ mod tests {
             " [stable]",
             &identity(BinaryFreshness::Current),
         );
-        assert!(report.starts_with("grok 0.2.7 [stable] (commit 324f371)"), "{report}");
+        assert!(
+            report.starts_with("grok 0.2.7 [stable] (commit 324f371)"),
+            "{report}"
+        );
         assert!(
             report.contains(
                 "https://github.com/wow-look-at-my/grok-build/commit/\
@@ -123,7 +126,10 @@ mod tests {
             ),
             "{report}"
         );
-        assert!(report.contains("running: /h/.grok/versions/0.2.7/grok"), "{report}");
+        assert!(
+            report.contains("running: /h/.grok/versions/0.2.7/grok"),
+            "{report}"
+        );
         assert!(report.contains("up to date"), "{report}");
     }
 

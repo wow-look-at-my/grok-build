@@ -1519,12 +1519,18 @@ pub struct AgentView {
     /// summary and stops the animation. `None` when no manual recap is
     /// pending (auto recaps never show a loading block).
     pub(crate) pending_recap_entry: Option<EntryId>,
-    /// Entry ID of the in-flight `/todo` capture block (rendered with the
-    /// animated "running" sidebar). Taken by the `TodoCaptured` handler, which
-    /// removes it and pushes what the capture agent appended. Cleared on
-    /// reload alongside `pending_recap_entry` — the capture runs in the shell,
-    /// so a spinner left behind by a reload would never stop on its own.
+    /// Entry ID of the in-flight `/todo` capture block (rendered as a running
+    /// tool, same chrome as other in-flight work). Taken by the `TodoCaptured`
+    /// handler, which removes it and pushes what the capture agent appended.
+    /// Cleared on reload alongside `pending_recap_entry` — the capture runs in
+    /// the shell, so a spinner left behind by a reload would never stop on its
+    /// own.
     pub(crate) pending_todo_entry: Option<EntryId>,
+    /// Tasks-pane row for the in-flight `/todo` capture (`todo-capture:` prefix).
+    /// Inserted when `/todo` is dispatched so the capture shows at the top of
+    /// the agent view with other running tasks; removed when the result lands
+    /// or the session reloads.
+    pub(crate) pending_todo_task_id: Option<String>,
     /// The manually-chosen session title (`/rename` or the dashboard
     /// rename flow), as distinct from the auto-generated
     /// `generated_session_title` below. Set optimistically at dispatch,

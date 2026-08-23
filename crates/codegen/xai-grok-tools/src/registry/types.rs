@@ -3521,7 +3521,7 @@ mod tests {
         [
           {
             "name": "todo_write",
-            "description": "Create and manage a structured task list. The user sees this list live — it is your primary way to show progress.\n\nUse for any task with 3+ steps. Skip for trivial single-step work.",
+            "description": "Create and manage a structured task list. The user sees this list live — it is your primary way to show progress.\n\nAdd as many items as the work needs — a small task may be one or two, a large one many more. Do not pad a small job into a fake checklist, and do not crush a large job into a handful of vague items. Skip for trivial single-step work. Check items off as you go; keep roughly one in_progress.",
             "parameters": {
               "$schema": "http://json-schema.org/draft-07/schema#",
               "required": [
