@@ -423,6 +423,21 @@ async fn apply_retry_decision(
             emit_retrying(event_tx, request_id, *retry_count, max_retries, err);
             true
         }
+        RetryDecision::RetryWithReasoningEffortRemap => {
+            // The provider mandates reasoning for this target. Mark it on the
+            // request so the wire builders remap a disabled/omitted requested
+            // effort (unset/None/Minimal) to the lowest non-disabled tier on
+            // the retry — never re-sending a disabling body.
+            request.reasoning_mandatory = true;
+            tracing::warn!(
+                model = %config.model,
+                reason = %err,
+                "model requires reasoning; remapping requested effort to the lowest enabled tier for retry"
+            );
+            *retry_count += 1;
+            emit_retrying(event_tx, request_id, *retry_count, max_retries, err);
+            true
+        }
         RetryDecision::RetryWithClientRebuild { backoff } => {
             *retry_count += 1;
             emit_retrying(event_tx, request_id, *retry_count, max_retries, err);
