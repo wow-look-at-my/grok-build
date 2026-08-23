@@ -1017,8 +1017,7 @@ mod tests {
     fn a_404_names_the_endpoint_and_other_statuses_do_not() {
         let url = "https://api.example.com/v1/responses";
 
-        let not_found =
-            api_error_message_for_endpoint(StatusCode::NOT_FOUND, b"", url);
+        let not_found = api_error_message_for_endpoint(StatusCode::NOT_FOUND, b"", url);
         assert!(
             not_found.contains(url),
             "a 404 must name the endpoint that does not exist: {not_found}"

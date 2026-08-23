@@ -132,9 +132,13 @@ verify serially wastes time when a parallel CI build could be running.
   and overloads (the `/btw` retry budget, now shared in `side_call.rs`), empty
   or concatenated-JSON tool arguments (`parse_tool_arguments`, mirroring the
   main turn), a model answering in prose instead of calling the tool (one
-  nudge), and a context window too small for the conversation
-  (`budget_instruction_items` fits the snapshot, with `LOOP_GROWTH_RESERVE_TOKENS`
-  held back for the loop's own turns).
+  nudge plus a write-only retry after the turn budget), and a context window too
+  small for the conversation (`budget_instruction_items` fits the snapshot, with
+  `LOOP_GROWTH_RESERVE_TOKENS` held back for the loop's own turns).
+- The capture agent's conversation is persisted to
+  `{session_dir}/todo-captures/todo-<uuid>.jsonl` so a missed `todo_write` is
+  diagnosable. `NothingAdded` names that path; "Try sending again" is not the
+  only residue.
 
 ## Cost-indicator feature notes
 

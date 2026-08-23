@@ -190,9 +190,9 @@ fn null_lists_as_empty(value: &mut serde_json::Value) -> bool {
             }
             changed
         }
-        serde_json::Value::Array(items) => items.iter_mut().fold(false, |changed, item| {
-            null_lists_as_empty(item) || changed
-        }),
+        serde_json::Value::Array(items) => items
+            .iter_mut()
+            .fold(false, |changed, item| null_lists_as_empty(item) || changed),
         _ => false,
     }
 }
@@ -333,10 +333,7 @@ fn apply_terminal_event_overrides(event: &mut rs::ResponseStreamEvent, data: &st
             value
                 .pointer("/response/usage/cost")
                 .and_then(|v| {
-                    serde_json::from_value::<xai_grok_sampling_types::UsageCost>(
-                        v.clone(),
-                    )
-                    .ok()
+                    serde_json::from_value::<xai_grok_sampling_types::UsageCost>(v.clone()).ok()
                 })
                 .map(|c| c.as_usd_float()),
         )
@@ -1059,8 +1056,7 @@ impl SamplingClient {
                     sent_bearer,
                 ));
             }
-            let message =
-                api_error_message_for_endpoint(status, bytes.as_ref(), &request_url);
+            let message = api_error_message_for_endpoint(status, bytes.as_ref(), &request_url);
             return Err(SamplingError::Api {
                 status,
                 message,
@@ -1223,8 +1219,7 @@ impl SamplingClient {
             }
 
             let bytes = response.bytes().await?;
-            let message =
-                api_error_message_for_endpoint(status, bytes.as_ref(), &request_url);
+            let message = api_error_message_for_endpoint(status, bytes.as_ref(), &request_url);
             span.record("error", message.as_str());
             tracing::error!(
                 status = %status,
@@ -1422,8 +1417,7 @@ impl SamplingClient {
                 ));
             }
 
-            let message =
-                api_error_message_for_endpoint(status, bytes.as_ref(), &request_url);
+            let message = api_error_message_for_endpoint(status, bytes.as_ref(), &request_url);
             tracing::warn!(
                 status = %status,
                 error_message = %message,
@@ -1595,8 +1589,7 @@ impl SamplingClient {
             let retry_after_secs = extract_retry_after(response.headers());
             let should_retry = extract_should_retry(response.headers());
             let bytes = response.bytes().await?;
-            let message =
-                api_error_message_for_endpoint(status, bytes.as_ref(), &request_url);
+            let message = api_error_message_for_endpoint(status, bytes.as_ref(), &request_url);
             span.record("error", message.as_str());
             tracing::error!(
                 status = %status,
@@ -1779,8 +1772,7 @@ impl SamplingClient {
                 ));
             }
 
-            let message =
-                api_error_message_for_endpoint(status, bytes.as_ref(), &request_url);
+            let message = api_error_message_for_endpoint(status, bytes.as_ref(), &request_url);
             tracing::warn!(
                 status = %status,
                 error_message = %message,
@@ -1913,8 +1905,7 @@ impl SamplingClient {
             let retry_after_secs = extract_retry_after(response.headers());
             let should_retry = extract_should_retry(response.headers());
             let bytes = response.bytes().await?;
-            let message =
-                api_error_message_for_endpoint(status, bytes.as_ref(), &request_url);
+            let message = api_error_message_for_endpoint(status, bytes.as_ref(), &request_url);
             span.record("error", message.as_str());
             tracing::error!(
                 status = %status,

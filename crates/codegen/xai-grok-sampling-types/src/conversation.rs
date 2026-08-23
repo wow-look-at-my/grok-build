@@ -2437,7 +2437,7 @@ mod compaction_item_bridge_tests {
             id: "tc1".into(),
             name: "read_file".into(),
             arguments: "{}".into(),
-        	vendor: Default::default(),
+            vendor: Default::default(),
         }]);
         assert_eq!(CompactionItem::text(&tool_only), None);
     }
@@ -2448,7 +2448,7 @@ mod compaction_item_bridge_tests {
             id: "tc1".into(),
             name: "read_file".into(),
             arguments: "{}".into(),
-        	vendor: Default::default(),
+            vendor: Default::default(),
         }]);
         assert!(CompactionItem::has_tool_requests(&with_tools));
         assert!(!CompactionItem::has_tool_requests(
@@ -2982,13 +2982,13 @@ mod tests {
                     id: "call_A".into(),
                     name: "grep".to_string(),
                     arguments: "{}".into(),
-                	vendor: Default::default(),
+                    vendor: Default::default(),
                 },
                 ToolCall {
                     id: "call_B".into(),
                     name: "read_file".to_string(),
                     arguments: "{}".into(),
-                	vendor: Default::default(),
+                    vendor: Default::default(),
                 },
             ]),
             // Only one of two tool results arrived
@@ -3069,7 +3069,7 @@ mod tests {
                 id: "call_1".into(),
                 name: "bash".to_string(),
                 arguments: "{}".into(),
-            	vendor: Default::default(),
+                vendor: Default::default(),
             }]),
             ConversationItem::tool_result("call_1", "result"),
             ConversationItem::assistant("Done"),
@@ -3610,7 +3610,7 @@ mod tests {
                     id: "call_1".into(),
                     name: "read_file".to_string(),
                     arguments: format!(r#"{{"target_file":"{root}/src/main.rs"}}"#).into(),
-                	vendor: Default::default(),
+                    vendor: Default::default(),
                 }],
                 model_id: None,
                 model_fingerprint: None,
@@ -3719,7 +3719,7 @@ mod tests {
                 id: "call_1".into(),
                 name: "run_terminal_cmd".to_string(),
                 arguments: r#"{"command":"echo hello"}"#.into(),
-            	vendor: Default::default(),
+                vendor: Default::default(),
             }],
             model_id: None,
             model_fingerprint: None,
@@ -3747,13 +3747,13 @@ mod tests {
                 id: "call_1".into(),
                 name: "read_file".to_string(),
                 arguments: format!(r#"{{"target_file":"{worktree}/src/main.rs"}}"#).into(),
-            	vendor: Default::default(),
+                vendor: Default::default(),
             },
             ToolCall {
                 id: "call_2".into(),
                 name: "grep".to_string(),
                 arguments: format!(r#"{{"pattern":"TODO","path":"{worktree}/src"}}"#).into(),
-            	vendor: Default::default(),
+                vendor: Default::default(),
             },
         ])];
 
@@ -3825,7 +3825,7 @@ mod tests {
                 id: "1".into(),
                 name: "test".to_string(),
                 arguments: "{}".into(),
-            	vendor: Default::default(),
+                vendor: Default::default(),
             }])],
             stop_reason: None,
             usage: None,
@@ -3899,7 +3899,7 @@ mod tests {
                     id: "call_1".into(),
                     name: "read_file".to_string(),
                     arguments: "{}".into(),
-                	vendor: Default::default(),
+                    vendor: Default::default(),
                 }],
                 model_id: None,
                 model_fingerprint: None,
@@ -3929,13 +3929,13 @@ mod tests {
                     id: "1".into(),
                     name: "read_file".to_string(),
                     arguments: "{}".into(),
-                	vendor: Default::default(),
+                    vendor: Default::default(),
                 },
                 ToolCall {
                     id: "2".into(),
                     name: "bash".to_string(),
                     arguments: "{}".into(),
-                	vendor: Default::default(),
+                    vendor: Default::default(),
                 },
             ])],
             stop_reason: Some(StopReason::ToolCalls),
@@ -4047,7 +4047,7 @@ mod tests {
                 id: "1".into(),
                 name: "read_file".to_string(),
                 arguments: "{}".into(),
-            	vendor: Default::default(),
+                vendor: Default::default(),
             }])],
             stop_reason: Some(StopReason::ToolCalls),
             usage: None,
@@ -4171,7 +4171,7 @@ mod tests {
             id: "call_123".into(),
             name: "bash".to_string(),
             arguments: r#"{"command": "ls"}"#.into(),
-        	vendor: Default::default(),
+            vendor: Default::default(),
         };
 
         let json = serde_json::to_string(&tool_call).expect("Should serialize");
@@ -5174,7 +5174,7 @@ mod tests {
             id: "tc1".into(),
             name: "read_file".into(),
             arguments: "{}".into(),
-        	vendor: Default::default(),
+            vendor: Default::default(),
         }]));
         assert!(resp.empty_reason().is_none());
         assert!(!resp.is_empty());
@@ -5831,10 +5831,7 @@ mod tests {
         let usage = usage_with(1_000, 200, 0, 0);
         // 1000 * 0.000005 + 200 * 0.000015 = 0.005 + 0.003 = 0.008 USD
         // ticks = round(0.008 * 1e10) = 80_000_000
-        assert_eq!(
-            compute_cost_ticks(Some(&usage), &pricing),
-            Some(80_000_000),
-        );
+        assert_eq!(compute_cost_ticks(Some(&usage), &pricing), Some(80_000_000),);
     }
 
     /// Cache tiers: cached reads billed at a discount and cache writes at a
@@ -5857,10 +5854,7 @@ mod tests {
         // output:   300 * 0.000008 = 0.0024
         // total = 0.0014 + 0.00004 + 0.00025 + 0.0024 = 0.00409
         // ticks = round(0.00409 * 1e10) = 40_900_000
-        assert_eq!(
-            compute_cost_ticks(Some(&usage), &pricing),
-            Some(40_900_000),
-        );
+        assert_eq!(compute_cost_ticks(Some(&usage), &pricing), Some(40_900_000),);
     }
 
     /// No usable pricing → `None` (honest absence, never a fabricated $0.00).

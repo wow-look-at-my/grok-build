@@ -1111,7 +1111,9 @@ impl Renderable for EntryRenderer<'_> {
         {
             let cache_y = max_row.saturating_sub(1);
             let cache_width = cache_str.len() as u16;
-            if content_area.width > cache_width + 1 && cache_y >= content_area.y && cache_y < max_row
+            if content_area.width > cache_width + 1
+                && cache_y >= content_area.y
+                && cache_y < max_row
             {
                 let cache_x = content_area.x + content_area.width - cache_width;
                 let cache_style = Style::default().fg(self.theme.gray_dim);
@@ -1882,7 +1884,10 @@ mod tests {
         renderer.render(area, &mut buf);
 
         let row0 = collect_row_symbols(&buf, 0, 0, width);
-        assert!(!row0.contains("cache"), "no cache-hit token when unreported");
+        assert!(
+            !row0.contains("cache"),
+            "no cache-hit token when unreported"
+        );
     }
 
     #[test]
@@ -1891,8 +1896,8 @@ mod tests {
         // cache-hit marker either, even if a value were attached.
         crate::appearance::cache::set_show_thinking_blocks(true);
         let theme = Theme::current();
-        let entry = ScrollbackEntry::new(RenderBlock::thinking("think"))
-            .with_cache_hit_percent(Some(87));
+        let entry =
+            ScrollbackEntry::new(RenderBlock::thinking("think")).with_cache_hit_percent(Some(87));
         let renderer = EntryRenderer::new(&entry, &theme);
 
         let width: u16 = 80;

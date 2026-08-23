@@ -271,7 +271,7 @@ impl crate::types::tool_metadata::ToolMetadata for TodoWriteTool {
     fn description_template(&self) -> &str {
         r#"Create and manage a structured task list. The user sees this list live — it is your primary way to show progress.
 
-Use for any task with 3+ steps. Skip for trivial single-step work."#
+Add as many items as the work needs — a small task may be one or two, a large one many more. Do not pad a small job into a fake checklist, and do not crush a large job into a handful of vague items. Skip for trivial single-step work. Check items off as you go; keep roughly one in_progress."#
     }
 
     fn requires_expr(&self) -> Expr<ToolRequirement> {
@@ -393,7 +393,13 @@ mod tests {
         use crate::types::tool_metadata::ToolMetadata;
         let tool = TodoWriteTool;
         assert_eq!(xai_tool_runtime::Tool::id(&tool).as_str(), "todo_write");
-        assert!(ToolMetadata::description_template(&tool).contains("task list"));
+        let desc = ToolMetadata::description_template(&tool);
+        assert!(desc.contains("task list"));
+        assert!(
+            desc.contains("as many items as the work needs"),
+            "todo_write must not cap the list at 4–6 / 3+: {desc}"
+        );
+        assert!(!desc.contains("3+ steps"), "{desc}");
     }
 
     #[tokio::test]
