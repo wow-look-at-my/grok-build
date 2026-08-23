@@ -15,6 +15,7 @@ use super::side_call::{
 use super::*;
 
 use backon::Retryable as _;
+use std::path::{Path, PathBuf};
 use xai_grok_sampling_types::ToolCall;
 use xai_grok_tools::types::tool::ToolKind;
 
@@ -62,8 +63,13 @@ pub enum TodoCaptureError {
         "/todo needs an append-capable task-list tool (`todo_write`); this session's is `{0}`, which replaces the list instead"
     )]
     UnsupportedTodoTool(String),
-    #[error("the capture agent finished without adding a todo")]
-    NothingAdded,
+    #[error(
+        "the capture agent finished without adding a todo ({reason}). Transcript: {transcript}"
+    )]
+    NothingAdded {
+        reason: String,
+        transcript: String,
+    },
     #[error("adding the todo failed: {0}")]
     TodoWriteFailed(String),
 }
@@ -260,6 +266,81 @@ fn no_tool_call_nudge(tag: &str, todo_tool: &str) -> ConversationItem {
     ))
 }
 
+/// Last-chance user turn when the capture loop spent its budget without a
+/// write. Reads are refused on the turn that follows (`tools_used` is forced
+/// to the cap), so this is the one remaining action.
+fn write_only_retry_nudge(tag: &str, todo_tool: &str, request: &str) -> ConversationItem {
+    ConversationItem::user(format!(
+        "<{tag}>You finished without calling `{todo_tool}`. That call is the ONLY \
+         deliverable of this run — reads, refusals, empty replies, and prose do \
+         not count. Call `{todo_tool}` NOW with the item(s) for this request, and \
+         nothing else:\n{request}</{tag}>"
+    ))
+}
+
+/// Best-effort capture-agent transcript under `{session_dir}/todo-captures/`.
+/// A missed `todo_write` is diagnosable from this file instead of only
+/// "Try sending again".
+fn persist_todo_capture_transcript(
+    session_dir: &Path,
+    conv_id: &str,
+    items: &[ConversationItem],
+) -> Result<PathBuf, String> {
+    let dir = session_dir.join("todo-captures");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let path = dir.join(format!("{conv_id}.jsonl"));
+    let mut buf = Vec::new();
+    for item in items {
+        serde_json::to_writer(&mut buf, item).map_err(|e| e.to_string())?;
+        buf.push(b'\n');
+    }
+    std::fs::write(&path, &buf).map_err(|e| e.to_string())?;
+    Ok(path)
+}
+
+fn transcript_label(result: Result<PathBuf, String>) -> String {
+    match result {
+        Ok(path) => path.display().to_string(),
+        Err(e) => format!("not written ({e})"),
+    }
+}
+
+fn todo_capture_instruction_text(tag: &str, todo_tool: &str, request: &str) -> String {
+    format!(
+        "<{tag}>You are a todo-capture agent: a separate, lightweight agent \
+         spawned to turn one request from the user into items on the shared \
+         todo list.\n\n\
+         CONTEXT:\n\
+         - The main agent is NOT interrupted; it keeps working while you run\n\
+         - You share its conversation context but are a separate instance\n\
+         - Do NOT reference being interrupted or what you were \"previously doing\"\n\n\
+         YOUR JOB, IN ORDER:\n\
+         1. Spend a few READ-ONLY tool calls (read, search, list) if and only if \
+         you need them to name the work concretely. Skip this entirely when the \
+         request is already specific.\n\
+         2. Call `{todo_tool}` with the item(s) to add, then stop. That call is \
+         the ONLY deliverable: a run that ends without `{todo_tool}` has failed. \
+         Do not answer in prose. Do not summarize. Do not stop after reading.\n\n\
+         CONSTRAINTS, enforced outside this prompt — a call that breaks one is \
+         refused and never runs, so do not spend a turn on it:\n\
+         - Adding todo items is your ONLY permitted mutation. Every edit, write, \
+         shell command, and subagent call is refused.\n\
+         - Your `{todo_tool}` call APPENDS: the ids you send are replaced with \
+         fresh ones, statuses are forced to pending, and existing items are \
+         untouched. You cannot complete, reword, reorder, or drop the main \
+         agent's work.\n\
+         - You get at most {MAX_MODEL_CALLS} turns and {MAX_TOOL_CALLS} \
+         read-only tool calls. Spend them on the write, not on investigation.\n\n\
+         You MUST call `{todo_tool}` before you finish. Prose is not a todo.\n\n\
+         Write items the main agent can act on later without you: state the \
+         outcome, and name the file, symbol, or command when you have one. One \
+         item per separable piece of work — do not inflate a single ask into a \
+         checklist.\n\n\
+         The user's request follows.</{tag}>\n\n\
+         {request}"
+    )
+}
+
 impl SessionActor {
     /// Run a `/todo` capture: a few read-only tool calls to name the work, then
     /// one append to the todo list. Never touches the parent conversation, and
@@ -328,8 +409,25 @@ impl SessionActor {
         // refused the write, or the agent never asked for one.
         let mut append_error: Option<String> = None;
         let mut nudges_left = 1usize;
+        let mut turns_done = 0usize;
+        let mut refuse_reads = false;
+        let mut no_write_reason = format!("no `{todo_tool}` call");
 
-        for _ in 0..MAX_MODEL_CALLS {
+        loop {
+            if turns_done >= MAX_MODEL_CALLS {
+                if added.is_empty() && append_error.is_none() && !refuse_reads {
+                    // Budget spent (prose, refusals, or reads) without a write:
+                    // one last turn that can only call the todo tool.
+                    items.push(write_only_retry_nudge(tag, &todo_tool, request));
+                    refuse_reads = true;
+                    no_write_reason = format!(
+                        "ended after {MAX_MODEL_CALLS} turns without a `{todo_tool}` call"
+                    );
+                } else {
+                    break;
+                }
+            }
+
             let base_request = self.parent_cached_request(AuxCall {
                 items: items.clone(),
                 tools: tool_specs.clone(),
@@ -359,29 +457,59 @@ impl SessionActor {
 
             let calls: Vec<ToolCall> = response.tool_calls().to_vec();
             items.extend(echoed_response_items(response.items, strip_reasoning));
+            turns_done += 1;
 
             if calls.is_empty() {
-                // A model that answered in prose gets exactly one correction.
-                if nudges_left == 0 {
+                no_write_reason = if refuse_reads {
+                    format!("write-only retry answered in prose instead of calling `{todo_tool}`")
+                } else {
+                    format!("answered in prose instead of calling `{todo_tool}`")
+                };
+                // A model that answered in prose gets exactly one correction
+                // inside the regular budget; the write-only turn is itself
+                // that correction after the budget is spent.
+                if refuse_reads {
                     break;
+                }
+                if nudges_left == 0 {
+                    turns_done = MAX_MODEL_CALLS;
+                    continue;
                 }
                 nudges_left -= 1;
                 items.push(no_tool_call_nudge(tag, &todo_tool));
                 continue;
             }
+            let dispatch_used = if refuse_reads {
+                MAX_TOOL_CALLS
+            } else {
+                tools_used
+            };
+            let mut refused_only = true;
             for call in &calls {
-                let outcome = self.run_capture_tool(call, &todo_tool, tools_used).await;
+                let outcome = self
+                    .run_capture_tool(call, &todo_tool, dispatch_used)
+                    .await;
                 if outcome.spent_a_read {
                     tools_used += 1;
+                    refused_only = false;
                 }
                 if outcome.append_error.is_some() {
                     append_error = outcome.append_error;
+                    refused_only = false;
+                }
+                if !outcome.appended.is_empty() {
+                    refused_only = false;
                 }
                 added.extend(outcome.appended);
                 items.push(ConversationItem::tool_result(
                     call.id.to_string(),
                     outcome.result_text,
                 ));
+            }
+            if added.is_empty() && refused_only {
+                no_write_reason = format!(
+                    "tool calls were refused and `{todo_tool}` was never invoked"
+                );
             }
             // The append is the end of the job. Finish the batch that produced
             // it (a split across two calls in one batch is still one write),
@@ -391,15 +519,32 @@ impl SessionActor {
             }
         }
 
+        let transcript = transcript_label(persist_todo_capture_transcript(
+            &crate::session::persistence::session_dir(&self.session_info),
+            &conv_id,
+            &items,
+        ));
         if added.is_empty() {
+            tracing::warn!(
+                tools_used,
+                turns_done,
+                %transcript,
+                "todo capture finished without adding a todo"
+            );
             return Err(match append_error {
-                Some(reason) => TodoCaptureError::TodoWriteFailed(reason),
-                None => TodoCaptureError::NothingAdded,
+                Some(reason) => {
+                    TodoCaptureError::TodoWriteFailed(format!("{reason}. Transcript: {transcript}"))
+                }
+                None => TodoCaptureError::NothingAdded {
+                    reason: no_write_reason,
+                    transcript,
+                },
             });
         }
         tracing::info!(
             added = added.len(),
             tools_used,
+            %transcript,
             "todo capture appended items"
         );
         Ok(TodoCaptureOutcome { added, tools_used })
@@ -432,37 +577,7 @@ impl SessionActor {
     /// The capture agent's instruction, appended after the snapshot as the
     /// run's one user turn.
     fn todo_capture_instruction(&self, todo_tool: &str, request: &str) -> String {
-        let tag = self.reminder_wrapper_tag();
-        format!(
-            "<{tag}>You are a todo-capture agent: a separate, lightweight agent \
-             spawned to turn one request from the user into items on the shared \
-             todo list.\n\n\
-             CONTEXT:\n\
-             - The main agent is NOT interrupted; it keeps working while you run\n\
-             - You share its conversation context but are a separate instance\n\
-             - Do NOT reference being interrupted or what you were \"previously doing\"\n\n\
-             YOUR JOB, IN ORDER:\n\
-             1. Spend a few READ-ONLY tool calls (read, search, list) if and only if \
-             you need them to name the work concretely. Skip this entirely when the \
-             request is already specific.\n\
-             2. Call `{todo_tool}` with the item(s) to add, then stop.\n\n\
-             CONSTRAINTS, enforced outside this prompt — a call that breaks one is \
-             refused and never runs, so do not spend a turn on it:\n\
-             - Adding todo items is your ONLY permitted mutation. Every edit, write, \
-             shell command, and subagent call is refused.\n\
-             - Your `{todo_tool}` call APPENDS: the ids you send are replaced with \
-             fresh ones, statuses are forced to pending, and existing items are \
-             untouched. You cannot complete, reword, reorder, or drop the main \
-             agent's work.\n\
-             - You get at most {MAX_MODEL_CALLS} turns and {MAX_TOOL_CALLS} \
-             read-only tool calls.\n\n\
-             Write items the main agent can act on later without you: state the \
-             outcome, and name the file, symbol, or command when you have one. One \
-             item per separable piece of work — do not inflate a single ask into a \
-             checklist.\n\n\
-             The user's request follows.</{tag}>\n\n\
-             {request}"
-        )
+        todo_capture_instruction_text(self.reminder_wrapper_tag(), todo_tool, request)
     }
 
     /// Dispatch one tool call from the capture loop.
@@ -806,5 +921,62 @@ mod tests {
         ] {
             assert!(!is_capture_readable(kind), "{kind:?} must be refused");
         }
+    }
+
+    #[test]
+    fn capture_instruction_requires_todo_write_as_the_deliverable() {
+        let text = todo_capture_instruction_text("r", TODO_WRITE, "push to 2 git repos");
+        assert!(
+            text.contains("ONLY deliverable"),
+            "prompt must name todo_write as the deliverable: {text}"
+        );
+        assert!(
+            text.contains(&format!("MUST call `{TODO_WRITE}`")),
+            "prompt must require the write: {text}"
+        );
+        assert!(
+            text.contains("push to 2 git repos"),
+            "prompt must carry the request: {text}"
+        );
+        let nudge = format!(
+            "{:?}",
+            write_only_retry_nudge("r", TODO_WRITE, "push to 2 git repos")
+        );
+        assert!(nudge.contains(TODO_WRITE), "{nudge}");
+        assert!(nudge.contains("ONLY deliverable"), "{nudge}");
+    }
+
+    #[test]
+    fn capture_transcript_is_written_under_todo_captures() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let items = vec![
+            ConversationItem::user("add a second remote"),
+            ConversationItem::assistant("calling todo_write"),
+        ];
+        let path = persist_todo_capture_transcript(dir.path(), "todo-abc123", &items)
+            .expect("persist must succeed");
+        assert_eq!(
+            path,
+            dir.path().join("todo-captures").join("todo-abc123.jsonl")
+        );
+        let body = std::fs::read_to_string(&path).expect("transcript readable");
+        assert!(body.contains("add a second remote"), "{body}");
+        assert!(body.contains("calling todo_write"), "{body}");
+        assert_eq!(body.lines().count(), 2);
+    }
+
+    #[test]
+    fn nothing_added_error_names_the_transcript() {
+        let err = TodoCaptureError::NothingAdded {
+            reason: "answered in prose instead of calling todo_write".into(),
+            transcript: "/tmp/sess/todo-captures/todo-x.jsonl".into(),
+        };
+        let msg = err.to_string();
+        assert!(
+            msg.contains("the capture agent finished without adding a todo"),
+            "{msg}"
+        );
+        assert!(msg.contains("answered in prose"), "{msg}");
+        assert!(msg.contains("/tmp/sess/todo-captures/todo-x.jsonl"), "{msg}");
     }
 }

@@ -901,7 +901,10 @@ mod queue_edit_routing_tests {
             }
             other => panic!("expected SendPromptNow for the later prompt, got {other:?}"),
         }
-        assert!(agent.toast.is_none(), "a sendable row was found; no refusal");
+        assert!(
+            agent.toast.is_none(),
+            "a sendable row was found; no refusal"
+        );
         assert_eq!(
             agent.session.pending_prompts.len(),
             1,
@@ -909,7 +912,6 @@ mod queue_edit_routing_tests {
         );
         assert_eq!(agent.session.pending_prompts[0].text, "ls -la");
     }
-
 
     /// A bash-command row still has no promptable payload to carry — it owns
     /// its own turn and runs from block meta, not from `SendPromptNow`'s

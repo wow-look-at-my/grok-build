@@ -993,8 +993,11 @@ fn dispatch_cycle_mode_inner(app: &mut AppView) -> Vec<Effect> {
             let label = shift_tab_agent_label(first);
             refresh_open_settings_modals(app);
             if let Some(a) = app.agents.get_mut(&id) {
-                a.shift_tab_base_agent =
-                    Some(a.session_agent_name.clone().unwrap_or_else(|| "grok-build".to_string()));
+                a.shift_tab_base_agent = Some(
+                    a.session_agent_name
+                        .clone()
+                        .unwrap_or_else(|| "grok-build".to_string()),
+                );
                 a.shift_tab_ring_agent_index = Some(0);
                 a.show_mode_switch_banner(label);
             }

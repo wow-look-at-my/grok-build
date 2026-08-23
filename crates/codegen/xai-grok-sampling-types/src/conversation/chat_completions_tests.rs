@@ -128,7 +128,7 @@ fn test_chat_response_message_to_conversation_item() {
                 name: "read_file".to_string(),
                 arguments: r#"{"path": "/foo.txt"}"#.to_string(),
             },
-        	vendor: Default::default(),
+            vendor: Default::default(),
         }],
         tool_call_id: None,
         citations: None,
@@ -149,7 +149,7 @@ fn test_tool_calls_roundtrip_to_chat_request() {
         id: "call_abc123".into(),
         name: "read_file".to_string(),
         arguments: r#"{"path": "/foo.txt", "limit": 100}"#.into(),
-    	vendor: Default::default(),
+        vendor: Default::default(),
     };
 
     let item = ConversationItem::assistant_tool_calls(vec![tool_call.clone()]);
@@ -183,19 +183,19 @@ fn test_multiple_tool_calls_roundtrip() {
             id: "call_1".into(),
             name: "read_file".to_string(),
             arguments: r#"{"path": "/a.txt"}"#.into(),
-        	vendor: Default::default(),
+            vendor: Default::default(),
         },
         ToolCall {
             id: "call_2".into(),
             name: "bash".to_string(),
             arguments: r#"{"command": "ls -la"}"#.into(),
-        	vendor: Default::default(),
+            vendor: Default::default(),
         },
         ToolCall {
             id: "call_3".into(),
             name: "grep".to_string(),
             arguments: r#"{"pattern": "TODO", "path": "."}"#.into(),
-        	vendor: Default::default(),
+            vendor: Default::default(),
         },
     ];
 
@@ -227,7 +227,7 @@ fn test_assistant_with_content_and_tool_calls() {
             id: "call_1".into(),
             name: "read_file".to_string(),
             arguments: r#"{"path": "/test.txt"}"#.into(),
-        	vendor: Default::default(),
+            vendor: Default::default(),
         }],
         model_id: Some("grok-3".to_string()),
         model_fingerprint: None,
@@ -364,7 +364,7 @@ fn test_malformed_tool_arguments_sanitized_to_empty_object_in_chat_request() {
         id: "functions.search_replace:10".into(),
         name: "search_replace".to_string(),
         arguments: bad_args.into(),
-    	vendor: Default::default(),
+        vendor: Default::default(),
     };
 
     let item = ConversationItem::assistant_tool_calls(vec![tool_call]);
@@ -389,7 +389,7 @@ fn test_valid_tool_arguments_pass_through_unchanged_in_chat_request() {
         id: "call_1".into(),
         name: "search_replace".to_string(),
         arguments: valid_args.into(),
-    	vendor: Default::default(),
+        vendor: Default::default(),
     };
 
     let item = ConversationItem::assistant_tool_calls(vec![tool_call]);
@@ -516,7 +516,7 @@ fn test_sanitize_non_ascii_args_preview_does_not_panic() {
         id: "call_1".into(),
         name: "search_replace".to_string(),
         arguments: malformed.clone().into(),
-    	vendor: Default::default(),
+        vendor: Default::default(),
     };
     // Must not panic.
     let item = ConversationItem::assistant_tool_calls(vec![tool_call]);
@@ -530,7 +530,7 @@ fn test_sanitize_non_ascii_args_preview_does_not_panic() {
         id: "call_2".into(),
         name: "search_replace".to_string(),
         arguments: bad_args.clone().into(),
-    	vendor: Default::default(),
+        vendor: Default::default(),
     };
     let item_valid = ConversationItem::assistant_tool_calls(vec![tool_call_valid]);
     let chat_msg_valid = conversation_item_to_chat_message(item_valid);
@@ -634,11 +634,10 @@ fn upgrade_then_fold_through_conversation_to_chat_messages() {
 /// carrying the call plus a matching `tool` message.
 #[test]
 fn todo_capture_loop_maps_to_assistant_call_and_tool_message() {
-    let request: ChatCompletionRequest = ConversationRequest::from_items(
-        todo_capture_loop_items(false),
-    )
-    .with_model("chat-completions-model")
-    .into();
+    let request: ChatCompletionRequest =
+        ConversationRequest::from_items(todo_capture_loop_items(false))
+            .with_model("chat-completions-model")
+            .into();
     let json = serde_json::to_value(&request).unwrap();
     let messages = json["messages"].as_array().unwrap();
 
