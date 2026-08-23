@@ -1175,6 +1175,19 @@ mod tests {
         assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("## Task checklist"));
         assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("unchecked box"));
         assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("never part of the judged contract"),);
+        assert!(
+            GOAL_PLANNER_PROMPT_TEMPLATE.contains("as many ordered"),
+            "checklist size must follow the work, not a 4–6 / 3–8 cap"
+        );
+        assert!(
+            !GOAL_PLANNER_PROMPT_TEMPLATE.contains("3-8"),
+            "a numeric todo cap makes small tasks over-specific and large ones underspecified"
+        );
+        assert!(
+            !GOAL_PLANNER_PROMPT_TEMPLATE.contains("4-6")
+                && !GOAL_PLANNER_PROMPT_TEMPLATE.contains("4–6"),
+            "a numeric todo cap makes small tasks over-specific and large ones underspecified"
+        );
     }
 
     /// Pin the visual/interactive guidance: gamedev/UI goals must be

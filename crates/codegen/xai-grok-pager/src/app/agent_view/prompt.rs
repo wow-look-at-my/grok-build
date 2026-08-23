@@ -666,7 +666,9 @@ impl AgentView {
                             wire_blocks: None,
                         });
                     }
-                    if turn_running && let Some(outcome) = self.try_interrupt_with_queued_from_prompt() {
+                    if turn_running
+                        && let Some(outcome) = self.try_interrupt_with_queued_from_prompt()
+                    {
                         return outcome;
                     }
                     return InputOutcome::Changed;

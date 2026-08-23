@@ -328,6 +328,7 @@ impl AgentView {
             loading_placeholder_id: None,
             pending_recap_entry: None,
             pending_todo_entry: None,
+            pending_todo_task_id: None,
             display_name: None,
             generated_session_title: None,
             last_turn_summary: None,
@@ -469,6 +470,9 @@ impl AgentView {
         }
         if let Some(tid) = self.pending_todo_entry.take() {
             self.scrollback.remove_entry(tid);
+        }
+        if let Some(task_id) = self.pending_todo_task_id.take() {
+            self.session.bg_tasks.remove(&task_id);
         }
         self.session.model_switch_pending = false;
         self.pending_adoption_updates.clear();
@@ -771,6 +775,9 @@ impl AgentView {
         }
         if let Some(id) = self.pending_todo_entry.take() {
             self.scrollback.remove_entry(id);
+        }
+        if let Some(task_id) = self.pending_todo_task_id.take() {
+            self.session.bg_tasks.remove(&task_id);
         }
         self.mark_turn_finished();
         self.activity_started_at = None;

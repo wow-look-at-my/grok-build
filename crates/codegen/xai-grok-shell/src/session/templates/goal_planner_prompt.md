@@ -220,8 +220,10 @@ easy to test: separate pure logic from I/O and prefer small testable units.
 Design guidance, NOT an acceptance criterion — do not refute working code for
 diverging from it, and do not restate it as a criterion.
 
-**Task checklist** (`code-change` only) — 3-8 ordered `- [ ]` checkbox steps
-the implementer executes and checks off as it goes; the harness mines the first
+**Task checklist** (`code-change` only) — as many ordered `- [ ]` checkbox steps
+as the work needs (a small change may be 1–2; a large one many more — do not
+pad a small task or crush a large one into a handful of vague items). The
+implementer executes and checks them off as it goes; the harness mines the first
 unchecked box as the per-turn "next step" nudge. Steps are HOW guidance like
 the approach, never part of the judged contract — keep each small, concrete,
 and completable in one sitting (end with a testing/evidence step). Do not put

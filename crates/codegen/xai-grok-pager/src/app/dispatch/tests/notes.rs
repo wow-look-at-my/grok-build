@@ -943,12 +943,42 @@ fn todo_capture_requests_and_shows_a_running_block() {
     let entry_id = agent
         .pending_todo_entry
         .expect("capture shows a running block while it runs");
+    let entry = agent
+        .scrollback
+        .get_by_id(entry_id)
+        .expect("running capture block");
     assert!(
-        agent
-            .scrollback
-            .get_by_id(entry_id)
-            .is_some_and(|e| e.is_running),
+        entry.is_running,
         "the capture block animates until the response lands"
+    );
+    assert!(
+        matches!(
+            &entry.block,
+            crate::scrollback::block::RenderBlock::ToolCall(_)
+        ),
+        "capture must render as a running tool, not a delayed system one-liner: {:?}",
+        entry.block
+    );
+    let task_id = agent
+        .pending_todo_task_id
+        .as_deref()
+        .expect("capture is a running task at the top");
+    assert!(
+        task_id.starts_with("todo-capture:"),
+        "task id must be namespaced: {task_id}"
+    );
+    let task = agent
+        .session
+        .bg_tasks
+        .get(task_id)
+        .expect("tasks pane row exists while the capture runs");
+    assert_eq!(task.status, crate::app::agent::BgTaskStatus::Running);
+    assert!(
+        task.description
+            .as_deref()
+            .is_some_and(|d| d.contains("push to 2 git repos")),
+        "task label must carry the request: {:?}",
+        task.description
     );
     assert_eq!(agent.prompt.text(), "", "slash command text is cleared");
 }
@@ -974,6 +1004,11 @@ fn captured_todos_replace_the_running_block_with_what_landed() {
 
     let agent = app.agents.get(&id).unwrap();
     assert!(agent.pending_todo_entry.is_none());
+    assert!(agent.pending_todo_task_id.is_none());
+    assert!(
+        agent.session.bg_tasks.is_empty(),
+        "the tasks-pane row is gone when the capture finishes"
+    );
     assert!(
         agent.scrollback.get_by_id(spinner).is_none(),
         "the running block is gone, not left spinning"
@@ -1016,6 +1051,8 @@ fn a_failed_capture_reports_instead_of_vanishing() {
 
     let agent = app.agents.get(&id).unwrap();
     assert!(agent.pending_todo_entry.is_none());
+    assert!(agent.pending_todo_task_id.is_none());
+    assert!(agent.session.bg_tasks.is_empty());
     assert!(agent.scrollback.get_by_id(spinner).is_none());
     let text = last_system_text(&app, id);
     assert!(text.contains("look into the flaky test"), "{text}");
@@ -1033,6 +1070,7 @@ fn todo_capture_without_a_session_says_so_and_fires_nothing() {
     assert!(effects.is_empty(), "no session, no ext call: {effects:?}");
     let agent = app.agents.get(&id).unwrap();
     assert!(agent.pending_todo_entry.is_none());
+    assert!(agent.pending_todo_task_id.is_none());
     assert_eq!(
         agent.toast.as_ref().map(|(s, _)| s.as_str()),
         Some("No active session")

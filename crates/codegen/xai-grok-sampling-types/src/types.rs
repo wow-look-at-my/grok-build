@@ -649,14 +649,14 @@ impl<'de> Deserialize<'de> for UsageCost {
         let v = serde_json::Value::deserialize(d)?;
         match &v {
             // Bare float: `"cost": 0.0000416`
-            serde_json::Value::Number(n) => n.as_f64().map(UsageCost).ok_or_else(|| {
-                D::Error::custom("cost number is not a finite f64")
-            }),
+            serde_json::Value::Number(n) => n
+                .as_f64()
+                .map(UsageCost)
+                .ok_or_else(|| D::Error::custom("cost number is not a finite f64")),
             // Bifrost object: `"cost": {"total_cost": 0.0000416, ...}`
             serde_json::Value::Object(_) => {
-                let obj = serde_json::from_value::<CostObject>(v.clone()).map_err(|e| {
-                    D::Error::custom(format!("invalid cost object: {e}"))
-                })?;
+                let obj = serde_json::from_value::<CostObject>(v.clone())
+                    .map_err(|e| D::Error::custom(format!("invalid cost object: {e}")))?;
                 // Prefer total_cost; fall back to the sum of the component
                 // costs when the gateway omits the rollup (some providers only
                 // report per-tier costs).
@@ -795,10 +795,7 @@ pub struct ChatChunkDelta {
     /// (synthetic.new's OpenAI-compatible naming) so both wire shapes feed the
     /// same accumulator; serializes as `reasoning_content` (the shape the
     /// resend path / providers accept).
-    #[serde(
-        skip_serializing_if = "Option::is_none",
-        alias = "reasoning"
-    )]
+    #[serde(skip_serializing_if = "Option::is_none", alias = "reasoning")]
     pub reasoning_content: Option<String>,
     /// Tool call deltas. Handles `null` in JSON as empty vec.
     #[serde(
@@ -1704,10 +1701,9 @@ mod tests {
         .expect("a null `choices` must not fail the response");
         assert!(response.choices.is_empty());
 
-        let message: ChatResponseMessage = serde_json::from_str(
-            r#"{"role": "assistant", "content": "hi", "tool_calls": null}"#,
-        )
-        .expect("a null `tool_calls` must not fail the message");
+        let message: ChatResponseMessage =
+            serde_json::from_str(r#"{"role": "assistant", "content": "hi", "tool_calls": null}"#)
+                .expect("a null `tool_calls` must not fail the message");
         assert!(message.tool_calls.is_empty());
     }
 
@@ -1778,7 +1774,10 @@ mod tests {
         let usage: Usage = serde_json::from_value(json).unwrap();
         assert_eq!(usage.prompt_tokens, 18);
         assert_eq!(usage.completion_tokens, 10);
-        assert_eq!(usage.cost.as_ref().map(|c| c.as_usd_float()), Some(6.92e-05));
+        assert_eq!(
+            usage.cost.as_ref().map(|c| c.as_usd_float()),
+            Some(6.92e-05)
+        );
         assert_eq!(usage.cost_in_usd_ticks, None);
     }
 
