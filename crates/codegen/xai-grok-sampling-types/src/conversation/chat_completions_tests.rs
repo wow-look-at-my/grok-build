@@ -440,7 +440,109 @@ fn test_chat_completion_request_omits_reasoning_effort_when_unset() {
 }
 
 #[test]
-fn test_btw_cross_api_chat_completions_no_regressions() {
+fn wire_reasoning_effort_remaps_only_mandatory_disabled_tiers() {
+    use crate::{ReasoningEffort, wire_reasoning_effort};
+    // For a mandatory target, unset/None/Minimal all lift to the lowest
+    // enabled tier; supported efforts pass through unchanged.
+    assert_eq!(
+        wire_reasoning_effort(true, None),
+        Some(ReasoningEffort::Low),
+    );
+    assert_eq!(
+        wire_reasoning_effort(true, Some(ReasoningEffort::None)),
+        Some(ReasoningEffort::Low),
+    );
+    assert_eq!(
+        wire_reasoning_effort(true, Some(ReasoningEffort::Minimal)),
+        Some(ReasoningEffort::Low),
+    );
+    for supported in [
+        ReasoningEffort::Low,
+        ReasoningEffort::Medium,
+        ReasoningEffort::High,
+        ReasoningEffort::Xhigh,
+        ReasoningEffort::Max,
+    ] {
+        assert_eq!(wire_reasoning_effort(true, Some(supported)), Some(supported));
+    }
+    // A non-mandatory target is a strict no-op, including the disabled tiers.
+    assert_eq!(wire_reasoning_effort(false, None), None);
+    assert_eq!(
+        wire_reasoning_effort(false, Some(ReasoningEffort::None)),
+        Some(ReasoningEffort::None),
+    );
+    assert_eq!(
+        wire_reasoning_effort(false, Some(ReasoningEffort::Minimal)),
+        Some(ReasoningEffort::Minimal),
+    );
+    assert_eq!(
+        wire_reasoning_effort(false, Some(ReasoningEffort::High)),
+        Some(ReasoningEffort::High),
+    );
+}
+
+/// A reasoning-mandatory target must never be sent a chat-completions body
+/// that disables reasoning: any requested effort resolving to `None` (or to a
+/// `None`/`Minimal`/unset request) is remapped to the lowest enabled tier
+/// (`low`) on the wire, and the disabled `none` signal is never present.
+#[test]
+fn mandatory_target_never_disables_reasoning_on_chat_completions_wire() {
+    // These requests all resolve to a disabled/omitted effort and must be
+    // remapped for a mandatory target.
+    for requested in [
+        Some(crate::ReasoningEffort::None),
+        Some(crate::ReasoningEffort::Minimal),
+        None,
+    ] {
+        let req = ConversationRequest {
+            reasoning_effort: requested,
+            reasoning_mandatory: true,
+            ..ConversationRequest::from_items(vec![ConversationItem::user("hi")])
+                .with_model("test")
+        };
+        let chat: ChatCompletionRequest = req.into();
+        let json = serde_json::to_value(&chat).unwrap();
+        assert_eq!(
+            json.pointer("/reasoning_effort").and_then(|v| v.as_str()),
+            Some("low"),
+            "requested {requested:?} on a reasoning-mandatory target must be remapped to \
+             the lowest enabled effort; got: {json:#}",
+        );
+    }
+}
+
+/// A non-mandatory target is unchanged: requesting `None` serializes `none`,
+/// and an unset effort stays absent — no behavior change for models that do
+/// not mandate reasoning.
+#[test]
+fn non_mandatory_target_is_unchanged_on_chat_completions_wire() {
+    let req = ConversationRequest {
+        reasoning_effort: Some(crate::ReasoningEffort::None),
+        reasoning_mandatory: false,
+        ..ConversationRequest::from_items(vec![ConversationItem::user("hi")]).with_model("test")
+    };
+    let chat: ChatCompletionRequest = req.into();
+    let json = serde_json::to_value(&chat).unwrap();
+    assert_eq!(
+        json.pointer("/reasoning_effort").and_then(|v| v.as_str()),
+        Some("none"),
+        "non-mandatory target requesting None must keep the none signal; got: {json:#}",
+    );
+
+    let unset = ConversationRequest {
+        reasoning_mandatory: false,
+        ..ConversationRequest::from_items(vec![ConversationItem::user("hi")]).with_model("test")
+    };
+    let chat: ChatCompletionRequest = unset.into();
+    let json = serde_json::to_value(&chat).unwrap();
+    assert!(
+        json.get("reasoning_effort").is_none(),
+        "non-mandatory target with unset effort must stay absent; got: {json:#}",
+    );
+}
+
+#[test]
+fn btw_cross_api_chat_completions_no_regressions() {
     let items = btw_prepare_items(btw_mid_turn_conversation());
     let req = ConversationRequest::from_items(items);
     let chat: ChatCompletionRequest = req.into();

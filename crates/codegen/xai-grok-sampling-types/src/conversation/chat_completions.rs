@@ -303,7 +303,7 @@ impl From<ConversationRequest> for ChatCompletionRequest {
             tool_choice,
             search_parameters: None,
             response_format,
-            reasoning_effort: req.reasoning_effort,
+            reasoning_effort: wire_reasoning_effort(req.reasoning_mandatory, req.reasoning_effort),
             x_grok_conv_id: req.x_grok_conv_id,
             x_grok_req_id: req.x_grok_req_id,
             x_grok_session_id: req.x_grok_session_id,
