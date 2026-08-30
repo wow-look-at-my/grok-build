@@ -162,6 +162,150 @@ async fn drain_with_empty_buffer_is_a_noop() {
         .await;
 }
 
+/// Draining an interjection persists the envelope-free original user text to
+/// updates.jsonl (the pager/reload source of truth) — NOT the "The user sent
+/// a message while you were working" `<user_query>` wrapper — while the
+/// model-visible conversation item keeps the wrapped text tagged
+/// `SyntheticReason::Interjection` for the live turn.
+#[tokio::test]
+async fn drain_interjection_persists_original_text_not_wrapper() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (gateway_tx, _gateway_rx) =
+                tokio::sync::mpsc::unbounded_channel::<xai_acp_lib::AcpClientMessage>();
+            let (persistence_tx, mut persistence_rx) =
+                tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
+            let actor = create_test_actor(0, 256_000, 85, gateway_tx, persistence_tx).await;
+
+            actor.pending_interjections.push(PendingInterjection {
+                text: "please also add tests".to_string(),
+                attachments: vec![],
+            });
+            assert!(actor.drain_pending_interjections().await);
+
+            // Capture the persisted UserMessageChunk from the persistence channel.
+            let mut persisted_texts = Vec::new();
+            while let Ok(msg) = persistence_rx.try_recv() {
+                if let PersistenceMsg::Update(SessionUpdate::Acp(notification)) = msg
+                    && let acp::SessionUpdate::UserMessageChunk(chunk) = &notification.update
+                    && let acp::ContentBlock::Text(text) = &chunk.content
+                {
+                    persisted_texts.push(text.text.clone());
+                }
+            }
+            assert!(
+                !persisted_texts.is_empty(),
+                "drain must persist a UserMessageChunk"
+            );
+            for persisted in &persisted_texts {
+                assert_eq!(
+                    persisted, "please also add tests",
+                    "persisted chunk must be the envelope-free original text"
+                );
+                assert!(
+                    !persisted.contains("The user sent a message while you were working")
+                        && !persisted.contains("<user_query>"),
+                    "persisted chunk must not carry the interjection wrapper, got: {persisted}"
+                );
+            }
+
+            // The model-visible conversation item still carries the wrapped text.
+            let conversation = actor.chat_state_handle.get_conversation().await;
+            let user_item = match conversation.last() {
+                Some(ConversationItem::User(u)) => u,
+                other => panic!("conversation tail must be a user item, got: {other:?}"),
+            };
+            assert_eq!(
+                user_item.synthetic_reason,
+                Some(SyntheticReason::Interjection),
+                "interjection must stay tagged SyntheticReason::Interjection"
+            );
+            let text = conversation.last().unwrap().text_content();
+            assert!(
+                text.contains("<user_query>") && text.contains("please also add tests"),
+                "model-visible item must keep the wrapped text, got: {text}"
+            );
+        })
+        .await;
+}
+
+/// Reload round-trip: an interjection persisted through the real drain path
+/// rebuilds the conversation (via `load_session` /
+/// `load_rebuilds_chat_history_from_updates`) with the original user text —
+/// not the "The user sent a message while you were working" wrapper. This is
+/// what a closed-and-reopened session renders.
+#[tokio::test]
+async fn drain_interjection_reload_round_trip_renders_original_text() {
+    use crate::session::info::Info;
+    use crate::session::persistence::default_model_id;
+    use crate::session::storage::{JsonlStorageAdapter, StorageAdapter};
+    use tempfile::TempDir;
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (gateway_tx, _gateway_rx) =
+                tokio::sync::mpsc::unbounded_channel::<xai_acp_lib::AcpClientMessage>();
+            let (persistence_tx, mut persistence_rx) =
+                tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
+            let actor = create_test_actor(0, 256_000, 85, gateway_tx, persistence_tx).await;
+
+            actor.pending_interjections.push(PendingInterjection {
+                text: "please also add tests".to_string(),
+                attachments: vec![],
+            });
+            assert!(actor.drain_pending_interjections().await);
+
+            // Capture the persisted UserMessageChunk update.
+            let mut captured = None;
+            while let Ok(msg) = persistence_rx.try_recv() {
+                if let PersistenceMsg::Update(SessionUpdate::Acp(notification)) = msg
+                    && let acp::SessionUpdate::UserMessageChunk(_) = &notification.update
+                {
+                    captured = Some(notification.update);
+                }
+            }
+            let update = captured.expect("drain must persist a UserMessageChunk");
+
+            // Reload: rebuild chat history from the persisted update stream.
+            let temp_dir = TempDir::new().unwrap();
+            let info = Info {
+                id: acp::SessionId::new("test-session-123"),
+                cwd: "/test/workspace".to_string(),
+            };
+            let adapter = JsonlStorageAdapter::with_root(temp_dir.path().to_path_buf());
+            adapter.init_session(&info, default_model_id()).await.unwrap();
+            adapter
+                .append_update(
+                    &info,
+                    &SessionUpdate::Acp(Box::new(acp::SessionNotification::new(
+                        info.id.clone(),
+                        update,
+                    ))),
+                )
+                .await
+                .unwrap();
+            let loaded = adapter.load_session(&info).await.unwrap();
+            assert_eq!(loaded.chat_history.len(), 1, "one user conversation item");
+            assert!(
+                matches!(loaded.chat_history[0], ConversationItem::User(_)),
+                "rebuilt history must be a user item"
+            );
+            let text = loaded.chat_history[0].text_content();
+            assert_eq!(
+                text, "please also add tests",
+                "rebuilt conversation must render the original user text, got: {text}"
+            );
+            assert!(
+                !text.contains("The user sent a message while you were working")
+                    && !text.contains("<user_query>"),
+                "rebuilt conversation must not carry the interjection wrapper, got: {text}"
+            );
+        })
+        .await;
+}
+
 mod interjection_format_tests {
     use super::format_interjection;
 
