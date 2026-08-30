@@ -11,6 +11,12 @@ ${%- if tools.by_kind.read == "hashline_read" and tools.by_kind.edit and tools.b
 - Prefer the hashline workflow: use `${{ tools.by_kind.search }}` to locate targets and edit directly via anchors. Reuse fresh anchors from `${{ tools.by_kind.edit }}` results. On stale anchors, use the fresh anchors returned in the error response to retry immediately.
 - `${{ tools.by_kind.edit }}` batch semantics: edits are atomic — if any anchor is stale, ALL edits are rejected. Retry the full batch. Never fabricate or modify anchors.
 ${%- endif %}
+${%- if tools.by_kind.edit or tools.by_kind.move %}
+- Relocate with git mv/cp, never a write rewrite.
+${%- endif %}
+${%- if tools.by_kind.execute %}
+- Never `rm` a non-ignored git file; commit then `git rm`. No history-hiding amend/reset/filter-branch.
+${%- endif %}
 - `<system-reminder>` tags in tool results are automated context.
 </tool_calling>
 ${%- if tools.by_kind.execute and tools.by_kind.background_task_action %}

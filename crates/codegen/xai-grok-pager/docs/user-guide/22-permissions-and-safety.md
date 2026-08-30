@@ -2,6 +2,8 @@
 
 Control what Grok can access and do: permission modes, allow/ask/deny rules, hooks, and the optional OS-level sandbox.
 
+File relocate and git-deletion rules (`copy_file`/`move_file`, no rewrite-to-copy, commit then `git rm`, no history-hiding amend) are documented in [File Copy/Move and Git Deletion Safety](25-file-and-git-safety.md).
+
 - **Modes** set how often Grok asks for approval (always-approve, auto, ask, and related).
 - **Rules** set which tools are allowed, asked about, or blocked within that baseline.
 

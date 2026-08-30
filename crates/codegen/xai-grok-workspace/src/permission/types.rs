@@ -324,6 +324,7 @@ impl From<&xai_grok_tools::types::ToolInput> for AccessKind {
             ToolInput::ApplyPatch(_) => AccessKind::Edit("apply_patch".to_string()),
             ToolInput::HashlineEdit(he) => AccessKind::Edit(he.file_path.to_string()),
             ToolInput::Write(w) => AccessKind::Edit(w.file_path.clone()),
+            ToolInput::CopyMove(c) => AccessKind::Edit(c.destination.clone()),
             ToolInput::Bash(bash) => AccessKind::Bash(bash.command.to_string()),
             ToolInput::Monitor(m) => AccessKind::Bash(m.command.clone()),
             ToolInput::MCPTool(mcp) => AccessKind::MCPTool {

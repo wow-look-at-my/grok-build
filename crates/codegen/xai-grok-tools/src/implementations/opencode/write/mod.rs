@@ -20,7 +20,8 @@ use crate::types::tool::{ToolKind, ToolNamespace};
 const DESCRIPTION: &str = r#"Create or overwrite a file.
 
 - Writing to an existing path replaces the file${%- if tools.by_kind.read %} — read it first with the ${{ tools.by_kind.read }} tool${%- endif %}.
-- Parent directories are created for you."#;
+- Parent directories are created for you.
+- Do not use this tool to duplicate or relocate an existing file. Relocating code is `cp`/`git mv` (or the copy_file/move_file tools) plus a minimal edit — never a full rewrite of the destination. search_replace is not a relocate mechanism either."#;
 
 // ─── Input ───────────────────────────────────────────────────────────
 
@@ -111,6 +112,14 @@ impl xai_tool_runtime::Tool for WriteTool {
 
         // Resolve the model-provided path.
         let path = resolve_model_path(&cwd, display_cwd.as_deref(), &input.file_path);
+
+        if let Some(msg) = crate::implementations::editor_infra::reject_duplicate_write(
+            &cwd,
+            &path,
+            input.content.as_bytes(),
+        ) {
+            return Ok(SearchReplaceOutput::InvalidInput(msg));
+        }
 
         // ── Check if file exists and read old content ────────────
         let (existed, old_content) = match fs.read_file(&path).await {
@@ -304,6 +313,50 @@ mod tests {
         assert_eq!(xai_tool_runtime::Tool::id(&tool).as_str(), "write");
         assert!(matches!(tool.kind(), ToolKind::Write));
         assert!(matches!(tool.tool_namespace(), ToolNamespace::OpenCode));
+        assert!(
+            DESCRIPTION.contains("Do not use this tool to duplicate or relocate"),
+            "write description must ban relocate-by-rewrite"
+        );
+    }
+
+    #[tokio::test]
+    async fn refuses_duplicate_of_another_repo_file() {
+        let tmp = TempDir::new().unwrap();
+        assert!(
+            std::process::Command::new("git")
+                .args(["init"])
+                .current_dir(tmp.path())
+                .status()
+                .unwrap()
+                .success()
+        );
+        let body = "fn main() {\n    println!(\"hello from the original crate\");\n    let x = 1;\n    let y = 2;\n    let z = x + y;\n    println!(\"{z}\");\n}\n";
+        std::fs::write(tmp.path().join("orig.rs"), body).unwrap();
+        assert!(
+            std::process::Command::new("git")
+                .args(["add", "orig.rs"])
+                .current_dir(tmp.path())
+                .status()
+                .unwrap()
+                .success()
+        );
+        let tool = WriteTool;
+        let resources = test_resources(tmp.path());
+        let input = WriteInput {
+            file_path: tmp.path().join("copy.rs").to_string_lossy().into_owned(),
+            content: body.to_string(),
+        };
+        let result = xai_tool_runtime::Tool::run(&tool, test_ctx(resources.into_shared()), input)
+            .await
+            .unwrap();
+        match result {
+            SearchReplaceOutput::InvalidInput(msg) => {
+                assert!(msg.contains("orig.rs"), "{msg}");
+                assert!(msg.contains("git mv") || msg.contains("copy_file"), "{msg}");
+            }
+            other => panic!("expected InvalidInput, got {other:?}"),
+        }
+        assert!(!tmp.path().join("copy.rs").exists());
     }
 
     // ── Serde roundtrip ────────────────────────────────────────
