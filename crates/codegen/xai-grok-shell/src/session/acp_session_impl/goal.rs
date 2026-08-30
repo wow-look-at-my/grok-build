@@ -112,6 +112,7 @@ impl SessionActor {
             .unwrap_or_else(|| self.models_manager.current_model_id().0.to_string());
         let session_id = self.session_info.id.to_string();
         let mut last_error = String::new();
+        let mut parse_error: Option<String> = None;
         for _ in 0..2 {
             let client = match self.prepare_chat_completion(false).await {
                 Ok(client) => client,
@@ -126,6 +127,7 @@ impl SessionActor {
                 plan.as_deref(),
                 active_model.clone(),
                 &session_id,
+                parse_error.as_deref(),
             );
             let response = match client.conversation_collect(request).await {
                 Ok(response) => response,
@@ -148,7 +150,10 @@ impl SessionActor {
             }
             match parse_goal_evaluator_verdict(&response.assistant_text()) {
                 Ok(verdict) => return Ok(verdict),
-                Err(error) => last_error = error.to_string(),
+                Err(error) => {
+                    parse_error = Some(error.to_string());
+                    last_error = error.to_string();
+                }
             }
         }
         Err(last_error)
