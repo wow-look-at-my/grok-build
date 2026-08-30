@@ -375,6 +375,26 @@ pub fn normalize_inline_mcp_servers(value: &serde_json::Value) -> serde_json::Va
     serde_json::json!({ "mcpServers": inner })
 }
 
+/// Normalize a plugin manifest's inline `hooks` value into the shape the hook
+/// parser expects (a top-level `hooks` key wrapping the event map).
+///
+/// Grok's native inline-hook shape is already wrapped:
+/// `{ "hooks": { "<Event>": [...] } }`. Claude Code plugins declare hooks
+/// inline in the unwrapped shape `{ "<Event>": [ { "hooks": [...], "matcher": ... } ] }`
+/// (no top-level `hooks` key). The hook parser requires the wrapper, so the
+/// unwrapped Claude Code shape currently parses to zero specs and the hooks
+/// silently never run. This mirrors [`normalize_inline_mcp_servers`]: a value
+/// that already has a top-level `hooks` key is returned unchanged (idempotent
+/// for Grok's native shape); anything else is wrapped so the Claude Code shape
+/// is rescued.
+pub fn normalize_inline_hooks(value: &serde_json::Value) -> serde_json::Value {
+    if value.get("hooks").is_some() {
+        value.clone()
+    } else {
+        serde_json::json!({ "hooks": value })
+    }
+}
+
 // ── Errors ────────────────────────────────────────────────────────────
 
 #[derive(Debug, thiserror::Error)]
@@ -830,6 +850,38 @@ mod tests {
             "mcpServers": { "sentry": { "type": "http", "url": "https://mcp.sentry.dev/mcp" } }
         });
         assert_eq!(normalize_inline_mcp_servers(&wrapped), wrapped);
+    }
+
+    #[test]
+    fn normalize_inline_hooks_wraps_claude_code_shape() {
+        // Claude Code declares hooks inline without a top-level `hooks` key.
+        let claude_shape = serde_json::json!({
+            "PreToolUse": [
+                {
+                    "hooks": [
+                        { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hook.sh" }
+                    ],
+                    "matcher": "Bash"
+                }
+            ]
+        });
+        let normalized = normalize_inline_hooks(&claude_shape);
+        let hooks = normalized.get("hooks").and_then(|v| v.as_object()).unwrap();
+        assert_eq!(hooks.len(), 1);
+        assert!(hooks.contains_key("PreToolUse"));
+    }
+
+    #[test]
+    fn normalize_inline_hooks_idempotent_for_wrapped() {
+        // Grok's native shape is already wrapped in a top-level `hooks` key.
+        let wrapped = serde_json::json!({
+            "hooks": {
+                "PostToolUse": [
+                    { "hooks": [ { "type": "command", "command": "lint" } ] }
+                ]
+            }
+        });
+        assert_eq!(normalize_inline_hooks(&wrapped), wrapped);
     }
 
     #[test]
