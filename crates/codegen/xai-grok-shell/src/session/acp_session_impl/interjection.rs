@@ -468,7 +468,7 @@ impl SessionActor {
             let sanitized =
                 crate::session::placeholder_images::strip_paths_from_image_placeholders(text);
             let skill_information = self.interjection_skill_information(&sanitized).await;
-            let mut wrapped = format_interjection(sanitized);
+            let mut wrapped = format_interjection(sanitized.clone());
             let images = self
                 .prepare_interjection_images(&mut wrapped, attachments)
                 .await;
@@ -490,7 +490,15 @@ impl SessionActor {
             for img in &images {
                 item.add_image(pick_user_image_url(img));
             }
-            self.inject_synthetic_user_message(&wrapped, item, false, &images)
+            // Persist the envelope-free original text (the sanitized user
+            // message), not `wrapped`: the persisted `UserMessageChunk` is
+            // what the pager renders and what a reload rebuilds the
+            // conversation from, so it must carry the user's actual message —
+            // not the "The user sent a message while you were working"
+            // `<user_query>` envelope. The `ConversationItem` above keeps the
+            // wrapped `model_text` for the live turn, so mid-turn steering
+            // semantics are preserved.
+            self.inject_synthetic_user_message(&sanitized, item, false, &images)
                 .await;
             tracing::info!("Injected mid-turn interjection as standalone synthetic user message");
         }
