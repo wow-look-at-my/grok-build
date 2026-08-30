@@ -24,7 +24,6 @@ pub(crate) enum GoalEvaluatorDecision {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
 pub(crate) struct GoalEvaluatorVerdict {
     pub decision: GoalEvaluatorDecision,
     pub evidence: String,
@@ -148,12 +147,21 @@ pub(crate) fn build_goal_evaluator_request(
     plan: Option<&str>,
     model: String,
     session_id: &str,
+    previous_parse_error: Option<&str>,
 ) -> ConversationRequest {
-    let input = serde_json::json!({
+    let mut input = serde_json::json!({
         "objective": objective,
         "transcript": transcript,
         "plan": plan.unwrap_or("(no plan available)"),
     });
+    if let Some(error) = previous_parse_error {
+        // The retry must differ from the failed attempt, or a deterministic
+        // sampling path repeats the same malformed reply until the retry
+        // budget runs out.
+        input["correction"] = serde_json::json!(format!(
+            "Your previous reply was rejected: {error}. Reply again with exactly one JSON object containing only the required fields."
+        ));
+    }
     ConversationRequest {
         items: vec![
             ConversationItem::system(SYSTEM_PROMPT),
@@ -205,10 +213,9 @@ mod tests {
     }
 
     #[test]
-    fn rejects_unknown_decision_extra_fields_and_empty_guidance() {
+    fn rejects_unknown_decision_and_empty_guidance() {
         for raw in [
             r#"{"decision":"achieved","evidence":"x","next_step":"y","blocker_key":""}"#,
-            r#"{"decision":"continue","evidence":"x","next_step":"y","blocker_key":"","extra":true}"#,
             r#"{"decision":"continue","evidence":" ","next_step":"y","blocker_key":""}"#,
             r#"{"decision":"blocked","evidence":"x","next_step":"","blocker_key":"missing_access"}"#,
             r#"{"decision":"blocked","evidence":"x","next_step":"y","blocker_key":""}"#,
@@ -217,6 +224,21 @@ mod tests {
         ] {
             assert!(parse_goal_evaluator_verdict(raw).is_err(), "accepted {raw}");
         }
+    }
+
+    #[test]
+    fn tolerates_unknown_metadata_fields() {
+        // Models in the wild add fields the schema does not ask for (a
+        // `reasoning` field paused a real goal: the strict deserializer
+        // rejected an otherwise-valid verdict twice and the goal went to
+        // infra_paused). Extra keys are ignored; the required fields still
+        // gate the verdict.
+        let raw = r#"{"reasoning":"why I think so","decision":"continue","evidence":"observed evidence","next_step":"do one thing","blocker_key":"","extra":true}"#;
+        let verdict = parse_goal_evaluator_verdict(raw).unwrap();
+        assert_eq!(verdict.decision, GoalEvaluatorDecision::Continue);
+        assert_eq!(verdict.evidence, "observed evidence");
+        assert_eq!(verdict.next_step, "do one thing");
+        assert_eq!(verdict.blocker_key, "");
     }
 
     #[test]
@@ -235,10 +257,28 @@ mod tests {
 
     #[test]
     fn request_is_tool_free_and_schema_constrained() {
-        let request = build_goal_evaluator_request("goal", "trace", None, "small".into(), "s");
+        let request =
+            build_goal_evaluator_request("goal", "trace", None, "small".into(), "s", None);
         assert!(request.tools.is_empty());
         assert!(request.hosted_tools.is_empty());
         assert!(request.json_schema.is_some());
         assert_eq!(request.model.as_deref(), Some("small"));
+    }
+
+    #[test]
+    fn request_carries_correction_after_parse_failure() {
+        let clean = build_goal_evaluator_request("goal", "trace", None, "small".into(), "s", None);
+        let corrected = build_goal_evaluator_request(
+            "goal",
+            "trace",
+            None,
+            "small".into(),
+            "s",
+            Some("unknown field `reasoning`"),
+        );
+        let clean_text = clean.items[1].text_content();
+        let corrected_text = corrected.items[1].text_content();
+        assert!(!clean_text.contains("correction"));
+        assert!(corrected_text.contains("unknown field `reasoning`"));
     }
 }
