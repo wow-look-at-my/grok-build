@@ -127,6 +127,10 @@ impl WebSearchClient {
             .temperature(0.1)
             .top_p(0.95)
             .max_output_tokens(8192u32)
+            .reasoning(rs::Reasoning {
+                effort: Some(rs::ReasoningEffort::None),
+                summary: None,
+            })
             .build()
             .map_err(|e| {
                 xai_tool_runtime::ToolError::execution(
@@ -218,6 +222,10 @@ impl WebSearchClient {
             .temperature(0.1)
             .top_p(0.95)
             .max_output_tokens(8192u32)
+            .reasoning(rs::Reasoning {
+                effort: Some(rs::ReasoningEffort::None),
+                summary: None,
+            })
             .build()
             .map_err(|e| {
                 xai_tool_runtime::ToolError::execution(
