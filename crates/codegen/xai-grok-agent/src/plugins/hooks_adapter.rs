@@ -47,7 +47,12 @@ pub fn parse_plugin_hooks_from_value(
     plugin_root: &str,
     plugin_data: &str,
 ) -> (Vec<HookSpec>, Vec<String>) {
-    let content = serde_json::to_string(value).unwrap_or_default();
+    // Normalize the inline value into the wrapped shape the parser requires.
+    // Claude Code plugins declare hooks inline without a top-level `hooks` key;
+    // without this they parse to zero specs and the hooks silently never run.
+    // Grok's native wrapped shape is returned unchanged (idempotent).
+    let normalized = super::manifest::normalize_inline_hooks(value);
+    let content = serde_json::to_string(&normalized).unwrap_or_default();
     // Use a synthetic path for parse_hook_file's source_dir (resolves relative commands).
     let synthetic_path = Path::new(plugin_root).join("plugin.json");
     let (specs, warnings) = process_hooks_content(
@@ -321,6 +326,56 @@ mod tests {
         assert_eq!(
             specs[0].extra_env.get("GROK_PLUGIN_ROOT").unwrap(),
             "/path/to/plugin"
+        );
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn parse_inline_hooks_from_claude_code_shape() {
+        // Claude Code declares hooks inline WITHOUT a top-level `hooks` key.
+        // This is the shape that previously parsed to zero specs and silently
+        // never ran; normalization must rescue it.
+        let value = serde_json::json!({
+            "PreToolUse": [
+                {
+                    "hooks": [
+                        {"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hook.sh"}
+                    ],
+                    "matcher": "Bash"
+                }
+            ]
+        });
+
+        let (specs, warnings) = parse_plugin_hooks_from_value(
+            &value,
+            "claude-shape-plugin",
+            "/path/to/plugin",
+            "/path/to/data",
+        );
+
+        assert_eq!(specs.len(), 1, "Claude Code-shape inline hooks must parse to specs");
+        assert!(specs[0].name.starts_with("plugin/claude-shape-plugin/"));
+        // The command resolves to the plugin root via the injected env var.
+        assert_eq!(
+            specs[0].command.as_deref().map(|p| p.to_string_lossy().into_owned()),
+            Some("/path/to/plugin/hook.sh".to_string())
+        );
+        // Both the native and Claude-compat plugin env vars are set on the spec.
+        assert_eq!(
+            specs[0].extra_env.get("GROK_PLUGIN_ROOT").unwrap(),
+            "/path/to/plugin"
+        );
+        assert_eq!(
+            specs[0].extra_env.get("CLAUDE_PLUGIN_ROOT").unwrap(),
+            "/path/to/plugin"
+        );
+        assert_eq!(
+            specs[0].extra_env.get("GROK_PLUGIN_DATA").unwrap(),
+            "/path/to/data"
+        );
+        assert_eq!(
+            specs[0].extra_env.get("CLAUDE_PLUGIN_DATA").unwrap(),
+            "/path/to/data"
         );
         assert!(warnings.is_empty());
     }

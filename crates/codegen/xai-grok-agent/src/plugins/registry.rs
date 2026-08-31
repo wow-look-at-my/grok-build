@@ -579,7 +579,10 @@ fn count_lsp_servers(dp: &DiscoveredPlugin) -> usize {
 /// Each entry in the inner `hooks` array is one hook handler spec.
 fn count_hook_specs(hooks_path: Option<&Path>, inline_hooks: Option<&serde_json::Value>) -> usize {
     fn count_in_value(v: &serde_json::Value) -> usize {
-        let Some(events) = v.get("hooks").and_then(|h| h.as_object()) else {
+        // Normalize so a Claude Code-shape inline value (no top-level `hooks`
+        // key) is counted; Grok's native wrapped shape is unchanged.
+        let normalized = super::manifest::normalize_inline_hooks(v);
+        let Some(events) = normalized.get("hooks").and_then(|h| h.as_object()) else {
             return 0;
         };
         events
@@ -667,6 +670,37 @@ mod tests {
             lsp_config_path: None,
             conflict: None,
         }
+    }
+
+    #[test]
+    fn count_hook_specs_counts_claude_code_shape_inline_hooks() {
+        // Claude Code declares hooks inline without a top-level `hooks` key.
+        // Previously this counted as 0; normalization must make it count.
+        let claude_shape = serde_json::json!({
+            "PreToolUse": [
+                {
+                    "hooks": [
+                        { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hook.sh" }
+                    ],
+                    "matcher": "Bash"
+                }
+            ]
+        });
+        let count = count_hook_specs(None, Some(&claude_shape));
+        assert_eq!(count, 1, "Claude Code-shape inline hooks must be counted");
+    }
+
+    #[test]
+    fn count_hook_specs_counts_native_wrapped_shape() {
+        let wrapped = serde_json::json!({
+            "hooks": {
+                "PostToolUse": [
+                    { "hooks": [ { "type": "command", "command": "lint" } ] }
+                ]
+            }
+        });
+        let count = count_hook_specs(None, Some(&wrapped));
+        assert_eq!(count, 1);
     }
 
     #[test]
