@@ -194,7 +194,8 @@ fn scan_single_plugin(plugin_dir: &Path, relative_path: &str) -> MarketplaceEntr
             .filter_map(|e| e.ok())
             .filter(|e| e.path().join("SKILL.md").exists())
             .count();
-        let hk = m.hooks_path(plugin_dir).is_some_and(|p| p.exists());
+        let hk = m.hooks_path(plugin_dir).is_some_and(|p| p.exists())
+            || m.inline_hooks().is_some();
         let ag = m.agent_dirs(plugin_dir).iter().any(|d| {
             d.is_dir()
                 && std::fs::read_dir(d)
@@ -280,6 +281,40 @@ mod tests {
         assert_eq!(plugins[0].skill_count, 1);
         assert!(plugins[0].keywords.is_empty());
         assert_eq!(plugins[1].name, "plugin-b");
+    }
+
+    #[test]
+    fn filesystem_scan_counts_claude_code_shape_inline_hooks() {
+        let dir = tempfile::tempdir().unwrap();
+        let plugin_dir = dir.path().join("plugins").join("hook-plugin");
+        let claude_dir = plugin_dir.join(".claude-plugin");
+        std::fs::create_dir_all(&claude_dir).unwrap();
+        // Claude Code declares hooks inline WITHOUT a top-level `hooks` key.
+        std::fs::write(
+            claude_dir.join("plugin.json"),
+            r#"{
+                "name": "hook-plugin",
+                "version": "1.0.0",
+                "hooks": {
+                    "PreToolUse": [
+                        {
+                            "hooks": [
+                                { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hook.sh" }
+                            ],
+                            "matcher": "Bash"
+                        }
+                    ]
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let plugins = scan_marketplace(dir.path()).entries;
+        let entry = plugins.iter().find(|p| p.name == "hook-plugin").unwrap();
+        assert!(
+            entry.has_hooks,
+            "Claude Code-shape inline hooks must be reflected in has_hooks"
+        );
     }
 
     #[test]
