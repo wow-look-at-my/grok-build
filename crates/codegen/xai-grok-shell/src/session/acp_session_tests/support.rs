@@ -124,7 +124,13 @@ async fn test_agent_from_config(
         subagent: None,
         parent_scheduler_handle: None,
         skills: vec![],
-        state_path: std::path::PathBuf::from("/tmp/tool_state.json"),
+        // Per-actor directory: the bridge persists `resources_state.json` next
+        // to this path after every tool run and loads it on the next build, so
+        // a shared parent leaks one test's state into another process.
+        state_path: tempfile::tempdir()
+            .expect("temp dir for tool state")
+            .keep()
+            .join("tool_state.json"),
         memory_backend: None,
         web_search_config: Default::default(),
         web_fetch_config: Default::default(),
