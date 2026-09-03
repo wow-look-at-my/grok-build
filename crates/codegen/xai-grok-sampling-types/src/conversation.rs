@@ -2572,16 +2572,6 @@ mod tests {
                         .get("prompt_cache_key")
                         .is_some()
                 }
-                // `AutoDetect` is resolved to a concrete backend before the
-                // sampler builds a client; its fallback is ChatCompletions
-                // (see `ApiBackend::auto_detect_fallback`), so it maps the same.
-                crate::ApiBackend::AutoDetect => {
-                    let mapped = ChatCompletionRequest::from(request());
-                    serde_json::to_value(&mapped)
-                        .expect("chat request serializes")
-                        .get("prompt_cache_key")
-                        .is_some()
-                }
             };
             assert_eq!(
                 on_wire,

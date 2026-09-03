@@ -617,8 +617,6 @@ pub struct AppView {
     /// startup; updated synchronously by `set_X_inner` so dispatch
     /// stays sans-IO.
     pub current_ui: xai_grok_shell::agent::config::UiConfig,
-    /// In-memory mirror of the user-managed OpenAI-compatible endpoint.
-    pub openai_compatible: crate::settings::OpenAiCompatibleSnapshot,
     /// Working directory.
     pub cwd: PathBuf,
     /// Whether the cwd is inside a git repository (any ancestor has `.git`).
@@ -1435,7 +1433,6 @@ impl AppView {
             registry: ActionRegistry::defaults(),
             settings_registry: Arc::new(crate::settings::SettingsRegistry::defaults()),
             current_ui: xai_grok_shell::agent::config::UiConfig::default(),
-            openai_compatible: crate::settings::OpenAiCompatibleSnapshot::default(),
             cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             cwd_has_git_ancestor: std::env::current_dir()
                 .ok()
@@ -6005,7 +6002,6 @@ pub(crate) mod tests {
             registry: ActionRegistry::defaults(),
             settings_registry: std::sync::Arc::new(crate::settings::SettingsRegistry::defaults()),
             current_ui: xai_grok_shell::agent::config::UiConfig::default(),
-            openai_compatible: crate::settings::OpenAiCompatibleSnapshot::default(),
             cwd: std::path::PathBuf::from("/tmp"),
             cwd_has_git_ancestor: false,
             acp_tx: tx,

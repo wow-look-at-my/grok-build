@@ -98,9 +98,6 @@ pub fn load_config_from_toml(root: &TomlValue) -> Config {
             let mut harness: crate::agent::config::HarnessConfig = section(table, "harness");
             harness
         },
-        openai_compatible: table
-            .get("openai_compatible")
-            .and_then(|value| value.clone().try_into().ok()),
         skills: section(table, "skills"),
         compat: section(table, "compat"),
         management_api_key,

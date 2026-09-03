@@ -82,7 +82,6 @@ fn test_app() -> AppView {
         registry: crate::actions::ActionRegistry::defaults(),
         settings_registry: std::sync::Arc::new(crate::settings::SettingsRegistry::defaults()),
         current_ui: xai_grok_shell::agent::config::UiConfig::default(),
-        openai_compatible: crate::settings::OpenAiCompatibleSnapshot::default(),
         cwd: PathBuf::from("/tmp"),
         cwd_has_git_ancestor: false,
         acp_tx: tx,

@@ -35,9 +35,6 @@ async fn save_config_locked(config: &Config) -> Result<()> {
     merge_section(table, "ui", &config.ui);
     merge_section(table, "harness", &config.harness);
     merge_section(table, "session", &config.session);
-    if let Some(profile) = &config.openai_compatible {
-        merge_section(table, "openai_compatible", profile);
-    }
     merge_ask_user_question_section(table, &config.ask_user_question);
     if config.privacy == super::mcp::PrivacyConfig::default() {
         table.remove("privacy");
@@ -215,56 +212,6 @@ mod tests {
     use super::*;
     use toml::Value as TomlValue;
     use toml::map::Map as TomlMap;
-
-    #[test]
-    fn openai_compatible_profile_loads_and_merge_preserves_unknown_fields() {
-        let root: TomlValue = toml::from_str(
-            r#"
-            [openai_compatible]
-            enabled = true
-            base_url = "http://localhost:11434/v1"
-            model = "old-model"
-            api_backend = "chat_completions"
-            context_window = 131072
-            make_default = true
-            future_option = "keep-me"
-            "#,
-        )
-        .unwrap();
-        let mut cfg = load_config_from_toml(&root);
-        cfg.openai_compatible
-            .as_mut()
-            .expect("profile must load")
-            .model = "new-model".to_owned();
-
-        let mut table = root.as_table().unwrap().clone();
-        merge_section(
-            &mut table,
-            "openai_compatible",
-            cfg.openai_compatible.as_ref().unwrap(),
-        );
-        let profile = table
-            .get("openai_compatible")
-            .and_then(TomlValue::as_table)
-            .unwrap();
-        assert_eq!(
-            profile.get("model").and_then(TomlValue::as_str),
-            Some("new-model")
-        );
-        assert_eq!(
-            profile.get("future_option").and_then(TomlValue::as_str),
-            Some("keep-me")
-        );
-        // `context_window` is no longer part of the `[openai_compatible]`
-        // profile — the only supported knobs are the per-model
-        // `[model.<id>] context_window`. A stale global key in the file is
-        // ignored on parse and, like any unknown field, preserved verbatim on
-        // merge so we never hand-mangle the user's config.toml.
-        assert_eq!(
-            profile.get("context_window").and_then(TomlValue::as_integer),
-            Some(131_072)
-        );
-    }
 
     /// The `[toolset.ask_user_question]` settings write merges only that
     /// sub-table: the toggled field lands, hand-written sibling keys survive,

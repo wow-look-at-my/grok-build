@@ -8,10 +8,7 @@ use super::setters::{
     set_default_selected_permission_inner, set_display_refresh_auto_cadence_inner,
     set_fork_secondary_model_inner, set_group_tool_verbs_inner, set_hunk_tracker_mode_inner,
     set_invert_scroll_inner, set_keep_text_selection_inner, set_max_thoughts_width_inner,
-    set_multiline_mode, set_openai_compatible_api_backend_inner,
-    set_openai_compatible_api_key_configured_inner, set_openai_compatible_base_url_inner,
-    set_openai_compatible_enabled_inner, set_openai_compatible_make_default_inner,
-    set_openai_compatible_model_inner, set_page_flip_on_send_inner, set_prompt_suggestions_inner,
+    set_multiline_mode, set_page_flip_on_send_inner, set_prompt_suggestions_inner,
     set_remember_tool_approvals_inner, set_render_mermaid_inner, set_respect_manual_folds_inner,
     set_screen_mode_inner, set_scroll_lines_inner, set_scroll_mode_inner, set_scroll_speed_inner,
     set_show_thinking_blocks_inner, set_show_tips_inner, set_simple_mode_inner, set_theme_inner,
@@ -58,7 +55,6 @@ pub(crate) fn refresh_open_settings_modals(app: &mut AppView) {
     let ask_user_question_timeout_enabled_from_app = app.ask_user_question_timeout_enabled;
     let voice_stt_language_from_app = app.voice_config.language.clone();
     let scheduler_background_loops_seed = app.scheduler_background_loops_seed;
-    let openai_compatible_from_app = app.openai_compatible.clone();
     for agent in app.agents.values_mut() {
         // Walk both `Settings` and `ResetSettingsConfirm` — the
         // confirm dialog embeds settings state that must stay fresh
@@ -100,7 +96,6 @@ pub(crate) fn refresh_open_settings_modals(app: &mut AppView) {
                 scheduler_background_loops: agent
                     .scheduler_background_loops
                     .unwrap_or(scheduler_background_loops_seed),
-                openai_compatible: openai_compatible_from_app.clone(),
             };
         }
     }
@@ -201,7 +196,6 @@ pub(in crate::app::dispatch) fn dispatch_open_settings(
     let ask_user_question_timeout_enabled_from_app = app.ask_user_question_timeout_enabled;
     let voice_stt_language_from_app = app.voice_config.language.clone();
     let scheduler_background_loops_seed = app.scheduler_background_loops_seed;
-    let openai_compatible_from_app = app.openai_compatible.clone();
 
     let Some(agent) = app.agents.get_mut(&id) else {
         return effects;
@@ -252,7 +246,6 @@ pub(in crate::app::dispatch) fn dispatch_open_settings(
         scheduler_background_loops: agent
             .scheduler_background_loops
             .unwrap_or(scheduler_background_loops_seed),
-        openai_compatible: openai_compatible_from_app,
     };
     let mut state = Box::new(SettingsModalState::new(
         registry,
@@ -748,7 +741,6 @@ pub(crate) fn build_pager_snapshot(app: &AppView) -> crate::settings::PagerLocal
         ask_user_question_timeout_enabled: app.ask_user_question_timeout_enabled,
         voice_stt_language: app.voice_config.language.clone(),
         scheduler_background_loops: agent_scheduler_background_loops(app),
-        openai_compatible: app.openai_compatible.clone(),
     }
 }
 
@@ -883,26 +875,6 @@ pub(in crate::app::dispatch) fn action_for_reset(
                 );
                 None
             }
-        }
-        ("openai_compatible.enabled", SettingValue::Bool(value)) => {
-            Some(Action::SetOpenAiCompatibleEnabled(*value))
-        }
-        ("openai_compatible.base_url", SettingValue::String(value)) => {
-            Some(Action::SetOpenAiCompatibleBaseUrl(value.clone()))
-        }
-        ("openai_compatible.model", SettingValue::String(value)) => {
-            Some(Action::SetOpenAiCompatibleModel(value.clone()))
-        }
-        ("openai_compatible.api_backend", SettingValue::Enum(value)) => {
-            Some(Action::SetOpenAiCompatibleApiBackend((*value).to_owned()))
-        }
-        ("openai_compatible.make_default", SettingValue::Bool(value)) => {
-            Some(Action::SetOpenAiCompatibleMakeDefault(*value))
-        }
-        ("openai_compatible.api_key", SettingValue::String(_)) => {
-            Some(Action::SetOpenAiCompatibleApiKey(
-                crate::app::actions::SecretString::new(String::new()),
-            ))
         }
         // max_thoughts_width: direct round-trip.
         ("max_thoughts_width", SettingValue::Int(i)) => Some(Action::SetMaxThoughtsWidth(*i)),
@@ -1239,25 +1211,6 @@ pub(in crate::app::dispatch) fn apply_setting_rollback(
             };
             set_fork_secondary_model_inner(app, restored);
         }
-        ("openai_compatible.enabled", SettingValue::Bool(value)) => {
-            set_openai_compatible_enabled_inner(app, *value)
-        }
-        ("openai_compatible.base_url", SettingValue::String(value)) => {
-            set_openai_compatible_base_url_inner(app, value.clone())
-        }
-        ("openai_compatible.model", SettingValue::String(value)) => {
-            set_openai_compatible_model_inner(app, value.clone())
-        }
-        ("openai_compatible.api_backend", SettingValue::Enum(value)) => {
-            set_openai_compatible_api_backend_inner(app, value)
-        }
-        ("openai_compatible.make_default", SettingValue::Bool(value)) => {
-            set_openai_compatible_make_default_inner(app, *value)
-        }
-        ("openai_compatible.api_key", SettingValue::Bool(value)) => {
-            set_openai_compatible_api_key_configured_inner(app, *value)
-        }
-
         _ => {
             tracing::error!(
                 target: "settings",

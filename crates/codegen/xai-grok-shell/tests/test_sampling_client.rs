@@ -1497,9 +1497,6 @@ async fn test_responses_backend_hits_responses_endpoint_not_chat_completions() {
         ApiBackend::Messages => {
             panic!("Expected Responses backend but got Messages");
         }
-        ApiBackend::AutoDetect => {
-            panic!("Expected Responses backend but got AutoDetect");
-        }
     }
 
     assert!(
@@ -1537,9 +1534,6 @@ async fn test_chat_completions_backend_hits_chat_endpoint_not_responses() {
         }
         ApiBackend::Messages => {
             panic!("Expected ChatCompletions backend but got Messages");
-        }
-        ApiBackend::AutoDetect => {
-            panic!("Expected ChatCompletions backend but got AutoDetect");
         }
     }
 

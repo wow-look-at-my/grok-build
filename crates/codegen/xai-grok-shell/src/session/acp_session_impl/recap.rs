@@ -512,8 +512,7 @@ impl SessionActor {
         let idle_timeout = std::time::Duration::from_secs(5);
 
         let result = match sampling_client.api_backend() {
-            crate::sampling::ApiBackend::ChatCompletions
-            | crate::sampling::ApiBackend::AutoDetect => {
+            crate::sampling::ApiBackend::ChatCompletions => {
                 let (raw, meta) = sampling_client.conversation_stream(request).await.ok()?;
                 let events =
                     xai_grok_sampler::stream_chat_completions(raw, meta, request_id, idle_timeout);
