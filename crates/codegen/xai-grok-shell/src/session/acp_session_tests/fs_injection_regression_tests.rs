@@ -54,7 +54,10 @@ async fn tool_bridge_routes_writes_through_injected_fs() {
         subagent: None,
         parent_scheduler_handle: None,
         skills: vec![],
-        state_path: std::env::temp_dir().join("grok-test-fs/tool_state.json"),
+        state_path: tempfile::tempdir()
+            .expect("temp dir for tool state")
+            .keep()
+            .join("tool_state.json"),
         memory_backend: None,
         web_search_config: Default::default(),
         web_fetch_config: Default::default(),
