@@ -957,6 +957,22 @@ fn test_responses_request_carries_reasoning_effort_nested() {
     }
 }
 
+/// The API returns `encrypted_content` only for a request that asks for it,
+/// and every replay path here is built to carry that blob back verbatim.
+/// Without the ask the model reads a summary of its own prior thinking.
+#[test]
+fn responses_request_asks_for_encrypted_reasoning() {
+    let req =
+        ConversationRequest::from_items(vec![ConversationItem::user("hi")]).with_model("test");
+    let resp: crate::rs::CreateResponse = (&req).into();
+    let json = serde_json::to_value(&resp).unwrap();
+    assert_eq!(
+        json.pointer("/include/0").and_then(|v| v.as_str()),
+        Some("reasoning.encrypted_content"),
+        "every request must ask for encrypted reasoning; got: {json:#}",
+    );
+}
+
 #[test]
 fn test_responses_request_omits_effort_when_unset() {
     let req =

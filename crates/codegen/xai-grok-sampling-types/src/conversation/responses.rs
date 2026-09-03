@@ -129,7 +129,10 @@ impl From<&ConversationRequest> for rs::CreateResponse {
         rs::CreateResponse {
             background: None,
             conversation: None,
-            include: None,
+            // The only source of `encrypted_content` is this field. Without it
+            // the API returns the summary alone, and the next turn replays a
+            // paraphrase of the model's own thinking as if it were the thinking.
+            include: Some(vec![rs::IncludeEnum::ReasoningEncryptedContent]),
             input,
             instructions: None,
             max_output_tokens: req.max_output_tokens,
