@@ -414,7 +414,13 @@ pub(crate) fn test_rebuild_spec_default() -> Arc<AgentRebuildSpec> {
         ),
         fs_backend: Arc::new(xai_grok_tools::computer::local::LocalFs),
         tools_notification_handle: ToolNotificationHandle::noop(),
-        bridge_state_path: std::env::temp_dir().join("test_tool_state.json"),
+        // Own directory per spec: `resources_state.json` is persisted beside
+        // this path and loaded on rebuild, so a shared parent leaks state
+        // between test processes.
+        bridge_state_path: tempfile::tempdir()
+            .expect("temp dir for tool state")
+            .keep()
+            .join("tool_state.json"),
         session_env: Arc::new(HashMap::new()),
         models_manager: crate::agent::models::ModelsManager::default(),
         compaction_policy: CompactionPolicy::default(),
