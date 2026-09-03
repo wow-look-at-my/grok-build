@@ -261,9 +261,7 @@ fn handle_picking_group(state: &mut SettingsModalState, key: &KeyEvent) -> Setti
                 }
             } else {
                 // String → EditingString, Enum → PickingEnum, Int → EditingInt.
-                // The child's editor seeds from its current value (and the
-                // `openai_compatible.api_key` masked-secret behavior is
-                // preserved by `try_enter_editing_value_for`).
+                // The child's editor seeds from its current value.
                 if state.try_enter_editing_value_for(child_key)
                     || state.try_enter_picking_enum_for(child_key)
                 {

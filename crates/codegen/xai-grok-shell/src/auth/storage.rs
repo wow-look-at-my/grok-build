@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use super::model::{
-    API_KEY_SCOPE, AuthMode, AuthStore, GrokAuth, OPENAI_COMPATIBLE_API_KEY_SCOPE, lookup_auth,
+    API_KEY_SCOPE, AuthMode, AuthStore, GrokAuth, lookup_auth,
 };
 
 /// RAII guard for an exclusive advisory lock on `auth.json.lock`.
@@ -465,21 +465,6 @@ fn clear_api_key_at_scope(grok_home: &Path, scope: &str) -> std::io::Result<()> 
     Ok(())
 }
 
-/// Read the API key for the user-configured OpenAI-compatible endpoint.
-pub fn read_openai_compatible_api_key(grok_home: &Path) -> Option<String> {
-    read_api_key_at_scope(grok_home, OPENAI_COMPATIBLE_API_KEY_SCOPE)
-}
-
-/// Store the OpenAI-compatible endpoint key without placing it in config.toml.
-pub fn store_openai_compatible_api_key(grok_home: &Path, api_key: &str) -> std::io::Result<()> {
-    store_api_key_at_scope(grok_home, OPENAI_COMPATIBLE_API_KEY_SCOPE, api_key)
-}
-
-/// Remove the OpenAI-compatible endpoint key while preserving other auth scopes.
-pub fn clear_openai_compatible_api_key(grok_home: &Path) -> std::io::Result<()> {
-    clear_api_key_at_scope(grok_home, OPENAI_COMPATIBLE_API_KEY_SCOPE)
-}
-
 #[cfg(test)]
 mod write_fallback_tests {
     use super::*;
@@ -678,20 +663,5 @@ mod write_fallback_tests {
         let _ = write_auth_json_in_place_with(&path, &sample_store(), fake_truncate_then_fail);
         let mode = std::fs::metadata(&path).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o600, "restored file must stay 0o600");
-    }
-
-    #[test]
-    fn openai_compatible_key_roundtrips_without_clobbering_xai_key() {
-        let dir = tempfile::tempdir().unwrap();
-        store_api_key(dir.path(), "xai-key").unwrap();
-        store_openai_compatible_api_key(dir.path(), "compatible-key").unwrap();
-        assert_eq!(read_api_key(dir.path()).as_deref(), Some("xai-key"));
-        assert_eq!(
-            read_openai_compatible_api_key(dir.path()).as_deref(),
-            Some("compatible-key")
-        );
-        clear_openai_compatible_api_key(dir.path()).unwrap();
-        assert_eq!(read_api_key(dir.path()).as_deref(), Some("xai-key"));
-        assert_eq!(read_openai_compatible_api_key(dir.path()), None);
     }
 }

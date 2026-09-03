@@ -186,20 +186,13 @@ impl std::fmt::Debug for SettingsMode {
                 editor,
                 validator,
                 validation_error,
-            } => {
-                let text = editor.text();
-                let buffer_field: &dyn std::fmt::Debug = if *key == "openai_compatible.api_key" {
-                    &"[REDACTED]"
-                } else {
-                    &text
-                };
-                f.debug_struct("EditingString")
-                    .field("key", key)
-                    .field("buffer", buffer_field)
-                    .field("validator", validator)
-                    .field("validation_error", validation_error)
-                    .finish()
-            }
+            } => f
+                .debug_struct("EditingString")
+                .field("key", key)
+                .field("buffer", &editor.text())
+                .field("validator", validator)
+                .field("validation_error", validation_error)
+                .finish(),
             Self::EditingInt {
                 key,
                 buffer,
@@ -786,15 +779,9 @@ impl SettingsModalState {
             SettingKind::String {
                 default, validator, ..
             } => {
-                let text = if key == "openai_compatible.api_key" {
-                    // The row displays only a presence bit. Never seed the
-                    // editor with that label (or with the stored secret).
-                    String::new()
-                } else {
-                    match value {
-                        Some(SettingValue::String(text)) => text,
-                        _ => default.to_string(),
-                    }
+                let text = match value {
+                    Some(SettingValue::String(text)) => text,
+                    _ => default.to_string(),
                 };
                 let mut editor = LineEditor::default();
                 editor.set_text(text);
@@ -992,8 +979,6 @@ pub(super) fn action_for_bool(key: SettingKey, new: bool) -> Option<Action> {
         "show_tips" => Some(Action::SetShowTips(new)),
         "auto_update" => Some(Action::SetAutoUpdate(new)),
         "display_refresh_auto_cadence" => Some(Action::SetDisplayRefreshAutoCadence(new)),
-        "openai_compatible.enabled" => Some(Action::SetOpenAiCompatibleEnabled(new)),
-        "openai_compatible.make_default" => Some(Action::SetOpenAiCompatibleMakeDefault(new)),
         _ => None,
     }
 }
@@ -1070,9 +1055,6 @@ pub(super) fn action_for_enum_commit(key: SettingKey, choice: &'static str) -> O
         "default_selected_permission" => {
             Some(Action::SetDefaultSelectedPermission(choice.to_string()))
         }
-        "openai_compatible.api_backend" => {
-            Some(Action::SetOpenAiCompatibleApiBackend(choice.to_string()))
-        }
         _ => None,
     }
 }
@@ -1104,12 +1086,6 @@ pub(super) fn action_for_string(
                     .map(Action::SetForkSecondaryModel)
             }
         }
-        "openai_compatible.base_url" => Some(Action::SetOpenAiCompatibleBaseUrl(value)),
-        "openai_compatible.model" => Some(Action::SetOpenAiCompatibleModel(value)),
-        "openai_compatible.api_key" => Some(Action::SetOpenAiCompatibleApiKey(
-            crate::app::actions::SecretString::new(value),
-        )),
-
         _ => {
             let _ = value;
             let _ = snapshot;

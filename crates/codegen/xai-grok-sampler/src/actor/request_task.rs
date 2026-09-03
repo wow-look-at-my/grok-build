@@ -602,25 +602,6 @@ async fn run_one_attempt(
             )
             .await
         }
-        // Unresolved `AutoDetect` fallback (see `SamplingClient::api_backend`).
-        ApiBackend::AutoDetect => {
-            let (raw, metadata) = match client.conversation_stream(request).await {
-                Ok(pair) => pair,
-                Err(e) => return AttemptOutcome::InitFailed { error: e },
-            };
-            let (teed, captured) = tee_errors(raw);
-            let l2 = stream_chat_completions(teed, metadata, request_id.clone(), idle_timeout);
-            drive_l2(
-                l2,
-                request_id,
-                event_tx,
-                cancel_token,
-                captured,
-                None,
-                output_observed,
-            )
-            .await
-        }
     }
 }
 

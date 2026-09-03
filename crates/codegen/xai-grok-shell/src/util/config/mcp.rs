@@ -33,9 +33,6 @@ pub struct Config {
     pub models: crate::agent::config::ModelsConfig,
     pub ui: crate::agent::config::UiConfig,
     pub harness: crate::agent::config::HarnessConfig,
-    /// `[openai_compatible]` endpoint profile. `None` preserves an absent
-    /// section when unrelated settings are written.
-    pub openai_compatible: Option<crate::agent::config::OpenAiCompatibleConfig>,
     pub skills: SkillsConfig,
     /// `[compat]` vendor-compatibility config, round-tripped so the
     /// pager preserves per-vendor toggles when persisting other settings.

@@ -54,8 +54,6 @@ pub(crate) fn default_agent_type() -> String {
 pub const CLI_CHAT_PROXY_BASE_URL_DEFAULT: &str = "https://cli-chat-proxy.grok.com/v1";
 /// Default base URL for the public xAI API.
 pub const XAI_API_BASE_URL_DEFAULT: &str = "https://api.x.ai/v1";
-/// Stable catalog key for the endpoint configured through the TUI.
-pub const OPENAI_COMPATIBLE_MODEL_ID: &str = "openai-compatible";
 /// Default base URL for the asset server (profile images, etc.).
 pub const ASSET_SERVER_URL_DEFAULT: &str = "https://assets.grok.com";
 /// One or more environment variable names that may hold a model API key.
@@ -578,190 +576,6 @@ impl Default for EndpointsConfig {
     }
 }
 
-/// A single user-managed OpenAI-compatible inference endpoint.
-///
-/// The API key is deliberately not part of this structure. It is read from
-/// `OPENAI_API_KEY`, or from the dedicated owner-only scope in `auth.json`.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(default)]
-pub struct OpenAiCompatibleConfig {
-    pub enabled: bool,
-    pub base_url: String,
-    pub model: String,
-    pub api_backend: ApiBackend,
-    pub make_default: bool,
-}
-
-impl Default for OpenAiCompatibleConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            base_url: String::new(),
-            model: String::new(),
-            api_backend: ApiBackend::AutoDetect,
-            make_default: true,
-        }
-    }
-}
-
-impl OpenAiCompatibleConfig {
-    /// Validate the profile fields that are needed to route a request.
-    pub fn validation_error(&self) -> Option<String> {
-        let base_url = self.base_url.trim();
-        let parsed = url::Url::parse(base_url).ok();
-        if base_url.is_empty()
-            || parsed
-                .as_ref()
-                .is_none_or(|url| !matches!(url.scheme(), "http" | "https"))
-        {
-            return Some("base URL must be an absolute http:// or https:// URL".to_owned());
-        }
-        if parsed
-            .as_ref()
-            .is_some_and(|url| url.query().is_some() || url.fragment().is_some())
-        {
-            return Some("base URL cannot contain a query string or fragment".to_owned());
-        }
-        if self.model.trim().is_empty() {
-            return Some("model name cannot be empty".to_owned());
-        }
-        None
-    }
-
-    fn resolved_api_key(&self) -> Option<String> {
-        std::env::var("OPENAI_API_KEY")
-            .ok()
-            .filter(|value| !value.trim().is_empty())
-            .or_else(|| {
-                crate::auth::read_openai_compatible_api_key(&crate::util::grok_home::grok_home())
-                    .filter(|value| !value.trim().is_empty())
-            })
-    }
-
-    /// `pub(crate)` accessor for the resolved OpenAI API key so the remote
-    /// model-fetch and backend-detection code can authenticate the openai
-    /// endpoint (BYOK) without forwarding any session credential.
-    pub(crate) fn resolved_api_key_owned(&self) -> Option<String> {
-        self.resolved_api_key()
-    }
-
-    fn to_model_entry(&self) -> Option<ModelEntry> {
-        if !self.enabled {
-            return None;
-        }
-        if let Some(error) = self.validation_error() {
-            tracing::warn!(%error, "ignoring invalid [openai_compatible] configuration");
-            return None;
-        }
-        let api_key = self.resolved_api_key();
-        let entry = ModelEntryConfig {
-            id: Some(OPENAI_COMPATIBLE_MODEL_ID.to_owned()),
-            model: self.model.trim().to_owned(),
-            base_url: self.base_url.trim().trim_end_matches('/').to_owned(),
-            api_base_url: None,
-            name: Some(format!("OpenAI-compatible ({})", self.model.trim())),
-            description: Some("User-configured OpenAI-compatible endpoint".to_owned()),
-            context_window: NonZeroU64::new(DEFAULT_CONTEXT_WINDOW)
-                .expect("default context window is non-zero"),
-            auto_compact_threshold_percent: None,
-            system_prompt_label: None,
-            temperature: None,
-            top_p: None,
-            max_completion_tokens: None,
-            api_backend: self.api_backend.clone(),
-            auth_scheme: Some(if api_key.is_some() {
-                AuthScheme::Bearer
-            } else {
-                AuthScheme::None
-            }),
-            agent_type: default_agent_type(),
-            inference_idle_timeout_secs: None,
-            max_retries: None,
-            api_key,
-            env_key: None,
-            extra_headers: IndexMap::new(),
-            use_concise: false,
-            hidden: false,
-            supported_in_api: true,
-            reasoning_effort: None,
-            supports_reasoning_effort: false,
-            reasoning_efforts: Vec::new(),
-            supports_backend_search: false,
-            compactions_remaining: None,
-            compaction_at_tokens: None,
-            show_model_fingerprint: false,
-            stream_tool_calls: None,
-            laziness_detector: LazinessDetectorPerModelConfig::default(),
-            pricing: xai_grok_sampling_types::ModelPricing::default(),
-        };
-        Some(ModelEntry::from_config_entry(&entry))
-    }
-
-    /// Build the catalog entries for this profile from prefetched
-    /// `openai-compatible/<model-slug>` entries (fetched from the profile's
-    /// `{base_url}/models` at startup).
-    ///
-    /// Each entry inherits the profile's `base_url`, resolved OpenAI API key,
-    /// `auth_scheme` (Bearer when a key is present, else None), `agent_type`
-    /// (the default harness), and `api_backend` (e.g. `AutoDetect`, resolved
-    /// by the shell before the sampler builds a client). Per-model
-    /// `context_window` from the fetched payload is preserved.
-    ///
-    /// Returns `None` when the profile is disabled/invalid, and `Some` with a
-    /// single fallback entry under `OPENAI_COMPATIBLE_MODEL_ID` when the fetch
-    /// is unavailable so the feature degrades gracefully offline.
-    fn catalog_entries(
-        &self,
-        prefetched: Option<&IndexMap<String, ModelEntry>>,
-    ) -> Option<IndexMap<String, ModelEntry>> {
-        if !self.enabled {
-            return None;
-        }
-        if let Some(error) = self.validation_error() {
-            tracing::warn!(%error, "ignoring invalid [openai_compatible] configuration");
-            return None;
-        }
-        let api_key = self.resolved_api_key();
-        let auth_scheme = if api_key.is_some() {
-            AuthScheme::Bearer
-        } else {
-            AuthScheme::None
-        };
-        let base_url = self.base_url.trim().trim_end_matches('/').to_owned();
-        let agent_type = default_agent_type();
-
-        let mut entries = IndexMap::new();
-        if let Some(prefetched) = prefetched {
-            for (key, entry) in prefetched {
-                let Some(slug) = key.strip_prefix("openai-compatible/") else {
-                    continue;
-                };
-                let mut e = entry.clone();
-                e.info.id = Some(key.clone());
-                e.info.base_url = base_url.clone();
-                e.info.api_backend = self.api_backend.clone();
-                e.info.auth_scheme = auth_scheme;
-                e.info.agent_type = agent_type.clone();
-                e.api_key = api_key.clone();
-                e.api_base_url = None;
-                entries.insert(key.clone(), e);
-            }
-        }
-
-        if entries.is_empty() {
-            // Offline / unavailable-fetch fallback: keep the single configured
-            // entry so `openai-compatible` still works (degradation path).
-            self.to_model_entry()
-                .map(|entry| {
-                    let mut m = IndexMap::new();
-                    m.insert(OPENAI_COMPATIBLE_MODEL_ID.to_owned(), entry);
-                    m
-                })
-        } else {
-            Some(entries)
-        }
-    }
-}
 pub use xai_grok_config_types::{BoolFlag, ConfigSource, LazinessDetectorPerModelConfig, Resolved};
 /// Resolution result for a `/goal` role's model selection.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -1563,9 +1377,6 @@ pub struct Config {
     pub shell_environment_policy: ShellEnvironmentPolicyKnownKeys,
     #[serde(default)]
     pub endpoints: EndpointsConfig,
-    /// Optional endpoint profile managed by `/settings`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub openai_compatible: Option<OpenAiCompatibleConfig>,
     #[serde(default)]
     pub telemetry: TelemetryConfig,
     /// Session behavior configuration.
@@ -2007,7 +1818,6 @@ impl Default for Config {
             toolset: ShellToolsetConfig::default(),
             shell_environment_policy: ShellEnvironmentPolicyKnownKeys::default(),
             endpoints,
-            openai_compatible: None,
             telemetry: TelemetryConfig::default(),
             session: SessionConfig::default(),
             agent: AgentSelectionConfig::default(),
@@ -2362,11 +2172,6 @@ impl Config {
         config.image_description_model = model_overrides.image_description;
         config.prompt_suggest_model_pin = model_overrides.prompt_suggestion;
         config.apply_env_overrides();
-        if config.openai_compatible.as_ref().is_some_and(|profile| {
-            profile.enabled && profile.make_default && profile.validation_error().is_none()
-        }) {
-            config.models.default = Some(OPENAI_COMPATIBLE_MODEL_ID.to_owned());
-        }
         Ok(config)
     }
     /// Populate trust-independent `#[serde(skip)]` subagent base fields.
@@ -3764,17 +3569,7 @@ pub(crate) fn resolve_model_list(
         tracing::debug!(count = defaults.len(), "loaded default models");
         resolved.extend(defaults);
     }
-    // Inject the user-managed OpenAI-compatible endpoint(s). When the
-    // `{base_url}/models` listing was prefetched, one catalog entry per
-    // advertised model (`openai-compatible/<slug>`) is produced; otherwise the
-    // single configured entry under `OPENAI_COMPATIBLE_MODEL_ID` is kept as an
-    // offline fallback. Computed here (while `prefetched` is still owned) so the
-    // prefetched map can be moved into `resolved` afterwards without a partial move.
-    let openai_entries = if let Some(mut prefetched) = prefetched {
-        let entries = cfg
-            .openai_compatible
-            .as_ref()
-            .and_then(|p| p.catalog_entries(Some(&prefetched)));
+    if let Some(mut prefetched) = prefetched {
         tracing::debug!(count = prefetched.len(), "loaded prefetched models");
         let default_cw = DEFAULT_CONTEXT_WINDOW;
         for (key, entry) in prefetched.iter_mut() {
@@ -3805,19 +3600,6 @@ pub(crate) fn resolve_model_list(
             }
         }
         resolved = prefetched;
-        entries
-    } else {
-        cfg.openai_compatible
-            .as_ref()
-            .and_then(|p| p.catalog_entries(None))
-    };
-    if let Some(openai_entries) = openai_entries {
-        // Make this block authoritative: drop any stale openai-compatible keys
-        // (single + fetched) before inserting fresh ones.
-        resolved.retain(|key, _| {
-            key != OPENAI_COMPATIBLE_MODEL_ID && !key.starts_with("openai-compatible/")
-        });
-        resolved.extend(openai_entries);
     }
     for (key, model_override) in &cfg.config_models {
         let had_base = resolved.contains_key(key);
@@ -13239,58 +13021,6 @@ default = "grok-4.5"
     }
 
     #[test]
-    fn openai_compatible_profile_parses_and_becomes_default() {
-        let raw: toml::Value = toml::from_str(
-            r#"
-            [openai_compatible]
-            enabled = true
-            base_url = "http://localhost:11434/v1"
-            model = "llama3.3"
-            api_backend = "responses"
-            make_default = true
-            "#,
-        )
-        .unwrap();
-        let cfg = Config::new_from_toml_cfg(&raw).unwrap();
-        let profile = cfg.openai_compatible.as_ref().expect("profile");
-        assert!(profile.enabled);
-        assert_eq!(profile.base_url, "http://localhost:11434/v1");
-        assert_eq!(profile.model, "llama3.3");
-        assert_eq!(profile.api_backend, ApiBackend::Responses);
-        assert_eq!(
-            cfg.models.default.as_deref(),
-            Some(OPENAI_COMPATIBLE_MODEL_ID)
-        );
-    }
-
-    #[test]
-    #[serial]
-    fn openai_compatible_profile_adds_routable_catalog_entry() {
-        let _key = EnvGuard::set("OPENAI_API_KEY", "compat-test-key");
-        let mut cfg = Config::default();
-        cfg.openai_compatible = Some(OpenAiCompatibleConfig {
-            enabled: true,
-            base_url: "https://example.test/openai/v1/".to_owned(),
-            model: "example-model".to_owned(),
-            api_backend: ApiBackend::ChatCompletions,
-            make_default: false,
-        });
-        let models = resolve_model_list(&cfg, None);
-        let entry = models
-            .get(OPENAI_COMPATIBLE_MODEL_ID)
-            .expect("compatible model must be injected");
-        assert_eq!(entry.info.model, "example-model");
-        assert_eq!(entry.info.base_url, "https://example.test/openai/v1");
-        assert_eq!(
-            entry.info.context_window.get(),
-            DEFAULT_CONTEXT_WINDOW,
-            "global context_window is removed; the compatible endpoint inherits the model default"
-        );
-        assert_eq!(entry.info.auth_scheme, AuthScheme::Bearer);
-        assert_eq!(entry.api_key.as_deref(), Some("compat-test-key"));
-    }
-
-    #[test]
     fn no_auth_scheme_never_forwards_session_or_model_credentials() {
         let mut entry = ModelEntry::fallback("local-model", &EndpointsConfig::default());
         entry.info.base_url = "http://localhost:1234/v1".to_owned();
@@ -13300,17 +13030,5 @@ default = "grok-4.5"
         assert_eq!(resolved.auth_scheme, AuthScheme::None);
         assert_eq!(resolved.api_key, None);
         assert_eq!(resolved.base_url, "http://localhost:1234/v1");
-    }
-
-    #[test]
-    fn invalid_openai_compatible_profile_is_not_injected() {
-        let mut cfg = Config::default();
-        cfg.openai_compatible = Some(OpenAiCompatibleConfig {
-            enabled: true,
-            base_url: "not a URL".to_owned(),
-            model: "model".to_owned(),
-            ..Default::default()
-        });
-        assert!(!resolve_model_list(&cfg, None).contains_key(OPENAI_COMPATIBLE_MODEL_ID));
     }
 }

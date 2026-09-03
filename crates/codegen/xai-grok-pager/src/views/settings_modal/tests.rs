@@ -26,45 +26,6 @@ fn make_state() -> SettingsModalState {
     )
 }
 
-#[test]
-fn api_key_editor_debug_is_redacted() {
-    let mut editor = LineEditor::default();
-    editor.set_text("never-print-this-key");
-    let mode = SettingsMode::EditingString {
-        key: "openai_compatible.api_key",
-        editor,
-        validator: StringValidator::Any,
-        validation_error: None,
-    };
-    let debug = format!("{mode:?}");
-    assert!(!debug.contains("never-print-this-key"));
-    assert!(debug.contains("[REDACTED]"));
-}
-
-#[test]
-fn api_key_editor_renders_mask_instead_of_secret() {
-    let mut state = make_state();
-    let mut editor = LineEditor::default();
-    editor.set_text("super-secret");
-    let _ = editor.set_cursor_byte("super-secret".len());
-    state.transition_to_editing_string(
-        "openai_compatible.api_key",
-        editor,
-        StringValidator::Any,
-        None,
-    );
-    let area = Rect::new(0, 0, 80, 16);
-    let mut buffer = Buffer::empty(area);
-    render_editing_value(&mut buffer, area, &mut state, &Theme::current());
-    let rendered = (area.y..area.y + area.height)
-        .map(|y| buf_row_text(&buffer, y, area.x, area.width))
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    assert!(!rendered.contains("super-secret"));
-    assert!(rendered.contains("************"));
-}
-
 /// The contextual-hints group renders as a single top-level row (children
 /// hidden); Enter opens the sub-sheet, Space there toggles the focused
 /// child via the typed action, and Esc returns to Browse.
@@ -108,105 +69,6 @@ fn contextual_hints_group_sub_sheet_flow() {
     );
 
     // Esc returns to Browse.
-    let out = handle_settings_key(&mut s, &KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
-    assert!(matches!(out, SettingsKeyOutcome::Changed));
-    assert!(matches!(s.mode(), SettingsModalMode::Browse));
-}
-
-/// The OpenAI-compatible group renders as a single top-level row (children
-/// hidden); Enter opens the sub-sheet; a String child (base_url) opens its
-/// editor from inside the sheet, a Bool child (enabled) toggles in place, and
-/// an Enum child (api_backend) opens its picker; Esc returns to Browse.
-#[test]
-fn openai_compatible_group_sub_sheet_flow() {
-    let mut s = make_state();
-    // Group row present; all 6 child rows hidden from the top-level list.
-    let group_idx = s
-        .rows
-        .iter()
-        .position(|r| matches!(r, RowEntry::Setting { key, .. } if *key == "openai_compatible"))
-        .expect("openai group row present");
-    assert!(
-        !s.rows.iter().any(|r| matches!(
-            r,
-            RowEntry::Setting { key, .. } if key.starts_with("openai_compatible.")
-        )),
-        "openai child rows must be hidden from the top-level list",
-    );
-
-    let focus_group = |s: &mut SettingsModalState| {
-        s.selected = group_idx;
-        let _ = handle_settings_key(s, &KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        assert!(matches!(
-            s.mode(),
-            SettingsModalMode::PickingGroup { child_idx: 0, .. }
-        ));
-    };
-
-    // Focus the group, Enter → PickingGroup on the first child (base_url).
-    focus_group(&mut s);
-
-    // Child 0 is `base_url` (String): Enter opens its editor (EditingString).
-    let out = handle_settings_key(&mut s, &KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-    assert!(matches!(out, SettingsKeyOutcome::Changed));
-    assert!(matches!(
-        s.mode(),
-        SettingsModalMode::EditingValue {
-            key: "openai_compatible.base_url"
-        }
-    ));
-    // Esc cancels back to Browse (standard editor cancel).
-    let out = handle_settings_key(&mut s, &KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
-    assert!(matches!(out, SettingsKeyOutcome::Changed));
-    assert!(matches!(s.mode(), SettingsModalMode::Browse));
-
-    // Re-open the group, move down to child 2 (`enabled`, Bool): Space toggles
-    // in place and the sheet stays open (default false → true).
-    focus_group(&mut s);
-    for _ in 0..2 {
-        let _ = handle_settings_key(&mut s, &KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
-    }
-    assert!(matches!(
-        s.mode(),
-        SettingsModalMode::PickingGroup { child_idx: 2, .. }
-    ));
-    let out = handle_settings_key(
-        &mut s,
-        &KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE),
-    );
-    assert!(
-        matches!(
-            out,
-            SettingsKeyOutcome::Action(Action::SetOpenAiCompatibleEnabled(true))
-        ),
-        "Space must toggle the focused Bool child, got {out:?}",
-    );
-    // Sheet stays open after the toggle.
-    assert!(matches!(
-        s.mode(),
-        SettingsModalMode::PickingGroup { child_idx: 2, .. }
-    ));
-
-    // Esc from the sheet itself returns to Browse.
-    let out = handle_settings_key(&mut s, &KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
-    assert!(matches!(out, SettingsKeyOutcome::Changed));
-    assert!(matches!(s.mode(), SettingsModalMode::Browse));
-
-    // Re-open, move down to child 4 (`api_backend`, Enum): Enter opens the
-    // choice picker (PickingEnum) seeded with the current value.
-    focus_group(&mut s);
-    for _ in 0..4 {
-        let _ = handle_settings_key(&mut s, &KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
-    }
-    assert!(matches!(
-        s.mode(),
-        SettingsModalMode::PickingGroup { child_idx: 4, .. }
-    ));
-    let out = handle_settings_key(&mut s, &KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-    assert!(matches!(out, SettingsKeyOutcome::Changed));
-    assert!(matches!(s.mode(), SettingsModalMode::PickingEnum { .. }));
-
-    // Esc cancels the picker back to Browse.
     let out = handle_settings_key(&mut s, &KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
     assert!(matches!(out, SettingsKeyOutcome::Changed));
     assert!(matches!(s.mode(), SettingsModalMode::Browse));
@@ -703,8 +565,7 @@ fn render_setting_row_shows_full_label_when_one_line_fits() {
 /// (3 bools + 3 enums + 1 int = 7 entries), the Editor entry
 /// `multiline_mode`, the Agent entries `permission_mode` and
 /// `plan_mode`, the Privacy entry `coding_data_sharing`, the
-/// Models entries `default_model` and the `openai_compatible.*`
-/// endpoint settings, and the Advanced entries `show_tips` and
+/// Models entry `default_model`, and the Advanced entries `show_tips` and
 /// `auto_update`. `default_reasoning_effort` and
 /// `auto_compact_threshold_percent` are not exposed in the modal.
 #[test]
@@ -822,12 +683,6 @@ fn rows_contain_categories_and_settings_through_pr_14() {
             "coding_data_sharing",
             // SHELL-owned default_model (Models category).
             "default_model",
-            // User-managed OpenAI-compatible endpoint (Models category),
-            // registered directly after default_model. All 6 child settings
-            // (`openai_compatible.{base_url,api_key,enabled,model,api_backend,
-            // make_default}`) are hidden from the top-level list
-            // and reached via this group's sub-sheet.
-            "openai_compatible",
             // Models category. `default_reasoning_effort`,
             // `web_search_model`, and `session_summary_model` are
             // not exposed in the modal.
