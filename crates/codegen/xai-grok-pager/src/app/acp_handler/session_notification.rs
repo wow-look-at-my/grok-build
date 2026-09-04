@@ -921,6 +921,22 @@ pub(super) fn handle_session_notification(notif: &acp::ExtNotification, app: &mu
                 false
             }
         }
+        // The capture agent runs its own conversation, which reaches the
+        // client only here. Without it the task row this capture opened has
+        // nothing behind it, and opening it shows an empty window.
+        XaiSessionUpdate::TodoCaptureProgress { capture_id, text } => {
+            let task_id = crate::app::dispatch::todo_capture_task_id(&capture_id);
+            match agent.session.bg_tasks.get_mut(&task_id) {
+                Some(task) => {
+                    task.append_stdout(&text);
+                    true
+                }
+                // A capture whose row is already gone (finished, or replaced
+                // by a newer one) has nowhere to put this. The run's own
+                // `todo-captures/*.jsonl` is still the durable copy.
+                None => false,
+            }
+        }
         XaiSessionUpdate::ModelAutoSwitched {
             previous_model_id,
             new_model_id,

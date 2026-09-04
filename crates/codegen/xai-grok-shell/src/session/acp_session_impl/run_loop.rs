@@ -1917,10 +1917,11 @@ pub(super) async fn run_session(
                                 let _ = respond_to.send(result);
                             });
                         }
-                        SessionCommand::TodoCapture { request, respond_to } => {
+                        SessionCommand::TodoCapture { request, urgent, capture_id, respond_to } => {
                             let s = session.clone();
                             tokio::task::spawn_local(async move {
-                                let result = s.handle_todo_capture(&request).await;
+                                let result =
+                                    s.handle_todo_capture(&request, urgent, &capture_id).await;
                                 let _ = respond_to.send(result);
                             });
                         }

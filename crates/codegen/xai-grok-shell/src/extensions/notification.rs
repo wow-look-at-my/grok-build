@@ -609,6 +609,19 @@ pub enum SessionUpdate {
     /// forever; on receipt the pager clears it. Never emitted for an automatic
     /// recap (those show no spinner).
     SessionRecapUnavailable,
+    /// Transcript lines from a running `/todo` capture, for the task row the
+    /// client opened for it. The capture agent runs its own conversation,
+    /// which no other update carries, so without this the task window has
+    /// nothing to show.
+    ///
+    /// Display only — never added to the model conversation, and never
+    /// persisted: the durable copy is the run's `todo-captures/*.jsonl`.
+    TodoCaptureProgress {
+        /// The client-minted id of this capture, which names its task row.
+        capture_id: String,
+        /// Lines to append, already rendered. Each delivery is new text.
+        text: String,
+    },
     /// Ultra-short summary of the just-finished successful turn, generated at
     /// turn end for the dashboard row's secondary line. Rows show it until
     /// the next successful turn's summary replaces it.

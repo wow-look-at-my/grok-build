@@ -107,9 +107,10 @@ verify serially wastes time when a parallel CI build could be running.
   `TodoState` directly, which is what makes the item persist, reach the client
   as a `Plan` update, and show up in the next turn's todo-gate reminder the same
   way one the main agent wrote does. That path is `todo_write`-specific:
-  another harness's task-list tool (opencode's `todowrite`) replaces the list
-  instead of merging, so the run fails loudly with `UnsupportedTodoTool`
-  instead of writing through semantics that cannot express an append.
+  opencode's `todowrite` gives its items no ids and identifies them by text
+  alone, so a capture cannot address the item it adds (or place it at the front
+  for `/TODO`). The run fails loudly with `UnsupportedTodoTool` rather than
+  writing through semantics that cannot express that append.
 - Nothing in the loop compares against the literal `todo_write`. A harness
   preset renames tools per provider (`name_override`), and the model calls the
   renamed one, so the tool is resolved by kind and identified by NAMESPACE
@@ -139,6 +140,45 @@ verify serially wastes time when a parallel CI build could be running.
   `{session_dir}/todo-captures/todo-<uuid>.jsonl` so a missed `todo_write` is
   diagnosable. `NothingAdded` names that path; "Try sending again" is not the
   only residue.
+- `/TODO` is the urgent spelling: its items go to the front of the list. Only
+  the exact all-caps name counts (`is_urgent_token` in the pager's
+  `slash/commands/todo.rs`) — `/Todo` and `/ToDo` are shift-key noise, not a
+  request to jump the queue. Command resolution is case-insensitive, so the
+  typed case reaches the command only through `SlashCommand::run_with_token`.
+- The front of the list is `prepend` on `TodoWriteInput`, which is
+  `#[schemars(skip)]`: the model cannot reach it, and the serialized tool list
+  is unchanged, so the conversation's prompt cache survives the field. Prepend
+  places new items only — an id already on the list keeps its position, so this
+  is not a way around the append-only rule.
+- A landed capture delivers a `<system-reminder>` to the main agent saying the
+  user assigned the items. The list carries no provenance, so the agent read an
+  item it did not write as somebody else's idea and cancelled it as out of
+  scope. `/todo` reports the count only; `/TODO` names the items, because they
+  are the next thing the agent does.
+- The capture's tasks-pane row is kept, finished, rather than removed
+  (`finish_todo_capture_ui`). The row is what holds the streamed transcript
+  (`SessionUpdate::TodoCaptureProgress`, stamped with the client-minted
+  `capture_id` that names the row), and removing it is what made opening the
+  row show a blank window.
+
+## The todo list cannot be discarded or overwritten
+
+- A todo is the user's. Nothing can delete one: an item leaves the actionable
+  set only by becoming `Completed` or `Cancelled`, both of which name it by id.
+  Text is changed by sending that id with new content.
+- Every `todo_write` is a merge, and an item the call omits survives with its
+  status untouched. `merge: false` used to clear the list and keep only what
+  the call resent, which is how a status update that forgot the flag erased
+  the user's list.
+- `merge` is still accepted on the wire and ignored, and is `#[schemars(skip)]`
+  now that both values behave the same — advertising it would describe a
+  choice the tool no longer offers.
+- `TodoState` has no `clear` and no remove of any shape. The guarantee lives in
+  the data structure so a later caller cannot reach around it.
+- opencode's `todowrite` sends a whole list with no ids, so it merges by
+  ITEM TEXT, not by position. Position is not identity: keying on it let a
+  reordered or shorter list write one row's text over another's, which loses
+  work as surely as a delete.
 
 ## Cost-indicator feature notes
 

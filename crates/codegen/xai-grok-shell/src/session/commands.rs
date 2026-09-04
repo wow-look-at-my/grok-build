@@ -741,6 +741,12 @@ pub enum SessionCommand {
     /// turn is not interrupted.
     TodoCapture {
         request: String,
+        /// `/TODO` rather than `/todo`: the items go to the top of the list
+        /// and the notice to the main agent names them.
+        urgent: bool,
+        /// Client-minted id for this capture. Names the task row the client
+        /// opened, so progress updates reach it.
+        capture_id: String,
         respond_to: oneshot::Sender<
             Result<super::acp_session::TodoCaptureOutcome, super::acp_session::TodoCaptureError>,
         >,
