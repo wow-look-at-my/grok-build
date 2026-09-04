@@ -271,10 +271,13 @@ async fn a_capture_leaves_the_parent_conversation_alone() {
             );
             let notice = format!("{:?}", after.last().expect("the notice"));
             assert!(
-                notice.contains("The user added 1 item to the todo list"),
-                "{notice}"
+                notice.contains("The user has assigned a new todo"),
+                "the notice says whose the item is, and how many: {notice}"
             );
-            assert!(notice.contains("in scope by definition"), "{notice}");
+            assert!(
+                notice.contains("you've finished what you're currently working on"),
+                "a /todo notice defers the work rather than interrupting: {notice}"
+            );
             assert!(
                 !notice.contains("Add a second remote to ci/push.sh"),
                 "a /todo notice must not name the items: {notice}"
@@ -390,7 +393,11 @@ async fn an_urgent_capture_lands_at_the_top_without_disturbing_the_list() {
                     .last()
                     .expect("the notice")
             );
-            assert!(notice.contains("/TODO"), "{notice}");
+            assert!(
+                notice.contains("do not interrupt/abandon your current unit of work"),
+                "even an urgent notice must not tell the agent to drop what it is \
+                 doing: {notice}"
+            );
             assert!(
                 notice.contains("Add a second remote to ci/push.sh"),
                 "an urgent notice names the items: {notice}"
@@ -399,11 +406,11 @@ async fn an_urgent_capture_lands_at_the_top_without_disturbing_the_list() {
         .await;
 }
 
-/// A session whose task-list tool cannot express an append is refused before
-/// any model call, rather than written through with semantics that would
-/// replace the main agent's list.
+/// A session whose task-list tool cannot address the item a capture adds is
+/// refused before any model call, rather than written through with semantics
+/// that cannot express the append.
 #[tokio::test(flavor = "current_thread")]
-async fn a_replace_only_task_list_tool_is_refused() {
+async fn a_task_list_tool_without_item_ids_is_refused() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
@@ -415,8 +422,8 @@ async fn a_replace_only_task_list_tool_is_refused() {
             drain_persistence(persistence_rx);
 
             let mut actor = create_test_actor(0, 256_000, 85, gateway_tx, persistence_tx).await;
-            // opencode's `todowrite` is `ToolKind::Plan` too, and replaces the
-            // whole list — the case the namespace check exists for.
+            // opencode's `todowrite` is `ToolKind::Plan` too, and gives its
+            // items no ids — the case the namespace check exists for.
             *actor.agent.borrow_mut() = test_agent_with_tools(vec![
                 xai_grok_tools::registry::types::ToolConfig::for_tool::<
                     xai_grok_tools::implementations::opencode::todowrite::TodoWriteTool,
@@ -427,16 +434,18 @@ async fn a_replace_only_task_list_tool_is_refused() {
             let err = actor
                 .handle_todo_capture("add something", false, "cap-3")
                 .await
-                .expect_err("a replace-only task-list tool must be refused");
+                .expect_err("a task-list tool without item ids must be refused");
             assert!(
                 matches!(err, TodoCaptureError::UnsupportedTodoTool(_)),
                 "got {err:?}"
             );
             // No model was configured, so reaching one would have failed
             // differently — the refusal has to come first.
+            let msg = err.to_string();
             assert!(
-                err.to_string().contains("append-capable"),
-                "the message must say what is missing: {err}"
+                msg.contains("items carry ids") && msg.contains("todowrite"),
+                "the message must say what is missing, and name the tool that \
+                 is missing it: {err}"
             );
         })
         .await;
