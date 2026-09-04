@@ -3521,7 +3521,7 @@ mod tests {
         [
           {
             "name": "todo_write",
-            "description": "Create and manage a structured task list. The user sees this list live — it is your primary way to show progress.\n\nAdd as many items as the work needs — a small task may be one or two, a large one many more. Do not pad a small job into a fake checklist, and do not crush a large job into a handful of vague items. Skip for trivial single-step work. Check items off as you go; keep roughly one in_progress.",
+            "description": "Create and manage a structured task list. The user sees this list live — it is your primary way to show progress.\n\nAdd as many items as the work needs — a small task may be one or two, a large one many more. Do not pad a small job into a fake checklist, and do not crush a large job into a handful of vague items. Skip for trivial single-step work. Check items off as you go; keep roughly one in_progress.\n\nWrites merge by id, so send only the items you are changing. An item you leave out is kept exactly as it was: there is no way to remove one. Work leaves the list by status only — completed when it is done, cancelled when it will not be done. Reword an item by sending its id with new content.",
             "parameters": {
               "$schema": "http://json-schema.org/draft-07/schema#",
               "required": [
@@ -3529,13 +3529,8 @@ mod tests {
               ],
               "type": "object",
               "properties": {
-                "merge": {
-                  "description": "Optional. When true (default), merges the provided todos into the existing list by id — send only the items you are changing, and to flip status without changing content send just id + status. When false, the provided todos replace the existing list.",
-                  "type": "boolean",
-                  "default": true
-                },
                 "todos": {
-                  "description": "Array of todo items to write to the workspace",
+                  "description": "Todo items to add or update, matched by id. Send only what you are changing; items you omit are left untouched. To flip status without changing the text, send just id + status.",
                   "type": "array",
                   "items": {
                     "type": "object",
