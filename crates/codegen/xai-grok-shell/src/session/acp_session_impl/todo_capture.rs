@@ -182,14 +182,13 @@ fn add_only_todo_args(contents: &[String], urgent: bool) -> serde_json::Value {
 /// "next", so the items ride along and the agent needs no second call to know
 /// what it is about to do.
 fn captured_todos_reminder(urgent: bool, todo_tool: &str, added: &[String]) -> String {
-    let n = added.len();
-    let items = if n == 1 { "item" } else { "items" };
+    let one = added.len() == 1;
     if urgent {
+        let todo = if one { "a todo" } else { "todos" };
         let mut text = format!(
-            "The user added {n} {items} to the todo list with /TODO, at the TOP of the list. \
-             Anything the user assigns is in scope by definition — do not cancel, drop, or \
-             re-scope these. Start on them once your CURRENT unit of work is complete; do not \
-             interrupt or abandon what you are doing now. The TODO(s) are:"
+            "The user added {todo} they want you to handle once you're done with your current \
+             step. Start doing it once you've completed your current unit of work, but do not \
+             interrupt/abandon your current unit of work. The TODO(s) are:"
         );
         for item in added {
             text.push_str("\n- ");
@@ -197,12 +196,14 @@ fn captured_todos_reminder(urgent: bool, todo_tool: &str, added: &[String]) -> S
         }
         return text;
     }
+    let todos = if one { "a new todo" } else { "new todos" };
+    // `merge: true` is load-bearing, not decoration: an empty `todos` array
+    // without it takes the replace path, which clears the list first.
     format!(
-        "The user added {n} {items} to the todo list with /todo. Anything the user assigns is \
-         in scope by definition — do not cancel, drop, or re-scope these. They are deliberately \
-         NOT urgent: had the user wanted them done now, they would have said so instead of using \
-         the todo system. Finish what you are working on first, then read the list back with a \
-         `{todo_tool}` call carrying an empty `todos` array and pick them up."
+        "The user has assigned {todos}, with the explicit intention that you handle them \
+         *after* you've finished what you're currently working on (if they wanted it done now, \
+         they would've said so instead of using the todo system). Check out the todo list with \
+         `{todo_tool}` (`merge: true`, empty `todos`) when you have a moment."
     )
 }
 
@@ -1103,31 +1104,49 @@ mod tests {
     }
 
     /// The bug this message exists for: the agent read a captured item as
-    /// somebody else's idea and cancelled it. Both variants have to say the
-    /// user assigned it, and neither may read as "do this now" — `/todo` is
-    /// explicitly for after the current work.
+    /// somebody else's idea and cancelled it. Both variants have to name the
+    /// user as the one who assigned it, and neither may read as "do this now"
+    /// — the whole point of the todo system is that it is for afterwards.
     #[test]
-    fn both_reminders_put_the_items_in_scope_and_after_the_current_work() {
+    fn both_reminders_name_the_user_and_defer_to_the_current_work() {
         let added = ["add a second remote".to_owned(), "document it".to_owned()];
         for urgent in [false, true] {
             let text = captured_todos_reminder(urgent, TODO_WRITE, &added);
-            assert!(text.contains("The user added 2 items"), "{text}");
-            assert!(text.contains("in scope by definition"), "{text}");
-            assert!(text.contains("do not cancel"), "{text}");
+            assert!(text.starts_with("The user "), "{text}");
         }
         let calm = captured_todos_reminder(false, TODO_WRITE, &added);
-        assert!(calm.contains("NOT urgent"), "{calm}");
+        assert!(calm.contains("has assigned new todos"), "{calm}");
+        assert!(
+            calm.contains("*after* you've finished what you're currently working on"),
+            "{calm}"
+        );
         assert!(
             calm.contains(TODO_WRITE),
             "the calm notice must say how to read the list: {calm}"
         );
         let urgent = captured_todos_reminder(true, TODO_WRITE, &added);
-        assert!(urgent.contains("do not interrupt or abandon"), "{urgent}");
-        // Case-insensitive: the notice emphasizes words in caps, and which
-        // ones it shouts is not what this test is about.
         assert!(
-            urgent.to_lowercase().contains("current unit of work"),
+            urgent.contains("do not interrupt/abandon your current unit of work"),
             "{urgent}"
+        );
+        assert!(
+            urgent.contains("once you've completed your current unit of work"),
+            "{urgent}"
+        );
+    }
+
+    /// The read-back the calm notice asks for must not be the one that erases
+    /// the list. An empty `todos` array is a REPLACE unless `merge` is set,
+    /// and replace clears the state before writing — so a notice that names
+    /// the tool without naming `merge` tells the agent to wipe the todos the
+    /// user just captured.
+    #[test]
+    fn the_calm_read_back_cannot_be_read_as_a_wipe() {
+        let calm = captured_todos_reminder(false, TODO_WRITE, &["only one".to_owned()]);
+        let tool_at = calm.find(TODO_WRITE).expect("names the tool");
+        assert!(
+            calm[tool_at..].contains("`merge: true`"),
+            "the read-back must carry merge: true or it clears the list: {calm}"
         );
     }
 
@@ -1146,8 +1165,10 @@ mod tests {
 
     #[test]
     fn one_captured_item_reads_as_singular() {
-        let text = captured_todos_reminder(false, TODO_WRITE, &["only one".to_owned()]);
-        assert!(text.contains("1 item to the todo list"), "{text}");
+        let calm = captured_todos_reminder(false, TODO_WRITE, &["only one".to_owned()]);
+        assert!(calm.contains("has assigned a new todo,"), "{calm}");
+        let urgent = captured_todos_reminder(true, TODO_WRITE, &["only one".to_owned()]);
+        assert!(urgent.contains("added a todo they want you"), "{urgent}");
     }
 
     /// What the task window shows is the capture agent's own run: what it
