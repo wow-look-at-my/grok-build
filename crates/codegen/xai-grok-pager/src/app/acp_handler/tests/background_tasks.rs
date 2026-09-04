@@ -850,3 +850,68 @@
         assert!(agent.session.bg_tasks["task-replay"].restored_from_replay);
     }
 
+    /// The capture agent's conversation reaches the client only as
+    /// `TodoCaptureProgress`, so the row the capture opened is empty without
+    /// it — which is the blank window the user reported.
+    #[test]
+    fn todo_capture_progress_fills_the_capture_s_task_row() {
+        use crate::app::actions::Action;
+        use crate::app::dispatch::dispatch;
+
+        let mut app = make_app_with_agent("sess-1");
+        let id = AgentId(0);
+        dispatch(
+            Action::SendTodo { request: "check the flaky test".into(), urgent: false },
+            &mut app,
+        );
+        let task_id = app.agents[&id].pending_todo_task_id.clone().unwrap();
+        let capture_id = task_id.strip_prefix("todo-capture:").unwrap().to_string();
+
+        for text in ["reading the test file\n", "appending 1 todo\n"] {
+            assert!(
+                handle(
+                    make_ext_session_notification_with_method(
+                        "sess-1",
+                        "x.ai/session/update",
+                        XaiSessionUpdate::TodoCaptureProgress {
+                            capture_id: capture_id.clone(),
+                            text: text.into(),
+                        },
+                    ),
+                    &mut app,
+                ),
+                "progress on the active agent must request a redraw",
+            );
+        }
+
+        let stdout = &app.agents[&id].session.bg_tasks[&task_id].stdout;
+        assert!(stdout.contains("reading the test file"), "{stdout}");
+        assert!(stdout.contains("appending 1 todo"), "{stdout}");
+    }
+
+    /// Progress can outlive its row (the capture finished, or a newer one
+    /// replaced it). It has nowhere to go, and inventing a row for it would
+    /// put a task in the pane that nothing ever finishes.
+    #[test]
+    fn todo_capture_progress_for_an_unknown_capture_is_dropped() {
+        let mut app = make_app_with_agent("sess-1");
+
+        let affected = handle(
+            make_ext_session_notification_with_method(
+                "sess-1",
+                "x.ai/session/update",
+                XaiSessionUpdate::TodoCaptureProgress {
+                    capture_id: "no-such-capture".into(),
+                    text: "orphaned line\n".into(),
+                },
+            ),
+            &mut app,
+        );
+
+        assert!(!affected, "nothing changed, so nothing to redraw");
+        assert!(
+            app.agents[&AgentId(0)].session.bg_tasks.is_empty(),
+            "an unknown capture id must not conjure a task row",
+        );
+    }
+

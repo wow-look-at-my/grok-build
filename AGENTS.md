@@ -139,6 +139,26 @@ verify serially wastes time when a parallel CI build could be running.
   `{session_dir}/todo-captures/todo-<uuid>.jsonl` so a missed `todo_write` is
   diagnosable. `NothingAdded` names that path; "Try sending again" is not the
   only residue.
+- `/TODO` is the urgent spelling: its items go to the front of the list. Only
+  the exact all-caps name counts (`is_urgent_token` in the pager's
+  `slash/commands/todo.rs`) — `/Todo` and `/ToDo` are shift-key noise, not a
+  request to jump the queue. Command resolution is case-insensitive, so the
+  typed case reaches the command only through `SlashCommand::run_with_token`.
+- The front of the list is `prepend` on `TodoWriteInput`, which is
+  `#[schemars(skip)]`: the model cannot reach it, and the serialized tool list
+  is unchanged, so the conversation's prompt cache survives the field. Prepend
+  places new items only — an id already on the list keeps its position, so this
+  is not a way around the append-only rule.
+- A landed capture delivers a `<system-reminder>` to the main agent saying the
+  user assigned the items. The list carries no provenance, so the agent read an
+  item it did not write as somebody else's idea and cancelled it as out of
+  scope. `/todo` reports the count only; `/TODO` names the items, because they
+  are the next thing the agent does.
+- The capture's tasks-pane row is kept, finished, rather than removed
+  (`finish_todo_capture_ui`). The row is what holds the streamed transcript
+  (`SessionUpdate::TodoCaptureProgress`, stamped with the client-minted
+  `capture_id` that names the row), and removing it is what made opening the
+  row show a blank window.
 
 ## Cost-indicator feature notes
 

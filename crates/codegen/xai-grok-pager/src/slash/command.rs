@@ -367,4 +367,13 @@ pub trait SlashCommand: Send + Sync {
     /// For async work, return `CommandResult::Action(action)` and let
     /// the dispatch layer handle the effect pipeline.
     fn run(&self, ctx: &mut CommandExecCtx, args: &str) -> CommandResult;
+
+    /// Execute, with the name the user actually typed.
+    ///
+    /// Resolution is case-insensitive, so `token` is the only place the typed
+    /// case survives. Override this when the case is part of the request
+    /// (`/TODO` versus `/todo`); everything else wants [`Self::run`].
+    fn run_with_token(&self, ctx: &mut CommandExecCtx, _token: &str, args: &str) -> CommandResult {
+        self.run(ctx, args)
+    }
 }

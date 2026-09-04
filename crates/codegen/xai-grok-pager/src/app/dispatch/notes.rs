@@ -397,10 +397,17 @@ pub(super) fn dispatch_send_btw(app: &mut AppView, question: String) -> Vec<Effe
 
 /// Prefix for the synthetic tasks-pane row that tracks an in-flight `/todo`
 /// capture. Kill requests for these ids are local-only (there is no shell
-/// bg-task to cancel); completion always removes the row.
-const TODO_CAPTURE_TASK_PREFIX: &str = "todo-capture:";
+/// bg-task to cancel); completion marks the row finished and keeps it.
+pub(crate) const TODO_CAPTURE_TASK_PREFIX: &str = "todo-capture:";
 
-fn begin_todo_capture_ui(agent: &mut AgentView, request: &str) {
+/// The tasks-pane row id for a capture. The client mints `capture_id` and
+/// sends it to the shell, which stamps its progress updates with it — that
+/// round trip is what lets a transcript line find the row it belongs to.
+pub(crate) fn todo_capture_task_id(capture_id: &str) -> String {
+    format!("{TODO_CAPTURE_TASK_PREFIX}{capture_id}")
+}
+
+fn begin_todo_capture_ui(agent: &mut AgentView, request: &str, capture_id: &str) {
     if let Some(old_id) = agent.pending_todo_task_id.take() {
         agent.session.bg_tasks.remove(&old_id);
     }
@@ -417,7 +424,7 @@ fn begin_todo_capture_ui(agent: &mut AgentView, request: &str) {
     agent.pending_todo_entry = Some(entry_id);
     // Tasks pane sits at the top of the agent view and auto-opens on a new
     // live running task — that is the "in-flight at the top" surface.
-    let task_id = format!("{TODO_CAPTURE_TASK_PREFIX}{}", uuid::Uuid::new_v4());
+    let task_id = todo_capture_task_id(capture_id);
     agent.session.bg_tasks.insert(
         task_id.clone(),
         BgTaskState {
@@ -445,12 +452,21 @@ fn begin_todo_capture_ui(agent: &mut AgentView, request: &str) {
     agent.pending_todo_task_id = Some(task_id);
 }
 
-fn finish_todo_capture_ui(agent: &mut AgentView) {
+/// Stop the capture's spinner. The tasks-pane row stays, finished, the way a
+/// finished bash task does: it holds the capture agent's transcript, and that
+/// is the only place the user can read what this run actually did.
+fn finish_todo_capture_ui(agent: &mut AgentView, ok: bool) {
     if let Some(entry_id) = agent.pending_todo_entry.take() {
         agent.scrollback.remove_entry(entry_id);
     }
-    if let Some(task_id) = agent.pending_todo_task_id.take() {
-        agent.session.bg_tasks.remove(&task_id);
+    if let Some(task_id) = agent.pending_todo_task_id.take()
+        && let Some(task) = agent.session.bg_tasks.get_mut(&task_id)
+    {
+        task.status = if ok { BgTaskStatus::Done } else { BgTaskStatus::Failed };
+        task.end_time = Some(std::time::SystemTime::now());
+        // The running scrollback entry is gone above, so a row pointing at it
+        // would open a viewer on an entry that no longer exists.
+        task.scrollback_entry_id = None;
     }
 }
 
@@ -458,11 +474,12 @@ fn finish_todo_capture_ui(agent: &mut AgentView) {
 /// agent is mid-turn. Fires an ACP ext method and leaves a running tool in the
 /// transcript plus a tasks-pane row, which [`handle_todo_captured`] replaces
 /// with what landed on the list.
-pub(super) fn dispatch_send_todo(app: &mut AppView, request: String) -> Vec<Effect> {
+pub(super) fn dispatch_send_todo(app: &mut AppView, request: String, urgent: bool) -> Vec<Effect> {
     let ActiveView::Agent(id) = app.active_view else {
         return vec![];
     };
     let minimal = app.screen_mode.is_minimal();
+    let capture_id = uuid::Uuid::new_v4().to_string();
     let session_id = {
         let Some(agent) = app.agents.get_mut(&id) else {
             return vec![];
@@ -481,7 +498,7 @@ pub(super) fn dispatch_send_todo(app: &mut AppView, request: String) -> Vec<Effe
         // Repeated `/todo`s are independent captures, so each gets its own
         // block; only the newest id is tracked, and an older spinner is stopped
         // by whichever response lands.
-        begin_todo_capture_ui(agent, &request);
+        begin_todo_capture_ui(agent, &request, &capture_id);
         session_id
     };
 
@@ -489,6 +506,8 @@ pub(super) fn dispatch_send_todo(app: &mut AppView, request: String) -> Vec<Effe
         agent_id: id,
         session_id,
         request,
+        urgent,
+        capture_id,
     }]
 }
 
@@ -504,7 +523,7 @@ pub(super) fn handle_todo_captured(
     let Some(agent) = app.agents.get_mut(&agent_id) else {
         return vec![];
     };
-    finish_todo_capture_ui(agent);
+    finish_todo_capture_ui(agent, result.is_ok());
     let block = match result {
         Ok(added) => {
             let mut text = format!(

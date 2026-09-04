@@ -1426,7 +1426,7 @@ pub(super) fn dispatch_dashboard_dispatch_slash(app: &mut AppView, text: String)
                 scheduler_background_loops: scheduler_background_loops_seed,
             },
         };
-        command.run(&mut ctx, invocation.args)
+        command.run_with_token(&mut ctx, invocation.token, invocation.args)
     };
 
     match result {

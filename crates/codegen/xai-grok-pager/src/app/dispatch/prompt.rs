@@ -603,7 +603,7 @@ pub(super) fn dispatch_send_prompt_inner(
                             .prompt
                             .slash_controller
                             .record_command_use(invocation.token, invocation.token);
-                        command.run(&mut ctx, invocation.args)
+                        command.run_with_token(&mut ctx, invocation.token, invocation.args)
                     }
                 } else {
                     // Unknown command -- pass through to shell.

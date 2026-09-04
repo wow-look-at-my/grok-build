@@ -3662,7 +3662,7 @@ pub(crate) fn execute(
                     }
                 });
         }
-        Effect::SendTodo { agent_id, session_id, request } => {
+        Effect::SendTodo { agent_id, session_id, request, urgent, capture_id } => {
             let tx = acp_tx.clone();
             let is_api_key_auth = session_flags.is_api_key_auth;
             tasks
@@ -3673,6 +3673,8 @@ pub(crate) fn execute(
                                 &serde_json::json!({
                         "sessionId": session_id.0.to_string(),
                         "request": &request,
+                        "urgent": urgent,
+                        "captureId": &capture_id,
                     }),
                             )
                             .expect("serialize todo params")

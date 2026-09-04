@@ -930,15 +930,27 @@ fn todo_capture_requests_and_shows_a_running_block() {
         .prompt
         .set_text("/todo ...");
 
-    let effects = dispatch(Action::SendTodo("push to 2 git repos".into()), &mut app);
-
-    assert!(
-        matches!(
-            effects.as_slice(),
-            [Effect::SendTodo { request, .. }] if request == "push to 2 git repos"
-        ),
-        "expected SendTodo effect, got {effects:?}"
+    let effects = dispatch(
+        Action::SendTodo {
+            request: "push to 2 git repos".into(),
+            urgent: false,
+        },
+        &mut app,
     );
+
+    let [
+        Effect::SendTodo {
+            request,
+            urgent,
+            capture_id,
+            ..
+        },
+    ] = effects.as_slice() else {
+        panic!("expected SendTodo effect, got {effects:?}");
+    };
+    assert_eq!(request, "push to 2 git repos");
+    assert!(!urgent, "/todo is the deferred spelling");
+    let capture_id = capture_id.clone();
     let agent = app.agents.get(&id).unwrap();
     let entry_id = agent
         .pending_todo_entry
@@ -963,10 +975,9 @@ fn todo_capture_requests_and_shows_a_running_block() {
         .pending_todo_task_id
         .as_deref()
         .expect("capture is a running task at the top");
-    assert!(
-        task_id.starts_with("todo-capture:"),
-        "task id must be namespaced: {task_id}"
-    );
+    // The shell stamps its progress updates with the capture id the client
+    // minted, so the row it names has to be the row this capture opened.
+    assert_eq!(task_id, format!("todo-capture:{capture_id}"));
     let task = agent
         .session
         .bg_tasks
@@ -987,8 +998,15 @@ fn todo_capture_requests_and_shows_a_running_block() {
 fn captured_todos_replace_the_running_block_with_what_landed() {
     let mut app = test_app_with_agent();
     let id = AgentId(0);
-    dispatch(Action::SendTodo("push to 2 git repos".into()), &mut app);
+    dispatch(
+        Action::SendTodo {
+            request: "push to 2 git repos".into(),
+            urgent: false,
+        },
+        &mut app,
+    );
     let spinner = app.agents[&id].pending_todo_entry.unwrap();
+    let task_id = app.agents[&id].pending_todo_task_id.clone().unwrap();
 
     dispatch(
         Action::TaskComplete(TaskResult::TodoCaptured {
@@ -1005,9 +1023,18 @@ fn captured_todos_replace_the_running_block_with_what_landed() {
     let agent = app.agents.get(&id).unwrap();
     assert!(agent.pending_todo_entry.is_none());
     assert!(agent.pending_todo_task_id.is_none());
+    // The row holds the capture agent's transcript, so it outlives the run the
+    // way a finished bash task's row does.
+    let task = agent
+        .session
+        .bg_tasks
+        .get(&task_id)
+        .expect("the finished capture keeps its tasks-pane row");
+    assert_eq!(task.status, crate::app::agent::BgTaskStatus::Done);
+    assert!(task.end_time.is_some(), "a finished row is stamped");
     assert!(
-        agent.session.bg_tasks.is_empty(),
-        "the tasks-pane row is gone when the capture finishes"
+        task.scrollback_entry_id.is_none(),
+        "the running entry is gone, so the row must not point at it"
     );
     assert!(
         agent.scrollback.get_by_id(spinner).is_none(),
@@ -1035,10 +1062,14 @@ fn a_failed_capture_reports_instead_of_vanishing() {
     let mut app = test_app_with_agent();
     let id = AgentId(0);
     dispatch(
-        Action::SendTodo("look into the flaky test".into()),
+        Action::SendTodo {
+            request: "look into the flaky test".into(),
+            urgent: false,
+        },
         &mut app,
     );
     let spinner = app.agents[&id].pending_todo_entry.unwrap();
+    let task_id = app.agents[&id].pending_todo_task_id.clone().unwrap();
 
     dispatch(
         Action::TaskComplete(TaskResult::TodoCaptured {
@@ -1052,11 +1083,39 @@ fn a_failed_capture_reports_instead_of_vanishing() {
     let agent = app.agents.get(&id).unwrap();
     assert!(agent.pending_todo_entry.is_none());
     assert!(agent.pending_todo_task_id.is_none());
-    assert!(agent.session.bg_tasks.is_empty());
+    let task = agent
+        .session
+        .bg_tasks
+        .get(&task_id)
+        .expect("a failed capture keeps its row too — it is where the run is readable");
+    assert_eq!(task.status, crate::app::agent::BgTaskStatus::Failed);
     assert!(agent.scrollback.get_by_id(spinner).is_none());
     let text = last_system_text(&app, id);
     assert!(text.contains("look into the flaky test"), "{text}");
     assert!(text.contains("the capture agent added no todo"), "{text}");
+}
+
+/// `/TODO` is the urgent spelling, and the flag is what puts its items at the
+/// front of the list — it has to survive the trip to the shell.
+#[test]
+fn an_urgent_capture_carries_the_flag_to_the_shell() {
+    let mut app = test_app_with_agent();
+
+    let effects = dispatch(
+        Action::SendTodo {
+            request: "the build is broken on master".into(),
+            urgent: true,
+        },
+        &mut app,
+    );
+
+    assert!(
+        matches!(
+            effects.as_slice(),
+            [Effect::SendTodo { urgent: true, .. }]
+        ),
+        "expected an urgent SendTodo effect, got {effects:?}"
+    );
 }
 
 #[test]
@@ -1065,7 +1124,13 @@ fn todo_capture_without_a_session_says_so_and_fires_nothing() {
     let id = AgentId(0);
     app.agents.get_mut(&id).unwrap().session.session_id = None;
 
-    let effects = dispatch(Action::SendTodo("anything".into()), &mut app);
+    let effects = dispatch(
+        Action::SendTodo {
+            request: "anything".into(),
+            urgent: false,
+        },
+        &mut app,
+    );
 
     assert!(effects.is_empty(), "no session, no ext call: {effects:?}");
     let agent = app.agents.get(&id).unwrap();

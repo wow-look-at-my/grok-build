@@ -734,7 +734,12 @@ pub enum Action {
     /// Send a /btw side question (bypasses queue, works while agent is busy).
     SendBtw(String),
     /// Send a /todo capture request (bypasses queue, works while agent is busy).
-    SendTodo(String),
+    SendTodo {
+        request: String,
+        /// The user typed `/TODO`, so the items go to the top of the list and
+        /// the agent is told to pick them up after its current unit of work.
+        urgent: bool,
+    },
     /// Request a session recap ("where was I" summary). `auto` is `true` for
     /// the automatic return-from-away recap, `false` for an explicit `/recap`.
     /// Bypasses the prompt queue (works while the agent is busy).
@@ -1992,6 +1997,12 @@ pub enum Effect {
         agent_id: AgentId,
         session_id: acp::SessionId,
         request: String,
+        /// The user typed `/TODO`, so the items go to the top of the list and
+        /// the agent is told to pick them up after its current unit of work.
+        urgent: bool,
+        /// Names the tasks-pane row opened for this capture, so the shell's
+        /// progress updates can find it.
+        capture_id: String,
     },
     /// Request a session recap via the x.ai/recap ext method. Fire-and-forget:
     /// the recap arrives later as a `SessionRecap` notification.
