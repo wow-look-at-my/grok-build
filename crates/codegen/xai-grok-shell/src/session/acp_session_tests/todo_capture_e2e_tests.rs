@@ -134,7 +134,11 @@ async fn a_capture_appends_and_cannot_touch_the_main_agent_s_items() {
 
             let outcome = tokio::time::timeout(
                 Duration::from_secs(60),
-                actor.handle_todo_capture("add a way to push changes to 2 git repos"),
+                actor.handle_todo_capture(
+                    "add a way to push changes to 2 git repos",
+                    false,
+                    "cap-1",
+                ),
             )
             .await
             .expect("capture must finish within timeout")
@@ -191,8 +195,10 @@ async fn a_capture_appends_and_cannot_touch_the_main_agent_s_items() {
         .await;
 }
 
-/// The capture never touches the conversation the main agent is working in —
-/// that is what makes it safe to run mid-turn.
+/// The capture's own turns never reach the conversation the main agent is
+/// working in — that is what makes it safe to run mid-turn. The one thing it
+/// does add there is the notice that the user assigned these items, without
+/// which the agent reads them as somebody else's idea and cancels them.
 #[tokio::test(flavor = "current_thread")]
 async fn a_capture_leaves_the_parent_conversation_alone() {
     let local = tokio::task::LocalSet::new();
@@ -249,7 +255,7 @@ async fn a_capture_leaves_the_parent_conversation_alone() {
             let before = actor.chat_state_handle.get_conversation().await;
             let outcome = tokio::time::timeout(
                 Duration::from_secs(60),
-                actor.handle_todo_capture("push to two remotes"),
+                actor.handle_todo_capture("push to two remotes", false, "cap-2"),
             )
             .await
             .expect("capture must finish within timeout")
@@ -258,10 +264,136 @@ async fn a_capture_leaves_the_parent_conversation_alone() {
 
             let after = actor.chat_state_handle.get_conversation().await;
             assert_eq!(
-                before.len(),
                 after.len(),
-                "the capture's own turns must not reach the parent conversation: \
+                before.len() + 1,
+                "the notice is the only thing a capture adds: \
                  before={before:#?} after={after:#?}"
+            );
+            let notice = format!("{:?}", after.last().expect("the notice"));
+            assert!(
+                notice.contains("The user added 1 item to the todo list"),
+                "{notice}"
+            );
+            assert!(notice.contains("in scope by definition"), "{notice}");
+            assert!(
+                !notice.contains("Add a second remote to ci/push.sh"),
+                "a /todo notice must not name the items: {notice}"
+            );
+            // The capture agent's own turns — its reasoning, its tool call,
+            // the tool result — stay in its own conversation.
+            assert!(!notice.contains("call_capture_1"), "{notice}");
+        })
+        .await;
+}
+
+/// `/TODO` is the same capture with the items put where the user will act on
+/// them next. The adversarial call is still sanitized — the front of the list
+/// is not a way around the one-mutation rule — and the main agent's own item
+/// keeps its place, its content and its status.
+#[tokio::test(flavor = "current_thread")]
+async fn an_urgent_capture_lands_at_the_top_without_disturbing_the_list() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let server = MockInferenceServer::start()
+                .await
+                .expect("mock inference server");
+            server.enqueue_response(
+                "/v1/responses",
+                ScriptedResponse::sse(responses_api_reasoning_then_tool_call_events(
+                    "the push script is ci/push.sh",
+                    "call_capture_1",
+                    "todo_write",
+                    ADVERSARIAL_TODO_ARGS,
+                    "test",
+                )),
+            );
+
+            let (gateway_tx, gateway_rx) =
+                tokio::sync::mpsc::unbounded_channel::<xai_acp_lib::AcpClientMessage>();
+            drain_gateway(gateway_rx);
+            let (persistence_tx, persistence_rx) =
+                tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
+            drain_persistence(persistence_rx);
+
+            let mut actor = create_test_actor(0, 256_000, 85, gateway_tx, persistence_tx).await;
+            *actor.agent.borrow_mut() = test_grok_build_agent_with_todo().await;
+
+            let mut cfg = actor
+                .chat_state_handle
+                .get_sampling_config()
+                .await
+                .expect("test actor has sampling config");
+            cfg.base_url = server.url();
+            cfg.api_backend = xai_grok_sampling_types::ApiBackend::Responses;
+            cfg.model = "test".to_string();
+            actor.chat_state_handle.update_sampling_config(cfg);
+            let mut creds = actor.chat_state_handle.get_credentials().await;
+            creds.api_key = Some("test-key".to_string());
+            actor.chat_state_handle.update_credentials(creds);
+
+            actor
+                .workspace_ops
+                .bind_local_session(
+                    &actor.session_id_string(),
+                    actor.tool_context.cwd.as_path().to_path_buf(),
+                    actor.tool_context.hunk_tracker_handle.clone(),
+                    actor.agent.borrow().tool_bridge().toolset(),
+                    None,
+                )
+                .expect("bind_local_session");
+
+            actor
+                .workspace_ops
+                .call_tool(
+                    "todo_write",
+                    serde_json::from_str(SEED_TODO_ARGS).unwrap(),
+                    "seed",
+                    Some(&actor.session_info.id.0),
+                )
+                .await
+                .expect("seed todo");
+
+            tokio::time::timeout(
+                Duration::from_secs(60),
+                actor.handle_todo_capture("push to two remotes", true, "cap-urgent"),
+            )
+            .await
+            .expect("capture must finish within timeout")
+            .expect("capture must succeed");
+
+            let todos = todo_list(&actor).await;
+            assert_eq!(todos.len(), 3, "{todos:?}");
+            assert!(
+                todos[0].0.starts_with("capture-") && todos[1].0.starts_with("capture-"),
+                "an urgent capture goes to the front of the list: {todos:?}"
+            );
+            assert_eq!(
+                todos[2].0, "t1",
+                "the main agent's item keeps its place: {todos:?}"
+            );
+            assert_eq!(
+                todos[2].2,
+                crate::tools::todo::TodoStatus::InProgress,
+                "prepending is not a way around the one-mutation rule: {todos:?}"
+            );
+            for captured in &todos[..2] {
+                assert_eq!(captured.2, crate::tools::todo::TodoStatus::Pending);
+            }
+
+            let notice = format!(
+                "{:?}",
+                actor
+                    .chat_state_handle
+                    .get_conversation()
+                    .await
+                    .last()
+                    .expect("the notice")
+            );
+            assert!(notice.contains("/TODO"), "{notice}");
+            assert!(
+                notice.contains("Add a second remote to ci/push.sh"),
+                "an urgent notice names the items: {notice}"
             );
         })
         .await;
@@ -293,7 +425,7 @@ async fn a_replace_only_task_list_tool_is_refused() {
             .await;
 
             let err = actor
-                .handle_todo_capture("add something")
+                .handle_todo_capture("add something", false, "cap-3")
                 .await
                 .expect_err("a replace-only task-list tool must be refused");
             assert!(

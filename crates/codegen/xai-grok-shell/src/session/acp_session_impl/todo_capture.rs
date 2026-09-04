@@ -151,7 +151,11 @@ fn parse_tool_arguments(arguments: &str) -> serde_json::Value {
 /// state can only append, so the random suffix is what keeps the write off an
 /// item the main agent is working through. The `capture-` prefix is provenance,
 /// visible on the list and in the model's view of it.
-fn add_only_todo_args(contents: &[String]) -> serde_json::Value {
+///
+/// `prepend` is the one thing `/TODO` changes: new items land at the front of
+/// the list. Existing items keep their place, so the append-only guarantee is
+/// the same at either end.
+fn add_only_todo_args(contents: &[String], urgent: bool) -> serde_json::Value {
     let todos: Vec<serde_json::Value> = contents
         .iter()
         .map(|content| {
@@ -162,7 +166,75 @@ fn add_only_todo_args(contents: &[String]) -> serde_json::Value {
             })
         })
         .collect();
-    serde_json::json!({ "merge": true, "todos": todos })
+    serde_json::json!({ "merge": true, "prepend": urgent, "todos": todos })
+}
+
+/// What the main agent is told after a capture lands.
+///
+/// The model treats an item it did not write as somebody else's idea, and
+/// cancels it as out of scope. Nothing on the list carries who put it there,
+/// so the correction has to arrive as its own message: the user assigned this,
+/// which makes it in scope by definition.
+///
+/// The two variants differ in what they carry, not just in tone. `/todo` is
+/// explicitly not-now, so naming the items would pull attention onto work the
+/// user deferred; it reports the count and points at the list. `/TODO` is
+/// "next", so the items ride along and the agent needs no second call to know
+/// what it is about to do.
+fn captured_todos_reminder(urgent: bool, todo_tool: &str, added: &[String]) -> String {
+    let n = added.len();
+    let items = if n == 1 { "item" } else { "items" };
+    if urgent {
+        let mut text = format!(
+            "The user added {n} {items} to the todo list with /TODO, at the TOP of the list. \
+             Anything the user assigns is in scope by definition — do not cancel, drop, or \
+             re-scope these. Start on them once your CURRENT unit of work is complete; do not \
+             interrupt or abandon what you are doing now. The TODO(s) are:"
+        );
+        for item in added {
+            text.push_str("\n- ");
+            text.push_str(item);
+        }
+        return text;
+    }
+    format!(
+        "The user added {n} {items} to the todo list with /todo. Anything the user assigns is \
+         in scope by definition — do not cancel, drop, or re-scope these. They are deliberately \
+         NOT urgent: had the user wanted them done now, they would have said so instead of using \
+         the todo system. Finish what you are working on first, then read the list back with a \
+         `{todo_tool}` call carrying an empty `todos` array and pick them up."
+    )
+}
+
+/// One line of the capture agent's transcript, for the task window that shows
+/// this run. Rendered here rather than client-side: the client never sees the
+/// capture agent's conversation, and a `ConversationItem` is not something the
+/// tasks pane knows how to draw.
+fn transcript_lines(items: &[ConversationItem]) -> String {
+    let mut out = String::new();
+    for item in items {
+        match item {
+            ConversationItem::Assistant(a) => {
+                if !a.content.trim().is_empty() {
+                    out.push_str(a.content.trim());
+                    out.push('\n');
+                }
+                for call in &a.tool_calls {
+                    out.push_str(&format!("→ {}({})\n", call.name, call.arguments.trim()));
+                }
+            }
+            ConversationItem::ToolResult(r) => {
+                out.push_str("← ");
+                out.push_str(r.content.trim());
+                out.push('\n');
+            }
+            // Reasoning is the model's scratch space and the snapshot is the
+            // parent conversation the user already read; neither is what
+            // "show me this run" means.
+            _ => {}
+        }
+    }
+    out
 }
 
 /// What the capture loop does with one tool call the model emitted.
@@ -348,6 +420,8 @@ impl SessionActor {
     pub(super) async fn handle_todo_capture(
         &self,
         request: &str,
+        urgent: bool,
+        capture_id: &str,
     ) -> Result<TodoCaptureOutcome, TodoCaptureError> {
         let bridge = self.agent.borrow().tool_bridge().clone();
         let todo_tool = self.resolve_capture_todo_tool(&bridge).await?;
@@ -400,7 +474,14 @@ impl SessionActor {
         // actually run is decided at dispatch, in `capture_action`.
         let tool_specs = self.turn_base_tool_specs(&self.prepare_tool_definitions().await);
         let hosted_tools = self.hosted_tools_for_turn();
-        let conv_id = format!("todo-{}", uuid::Uuid::new_v4());
+        // The client minted this id and named its task row after it, so the
+        // progress updates below reach that row and the persisted transcript
+        // is filed under the same name the user saw.
+        let conv_id = format!("todo-{capture_id}");
+        // Everything after this index is the capture run itself; the snapshot
+        // before it is the parent conversation, which the user already read.
+        let run_start = items.len();
+        let mut streamed = run_start;
 
         let mut added: Vec<String> = Vec::new();
         let mut tools_used = 0usize;
@@ -458,6 +539,8 @@ impl SessionActor {
             let calls: Vec<ToolCall> = response.tool_calls().to_vec();
             items.extend(echoed_response_items(response.items, strip_reasoning));
             turns_done += 1;
+            self.stream_capture_transcript(capture_id, &items, &mut streamed)
+                .await;
 
             if calls.is_empty() {
                 no_write_reason = if refuse_reads {
@@ -487,7 +570,7 @@ impl SessionActor {
             let mut refused_only = true;
             for call in &calls {
                 let outcome = self
-                    .run_capture_tool(call, &todo_tool, dispatch_used)
+                    .run_capture_tool(call, &todo_tool, dispatch_used, urgent)
                     .await;
                 if outcome.spent_a_read {
                     tools_used += 1;
@@ -506,6 +589,8 @@ impl SessionActor {
                     outcome.result_text,
                 ));
             }
+            self.stream_capture_transcript(capture_id, &items, &mut streamed)
+                .await;
             if added.is_empty() && refused_only {
                 no_write_reason = format!(
                     "tool calls were refused and `{todo_tool}` was never invoked"
@@ -544,10 +629,43 @@ impl SessionActor {
         tracing::info!(
             added = added.len(),
             tools_used,
+            urgent,
             %transcript,
             "todo capture appended items"
         );
+        // The list alone does not say who wrote an item, and the main agent
+        // reads one it did not write as somebody else's suggestion. This is
+        // the message that says the user assigned it.
+        self.deliver_reminder_to_main_agent(captured_todos_reminder(
+            urgent, &todo_tool, &added,
+        ));
         Ok(TodoCaptureOutcome { added, tools_used })
+    }
+
+    /// Push the capture run's new transcript lines to the client's task row
+    /// for this capture. Advances `streamed` past what it sent, so each line
+    /// is delivered once.
+    async fn stream_capture_transcript(
+        &self,
+        capture_id: &str,
+        items: &[ConversationItem],
+        streamed: &mut usize,
+    ) {
+        if *streamed >= items.len() {
+            return;
+        }
+        let text = transcript_lines(&items[*streamed..]);
+        *streamed = items.len();
+        if text.is_empty() {
+            return;
+        }
+        self.send_xai_notification(
+            crate::extensions::notification::SessionUpdate::TodoCaptureProgress {
+                capture_id: capture_id.to_owned(),
+                text,
+            },
+        )
+        .await;
     }
 
     /// The name this session advertises the append-capable todo tool under, or
@@ -586,6 +704,7 @@ impl SessionActor {
         call: &ToolCall,
         todo_tool: &str,
         tools_used: usize,
+        urgent: bool,
     ) -> CaptureToolOutcome {
         let args = parse_tool_arguments(&call.arguments);
         let kind = self.agent.borrow().tool_bridge().tool_kind(&call.name);
@@ -600,7 +719,11 @@ impl SessionActor {
                     ));
                 }
                 match self
-                    .append_capture_todos(todo_tool, &call.id, add_only_todo_args(&contents))
+                    .append_capture_todos(
+                        todo_tool,
+                        &call.id,
+                        add_only_todo_args(&contents, urgent),
+                    )
                     .await
                 {
                     Ok(text) => CaptureToolOutcome {
@@ -701,8 +824,9 @@ mod tests {
 
     #[test]
     fn append_only_args_mint_ids_and_force_pending_merge() {
-        let args = add_only_todo_args(&["wire the exporter".to_owned()]);
+        let args = add_only_todo_args(&["wire the exporter".to_owned()], false);
         assert_eq!(args["merge"], serde_json::json!(true));
+        assert_eq!(args["prepend"], serde_json::json!(false));
         let todo = &args["todos"][0];
         assert_eq!(todo["content"], serde_json::json!("wire the exporter"));
         assert_eq!(todo["status"], serde_json::json!("pending"));
@@ -712,8 +836,21 @@ mod tests {
             "{id} must be marked as captured"
         );
         // Two calls with the same content must not collide on the list.
-        let other = add_only_todo_args(&["wire the exporter".to_owned()]);
+        let other = add_only_todo_args(&["wire the exporter".to_owned()], false);
         assert_ne!(id, other["todos"][0]["id"].as_str().unwrap());
+    }
+
+    /// `/TODO` differs from `/todo` in exactly one argument. Everything that
+    /// holds the one-mutation rule — minted ids, forced pending, merge on —
+    /// is the same at the front of the list as at the back.
+    #[test]
+    fn urgent_args_prepend_and_change_nothing_else() {
+        let args = add_only_todo_args(&["ship the fix".to_owned()], true);
+        assert_eq!(args["prepend"], serde_json::json!(true));
+        assert_eq!(args["merge"], serde_json::json!(true));
+        let todo = &args["todos"][0];
+        assert_eq!(todo["status"], serde_json::json!("pending"));
+        assert!(todo["id"].as_str().unwrap().starts_with("capture-"));
     }
 
     /// The model's own ids, statuses and `merge: false` are the three ways a
@@ -729,7 +866,7 @@ mod tests {
             ],
         }));
         assert_eq!(contents, vec!["ship the release", "2"]);
-        let args = add_only_todo_args(&contents);
+        let args = add_only_todo_args(&contents, false);
         assert_eq!(args["merge"], serde_json::json!(true));
         for todo in args["todos"].as_array().unwrap() {
             assert_eq!(todo["status"], serde_json::json!("pending"));
@@ -963,6 +1100,82 @@ mod tests {
         assert!(body.contains("add a second remote"), "{body}");
         assert!(body.contains("calling todo_write"), "{body}");
         assert_eq!(body.lines().count(), 2);
+    }
+
+    /// The bug this message exists for: the agent read a captured item as
+    /// somebody else's idea and cancelled it. Both variants have to say the
+    /// user assigned it, and neither may read as "do this now" — `/todo` is
+    /// explicitly for after the current work.
+    #[test]
+    fn both_reminders_put_the_items_in_scope_and_after_the_current_work() {
+        let added = ["add a second remote".to_owned(), "document it".to_owned()];
+        for urgent in [false, true] {
+            let text = captured_todos_reminder(urgent, TODO_WRITE, &added);
+            assert!(text.contains("The user added 2 items"), "{text}");
+            assert!(text.contains("in scope by definition"), "{text}");
+            assert!(text.contains("do not cancel"), "{text}");
+        }
+        let calm = captured_todos_reminder(false, TODO_WRITE, &added);
+        assert!(calm.contains("NOT urgent"), "{calm}");
+        assert!(
+            calm.contains(TODO_WRITE),
+            "the calm notice must say how to read the list: {calm}"
+        );
+        let urgent = captured_todos_reminder(true, TODO_WRITE, &added);
+        assert!(urgent.contains("do not interrupt or abandon"), "{urgent}");
+        assert!(urgent.contains("current unit of work"), "{urgent}");
+    }
+
+    /// The items ride along on `/TODO` (it is the next thing the agent does,
+    /// so it needs no second call to find out what) and are deliberately left
+    /// off `/todo`, where naming them would pull attention onto work the user
+    /// just deferred.
+    #[test]
+    fn only_the_urgent_reminder_carries_the_items() {
+        let added = ["add a second remote".to_owned()];
+        assert!(
+            !captured_todos_reminder(false, TODO_WRITE, &added).contains("add a second remote")
+        );
+        assert!(captured_todos_reminder(true, TODO_WRITE, &added).contains("add a second remote"));
+    }
+
+    #[test]
+    fn one_captured_item_reads_as_singular() {
+        let text = captured_todos_reminder(false, TODO_WRITE, &["only one".to_owned()]);
+        assert!(text.contains("1 item to the todo list"), "{text}");
+    }
+
+    /// What the task window shows is the capture agent's own run: what it
+    /// said, what it called, and what came back. The parent conversation it
+    /// was handed is not part of that — the user already read it.
+    #[test]
+    fn transcript_renders_the_runs_calls_and_results_only() {
+        let items = vec![
+            ConversationItem::user("the snapshot the capture agent was handed"),
+            ConversationItem::Reasoning(xai_grok_sampling_types::synthesized_reasoning_item(
+                "which file owns the push",
+            )),
+            ConversationItem::assistant("naming the work"),
+            ConversationItem::assistant_tool_calls(vec![ToolCall {
+                id: "call_1".into(),
+                name: "grep".to_string(),
+                arguments: r#"{"pattern":"git push"}"#.into(),
+                vendor: Default::default(),
+            }]),
+            ConversationItem::tool_result("call_1".to_string(), "src/push.rs:12".to_string()),
+        ];
+        let text = transcript_lines(&items);
+        assert!(text.contains("naming the work"), "{text}");
+        assert!(text.contains(r#"→ grep({"pattern":"git push"})"#), "{text}");
+        assert!(text.contains("← src/push.rs:12"), "{text}");
+        assert!(
+            !text.contains("the snapshot the capture agent was handed"),
+            "the parent conversation is not this run: {text}"
+        );
+        assert!(
+            !text.contains("which file owns the push"),
+            "reasoning is scratch space, not the run: {text}"
+        );
     }
 
     #[test]

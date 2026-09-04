@@ -19,6 +19,15 @@ pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
     struct TodoRequest {
         session_id: String,
         request: String,
+        /// `/TODO`, not `/todo`. Defaulted so an older client keeps the
+        /// ordinary, non-urgent capture it has always sent.
+        #[serde(default)]
+        urgent: bool,
+        /// Names the client's task row for this capture, so progress updates
+        /// reach it. An older client sends none and gets a minted one, which
+        /// matches no row — its transcript then only lands in the run's file.
+        #[serde(default)]
+        capture_id: Option<String>,
     }
 
     let req: TodoRequest = parse_params(args)?;
@@ -34,6 +43,10 @@ pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
     let (tx, rx) = oneshot::channel();
     let _ = session.cmd_tx.send(SessionCommand::TodoCapture {
         request: req.request,
+        urgent: req.urgent,
+        capture_id: req
+            .capture_id
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
         respond_to: tx,
     });
     let result = rx
