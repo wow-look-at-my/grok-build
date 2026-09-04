@@ -1,11 +1,12 @@
-//! OpenCode `todowrite` tool — full-replace task list management.
+//! OpenCode `todowrite` tool — task list management.
 //!
-//! Follows the opencode convention: every call sends the **complete** todo list
-//! (full-replace semantics, no merge). Items carry `content`, `status`, and
-//! `priority` — no caller-supplied IDs.
+//! Follows the opencode convention that every call sends the **complete** todo
+//! list. Items carry `content`, `status`, and `priority` — no caller-supplied
+//! IDs, so an item is matched by its position.
 //!
-//! State is stored as `State<TodoState>` in Resources, shared with the
-//! grok_build todo infrastructure.
+//! The list it writes to is the user's, shared with the grok_build todo
+//! infrastructure, so a write here is a merge by position and never deletes.
+//! A call carrying fewer items than the list holds leaves the tail alone.
 
 use std::fmt::Write;
 
@@ -341,9 +342,9 @@ impl xai_tool_runtime::Tool for TodoWriteTool {
             let mut res = resources.lock().await;
             let todo_state = res.get_or_default::<State<TodoState>>();
 
-            // Full-replace: clear existing state and insert all incoming items.
-            todo_state.0.clear();
-
+            // opencode's own tool is full-replace, but the list it writes to is
+            // the user's. A shorter list than last time means the tail is left
+            // alone, not deleted: an item leaves only by being cancelled.
             for (i, item) in input.todos.iter().enumerate() {
                 let status = parse_status(&item.status);
                 let priority = parse_priority(&item.priority);
@@ -351,6 +352,9 @@ impl xai_tool_runtime::Tool for TodoWriteTool {
                 // Use a positional id since opencode items don't carry IDs.
                 let id = format!("{}", i + 1);
 
+                if todo_state.0.update(&id, Some(&item.content), Some(status)) {
+                    continue;
+                }
                 todo_state.0.push(
                     id,
                     TodoItem {
