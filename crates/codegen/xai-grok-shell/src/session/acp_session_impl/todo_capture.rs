@@ -1123,7 +1123,12 @@ mod tests {
         );
         let urgent = captured_todos_reminder(true, TODO_WRITE, &added);
         assert!(urgent.contains("do not interrupt or abandon"), "{urgent}");
-        assert!(urgent.contains("current unit of work"), "{urgent}");
+        // Case-insensitive: the notice emphasizes words in caps, and which
+        // ones it shouts is not what this test is about.
+        assert!(
+            urgent.to_lowercase().contains("current unit of work"),
+            "{urgent}"
+        );
     }
 
     /// The items ride along on `/TODO` (it is the next thing the agent does,
