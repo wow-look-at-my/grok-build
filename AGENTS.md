@@ -107,9 +107,10 @@ verify serially wastes time when a parallel CI build could be running.
   `TodoState` directly, which is what makes the item persist, reach the client
   as a `Plan` update, and show up in the next turn's todo-gate reminder the same
   way one the main agent wrote does. That path is `todo_write`-specific:
-  another harness's task-list tool (opencode's `todowrite`) replaces the list
-  instead of merging, so the run fails loudly with `UnsupportedTodoTool`
-  instead of writing through semantics that cannot express an append.
+  opencode's `todowrite` gives its items no ids and identifies them by text
+  alone, so a capture cannot address the item it adds (or place it at the front
+  for `/TODO`). The run fails loudly with `UnsupportedTodoTool` rather than
+  writing through semantics that cannot express that append.
 - Nothing in the loop compares against the literal `todo_write`. A harness
   preset renames tools per provider (`name_override`), and the model calls the
   renamed one, so the tool is resolved by kind and identified by NAMESPACE
@@ -159,6 +160,25 @@ verify serially wastes time when a parallel CI build could be running.
   (`SessionUpdate::TodoCaptureProgress`, stamped with the client-minted
   `capture_id` that names the row), and removing it is what made opening the
   row show a blank window.
+
+## The todo list cannot be discarded or overwritten
+
+- A todo is the user's. Nothing can delete one: an item leaves the actionable
+  set only by becoming `Completed` or `Cancelled`, both of which name it by id.
+  Text is changed by sending that id with new content.
+- Every `todo_write` is a merge, and an item the call omits survives with its
+  status untouched. `merge: false` used to clear the list and keep only what
+  the call resent, which is how a status update that forgot the flag erased
+  the user's list.
+- `merge` is still accepted on the wire and ignored, and is `#[schemars(skip)]`
+  now that both values behave the same — advertising it would describe a
+  choice the tool no longer offers.
+- `TodoState` has no `clear` and no remove of any shape. The guarantee lives in
+  the data structure so a later caller cannot reach around it.
+- opencode's `todowrite` sends a whole list with no ids, so it merges by
+  ITEM TEXT, not by position. Position is not identity: keying on it let a
+  reordered or shorter list write one row's text over another's, which loses
+  work as surely as a delete.
 
 ## Cost-indicator feature notes
 

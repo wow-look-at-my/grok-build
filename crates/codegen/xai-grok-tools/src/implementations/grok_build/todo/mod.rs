@@ -189,6 +189,38 @@ impl TodoState {
         true
     }
 
+    /// Change an item's priority without touching its text or status.
+    pub fn set_priority(&mut self, id: &TodoId, priority: TodoPriority) -> bool {
+        let Some(todo) = self.todos.get_mut(id) else {
+            return false;
+        };
+        todo.priority = priority;
+        true
+    }
+
+    /// The id of the first item whose text is exactly `content`.
+    ///
+    /// For a caller whose items carry no id of their own, the text is the only
+    /// identity they have.
+    pub fn id_with_content(&self, content: &str) -> Option<TodoId> {
+        self.todos
+            .iter()
+            .find(|(_, todo)| todo.content == content)
+            .map(|(id, _)| id.clone())
+    }
+
+    /// An id no item is using, for appending to a list whose caller supplies
+    /// none. Counts up past the numeric ids already present.
+    pub fn next_free_numeric_id(&self) -> TodoId {
+        let highest = self
+            .todos
+            .keys()
+            .filter_map(|id| id.parse::<usize>().ok())
+            .max()
+            .unwrap_or(0);
+        format!("{}", highest + 1)
+    }
+
     pub fn todo_items(&self) -> impl Iterator<Item = &TodoItem> + '_ {
         self.todos.values()
     }
@@ -409,7 +441,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn replace_mode_creates_items() {
+    async fn a_first_write_creates_items() {
         let tool = TodoWriteTool;
         let resources = Resources::new();
 
@@ -438,27 +470,29 @@ mod tests {
         assert_eq!(state.0.todo_items().count(), 2);
     }
 
+    /// `merge: false` was a wholesale replace: it cleared the list and kept
+    /// only what the call resent. Through the tool, with the flag still set
+    /// the destructive way, the earlier item has to survive — it is the
+    /// user's, and only a status can retire it.
     #[tokio::test]
-    async fn replace_clears_previous_state() {
+    async fn a_write_cannot_discard_what_it_omits() {
         let tool = TodoWriteTool;
         let resources = Resources::new();
         let shared = resources.into_shared();
 
-        // Seed initial state
         let input1 = TodoWriteInput {
             merge: false,
             prepend: false,
             todos: vec![make_update(
                 "old",
                 Some("Old task"),
-                Some(TodoStatus::Completed),
+                Some(TodoStatus::InProgress),
             )],
         };
         xai_tool_runtime::Tool::run(&tool, test_ctx(shared.clone()), input1)
             .await
             .unwrap();
 
-        // Replace with new
         let input2 = TodoWriteInput {
             merge: false,
             prepend: false,
@@ -473,9 +507,14 @@ mod tests {
                 .await
                 .unwrap(),
         );
-        assert_eq!(output.todos.len(), 1);
+        assert_eq!(output.todos.len(), 2, "the omitted item is still there");
         assert!(output.summary_for_prompt.contains("New task"));
-        assert!(!output.summary_for_prompt.contains("Old task"));
+        assert!(output.summary_for_prompt.contains("Old task"));
+        assert!(
+            output.summary_for_prompt.contains("[in_progress]"),
+            "the survivor keeps its status: {}",
+            output.summary_for_prompt
+        );
     }
 
     #[tokio::test]
@@ -967,7 +1006,7 @@ mod tests {
     // ── regression: missing merge=true auto-upgrade ────────────────────
 
     #[tokio::test]
-    async fn missing_merge_flag_auto_upgrades_when_status_only() {
+    async fn a_status_only_write_updates_in_place_whatever_the_flag_says() {
         // Regression: status-only update without merge=true must not wipe content.
         let tool = TodoWriteTool;
         let resources = Resources::new();

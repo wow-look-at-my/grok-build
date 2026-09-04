@@ -60,7 +60,7 @@ pub enum TodoCaptureError {
     #[error("failed to prepare client: {0}")]
     PrepareClient(String),
     #[error(
-        "/todo needs an append-capable task-list tool (`todo_write`); this session's is `{0}`, which replaces the list instead"
+        "/todo needs a task-list tool whose items carry ids (`todo_write`); this session's is `{0}`, which identifies items by their text alone, so a capture cannot address the one it adds"
     )]
     UnsupportedTodoTool(String),
     #[error(

@@ -342,21 +342,25 @@ impl xai_tool_runtime::Tool for TodoWriteTool {
             let mut res = resources.lock().await;
             let todo_state = res.get_or_default::<State<TodoState>>();
 
-            // opencode's own tool is full-replace, but the list it writes to is
-            // the user's. A shorter list than last time means the tail is left
-            // alone, not deleted: an item leaves only by being cancelled.
-            for (i, item) in input.todos.iter().enumerate() {
+            // opencode sends the whole list every call and gives its items no
+            // ids, so their text is the only identity they have. Match on it:
+            // an item already on the list gets its status and priority
+            // updated, and anything else is appended.
+            //
+            // Position is NOT identity here. Keying on it lets a reordered or
+            // shorter list write one row's text over another's, which loses
+            // the user's work just as thoroughly as deleting it.
+            for item in &input.todos {
                 let status = parse_status(&item.status);
                 let priority = parse_priority(&item.priority);
 
-                // Use a positional id since opencode items don't carry IDs.
-                let id = format!("{}", i + 1);
-
-                if todo_state.0.update(&id, Some(&item.content), Some(status)) {
+                if let Some(id) = todo_state.0.id_with_content(&item.content) {
+                    todo_state.0.update(&id, None, Some(status));
+                    todo_state.0.set_priority(&id, priority);
                     continue;
                 }
                 todo_state.0.push(
-                    id,
+                    todo_state.0.next_free_numeric_id(),
                     TodoItem {
                         content: item.content.clone(),
                         priority,
@@ -414,7 +418,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn basic_replace() {
+    async fn basic_write() {
         let tool = TodoWriteTool;
         let resources = Resources::new();
 
@@ -435,21 +439,22 @@ mod tests {
         assert!(output.summary_for_prompt.contains("Run tests"));
     }
 
+    /// A second call naming only a new task is not a statement that the first
+    /// one is gone. This tool used to clear the list on every call, which made
+    /// every write a silent delete of everything the caller did not resend.
     #[tokio::test]
-    async fn replace_clears_previous() {
+    async fn a_later_call_does_not_discard_the_earlier_list() {
         let tool = TodoWriteTool;
         let resources = Resources::new();
         let shared = resources.into_shared();
 
-        // First call
         let input1 = TodoWriteInput {
-            todos: vec![make_item("Old task", "completed", "low")],
+            todos: vec![make_item("Old task", "in_progress", "low")],
         };
         xai_tool_runtime::Tool::run(&tool, test_ctx(shared.clone()), input1)
             .await
             .unwrap();
 
-        // Second call replaces everything
         let input2 = TodoWriteInput {
             todos: vec![make_item("New task", "pending", "high")],
         };
@@ -459,9 +464,66 @@ mod tests {
                 .unwrap(),
         );
 
-        assert_eq!(output.todos.len(), 1);
+        assert_eq!(output.todos.len(), 2);
         assert!(output.summary_for_prompt.contains("New task"));
-        assert!(!output.summary_for_prompt.contains("Old task"));
+        assert!(
+            output.summary_for_prompt.contains("Old task"),
+            "the omitted task is still the user's: {}",
+            output.summary_for_prompt
+        );
+        assert!(
+            output.summary_for_prompt.contains("[in_progress]"),
+            "and it keeps the status it had: {}",
+            output.summary_for_prompt
+        );
+    }
+
+    /// Position is not identity. A list that drops its first entry must not
+    /// slide every later task up a row, writing each one's text over the task
+    /// that used to hold that slot.
+    #[tokio::test]
+    async fn a_reordered_list_does_not_overwrite_rows() {
+        let tool = TodoWriteTool;
+        let resources = Resources::new();
+        let shared = resources.into_shared();
+
+        let input1 = TodoWriteInput {
+            todos: vec![
+                make_item("First", "completed", "low"),
+                make_item("Second", "in_progress", "low"),
+            ],
+        };
+        xai_tool_runtime::Tool::run(&tool, test_ctx(shared.clone()), input1)
+            .await
+            .unwrap();
+
+        // "First" is done, so the caller stops sending it.
+        let input2 = TodoWriteInput {
+            todos: vec![make_item("Second", "completed", "low")],
+        };
+        let output = expect_success(
+            xai_tool_runtime::Tool::run(&tool, test_ctx(shared.clone()), input2)
+                .await
+                .unwrap(),
+        );
+
+        assert_eq!(output.todos.len(), 2);
+        let first = output
+            .todos
+            .iter()
+            .find(|t| t.content == "First")
+            .expect("First survives");
+        assert_eq!(
+            first.status,
+            TodoStatus::Completed,
+            "First must keep its own status, not inherit Second's text or state"
+        );
+        let second = output
+            .todos
+            .iter()
+            .find(|t| t.content == "Second")
+            .expect("Second survives");
+        assert_eq!(second.status, TodoStatus::Completed);
     }
 
     #[tokio::test]
@@ -692,7 +754,8 @@ mod tests {
             .await
             .unwrap();
 
-        // Call 3 — only these should survive.
+        // Call 3 adds three more. Every call accumulates: none of the six
+        // items has been completed or cancelled, so none of them may vanish.
         let input3 = TodoWriteInput {
             todos: vec![
                 make_item("Final X", "completed", "high"),
@@ -706,18 +769,25 @@ mod tests {
                 .unwrap(),
         );
 
-        assert_eq!(output.todos.len(), 3);
-        assert!(!output.summary_for_prompt.contains("First batch"));
-        assert!(!output.summary_for_prompt.contains("Second A"));
-        assert!(!output.summary_for_prompt.contains("Second B"));
-        assert!(output.summary_for_prompt.contains("Final X"));
-        assert!(output.summary_for_prompt.contains("Final Y"));
-        assert!(output.summary_for_prompt.contains("Final Z"));
+        assert_eq!(output.todos.len(), 6);
+        for content in [
+            "First batch",
+            "Second A",
+            "Second B",
+            "Final X",
+            "Final Y",
+            "Final Z",
+        ] {
+            assert!(
+                output.summary_for_prompt.contains(content),
+                "{content} was dropped: {}",
+                output.summary_for_prompt
+            );
+        }
 
-        // Verify shared state also only has 3 items.
         let res = shared.lock().await;
         let state = res.get::<State<TodoState>>().unwrap();
-        assert_eq!(state.0.todo_items().count(), 3);
+        assert_eq!(state.0.todo_items().count(), 6);
     }
 
     #[test]
