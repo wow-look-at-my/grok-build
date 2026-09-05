@@ -212,6 +212,20 @@ verify serially wastes time when a parallel CI build could be running.
   reserved row below the content instead of widening the cost/timestamp
   gutter further (`EntryRenderer::cache_hit_reserved_rows`).
 
+## Stream-timing notes
+
+- `itl_intervals_ms` truncates every gap to whole milliseconds, so a stream
+  above ~1000 chunks/s reads as a run of zeros and `itl_p50_ms` reports 0 for
+  one that stutters. `InferenceLatencyStats.chunk_offsets_us` keeps each
+  content chunk's arrival offset from `stream_start` in microseconds instead,
+  off the `Instant`s all three backend streams already record.
+- `GROK_LOG_STREAM_TIMING=1` adds it to `shell.turn.inference_done` in
+  `~/.grok/logs/unified.jsonl`. Opt-in: it is one number per chunk on a log
+  that is otherwise one line per model call. The gate is read once per process
+  (`inference_metrics::log_stream_timing`), so one run's entries agree.
+- The offsets are client-side SSE-parse times, so transport jitter is in them.
+  They are not a measurement of server decode.
+
 ## Thinking-signature notes
 
 - The Messages API verifies a thinking block's `signature` against the model

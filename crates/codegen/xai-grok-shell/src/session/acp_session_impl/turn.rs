@@ -2464,22 +2464,35 @@ impl SessionActor {
                 }
                 _ => None,
             };
+            let mut inference_ctx = serde_json::json!({
+                "loop_index": loop_index,
+                "model_elapsed_ms": model_elapsed_ms,
+                "elapsed_since_turn_start_ms": conv_turn_start.elapsed().as_millis() as u64,
+                "ttft_ms": ttft_ms,
+                "itl_p50_ms": latency.itl_p50_ms,
+                "attempts": latency.attempts,
+                "prompt_tokens": prompt_tokens,
+                "cached_prompt_tokens": cached_prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "reasoning_tokens": reasoning_tokens,
+                "tokens_per_sec": tokens_per_sec,
+            });
+            // p50 hides the shape of an uneven stream, which is the whole
+            // question when a receive rate stutters. The per-chunk arrival
+            // curve answers it, and is opt-in because it is one number per
+            // chunk on a log that is otherwise one line per model call.
+            if crate::session::inference_metrics::log_stream_timing()
+                && let Some(obj) = inference_ctx.as_object_mut()
+            {
+                obj.insert(
+                    "chunk_offsets_us".to_string(),
+                    serde_json::json!(latency.chunk_offsets_us),
+                );
+            }
             xai_grok_telemetry::unified_log::info(
                 "shell.turn.inference_done",
                 Some(self.session_info.id.0.as_ref()),
-                Some(serde_json::json!({
-                    "loop_index": loop_index,
-                    "model_elapsed_ms": model_elapsed_ms,
-                    "elapsed_since_turn_start_ms": conv_turn_start.elapsed().as_millis() as u64,
-                    "ttft_ms": ttft_ms,
-                    "itl_p50_ms": latency.itl_p50_ms,
-                    "attempts": latency.attempts,
-                    "prompt_tokens": prompt_tokens,
-                    "cached_prompt_tokens": cached_prompt_tokens,
-                    "completion_tokens": completion_tokens,
-                    "reasoning_tokens": reasoning_tokens,
-                    "tokens_per_sec": tokens_per_sec,
-                })),
+                Some(inference_ctx),
             );
             if let Some(usage) = response.usage.as_ref() {
                 self.chat_state_handle

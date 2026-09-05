@@ -39,6 +39,12 @@ pub struct InferenceLatencyStats {
     pub chunk_count: u32,
     /// Inter-token latency intervals (raw data for session aggregation)
     pub itl_intervals_ms: Vec<u64>,
+    /// Arrival offset of each content chunk from `stream_start`, in
+    /// MICROseconds. `itl_intervals_ms` truncates to whole milliseconds, so a
+    /// stream faster than ~1000 chunks/s reads as a run of zeros and its
+    /// jitter is unrecoverable. This keeps the raw arrival curve.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub chunk_offsets_us: Vec<u64>,
     /// Inter-token latency: median (ms)
     pub itl_p50_ms: Option<u64>,
     /// Inter-token latency: 99th percentile (ms)
@@ -88,6 +94,11 @@ impl InferenceLatencyStats {
             };
         }
 
+        let chunk_offsets_us: Vec<u64> = chunk_timestamps
+            .iter()
+            .map(|t| t.duration_since(stream_start).as_micros() as u64)
+            .collect();
+
         let ttfb = chunk_timestamps[0].duration_since(stream_start);
 
         // Compute inter-token intervals
@@ -110,6 +121,7 @@ impl InferenceLatencyStats {
             time_to_last_byte_ms: ttlb,
             chunk_count: u32::try_from(chunk_timestamps.len()).unwrap_or(u32::MAX),
             itl_intervals_ms: intervals,
+            chunk_offsets_us,
             itl_p50_ms: itl_p50,
             itl_p99_ms: itl_p99,
             itl_max_ms: itl_max,
@@ -179,6 +191,44 @@ mod tests {
         assert_eq!(stats.itl_p99_ms, Some(50));
         assert_eq!(stats.itl_max_ms, Some(50));
         assert_eq!(stats.itl_mean_ms, Some(50));
+    }
+
+    #[test]
+    fn chunk_offsets_keep_jitter_that_millisecond_intervals_erase() {
+        let start = Instant::now();
+        // A fast stream that stalls once: 200us, 200us, then a 4ms gap.
+        let chunks = vec![
+            start + Duration::from_micros(1_000),
+            start + Duration::from_micros(1_200),
+            start + Duration::from_micros(1_400),
+            start + Duration::from_micros(5_400),
+        ];
+        let end = offset(start, 6);
+
+        let stats = InferenceLatencyStats::from_timestamps(start, &chunks, end);
+
+        // The millisecond intervals report the two fast gaps as zero, so the
+        // stall is the only thing left and every statistic agrees it is
+        // typical. This is what makes an uneven stream unreadable.
+        assert_eq!(stats.itl_intervals_ms, vec![0, 0, 4]);
+        assert_eq!(stats.itl_p50_ms, Some(0));
+
+        // The offsets keep it.
+        assert_eq!(stats.chunk_offsets_us, vec![1_000, 1_200, 1_400, 5_400]);
+        let gaps_us: Vec<u64> = stats
+            .chunk_offsets_us
+            .windows(2)
+            .map(|w| w[1] - w[0])
+            .collect();
+        assert_eq!(gaps_us, vec![200, 200, 4_000]);
+    }
+
+    #[test]
+    fn chunk_offsets_are_empty_when_no_chunk_arrives() {
+        let start = Instant::now();
+        let stats = InferenceLatencyStats::from_timestamps(start, &[], offset(start, 200));
+
+        assert!(stats.chunk_offsets_us.is_empty());
     }
 
     #[test]
