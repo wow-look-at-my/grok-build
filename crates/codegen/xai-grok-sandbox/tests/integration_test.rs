@@ -47,6 +47,87 @@ fn test_profile_capability_set_construction() {
     }
 }
 
+// ── CI host worker: real end-to-end across an inherited socketpair ──────────
+//
+// The unsandboxed `gh` CI-status worker is the only code that must run on the
+// host side of a `--sandbox` session. This suite drives the shipped worker
+// entry (`run_ci_host_worker`) as a REAL child process re-entering this same
+// binary in worker mode, with its stdin/stdout pointed at a socketpair the
+// parent then queries with the shipped `query_ci_host_stream` client — the
+// exact fd handoff `spawn_ci_host` performs before the jail exec.
+
+/// Run by the parent: spawn the current binary as the worker child and prove a
+/// request round-trips through the real shipped worker loop to a real client.
+#[test]
+fn ci_host_worker_serves_a_request_over_an_inherited_socketpair() {
+    use std::os::unix::io::{FromRawFd, IntoRawFd};
+    use std::os::unix::net::UnixStream;
+
+    let (ours, theirs) = UnixStream::pair().expect("socketpair");
+    // Two handles to the worker's end of the socket: one for the child's
+    // stdin, one for its stdout — both the same connection, exactly as the
+    // host-side `spawn_ci_host` wires them before the jail exec.
+    let child_stdin = theirs.try_clone().expect("clone stdin");
+    let child_stdout = theirs.try_clone().expect("clone stdout");
+    let stdin_fd: std::os::unix::io::RawFd = {
+        use std::os::unix::io::AsRawFd as _;
+        child_stdin.as_raw_fd()
+    };
+    let stdout_fd: std::os::unix::io::RawFd = {
+        use std::os::unix::io::AsRawFd as _;
+        child_stdout.as_raw_fd()
+    };
+
+    let exe = std::env::current_exe().expect("current test binary");
+    let mut child = std::process::Command::new(exe);
+    child
+        .env(xai_grok_sandbox::ci_host::CI_HOST_MARKER_ENV, "1")
+        .arg("--exact")
+        .arg("ci_host_worker_self_entry")
+        .stdin(unsafe { std::process::Stdio::from_raw_fd(stdin_fd) })
+        .stdout(unsafe { std::process::Stdio::from_raw_fd(stdout_fd) })
+        .stderr(std::process::Stdio::null());
+    // `into_raw_fd` prevents the parent's copies from closing the peer.
+    let _ = (child_stdin.into_raw_fd(), child_stdout.into_raw_fd(), theirs.into_raw_fd());
+    let mut child = child.spawn().expect("spawn worker child");
+
+    // Ask the worker for a branch. Whatever `gh` does (present or not), the
+    // client must get a framed one-line answer and never hang.
+    let got = xai_grok_sandbox::ci_host::query_ci_host_stream(ours, "feature/ci-host");
+    // `query_ci_host_stream` owns `ours`; dropping it on return closes our end
+    // of the socket, so the worker's persistent read loop hits EOF and exits.
+    // Bound the wait so a hung worker fails the test instead of hanging CI.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    loop {
+        if let Some(_status) = child.try_wait().expect("poll child") {
+            break;
+        }
+        if std::time::Instant::now() >= deadline {
+            panic!("worker child did not exit; worker loop likely hung");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    // The worker always answers one framed line: the nothing-usable sentinel
+    // (→ None, when `gh` is absent or has no runs) or a real JSON array. Both
+    // prove the shipped client/worker framing; either is a valid session.
+    match got {
+        None => {} // sentinel / no runs → the dot reads "off"
+        Some(body) => {
+            let parsed: Result<serde_json::Value, _> = serde_json::from_slice(&body);
+            assert!(parsed.is_ok(), "a worker JSON answer must parse");
+        }
+    }
+}
+
+/// Delegate that the parent spawns: re-enter the real shipped worker loop.
+#[test]
+fn ci_host_worker_self_entry() {
+    if !xai_grok_sandbox::ci_host::is_ci_host_subprocess() {
+        return; // only meaningful when spawned as the worker
+    }
+    xai_grok_sandbox::ci_host::run_ci_host_worker();
+}
+
 #[test]
 fn test_sandbox_manager_lifecycle() {
     use xai_grok_sandbox::{ProfileName, SandboxManager};

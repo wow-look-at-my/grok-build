@@ -27,6 +27,7 @@
 //! sandbox.install();
 //! ```
 pub mod child_net;
+pub mod ci_host;
 mod deny;
 mod hook_write_deny;
 pub mod jail;

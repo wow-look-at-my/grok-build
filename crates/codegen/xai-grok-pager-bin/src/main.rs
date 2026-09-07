@@ -1820,6 +1820,15 @@ fn dispatch_doctor_if_requested(args: &PagerArgs) -> bool {
     true
 }
 fn main() {
+    // A `--sandbox` session starts on the host (outside the jail), where we
+    // spawn an unsandboxed `gh` CI-status worker and hand its stream fd into
+    // the jail. The worker is a re-entry of this binary that must run ONLY
+    // the worker loop and exit — before the jail re-exec, or it would try to
+    // sandbox itself and fork another worker.
+    if xai_grok_sandbox::ci_host::is_ci_host_subprocess() {
+        xai_grok_sandbox::ci_host::run_ci_host_worker();
+        std::process::exit(0);
+    }
     // Before anything else: a bare `--sandbox` replaces this process with
     // itself inside bwrap or Seatbelt. Anything started first would run
     // outside the jail, and telemetry would count the process twice.
