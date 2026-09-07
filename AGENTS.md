@@ -33,8 +33,18 @@ verify serially wastes time when a parallel CI build could be running.
 
 - `cargo check -p <touched-crate>` before pushing.
 - `cargo test -p <touched-crate>` for the crate you changed.
-- Prefer committing real tests that drive the shipped code (not mocks of the
-  unit under test, not hand-built expected objects).
+- Prefer committing real tests that drive the shipped code (not mocks of the unit under test, not hand-built expected objects).
+- **A web session cannot link the workspace.** `target/` reaches ~16 GB after a `cargo check` of the pager, against a ~12 GB session disk allowance, so `cargo build -p xai-grok-pager-bin` runs the container out of space. Check the crate, run that crate's tests, push, and let CI produce the binary.
+- `protoc` is missing from the image and the `bin/protoc` dotslash shim cannot run either, so any build that reaches `xai-grok-tools-api` dies in its build script. Run `apt-get install -y protobuf-compiler` first.
+
+## `--sandbox` jail notes
+
+- A bare `--sandbox` execs this process into `bwrap` (Linux) or `sandbox-exec` (macOS) as the first statement of `main()` (`xai-grok-sandbox/src/jail.rs`). `--sandbox <profile>` keeps its older meaning and builds no jail. That is why the flag became value-optional (`num_args = 0..=1`) instead of a second flag nobody finds.
+- The jail is planned off the RAW argv, not off `PagerArgs`. Precedence IS the command-line order. clap collects `--ro` and `--rw` into two separate `Vec`s, which loses how they interleaved.
+- Bind order enforces precedence. The order is: the read-only system base, the user mounts as given, then `$GROK_HOME`. Bubblewrap applies binds in order and a later bind covers an earlier one. SBPL gives the last matching rule. `$GROK_HOME` is last on both, so no `--ro` takes it away.
+- `/run` and `/var` are in the read-only base for one reason. On a systemd host `/etc/resolv.conf` is a symlink into one of them, and a jail without them resolves no name.
+- A working directory nothing binds is refused before the exec. Bubblewrap answers that case with a bare chdir error. That error reads as a broken sandbox and not as a missing `--rw .`.
+- Seatbelt confines WRITES only. The profile is `(allow default)` plus `(deny file-write*)`, so `--ro` means "not writable" there and reads stay open. Linux confines both.
 
 ## CI-status feature notes
 
