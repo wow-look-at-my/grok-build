@@ -24,6 +24,26 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - `cargo check -p <touched-crate>` before pushing.
 - `cargo test -p <touched-crate>` for the crate you changed.
 - Prefer committing real tests that drive the shipped code (not mocks of the unit under test, not hand-built expected objects).
+- **A web session cannot link the workspace.** `target/` reaches ~16 GB after a `cargo check` of the pager, against a ~12 GB session disk allowance, so `cargo build -p xai-grok-pager-bin` runs the container out of space. Check the crate, run that crate's tests, push, and let CI produce the binary.
+- `protoc` is missing from the image and the `bin/protoc` dotslash shim cannot run either, so any build that reaches `xai-grok-tools-api` dies in its build script. Run `apt-get install -y protobuf-compiler` first.
+
+## `--sandbox` jail notes
+
+- A bare `--sandbox` execs this process into `bwrap` (Linux) or `sandbox-exec` (macOS) as the first statement of `main()` (`xai-grok-sandbox/src/jail.rs`). `--sandbox <profile>` keeps its older meaning and builds no jail. That is why the flag became value-optional (`num_args = 0..=1`) instead of a second flag nobody finds.
+- The jail is planned off the RAW argv, not off `PagerArgs`. Precedence IS the command-line order. clap collects `--ro` and `--rw` into two separate `Vec`s, which loses how they interleaved.
+- Bind order enforces precedence. The order is: the read-only system base, the user mounts as given, then `$GROK_HOME`. Bubblewrap applies binds in order and a later bind covers an earlier one. SBPL gives the last matching rule. `$GROK_HOME` is last on both, so no `--ro` takes it away.
+- `/run` and `/var` are in the read-only base for one reason. On a systemd host `/etc/resolv.conf` is a symlink into one of them, and a jail without them resolves no name.
+- A working directory nothing binds is refused before the exec. Bubblewrap answers that case with a bare chdir error. That error reads as a broken sandbox and not as a missing `--rw .`.
+- Seatbelt confines WRITES only. The profile is `(allow default)` plus `(deny file-write*)`, so `--ro` means "not writable" there and reads stay open. Linux confines both.
+
+## The darwin binary is compiled on Linux and linked on macOS
+
+- A macOS runner bills at ten times the Linux rate, so `build-darwin-objects` (ubuntu-22.04) compiles every crate for `aarch64-apple-darwin`, and `link-darwin` (macos-14) runs one `cc`. That second job is the only macOS minute this workflow spends.
+- Compiling for darwin on Linux works. Linking does not. Every cross-linker that reads the Apple SDK also rewrites the search paths rustc passes. Each build script's own static library then drops out of the link: aws-lc, ring, jemalloc, libgit2, the tree-sitter grammars.
+- So `xai-darwin-link` stands in as rustc's linker and records the command instead of running it. It copies every input into a bundle, because rustc deletes its temporary object directory the moment the linker returns.
+- Paths in the recorded list are written as `@BUNDLE@` and `@OUT@`. The replay host mounts the bundle somewhere else, and `ci/darwin-relink.sh` substitutes both.
+- zig compiles the C in the build scripts, through `CC_aarch64_apple_darwin` and its siblings. It never links. The macOS SDK is still needed for Apple headers such as `CoreServices`.
+- `round_trip.rs` drives the recorder and the replay script for the HOST target and runs the binary that comes out. A Linux runner cannot execute a Mach-O binary. This is the only place the replay path is covered before it reaches a Mac, and it caught the reader dropping the last argument.
 
 ## CI-status feature notes
 

@@ -1820,6 +1820,10 @@ fn dispatch_doctor_if_requested(args: &PagerArgs) -> bool {
     true
 }
 fn main() {
+    // Before anything else: a bare `--sandbox` replaces this process with
+    // itself inside bwrap or Seatbelt. Anything started first would run
+    // outside the jail, and telemetry would count the process twice.
+    xai_grok_sandbox::jail::maybe_reexec_into_jail();
     xai_grok_telemetry::startup::mark_process_start();
     if let Some(code) = xai_grok_pager::app::mermaid_worker::maybe_run_render_subprocess() {
         std::process::exit(code);

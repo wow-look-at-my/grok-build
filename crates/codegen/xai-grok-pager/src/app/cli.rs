@@ -706,9 +706,27 @@ pub struct PagerArgs {
         value_parser = clap::value_parser!(u64).range(1..)
     )]
     pub background_wait_timeout_secs: u64,
-    /// Sandbox profile for filesystem and network access.
-    #[arg(long, env = "GROK_SANDBOX", value_name = "PROFILE")]
+    /// Sandbox profile for filesystem and network access. With no PROFILE,
+    /// run the whole session inside an OS jail (bwrap on Linux, Seatbelt on
+    /// macOS) that binds only `~/.grok`, a dedicated tmpfs, a read-only system
+    /// base, and whatever `--ro`/`--rw` name.
+    #[arg(
+        long,
+        env = "GROK_SANDBOX",
+        value_name = "PROFILE",
+        num_args = 0..=1,
+        default_missing_value = ""
+    )]
     pub sandbox: Option<String>,
+    /// Bind PATH into the `--sandbox` jail read-only. Repeatable. A later
+    /// `--ro`/`--rw` overrides an earlier one for the same path or for a path
+    /// inside it. Implies a bare `--sandbox`.
+    #[arg(long = "ro", value_name = "PATH")]
+    pub sandbox_ro: Vec<PathBuf>,
+    /// Bind PATH into the `--sandbox` jail read-write. See `--ro` for
+    /// precedence.
+    #[arg(long = "rw", value_name = "PATH")]
+    pub sandbox_rw: Vec<PathBuf>,
     /// Session storage mode: local or writeback.
     #[arg(long = "storage-mode", value_name = "MODE", hide = true)]
     pub storage_mode: Option<String>,
@@ -1251,6 +1269,28 @@ mod tests {
                 .startup_sandbox_profile(None),
             SandboxStartup::Apply(None)
         );
+    }
+    /// A bare `--sandbox` asks the jail for confinement, not for a profile.
+    /// It must still parse, and it must leave the profile alone.
+    #[test]
+    fn bare_sandbox_parses_and_selects_no_profile() {
+        let args = PagerArgs::try_parse_from(["grok", "--sandbox"]).unwrap();
+        assert_eq!(args.sandbox.as_deref(), Some(""));
+        assert_eq!(
+            args.startup_sandbox_profile(None),
+            SandboxStartup::Apply(None)
+        );
+    }
+    #[test]
+    fn ro_and_rw_paths_parse() {
+        let args =
+            PagerArgs::try_parse_from(["grok", "--sandbox", "--rw", "/a", "--ro", "/b", "--rw=/c"])
+                .unwrap();
+        assert_eq!(
+            args.sandbox_rw,
+            vec![PathBuf::from("/a"), PathBuf::from("/c")]
+        );
+        assert_eq!(args.sandbox_ro, vec![PathBuf::from("/b")]);
     }
     #[test]
     fn launch_directory_anchoring_precedes_cwd_change() {

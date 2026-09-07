@@ -21,6 +21,37 @@ grok --sandbox strict
 
 ---
 
+## Whole-process jail (`--sandbox` with no profile)
+
+`--sandbox` with no profile name puts the whole session inside an OS jail. Grok replaces itself with `bwrap` on Linux, or `sandbox-exec` on macOS, before it starts any work. The agent runs in the jail, and so does every command it spawns.
+
+```bash
+# Nothing but ~/.grok, a tmpfs, and a read-only system base
+grok --sandbox
+
+# Work in this directory, but keep one subtree readable only
+grok --sandbox --rw . --ro ./secrets
+```
+
+The jail binds these paths, in this order:
+
+1. A read-only system base: `/usr`, `/bin`, `/sbin`, `/lib*`, `/etc`, `/opt`, `/run`, `/var`. A process needs them to run at all.
+2. A dedicated tmpfs at `/tmp`, plus a fresh `/proc` and `/dev`. Nothing written there touches the host.
+3. Each `--ro PATH` and `--rw PATH`, in the order you typed them.
+4. `$GROK_HOME` (`~/.grok`), read-write.
+
+Order is precedence. A later flag beats an earlier one for the same path, and for any path inside it. So `--rw . --ro ./secrets` gives the agent the working directory and takes back one subtree. `$GROK_HOME` comes last. It is always writable, because the session needs it for its own state.
+
+Nothing else is bound. Your home directory, other checkouts, and `/data` are absent from the jail. The working directory must be bound. Grok refuses to start when nothing binds it.
+
+macOS confines writes only. The Seatbelt profile allows reads and denies every write. It then gives back the `--rw` paths, `~/.grok` and a dedicated temp directory. `--ro` means "not writable" there. Linux confines both reads and writes.
+
+One spelling to avoid: `grok --sandbox "fix the bug"` reads the prompt as a profile name. `--sandbox` takes the next word as its value when that word is not a flag. Put another flag after it, or put the prompt first: `grok "fix the bug" --sandbox`.
+
+This jail and the profiles below are separate features. `--sandbox <profile>` selects a profile and builds no jail. Pass a profile name to get the `deny` lists and the child-network rules.
+
+---
+
 ## Built-in Profiles
 
 | Profile               | FS Read            | FS Write                                       | Child Network | Use Case                          |

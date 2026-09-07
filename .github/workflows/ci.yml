@@ -40,7 +40,6 @@ jobs:
       PAGER_BINARY: ${{ github.workspace }}/target/debug/xai-grok-pager
       # No global CARGO_BUILD_JOBS: the compile-RAM cap belongs to the build step alone. See ci/ram-guard.sh.
     steps:
-      - uses: wow-look-at-my/actions@yaml-comment-block#latest
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       # After the checkout: it reads the workspace, and an empty one enforces nothing.
@@ -74,6 +73,10 @@ jobs:
       # rg_path() ends at a bare "rg" on PATH, so without this the grep and glob tests fail on empty output.
       - name: Install ripgrep
         uses: wow-look-at-my/actions@cache-rg#latest
+
+      # jail_bwrap_e2e drives the `--sandbox` command builder against real bwrap, and reports a skip without it.
+      - name: Install bubblewrap
+        run: sudo apt-get install -y bubblewrap
 
       # Each test runs in its own process under a per-test timeout (.config/nextest.toml), which cargo test has none of.
       - name: Install cargo-nextest
@@ -200,42 +203,26 @@ jobs:
             --run-ignored all --test-threads 4
 
   build-release:
-    name: Build release binary (${{ matrix.target_os }}/${{ matrix.target_arch }})
+    name: Build release binary (linux/amd64)
     # Depends on publish-create so the release number buildhost assigned there
     # can be stamped into the binary as GROK_VERSION below — the number the
     # site lists must equal `grok --version`.
     needs: publish-create
-    runs-on: ${{ matrix.runner }}
+    # ubuntu-22.04 ships glibc 2.35, which holds every GLIBC_x.y dependency at or below what a 22.04 user has.
+    runs-on: ubuntu-22.04
     timeout-minutes: 45
     env:
-      # Per-target namespace so neither target evicts the other, and each 0.17.0 token must match the pinned version below.
-      SCCACHE_GHA_VERSION: ${{ matrix.sccache_version }}
-    strategy:
-      matrix:
-        include:
-          # ubuntu-22.04 ships glibc 2.35, which holds every GLIBC_x.y dependency at or below what a 22.04 user has.
-          - runner: ubuntu-22.04
-            target_os: linux
-            target_arch: amd64
-            sccache_version: sccache-v0.17.0-x86_64-unknown-linux-gnu
-            protoc_url: https://github.com/protocolbuffers/protobuf/releases/download/v29.3/protoc-29.3-linux-x86_64.zip
-            protoc_sha256: 3e866620c5be27664f3d2fa2d656b5f3e09b5152b42f1bedbf427b333e90021a
-            checksum_cmd: sha256sum -c -
-          - runner: macos-14
-            target_os: darwin
-            target_arch: arm64
-            sccache_version: sccache-v0.17.0-aarch64-apple-darwin
-            protoc_url: https://github.com/protocolbuffers/protobuf/releases/download/v29.3/protoc-29.3-osx-aarch_64.zip
-            protoc_sha256: 2b8a3403cd097f95f3ba656e14b76c732b6b26d7f183330b11e36ef2bc028765
-            checksum_cmd: shasum -a 256 -c -
+      # Per-target namespace so neither target evicts the other, and the 0.17.0 token must match the pinned version below.
+      SCCACHE_GHA_VERSION: sccache-v0.17.0-x86_64-unknown-linux-gnu
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Install protoc (pinned v29.3)
         run: |
           # bin/protoc is the source of truth for this artifact and its sha256. Update both together.
-          curl -fsSL -o "$RUNNER_TEMP/protoc.zip" "${{ matrix.protoc_url }}"
-          echo "${{ matrix.protoc_sha256 }}  $RUNNER_TEMP/protoc.zip" | ${{ matrix.checksum_cmd }}
+          curl -fsSL -o "$RUNNER_TEMP/protoc.zip" \
+            https://github.com/protocolbuffers/protobuf/releases/download/v29.3/protoc-29.3-linux-x86_64.zip
+          echo "3e866620c5be27664f3d2fa2d656b5f3e09b5152b42f1bedbf427b333e90021a  $RUNNER_TEMP/protoc.zip" | sha256sum -c -
           unzip -q -o "$RUNNER_TEMP/protoc.zip" -d "$RUNNER_TEMP/protoc"
           echo "PROTOC=$RUNNER_TEMP/protoc/bin/protoc" >> "$GITHUB_ENV"
           "$RUNNER_TEMP/protoc/bin/protoc" --version
@@ -276,7 +263,6 @@ jobs:
 
       # Guards the floor the build above buys: a symbol newer than 2.35 is a load error on Ubuntu 22.04.
       - name: Verify glibc symbols are <= 2.35 (linux/amd64)
-        if: matrix.target_os == 'linux'
         shell: bash
         run: |
           max_glibc="$(readelf --version-info target/release/xai-grok-pager 2>/dev/null \
@@ -293,12 +279,127 @@ jobs:
       - name: Stage artifact
         run: |
           mkdir -p dist
-          cp target/release/xai-grok-pager "dist/grok-${{ matrix.target_os }}-${{ matrix.target_arch }}"
+          cp target/release/xai-grok-pager dist/grok-linux-amd64
 
       - uses: wow-look-at-my/actions@cache-upload#latest
         with:
-          name: grok-${{ matrix.target_os }}-${{ matrix.target_arch }}
-          path: dist/grok-${{ matrix.target_os }}-${{ matrix.target_arch }}
+          name: grok-linux-amd64
+          path: dist/grok-linux-amd64
+
+  # Every crate of the darwin binary compiles here. Only the link needs a Mac, and it is its own job below.
+  build-darwin-objects:
+    name: Compile darwin/arm64 (Linux)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    env:
+      SCCACHE_GHA_VERSION: sccache-v0.17.0-x86_64-unknown-linux-gnu-darwin
+      SDKROOT: ${{ github.workspace }}/.darwin-sdk
+      GROK_DARWIN_LINK_BUNDLE: ${{ github.workspace }}/.darwin-link
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Install protoc (pinned v29.3)
+        run: |
+          # protoc runs on the HOST, so this cross build takes the linux one. bin/protoc pins the same artifact and sha256.
+          curl -fsSL -o "$RUNNER_TEMP/protoc.zip" \
+            https://github.com/protocolbuffers/protobuf/releases/download/v29.3/protoc-29.3-linux-x86_64.zip
+          echo "3e866620c5be27664f3d2fa2d656b5f3e09b5152b42f1bedbf427b333e90021a  $RUNNER_TEMP/protoc.zip" | sha256sum -c -
+          unzip -q -o "$RUNNER_TEMP/protoc.zip" -d "$RUNNER_TEMP/protoc"
+          echo "PROTOC=$RUNNER_TEMP/protoc/bin/protoc" >> "$GITHUB_ENV"
+          "$RUNNER_TEMP/protoc/bin/protoc" --version
+
+      - name: Install Rust toolchain (pinned by rust-toolchain.toml)
+        run: rustup show
+
+      - name: Add the darwin target
+        run: rustup target add aarch64-apple-darwin
+
+      # zig compiles the C in the build scripts for macOS. It never links here: xai-darwin-link records that step instead.
+      - name: Install zig (pinned 0.14.1)
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/zig.tar.xz" https://ziglang.org/download/0.14.1/zig-x86_64-linux-0.14.1.tar.xz
+          echo "24aeeec8af16c381934a6cd7d95c807a8cb2cf7df9fa40d359aa884195c4716c  $RUNNER_TEMP/zig.tar.xz" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/zig"
+          tar -xJf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP/zig" --strip-components=1
+          echo "$RUNNER_TEMP/zig" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/zig/zig" version
+
+      # aws-lc-sys and its siblings include Apple headers (CoreServices, CoreFoundation), which zig does not carry.
+      - name: Install the macOS SDK (pinned 14.5)
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/sdk.tar.xz" \
+            https://github.com/joseluisq/macosx-sdks/releases/download/14.5/MacOSX14.5.sdk.tar.xz
+          echo "6e146275d19f027faa2e8354da5e0267513abf013b8f16ad65a231653a2b1c5d  $RUNNER_TEMP/sdk.tar.xz" | sha256sum -c -
+          mkdir -p "$SDKROOT"
+          tar -xJf "$RUNNER_TEMP/sdk.tar.xz" -C "$SDKROOT" --strip-components=1
+
+      - name: Run sccache-cache
+        uses: mozilla-actions/sccache-action@v0.0.11
+        # Same 'v' prefix requirement as build-test: the tag is v0.17.0.
+        with:
+          version: v0.17.0
+
+      # cc-rs reads these per-target. ci/zig-cc replaces the target cc-rs chooses, which zig rejects; ar and ranlib take no target.
+      - name: Point the C toolchain at zig
+        run: |
+          printf '#!/bin/sh\nexec zig ar "$@"\n' > "$RUNNER_TEMP/zig-ar"
+          printf '#!/bin/sh\nexec zig ranlib "$@"\n' > "$RUNNER_TEMP/zig-ranlib"
+          chmod +x "$RUNNER_TEMP/zig-ar" "$RUNNER_TEMP/zig-ranlib"
+          {
+            echo "CC_aarch64_apple_darwin=$PWD/ci/zig-cc"
+            echo "CXX_aarch64_apple_darwin=$PWD/ci/zig-cxx"
+            echo "AR_aarch64_apple_darwin=$RUNNER_TEMP/zig-ar"
+            echo "RANLIB_aarch64_apple_darwin=$RUNNER_TEMP/zig-ranlib"
+          } >> "$GITHUB_ENV"
+
+      - name: Build the link recorder
+        run: |
+          cargo build --locked --release -p xai-darwin-link
+          echo "CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER=$PWD/target/release/xai-darwin-link" >> "$GITHUB_ENV"
+
+      # The link at the end of this records itself into GROK_DARWIN_LINK_BUNDLE rather than running.
+      - name: Compile every crate for darwin/arm64
+        env:
+          # GROK_VERSION is a compile-time stamp (option_env! in xai-grok-version), so
+          # it must be set here, where the cross-compile happens — link-darwin only
+          # replays the recorded link and cannot change the version baked into the
+          # binary. Same number buildhost assigned in publish-create, so the darwin
+          # binary reports the same version the site lists, like the linux one.
+          GROK_VERSION: ${{ needs.publish-create.outputs.version }}
+        run: cargo build --locked --release --target aarch64-apple-darwin -p xai-grok-pager-bin
+
+      - name: Bundle the recorded link
+        run: ci/darwin-bundle.sh "$GROK_DARWIN_LINK_BUNDLE" dist/darwin-link.tar
+
+      - uses: wow-look-at-my/actions@cache-upload#latest
+        with:
+          name: darwin-link-bundle
+          path: dist/darwin-link.tar
+
+  # The only macOS job in this workflow: one cc invocation over a bundle Linux built.
+  link-darwin:
+    name: Link darwin/arm64 (macOS)
+    needs: build-darwin-objects
+    runs-on: macos-14
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: wow-look-at-my/actions@cache-download#latest
+        with:
+          name: darwin-link-bundle
+          path: dist
+
+      - name: Link the darwin binary
+        run: |
+          mkdir -p "$RUNNER_TEMP/darwin-link"
+          tar -xf dist/darwin-link.tar -C "$RUNNER_TEMP/darwin-link"
+          ci/darwin-relink.sh "$RUNNER_TEMP/darwin-link" "$PWD/dist/grok-darwin-arm64"
+
+      - uses: wow-look-at-my/actions@cache-upload#latest
+        with:
+          name: grok-darwin-arm64
+          path: dist/grok-darwin-arm64
 
   publish-create:
     name: Create buildhost release
