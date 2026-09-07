@@ -84,6 +84,8 @@ fn the_wrapper_replaces_every_target_cc_rs_chose() {
             "/sdk",
             "-iframework",
             "/sdk/System/Library/Frameworks",
+            "-idirafter",
+            "/sdk/usr/include",
             "-O3",
             "-c",
             "sha256-armv8-ios64.S",

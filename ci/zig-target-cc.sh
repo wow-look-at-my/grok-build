@@ -33,7 +33,11 @@ for arg in "$@"; do
 	esac
 done
 
+# -idirafter, not -I: zig ships its own macOS libc headers and they must keep
+# winning. The SDK only fills what zig does not carry, such as the libDER that
+# Security.framework's oids.h includes.
 exec zig "$mode" -target aarch64-macos \
 	-isysroot "$sdk" \
 	-iframework "$sdk/System/Library/Frameworks" \
+	-idirafter "$sdk/usr/include" \
 	"${args[@]}"
