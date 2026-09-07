@@ -425,6 +425,9 @@ jobs:
 
       - name: Build release binary (cross to macOS)
         if: matrix.target_os == 'darwin'
+        # zig resolves a linker search path against the sysroot, so these are written relative to SDKROOT. An absolute one comes back as $SDKROOT$SDKROOT/usr/lib and the link cannot find libiconv.
+        env:
+          CARGO_TARGET_AARCH64_APPLE_DARWIN_RUSTFLAGS: -L native=/usr/lib -L framework=/System/Library/Frameworks
         run: cargo zigbuild --locked --release --target ${{ matrix.rust_target }} -p xai-grok-pager-bin
 
       # Guard the glibc floor: fail if the binary demands a symbol newer than 2.35, which is the load error an Ubuntu 22.04 user would get. A darwin binary uses no glibc.
