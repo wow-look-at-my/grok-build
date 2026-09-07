@@ -292,12 +292,12 @@ mod tests {
         // Ever with the `gh-status` prefix, a token that could not be a real
         // branch is rejected before `gh` is ever invoked (returns `.`).
         for line in [
-            "gh-status ",
-            "gh-status aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            "gh-status evil\nbranch",
-            "gh-status has space",
+            "gh-status ".to_string(),
+            format!("gh-status {}", "a".repeat(300)),
+            "gh-status evil\nbranch".to_string(),
+            "gh-status has space".to_string(),
         ] {
-            assert_eq!(answer(line), b".\n", "token {line:?} must be refused");
+            assert_eq!(answer(&line), b".\n", "token {line:?} must be refused");
         }
     }
 

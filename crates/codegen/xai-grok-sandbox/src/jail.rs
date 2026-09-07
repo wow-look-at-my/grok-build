@@ -8,6 +8,10 @@
 //! for the same path or for a path that contains it. `$GROK_HOME` (`~/.grok`)
 //! is bound read-write after the user mounts, so nothing can take it away.
 //!
+//! The working directory is bound read-write by default, so a bare `--sandbox`
+//! can write in the cwd without an explicit `--rw .`. An explicit `--ro .` or
+//! `--rw .` (or any user mount containing the cwd) overrides that default.
+//!
 //! Both backends confine reads AND writes to the bound set: bwrap mounts only
 //! the base, the user mounts and `$GROK_HOME`, and the Seatbelt profile denies
 //! every file read and write and re-allows exactly that same set. A path no
@@ -65,7 +69,9 @@ pub enum Access {
     Rw,
 }
 
-/// One `--ro`/`--rw` request, in the order the command line gave it.
+/// One mount the jail will make. Carries a `--ro`/`--rw` request, in command
+/// line order, OR the plan-injected working-directory mount `build_plan` puts
+/// at the front of [`JailPlan::mounts`] (bound read-write by default).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Mount {
     pub access: Access,
@@ -200,7 +206,12 @@ where
 /// Everything the backend command needs, with each path already resolved.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JailPlan {
-    /// User mounts, in order, canonicalized.
+    /// User mounts, in order, canonicalized, with the working directory
+    /// mounted at the FRONT. The front cwd mount is bound read-write by
+    /// default (`Access::Rw`) so a bare `--sandbox` is usable without an
+    /// explicit `--rw .`; a user `--ro .`/`--rw .` (or any user mount that
+    /// contains the cwd) overrides that default, and being at the front means
+    /// a later, more-specific user mount still wins for a path both cover.
     pub mounts: Vec<Mount>,
     /// `$GROK_HOME`. Bound read-write after the user mounts.
     pub grok_home: PathBuf,
@@ -216,6 +227,16 @@ pub struct JailPlan {
 
 /// Resolve a request into a plan. Every path must exist: a missing bind is a
 /// hole the caller cannot see.
+///
+/// The working directory is bound read-write by default, so a jail built with
+/// a bare `--sandbox` can write in the cwd without an explicit `--rw .`. The
+/// effective cwd access is the LAST user mount that contains the cwd (default
+/// `Access::Rw` when none does), and that single cwd mount is placed at the
+/// FRONT of `plan.mounts`. Front-placement plus the effective access is what
+/// lets `--ro .` win cleanly: the front cwd mount then carries `Access::Ro`,
+/// so the Seatbelt profile emits no stale write-allow for the cwd and bwrap
+/// binds it read-only. `parse_jail_args` is untouched — the default is a
+/// plan-level injection, not a flag.
 pub fn build_plan(request: &JailRequest, args: Vec<OsString>) -> Result<JailPlan, JailError> {
     let mut mounts = Vec::with_capacity(request.mounts.len());
     for mount in &request.mounts {
@@ -242,6 +263,24 @@ pub fn build_plan(request: &JailRequest, args: Vec<OsString>) -> Result<JailPlan
     let grok_home = dunce::canonicalize(&grok_home).unwrap_or(grok_home);
     let self_exe = std::env::current_exe().map_err(JailError::NoSelfExe)?;
     let cwd = std::env::current_dir().map_err(JailError::NoCwd)?;
+    let cwd = dunce::canonicalize(&cwd).unwrap_or(cwd);
+    // The effective cwd access comes from the LAST user mount that contains
+    // the cwd (`cwd.starts_with(mount.path)`); later mounts win in the ordered
+    // contract, so scanning reversed is what honors `--ro .` over an earlier
+    // `--rw /`. With no covering mount, default to read-write.
+    let cwd_access = mounts
+        .iter()
+        .rev()
+        .find(|mount| cwd.starts_with(&mount.path))
+        .map(|mount| mount.access)
+        .unwrap_or(Access::Rw);
+    mounts.insert(
+        0,
+        Mount {
+            access: cwd_access,
+            path: cwd.clone(),
+        },
+    );
     let temp_dir = dedicated_temp_dir()?;
     let plan = JailPlan {
         mounts,
@@ -367,6 +406,16 @@ pub fn seatbelt_profile(plan: &JailPlan) -> String {
     // A terminal, a PTY and /dev/null are reads and writes every tool makes.
     profile.push_str("(allow file-read* (subpath \"/dev\"))\n");
     profile.push_str("(allow file-write* (subpath \"/dev\"))\n");
+    // The read-only system base the process needs to run (dylibs, binaries,
+    // config, and on macOS the real /private home of /etc, /var and /tmp).
+    // Emitted before the user mounts, matching bwrap's bind order (base first,
+    // then user mounts, then $GROK_HOME) so a user mount over a base path wins.
+    for path in system_ro_base() {
+        profile.push_str(&format!(
+            "(allow file-read* (subpath \"{}\"))\n",
+            sbpl_escape(Path::new(path))
+        ));
+    }
     // A --rw mount is readable and writable; a --ro mount is readable only.
     for mount in &plan.mounts {
         profile.push_str(&format!(
@@ -379,14 +428,6 @@ pub fn seatbelt_profile(plan: &JailPlan) -> String {
                 sbpl_escape(&mount.path)
             ));
         }
-    }
-    // The read-only system base the process needs to run (dylibs, binaries,
-    // config, and on macOS the real /private home of /etc, /var and /tmp).
-    for path in system_ro_base() {
-        profile.push_str(&format!(
-            "(allow file-read* (subpath \"{}\"))\n",
-            sbpl_escape(Path::new(path))
-        ));
     }
     profile.push_str(&format!(
         "(allow file-read* (subpath \"{}\"))\n",
@@ -747,5 +788,186 @@ mod tests {
     #[test]
     fn sbpl_escapes_a_quote_in_a_path() {
         assert_eq!(sbpl_escape(Path::new("/a\"b")), "/a\\\"b");
+    }
+
+    // ── cwd rw default ─────────────────────────────────────────────────────
+    //
+    // These drive the shipped functions end to end (`parse_jail_args` →
+    // `build_plan` → `bwrap_command` / `seatbelt_profile`) from the real
+    // working directory, so the assertions are about the actual cwd the jail
+    // would mount, not a hand-built `JailPlan`.
+
+    /// Run the shipped parse + plan against the real cwd.
+    fn plan_for(args: &[&str]) -> JailPlan {
+        let request = parse(args);
+        assert!(request.enabled, "args must ask for a jail");
+        build_plan(&request, argv(args)).expect("build_plan")
+    }
+
+    /// The front of `plan.mounts` is the injected cwd mount.
+    fn front_cwd_mount(plan: &JailPlan) -> &Mount {
+        &plan.mounts[0]
+    }
+
+    #[test]
+    fn cwd_defaults_to_rw_when_no_cwd_flag_is_given() {
+        let plan = plan_for(&["--sandbox"]);
+        let front = front_cwd_mount(&plan);
+        assert_eq!(front.access, Access::Rw, "bare --sandbox must mount the cwd rw");
+        assert_eq!(
+            front.path, plan.cwd,
+            "the injected mount must be exactly the working directory"
+        );
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn cwd_default_bwrap_binds_the_cwd_read_write() {
+        let plan = plan_for(&["--sandbox"]);
+        let cwd = plan.cwd.display().to_string();
+        let args: Vec<String> = bwrap_command(&plan)
+            .get_args()
+            .map(|a| a.to_string_lossy().to_string())
+            .collect();
+        assert!(
+            args.windows(3).any(|w| w == ["--bind", &cwd, &cwd]),
+            "the cwd must be bound read-write by default: {args:?}"
+        );
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn cwd_default_seatbelt_allows_write_on_the_cwd() {
+        let plan = plan_for(&["--sandbox"]);
+        let profile = seatbelt_profile(&plan);
+        let cwd = sbpl_escape(&plan.cwd);
+        assert!(
+            profile.contains(&format!("(allow file-write* (subpath \"{cwd}\"))\n")),
+            "the cwd must be writable by default: {profile}"
+        );
+    }
+
+    #[test]
+    fn ro_cwd_overrides_the_rw_default() {
+        let plan = plan_for(&["--sandbox", "--ro", "."]);
+        assert_eq!(
+            front_cwd_mount(&plan).access,
+            Access::Ro,
+            "--ro . must mount the cwd read-only"
+        );
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn ro_cwd_bwrap_binds_read_only_and_never_read_write() {
+        let plan = plan_for(&["--sandbox", "--ro", "."]);
+        let cwd = plan.cwd.display().to_string();
+        let args: Vec<String> = bwrap_command(&plan)
+            .get_args()
+            .map(|a| a.to_string_lossy().to_string())
+            .collect();
+        assert!(
+            args.windows(3).any(|w| w == ["--ro-bind", &cwd, &cwd]),
+            "--ro . must bind the cwd read-only: {args:?}"
+        );
+        assert!(
+            !args.windows(3).any(|w| w == ["--bind", &cwd, &cwd]),
+            "--ro . must NOT leave a read-write bind for the cwd: {args:?}"
+        );
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn ro_cwd_seatbelt_grants_read_but_not_write() {
+        let plan = plan_for(&["--sandbox", "--ro", "."]);
+        let profile = seatbelt_profile(&plan);
+        let cwd = sbpl_escape(&plan.cwd);
+        assert!(
+            profile.contains(&format!("(allow file-read* (subpath \"{cwd}\"))\n")),
+            "--ro . must keep the cwd readable: {profile}"
+        );
+        assert!(
+            !profile.contains(&format!("(allow file-write* (subpath \"{cwd}\"))\n")),
+            "--ro . must not leave a stale write-allow for the cwd: {profile}"
+        );
+    }
+
+    #[test]
+    fn rw_cwd_remains_accepted_and_stays_rw() {
+        let plan = plan_for(&["--sandbox", "--rw", "."]);
+        assert_eq!(
+            front_cwd_mount(&plan).access,
+            Access::Rw,
+            "--rw . must keep the cwd read-write"
+        );
+    }
+
+    #[test]
+    fn precedence_keeps_the_parse_contract_and_lets_the_user_win() {
+        // The default is a plan-level injection, not a flag: the parsed
+        // request must carry exactly the user's mounts, with no injected cwd.
+        let request = parse(&["--sandbox", "--ro", "."]);
+        assert_eq!(
+            request.mounts,
+            vec![Mount {
+                access: Access::Ro,
+                path: PathBuf::from("."),
+            }],
+            "parse_jail_args must not inject a cwd mount"
+        );
+        // And the plan must honor the user's ro (no stale write-allow).
+        let plan = build_plan(&request, argv(&["--sandbox", "--ro", "."])).expect("build_plan");
+        assert_eq!(
+            front_cwd_mount(&plan).access,
+            Access::Ro,
+            "a user --ro . must beat the rw default"
+        );
+        // A user ro mount that merely *contains* the cwd also flips it to ro.
+        let plan = plan_for(&["--sandbox", "--ro", "/"]);
+        assert_eq!(
+            front_cwd_mount(&plan).access,
+            Access::Ro,
+            "a user ro mount containing the cwd must override the rw default"
+        );
+    }
+
+    #[test]
+    fn capture_cwd_default_cases() {
+        // Prints the plan + platform backend for the three cases so the
+        // rw-vs-ro difference is visible in captured output, not just asserted.
+        let cases: &[(&str, &[&str])] = &[
+            ("bare --sandbox", &["--sandbox"]),
+            ("--sandbox --ro .", &["--sandbox", "--ro", "."]),
+            ("--sandbox --rw .", &["--sandbox", "--rw", "."]),
+        ];
+        for (label, args) in cases {
+            let plan = plan_for(args);
+            let mounts: Vec<String> = plan
+                .mounts
+                .iter()
+                .map(|m| {
+                    format!(
+                        "{:?} {}",
+                        m.access,
+                        m.path.display()
+                    )
+                })
+                .collect();
+            println!("== {label} ==");
+            println!("cwd: {}", plan.cwd.display());
+            println!("mounts: {mounts:?}");
+            #[cfg(target_os = "linux")]
+            {
+                let args: Vec<String> = bwrap_command(&plan)
+                    .get_args()
+                    .map(|a| a.to_string_lossy().to_string())
+                    .collect();
+                println!("bwrap args: {args:?}");
+            }
+            #[cfg(target_os = "macos")]
+            {
+                println!("seatbelt profile:\n{}", seatbelt_profile(&plan));
+            }
+        }
     }
 }
