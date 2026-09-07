@@ -13,6 +13,12 @@ set -euo pipefail
 mode="${1:?usage: zig-target-cc.sh <cc|c++> [args...]}"
 shift
 
+# zig's clang does not read SDKROOT the way a Darwin-hosted clang does, so
+# aws-lc-sys failed on a missing CoreServices/CoreServices.h with the SDK
+# sitting right there. -isysroot is headers and frameworks only: it never
+# rewrites a linker search path, which is the trap that sank linking here.
+sdk="${SDKROOT:?SDKROOT must name the macOS SDK for the darwin cross build}"
+
 args=()
 skip_next=0
 for arg in "$@"; do
@@ -27,4 +33,7 @@ for arg in "$@"; do
 	esac
 done
 
-exec zig "$mode" -target aarch64-macos "${args[@]}"
+exec zig "$mode" -target aarch64-macos \
+	-isysroot "$sdk" \
+	-iframework "$sdk/System/Library/Frameworks" \
+	"${args[@]}"

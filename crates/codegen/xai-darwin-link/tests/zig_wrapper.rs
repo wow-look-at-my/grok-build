@@ -64,6 +64,7 @@ fn the_wrapper_replaces_every_target_cc_rs_chose() {
             "sha256-armv8-ios64.S",
         ])
         .env("PATH", path)
+        .env("SDKROOT", "/sdk")
         .status()
         .expect("the wrapper must run");
     assert!(status.success(), "the wrapper must exit cleanly");
@@ -79,11 +80,15 @@ fn the_wrapper_replaces_every_target_cc_rs_chose() {
             "cc",
             "-target",
             "aarch64-macos",
+            "-isysroot",
+            "/sdk",
+            "-iframework",
+            "/sdk/System/Library/Frameworks",
             "-O3",
             "-c",
             "sha256-armv8-ios64.S",
         ],
-        "both spellings of cc-rs's target must be gone, and zig's own must be there"
+        "both spellings of cc-rs's target must be gone, and zig's own plus the SDK must be there"
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
