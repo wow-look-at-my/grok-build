@@ -313,20 +313,17 @@ jobs:
         with:
           version: v0.17.0
 
-      # cc-rs reads these per-target. Each pins zig to the darwin target, so a build script's C lands as arm64 Mach-O.
+      # cc-rs reads these per-target. ci/zig-cc replaces the target cc-rs chooses, which zig rejects; ar and ranlib take no target.
       - name: Point the C toolchain at zig
         run: |
-          mkdir -p "$RUNNER_TEMP/zigwrap"
-          printf '#!/bin/sh\nexec zig cc -target aarch64-macos "$@"\n' > "$RUNNER_TEMP/zigwrap/zig-cc"
-          printf '#!/bin/sh\nexec zig c++ -target aarch64-macos "$@"\n' > "$RUNNER_TEMP/zigwrap/zig-cxx"
-          printf '#!/bin/sh\nexec zig ar "$@"\n' > "$RUNNER_TEMP/zigwrap/zig-ar"
-          printf '#!/bin/sh\nexec zig ranlib "$@"\n' > "$RUNNER_TEMP/zigwrap/zig-ranlib"
-          chmod +x "$RUNNER_TEMP/zigwrap/"*
+          printf '#!/bin/sh\nexec zig ar "$@"\n' > "$RUNNER_TEMP/zig-ar"
+          printf '#!/bin/sh\nexec zig ranlib "$@"\n' > "$RUNNER_TEMP/zig-ranlib"
+          chmod +x "$RUNNER_TEMP/zig-ar" "$RUNNER_TEMP/zig-ranlib"
           {
-            echo "CC_aarch64_apple_darwin=$RUNNER_TEMP/zigwrap/zig-cc"
-            echo "CXX_aarch64_apple_darwin=$RUNNER_TEMP/zigwrap/zig-cxx"
-            echo "AR_aarch64_apple_darwin=$RUNNER_TEMP/zigwrap/zig-ar"
-            echo "RANLIB_aarch64_apple_darwin=$RUNNER_TEMP/zigwrap/zig-ranlib"
+            echo "CC_aarch64_apple_darwin=$PWD/ci/zig-cc"
+            echo "CXX_aarch64_apple_darwin=$PWD/ci/zig-cxx"
+            echo "AR_aarch64_apple_darwin=$RUNNER_TEMP/zig-ar"
+            echo "RANLIB_aarch64_apple_darwin=$RUNNER_TEMP/zig-ranlib"
           } >> "$GITHUB_ENV"
 
       - name: Build the link recorder
