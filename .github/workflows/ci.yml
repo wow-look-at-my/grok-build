@@ -90,6 +90,7 @@ jobs:
       # comfortably under the 16 GiB runner cap — so -j3 keeps the workspace
       # meaningfully parallel while staying safely within budget.
     steps:
+      - uses: wow-look-at-my/actions@yaml-comment-block#latest
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       # This repo's `cargo test --workspace` needs >37 GB of target/ (the
