@@ -222,34 +222,39 @@ fn git_stdout(git_root: &Path, args: &[&str]) -> Vec<String> {
 }
 
 /// Split on `&&` `||` `;` `|` and newlines that are not inside quotes.
+///
+/// The walk is by CHARACTER, never by raw byte index: quotes are ASCII (`'` /
+/// `"`), and a multi-byte UTF-8 character is neither a separator nor a quote,
+/// so it is skipped whole. That keeps `i` on a char boundary whenever the
+/// statement slices below run. (The previous byte-index walk stepped onto a
+/// UTF-8 continuation byte and panicked — "byte index N is not a char
+/// boundary" — on any command carrying non-ASCII text, which aborted the
+/// whole session.)
 fn split_statements(command: &str) -> Vec<&str> {
     let mut out = Vec::new();
     let mut start = 0usize;
-    let bytes = command.as_bytes();
-    let mut i = 0usize;
-    let mut quote: Option<u8> = None;
-    while i < bytes.len() {
-        let b = bytes[i];
+    let mut quote: Option<char> = None;
+    let mut chars = command.char_indices().peekable();
+    while let Some((i, c)) = chars.next() {
         if let Some(q) = quote {
-            if b == q && (q != b'\\') {
+            if c == q {
                 quote = None;
+            } else if c == '\\' {
+                // Escaped character: skip it whole, whatever its width, so the
+                // scan never steps into the middle of a multi-byte char.
+                chars.next();
             }
-            if b == b'\\' && i + 1 < bytes.len() {
-                i += 2;
-                continue;
-            }
-            i += 1;
             continue;
         }
-        if b == b'\'' || b == b'"' {
-            quote = Some(b);
-            i += 1;
+        if c == '\'' || c == '"' {
+            quote = Some(c);
             continue;
         }
-        let rest = &command[i..];
-        let sep_len = if rest.starts_with("&&") || rest.starts_with("||") {
+        let sep_len = if c == '&' && chars.next_if(|&(_, n)| n == '&').is_some() {
             2
-        } else if rest.starts_with(';') || rest.starts_with('|') || rest.starts_with('\n') {
+        } else if c == '|' && chars.next_if(|&(_, n)| n == '|').is_some() {
+            2
+        } else if c == ';' || c == '|' || c == '\n' {
             1
         } else {
             0
@@ -259,11 +264,9 @@ fn split_statements(command: &str) -> Vec<&str> {
             if !stmt.is_empty() {
                 out.push(stmt);
             }
-            i += sep_len;
-            start = i;
+            start = i + sep_len;
             continue;
         }
-        i += 1;
     }
     let stmt = command[start..].trim();
     if !stmt.is_empty() {
@@ -455,5 +458,53 @@ mod tests {
     fn split_respects_quotes() {
         let parts = split_statements("echo 'a && b' && rm foo");
         assert_eq!(parts, vec!["echo 'a && b'", "rm foo"]);
+    }
+
+    /// Regression: the statement scanner walked the command by RAW BYTE index
+    /// and sliced `&command[i..]` every iteration, so any multi-byte UTF-8
+    /// character panicked with "byte index N is not a char boundary" and the
+    /// panic aborted the whole session (observed as an instant quit-to-shell
+    /// on `SCRATCH=…; cat >> ci.log <<'EOF' …em-dash… EOF`). The em-dash in
+    /// CI-log prose is enough to trigger it.
+    #[test]
+    fn split_survives_multibyte_utf8_in_a_heredoc() {
+        let with_dash = "SCRATCH=/tmp/grok-ci; cat >> \"$SCRATCH/ci.log\" <<'EOF'\n\
+                         === Detailed failure characterization (run 34144429017, head 20346d25) ===\n\
+                         — sourced from job logs macos-build.log / windows-build.log + ubuntu —\n\
+                         ✓ é ü 漢 — more multibyte prose —\n\
+                         EOF";
+        // The ASCII-equivalent (every non-ASCII char swapped for ASCII) must
+        // produce the same statement split, since none of them are separators.
+        let ascii = with_dash
+            .replace('—', "-")
+            .replace('✓', "v")
+            .replace('é', "e")
+            .replace('ü', "u")
+            .replace('漢', "k");
+
+        let multibyte = split_statements(with_dash);
+        let plain = split_statements(&ascii);
+        assert_eq!(
+            multibyte.len(),
+            plain.len(),
+            "multibyte content must not change the statement split:\n{multibyte:?}\nvs\n{plain:?}"
+        );
+        // The multibyte text survives verbatim inside its statement.
+        assert!(
+            multibyte.iter().any(|s| s.contains('—')),
+            "the em-dash must survive the split: {multibyte:?}"
+        );
+        // And the REAL shipped caller stays panic-free on the same command.
+        let tmp = tempfile::tempdir().unwrap();
+        assert_eq!(bash_command_violation(with_dash, tmp.path()), None);
+    }
+
+    /// A `\` escape skipping two raw bytes must not step into a multi-byte
+    /// char either (the quoted-region `i += 2` had the same hazard).
+    #[test]
+    fn split_survives_backslash_before_a_multibyte_char() {
+        let cmd = r#"echo "a\-—b""#;
+        let parts = split_statements(cmd);
+        assert_eq!(parts.len(), 1, "one quoted statement, no panic: {parts:?}");
     }
 }

@@ -674,16 +674,20 @@ impl Reminder for TaskCompletionReminder {
                 .into_iter()
                 .filter(|t| task_owned_by_session(t, my_owner.as_deref()))
                 .collect();
-            let goal_loop_active = res
-                .get::<crate::implementations::grok_build::task::types::GoalLoopActive>()
-                .is_some_and(|g| g.0);
-            let surface_reminders = !goal_loop_active
-                && res
-                    .get::<crate::types::resources::Params<
-                        crate::implementations::grok_build::bash::BashParams,
-                    >>()
-                    .map(|p| p.0.surface_bg_completion_reminders)
-                    .unwrap_or(true);
+            // Background bash/monitor completions surface at the NEXT TOOL-CALL
+            // BOUNDARY even while a goal loop drives the turn: the reminder
+            // rides a tool result the loop already receives, so it interrupts
+            // nothing. The goal-loop gate that used to sit here is what
+            // deferred completions to the session going idle (the auto-wake
+            // path is goal-gated too, and that one DOES interrupt — it stays
+            // gated in the notification bridge). Subagent completions keep the
+            // suppression: the goal loop consumes those results itself.
+            let surface_reminders = res
+                .get::<crate::types::resources::Params<
+                    crate::implementations::grok_build::bash::BashParams,
+                >>()
+                .map(|p| p.0.surface_bg_completion_reminders)
+                .unwrap_or(true);
             let renderer = res.get::<crate::types::template_renderer::TemplateRenderer>();
             let task_output_name: Option<String> = renderer.and_then(|r| {
                 r.tool_for_kind(crate::types::tool::ToolKind::BackgroundTaskAction)
@@ -1619,7 +1623,7 @@ mod tests {
     /// mid-goal), but the IDs must still be marked reported so they never
     /// resurface once the goal ends.
     #[tokio::test]
-    async fn completions_suppressed_when_goal_loop_active() {
+    async fn bash_completions_surface_during_a_goal_loop_subagent_ones_do_not() {
         let mut res = Resources::new();
         let backend: Arc<dyn TerminalBackend> = Arc::new(MockTerminal {
             tasks: vec![make_completed("bash-1")],
@@ -1639,11 +1643,19 @@ mod tests {
         let shared = res.into_shared();
         let reminder = TaskCompletionReminder;
         let output = ToolOutput::Dynamic(serde_json::Value::Null.into());
+        // First post-completion tool round, goal loop STILL ACTIVE: the bash
+        // completion surfaces (it rides a tool result — it interrupts nothing),
+        // while the subagent completion stays suppressed (the goal loop
+        // consumes its own subagent results).
         let first = reminder.collect_reminders(shared.clone(), &output).await;
-        assert!(
-            first.is_empty(),
-            "goal loop active should suppress bash + subagent reminders, got: {first:?}"
+        assert_eq!(
+            first.len(),
+            1,
+            "bash completion must surface on the first post-completion tool round \
+             even mid-goal: {first:?}"
         );
+        assert!(first[0].contains("bash-1"), "{first:?}");
+        // After the goal ends: nothing re-surfaces — once-only delivery.
         shared
             .lock()
             .await
@@ -1651,8 +1663,98 @@ mod tests {
         let second = reminder.collect_reminders(shared, &output).await;
         assert!(
             second.is_empty(),
-            "suppressed completions must stay reported after goal ends, got: {second:?}"
+            "suppressed subagent completion stays reported, bash completion stays once-only, \
+             got: {second:?}"
         );
+    }
+
+    /// A completed background task's reminder must be available on the FIRST
+    /// post-completion tool round — even mid-goal-loop — and exactly once.
+    /// Drives the REAL `LocalTerminalBackend` end to end: a real command is
+    /// spawned in the background, the session sees it complete, and the
+    /// shipped reminder path surfaces it at the next tool-call boundary.
+    #[tokio::test]
+    async fn completed_task_reminder_surfaces_on_the_first_post_completion_tool_round() {
+        use crate::computer::local::LocalTerminalBackend;
+        use crate::types::resources::OwnerSessionId;
+        use crate::notification::types::ToolNotificationHandle;
+
+        let backend: Arc<dyn TerminalBackend> = Arc::new(LocalTerminalBackend::new());
+        let output_file = std::env::temp_dir().join(format!(
+            "task-completion-reminder-{}-{}.out",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let request = TerminalRunRequest {
+            command: "echo bg-echo-sentinel".to_string(),
+            working_directory: std::env::temp_dir(),
+            env: Default::default(),
+            timeout: Duration::from_secs(30),
+            output_byte_limit: 64 * 1024,
+            output_file: output_file.clone(),
+            notification_handle: ToolNotificationHandle::noop(),
+            tool_call_id: format!(
+                "reminder-test-{}",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ),
+            display_command: None,
+            auto_background_on_timeout: false,
+            foreground_block_budget: None,
+            kind: Default::default(),
+            owner_session_id: Some("sess-1".to_string()),
+            description: None,
+        };
+        let handle = backend
+            .run_background(request)
+            .await
+            .expect("real background spawn");
+        // The task runs to completion on the real backend.
+        let snapshot = backend
+            .wait_for_completion(&handle.task_id, Some(Duration::from_secs(30)))
+            .await
+            .expect("background task must complete");
+        assert!(snapshot.completed, "expected a completed task: {snapshot:?}");
+
+        // Resources as a live goal-loop session would hold them: the loop is
+        // active while the task completes, and the next tool call arrives.
+        let mut res = Resources::new();
+        res.insert(Terminal(backend));
+        res.register_state::<ReportedTaskCompletions>();
+        res.insert(crate::implementations::grok_build::task::types::GoalLoopActive(true));
+        res.insert(OwnerSessionId("sess-1".to_string()));
+        let shared = res.into_shared();
+
+        let reminder = TaskCompletionReminder;
+        let output = ToolOutput::Dynamic(serde_json::Value::Null.into());
+        // FIRST post-completion tool round, work still active: the reminder
+        // must be here — not deferred to idle.
+        let first = reminder.collect_reminders(shared.clone(), &output).await;
+        assert_eq!(
+            first.len(),
+            1,
+            "the completed task must surface on the first post-completion tool round: {first:?}"
+        );
+        assert!(
+            first[0].contains("Background task") && first[0].contains("completed"),
+            "expected the shipped completion text: {first:?}"
+        );
+        assert!(
+            first[0].contains(&handle.task_id),
+            "the reminder must name the completed task: {first:?}"
+        );
+        // Second round: exactly once.
+        let second = reminder.collect_reminders(shared, &output).await;
+        assert!(
+            second.is_empty(),
+            "the reminder must be emitted exactly once per task: {second:?}"
+        );
+        let _ = std::fs::remove_file(&output_file);
     }
     #[tokio::test]
     async fn subagent_and_bash_completions_together() {
