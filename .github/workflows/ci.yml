@@ -130,6 +130,10 @@ jobs:
       - name: Install ripgrep
         uses: wow-look-at-my/actions@cache-rg#latest
 
+      # jail_bwrap_e2e drives the `--sandbox` command builder against real bwrap, and reports a skip without it.
+      - name: Install bubblewrap
+        run: sudo apt-get install -y bubblewrap
+
       # cargo-nextest runs each test in its own process with a per-test
       # timeout (configured in .config/nextest.toml), so a test that wedges —
       # a PTY suite waiting on a process that never starts — fails in 60s

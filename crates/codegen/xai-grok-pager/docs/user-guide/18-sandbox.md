@@ -46,6 +46,8 @@ Nothing else is bound. Your home directory, other checkouts, and `/data` are abs
 
 macOS confines writes only. The Seatbelt profile allows reads and denies every write. It then gives back the `--rw` paths, `~/.grok` and a dedicated temp directory. `--ro` means "not writable" there. Linux confines both reads and writes.
 
+One spelling to avoid: `grok --sandbox "fix the bug"` reads the prompt as a profile name. `--sandbox` takes the next word as its value when that word is not a flag. Put another flag after it, or put the prompt first: `grok "fix the bug" --sandbox`.
+
 This jail and the profiles below are separate features. `--sandbox <profile>` selects a profile and builds no jail. Pass a profile name to get the `deny` lists and the child-network rules.
 
 ---

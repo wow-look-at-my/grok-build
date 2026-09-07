@@ -279,14 +279,18 @@ fn dedicated_temp_dir() -> Result<PathBuf, JailError> {
 /// beat an earlier `--rw`.
 #[cfg(target_os = "linux")]
 pub fn bwrap_command(plan: &JailPlan) -> std::process::Command {
+    // No --die-with-parent: it kills the jail when bwrap's parent dies, and a
+    // session started from a script that exits right after is a live session.
     let mut cmd = std::process::Command::new("bwrap");
-    cmd.arg("--die-with-parent");
     cmd.arg("--cap-drop").arg("ALL");
     for path in SYSTEM_RO_BASE {
         cmd.arg("--ro-bind-try").arg(path).arg(path);
     }
     cmd.arg("--proc").arg("/proc");
     cmd.arg("--dev").arg("/dev");
+    // `--dev` builds a fresh /dev without /dev/shm, and a program that wants
+    // shared memory fails on the missing directory rather than on a denial.
+    cmd.arg("--tmpfs").arg("/dev/shm");
     cmd.arg("--tmpfs").arg(JAIL_TMP);
     for mount in &plan.mounts {
         let flag = match mount.access {
