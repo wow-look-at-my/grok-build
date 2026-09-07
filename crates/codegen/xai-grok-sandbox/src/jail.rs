@@ -1,4 +1,5 @@
-//! `--sandbox`: replace this process with itself inside an OS jail.
+//! `--sandbox=pathbox` / `--ro`/`--rw`/`--rn`: replace this process with itself
+//! inside an OS jail ("pathbox").
 //!
 //! Linux uses `bwrap`, macOS uses `sandbox-exec`. The re-exec happens before
 //! any other startup work, so everything the session does — the agent, its
@@ -6,11 +7,18 @@
 //!
 //! The mount list is ordered. A later `--ro`/`--rw` overrides an earlier one
 //! for the same path or for a path that contains it. `$GROK_HOME` (`~/.grok`)
-//! is bound read-write after the user mounts, so nothing can take it away.
+//! is bound read-write after the user mounts, so nothing can take it away. A
+//! `--rn` path is actively hidden (Deny) and, being applied last, hides even
+//! when it lives under a visible mount.
 //!
-//! The working directory is bound read-write by default, so a bare `--sandbox`
-//! can write in the cwd without an explicit `--rw .`. An explicit `--ro .` or
-//! `--rw .` (or any user mount containing the cwd) overrides that default.
+//! The working directory is bound read-write by default, so the jail can write
+//! in the cwd without an explicit `--rw .`. An explicit `--ro .` or `--rw .`
+//! (or any user mount containing the cwd) overrides that default.
+//!
+//! The jail is selected by `--sandbox=pathbox` (the reserved name of the
+//! path-mount jail) or by any `--ro`/`--rw`/`--rn` on the line; a bare
+//! `--sandbox` with no value is invalid, and `--sandbox <other-profile>` is the
+//! built-in profile sandbox, never the jail.
 //!
 //! Both backends confine reads AND writes to the bound set: bwrap mounts only
 //! the base, the user mounts and `$GROK_HOME`, and the Seatbelt profile denies
@@ -78,11 +86,16 @@ pub enum Access {
     Ro,
     /// Readable and writable.
     Rw,
+    /// Actively denied (hidden): not readable and not writable, even when an
+    /// ancestor is mounted in via `--ro`/`--rw` or exposed by a default.
+    Deny,
 }
 
-/// One mount the jail will make. Carries a `--ro`/`--rw` request, in command
-/// line order, OR the plan-injected working-directory mount `build_plan` puts
-/// at the front of [`JailPlan::mounts`] (bound read-write by default).
+/// One mount the jail will make. Carries a `--ro`/`--rw`/`--rn` request, in
+/// command line order, OR the plan-injected working-directory mount
+/// `build_plan` puts at the front of [`JailPlan::mounts`] (bound read-write by
+/// default). A [`Access::Deny`] mount shadows any visible ancestor and is
+/// applied last by both backends.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Mount {
     pub access: Access,
@@ -216,9 +229,11 @@ impl JailDefaults {
 /// What the command line asked the jail for.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct JailRequest {
-    /// Whether `--sandbox`, `--ro` or `--rw` asked for a jail.
+    /// Whether a path-box jail was asked for: `--sandbox=pathbox` or any
+    /// `--ro`/`--rw`/`--rn` path flag.
     pub enabled: bool,
-    /// User mounts, in command-line order. Later entries win.
+    /// User mounts, in command-line order. Later entries win (a `--rn` deny is
+    /// applied after every visible bind regardless).
     pub mounts: Vec<Mount>,
 }
 
@@ -234,6 +249,21 @@ pub enum JailError {
         path: String,
         source: std::io::Error,
     },
+    #[error(
+        "a bare `--sandbox` (no profile value) is no longer valid. \
+         The path-mount jail is named `--sandbox={PATHBOX_PROFILE}` (or implied \
+         by `--ro`/`--rw`/`--rn`); use `--sandbox <profile>` for a built-in \
+         sandbox profile."
+    )]
+    BareSandboxInvalid,
+    #[error(
+        "cannot combine sandbox profile '{profile}' with --ro/--rw/--rn path \
+         flags; use --sandbox={PATHBOX_PROFILE} for path mounts."
+    )]
+    ProfileWithPathFlags { profile: String },
+    #[error("the path '{path}' is denied by `--rn`, but it is the working \
+         directory; the jail cannot start a process in a hidden cwd")]
+    CwdDenied { path: String },
     #[error("could not resolve the current executable: {0}")]
     NoSelfExe(std::io::Error),
     #[error("could not read the current directory: {0}")]
@@ -256,27 +286,41 @@ pub fn is_jailed() -> bool {
     std::env::var_os(JAIL_ENV_VAR).is_some()
 }
 
-/// Read `--sandbox`, `--ro` and `--rw` off the raw command line.
+/// The reserved name of the path-mount jail profile. Like the built-in sandbox
+/// profiles (`workspace`, `strict`, …) this is magic and un-overridable: a
+/// project/custom `sandbox.toml` profile cannot redefine it, and it is the only
+/// value of `--sandbox` that selects the re-exec jail (see [`parse_jail_args`]).
+pub const PATHBOX_PROFILE: &str = "pathbox";
+
+/// Read `--sandbox`, `--ro`, `--rw` and `--rn` off the raw command line.
 ///
-/// The raw line is what carries the order of the mounts; a parsed struct
-/// groups the two flags into separate lists and loses it.
+/// The raw line is what carries the order of the visible mounts; a parsed
+/// struct groups the flags into separate lists and loses it.
 ///
-/// A bare `--sandbox` asks for the jail. `--sandbox <profile>` keeps its older
-/// meaning (a profile name) and asks for nothing here. `--ro` and `--rw` ask
-/// for the jail by themselves. Scanning stops at a bare `--`, so a prompt is
-/// never read as a flag.
+/// The path-mount jail is enabled only when `--sandbox=pathbox` is given, OR
+/// any of `--ro`/`--rw`/`--rn` appears (the jail is then implied). A bare
+/// `--sandbox` with no value is always invalid, and a `--sandbox <profile>`
+/// naming anything other than `pathbox` is the built-in profile sandbox (not a
+/// jail) and cannot be combined with path flags. Scanning stops at a bare `--`,
+/// so a prompt is never read as a flag.
 pub fn parse_jail_args<I>(args: I) -> Result<JailRequest, JailError>
 where
     I: IntoIterator<Item = OsString>,
 {
     let mut request = JailRequest::default();
     let mut args = args.into_iter().peekable();
+    let mut has_path_flag = false;
+    let mut has_pathbox = false;
+    let mut other_profile: Option<String> = None;
+    let mut has_bare_sandbox = false;
+
     while let Some(arg) = args.next() {
         let Some(text) = arg.to_str() else { continue };
         if text == "--" {
             break;
         }
         if let Some(path) = flag_value("ro", text, &mut args)? {
+            has_path_flag = true;
             request.enabled = true;
             request.mounts.push(Mount {
                 access: Access::Ro,
@@ -285,6 +329,7 @@ where
             continue;
         }
         if let Some(path) = flag_value("rw", text, &mut args)? {
+            has_path_flag = true;
             request.enabled = true;
             request.mounts.push(Mount {
                 access: Access::Rw,
@@ -292,20 +337,60 @@ where
             });
             continue;
         }
+        if let Some(path) = flag_value("rn", text, &mut args)? {
+            has_path_flag = true;
+            request.enabled = true;
+            request.mounts.push(Mount {
+                access: Access::Deny,
+                path,
+            });
+            continue;
+        }
+        // `--sandbox` takes an optional value (clap `num_args = 0..=1`); mirror
+        // clap's "next non-flag token is the value" so the two agree.
         if text == "--sandbox" {
-            // clap takes the next token as the value unless it looks like a
-            // flag. Read it the same way, or the two disagree about what a
-            // bare `--sandbox` is.
             let has_value = args
                 .peek()
                 .and_then(|next| next.to_str())
                 .is_some_and(|next| !next.starts_with('-'));
             if has_value {
-                args.next();
+                let value = args
+                    .next()
+                    .map(|v| v.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                if value == PATHBOX_PROFILE {
+                    has_pathbox = true;
+                    request.enabled = true;
+                } else {
+                    other_profile.get_or_insert(value);
+                }
             } else {
-                request.enabled = true;
+                has_bare_sandbox = true;
             }
+            continue;
         }
+        if let Some(rest) = text.strip_prefix("--sandbox=") {
+            if rest == PATHBOX_PROFILE {
+                has_pathbox = true;
+                request.enabled = true;
+            } else if rest.is_empty() {
+                has_bare_sandbox = true;
+            } else {
+                other_profile.get_or_insert(rest.to_owned());
+            }
+            continue;
+        }
+    }
+
+    // Pre-clap mirror of the CLI contract, so we never run a jail the command
+    // line did not actually authorize.
+    if has_bare_sandbox {
+        return Err(JailError::BareSandboxInvalid);
+    }
+    if let Some(profile) = other_profile
+        && (has_path_flag || has_pathbox)
+    {
+        return Err(JailError::ProfileWithPathFlags { profile });
     }
     Ok(request)
 }
@@ -352,6 +437,10 @@ pub struct JailPlan {
     pub grok_home: PathBuf,
     /// The scratch directory the jail dedicates to this process.
     pub temp_dir: PathBuf,
+    /// An empty, read-only host directory used as the bwrap sink for `--rn`
+    /// denied paths (bound ro over each deny so nothing in them leaks). Never
+    /// used by the Seatbelt backend, which hides via profile rules instead.
+    pub deny_sink: PathBuf,
     /// The binary to run inside the jail.
     pub self_exe: PathBuf,
     /// The directory the jailed process starts in.
@@ -372,7 +461,8 @@ pub struct JailPlan {
 /// an explicit value so they never depend on the host's `config.toml`.
 ///
 /// The working directory is bound read-write by default, so a jail built with
-/// a bare `--sandbox` can write in the cwd without an explicit `--rw .`. The
+/// the pathbox marker (`--sandbox=pathbox`) or a path flag can write in the
+/// cwd without an explicit `--rw .`. The
 /// effective cwd access is the LAST user mount that contains the cwd
 /// (`defaults.cwd` when none does), and that single cwd mount is placed at the
 /// FRONT of `plan.mounts`. Front-placement plus the effective access is what
@@ -391,6 +481,7 @@ pub fn build_plan(
         let flag = match mount.access {
             Access::Ro => "ro",
             Access::Rw => "rw",
+            Access::Deny => "rn",
         };
         let path = dunce::canonicalize(&mount.path).map_err(|source| JailError::BadPath {
             flag: flag.to_string(),
@@ -412,10 +503,22 @@ pub fn build_plan(
     let self_exe = std::env::current_exe().map_err(JailError::NoSelfExe)?;
     let cwd = std::env::current_dir().map_err(JailError::NoCwd)?;
     let cwd = dunce::canonicalize(&cwd).unwrap_or(cwd);
+    // A `--rn` that contains or equals the cwd hides it, but the jail must
+    // chdir into the cwd to run — that combination is impossible, so refuse it
+    // with a message instead of a confusing unbound-cwd error.
+    if mounts
+        .iter()
+        .any(|mount| mount.access == Access::Deny && cwd.starts_with(&mount.path))
+    {
+        return Err(JailError::CwdDenied {
+            path: cwd.display().to_string(),
+        });
+    }
     // The effective cwd access comes from the LAST user mount that contains
     // the cwd (`cwd.starts_with(mount.path)`); later mounts win in the ordered
     // contract, so scanning reversed is what honors `--ro .` over an earlier
-    // `--rw /`. With no covering mount, fall back to the config default
+    // `--rw /`. Deny mounts never cover the cwd here (they would have been
+    // refused above). With no covering mount, fall back to the config default
     // (`Access::Rw` in the release, overridable to `Access::Ro` from `[jail]`).
     let cwd_access = mounts
         .iter()
@@ -431,10 +534,22 @@ pub fn build_plan(
         },
     );
     let temp_dir = dedicated_temp_dir()?;
+    // A host sink for `--rn` denoted paths: an empty dir bwrap binds read-only
+    // over each denied path so the subtree reads as empty and nothing leaks.
+    // Unused by the Seatbelt backend (which hides via profile rules).
+    let deny_sink = crate::paths::grok_home()
+        .join("sandbox-tmp")
+        .join(std::process::id().to_string())
+        .join("deny-sink");
+    std::fs::create_dir_all(&deny_sink).map_err(|source| JailError::NoTempDir {
+        path: deny_sink.display().to_string(),
+        source,
+    })?;
     let plan = JailPlan {
         mounts,
         grok_home,
         temp_dir,
+        deny_sink,
         self_exe,
         cwd,
         args,
@@ -540,11 +655,19 @@ pub fn bwrap_command(plan: &JailPlan) -> std::process::Command {
         }
     }
     for mount in &plan.mounts {
-        let flag = match mount.access {
-            Access::Ro => "--ro-bind",
-            Access::Rw => "--bind",
-        };
-        cmd.arg(flag).arg(&mount.path).arg(&mount.path);
+        match mount.access {
+            Access::Ro => cmd
+                .arg("--ro-bind")
+                .arg(&mount.path)
+                .arg(&mount.path),
+            Access::Rw => cmd
+                .arg("--bind")
+                .arg(&mount.path)
+                .arg(&mount.path),
+            // Deny mounts are not bound here; they are applied last, after
+            // every visible bind, as an empty read-only sink over the path.
+            Access::Deny => {}
+        }
     }
     // `$GROK_HOME`, bound after the user mounts. A config `grok_home = "ro"`
     // binds it read-only; the release default (`rw`) is unchanged. Because it
@@ -562,6 +685,17 @@ pub fn bwrap_command(plan: &JailPlan) -> std::process::Command {
     cmd.arg("--ro-bind-try")
         .arg(&plan.self_exe)
         .arg(&plan.self_exe);
+    // `--rn` denies hide their subtree *after* every visible bind so they
+    // shadow even a containing `--rw`/`--ro` ancestor: bind the empty read-only
+    // sink over each denied path. bwrap applies binds in order, so these last
+    // binds win for the paths they name.
+    for mount in &plan.mounts {
+        if mount.access == Access::Deny {
+            cmd.arg("--ro-bind")
+                .arg(&plan.deny_sink)
+                .arg(&mount.path);
+        }
+    }
     cmd.arg("--chdir").arg(&plan.cwd);
     cmd.arg("--setenv").arg(JAIL_ENV_VAR).arg("1");
     cmd.arg("--setenv").arg(BWRAP_ENV_VAR).arg("1");
@@ -620,8 +754,12 @@ pub fn seatbelt_profile(plan: &JailPlan) -> String {
             ));
         }
     }
-    // A --rw mount is readable and writable; a --ro mount is readable only.
+    // A --rw mount is readable and writable; a --ro mount is readable only. A
+    // --rn (Deny) mount gets no allow here — it is hidden at the end.
     for mount in &plan.mounts {
+        if mount.access == Access::Deny {
+            continue;
+        }
         profile.push_str(&format!(
             "(allow file-read* (subpath \"{}\"))\n",
             sbpl_escape(&mount.path)
@@ -654,6 +792,22 @@ pub fn seatbelt_profile(plan: &JailPlan) -> String {
         "(allow file-write* (subpath \"{}\"))\n",
         sbpl_escape(&plan.temp_dir)
     ));
+    // `--rn` denies are emitted LAST so SBPL's last-matching-rule hides each
+    // path even when a visible ancestor (including $GROK_HOME or /dev) was
+    // allowed above it.
+    for mount in &plan.mounts {
+        if mount.access != Access::Deny {
+            continue;
+        }
+        profile.push_str(&format!(
+            "(deny file-read* (subpath \"{}\"))\n",
+            sbpl_escape(&mount.path)
+        ));
+        profile.push_str(&format!(
+            "(deny file-write* (subpath \"{}\"))\n",
+            sbpl_escape(&mount.path)
+        ));
+    }
     profile
 }
 
@@ -727,7 +881,10 @@ pub fn maybe_reexec_into_jail() {
         Ok(request) => request,
         Err(e) => fail(&e.to_string()),
     };
-    if !request.enabled {
+    // Honor `GROK_SANDBOX=pathbox` (clap reads the same env into `--sandbox`,
+    // but the raw job must re-exec before clap runs, so it reads the env too).
+    let env_pathbox = std::env::var("GROK_SANDBOX").ok().as_deref() == Some(PATHBOX_PROFILE);
+    if !request.enabled && !env_pathbox {
         return;
     }
     // Read the `[jail]` defaults from this process's `$GROK_HOME`/`config.toml`
@@ -795,16 +952,39 @@ mod tests {
     }
 
     #[test]
-    fn bare_sandbox_enables_the_jail() {
-        assert!(parse(&["--sandbox"]).enabled);
-        assert!(parse(&["--sandbox", "--minimal"]).enabled);
+    fn pathbox_value_and_each_path_flag_select_the_jail() {
+        // The reserved pathbox name enables the jail with no mounts.
+        assert!(parse(&["--sandbox=pathbox"]).enabled);
+        assert!(parse(&["--sandbox", "pathbox"]).enabled);
+        // Any of the three path flags alone implies the pathbox jail.
+        assert!(parse(&["--rn", "/a"]).enabled);
+        assert!(parse(&["--ro", "/a"]).enabled);
+        assert!(parse(&["--rw", "/a"]).enabled);
+        // A path flag beside an explicit pathbox marker is fine (redundant).
+        assert!(parse(&["--sandbox=pathbox", "--rn", "/a/secrets"]).enabled);
     }
 
     #[test]
-    fn sandbox_with_a_profile_value_is_the_older_flag() {
+    fn bare_sandbox_is_invalid_everywhere() {
+        // A bare `--sandbox` (no value) no longer means "the jail" — it is an
+        // error even when path flags are present.
+        assert!(parse_jail_args(argv(&["--sandbox"])).is_err());
+        assert!(parse_jail_args(argv(&["--sandbox="])).is_err());
+        assert!(parse_jail_args(argv(&["--sandbox", "--ro", "."])).is_err());
+        assert!(parse_jail_args(argv(&["--rn", "/s", "--sandbox"])).is_err());
+        // `--sandbox` followed by a prompt/path token is the profile value, so
+        // with path flags it is the invalid profile+path mix, not a bare flag.
+        assert!(parse_jail_args(argv(&["--sandbox", "strict", "--ro", "."])).is_err());
+    }
+
+    #[test]
+    fn a_profile_value_is_not_the_jail_but_cannot_combine_with_path_flags() {
         let request = parse(&["--sandbox", "strict"]);
         assert!(!request.enabled, "a profile name must not build a jail");
         assert!(!parse(&["--sandbox=strict"]).enabled);
+        // Mixing a (non-pathbox) profile with path flags is rejected outright.
+        assert!(parse_jail_args(argv(&["--sandbox", "strict", "--rn", "/a"])).is_err());
+        assert!(parse_jail_args(argv(&["--rn", "/a", "--sandbox", "strict"])).is_err());
     }
 
     #[test]
@@ -854,9 +1034,10 @@ mod tests {
             mounts,
             grok_home: PathBuf::from("/home/u/.grok"),
             temp_dir: PathBuf::from("/tmp"),
+            deny_sink: PathBuf::from("/home/u/.grok/sandbox-tmp/deny-sink"),
             self_exe: PathBuf::from("/opt/grok/bin/grok"),
             cwd: PathBuf::from("/work"),
-            args: vec![OsString::from("--sandbox")],
+            args: vec![OsString::from("--sandbox=pathbox")],
             defaults: JailDefaults::default(),
         }
     }
@@ -1028,9 +1209,9 @@ mod tests {
 
     #[test]
     fn cwd_defaults_to_rw_when_no_cwd_flag_is_given() {
-        let plan = plan_for(&["--sandbox"]);
+        let plan = plan_for(&["--sandbox=pathbox"]);
         let front = front_cwd_mount(&plan);
-        assert_eq!(front.access, Access::Rw, "bare --sandbox must mount the cwd rw");
+        assert_eq!(front.access, Access::Rw, "pathbox (no mounts) must mount the cwd rw");
         assert_eq!(
             front.path, plan.cwd,
             "the injected mount must be exactly the working directory"
@@ -1040,7 +1221,7 @@ mod tests {
     #[test]
     #[cfg(target_os = "linux")]
     fn cwd_default_bwrap_binds_the_cwd_read_write() {
-        let plan = plan_for(&["--sandbox"]);
+        let plan = plan_for(&["--sandbox=pathbox"]);
         let cwd = plan.cwd.display().to_string();
         let args: Vec<String> = bwrap_command(&plan)
             .get_args()
@@ -1055,7 +1236,7 @@ mod tests {
     #[test]
     #[cfg(target_os = "macos")]
     fn cwd_default_seatbelt_allows_write_on_the_cwd() {
-        let plan = plan_for(&["--sandbox"]);
+        let plan = plan_for(&["--sandbox=pathbox"]);
         let profile = seatbelt_profile(&plan);
         let cwd = sbpl_escape(&plan.cwd);
         assert!(
@@ -1066,7 +1247,7 @@ mod tests {
 
     #[test]
     fn ro_cwd_overrides_the_rw_default() {
-        let plan = plan_for(&["--sandbox", "--ro", "."]);
+        let plan = plan_for(&["--sandbox=pathbox", "--ro", "."]);
         assert_eq!(
             front_cwd_mount(&plan).access,
             Access::Ro,
@@ -1077,7 +1258,7 @@ mod tests {
     #[test]
     #[cfg(target_os = "linux")]
     fn ro_cwd_bwrap_binds_read_only_and_never_read_write() {
-        let plan = plan_for(&["--sandbox", "--ro", "."]);
+        let plan = plan_for(&["--sandbox=pathbox", "--ro", "."]);
         let cwd = plan.cwd.display().to_string();
         let args: Vec<String> = bwrap_command(&plan)
             .get_args()
@@ -1096,7 +1277,7 @@ mod tests {
     #[test]
     #[cfg(target_os = "macos")]
     fn ro_cwd_seatbelt_grants_read_but_not_write() {
-        let plan = plan_for(&["--sandbox", "--ro", "."]);
+        let plan = plan_for(&["--sandbox=pathbox", "--ro", "."]);
         let profile = seatbelt_profile(&plan);
         let cwd = sbpl_escape(&plan.cwd);
         assert!(
@@ -1111,7 +1292,7 @@ mod tests {
 
     #[test]
     fn rw_cwd_remains_accepted_and_stays_rw() {
-        let plan = plan_for(&["--sandbox", "--rw", "."]);
+        let plan = plan_for(&["--sandbox=pathbox", "--rw", "."]);
         assert_eq!(
             front_cwd_mount(&plan).access,
             Access::Rw,
@@ -1123,7 +1304,7 @@ mod tests {
     fn precedence_keeps_the_parse_contract_and_lets_the_user_win() {
         // The default is a plan-level injection, not a flag: the parsed
         // request must carry exactly the user's mounts, with no injected cwd.
-        let request = parse(&["--sandbox", "--ro", "."]);
+        let request = parse(&["--sandbox=pathbox", "--ro", "."]);
         assert_eq!(
             request.mounts,
             vec![Mount {
@@ -1133,7 +1314,7 @@ mod tests {
             "parse_jail_args must not inject a cwd mount"
         );
         // And the plan must honor the user's ro (no stale write-allow).
-        let plan = build_plan(&request, &JailDefaults::default(), argv(&["--sandbox", "--ro", "."]))
+        let plan = build_plan(&request, &JailDefaults::default(), argv(&["--sandbox=pathbox", "--ro", "."]))
             .expect("build_plan");
         assert_eq!(
             front_cwd_mount(&plan).access,
@@ -1141,7 +1322,7 @@ mod tests {
             "a user --ro . must beat the rw default"
         );
         // A user ro mount that merely *contains* the cwd also flips it to ro.
-        let plan = plan_for(&["--sandbox", "--ro", "/"]);
+        let plan = plan_for(&["--sandbox=pathbox", "--ro", "/"]);
         assert_eq!(
             front_cwd_mount(&plan).access,
             Access::Ro,
@@ -1154,9 +1335,9 @@ mod tests {
         // Prints the plan + platform backend for the three cases so the
         // rw-vs-ro difference is visible in captured output, not just asserted.
         let cases: &[(&str, &[&str])] = &[
-            ("bare --sandbox", &["--sandbox"]),
-            ("--sandbox --ro .", &["--sandbox", "--ro", "."]),
-            ("--sandbox --rw .", &["--sandbox", "--rw", "."]),
+            ("pathbox (no mounts)", &["--sandbox=pathbox"]),
+            ("pathbox --ro .", &["--sandbox=pathbox", "--ro", "."]),
+            ("pathbox --rw .", &["--sandbox=pathbox", "--rw", "."]),
         ];
         for (label, args) in cases {
             let plan = plan_for(args);
@@ -1369,12 +1550,12 @@ mod tests {
         // cwd default ro, no user mount names the cwd: the injected front mount
         // is read-only. (These run against the real cwd via the shipped builder.)
         let plan = build_plan(
-            &parse(&["--sandbox"]),
+            &parse(&["--sandbox=pathbox"]),
             &JailDefaults {
                 cwd: Access::Ro,
                 ..RELEASE
             },
-            argv(&["--sandbox"]),
+            argv(&["--sandbox=pathbox"]),
         )
         .expect("build_plan");
         assert_eq!(
@@ -1392,9 +1573,9 @@ mod tests {
             ..RELEASE
         };
         let plan = build_plan(
-            &parse(&["--sandbox", "--rw", "."]),
+            &parse(&["--sandbox=pathbox", "--rw", "."]),
             &ro_default,
-            argv(&["--sandbox", "--rw", "."]),
+            argv(&["--sandbox=pathbox", "--rw", "."]),
         )
         .expect("build_plan");
         assert_eq!(
@@ -1404,9 +1585,9 @@ mod tests {
         );
         // Config says rw, but --ro . on the line must win.
         let plan = build_plan(
-            &parse(&["--sandbox", "--ro", "."]),
+            &parse(&["--sandbox=pathbox", "--ro", "."]),
             &RELEASE,
-            argv(&["--sandbox", "--ro", "."]),
+            argv(&["--sandbox=pathbox", "--ro", "."]),
         )
         .expect("build_plan");
         assert_eq!(
@@ -1425,9 +1606,9 @@ mod tests {
             system: Access::Rw,
         };
         let plan = build_plan(
-            &parse(&["--sandbox"]),
+            &parse(&["--sandbox=pathbox"]),
             &defaults,
-            argv(&["--sandbox"]),
+            argv(&["--sandbox=pathbox"]),
         )
         .expect("build_plan");
         assert_eq!(plan.defaults, defaults);
@@ -1501,6 +1682,94 @@ mod tests {
                 "system=rw must grant writes over {path}: {rw_profile}"
             );
         }
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn rn_denies_a_subpath_even_under_a_visible_ancestor() {
+        // --rn /work/secrets hides the subtree even though /work is an rw mount
+        // and the cwd. Seatbelt hides by emitting last-match deny rules.
+        let plan = plan_fixture(vec![
+            Mount {
+                access: Access::Rw,
+                path: PathBuf::from("/work"),
+            },
+            Mount {
+                access: Access::Deny,
+                path: PathBuf::from("/work/secrets"),
+            },
+        ]);
+        let profile = seatbelt_profile(&plan);
+        assert!(
+            profile.contains("(deny file-read* (subpath \"/work/secrets\"))\n"),
+            "a --rn path must be read-denied even under an rw ancestor: {profile}"
+        );
+        assert!(
+            profile.contains("(deny file-write* (subpath \"/work/secrets\"))\n"),
+            "a --rn path must be write-denied: {profile}"
+        );
+        assert!(
+            !profile.contains("(allow file-read* (subpath \"/work/secrets\"))\n"),
+            "a --rn path must not get a read-allow from the ancestor grant: {profile}"
+        );
+        // The deny rule must come after the ancestor's allow so last-match wins.
+        let allow_work = profile
+            .find("(allow file-read* (subpath \"/work\"))\n")
+            .expect("ancestor allow");
+        let deny_secrets = profile
+            .find("(deny file-read* (subpath \"/work/secrets\"))\n")
+            .expect("deny rule");
+        assert!(allow_work < deny_secrets, "deny must come after the allow: {profile}");
+    }
+
+    #[test]
+    fn rn_on_the_working_directory_is_refused() {
+        // --rn . hides the cwd, but the jail must chdir into it, so refuse.
+        let request = parse(&["--rn", "."]);
+        let plan = build_plan(&request, &JailDefaults::default(), argv(&["--rn", "."]));
+        assert!(
+            matches!(plan, Err(JailError::CwdDenied { .. })),
+            "denying the cwd must be refused: {plan:?}"
+        );
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn rn_binds_an_empty_read_only_sink_over_the_denied_path() {
+        // bwrap has no "unmount": a --rn hides by binding an empty read-only
+        // sink over the exact path, grounded on the shared deny-sink dir. The
+        // deny bind must come after the ancestor grant so it shadows it.
+        let plan = plan_fixture(vec![
+            Mount {
+                access: Access::Rw,
+                path: PathBuf::from("/work"),
+            },
+            Mount {
+                access: Access::Deny,
+                path: PathBuf::from("/work/secrets"),
+            },
+        ]);
+        let args: Vec<String> = bwrap_command(&plan)
+            .get_args()
+            .map(|a| a.to_string_lossy().to_string())
+            .collect();
+        let sink = plan.deny_sink.to_string_lossy().to_string();
+        let rw = args
+            .windows(3)
+            .position(|w| w == ["--bind", "/work", "/work"])
+            .expect("rw bind");
+        let deny = args
+            .windows(3)
+            .position(|w| w == ["--ro-bind", &sink, "/work/secrets"])
+            .expect("deny sink bind");
+        assert!(
+            rw < deny,
+            "deny bind must come after the ancestor grant: {args:?}"
+        );
+        assert!(
+            !args.windows(3).any(|w| w == ["--bind", "/work/secrets", "/work/secrets"]),
+            "a --rn path must not be bound rw: {args:?}"
+        );
     }
 
     #[test]

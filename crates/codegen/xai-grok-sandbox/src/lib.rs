@@ -820,6 +820,7 @@ mod tests {
         assert!(super::profile_confines("strict"));
         assert!(super::profile_confines("read-only"));
         assert!(super::profile_confines("readonly"));
+        assert!(super::profile_confines("pathbox"));
         assert!(super::profile_confines("my-custom-profile"));
     }
     #[test]
@@ -871,6 +872,25 @@ mod tests {
         assert!(!requires_read_deny(&ProfileName::Strict, &ws));
         assert!(!requires_read_deny(&ProfileName::Devbox, &ws));
         assert!(!requires_read_deny(&ProfileName::Off, &ws));
+        let _ = std::fs::remove_dir_all(&ws);
+    }
+    #[test]
+    #[cfg(unix)]
+    fn pathbox_needs_no_nono_hook_protection_but_is_confining() {
+        // The pathbox jail is the re-exec jail; it must not trip the nono hook
+        // write-deny manager, and it must report as a confining profile (fork-B:
+        // leader/workspace gates treat it like any real sandbox).
+        let ws = std::env::temp_dir().join(format!(
+            "grok-pathbox-hw-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&ws).expect("create ws");
+        assert!(!requires_hook_write_deny(&ProfileName::Pathbox, &ws));
+        assert!(!super::requires_read_deny(&ProfileName::Pathbox, &ws));
+        assert!(super::profile_confines("pathbox"));
         let _ = std::fs::remove_dir_all(&ws);
     }
     #[test]

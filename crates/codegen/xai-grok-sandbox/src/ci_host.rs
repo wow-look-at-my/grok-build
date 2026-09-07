@@ -1,6 +1,7 @@
-//! Unsandboxed `gh` CI-status host worker for `--sandbox` sessions.
+//! Unsandboxed `gh` CI-status host worker for `--sandbox` (pathbox) sessions.
 //!
-//! A bare `--sandbox` re-execs the whole binary inside bwrap / Seatbelt, so
+//! A `--sandbox=pathbox` / path-flag jail re-execs the whole binary inside
+//! bwrap / Seatbelt, so
 //! an in-process `gh` call (or any `Command::new("gh")` reached from the
 //! jailed renderer) runs *inside* the jail, where it cannot reach the host
 //! credentials / git remote / network that power the real CI dot. Yet the dot

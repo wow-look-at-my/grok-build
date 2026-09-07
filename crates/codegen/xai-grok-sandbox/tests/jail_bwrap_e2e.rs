@@ -41,6 +41,7 @@ fn plan(script: &str, mounts: Vec<Mount>, grok_home: &Path, cwd: &Path) -> JailP
         mounts,
         grok_home: grok_home.to_path_buf(),
         temp_dir: PathBuf::from("/tmp"),
+        deny_sink: grok_home.join("sandbox-tmp").join("deny-sink"),
         self_exe: PathBuf::from("/bin/sh"),
         cwd: cwd.to_path_buf(),
         args: vec![OsString::from("-c"), OsString::from(script)],

@@ -92,8 +92,9 @@ fn config_subprocess() {
         defaults.cwd, defaults.grok_home, defaults.tmp, defaults.system);
 
     // A bare jail request, as `maybe_reexec_into_jail` would see it.
-    let request = parse_jail_args(vec![OsString::from("--sandbox")]).unwrap();
-    let plan = build_plan(&request, &defaults, vec![OsString::from("--sandbox")]).unwrap();
+    let request = parse_jail_args(vec![OsString::from("--sandbox=pathbox")]).unwrap();
+    let plan =
+        build_plan(&request, &defaults, vec![OsString::from("--sandbox=pathbox")]).unwrap();
     println!("plan:");
     println!("  cwd          = {}", plan.cwd.display());
     println!("  grok_home    = {}", plan.grok_home.display());
