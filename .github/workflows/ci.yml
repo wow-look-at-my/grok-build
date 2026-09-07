@@ -356,6 +356,8 @@ jobs:
       # pinned `version:` input on the sccache-action step below.
       SCCACHE_GHA_VERSION: ${{ matrix.sccache_version }}
     strategy:
+      # The two targets share no work, so a darwin failure must not cancel the linux binary and cost a whole rebuild to see it.
+      fail-fast: false
       matrix:
         include:
           - target_os: linux
