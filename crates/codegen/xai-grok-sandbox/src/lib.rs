@@ -29,6 +29,7 @@
 pub mod child_net;
 mod deny;
 mod hook_write_deny;
+pub mod jail;
 mod logging;
 mod network_policy;
 mod paths;
