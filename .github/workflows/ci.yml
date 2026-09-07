@@ -6,34 +6,21 @@ on:
 permissions:
   contents: read
 
-# Cancel superseded runs on branches, but let every master run finish so
-# rapid merges can't leave master commits with no completed CI, and so a
-# publish already in flight is never cancelled mid-upload.
+# A master run is never cancelled: a rapid merge must not strand a commit with no CI, or kill a publish mid-upload.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
 
 env:
   CARGO_TERM_COLOR: always
-  # Tests that round-trip non-ASCII OsStrings (xai-grok-sandbox's
-  # `fails_closed_on_non_utf8_*`) fail with errno 84 under a non-UTF-8 locale.
-  # The runners default to C.UTF-8, so this states the requirement rather than
-  # changing anything.
+  # xai-grok-sandbox's `fails_closed_on_non_utf8_*` hit errno 84 under a non-UTF-8 locale.
   LANG: C.UTF-8
   LC_ALL: C.UTF-8
-  # sccache wraps rustc and caches individual compilation outputs (per
-  # crate/compilation unit) in the GitHub Actions cache, so a changed crate
-  # only invalidates its own cached artifacts — not a whole target/ tarball.
-  # This requires CARGO_INCREMENTAL=0 (sccache cannot cache incremental
-  # compilation). rust-cache alone restored target/ but cargo recompiled
-  # everything anyway (fingerprints don't survive the zip round-trip), so the
-  # "cache hit" was a 14-min full recompile every time. sccache actually hits.
+  # sccache caches per compilation unit and cannot cache incremental, so this must stay 0 for it to hit at all.
   CARGO_INCREMENTAL: "0"
   SCCACHE_GHA_ENABLED: "true"
   RUSTC_WRAPPER: "sccache"
-  # Linking every crate's test binaries WITH debuginfo needs >37 GB of target/
-  # (measured); a runner has ~14 GB free, and ld dies on a bus error partway
-  # through the shell crate's integration tests. Nothing here reads a symbol.
+  # Debuginfo on every test binary needs >37 GB of target/ against a runner's ~14 GB, and ld then dies on a bus error.
   CARGO_PROFILE_DEV_DEBUG: "0"
   CARGO_PROFILE_TEST_DEBUG: "0"
   BUILDHOST_SERVER: https://pazer.build
@@ -42,62 +29,23 @@ env:
 jobs:
   build-test:
     name: Build & test
-    # Hosted, deliberately. This suite asserts on host semantics the org's lean
-    # self-hosted image does not provide: orphan reaping and process-group
-    # signals (every `*_grandchild*` case), st_blocks on a non-overlay
-    # filesystem (disk_usage_cmd / fs_size), and a real /bin/bash for the PTY
-    # tests. Pointing this job at that runner turns ~20 of them red, and the
-    # only way to make them pass there is to weaken what they check — so the
-    # runner belongs to the image, not to the tests. Revisit if the fleet image
-    # gains an init/reaper.
+    # Hosted deliberately: this suite asserts host semantics the org's lean self-hosted image lacks. See AGENTS.md.
     runs-on: ubuntu-latest
-    # Compiling ~90 test harness binaries dominates this job; the run itself is
-    # minutes. 45 is the ceiling, not a target to grow: a job that needs more
-    # has a hung test, and nextest's per-test timeout (.config/nextest.toml)
-    # is what fails that in 60s instead of burning the whole budget.
+    # A ceiling, not a target: a job needing more than this has a hung test, which nextest fails in 60s.
     timeout-minutes: 45
     env:
-      # Namespace this job's sccache entries away from the darwin release
-      # job so the more-frequent linux runs can't evict the darwin cache
-      # entries from the shared 10 GB GHAC bucket. sccache reads
-      # SCCACHE_GHA_VERSION before falling back to SCCACHE_GHA_ENABLED and
-      # uses it as the cache namespace (SHA-256'd into the GHAC `name`).
-      # The `0.17.0` token here MUST stay in sync with the pinned
-      # `version:` input on the sccache-action step below — the GHA cache key
-      # is `sccache-v{VERSION}-{SCCACHE_GHA_VERSION}`, so a mismatch between
-      # the installed sccache version and this namespace invalidates the cache.
+      # Namespaces this job's sccache entries away from darwin's, and the 0.17.0 token must match the pinned version below.
       SCCACHE_GHA_VERSION: sccache-v0.17.0-x86_64-unknown-linux-gnu
-      # Workspace tests drive this binary, and the harness builds it itself
-      # when this is unset — see the build step. The PTY suites need the same
-      # thing and build their own in the pty-e2e job.
+      # The harness builds this itself when unset, once per nextest process, all queued on cargo's package lock.
       PAGER_BINARY: ${{ github.workspace }}/target/debug/xai-grok-pager
-      # No global CARGO_BUILD_JOBS here. The compile-RAM protection lives
-      # entirely on the "Build test harnesses" step, which pins CARGO_BUILD_JOBS
-      # to 3 (see its comment). The run step reuses that same unified graph and
-      # fast-passes at full parallelism; the release jobs build lib+bins (no
-      # monolith test harnesses) at default parallelism.
-      # WHY bounded at 3, not a global cap: two crates — xai-grok-shell (365k
-      # LOC, 4,595 in-lib #[test]s) and xai-grok-pager (463k LOC, 8,468 in-lib
-      # #[test]s) — each compile their whole crate + every in-lib test into ONE
-      # rustc that cold-peaks at ~7.8 GiB and ~7.4 GiB (measured). That peak is
-      # monomorphization-bound and NOT reducible by codegen-units (128->512
-      # unchanged), incremental, or any [profile] knob; per-unit it is also
-      # structurally irreducible (92% of the shell's LOC is the mutually-
-      # referencing session+agent core whose crate:: references reach private
-      # surface; the movable fringe was already extracted into the
-      # xai-grok-shell-assets sub-crate). Even when the two units overlap at -j3
-      # on a cold build, their honest aggregate is measured at ~13.4 GiB —
-      # comfortably under the 16 GiB runner cap — so -j3 keeps the workspace
-      # meaningfully parallel while staying safely within budget.
+      # No global CARGO_BUILD_JOBS: the compile-RAM cap belongs to the build step alone. See AGENTS.md.
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      # This repo's `cargo test --workspace` needs >37 GB of target/ (the
-      # pager links ~90 test binaries) and a stock runner only has ~14 GB
-      # free, so the long Build & test job has repeatedly ground to a hang on
-      # full disk (ld/rustc I/O stalls). Free the known-safe oversized image
-      # dirs BEFORE building. dotnet/android/swift/haskell are never needed
-      # here; tool caches (rustup, sccache) are kept for speed.
+      # After the checkout: it reads the workspace, and an empty one enforces nothing.
+      - uses: wow-look-at-my/actions@yaml-comment-block#latest
+
+      # A stock runner's ~14 GB free is not enough for this build, and the job hangs on ld/rustc I/O stalls at a full disk.
       - name: Free up disk space before build
         uses: jlumbroso/free-disk-space@main
         with:
@@ -111,9 +59,7 @@ jobs:
 
       - name: Install protoc (pinned v29.3)
         run: |
-          # Same release artifact + sha256 the repo's dotslash launcher
-          # (bin/protoc) pins for linux-x86_64. bin/protoc is the source of
-          # truth; update both together when bumping protoc.
+          # bin/protoc is the source of truth for this artifact and its sha256. Update both together.
           curl -fsSL -o "$RUNNER_TEMP/protoc.zip" \
             https://github.com/protocolbuffers/protobuf/releases/download/v29.3/protoc-29.3-linux-x86_64.zip
           echo "3e866620c5be27664f3d2fa2d656b5f3e09b5152b42f1bedbf427b333e90021a  $RUNNER_TEMP/protoc.zip" | sha256sum -c -
@@ -124,18 +70,11 @@ jobs:
       - name: Install Rust toolchain (pinned by rust-toolchain.toml)
         run: rustup show
 
-      # The grep and glob tools shell out to ripgrep: rg_path() ends at a bare
-      # "rg" on PATH, and a runner has none, so every one of their tests failed
-      # on empty output rather than on anything they assert.
+      # rg_path() ends at a bare "rg" on PATH, so without this the grep and glob tests fail on empty output.
       - name: Install ripgrep
         uses: wow-look-at-my/actions@cache-rg#latest
 
-      # cargo-nextest runs each test in its own process with a per-test
-      # timeout (configured in .config/nextest.toml), so a test that wedges —
-      # a PTY suite waiting on a process that never starts — fails in 60s
-      # instead of eating the whole timeout-minutes budget. The standard cargo
-      # test harness has no per-test timeout, which is how a single hung test
-      # used to burn a 45-minute job.
+      # Each test runs in its own process under a per-test timeout (.config/nextest.toml), which cargo test has none of.
       - name: Install cargo-nextest
         run: |
           mkdir -p "$RUNNER_TEMP/nextest-bin"
@@ -144,87 +83,33 @@ jobs:
           tar -xzf "$RUNNER_TEMP/nextest.tar.gz" -C "$RUNNER_TEMP/nextest-bin"
           echo "$RUNNER_TEMP/nextest-bin" >> "$GITHUB_PATH"
 
-      # sccache caches individual rustc compilation outputs in the GHA cache.
-      # Unlike rust-cache (which restores a dumb target/ tarball that cargo
-      # recompiles from scratch anyway), sccache keys on the actual compilation
-      # inputs and only recompiles what genuinely changed.
+      # sccache keys on the real compilation inputs, where rust-cache restores a target/ tarball cargo recompiles anyway.
       - name: Run sccache-cache
         uses: mozilla-actions/sccache-action@v0.0.11
-        # The version input MUST carry the leading 'v': the action builds its
-        # download URL as releases/download/${version}/... which only exists
-        # for the tag 'v0.17.0'. Dropping the v made it 404 and skip the whole
-        # build. This installed binary still reports 0.17.0, so it stays in
-        # sync with SCCACHE_GHA_VERSION above and the GHA cache key
-        # (sccache-v{VERSION}-{SCCACHE_GHA_VERSION}) is unchanged.
+        # The leading 'v' is load-bearing: the download URL is built from this and only the tag v0.17.0 exists.
         with:
           version: v0.17.0
 
-      # Build-then-run split: the expensive, RAM-heavy phase is *compiling* the
-      # ~90 test harnesses. Two workspace crates — xai-grok-shell (365k LOC,
-      # 4,595 in-lib #[test]s) and xai-grok-pager (463k LOC, 8,468 in-lib
-      # #[test]s) — each compile their entire crate + every in-lib test into ONE
-      # rustc that cold-peaks at ~7.8 GiB and ~7.4 GiB respectively (measured).
-      # That peak is monomorphization-bound and NOT reducible by codegen-units,
-      # incremental, or any [profile] knob (proven), and per-unit it is
-      # structurally irreducible on the shell: 92% of its LOC lives in the
-      # mutually-referencing `session`+`agent` monoliths whose ~4,200 crate::
-      # references reach private surface (pub:private = 1,669:8,598). The
-      # structurally-movable fringe (bundle+builtin, 1,859 LOC + 49 tests) was
-      # extracted into the xai-grok-shell-assets sub-crate (a real compiler-
-      # side fix: the shell's rustc no longer type-checks that code, and the
-      # ~0.5 GiB assets unit schedules in its own slot, not inside the shell's
-      # rustc). The OOM happens when the multi-GiB harnesses compile
-      # CONCURRENTLY in the one `cargo test` call.
-      #
-      # We therefore (a) compile once with `--no-run` in the SAME unified
-      # `--workspace` resolution as the run step (so the run step fast-passes
-      # and never recompiles a different graph — a second exclude/isolation
-      # invocation was rejected because it changed workspace feature-unification
-      # and forced a broad cold recompile at -j16), and (b) bound this compile's
-      # parallelism so the two irreducible ~7.8+7.4 GiB units do not overlap on a
-      # cold build (CI is sccache-warmed, but a cold graph must still stay
-      # under the 16 GiB runner cap). The run step below then runs the already
-      # built binaries at full parallelism.
+      # One unified --workspace --no-run at -j3, which the RAM guard below enforces and AGENTS.md explains.
       - name: Build test harnesses (compile, no-run)
         env:
           CARGO_BUILD_JOBS: "3"
         run: |
           cargo test --locked --workspace --no-run --no-fail-fast
-          # The pager binary too, and here rather than from a test: the PTY
-          # suites drive the real binary, and `pager_binary()` falls back to
-          # running `cargo build` itself when PAGER_BINARY is unset. Under
-          # nextest that fallback is once per test process, so a dozen of them
-          # queue on cargo's package lock and time out. Building it once, and
-          # exporting PAGER_BINARY for the whole job, removes that entirely.
+          # Built once here, rather than once per nextest process on cargo's package lock.
           cargo build --locked -p xai-grok-pager-bin
 
-      # Run the pre-built test binaries with cargo-nextest, which enforces a
-      # per-test timeout (60s, configured in .config/nextest.toml). A hung
-      # test fails in 60s instead of blocking the whole job. The `ci` profile
-      # also sets fail-fast = false, so one failure doesn't hide every test
-      # behind it and each push surfaces the whole list. The version check
-      # after it is a smoke test: the binary the tests drive must at least
-      # start.
+      # The ci profile sets fail-fast = false, so one failure does not hide the rest, and --version smoke-tests the binary.
       - name: Run tests (workspace)
         run: |
           cargo nextest run --locked --workspace --profile ci
           "$PAGER_BINARY" --version
 
-      # RAM regression guard: prevent the compile-RAM pathology from silently
-      # coming back (see the build step above). Two monolith crates' single-rustc
-      # test harnesses cold-peak at ~7.8 GiB and ~7.4 GiB (irreducible per-unit,
-      # proven). The shipped structural fix is a sub-crate split (bundle+builtin
-      # extracted into xai-grok-shell-assets), and the compile phase must run
-      # under one unified `--workspace` --no-run at a bounded -j3 (so the run
-      # step never recompiles a divergent graph at -j16 and the two irreducible
-      # monoliths don't overlap on a cold build). This cheap, deterministic
-      # STRUCTURAL guard fails if the split is undone or that protection is
-      # removed. The real cold aggregate-RSS measurement of the shipped command
-      # is committed as ci/ram-guard.sh.
+      # Fails if the sub-crate split is undone or the -j3 unified compile is removed. AGENTS.md carries the measurements.
       - name: RAM guard (sub-crate split + unified --no-run at -j3 intact)
         run: |
           set -euo pipefail
-          # Structural split: bundle/builtin must stay out of the shell crate.
+          # bundle/builtin must stay out of the shell crate.
           [ -f crates/codegen/xai-grok-shell-assets/src/bundle.rs ] \
           && [ -f crates/codegen/xai-grok-shell-assets/src/builtin.rs ] \
           || { echo "RAM GUARD: FAIL — bundle/builtin must live in xai-grok-shell-assets"; exit 1; }
@@ -233,11 +118,7 @@ jobs:
           || { echo "RAM GUARD: FAIL — bundle/builtin re-inlined into xai-grok-shell"; exit 1; }
           grep -q 'xai-grok-shell-assets' crates/codegen/xai-grok-shell/Cargo.toml \
           || { echo "RAM GUARD: FAIL — shell must depend on xai-grok-shell-assets"; exit 1; }
-          # Build step is a single unified --workspace --no-run at -j3, and no
-          # split (an --exclude / -p invocation that changes workspace
-          # feature-unification and forced a broad -j16 recompile) has been
-          # reintroduced. Use bracketed classes in the patterns so the awk
-          # script's own source text is not matched by the same file scan.
+          # Bracketed classes keep the awk script's own source text out of the scan it runs over this file.
           awk '
             /--no-run --no-fail-fast/ { compile=1 }
             /--exclude xai[-]grok-shell/ || /-p xai[-]grok-shell -p xai[-]grok-pager/ { splitbad=1 }
@@ -250,23 +131,7 @@ jobs:
             || { echo "RAM GUARD: FAIL — run step missing"; exit 1; }
           echo "RAM GUARD: PASS — sub-crate split + unified --no-run compile at -j3 intact, run step fast-passes"
 
-  # The PTY suites drive the real binary through a virtual terminal and assert
-  # on what is actually on screen. They are #[ignore]d because they need a
-  # built binary, which is why nothing ran them -- and unit tests cannot stand
-  # in for them: a model picker whose rows rendered blank had passing tests
-  # over the width function the whole time.
-  #
-  # Its own job, running beside build-test rather than after it. Measured on
-  # the first run of the split: 29m44 for build-test against 33m21 before, and
-  # 16m52 here -- so the saving is real but modest, and 706s of this job is
-  # recompiling the pager. That duplicate is NOT cheap, and anyone tempted to
-  # split another suite off should weigh it at roughly that price.
-  #
-  # What it does avoid is the RAM peak: `--test <name>` builds the pager lib
-  # without `--cfg test` plus three integration binaries, never the `--lib`
-  # harness whose 8,468 in-lib tests cold-peak at ~7.4 GiB. Nothing here can
-  # reach the pathology build-test's guard defends against, and sccache serves
-  # the shared crate graph to both jobs out of one bucket.
+  # These assert on what a virtual terminal actually shows, which a unit test over the width function cannot stand in for.
   pty-e2e:
     name: Test (PTY end-to-end)
     # Hosted for the same reason as build-test: these need a real /bin/bash.
@@ -291,9 +156,7 @@ jobs:
 
       - name: Install protoc (pinned v29.3)
         run: |
-          # Same release artifact + sha256 the repo's dotslash launcher
-          # (bin/protoc) pins for linux-x86_64. bin/protoc is the source of
-          # truth; update both together when bumping protoc.
+          # bin/protoc is the source of truth for this artifact and its sha256. Update both together.
           curl -fsSL -o "$RUNNER_TEMP/protoc.zip" \
             https://github.com/protocolbuffers/protobuf/releases/download/v29.3/protoc-29.3-linux-x86_64.zip
           echo "3e866620c5be27664f3d2fa2d656b5f3e09b5152b42f1bedbf427b333e90021a  $RUNNER_TEMP/protoc.zip" | sha256sum -c -
@@ -317,10 +180,7 @@ jobs:
         with:
           version: v0.17.0
 
-      # The suites drive the real binary, and `pager_binary()` builds it itself
-      # when PAGER_BINARY is unset -- under nextest that is once per test
-      # process, all queued on cargo's package lock. Build it once here and
-      # export it job-wide, same as build-test does.
+      # Built once here, rather than once per nextest process on cargo's package lock.
       - name: Build the PTY harnesses and the pager binary
         run: |
           cargo test --locked -p xai-grok-pager --no-run \
@@ -329,8 +189,7 @@ jobs:
             --test pty_e2e_minimal
           cargo build --locked -p xai-grok-pager-bin
 
-      # Every case spawns a process, so cap the workers rather than letting the
-      # harness fan out to the core count.
+      # Every case spawns a process, so cap the workers rather than fanning out to the core count.
       - name: Test (PTY end-to-end)
         run: |
           cargo nextest run --locked -p xai-grok-pager --profile ci \
@@ -344,20 +203,12 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     env:
-      # Per-target sccache namespace: linux and darwin get distinct GHAC
-      # buckets so neither can evict the other's entries from the shared
-      # 10 GB repo cache. See build-test's SCCACHE_GHA_VERSION comment.
-      # The `0.17.0` token in each matrix value must stay in sync with the
-      # pinned `version:` input on the sccache-action step below.
+      # Per-target namespace so neither target evicts the other, and each 0.17.0 token must match the pinned version below.
       SCCACHE_GHA_VERSION: ${{ matrix.sccache_version }}
     strategy:
       matrix:
         include:
-          # ubuntu-22.04 ships glibc 2.35, the same libc users on Ubuntu 22.04
-          # (and most other distros) have. Building here keeps every GLIBC_x.y
-          # dependency at or below 2.35, so the amd64 binary runs on 22.04
-          # instead of demanding GLIBC_2.38/2.39 (which the previous
-          # ubuntu-latest, glibc 2.39, runner linked against).
+          # ubuntu-22.04 ships glibc 2.35, which holds every GLIBC_x.y dependency at or below what a 22.04 user has.
           - runner: ubuntu-22.04
             target_os: linux
             target_arch: amd64
@@ -377,9 +228,7 @@ jobs:
 
       - name: Install protoc (pinned v29.3)
         run: |
-          # Same release artifact + sha256 the repo's dotslash launcher
-          # (bin/protoc) pins for this platform. bin/protoc is the source of
-          # truth; update both together when bumping protoc.
+          # bin/protoc is the source of truth for this artifact and its sha256. Update both together.
           curl -fsSL -o "$RUNNER_TEMP/protoc.zip" "${{ matrix.protoc_url }}"
           echo "${{ matrix.protoc_sha256 }}  $RUNNER_TEMP/protoc.zip" | ${{ matrix.checksum_cmd }}
           unzip -q -o "$RUNNER_TEMP/protoc.zip" -d "$RUNNER_TEMP/protoc"
@@ -398,10 +247,7 @@ jobs:
       - name: Build release binary
         run: cargo build --locked --release -p xai-grok-pager-bin
 
-      # The linux binary is built on ubuntu-22.04 (glibc 2.35) so it runs on
-      # Ubuntu 22.04. Guard the floor: fail if the produced binary demands any
-      # symbol newer than 2.35 (which would reproduce the GLIBC_2.38/2.39 load
-      # error on 22.04). Darwin binaries don't use GLIBC, so skip them.
+      # Guards the floor the build above buys: a symbol newer than 2.35 is a load error on Ubuntu 22.04.
       - name: Verify glibc symbols are <= 2.35 (linux/amd64)
         if: matrix.target_os == 'linux'
         shell: bash
@@ -492,8 +338,7 @@ jobs:
           project: ${{ env.BUILDHOST_PROJECT }}
           version: ${{ needs.publish-create.outputs.version }}
 
-      # The binaries are on buildhost now; the run-scoped cache copies are dead
-      # weight. always() so a failed publish still cleans up after itself.
+      # always(), so a failed publish still clears the run-scoped copies buildhost has now superseded.
       - name: Clean up binary hand-offs
         if: always()
         uses: wow-look-at-my/actions@cache-cleanup#latest
