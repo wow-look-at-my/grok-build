@@ -40,7 +40,6 @@ jobs:
       PAGER_BINARY: ${{ github.workspace }}/target/debug/xai-grok-pager
       # No global CARGO_BUILD_JOBS: the compile-RAM cap belongs to the build step alone. See ci/ram-guard.sh.
     steps:
-      - uses: wow-look-at-my/actions@yaml-comment-block#latest
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       # After the checkout: it reads the workspace, and an empty one enforces nothing.
