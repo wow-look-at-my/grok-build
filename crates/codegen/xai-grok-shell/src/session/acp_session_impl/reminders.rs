@@ -759,9 +759,16 @@ impl SessionActor {
         let reminder = crate::terminal::format_resumed_tasks_reminder(&entries);
         self.push_system_reminder(&reminder);
     }
+    /// The persisted `[ui].stop_gate_unfinished_todos` toggle (default ON),
+    /// carried on the agent's reminder policy from spawn. Master switch for
+    /// the built-in todo-stop gate; the CLI/remote `todo_gate` opt-in is
+    /// independent.
+    pub(super) fn stop_gate_unfinished_todos_enabled(&self) -> bool {
+        self.agent.borrow().reminder_policy().stop_gate_unfinished_todos
+    }
+
     /// Turn-end TodoGate config, or `None` when [`todo_gate_active`] is false.
-    pub(super) fn todo_gate_policy(
-        &self,
+    pub(super) fn todo_gate_policy(        &self,
     ) -> Option<xai_grok_agent::system_reminder::TodoGateConfig> {
         let goal_status = self.goal_tracker.lock().status();
         let agent = self.agent.borrow();

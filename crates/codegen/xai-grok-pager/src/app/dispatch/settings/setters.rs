@@ -1000,6 +1000,33 @@ pub(in crate::app::dispatch) fn set_confirm_before_rewind(
     }]
 }
 
+pub(in crate::app::dispatch) fn set_stop_gate_unfinished_todos_inner(
+    app: &mut AppView,
+    new: bool,
+) {
+    app.current_ui.stop_gate_unfinished_todos = Some(new);
+}
+
+/// SHARED: `[ui].stop_gate_unfinished_todos` via `Effect::PersistSetting`.
+pub(in crate::app::dispatch) fn set_stop_gate_unfinished_todos(
+    app: &mut AppView,
+    new: bool,
+) -> Vec<Effect> {
+    let prev = app.current_ui.stop_gate_unfinished_todos_enabled();
+    if prev == new {
+        return vec![];
+    }
+    set_stop_gate_unfinished_todos_inner(app, new);
+    refresh_open_settings_modals(app);
+    tracing::info!(target: "settings", key = "stop_gate_unfinished_todos", value = new, "setting changed");
+    app.show_toast(&save_success_toast("Stop gate for unfinished todos", new));
+    vec![Effect::PersistSetting {
+        key: "stop_gate_unfinished_todos",
+        value: crate::settings::SettingValue::Bool(new),
+        rollback_value: crate::settings::SettingValue::Bool(prev),
+    }]
+}
+
 pub(super) fn set_combine_queued_prompts_inner(app: &mut AppView, new: bool) {
     app.current_ui.combine_queued_prompts = Some(new);
     crate::appearance::cache::set_combine_queued_prompts(new);

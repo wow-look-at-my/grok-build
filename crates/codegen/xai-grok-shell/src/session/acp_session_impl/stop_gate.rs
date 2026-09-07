@@ -8,6 +8,30 @@ use xai_grok_hooks::{dispatcher, result};
 
 pub const MAX_STOP_HOOK_CONTINUATIONS_PER_TURN: u32 = 8;
 
+/// Whether the built-in todo-stop gate blocks this stop.
+///
+/// The todo gate is just another stop hook: it fires after the user-configured
+/// hooks allowed the stop, it consumes the SAME continuation budget
+/// ([`MAX_STOP_HOOK_CONTINUATIONS_PER_TURN`] — the stuck-release the user
+/// asked for: a model that keeps turning over without finishing its todos
+/// eventually stops anyway), and its feedback rides the same
+/// `stop_hook_feedback` user message the hook blocks use. The persisted
+/// `[ui].stop_gate_unfinished_todos` toggle (default ON) is the master switch.
+///
+/// Pure and table-tested; the actor wires the inputs:
+/// - `toggle_enabled` — `[ui].stop_gate_unfinished_todos` (default ON).
+/// - `continuations_this_turn` — the shared stop-hook continuation counter.
+/// - `gate_decision` — [`evaluate_todo_gate`] over the live todo state.
+pub(crate) fn todo_stop_gate_blocks(
+    toggle_enabled: bool,
+    continuations_this_turn: u32,
+    gate_decision: &TodoGateDecision,
+) -> bool {
+    toggle_enabled
+        && continuations_this_turn < MAX_STOP_HOOK_CONTINUATIONS_PER_TURN
+        && matches!(gate_decision, TodoGateDecision::Nudge { .. })
+}
+
 const SESSION_END_STOP_BUDGET: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// `command` is a shell-only field, so a monitor's watch command is carried in
@@ -496,5 +520,77 @@ mod stop_gate_snapshot_tests {
         );
         assert!(matches!(&results[1], HookRunResult::Failed { .. }));
         assert!(matches!(&results[2], HookRunResult::Skipped { .. }));
+    }
+}
+
+#[cfg(test)]
+mod todo_stop_gate_tests {
+    use super::*;
+
+    /// The gate blocks only when the toggle is on, the shared stop-hook
+    /// continuation budget has room, and the todo evaluation nudges.
+    #[test]
+    fn blocks_only_on_toggle_and_budget_and_nudge() {
+        let nudge = TodoGateDecision::Nudge {
+            reminder: "finish your todos".to_string(),
+            reason: crate::session::acp_session_impl::types::TodoGateReason::InFlight,
+        };
+        assert!(todo_stop_gate_blocks(true, 0, &nudge));
+        assert!(todo_stop_gate_blocks(
+            true,
+            MAX_STOP_HOOK_CONTINUATIONS_PER_TURN - 1,
+            &nudge
+        ));
+        // Toggle off: the model stops freely even with pending todos.
+        assert!(!todo_stop_gate_blocks(false, 0, &nudge));
+        // The shared budget is the stuck-release: once exhausted, the model
+        // stops anyway, exactly like the stop hooks themselves.
+        assert!(!todo_stop_gate_blocks(
+            true,
+            MAX_STOP_HOOK_CONTINUATIONS_PER_TURN,
+            &nudge
+        ));
+        assert!(!todo_stop_gate_blocks(
+            true,
+            MAX_STOP_HOOK_CONTINUATIONS_PER_TURN + 3,
+            &nudge
+        ));
+        // No unfinished todos: nothing to block on.
+        assert!(!todo_stop_gate_blocks(true, 0, &TodoGateDecision::Continue));
+    }
+
+    /// End-to-end over the real evaluator: real todo inputs decide it.
+    #[test]
+    fn rides_the_real_todo_gate_evaluation() {
+        let pending = vec!["fix-round-1"];
+        let input = TodoGateInput {
+            pending: pending.iter().map(String::as_str).collect(),
+            in_progress_unbacked: Vec::new(),
+            in_progress_backed: Vec::new(),
+            backing_task_count: 0,
+        };
+        let decision = evaluate_todo_gate(&input);
+        assert!(
+            todo_stop_gate_blocks(true, 0, &decision),
+            "pending todos + toggle on + budget left => block"
+        );
+        // Everything terminal (or in-progress backed by live tasks): allow.
+        let done = TodoGateInput {
+            pending: Vec::new(),
+            in_progress_unbacked: Vec::new(),
+            in_progress_backed: vec!["watched-by-bash"],
+            backing_task_count: 1,
+        };
+        assert!(!todo_stop_gate_blocks(
+            true,
+            0,
+            &evaluate_todo_gate(&done)
+        ));
+        // And once the budget is exhausted, pending todos no longer block.
+        assert!(!todo_stop_gate_blocks(
+            true,
+            MAX_STOP_HOOK_CONTINUATIONS_PER_TURN,
+            &decision
+        ));
     }
 }

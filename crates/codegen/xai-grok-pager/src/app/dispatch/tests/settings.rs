@@ -616,6 +616,28 @@ fn set_confirm_before_rewind_emits_persist_setting_with_correct_payload() {
     assert_eq!(app.current_ui.confirm_before_rewind, Some(!default_on));
 }
 #[test]
+fn set_stop_gate_unfinished_todos_emits_persist_setting_with_correct_payload() {
+    use crate::settings::SettingValue;
+    let mut app = test_app_with_agent();
+    let default_on = app.current_ui.stop_gate_unfinished_todos_enabled();
+    assert!(default_on, "the stop gate ships ON");
+    let effects = dispatch(Action::SetStopGateUnfinishedTodos(!default_on), &mut app);
+    assert_eq!(effects.len(), 1);
+    match &effects[0] {
+        Effect::PersistSetting {
+            key,
+            value,
+            rollback_value,
+        } => {
+            assert_eq!(*key, "stop_gate_unfinished_todos");
+            assert_eq!(value, &SettingValue::Bool(!default_on));
+            assert_eq!(rollback_value, &SettingValue::Bool(default_on));
+        }
+        other => panic!("expected PersistSetting, got {other:?}"),
+    }
+    assert_eq!(app.current_ui.stop_gate_unfinished_todos, Some(!default_on));
+}
+#[test]
 fn set_page_flip_on_send_emits_persist_setting_with_correct_payload() {
     use crate::settings::SettingValue;
     let mut app = test_app_with_agent();

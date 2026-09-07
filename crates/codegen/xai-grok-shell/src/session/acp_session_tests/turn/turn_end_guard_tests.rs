@@ -2,6 +2,8 @@ use super::{
     CollectedTodoGateInput, TodoGateDecision, TodoGateInput, TodoGateReason,
     build_todo_gate_reminder, evaluate_todo_gate,
 };
+use super::stop_gate::todo_stop_gate_blocks;
+use super::MAX_STOP_HOOK_CONTINUATIONS_PER_TURN;
 use crate::tools::todo::TodoStatus;
 use std::collections::HashMap;
 use xai_grok_tools::types::template_renderer::TemplateRenderer;
@@ -113,44 +115,50 @@ fn todo_gate_has_its_own_vocabulary() {
     );
 }
 
-// The integration block uses a bare `<` comparison —
-//   `if todo_gate_fires < gate_cfg.max_fires_per_prompt { ... }`
-// — so the cap logic is exercised end-to-end by the replay
-// harness; the property covered here is just the off-by-one shape
-// ("cap=N permits exactly N fires"). Mirrors the loop the
-// production code runs but counts loop iterations separately so a
-// future regression that decouples `fires` from `nudged` would
-// surface.
+// The production predicate for the built-in todo-stop gate is
+// `todo_stop_gate_blocks` — `continuations < MAX_STOP_HOOK_CONTINUATIONS_PER_TURN`
+// against the shared stop-hook budget. These drive the real shipped
+// predicate (not a mirror), so an off-by-one or a budget decoupling
+// from the hooks surfaces here.
 #[test]
-fn fires_lt_cap_permits_exactly_cap_fires() {
-    let cap = 2u32;
-    let total_iterations = 5;
-    let mut fires = 0u32;
-    let mut nudged = 0u32;
-    for _ in 0..total_iterations {
-        if fires < cap {
-            fires += 1;
-            nudged += 1;
+fn budget_permits_exactly_max_blocks_then_releases() {
+    let nudge = TodoGateDecision::Nudge {
+        reminder: String::new(),
+        reason: TodoGateReason::InFlight,
+    };
+    let mut blocked = 0u32;
+    for continuations in 0u32..=MAX_STOP_HOOK_CONTINUATIONS_PER_TURN + 2 {
+        if todo_stop_gate_blocks(true, continuations, &nudge) {
+            blocked += 1;
         }
     }
     assert_eq!(
-        nudged, cap,
-        "cap-N must permit exactly N fires across more-than-N iterations"
+        blocked, MAX_STOP_HOOK_CONTINUATIONS_PER_TURN,
+        "the shared budget must permit exactly MAX consecutive blocks"
     );
-    assert_eq!(fires, cap);
+    // At the cap the gate releases: the model stops anyway.
+    assert!(!todo_stop_gate_blocks(
+        true,
+        MAX_STOP_HOOK_CONTINUATIONS_PER_TURN,
+        &nudge
+    ));
 }
 
 #[test]
-fn fires_lt_cap_zero_blocks_every_iteration() {
-    // Observation-only / operator-disabled mode: with cap=0 the
-    // production predicate `todo_gate_fires < cap` must be `false`
-    // for every `fires` value the counter could reach.
-    // Cap and `fires` come from a runtime variable (`black_box`)
-    // so clippy doesn't constant-fold the comparison away.
-    let cap = std::hint::black_box(0u32);
-    for fires in 0u32..=8 {
-        let permitted = std::hint::black_box(fires) < cap;
-        assert!(!permitted, "cap=0 must never permit a fire (fires={fires})");
+fn toggle_off_blocks_nothing_at_any_budget_state() {
+    // The persisted `[ui].stop_gate_unfinished_todos` toggle is the
+    // master switch: with it off, the todo gate must never block,
+    // whatever the continuation counter is.
+    let nudge = TodoGateDecision::Nudge {
+        reminder: String::new(),
+        reason: TodoGateReason::InFlight,
+    };
+    for continuations in 0u32..=MAX_STOP_HOOK_CONTINUATIONS_PER_TURN + 2 {
+        let permitted = std::hint::black_box(continuations);
+        assert!(
+            !todo_stop_gate_blocks(false, permitted, &nudge),
+            "toggle off must never block (continuations={permitted})"
+        );
     }
 }
 

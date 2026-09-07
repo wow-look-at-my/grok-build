@@ -34,6 +34,7 @@ const ALL_SETTINGS_EXERCISED: &[&str] = &[
     "show_timeline",
     "page_flip_on_send",
     "confirm_before_rewind",
+    "stop_gate_unfinished_todos",
     "combine_queued_prompts",
     "simple_mode",
     "vim_mode",
@@ -220,6 +221,12 @@ fn assert_set_bool_action(outcome: SettingsKeyOutcome, key: &str, expected: bool
             assert_eq!(
                 b, expected,
                 "SetConfirmBeforeRewind value differs from expected"
+            )
+        }
+        ("stop_gate_unfinished_todos", Action::SetStopGateUnfinishedTodos(b)) => {
+            assert_eq!(
+                b, expected,
+                "SetStopGateUnfinishedTodos value differs from expected"
             )
         }
         ("combine_queued_prompts", Action::SetCombineQueuedPrompts(b)) => {
@@ -1984,6 +1991,7 @@ fn defaults_round_trip_through_registry() {
             "show_timeline" => SettingValue::Bool(false),
             "page_flip_on_send" => SettingValue::Bool(true),
             "confirm_before_rewind" => SettingValue::Bool(true),
+            "stop_gate_unfinished_todos" => SettingValue::Bool(true),
             "combine_queued_prompts" => SettingValue::Bool(false),
             "simple_mode" => SettingValue::Bool(true),
             "vim_mode" => SettingValue::Bool(false),
