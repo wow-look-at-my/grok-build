@@ -263,7 +263,6 @@ jobs:
           echo "6e146275d19f027faa2e8354da5e0267513abf013b8f16ad65a231653a2b1c5d  $RUNNER_TEMP/sdk.tar.xz" | sha256sum -c -
           mkdir -p "$RUNNER_TEMP/sdk"
           tar -xJf "$RUNNER_TEMP/sdk.tar.xz" -C "$RUNNER_TEMP/sdk" --strip-components=1
-          echo "SDKROOT=$RUNNER_TEMP/sdk" >> "$GITHUB_ENV"
 
       - name: Run sccache-cache
         uses: mozilla-actions/sccache-action@v0.0.11
@@ -282,9 +281,9 @@ jobs:
 
       - name: Build release binary (cross to macOS)
         if: matrix.target_os == 'darwin'
-        # zig resolves a linker search path against the sysroot, so these are written relative to SDKROOT. An absolute one comes back as $SDKROOT$SDKROOT/usr/lib and the link cannot find libiconv.
+        # The SDK is search paths, never SDKROOT. As a sysroot zig rewrites EVERY -L against it, so a build script's own output directory came back as $SDKROOT/home/runner/.../aws-lc-sys-*/out and its static library vanished from the link.
         env:
-          CARGO_TARGET_AARCH64_APPLE_DARWIN_RUSTFLAGS: -L native=/usr/lib -L framework=/System/Library/Frameworks
+          CARGO_TARGET_AARCH64_APPLE_DARWIN_RUSTFLAGS: -L native=${{ runner.temp }}/sdk/usr/lib -L framework=${{ runner.temp }}/sdk/System/Library/Frameworks
         run: cargo zigbuild --locked --release --target ${{ matrix.rust_target }} -p xai-grok-pager-bin
 
       # Guards the floor the build above buys: a symbol newer than 2.35 is a load error on Ubuntu 22.04.
