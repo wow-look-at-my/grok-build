@@ -36,6 +36,15 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - A working directory nothing binds is refused before the exec. Bubblewrap answers that case with a bare chdir error. That error reads as a broken sandbox and not as a missing `--rw .`.
 - Seatbelt confines WRITES only. The profile is `(allow default)` plus `(deny file-write*)`, so `--ro` means "not writable" there and reads stay open. Linux confines both.
 
+## The darwin binary is compiled on Linux and linked on macOS
+
+- A macOS runner bills at ten times the Linux rate, so `build-darwin-objects` (ubuntu-22.04) compiles every crate for `aarch64-apple-darwin`, and `link-darwin` (macos-14) runs one `cc`. That second job is the only macOS minute this workflow spends.
+- Compiling for darwin on Linux works. Linking does not. Every cross-linker that reads the Apple SDK also rewrites the search paths rustc passes. Each build script's own static library then drops out of the link: aws-lc, ring, jemalloc, libgit2, the tree-sitter grammars.
+- So `xai-darwin-link` stands in as rustc's linker and records the command instead of running it. It copies every input into a bundle, because rustc deletes its temporary object directory the moment the linker returns.
+- Paths in the recorded list are written as `@BUNDLE@` and `@OUT@`. The replay host mounts the bundle somewhere else, and `ci/darwin-relink.sh` substitutes both.
+- zig compiles the C in the build scripts, through `CC_aarch64_apple_darwin` and its siblings. It never links. The macOS SDK is still needed for Apple headers such as `CoreServices`.
+- `round_trip.rs` drives the recorder and the replay script for the HOST target and runs the binary that comes out. A Linux runner cannot execute a Mach-O binary. This is the only place the replay path is covered before it reaches a Mac, and it caught the reader dropping the last argument.
+
 ## CI-status feature notes
 
 - The GitHub CI-status dot lives in `crates/codegen/xai-grok-pager/src/ci_status.rs` (pure `gh` invocation + tri-state mapping + HSV-value animation) and is wired into the session status bar in `src/app/agent_view/render.rs`.

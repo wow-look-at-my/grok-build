@@ -14,6 +14,7 @@ members = [
     "crates/codegen/xai-chat-state",
     "crates/codegen/xai-codebase-graph",
     "crates/codegen/xai-crash-handler",
+    "crates/codegen/xai-darwin-link",
     "crates/codegen/xai-fast-worktree",
     "crates/codegen/xai-file-utils",
     "crates/codegen/xai-fsnotify",
