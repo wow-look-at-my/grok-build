@@ -345,7 +345,8 @@ jobs:
 
   build-release:
     name: Build release binary (${{ matrix.target_os }}/${{ matrix.target_arch }})
-    runs-on: ${{ matrix.runner }}
+    # ubuntu-22.04 for BOTH targets: it ships glibc 2.35, which keeps the linux binary runnable on Ubuntu 22.04, and the darwin binary is cross-compiled, so it needs no macOS runner.
+    runs-on: ubuntu-22.04
     timeout-minutes: 45
     env:
       # Per-target sccache namespace: linux and darwin get distinct GHAC
@@ -357,41 +358,59 @@ jobs:
     strategy:
       matrix:
         include:
-          # ubuntu-22.04 ships glibc 2.35, the same libc users on Ubuntu 22.04
-          # (and most other distros) have. Building here keeps every GLIBC_x.y
-          # dependency at or below 2.35, so the amd64 binary runs on 22.04
-          # instead of demanding GLIBC_2.38/2.39 (which the previous
-          # ubuntu-latest, glibc 2.39, runner linked against).
-          - runner: ubuntu-22.04
-            target_os: linux
+          - target_os: linux
             target_arch: amd64
+            rust_target: x86_64-unknown-linux-gnu
             sccache_version: sccache-v0.17.0-x86_64-unknown-linux-gnu
-            protoc_url: https://github.com/protocolbuffers/protobuf/releases/download/v29.3/protoc-29.3-linux-x86_64.zip
-            protoc_sha256: 3e866620c5be27664f3d2fa2d656b5f3e09b5152b42f1bedbf427b333e90021a
-            checksum_cmd: sha256sum -c -
-          - runner: macos-14
-            target_os: darwin
+          # Cross-compiled from Linux with cargo-zigbuild. A macOS runner bills at ten times the rate, and nothing about this binary needs one to produce it.
+          - target_os: darwin
             target_arch: arm64
-            sccache_version: sccache-v0.17.0-aarch64-apple-darwin
-            protoc_url: https://github.com/protocolbuffers/protobuf/releases/download/v29.3/protoc-29.3-osx-aarch_64.zip
-            protoc_sha256: 2b8a3403cd097f95f3ba656e14b76c732b6b26d7f183330b11e36ef2bc028765
-            checksum_cmd: shasum -a 256 -c -
+            rust_target: aarch64-apple-darwin
+            sccache_version: sccache-v0.17.0-x86_64-unknown-linux-gnu-darwin-target
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Install protoc (pinned v29.3)
         run: |
-          # Same release artifact + sha256 the repo's dotslash launcher
-          # (bin/protoc) pins for this platform. bin/protoc is the source of
-          # truth; update both together when bumping protoc.
-          curl -fsSL -o "$RUNNER_TEMP/protoc.zip" "${{ matrix.protoc_url }}"
-          echo "${{ matrix.protoc_sha256 }}  $RUNNER_TEMP/protoc.zip" | ${{ matrix.checksum_cmd }}
+          # protoc runs on the HOST, so both targets take the linux build. bin/protoc pins the same artifact and sha256; update both together.
+          curl -fsSL -o "$RUNNER_TEMP/protoc.zip" \
+            https://github.com/protocolbuffers/protobuf/releases/download/v29.3/protoc-29.3-linux-x86_64.zip
+          echo "3e866620c5be27664f3d2fa2d656b5f3e09b5152b42f1bedbf427b333e90021a  $RUNNER_TEMP/protoc.zip" | sha256sum -c -
           unzip -q -o "$RUNNER_TEMP/protoc.zip" -d "$RUNNER_TEMP/protoc"
           echo "PROTOC=$RUNNER_TEMP/protoc/bin/protoc" >> "$GITHUB_ENV"
           "$RUNNER_TEMP/protoc/bin/protoc" --version
 
       - name: Install Rust toolchain (pinned by rust-toolchain.toml)
         run: rustup show
+
+      - name: Add the Rust target
+        run: rustup target add ${{ matrix.rust_target }}
+
+      # zig is the cross-linker cargo-zigbuild drives. Pinned to the shasum ziglang.org publishes for this release.
+      - name: Install zig (pinned 0.14.1)
+        if: matrix.target_os == 'darwin'
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/zig.tar.xz" https://ziglang.org/download/0.14.1/zig-x86_64-linux-0.14.1.tar.xz
+          echo "24aeeec8af16c381934a6cd7d95c807a8cb2cf7df9fa40d359aa884195c4716c  $RUNNER_TEMP/zig.tar.xz" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/zig"
+          tar -xJf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP/zig" --strip-components=1
+          echo "$RUNNER_TEMP/zig" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/zig/zig" version
+
+      # The binary links AppKit, Security and CoreFoundation by name (objc2-app-kit, security-framework), and zig ships only libSystem, so the cross link needs Apple's SDK stubs.
+      - name: Install the macOS SDK (pinned 14.5)
+        if: matrix.target_os == 'darwin'
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/sdk.tar.xz" \
+            https://github.com/joseluisq/macosx-sdks/releases/download/14.5/MacOSX14.5.sdk.tar.xz
+          echo "6e146275d19f027faa2e8354da5e0267513abf013b8f16ad65a231653a2b1c5d  $RUNNER_TEMP/sdk.tar.xz" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/sdk"
+          tar -xJf "$RUNNER_TEMP/sdk.tar.xz" -C "$RUNNER_TEMP/sdk" --strip-components=1
+          echo "SDKROOT=$RUNNER_TEMP/sdk" >> "$GITHUB_ENV"
+
+      - name: Install cargo-zigbuild (pinned 0.23.4)
+        if: matrix.target_os == 'darwin'
+        run: cargo install --locked cargo-zigbuild@0.23.4
 
       - name: Run sccache-cache
         uses: mozilla-actions/sccache-action@v0.0.11
@@ -400,17 +419,19 @@ jobs:
           version: v0.17.0
 
       - name: Build release binary
-        run: cargo build --locked --release -p xai-grok-pager-bin
+        if: matrix.target_os != 'darwin'
+        run: cargo build --locked --release --target ${{ matrix.rust_target }} -p xai-grok-pager-bin
 
-      # The linux binary is built on ubuntu-22.04 (glibc 2.35) so it runs on
-      # Ubuntu 22.04. Guard the floor: fail if the produced binary demands any
-      # symbol newer than 2.35 (which would reproduce the GLIBC_2.38/2.39 load
-      # error on 22.04). Darwin binaries don't use GLIBC, so skip them.
+      - name: Build release binary (cross to macOS)
+        if: matrix.target_os == 'darwin'
+        run: cargo zigbuild --locked --release --target ${{ matrix.rust_target }} -p xai-grok-pager-bin
+
+      # Guard the glibc floor: fail if the binary demands a symbol newer than 2.35, which is the load error an Ubuntu 22.04 user would get. A darwin binary uses no glibc.
       - name: Verify glibc symbols are <= 2.35 (linux/amd64)
         if: matrix.target_os == 'linux'
         shell: bash
         run: |
-          max_glibc="$(readelf --version-info target/release/xai-grok-pager 2>/dev/null \
+          max_glibc="$(readelf --version-info target/${{ matrix.rust_target }}/release/xai-grok-pager 2>/dev/null \
             | grep -oE 'GLIBC_[0-9]+\.[0-9]+' | sed 's/GLIBC_//' | sort -V | tail -n1)"
           echo "max GLIBC symbol referenced: ${max_glibc:-none}"
           if [[ -z "$max_glibc" ]]; then exit 1; fi
@@ -421,10 +442,22 @@ jobs:
           fi
           echo "PASS: max GLIBC $max_glibc <= 2.35, runs on Ubuntu 22.04"
 
+      # A cross build that quietly produced a Linux ELF would upload under the darwin name and fail on a user's Mac instead of here.
+      - name: Verify the darwin binary is Mach-O arm64
+        if: matrix.target_os == 'darwin'
+        shell: bash
+        run: |
+          described="$(file -b target/${{ matrix.rust_target }}/release/xai-grok-pager)"
+          echo "$described"
+          case "$described" in
+            *Mach-O*arm64*) echo "PASS: Mach-O arm64" ;;
+            *) echo "FAIL: not a Mach-O arm64 binary"; exit 1 ;;
+          esac
+
       - name: Stage artifact
         run: |
           mkdir -p dist
-          cp target/release/xai-grok-pager "dist/grok-${{ matrix.target_os }}-${{ matrix.target_arch }}"
+          cp target/${{ matrix.rust_target }}/release/xai-grok-pager "dist/grok-${{ matrix.target_os }}-${{ matrix.target_arch }}"
 
       - uses: wow-look-at-my/actions@cache-upload#latest
         with:
