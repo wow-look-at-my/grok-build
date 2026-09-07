@@ -7,6 +7,12 @@
 //! The mount list is ordered. A later `--ro`/`--rw` overrides an earlier one
 //! for the same path or for a path that contains it. `$GROK_HOME` (`~/.grok`)
 //! is bound read-write after the user mounts, so nothing can take it away.
+//!
+//! Both backends confine reads AND writes to the bound set: bwrap mounts only
+//! the base, the user mounts and `$GROK_HOME`, and the Seatbelt profile denies
+//! every file read and write and re-allows exactly that same set. A path no
+//! mount covers (a sibling repo, `$HOME` outside `~/.grok`) is unreadable and
+//! unwritable on macOS just as it is on Linux.
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -23,6 +29,30 @@ const BWRAP_ENV_VAR: &str = "__GROK_INSIDE_BWRAP";
 const SYSTEM_RO_BASE: &[&str] = &[
     "/usr", "/bin", "/sbin", "/lib", "/lib32", "/lib64", "/libx32", "/etc", "/opt", "/run", "/var",
 ];
+
+/// Extra read-only system paths macOS needs that the Linux base omits.
+///
+/// bwrap binds the whole tree at the VFS layer, so Linux gets everything it
+/// needs from `SYSTEM_RO_BASE`. Seatbelt matches *canonical* paths, so macOS
+/// must name what the process genuinely reads that is not under the Linux base:
+/// - `/System` and `/Library` hold the shared dylibs the dynamic loader pulls
+///   in — a jail that does not allow reading them cannot load the binary at all.
+/// - `/private` is the real home of `/etc`, `/var` and `/tmp` (they are
+///   symlinks into it on macOS), and Seatbelt matches the real path, so it has
+///   to be allowed too.
+#[cfg(target_os = "macos")]
+const SYSTEM_RO_BASE_MACOS: &[&str] = &["/System", "/Library", "/private"];
+
+/// The read-only system base, platform-appropriate. Used by the Seatbelt
+/// profile so macOS confines reads over exactly the set of paths it needs to
+/// run, matching the tree bwrap mounts on Linux.
+#[cfg(target_os = "macos")]
+fn system_ro_base() -> impl Iterator<Item = &'static str> {
+    SYSTEM_RO_BASE
+        .iter()
+        .copied()
+        .chain(SYSTEM_RO_BASE_MACOS.iter().copied())
+}
 /// Where the dedicated tmpfs is mounted on Linux.
 const JAIL_TMP: &str = "/tmp";
 
@@ -312,29 +342,63 @@ pub fn bwrap_command(plan: &JailPlan) -> std::process::Command {
 
 /// Build the Seatbelt profile for the plan.
 ///
-/// Seatbelt confines WRITES here, not reads: `(allow default)` keeps the
-/// process readable so it can still run, and `(deny file-write*)` takes every
-/// write away. `--rw` gives one back and `--ro` takes one away again. SBPL
-/// gives the last matching rule, so emitting the mounts in order is what
-/// makes a later flag win.
+/// Seatbelt confines READS and WRITES here, mirroring bwrap. `(allow default)`
+/// keeps the process's non-file capabilities (network, process, sysctl) open,
+/// then `(deny file-read*)` and `(deny file-write*)` take every file access
+/// away, and the rules that follow give each kind of access back only for the
+/// paths the jail is supposed to expose:
+///
+/// - `/dev` (a terminal, a PTY, `/dev/null`) — read and write.
+/// - a `--rw` mount — read and write.
+/// - a `--ro` mount — read only.
+/// - the read-only system base (including the macOS `/System`, `/Library` and
+///   `/private` additions) — read only.
+/// - `$GROK_HOME` and the sandbox temp dir — read and write.
+///
+/// Anything not in that set — e.g. a sibling repo under `$HOME` — is denied
+/// for both reads and writes, exactly as bwrap confines it on Linux. SBPL
+/// gives the last matching rule, so emitting the allows after the deny is what
+/// makes them win, and emitting the mounts in order is what makes a later flag
+/// beat an earlier one.
 #[cfg(target_os = "macos")]
 pub fn seatbelt_profile(plan: &JailPlan) -> String {
-    let mut profile = String::from("(version 1)\n(allow default)\n(deny file-write*)\n");
-    // A terminal, a PTY and /dev/null are writes every tool makes.
+    let mut profile = String::from("(version 1)\n(allow default)\n");
+    profile.push_str("(deny file-read*)\n(deny file-write*)\n");
+    // A terminal, a PTY and /dev/null are reads and writes every tool makes.
+    profile.push_str("(allow file-read* (subpath \"/dev\"))\n");
     profile.push_str("(allow file-write* (subpath \"/dev\"))\n");
+    // A --rw mount is readable and writable; a --ro mount is readable only.
     for mount in &plan.mounts {
-        let rule = match mount.access {
-            Access::Ro => "deny",
-            Access::Rw => "allow",
-        };
         profile.push_str(&format!(
-            "({rule} file-write* (subpath \"{}\"))\n",
+            "(allow file-read* (subpath \"{}\"))\n",
             sbpl_escape(&mount.path)
+        ));
+        if mount.access == Access::Rw {
+            profile.push_str(&format!(
+                "(allow file-write* (subpath \"{}\"))\n",
+                sbpl_escape(&mount.path)
+            ));
+        }
+    }
+    // The read-only system base the process needs to run (dylibs, binaries,
+    // config, and on macOS the real /private home of /etc, /var and /tmp).
+    for path in system_ro_base() {
+        profile.push_str(&format!(
+            "(allow file-read* (subpath \"{}\"))\n",
+            sbpl_escape(Path::new(path))
         ));
     }
     profile.push_str(&format!(
+        "(allow file-read* (subpath \"{}\"))\n",
+        sbpl_escape(&plan.grok_home)
+    ));
+    profile.push_str(&format!(
         "(allow file-write* (subpath \"{}\"))\n",
         sbpl_escape(&plan.grok_home)
+    ));
+    profile.push_str(&format!(
+        "(allow file-read* (subpath \"{}\"))\n",
+        sbpl_escape(&plan.temp_dir)
     ));
     profile.push_str(&format!(
         "(allow file-write* (subpath \"{}\"))\n",
@@ -420,10 +484,31 @@ pub fn maybe_reexec_into_jail() {
         Ok(plan) => plan,
         Err(e) => fail(&e.to_string()),
     };
+    // Start the unsandboxed `gh` CI-status worker *before* the exec so its
+    // stream fd survives into the jail. The jailed pager reads `gh` results
+    // from it instead of reaching the host from inside the jail. `None` when
+    // the worker cannot start — the jailed dot then degrades to "off", which
+    // is the same graceful state as a missing `gh`.
+    let ci_host_fd = crate::ci_host::spawn_ci_host(&plan.cwd);
     let mut cmd = match backend_command(&plan) {
         Ok(cmd) => cmd,
         Err(e) => fail(&e.to_string()),
     };
+    // Thread the host-worker fd through the jail boundary. bwrap rebuilds the
+    // env from its own argument list; Seatbelt inherits and we set it anyway.
+    if let Some(fd) = ci_host_fd {
+        let value = fd.to_string();
+        #[cfg(target_os = "linux")]
+        {
+            cmd.arg("--setenv")
+                .arg(crate::ci_host::CI_HOST_FD_ENV)
+                .arg(&value);
+        }
+        #[cfg(target_os = "macos")]
+        {
+            cmd.env(crate::ci_host::CI_HOST_FD_ENV, &value);
+        }
+    }
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt as _;
@@ -593,7 +678,7 @@ mod tests {
 
     #[test]
     #[cfg(target_os = "macos")]
-    fn seatbelt_denies_writes_and_ends_with_grok_home() {
+    fn seatbelt_confines_reads_and_writes_ending_with_grok_home() {
         let plan = plan_fixture(vec![
             Mount {
                 access: Access::Rw,
@@ -605,18 +690,58 @@ mod tests {
             },
         ]);
         let profile = seatbelt_profile(&plan);
-        let rw = profile
+        // Both reads and writes are denied up front.
+        assert!(profile.contains("(deny file-read*)\n"));
+        assert!(profile.contains("(deny file-write*)\n"));
+        // The rw mount is readable and writable.
+        let rw_read = profile
+            .find("(allow file-read* (subpath \"/work\"))")
+            .expect("rw read rule");
+        let rw_write = profile
             .find("(allow file-write* (subpath \"/work\"))")
-            .expect("rw rule");
-        let ro = profile
-            .find("(deny file-write* (subpath \"/work/secrets\"))")
-            .expect("ro rule");
+            .expect("rw write rule");
+        // The ro mount is readable only — it must NOT be writable.
+        let ro_read = profile
+            .find("(allow file-read* (subpath \"/work/secrets\"))")
+            .expect("ro read rule");
+        assert!(
+            !profile.contains("(allow file-write* (subpath \"/work/secrets\"))"),
+            "a --ro mount must not be writable: {profile}"
+        );
+        // The system base is readable so the process can load and run.
+        let base_read = profile
+            .find("(allow file-read* (subpath \"/usr\"))")
+            .expect("system base read rule");
         let home = profile
             .find("(allow file-write* (subpath \"/home/u/.grok\"))")
             .expect("grok home rule");
-        assert!(profile.contains("(deny file-write*)\n"));
-        assert!(rw < ro, "the last matching SBPL rule wins");
-        assert!(ro < home);
+        // Last matching rule wins: the rw read comes before its own write, the
+        // ro read comes after the rw read, the base before both, and grok_home
+        // after everything.
+        assert!(base_read < rw_read, "base must precede user mounts");
+        assert!(rw_read < rw_write, "read then write for an rw mount");
+        assert!(rw_read < ro_read, "user mounts keep their order");
+        assert!(ro_read < home, "grok home must win over a user mount");
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn seatbelt_reads_cover_the_macos_system_base() {
+        // macOS needs /System, /Library and the real /private tree readable or
+        // the binary cannot dyld-load; without them the read-deny bricks the
+        // sandboxed process outright.
+        let plan = plan_fixture(Vec::new());
+        let profile = seatbelt_profile(&plan);
+        for path in ["/System", "/Library", "/private", "/usr", "/etc", "/opt"] {
+            assert!(
+                profile.contains(&format!("(allow file-read* (subpath \"{path}\"))\n")),
+                "missing read allow for {path}: {profile}"
+            );
+        }
+        assert!(
+            !profile.contains("(allow file-write* (subpath \"/System\"))"),
+            "the system base must never be writable: {profile}"
+        );
     }
 
     #[test]
