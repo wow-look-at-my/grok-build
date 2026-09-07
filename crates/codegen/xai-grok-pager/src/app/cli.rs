@@ -1270,6 +1270,28 @@ mod tests {
             SandboxStartup::Apply(None)
         );
     }
+    /// A bare `--sandbox` asks the jail for confinement, not for a profile.
+    /// It must still parse, and it must leave the profile alone.
+    #[test]
+    fn bare_sandbox_parses_and_selects_no_profile() {
+        let args = PagerArgs::try_parse_from(["grok", "--sandbox"]).unwrap();
+        assert_eq!(args.sandbox.as_deref(), Some(""));
+        assert_eq!(
+            args.startup_sandbox_profile(None),
+            SandboxStartup::Apply(None)
+        );
+    }
+    #[test]
+    fn ro_and_rw_paths_parse() {
+        let args =
+            PagerArgs::try_parse_from(["grok", "--sandbox", "--rw", "/a", "--ro", "/b", "--rw=/c"])
+                .unwrap();
+        assert_eq!(
+            args.sandbox_rw,
+            vec![PathBuf::from("/a"), PathBuf::from("/c")]
+        );
+        assert_eq!(args.sandbox_ro, vec![PathBuf::from("/b")]);
+    }
     #[test]
     fn launch_directory_anchoring_precedes_cwd_change() {
         let args = PagerArgs::try_parse_from([
