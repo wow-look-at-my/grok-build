@@ -13209,6 +13209,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "xai-darwin-link"
+version = "0.1.0"
+
+[[package]]
 name = "xai-fast-worktree"
 version = "0.1.0"
 dependencies = [

@@ -1,0 +1,3 @@
+#!/bin/sh
+# CC_aarch64_apple_darwin points here. See zig-target-cc.sh for why.
+exec "$(dirname "$0")/zig-target-cc.sh" cc "$@"

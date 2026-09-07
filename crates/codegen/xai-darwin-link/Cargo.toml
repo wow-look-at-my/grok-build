@@ -1,0 +1,10 @@
+[package]
+license = "Apache-2.0"
+name = "xai-darwin-link"
+version = "0.1.0"
+edition.workspace = true
+description = "Records the macOS link step during a Linux cross build so a macOS runner can replay it"
+
+# No dependencies on purpose. This runs as the linker inside every cross build,
+# and a build that cannot link is a build that cannot be diagnosed.
+[dependencies]
