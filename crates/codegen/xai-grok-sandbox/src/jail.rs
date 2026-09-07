@@ -17,6 +17,17 @@
 //! every file read and write and re-allows exactly that same set. A path no
 //! mount covers (a sibling repo, `$HOME` outside `~/.grok`) is unreadable and
 //! unwritable on macOS just as it is on Linux.
+//!
+//! The per-path defaults this jail applies — the working directory, `$GROK_HOME`,
+//! `/tmp` and the platform system base — are read from the `[jail]` table of
+//! `$GROK_HOME/config.toml` (see [`JailDefaults`]). This is a *default layer*:
+//! a session with no config, or no `[jail]` section, gets exactly the four
+//! release defaults below, and a command-line `--ro`/`--rw` always beats the
+//! config for the path it names. This jail-layer config is deliberately
+//! separate from the built-in **grok-build sandbox** (`~/.grok/sandbox.toml`,
+//! `[profiles.*]`, `SandboxProfile`, the nono/Seatbelt/Landlock deny manager in
+//! `profiles.rs`) — that file is never read here, and these defaults never
+//! touch its `deny`/`read_write` profile model.
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -76,6 +87,130 @@ pub enum Access {
 pub struct Mount {
     pub access: Access,
     pub path: PathBuf,
+}
+
+/// How `/tmp` is exposed in the jail. Unlike the three `Access` toggles this is
+/// a tri-state, because the release default mounts a dedicated writable tmpfs
+/// there rather than binding the host tree (see [`system_ro_base`]/[`JAIL_TMP`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TmpHandling {
+    /// A fresh, writable tmpfs over `/tmp`. On Linux this is a `--tmpfs` mount;
+    /// on macOS Seatbelt exposes a dedicated sandbox temp dir, so nothing binds
+    /// the host `/tmp`. The release default.
+    Tmpfs,
+    /// Bind the host `/tmp` in read-write. The knob the objective names for the
+    /// future "grant the git ssh control socket under `/tmp`" follow-up. The
+    /// existing [`Mount`]/`Access` grammar intentionally does not model this, so
+    /// we advertise a value an SSH control socket over host `/tmp` needs.
+    Rw,
+    /// Bind the host `/tmp` read-only.
+    Ro,
+}
+
+/// The per-path defaults the `--sandbox` re-exec jail applies where the
+/// command line is silent. This is the [`config.toml` `[jail]`] layer only —
+/// distinct from, and never read by, the built-in grok-build sandbox profiles
+/// (`sandbox.toml`). Read via [`JailDefaults::load`]; the release defaults match
+/// the historical jail byte for byte, so a session with no `[jail]` section is
+/// unchanged:
+///
+/// - [`cwd`](JailDefaults::cwd) — the working directory, `Access::Rw`
+/// - [`grok_home`](JailDefaults::grok_home) — `$GROK_HOME`, `Access::Rw`
+/// - [`tmp`](JailDefaults::tmp) — `/tmp`, [`TmpHandling::Tmpfs`]
+/// - [`system`](JailDefaults::system) — the platform system base, `Access::Ro`
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct JailDefaults {
+    /// Working-directory access when no user `--ro`/`--rw` covers it.
+    pub cwd: Access,
+    /// `$GROK_HOME` access (kept, like today, bound after the user mounts — a
+    /// config-granted ro is honoured, a CLI flag cannot take it below that).
+    pub grok_home: Access,
+    /// `/tmp` handling.
+    pub tmp: TmpHandling,
+    /// The read-only system base (`/usr`, `/lib`, … and the macOS system dirs).
+    pub system: Access,
+}
+
+impl Default for JailDefaults {
+    fn default() -> Self {
+        Self {
+            cwd: Access::Rw,
+            grok_home: Access::Rw,
+            tmp: TmpHandling::Tmpfs,
+            system: Access::Ro,
+        }
+    }
+}
+
+/// One recognized `[jail]` config key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DefaultKey {
+    Cwd,
+    GrokHome,
+    Tmp,
+    System,
+}
+
+/// Map a `[jail]` config key name onto its enum so we resolve each key the same
+/// way (`cwd`/`grok_home`/`system` take `ro`/`rw`, `tmp` takes the tri-state).
+fn default_key(name: &str) -> Option<DefaultKey> {
+    match name {
+        "cwd" => Some(DefaultKey::Cwd),
+        "grok_home" => Some(DefaultKey::GrokHome),
+        "tmp" => Some(DefaultKey::Tmp),
+        "system" => Some(DefaultKey::System),
+        _ => None,
+    }
+}
+
+impl JailDefaults {
+    /// The four defaults from one `[jail]` config value. A key that is absent,
+    /// not a string, or holds a string we do not recognize keeps the release
+    /// default: a bad token is a no-op rather than a jail that silently grants
+    /// more (or refuses) than the user wrote meaningful words for. Unknown
+    /// section keys are ignored the same way — they may be reserved by `--sandbox`
+    /// profile config or written by a newer build.
+    pub fn from_config(config: &toml::Value) -> JailDefaults {
+        let mut defaults = JailDefaults::default();
+        let Some(table) = config.get("jail").and_then(toml::Value::as_table) else {
+            return defaults;
+        };
+        for (key, value) in table {
+            let Some(kind) = default_key(key) else { continue };
+            let Some(token) = value.as_str() else { continue };
+            match (kind, token) {
+                (DefaultKey::Cwd, "ro") => defaults.cwd = Access::Ro,
+                (DefaultKey::Cwd, "rw") => defaults.cwd = Access::Rw,
+                (DefaultKey::GrokHome, "ro") => defaults.grok_home = Access::Ro,
+                (DefaultKey::GrokHome, "rw") => defaults.grok_home = Access::Rw,
+                (DefaultKey::System, "ro") => defaults.system = Access::Ro,
+                (DefaultKey::System, "rw") => defaults.system = Access::Rw,
+                (DefaultKey::Tmp, "tmpfs") => defaults.tmp = TmpHandling::Tmpfs,
+                (DefaultKey::Tmp, "rw") => defaults.tmp = TmpHandling::Rw,
+                (DefaultKey::Tmp, "ro") => defaults.tmp = TmpHandling::Ro,
+                _ => {}
+            }
+        }
+        defaults
+    }
+
+    /// Read the `[jail]` defaults from `<home>/config.toml`. A missing or
+    /// unparsable file yields the release defaults (fail open to the historical
+    /// behavior, never to a `[jail]`-free accident). The built-in grok-build
+    /// sandbox file `sandbox.toml` is deliberately never consulted here. The
+    /// caller may pass a blank `home` to force defaults (used by tests that drive
+    /// `build_plan` without a config fixture).
+    pub fn load(home: &Path) -> JailDefaults {
+        let path = home.join("config.toml");
+        let contents = match std::fs::read_to_string(&path) {
+            Ok(s) => s,
+            Err(_) => return JailDefaults::default(),
+        };
+        match toml::from_str::<toml::Value>(&contents) {
+            Ok(value) => JailDefaults::from_config(&value),
+            Err(_) => JailDefaults::default(),
+        }
+    }
 }
 
 /// What the command line asked the jail for.
@@ -223,21 +358,34 @@ pub struct JailPlan {
     pub cwd: PathBuf,
     /// Arguments for the jailed binary, without `argv[0]`.
     pub args: Vec<OsString>,
+    /// The per-path defaults resolved from `[jail]` config (or the four release
+    /// defaults). The bwrap/Seatbelt builders read this for the access level of
+    /// `/tmp`, the system base and `$GROK_HOME`; the cwd default was already
+    /// applied by [`build_plan`] when it injected the front cwd mount.
+    pub defaults: JailDefaults,
 }
 
 /// Resolve a request into a plan. Every path must exist: a missing bind is a
-/// hole the caller cannot see.
+/// hole the caller cannot see. `defaults` is the config layer (see
+/// [`JailDefaults`]) that supplies the per-path access where the command line
+/// is silent; the runtime caller loads it via [`JailDefaults::load`], tests pass
+/// an explicit value so they never depend on the host's `config.toml`.
 ///
 /// The working directory is bound read-write by default, so a jail built with
 /// a bare `--sandbox` can write in the cwd without an explicit `--rw .`. The
-/// effective cwd access is the LAST user mount that contains the cwd (default
-/// `Access::Rw` when none does), and that single cwd mount is placed at the
+/// effective cwd access is the LAST user mount that contains the cwd
+/// (`defaults.cwd` when none does), and that single cwd mount is placed at the
 /// FRONT of `plan.mounts`. Front-placement plus the effective access is what
 /// lets `--ro .` win cleanly: the front cwd mount then carries `Access::Ro`,
 /// so the Seatbelt profile emits no stale write-allow for the cwd and bwrap
 /// binds it read-only. `parse_jail_args` is untouched — the default is a
-/// plan-level injection, not a flag.
-pub fn build_plan(request: &JailRequest, args: Vec<OsString>) -> Result<JailPlan, JailError> {
+/// plan-level injection, not a flag. A user `--ro`/`--rw` that names (or
+/// contains) the cwd is checked first and always beats `defaults.cwd`.
+pub fn build_plan(
+    request: &JailRequest,
+    defaults: &JailDefaults,
+    args: Vec<OsString>,
+) -> Result<JailPlan, JailError> {
     let mut mounts = Vec::with_capacity(request.mounts.len());
     for mount in &request.mounts {
         let flag = match mount.access {
@@ -267,13 +415,14 @@ pub fn build_plan(request: &JailRequest, args: Vec<OsString>) -> Result<JailPlan
     // The effective cwd access comes from the LAST user mount that contains
     // the cwd (`cwd.starts_with(mount.path)`); later mounts win in the ordered
     // contract, so scanning reversed is what honors `--ro .` over an earlier
-    // `--rw /`. With no covering mount, default to read-write.
+    // `--rw /`. With no covering mount, fall back to the config default
+    // (`Access::Rw` in the release, overridable to `Access::Ro` from `[jail]`).
     let cwd_access = mounts
         .iter()
         .rev()
         .find(|mount| cwd.starts_with(&mount.path))
         .map(|mount| mount.access)
-        .unwrap_or(Access::Rw);
+        .unwrap_or(defaults.cwd);
     mounts.insert(
         0,
         Mount {
@@ -289,6 +438,7 @@ pub fn build_plan(request: &JailRequest, args: Vec<OsString>) -> Result<JailPlan
         self_exe,
         cwd,
         args,
+        defaults: *defaults,
     };
     plan.check_cwd_is_bound()?;
     Ok(plan)
@@ -346,21 +496,49 @@ fn dedicated_temp_dir() -> Result<PathBuf, JailError> {
 /// user mounts as given, then `$GROK_HOME`. bwrap applies binds in order and
 /// a later one covers an earlier one, so this is what makes a later `--ro`
 /// beat an earlier `--rw`.
+///
+/// The access each synthesized bind carries comes from [`JailPlan::defaults`]
+/// where a user mount does not name it: the system base from `system`, `/tmp`
+/// from `tmp`, and `$GROK_HOME` from `grok_home`. All three default to the
+/// release behavior (ro base, tmpfs `/tmp`, rw `$GROK_HOME`), so a plan built
+/// with [`JailDefaults::default`] produces byte-identical argv to the jail
+/// before config existed.
 #[cfg(target_os = "linux")]
 pub fn bwrap_command(plan: &JailPlan) -> std::process::Command {
     // No --die-with-parent: it kills the jail when bwrap's parent dies, and a
     // session started from a script that exits right after is a live session.
     let mut cmd = std::process::Command::new("bwrap");
     cmd.arg("--cap-drop").arg("ALL");
+    // The platform read-only base. `--ro-bind-try` swallows an absent path;
+    // a config `system = "rw"` binds it read-write instead (the user's explicit
+    // choice to weaken the jail).
+    let system_flag = match plan.defaults.system {
+        Access::Ro => "--ro-bind-try",
+        Access::Rw => "--bind",
+    };
     for path in SYSTEM_RO_BASE {
-        cmd.arg("--ro-bind-try").arg(path).arg(path);
+        cmd.arg(system_flag).arg(path).arg(path);
     }
     cmd.arg("--proc").arg("/proc");
     cmd.arg("--dev").arg("/dev");
     // `--dev` builds a fresh /dev without /dev/shm, and a program that wants
     // shared memory fails on the missing directory rather than on a denial.
     cmd.arg("--tmpfs").arg("/dev/shm");
-    cmd.arg("--tmpfs").arg(JAIL_TMP);
+    match plan.defaults.tmp {
+        // Release default: a fresh, writable tmpfs over /tmp.
+        TmpHandling::Tmpfs => {
+            cmd.arg("--tmpfs").arg(JAIL_TMP);
+        }
+        // Overrides bind the host /tmp in/out so a granted path (e.g. an ssh
+        // control socket) reaches the jailed process. bwrap creates the
+        // destination mountpoint, so a bare bind joins the fresh namespace.
+        TmpHandling::Rw => {
+            cmd.arg("--bind").arg(JAIL_TMP).arg(JAIL_TMP);
+        }
+        TmpHandling::Ro => {
+            cmd.arg("--ro-bind").arg(JAIL_TMP).arg(JAIL_TMP);
+        }
+    }
     for mount in &plan.mounts {
         let flag = match mount.access {
             Access::Ro => "--ro-bind",
@@ -368,7 +546,19 @@ pub fn bwrap_command(plan: &JailPlan) -> std::process::Command {
         };
         cmd.arg(flag).arg(&mount.path).arg(&mount.path);
     }
-    cmd.arg("--bind").arg(&plan.grok_home).arg(&plan.grok_home);
+    // `$GROK_HOME`, bound after the user mounts. A config `grok_home = "ro"`
+    // binds it read-only; the release default (`rw`) is unchanged. Because it
+    // is bound last it survives a user `--ro` aimed at it either way.
+    match plan.defaults.grok_home {
+        Access::Rw => cmd
+            .arg("--bind")
+            .arg(&plan.grok_home)
+            .arg(&plan.grok_home),
+        Access::Ro => cmd
+            .arg("--ro-bind")
+            .arg(&plan.grok_home)
+            .arg(&plan.grok_home),
+    }
     cmd.arg("--ro-bind-try")
         .arg(&plan.self_exe)
         .arg(&plan.self_exe);
@@ -391,14 +581,21 @@ pub fn bwrap_command(plan: &JailPlan) -> std::process::Command {
 /// - a `--rw` mount — read and write.
 /// - a `--ro` mount — read only.
 /// - the read-only system base (including the macOS `/System`, `/Library` and
-///   `/private` additions) — read only.
-/// - `$GROK_HOME` and the sandbox temp dir — read and write.
+///   `/private` additions) — read only, or read and write when the config sets
+///   `system = "rw"` (the user's explicit choice to weaken the jail).
+/// - `$GROK_HOME` and the sandbox temp dir — read and write, unless
+///   `grok_home = "ro"` leaves `$GROK_HOME` readable only.
 ///
 /// Anything not in that set — e.g. a sibling repo under `$HOME` — is denied
 /// for both reads and writes, exactly as bwrap confines it on Linux. SBPL
 /// gives the last matching rule, so emitting the allows after the deny is what
 /// makes them win, and emitting the mounts in order is what makes a later flag
-/// beat an earlier one.
+/// beat an earlier one. Where a default from [`JailPlan::defaults`] is at play
+/// (system base, `$GROK_HOME`) the emitted rule still derives from the real
+/// shipped profile, so a config override changes exactly the rule the builder
+/// materializes. The `/tmp` [`TmpHandling`] is a bwrap mount concept; Seatbelt
+/// mounts nothing, so it has no rule here (the writable sandbox temp is the
+/// separate `temp_dir` allowed below).
 #[cfg(target_os = "macos")]
 pub fn seatbelt_profile(plan: &JailPlan) -> String {
     let mut profile = String::from("(version 1)\n(allow default)\n");
@@ -410,11 +607,18 @@ pub fn seatbelt_profile(plan: &JailPlan) -> String {
     // config, and on macOS the real /private home of /etc, /var and /tmp).
     // Emitted before the user mounts, matching bwrap's bind order (base first,
     // then user mounts, then $GROK_HOME) so a user mount over a base path wins.
+    // A config `system = "rw"` additionally re-allows writes over the base.
     for path in system_ro_base() {
         profile.push_str(&format!(
             "(allow file-read* (subpath \"{}\"))\n",
             sbpl_escape(Path::new(path))
         ));
+        if plan.defaults.system == Access::Rw {
+            profile.push_str(&format!(
+                "(allow file-write* (subpath \"{}\"))\n",
+                sbpl_escape(Path::new(path))
+            ));
+        }
     }
     // A --rw mount is readable and writable; a --ro mount is readable only.
     for mount in &plan.mounts {
@@ -433,10 +637,15 @@ pub fn seatbelt_profile(plan: &JailPlan) -> String {
         "(allow file-read* (subpath \"{}\"))\n",
         sbpl_escape(&plan.grok_home)
     ));
-    profile.push_str(&format!(
-        "(allow file-write* (subpath \"{}\"))\n",
-        sbpl_escape(&plan.grok_home)
-    ));
+    // `$GROK_HOME` is writable by release default; `grok_home = "ro"` leaves it
+    // readable only, matching the bwrap `--ro-bind`. Rule emitted after the
+    // mounts so nothing below it licks a rw grant back in for the home.
+    if plan.defaults.grok_home == Access::Rw {
+        profile.push_str(&format!(
+            "(allow file-write* (subpath \"{}\"))\n",
+            sbpl_escape(&plan.grok_home)
+        ));
+    }
     profile.push_str(&format!(
         "(allow file-read* (subpath \"{}\"))\n",
         sbpl_escape(&plan.temp_dir)
@@ -521,7 +730,11 @@ pub fn maybe_reexec_into_jail() {
     if !request.enabled {
         return;
     }
-    let plan = match build_plan(&request, argv) {
+    // Read the `[jail]` defaults from this process's `$GROK_HOME`/`config.toml`
+    // (release defaults when there is no `[jail]` section), then drive the real
+    // plan/service builders so the config layer shapes the emitted jail.
+    let defaults = JailDefaults::load(&crate::paths::grok_home());
+    let plan = match build_plan(&request, &defaults, argv) {
         Ok(plan) => plan,
         Err(e) => fail(&e.to_string()),
     };
@@ -644,6 +857,7 @@ mod tests {
             self_exe: PathBuf::from("/opt/grok/bin/grok"),
             cwd: PathBuf::from("/work"),
             args: vec![OsString::from("--sandbox")],
+            defaults: JailDefaults::default(),
         }
     }
 
@@ -797,11 +1011,14 @@ mod tests {
     // working directory, so the assertions are about the actual cwd the jail
     // would mount, not a hand-built `JailPlan`.
 
-    /// Run the shipped parse + plan against the real cwd.
+    /// Run the shipped parse + plan against the real cwd, with the release
+    /// (no-config) defaults so the assertions are independent of any host
+    /// `config.toml`.
+    #[allow(clippy::needless_pass_by_value)]
     fn plan_for(args: &[&str]) -> JailPlan {
         let request = parse(args);
         assert!(request.enabled, "args must ask for a jail");
-        build_plan(&request, argv(args)).expect("build_plan")
+        build_plan(&request, &JailDefaults::default(), argv(args)).expect("build_plan")
     }
 
     /// The front of `plan.mounts` is the injected cwd mount.
@@ -916,7 +1133,8 @@ mod tests {
             "parse_jail_args must not inject a cwd mount"
         );
         // And the plan must honor the user's ro (no stale write-allow).
-        let plan = build_plan(&request, argv(&["--sandbox", "--ro", "."])).expect("build_plan");
+        let plan = build_plan(&request, &JailDefaults::default(), argv(&["--sandbox", "--ro", "."]))
+            .expect("build_plan");
         assert_eq!(
             front_cwd_mount(&plan).access,
             Access::Ro,
@@ -969,5 +1187,374 @@ mod tests {
                 println!("seatbelt profile:\n{}", seatbelt_profile(&plan));
             }
         }
+    }
+
+    // ── `[jail]` config defaults ──────────────────────────────────────────
+    //
+    // These drive the REAL shipped config→plan→profile path: `JailDefaults::load`
+    // reads the `[jail]` table off a fixture `config.toml` under an isolated
+    // `$GROK_HOME`, and the resulting `JailDefaults` is what the shipped
+    // `build_plan`/`seatbelt_profile`/`bwrap_command` consume. None of them re-
+    // implement the mapping under test.
+
+    /// Resolve the `[jail]` table of an in-memory config string.
+    fn config_defaults(toml: &str) -> JailDefaults {
+        let value: toml::Value = toml::from_str(toml).expect("fixture toml parses");
+        JailDefaults::from_config(&value)
+    }
+
+    const RELEASE: JailDefaults = JailDefaults {
+        cwd: Access::Rw,
+        grok_home: Access::Rw,
+        tmp: TmpHandling::Tmpfs,
+        system: Access::Ro,
+    };
+
+    #[test]
+    fn no_config_yields_the_four_release_defaults() {
+        assert_eq!(JailDefaults::default(), RELEASE);
+        // No `[jail]` section, or an empty file, still resolves to the release
+        // struct that every builder consumes.
+        assert_eq!(config_defaults(""), RELEASE);
+        assert_eq!(config_defaults("[permission]\nmode = \"accept\""), RELEASE);
+        // An unknown `[jail]` key is not a recognized axis and is ignored.
+        assert_eq!(config_defaults("[jail]\ndenied = [\".env\"]"), RELEASE);
+    }
+
+    #[test]
+    fn each_single_override_moves_only_its_axis() {
+        // cwd ro.
+        let d = config_defaults("[jail]\ncwd = \"ro\"");
+        assert_eq!(
+            d,
+            JailDefaults {
+                cwd: Access::Ro,
+                ..RELEASE
+            }
+        );
+        // grok home ro (the read-only home), the rest unchanged.
+        let d = config_defaults("[jail]\ngrok_home = \"ro\"");
+        assert_eq!(
+            d,
+            JailDefaults {
+                grok_home: Access::Ro,
+                ..RELEASE
+            }
+        );
+        // /tmp rw bind.
+        let d = config_defaults("[jail]\ntmp = \"rw\"");
+        assert_eq!(
+            d,
+            JailDefaults {
+                tmp: TmpHandling::Rw,
+                ..RELEASE
+            }
+        );
+        // /tmp ro bind.
+        let d = config_defaults("[jail]\ntmp = \"ro\"");
+        assert_eq!(
+            d,
+            JailDefaults {
+                tmp: TmpHandling::Ro,
+                ..RELEASE
+            }
+        );
+        // system rw (weakens the jail — the user's explicit choice).
+        let d = config_defaults("[jail]\nsystem = \"rw\"");
+        assert_eq!(
+            d,
+            JailDefaults {
+                system: Access::Rw,
+                ..RELEASE
+            }
+        );
+    }
+
+    #[test]
+    fn all_four_together_and_explicit_rewrite_back_to_release() {
+        let d = config_defaults(
+            "[jail]\ncwd = \"ro\"\ngrok_home = \"ro\"\ntmp = \"rw\"\nsystem = \"rw\"",
+        );
+        assert_eq!(
+            d,
+            JailDefaults {
+                cwd: Access::Ro,
+                grok_home: Access::Ro,
+                tmp: TmpHandling::Rw,
+                system: Access::Rw,
+            }
+        );
+        // Explicitly spelling the release values round-trips to release.
+        assert_eq!(
+            config_defaults("[jail]\ncwd = \"rw\"\ngrok_home = \"rw\"\ntmp = \"tmpfs\"\nsystem = \"ro\""),
+            RELEASE
+        );
+    }
+
+    #[test]
+    fn bogus_values_and_unknown_section_keys_fall_back_not_guess() {
+        // A misspelled value is a no-op (keeps the release access), never a jail
+        // the user did not literally ask for.
+        assert_eq!(config_defaults("[jail]\ncwd = \"reads-only\""), RELEASE);
+        assert_eq!(config_defaults("[jail]\ntmp = \"bind-mode\"\n"), RELEASE);
+        let d = config_defaults("[jail]\ncwd = \"ro\"\nsystem = \"wr\""); // one bad token
+        assert_eq!(
+            d,
+            JailDefaults {
+                cwd: Access::Ro,
+                ..RELEASE
+            }
+        );
+        // Sanity: grok-build sandbox profile keys (`deny`, `read_write`, profile
+        // tables) are not `[jail]` axes and never leak in.
+        assert_eq!(config_defaults("[profiles.strict]\ndeny = [\".env\"]"), RELEASE);
+    }
+
+    /// A throwaway directory for a fixture `config.toml`, under this process's
+    /// temp dir (never a shared fixed path), removed on drop.
+    struct FixtureHome(std::path::PathBuf);
+    impl FixtureHome {
+        fn new(tag: &str) -> Self {
+            let dir = std::env::temp_dir().join(format!(
+                "grok-jail-config-{tag}-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+            std::fs::create_dir_all(&dir).expect("create fixture home");
+            FixtureHome(dir)
+        }
+    }
+    impl Drop for FixtureHome {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn load_reads_the_config_toml_under_an_isolated_home() {
+        let home = FixtureHome::new("reads");
+        std::fs::write(
+            home.0.join("config.toml"),
+            "[sandbox]\ntmp = \"tmpfs\"\n[jail]\ncwd = \"ro\"\ntmp = \"rw\"\nsystem = \"rw\"\n",
+        )
+        .expect("write config.toml");
+        // The `[jail]` table is read; the unrelated `[sandbox]` in the same file
+        // (the profile-era vocabulary) is not a `[jail]` axis.
+        assert_eq!(
+            JailDefaults::load(&home.0),
+            JailDefaults {
+                cwd: Access::Ro,
+                grok_home: Access::Rw,
+                tmp: TmpHandling::Rw,
+                system: Access::Rw,
+            }
+        );
+    }
+
+    #[test]
+    fn load_with_no_file_or_bad_file_keeps_release_defaults() {
+        let empty = FixtureHome::new("empty");
+        assert_eq!(JailDefaults::load(&empty.0), RELEASE);
+        let broken = FixtureHome::new("broken");
+        std::fs::write(broken.0.join("config.toml"), "this is = = not toml")
+            .expect("write config.toml");
+        assert_eq!(JailDefaults::load(&broken.0), RELEASE);
+    }
+
+    #[test]
+    fn config_cwd_ro_default_mounts_the_cwd_read_only() {
+        // cwd default ro, no user mount names the cwd: the injected front mount
+        // is read-only. (These run against the real cwd via the shipped builder.)
+        let plan = build_plan(
+            &parse(&["--sandbox"]),
+            &JailDefaults {
+                cwd: Access::Ro,
+                ..RELEASE
+            },
+            argv(&["--sandbox"]),
+        )
+        .expect("build_plan");
+        assert_eq!(
+            plan.mounts[0].access,
+            Access::Ro,
+            "a config cwd=ro must default the injected cwd mount to read-only"
+        );
+    }
+
+    #[test]
+    fn a_cli_flag_beats_the_config_cwd_default() {
+        // Config says ro, but --rw . on the line must win.
+        let ro_default = JailDefaults {
+            cwd: Access::Ro,
+            ..RELEASE
+        };
+        let plan = build_plan(
+            &parse(&["--sandbox", "--rw", "."]),
+            &ro_default,
+            argv(&["--sandbox", "--rw", "."]),
+        )
+        .expect("build_plan");
+        assert_eq!(
+            plan.mounts[0].access,
+            Access::Rw,
+            "--rw . must beat a config cwd=ro default"
+        );
+        // Config says rw, but --ro . on the line must win.
+        let plan = build_plan(
+            &parse(&["--sandbox", "--ro", "."]),
+            &RELEASE,
+            argv(&["--sandbox", "--ro", "."]),
+        )
+        .expect("build_plan");
+        assert_eq!(
+            plan.mounts[0].access,
+            Access::Ro,
+            "--ro . must beat a config cwd=rw default"
+        );
+    }
+
+    #[test]
+    fn plan_carries_exactly_the_resolved_defaults_it_was_built_with() {
+        let defaults = JailDefaults {
+            cwd: Access::Ro,
+            grok_home: Access::Ro,
+            tmp: TmpHandling::Rw,
+            system: Access::Rw,
+        };
+        let plan = build_plan(
+            &parse(&["--sandbox"]),
+            &defaults,
+            argv(&["--sandbox"]),
+        )
+        .expect("build_plan");
+        assert_eq!(plan.defaults, defaults);
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn seatbelt_grok_home_ro_keeps_read_and_drops_write() {
+        // The shipped profile with grok home ro must keep the home readable and
+        // emit NO write-allow for it (matching bwrap's --ro-bind).
+        let mut plan = plan_fixture(Vec::new());
+        plan.defaults = JailDefaults {
+            grok_home: Access::Ro,
+            ..RELEASE
+        };
+        let profile = seatbelt_profile(&plan);
+        assert!(
+            profile.contains("(allow file-read* (subpath \"/home/u/.grok\"))"),
+            "an ro grok home stays readable: {profile}"
+        );
+        assert!(
+            !profile.contains("(allow file-write* (subpath \"/home/u/.grok\"))"),
+            "an ro grok home must not be writable: {profile}"
+        );
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn seatbelt_release_grok_home_is_writable_and_system_is_never_written() {
+        // Release defaults: grok home is writable, the system base is read-only
+        // (no write-allow over /usr, /System, ..., by default).
+        let plan = plan_fixture(Vec::new());
+        let profile = seatbelt_profile(&plan);
+        assert!(
+            profile.contains("(allow file-write* (subpath \"/home/u/.grok\"))"),
+            "release grok home must be writable: {profile}"
+        );
+        assert!(
+            !profile.contains("(allow file-write* (subpath \"/usr\"))"),
+            "release system base must never be writable: {profile}"
+        );
+        assert!(
+            !profile.contains("(allow file-write* (subpath \"/System\"))"),
+            "release macOS base must never be writable: {profile}"
+        );
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn seatbelt_system_rw_makes_every_base_path_writable_too() {
+        // system = "rw" emits a write-allow over the whole platform base (the
+        // user's explicit weakening), while keeping the read side present.
+        let plan = plan_fixture(Vec::new());
+        let ro_profile = seatbelt_profile(&plan);
+
+        let mut rw_plan = plan_fixture(Vec::new());
+        rw_plan.defaults.system = Access::Rw;
+        let rw_profile = seatbelt_profile(&rw_plan);
+
+        for path in ["/usr", "/opt", "/System", "/Library", "/private"] {
+            assert!(
+                ro_profile.contains(&format!("(allow file-read* (subpath \"{path}\"))\n")),
+                "base {path} read allow missing in release: {ro_profile}"
+            );
+            assert!(
+                !ro_profile.contains(&format!("(allow file-write* (subpath \"{path}\"))\n")),
+                "base {path} must not be writable at release: {ro_profile}"
+            );
+            assert!(
+                rw_profile.contains(&format!("(allow file-write* (subpath \"{path}\"))\n")),
+                "system=rw must grant writes over {path}: {rw_profile}"
+            );
+        }
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn bwrap_defaults_stay_ro_base_tmpfs_tmp_and_rw_grok_home() {
+        // The linux builder keeps the release contract.
+        let plan = plan_fixture(Vec::new());
+        let args: Vec<String> = bwrap_command(&plan)
+            .get_args()
+            .map(|a| a.to_string_lossy().to_string())
+            .collect();
+        assert!(
+            args.windows(3).any(|w| w[0] == "--ro-bind-try" && w[1] == "/usr"),
+            "release system base must be ro-bind-try: {args:?}"
+        );
+        assert!(
+            args.windows(2).any(|w| w == ["--tmpfs", "/tmp"]),
+            "release /tmp must be a tmpfs: {args:?}"
+        );
+        assert!(
+            args.windows(3).any(|w| w == ["--bind", "/home/u/.grok", "/home/u/.grok"]),
+            "release grok home must be bound rw: {args:?}"
+        );
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn bwrap_overrides_change_only_their_bind() {
+        let mut plan = plan_fixture(Vec::new());
+        plan.defaults = JailDefaults {
+            system: Access::Rw,
+            tmp: TmpHandling::Rw,
+            grok_home: Access::Ro,
+            ..RELEASE
+        };
+        let args: Vec<String> = bwrap_command(&plan)
+            .get_args()
+            .map(|a| a.to_string_lossy().to_string())
+            .collect();
+        assert!(
+            args.windows(3).any(|w| w == ["--bind", "/usr", "/usr"]),
+            "system=rw must bind the base rw: {args:?}"
+        );
+        assert!(
+            args.windows(3).any(|w| w == ["--bind", "/tmp", "/tmp"]),
+            "tmp=rw must bind /tmp: {args:?}"
+        );
+        assert!(
+            args.windows(3).any(|w| w == ["--ro-bind", "/home/u/.grok", "/home/u/.grok"]),
+            "grok_home=ro must --ro-bind the home: {args:?}"
+        );
+        assert!(
+            !args.windows(2).any(|w| w == ["--tmpfs", "/tmp"]),
+            "tmp=rw must not leave the tmpfs: {args:?}"
+        );
     }
 }

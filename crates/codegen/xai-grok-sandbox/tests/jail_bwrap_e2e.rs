@@ -9,7 +9,7 @@
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use xai_grok_sandbox::jail::{Access, JailPlan, Mount, bwrap_command};
+use xai_grok_sandbox::jail::{Access, JailDefaults, JailPlan, Mount, bwrap_command};
 
 /// Whether bubblewrap can build a sandbox here. A host that forbids an
 /// unprivileged user namespace has the binary and cannot use it.
@@ -44,6 +44,9 @@ fn plan(script: &str, mounts: Vec<Mount>, grok_home: &Path, cwd: &Path) -> JailP
         self_exe: PathBuf::from("/bin/sh"),
         cwd: cwd.to_path_buf(),
         args: vec![OsString::from("-c"), OsString::from(script)],
+        // These e2e scenarios are the release-default jail (ro base, tmpfs
+        // /tmp, rw $GROK_HOME); they pin that the default bwrap argv confines.
+        defaults: JailDefaults::default(),
     }
 }
 
