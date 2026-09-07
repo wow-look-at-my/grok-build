@@ -533,7 +533,7 @@ mod todo_stop_gate_tests {
     fn blocks_only_on_toggle_and_budget_and_nudge() {
         let nudge = TodoGateDecision::Nudge {
             reminder: "finish your todos".to_string(),
-            reason: crate::session::acp_session_impl::types::TodoGateReason::InFlight,
+            reason: TodoGateReason::InFlight,
         };
         assert!(todo_stop_gate_blocks(true, 0, &nudge));
         assert!(todo_stop_gate_blocks(
@@ -564,7 +564,7 @@ mod todo_stop_gate_tests {
     fn rides_the_real_todo_gate_evaluation() {
         let pending = vec!["fix-round-1"];
         let input = TodoGateInput {
-            pending: pending.iter().map(String::as_str).collect(),
+            pending: pending.clone(),
             in_progress_unbacked: Vec::new(),
             in_progress_backed: Vec::new(),
             backing_task_count: 0,
