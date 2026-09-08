@@ -122,6 +122,7 @@ VERSION="$(printf 'pkg-cache-binpazer-v1%s' "${PKG_CACHE_SALT:-}" | sha256sum | 
 # A 429 is reported, never folded into the miss path: a throttled fetch reads as a slow compile, and
 # that is the one failure a timing run must not absorb quietly.
 THROTTLED=9
+THROTTLE_WAIT="${PKG_THROTTLE_WAIT:-2}"
 rpc() {
 	local body code
 	body="$(curl -sS --max-time 60 -X POST "$API/$1" \
@@ -149,6 +150,19 @@ manifest)
 	exit $?
 	;;
 get)
+	# Same reason as the put below: a throttled fetch is a compile the warm leg was not supposed to
+	# do, and a leg that recompiles is measuring different work from the one it is compared against.
+	# This one DOES hold a cargo job slot, so the cadence is what the compile waits on.
+	while :; do
+		"$0" get_once "$key" "$dir"
+		rc=$?
+		[ "$rc" = "$THROTTLED" ] || break
+		[ -n "${PKG_STATS_DIR:-}" ] && echo x >> "$PKG_STATS_DIR/remote-429-retried" 2>/dev/null
+		sleep "$THROTTLE_WAIT"
+	done
+	exit "$rc"
+	;;
+get_once)
 	if [ -n "$USE_V1" ]; then
 		url="$(v1_get_url)"
 	else
@@ -177,6 +191,24 @@ get)
 	[ "$i" -gt 0 ] || exit 1
 	;;
 put)
+	# A 429 is backpressure, not a verdict. The service throttled a large share of one cold pass, and
+	# every throttled entry was simply lost: the next run recompiled it. The upload is detached from
+	# the compile, so waiting here costs no compile time, only the drain at the end of the job.
+	#
+	# The cadence is fixed and it does not give up. A growing delay and an attempt cap both end the
+	# same way, with an entry the cache never got and nothing saying so.
+	throttles=0
+	while :; do
+		"$0" put_once "$key" "$dir"
+		rc=$?
+		[ "$rc" = "$THROTTLED" ] || break
+		throttles=$((throttles + 1))
+		[ -n "${PKG_STATS_DIR:-}" ] && echo x >> "$PKG_STATS_DIR/remote-429-retried" 2>/dev/null
+		sleep "$THROTTLE_WAIT"
+	done
+	exit "$rc"
+	;;
+put_once)
 	tmp="$(mktemp)" || exit 1
 	# binpazer resolves a manifest's file paths against the manifest's own directory, so the
 	# manifest lives beside the artifacts and names them bare.

@@ -71,12 +71,15 @@ say "target $(du -sm target 2>/dev/null | cut -f1) MB"
 say "upload-drain $drain s"
 say "index-get rc=$index_rc entries=$(wc -l < "$INDEX" 2>/dev/null || echo 0)"
 say "index-put rc=$index_put"
-for c in local-hit remote-hit remote-miss remote-restore-failed remote-no-index remote-not-held compiled remote-put remote-put-failed remote-finalize-failed remote-unavailable remote-429; do
+for c in local-hit remote-hit remote-miss remote-restore-failed remote-no-index remote-not-held compiled remote-put remote-put-failed remote-finalize-failed remote-unavailable remote-429 remote-429-retried; do
 	say "$c $(count "$c")"
 done
 
+# A throttle the upload waited out and then stored is backpressure the drain paid for, and the wall
+# above excludes it. A throttle that ENDED the upload is an entry the cache never got, so the next
+# run recompiles it and the pair of legs measures two different workloads.
 if [ "$(count remote-429)" -gt 0 ]; then
-	say "FAILED: the cache service answered 429, so this timing measures the throttle"
+	say "FAILED: an upload gave up on a 429, so the cache is missing entries this timing assumes"
 	exit 1
 fi
 exit "$rc"
