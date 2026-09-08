@@ -1,7 +1,11 @@
 name: CI
 
 on:
+  # Matches every branch and no tag, so the publish job cannot re-enter on its own tag.
   push:
+    branches: ['**']
+  # Build one tree twice: rerunning a finished run is denied to every session credential.
+  workflow_dispatch:
 
 permissions:
   contents: read
