@@ -138,6 +138,8 @@ if [ -n "$REMOTE" ] && [ -x "$REMOTE" ]; then
 	# A throttle is not a miss. Counting it as one hides the wait inside the compile time.
 	if [ "$got" = 9 ]; then
 		tally remote-429
+	elif [ "$got" = 3 ]; then
+		tally remote-unavailable
 	elif [ "$got" = 0 ] && restore "$entry"; then
 		tally remote-hit
 		exit 0
@@ -180,9 +182,12 @@ if [ "$code" = 0 ]; then
 		if [ -n "$REMOTE" ] && [ -x "$REMOTE" ]; then
 			"$REMOTE" put "$key" "$entry"
 			put=$?
-			# A throttle on the way up is the same event as one on the way down.
+			# Counted apart, because a cache service nobody wired up looks exactly like one
+			# rejecting every upload, and only one of those is a bug in this script.
 			if [ "$put" = 9 ]; then
 				tally remote-429
+			elif [ "$put" = 3 ]; then
+				tally remote-unavailable
 			elif [ "$put" = 0 ]; then
 				tally remote-put
 			else

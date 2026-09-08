@@ -28,9 +28,13 @@ say "salt ${PKG_CACHE_SALT:-none}"
 say "wall $wall s rc=$rc"
 # A leg that ran the disk out reads as a slow or dead compile unless the free space is on the record.
 say "disk-free-kb $(df -Pk . | tail -1 | tr -s ' ' | cut -d' ' -f4)"
+# Without these the remote layer cannot run at all, and every entry reads as an upload that failed.
+say "cache-url-set ${ACTIONS_RESULTS_URL:+yes}${ACTIONS_RESULTS_URL:-no}"
+say "cache-token-set ${ACTIONS_RUNTIME_TOKEN:+yes}${ACTIONS_RUNTIME_TOKEN:-no}"
+say "binpazer $("${BINPAZER:-binpazer}" --version 2>/dev/null || echo MISSING)"
 say "store $(du -sm "${PKG_CACHE_DIR:-/nonexistent}" 2>/dev/null | cut -f1) MB"
 say "target $(du -sm target 2>/dev/null | cut -f1) MB"
-for c in local-hit remote-hit remote-miss compiled remote-put remote-put-failed remote-429; do
+for c in local-hit remote-hit remote-miss compiled remote-put remote-put-failed remote-unavailable remote-429; do
 	say "$c $(count "$c")"
 done
 
