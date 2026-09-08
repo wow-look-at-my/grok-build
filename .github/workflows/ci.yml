@@ -23,12 +23,9 @@ env:
   # sccache caches per compilation unit and cannot cache incremental, so this must stay 0 for it to hit at all.
   CARGO_INCREMENTAL: "0"
   RUSTC_WRAPPER: "sccache"
-  # Two layers, not one. GHA alone was measured at 95% hits and 0.208s a hit, so 2915 hits spent ~607s blocking on round-trips; disk alone would put every object in one entry that Actions evicts whole, turning one eviction into a cold compile.
-  SCCACHE_MULTILEVEL_CHAIN: "disk,gha"
-  SCCACHE_GHA_ENABLED: "true"
-  # The disk layer is restored in one sequential download before the compile, so the common case never touches the network, and anything missing from it falls through to the GHA layer's individual objects instead of recompiling.
+  # Disk only. The GHA layer writes one Actions cache entry per compilation unit, and this workspace is ~1800 of them per job; against the documented 200-entry-per-minute ceiling that is minutes of throttling, and once the jobs got fast enough to finish together it failed a job outright with `CreateCacheEntry: (429) Too Many Requests`. actions/cache carries the same objects in ONE entry per job, so the second layer only ever added traffic.
   SCCACHE_DIR: ${{ github.workspace }}/.sccache
-  # Budget arithmetic, not a guess: the repo gets 10 GB of Actions cache and three disk-layer keys share it with the GHA layer's own objects. Bounding each key keeps one generation near 7 GB, so Actions LRU only ever has a superseded generation to drop, and sccache's LRU trims oldest-first inside a key.
+  # Budget arithmetic, not a guess: the repo gets 10 GB of Actions cache and the disk-layer keys are now the only thing in it. Bounding each key keeps one generation near 7 GB, so Actions LRU only ever has a superseded generation to drop, and sccache's LRU trims oldest-first inside a key.
   SCCACHE_CACHE_SIZE: "2G"
   # Without this the server idles out during the test step, and the post-job --show-stats reports a fresh server's 0 requests instead of the build's.
   SCCACHE_IDLE_TIMEOUT: "0"
