@@ -84,16 +84,25 @@ STATS="${PKG_STATS_DIR:-$STORE/../pkg-stats}"
 mkdir -p "$STATS" 2>/dev/null
 tally() { echo x >> "$STATS/$1" 2>/dev/null; }
 
-if [ -d "$entry" ]; then
-	cp -a "$entry"/. "$out_dir"/ 2>/dev/null && { tally local-hit; exit 0; }
+# An empty entry must never read as a hit. Restoring nothing and reporting success hands cargo a
+# missing artifact, which is a worse failure than a miss because it looks like a compiler bug.
+restore() {
+	[ -d "$1" ] && [ -n "$(ls -A "$1" 2>/dev/null)" ] || return 1
+	cp -a "$1"/. "$out_dir"/ 2>/dev/null
+}
+
+if restore "$entry"; then
+	tally local-hit
+	exit 0
 fi
 
 # A runner is a fresh VM, so the local store is empty on the first build of a run. This is where a
 # later run gets its warmth from.
 REMOTE="$(dirname "$0")/pkg-remote.sh"
 if [ -x "$REMOTE" ]; then
-	if "$REMOTE" get "$key" "$entry" 2>/dev/null; then
-		cp -a "$entry"/. "$out_dir"/ 2>/dev/null && { tally remote-hit; exit 0; }
+	if "$REMOTE" get "$key" "$entry" 2>/dev/null && restore "$entry"; then
+		tally remote-hit
+		exit 0
 	fi
 	tally remote-miss
 fi
@@ -115,8 +124,11 @@ while :; do
 			if [ "$code" = 0 ]; then
 				tally compiled
 				tmp="$entry.$$"
+				# Storing an empty directory is what makes a later run restore nothing and call it
+				# a hit, so a set that matched no output is thrown away instead.
 				if mkdir -p "$tmp" &&
 					find "$out_dir" -maxdepth 1 -name "*$suffix*" -exec cp -a {} "$tmp"/ \; 2>/dev/null &&
+					[ -n "$(ls -A "$tmp" 2>/dev/null)" ] &&
 					mv -T "$tmp" "$entry" 2>/dev/null; then
 					if [ -x "$REMOTE" ]; then
 						"$REMOTE" put "$key" "$entry" 2>/dev/null && tally remote-put || tally remote-put-failed
