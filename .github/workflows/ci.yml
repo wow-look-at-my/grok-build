@@ -47,17 +47,9 @@ jobs:
       # After the checkout: it reads the workspace, and an empty one enforces nothing.
       - uses: wow-look-at-my/actions@yaml-comment-block#latest
 
-      # A stock runner's ~14 GB free is not enough for this build, and the job hangs on ld/rustc I/O stalls at a full disk.
-      - name: Free up disk space before build
-        uses: jlumbroso/free-disk-space@main
-        with:
-          tool-cache: false
-          large-packages: true
-          swap-storage: true
-          docker-images: true
-          android: true
-          dotnet: true
-          haskell: true
+      # The runner starts with ~86 GB free and CARGO_PROFILE_*_DEBUG=0 holds target/ near 4 GB, so the 2m11s delete step this replaces was freeing 26 GB nobody needed.
+      - name: Report disk before build
+        run: df -h /
 
       - name: Install protoc (pinned v29.3)
         run: |
@@ -160,16 +152,8 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - name: Free up disk space before build
-        uses: jlumbroso/free-disk-space@main
-        with:
-          tool-cache: false
-          large-packages: true
-          swap-storage: true
-          docker-images: true
-          android: true
-          dotnet: true
-          haskell: true
+      - name: Report disk before build
+        run: df -h /
 
       - name: Install protoc (pinned v29.3)
         run: |
