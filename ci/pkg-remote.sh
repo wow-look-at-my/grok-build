@@ -23,19 +23,53 @@ dir="${3:-}"
 
 BASE="${ACTIONS_RESULTS_URL:-}"
 TOKEN="${ACTIONS_RUNTIME_TOKEN:-}"
-[ -n "$BASE" ] && [ -n "$TOKEN" ] || exit 3
+# Only the transfers need the service. Printing a manifest does not, which is what lets a test
+# check the packing rules off a runner.
+if [ "$op" != manifest ]; then
+	[ -n "$BASE" ] && [ -n "$TOKEN" ] || exit 3
+fi
 
 # The official client resolves /twirp against the base URL, which discards any path the base carries.
 ORIGIN="$(printf '%s' "$BASE" | cut -d/ -f1-3)"
 API="$ORIGIN/twirp/github.actions.results.api.v1.CacheService"
 
+# binpazer, not tar: it carries a Block Index, so a reader seeks to one artifact instead of
+# decompressing the whole member to reach it, and each block carries its own CRC and codec.
+BINPAZER="${BINPAZER:-binpazer}"
+TYPE_ARTIFACT=1
+TYPE_NAMES=2
+
+# The names block. binpazer stores payloads and does not model a file name, so the names travel as
+# their own critical block, in the order the artifact blocks were written.
+write_manifest() {
+	local d="$1" f names_json=""
+	local list=""
+	for f in "$d"/*; do
+		[ -f "$f" ] || continue
+		list="$list$(basename "$f")
+"
+	done
+	[ -n "$list" ] || return 1
+	names_json="$(printf '%s' "$list" | jq -Rs .)"
+
+	printf '{"writer_guid":"8f9d2c31-4b6a-4e0f-9a3d-1c2b3a4d5e6f","writer_name":"pkg-cache",'
+	printf '"types":[{"type_id":1,"guid":"6ba7b810-9dad-11d1-80b4-00c04fd430c8","name":"Artifact"},'
+	printf '{"type_id":2,"guid":"6ba7b811-9dad-11d1-80b4-00c04fd430c8","name":"Names"}],"blocks":['
+	printf '{"type_id":2,"flags":["critical"],"data":%s}' "$names_json"
+	for f in "$d"/*; do
+		[ -f "$f" ] || continue
+		printf ',{"type_id":1,"flags":["has_crc"],"codec":"zstd","file":%s}' "$(printf '%s' "$f" | jq -Rs .)"
+	done
+	printf '],"index":true}'
+}
+
 # The version field scopes a key to the archive format that wrote it. Changing the format must miss
-# rather than restore a tarball this script cannot read.
+# rather than restore a container this script cannot read.
 #
 # PKG_CACHE_SALT scopes it further. A measurement sets it per run, so the cold leg meets an empty
 # keyspace and the warm leg behind it meets what that cold leg wrote. Without it a cold leg is cold
 # exactly once, and every later one is served by an earlier run while still calling itself cold.
-VERSION="$(printf 'pkg-cache-tar-zstd-v1%s' "${PKG_CACHE_SALT:-}" | sha256sum | cut -d' ' -f1)"
+VERSION="$(printf 'pkg-cache-binpazer-v1%s' "${PKG_CACHE_SALT:-}" | sha256sum | cut -d' ' -f1)"
 
 # A 429 is reported, never folded into the miss path: a throttled fetch reads as a slow compile, and
 # that is the one failure a timing run must not absorb quietly.
@@ -56,6 +90,12 @@ rpc() {
 }
 
 case "$op" in
+# Prints the manifest for a directory and stops. The packing rules are then checkable without a
+# cache service, which is the only way a test can reach them.
+manifest)
+	write_manifest "$dir"
+	exit $?
+	;;
 get)
 	body="$(printf '{"key":"%s","restore_keys":[],"version":"%s"}' "$key" "$VERSION")"
 	answer="$(rpc GetCacheEntryDownloadURL "$body")"
@@ -64,12 +104,28 @@ get)
 	url="$(printf '%s' "$answer" | jq -r 'select(.ok == true) | .signed_download_url // .signedDownloadUrl // empty')"
 	[ -n "$url" ] || exit 1
 	mkdir -p "$dir" || exit 1
-	curl -fsS --max-time 300 "$url" 2>/dev/null | tar -x --zstd -C "$dir" 2>/dev/null || exit 1
+	blob="$(mktemp)" || exit 1
+	trap 'rm -f "$blob"' EXIT
+	curl -fsS --max-time 300 "$url" -o "$blob" 2>/dev/null || exit 1
+	# The names ride in their own block: binpazer stores payloads, and a file name is the caller's
+	# business, not the format's.
+	namefile="$blob.names"
+	"$BINPAZER" extract "$blob" --type "$TYPE_NAMES" -o "$namefile" 2>/dev/null || exit 1
+	i=0
+	while IFS= read -r name; do
+		[ -n "$name" ] || continue
+		"$BINPAZER" extract "$blob" --type "$TYPE_ARTIFACT" --index "$i" -o "$dir/$name" 2>/dev/null || exit 1
+		i=$((i + 1))
+	done < "$namefile"
+	rm -f "$namefile"
+	[ "$i" -gt 0 ] || exit 1
 	;;
 put)
 	tmp="$(mktemp)" || exit 1
-	trap 'rm -f "$tmp"' EXIT
-	tar -c --zstd -C "$dir" . > "$tmp" 2>/dev/null || exit 1
+	man="$(mktemp)" || exit 1
+	trap 'rm -f "$tmp" "$man"' EXIT
+	write_manifest "$dir" > "$man" || exit 1
+	"$BINPAZER" pack "$man" -o "$tmp" >/dev/null 2>&1 || exit 1
 	size="$(stat -c %s "$tmp")"
 
 	body="$(printf '{"key":"%s","version":"%s"}' "$key" "$VERSION")"

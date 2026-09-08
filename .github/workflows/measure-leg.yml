@@ -47,6 +47,15 @@ jobs:
       - name: Install mold
         run: sudo apt-get install -y mold
 
+      # The cache container format. Without it every remote call fails and the leg silently measures no cache.
+      - name: Install binpazer
+        run: |
+          curl -fSsL --location-trusted \
+            "https://dl.pazer.build/bin-file-fmt/binpazer?os=linux&arch=amd64" -o "$RUNNER_TEMP/binpazer"
+          chmod +x "$RUNNER_TEMP/binpazer"
+          echo "BINPAZER=$RUNNER_TEMP/binpazer" >> "$GITHUB_ENV"
+          "$RUNNER_TEMP/binpazer" --version
+
       # ci/measure-compile.sh owns the timing and the reporting, so nothing here decides anything.
       - name: Time the compile and report what the cache served
         env:
