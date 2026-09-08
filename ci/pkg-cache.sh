@@ -20,7 +20,7 @@ SLOTS="${PKG_SLOTS:-3}"
 SLOTDIR="${PKG_SLOT_DIR:-${RUNNER_TEMP:-/tmp}/pkg-slots}"
 mkdir -p "$STORE" "$SLOTDIR"
 # The locks are opened read-only, so they have to exist before anybody waits on one.
-for _s in $(seq 0 $((SLOTS - 1))); do
+for ((_s = 0; _s < SLOTS; _s++)); do
 	[ -e "$SLOTDIR/slot.$_s" ] || : >> "$SLOTDIR/slot.$_s"
 done
 
@@ -73,11 +73,16 @@ fi
 # for the life of the store.
 MEMO="$STORE/../pkg-hashes"
 mkdir -p "$MEMO" 2>/dev/null
+#
+# The memo is named by substitution rather than by a hash of the path, and read with the shell's
+# own read: both spend no process. A wrapper runs thousands of times in one build, so a fork it
+# takes per call is time the compiles do not get.
 hash_tree() {
-	local memo
-	memo="$MEMO/$(printf '%s' "$1" | sha256sum | cut -d' ' -f1)"
+	local memo cached
+	memo="$MEMO/${1//\//%}"
 	if [ -s "$memo" ]; then
-		cat "$memo"
+		read -r cached < "$memo"
+		printf '%s' "$cached"
 		return
 	fi
 	local h
@@ -86,7 +91,7 @@ hash_tree() {
 	printf '%s' "$h" > "$memo.$$" 2>/dev/null && mv -f "$memo.$$" "$memo" 2>/dev/null
 	printf '%s' "$h"
 }
-crate_dir="$(dirname "$crate_src")"
+crate_dir="${crate_src%/*}"
 case "$crate_dir" in
 */registry/src/*) content="$crate_dir" ;;
 *) content="$(hash_tree "$crate_dir")" ;;
@@ -98,13 +103,14 @@ fi
 # Memoised for the same reason: one fork per rustc call, for a string that cannot change mid-build.
 VERFILE="$MEMO/rustc-version"
 if [ -s "$VERFILE" ]; then
-	rustc_version="$(cat "$VERFILE")"
+	IFS= read -rd '' rustc_version < "$VERFILE"
 else
 	rustc_version="$("$REAL" -vV)"
 	printf '%s' "$rustc_version" > "$VERFILE.$$" 2>/dev/null && mv -f "$VERFILE.$$" "$VERFILE" 2>/dev/null
 fi
 
-key="$(printf '%s\0' "$rustc_version" "${key_args[@]}" "$content" | sha256sum | cut -d' ' -f1)"
+key="$(printf '%s\0' "$rustc_version" "${key_args[@]}" "$content" | sha256sum)"
+key="${key%% *}"
 entry="$STORE/$key"
 
 # Counted, not silent: a remote layer that quietly stops answering looks exactly like a slow build.
@@ -118,7 +124,8 @@ tally() { echo x >> "$STATS/$1" 2>/dev/null; }
 # cold build, so a second copy of every package's artifacts is both the disk and the I/O this cache
 # was meant to save. A rust artifact is written once and never edited, so sharing the inode is safe.
 restore() {
-	[ -d "$1" ] && [ -n "$(ls -A "$1" 2>/dev/null)" ] || return 1
+	local -a have=("$1"/*)
+	[ -e "${have[0]}" ] || return 1
 	cp -al "$1"/. "$out_dir"/ 2>/dev/null || cp -a "$1"/. "$out_dir"/ 2>/dev/null
 }
 
@@ -156,7 +163,7 @@ fi
 #
 # Blocking needs one lock per slot to still admit SLOTS at a time, so the slot is picked by this
 # process id. That spreads callers evenly without anybody reading the other slots.
-STATUS="$(mktemp)"
+STATUS="$SLOTDIR/status.$$"
 trap 'rm -f "$STATUS"' EXIT
 slot=$(( $$ % SLOTS ))
 {
@@ -175,9 +182,9 @@ if [ "$code" = 0 ]; then
 	tmp="$entry.$$"
 	# Storing an empty directory is what makes a later run restore nothing and call it a hit, so a
 	# set that matched no output is thrown away instead.
-	if mkdir -p "$tmp" &&
-		find "$out_dir" -maxdepth 1 -name "*$suffix*" -exec cp -al {} "$tmp"/ \; 2>/dev/null &&
-		[ -n "$(ls -A "$tmp" 2>/dev/null)" ] &&
+	mine=("$out_dir"/*"$suffix"*)
+	if [ -e "${mine[0]}" ] && mkdir -p "$tmp" &&
+		cp -al "${mine[@]}" "$tmp"/ 2>/dev/null &&
 		mv -T "$tmp" "$entry" 2>/dev/null; then
 		if [ -n "$REMOTE" ] && [ -x "$REMOTE" ]; then
 			"$REMOTE" put "$key" "$entry"
