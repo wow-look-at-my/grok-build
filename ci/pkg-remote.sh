@@ -40,7 +40,11 @@ API="$ORIGIN/twirp/github.actions.results.api.v1.CacheService"
 # The toolkit picks v2 only when ACTIONS_CACHE_SERVICE_V2 is set. A runner without it serves v1 at
 # ACTIONS_CACHE_URL, whose path carries its own scope, so the two are different APIs and not one
 # endpoint with two names.
+# The v1 base carries its own scope path and ends in a slash. Its endpoints hang directly off it,
+# so the slash is a path separator: without it the request leaves the API entirely and an Edge
+# error page comes back, which is what made every reserve fail.
 V1_BASE="${ACTIONS_CACHE_URL:-}"
+[ -n "$V1_BASE" ] && V1_BASE="${V1_BASE%/}/"
 if [ -z "${ACTIONS_CACHE_SERVICE_V2:-}" ] && [ -n "$V1_BASE" ]; then
 	USE_V1=1
 else
@@ -50,7 +54,7 @@ fi
 # v1 reserve, upload, commit. A reserve that is refused means the key already exists, which is a hit.
 v1_put() {
 	local reserved id
-	reserved="$(curl -sS --max-time 60 -X POST "${V1_BASE%/}_apis/artifactcache/caches" \
+	reserved="$(curl -sS --max-time 60 -X POST "${V1_BASE}_apis/artifactcache/caches" \
 		-H "Authorization: Bearer $TOKEN" -H "Accept: application/json;api-version=6.0-preview.1" \
 		-H "Content-Type: application/json" \
 		-d "$(printf '{"key":"%s","version":"%s","cacheSize":%s}' "$key" "$VERSION" "$3")" 2>/dev/null)"
@@ -59,11 +63,11 @@ v1_put() {
 		[ -n "${PKG_REMOTE_DEBUG:-}" ] && echo "pkg-remote: v1 reserve refused: $reserved" >&2
 		return 1
 	fi
-	curl -fsS --max-time 300 -X PATCH "${V1_BASE%/}_apis/artifactcache/caches/$id" \
+	curl -fsS --max-time 300 -X PATCH "${V1_BASE}_apis/artifactcache/caches/$id" \
 		-H "Authorization: Bearer $TOKEN" -H "Accept: application/json;api-version=6.0-preview.1" \
 		-H "Content-Type: application/octet-stream" \
 		-H "Content-Range: bytes 0-$(($3 - 1))/*" --data-binary "@$2" >/dev/null 2>&1 || return 1
-	curl -fsS --max-time 60 -X POST "${V1_BASE%/}_apis/artifactcache/caches/$id" \
+	curl -fsS --max-time 60 -X POST "${V1_BASE}_apis/artifactcache/caches/$id" \
 		-H "Authorization: Bearer $TOKEN" -H "Accept: application/json;api-version=6.0-preview.1" \
 		-H "Content-Type: application/json" \
 		-d "$(printf '{"size":%s}' "$3")" >/dev/null 2>&1 || return 4
@@ -71,7 +75,7 @@ v1_put() {
 
 # v1 lookup answers with the archive location, or 204 and an empty body when nothing matches.
 v1_get_url() {
-	curl -sS --max-time 60 -G "${V1_BASE%/}_apis/artifactcache/cache" \
+	curl -sS --max-time 60 -G "${V1_BASE}_apis/artifactcache/cache" \
 		-H "Authorization: Bearer $TOKEN" -H "Accept: application/json;api-version=6.0-preview.1" \
 		--data-urlencode "keys=$key" --data-urlencode "version=$VERSION" 2>/dev/null |
 		jq -r '.archiveLocation // empty'
