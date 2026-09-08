@@ -1,0 +1,110 @@
+#!/bin/bash
+# A RUSTC_WRAPPER that caches per package and rations only the compiles it cannot serve.
+#
+# Cargo runs `$RUSTC_WRAPPER <rustc> <args...>`. This owns that call, so unlike a third-party
+# compilation cache it knows whether it is about to compile. A hit copies artifacts back and takes
+# no slot. A miss takes one of PKG_SLOTS flock slots and then compiles. Cargo's own -j can
+# therefore stay wide: it paces restores, which cost no memory, while the semaphore paces compiles.
+#
+# The key is the package's identity, not the file's. It covers the rustc version, the command line
+# with the varying output paths removed, and the crate's source content. A registry crate carries
+# its version in an immutable path, so the path stands in for its content. A workspace crate is
+# hashed, because it changes between runs and a key that misses that serves stale artifacts.
+set -uo pipefail
+
+REAL="$1"
+shift
+
+STORE="${PKG_CACHE_DIR:-${RUNNER_TEMP:-/tmp}/pkg-cache}"
+SLOTS="${PKG_SLOTS:-3}"
+SLOTDIR="${PKG_SLOT_DIR:-${RUNNER_TEMP:-/tmp}/pkg-slots}"
+mkdir -p "$STORE" "$SLOTDIR"
+
+# A probe reads a value out of the compiler. It writes no artifact, so there is nothing to cache
+# and nothing to ration.
+for a in "$@"; do
+	case "$a" in
+	--print | --print=* | -vV | --version) exec "$REAL" "$@" ;;
+	esac
+done
+
+out_dir=""
+crate_src=""
+suffix=""
+prev=""
+key_args=()
+for a in "$@"; do
+	case "$prev" in
+	--out-dir) out_dir="$a"; prev=""; continue ;;
+	-C) case "$a" in extra-filename=*) suffix="${a#extra-filename=}" ;; esac
+		key_args+=(-C "$a"); prev=""; continue ;;
+	esac
+	case "$a" in
+	--out-dir) prev="--out-dir"; continue ;;
+	-C) prev="-C"; continue ;;
+	-Cextra-filename=*) suffix="${a#-Cextra-filename=}"; key_args+=("$a") ;;
+	*.rs) crate_src="$a"; key_args+=("$a") ;;
+	*) key_args+=("$a") ;;
+	esac
+done
+
+# Every crate shares one --out-dir, so the directory is not this call's artifact set. What this call
+# wrote is what carries its extra-filename, which is how cargo tells one crate's outputs from
+# another's in there. Without that suffix the outputs cannot be told apart, so nothing is cached.
+if [ -z "$out_dir" ] || [ -z "$crate_src" ] || [ -z "$suffix" ]; then
+	exec "$REAL" "$@"
+fi
+
+# A registry source is immutable at its version, so its path identifies its content. Anything else
+# is hashed, which is what keeps a workspace edit from hitting the previous run's artifacts.
+#
+# Every file counts, not only *.rs: `include_str!` reads a sibling of any name. A build script's
+# generated code is reached by `include!` under $OUT_DIR, which is a directory outside the crate,
+# so it is hashed as well. A key that misses either one serves an artifact of the older source.
+# `target` and `.git` are pruned. A build script's crate directory is the package root, and a
+# package that holds its own target directory otherwise hashes the output of the build it is part of.
+hash_tree() {
+	find "$1" \( -name target -o -name .git \) -prune -o -type f -print0 2>/dev/null |
+		sort -z | xargs -0 -r sha256sum 2>/dev/null | sha256sum
+}
+crate_dir="$(dirname "$crate_src")"
+case "$crate_dir" in
+*/registry/src/*) content="$crate_dir" ;;
+*) content="$(hash_tree "$crate_dir")" ;;
+esac
+if [ -n "${OUT_DIR:-}" ] && [ -d "${OUT_DIR:-}" ]; then
+	content="$content $(hash_tree "$OUT_DIR")"
+fi
+
+key="$(printf '%s\0' "$("$REAL" -vV)" "${key_args[@]}" "$content" | sha256sum | cut -d' ' -f1)"
+entry="$STORE/$key"
+
+if [ -d "$entry" ]; then
+	cp -a "$entry"/. "$out_dir"/ 2>/dev/null && exit 0
+fi
+
+# A miss from here on, so it waits for a slot before it compiles.
+BUSY=99
+STATUS="$(mktemp)"
+trap 'rm -f "$STATUS"' EXIT
+while :; do
+	for ((i = 0; i < SLOTS; i++)); do
+		flock --nonblock --conflict-exit-code "$BUSY" "$SLOTDIR/slot.$i" \
+			bash -c 'st=0; "$@" || st=$?; printf "%s\n" "$st" > "$0"; exit 0' \
+			"$STATUS" "$REAL" "$@"
+		if [ $? -ne "$BUSY" ]; then
+			code=""
+			read -r code < "$STATUS" || true
+			[ -z "$code" ] && exit 2
+			# Only a compile that succeeded may be served to a later run.
+			if [ "$code" = 0 ]; then
+				tmp="$entry.$$"
+				mkdir -p "$tmp" &&
+					find "$out_dir" -maxdepth 1 -name "*$suffix*" -exec cp -a {} "$tmp"/ \; 2>/dev/null &&
+					mv -T "$tmp" "$entry" 2>/dev/null || rm -rf "$tmp"
+			fi
+			exit "$code"
+		fi
+	done
+	sleep 0.05
+done

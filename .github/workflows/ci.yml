@@ -11,9 +11,11 @@ permissions:
   contents: read
 
 # A master run is never cancelled: a rapid merge must not strand a commit with no CI, or kill a publish mid-upload.
+# Every run finishes. A cancelled run reports step timestamps that read as durations and measure
+# nothing, so cancelling on a new push destroys the timing this workflow exists to produce.
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+  group: ci-${{ github.ref }}-${{ github.sha }}
+  cancel-in-progress: false
 
 env:
   CARGO_TERM_COLOR: always
@@ -79,14 +81,21 @@ jobs:
           tar -xzf "$RUNNER_TEMP/nextest.tar.gz" -C "$RUNNER_TEMP/nextest-bin"
           echo "$RUNNER_TEMP/nextest-bin" >> "$GITHUB_PATH"
 
-      # Interim, and not the design: with no wrapper there is nothing to cap a miss, so the outer -j is the only limit left. It goes back up when the per-package wrapper carries the semaphore.
+      # PKG_SLOTS caps the compiles that hold memory, so the outer -j is wide and paces free restores.
       - name: Build test harnesses (compile, no-run)
         env:
-          CARGO_BUILD_JOBS: "3"
+          CARGO_BUILD_JOBS: "16"
+          RUSTC_WRAPPER: ${{ github.workspace }}/ci/pkg-cache.sh
+          PKG_SLOTS: "3"
+          PKG_CACHE_DIR: ${{ runner.temp }}/pkg-cache
         run: |
+          start=$(date +%s)
           cargo test --locked --workspace --no-run --no-fail-fast
-          # Built once here, rather than once per nextest process on cargo's package lock.
           cargo build --locked -p xai-grok-pager-bin
+          echo "PKG-CACHE compile wall: $(( $(date +%s) - start )) s"
+          echo "PKG-CACHE entries: $(ls "$PKG_CACHE_DIR" 2>/dev/null | wc -l)"
+          echo "PKG-CACHE store: $(du -sh "$PKG_CACHE_DIR" 2>/dev/null | cut -f1)"
+          echo "PKG-CACHE target: $(du -sh target 2>/dev/null | cut -f1)"
 
       - name: Run tests (workspace)
         run: |
@@ -113,12 +122,16 @@ jobs:
             END { exit (compile && !splitbad) ? 0 : 1 }
           ' .github/workflows/ci.yml \
             || { echo "RAM GUARD: FAIL — build must be a single unified --no-run, no exclude/-p split"; exit 1; }
-          # Until the per-package wrapper lands, cargo makes every compile itself and -j is the only cap.
-          grep -q 'CARGO_BUILD_JOBS: "3"' .github/workflows/ci.yml \
-            || { echo "RAM GUARD: FAIL — missing -j3 on compile step"; exit 1; }
+          # The wrapper caps concurrent compiles now. Losing either half uncaps compile memory.
+          grep -q 'PKG_SLOTS: "3"' .github/workflows/ci.yml \
+            || { echo "RAM GUARD: FAIL — missing PKG_SLOTS=3 compile semaphore"; exit 1; }
+          grep -q 'RUSTC_WRAPPER: .*ci/pkg-cache.sh' .github/workflows/ci.yml \
+            || { echo "RAM GUARD: FAIL — compile step is not behind the per-package wrapper"; exit 1; }
+          [ -x ci/pkg-cache.sh ] \
+            || { echo "RAM GUARD: FAIL — ci/pkg-cache.sh is missing or not executable"; exit 1; }
           grep -qF -- 'cargo nextest run --locked --workspace --profile ci' .github/workflows/ci.yml \
             || { echo "RAM GUARD: FAIL — run step missing"; exit 1; }
-          echo "RAM GUARD: PASS — sub-crate split + unified --no-run compile at -j3 intact, run step fast-passes"
+          echo "RAM GUARD: PASS — sub-crate split + unified --no-run behind the 3-slot compile semaphore, run step fast-passes"
 
   # These assert on what a virtual terminal actually shows, which a unit test over the width function cannot stand in for.
   pty-e2e:
