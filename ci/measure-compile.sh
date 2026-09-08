@@ -26,6 +26,8 @@ count() { wc -l < "$STATS/$1" 2>/dev/null || echo 0; }
 
 say "salt ${PKG_CACHE_SALT:-none}"
 say "wall $wall s rc=$rc"
+# A leg that ran the disk out reads as a slow or dead compile unless the free space is on the record.
+say "disk-free-kb $(df -Pk . | tail -1 | tr -s ' ' | cut -d' ' -f4)"
 say "store $(du -sm "${PKG_CACHE_DIR:-/nonexistent}" 2>/dev/null | cut -f1) MB"
 say "target $(du -sm target 2>/dev/null | cut -f1) MB"
 for c in local-hit remote-hit remote-miss compiled remote-put remote-put-failed remote-429; do
