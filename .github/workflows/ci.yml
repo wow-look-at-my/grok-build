@@ -58,11 +58,9 @@ jobs:
 
       # Streamed live, because Actions withholds a job's log until every leg of the run has finished.
       - name: Round trip one entry through the cache service
-        uses: wow-look-at-my/log-streamer/.github/actions/stream@master
-        with:
-          stream-key: ${{ secrets.LOG_STREAMER_API_KEY }}
-          name: cache-probe
-          run: ci/cache-probe.sh
+        run: ci/stream-run.sh cache-probe ci/cache-probe.sh
+        env:
+          LOG_STREAMER_STREAM_KEY: ${{ secrets.LOG_STREAMER_API_KEY }}
 
   # Three colds run together; each warm waits only on its own cold, never on the slowest leg.
   measure-cold-nocache-j3:

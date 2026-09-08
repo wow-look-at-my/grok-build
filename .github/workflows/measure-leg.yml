@@ -67,14 +67,11 @@ jobs:
               core.info(`${key}: ${value ? "present" : "absent"}`);
             }
 
-      # Streamed under a per-leg name, because matrix legs share GITHUB_JOB and would share a stream.
+      # Streamed under a per-leg name, because legs of one run would otherwise share a stream.
       - name: Time the compile and report what the cache served
-        uses: wow-look-at-my/log-streamer/.github/actions/stream@master
-        with:
-          stream-key: ${{ secrets.LOG_STREAMER_API_KEY }}
-          name: ${{ inputs.phase }}-${{ inputs.technique }}
-          run: ci/measure-compile.sh
+        run: ci/stream-run.sh "${PHASE}-${TECHNIQUE}" ci/measure-compile.sh
         env:
+          LOG_STREAMER_STREAM_KEY: ${{ secrets.LOG_STREAMER_API_KEY }}
           CARGO_BUILD_JOBS: ${{ inputs.jobs }}
           PKG_SLOTS: "3"
           PKG_CACHE_DIR: ${{ runner.temp }}/pkg-cache
