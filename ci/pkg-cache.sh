@@ -179,9 +179,15 @@ if [ -n "$REMOTE" ] && [ -x "$REMOTE" ] && [ -n "$may_get" ]; then
 		tally remote-429
 	elif [ "$got" = 3 ]; then
 		tally remote-unavailable
-	elif [ "$got" = 0 ] && restore "$entry"; then
-		tally remote-hit
-		exit 0
+	elif [ "$got" = 0 ]; then
+		# A fetch that lands and then fails to restore is counted apart. Both spell "compile it
+		# again", and only one of them says the service is missing the entry, so folding them
+		# together hides which end is broken.
+		if restore "$entry"; then
+			tally remote-hit
+			exit 0
+		fi
+		tally remote-restore-failed
 	else
 		tally remote-miss
 	fi
@@ -234,9 +240,14 @@ if [ "$code" = 0 ]; then
 		# Its own slots cap how many run at once, so a wide outer -j cannot open 16 sockets at a
 		# time and earn a 429 that reads as a slow compile.
 		if [ -n "$REMOTE" ] && [ -x "$REMOTE" ]; then
+			# The shared lock is taken HERE, before the fork, and the upload inherits it. Taking it
+			# inside the child left a window between this process exiting and the child locking, and
+			# a drain that arrived in that window returned while the upload had not started: the
+			# entry then reached no service and the next run recompiled it, which a warm leg reported
+			# as a hit it never got.
+			exec {ufd}< "$SLOTDIR/uploads"
+			flock -s "$ufd"
 			{
-				exec {ufd}< "$SLOTDIR/uploads"
-				flock -s "$ufd"
 				exec {upfd}< "$SLOTDIR/up.$(($$ % UPLOADS))"
 				flock "$upfd"
 				"$REMOTE" put "$key" "$entry"
@@ -256,6 +267,8 @@ if [ "$code" = 0 ]; then
 				fi
 			} > /dev/null 2>&1 < /dev/null &
 			disown
+			# Dropped only after the fork, so the child's copy is what holds the drain off.
+			exec {ufd}<&-
 		fi
 	else
 		rm -rf "$tmp"

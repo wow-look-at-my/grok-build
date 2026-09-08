@@ -52,7 +52,9 @@ if [ -z "${PKG_NO_REMOTE:-}" ] && [ -x "$REMOTE" ]; then
 fi
 
 say() { echo "MEASURE $TECHNIQUE $PHASE $*"; }
-count() { wc -l < "$STATS/$1" 2>/dev/null || echo 0; }
+# A tally nothing incremented has no file. The redirection fails before wc runs, so wc's own stderr
+# is the wrong place to silence it, and every leg printed an error per absent counter.
+count() { [ -f "$STATS/$1" ] && wc -l < "$STATS/$1" || echo 0; }
 
 say "salt ${PKG_CACHE_SALT:-none}"
 say "wall $wall s rc=$rc"
@@ -67,7 +69,7 @@ say "target $(du -sm target 2>/dev/null | cut -f1) MB"
 say "upload-drain $drain s"
 say "index-get rc=$index_rc entries=$(wc -l < "$INDEX" 2>/dev/null || echo 0)"
 say "index-put rc=$index_put"
-for c in local-hit remote-hit remote-miss remote-no-index remote-not-held compiled remote-put remote-put-failed remote-finalize-failed remote-unavailable remote-429; do
+for c in local-hit remote-hit remote-miss remote-restore-failed remote-no-index remote-not-held compiled remote-put remote-put-failed remote-finalize-failed remote-unavailable remote-429; do
 	say "$c $(count "$c")"
 done
 
