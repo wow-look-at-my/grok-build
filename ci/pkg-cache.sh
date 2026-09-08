@@ -79,8 +79,23 @@ fi
 key="$(printf '%s\0' "$("$REAL" -vV)" "${key_args[@]}" "$content" | sha256sum | cut -d' ' -f1)"
 entry="$STORE/$key"
 
+# Counted, not silent: a remote layer that quietly stops answering looks exactly like a slow build.
+STATS="${PKG_STATS_DIR:-$STORE/../pkg-stats}"
+mkdir -p "$STATS" 2>/dev/null
+tally() { echo x >> "$STATS/$1" 2>/dev/null; }
+
 if [ -d "$entry" ]; then
-	cp -a "$entry"/. "$out_dir"/ 2>/dev/null && exit 0
+	cp -a "$entry"/. "$out_dir"/ 2>/dev/null && { tally local-hit; exit 0; }
+fi
+
+# A runner is a fresh VM, so the local store is empty on the first build of a run. This is where a
+# later run gets its warmth from.
+REMOTE="$(dirname "$0")/pkg-remote.sh"
+if [ -x "$REMOTE" ]; then
+	if "$REMOTE" get "$key" "$entry" 2>/dev/null; then
+		cp -a "$entry"/. "$out_dir"/ 2>/dev/null && { tally remote-hit; exit 0; }
+	fi
+	tally remote-miss
 fi
 
 # A miss from here on, so it waits for a slot before it compiles.
@@ -98,10 +113,17 @@ while :; do
 			[ -z "$code" ] && exit 2
 			# Only a compile that succeeded may be served to a later run.
 			if [ "$code" = 0 ]; then
+				tally compiled
 				tmp="$entry.$$"
-				mkdir -p "$tmp" &&
+				if mkdir -p "$tmp" &&
 					find "$out_dir" -maxdepth 1 -name "*$suffix*" -exec cp -a {} "$tmp"/ \; 2>/dev/null &&
-					mv -T "$tmp" "$entry" 2>/dev/null || rm -rf "$tmp"
+					mv -T "$tmp" "$entry" 2>/dev/null; then
+					if [ -x "$REMOTE" ]; then
+						"$REMOTE" put "$key" "$entry" 2>/dev/null && tally remote-put || tally remote-put-failed
+					fi
+				else
+					rm -rf "$tmp"
+				fi
 			fi
 			exit "$code"
 		fi

@@ -88,6 +88,7 @@ jobs:
           RUSTC_WRAPPER: ${{ github.workspace }}/ci/pkg-cache.sh
           PKG_SLOTS: "3"
           PKG_CACHE_DIR: ${{ runner.temp }}/pkg-cache
+          PKG_STATS_DIR: ${{ runner.temp }}/pkg-stats
         run: |
           start=$(date +%s)
           cargo test --locked --workspace --no-run --no-fail-fast
@@ -96,6 +97,9 @@ jobs:
           echo "PKG-CACHE entries: $(ls "$PKG_CACHE_DIR" 2>/dev/null | wc -l)"
           echo "PKG-CACHE store: $(du -sh "$PKG_CACHE_DIR" 2>/dev/null | cut -f1)"
           echo "PKG-CACHE target: $(du -sh target 2>/dev/null | cut -f1)"
+          for c in local-hit remote-hit remote-miss compiled remote-put remote-put-failed; do
+            echo "PKG-CACHE $c: $(wc -l < "$PKG_STATS_DIR/$c" 2>/dev/null || echo 0)"
+          done
 
       - name: Run tests (workspace)
         run: |
