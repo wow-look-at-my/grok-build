@@ -37,15 +37,14 @@ fi
 ORIGIN="$(printf '%s' "$BASE" | cut -d/ -f1-3)"
 API="$ORIGIN/twirp/github.actions.results.api.v1.CacheService"
 
-# The toolkit picks v2 only when ACTIONS_CACHE_SERVICE_V2 is set. A runner without it serves v1 at
-# ACTIONS_CACHE_URL, whose path carries its own scope, so the two are different APIs and not one
-# endpoint with two names.
-# The v1 base carries its own scope path and ends in a slash. Its endpoints hang directly off it,
-# so the slash is a path separator: without it the request leaves the API entirely and an Edge
-# error page comes back, which is what made every reserve fail.
+# ACTIONS_CACHE_SERVICE_V2 is unset on this runner, which by the toolkit's own rule means v1. It is
+# not what the service offers: every v1 reserve came back as an Azure Edge "services aren't
+# available" page, with and without the separating slash, so that host answers no request at all.
+# The results URL is what works, so v2 is taken whenever the runner offers one and v1 is the
+# fallback for a runner that offers only the older URL.
 V1_BASE="${ACTIONS_CACHE_URL:-}"
 [ -n "$V1_BASE" ] && V1_BASE="${V1_BASE%/}/"
-if [ -z "${ACTIONS_CACHE_SERVICE_V2:-}" ] && [ -n "$V1_BASE" ]; then
+if [ -z "$BASE" ] && [ -n "$V1_BASE" ]; then
 	USE_V1=1
 else
 	USE_V1=
