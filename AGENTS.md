@@ -135,6 +135,16 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - `output_config.effort` is 4.6-and-later too. So the older dialect sends the effort as `budget_tokens` instead and nothing beside it. `output_config.format` is untouched — structured outputs are not what 4.6 changed.
 - A budget must clear the API's 1024 floor and stay under `max_tokens`. One that cannot do both leaves thinking off with a warning, rather than sending a request the API answers with a 400.
 
+## CI compile-cache notes
+
+- The cache is a chain, `SCCACHE_MULTILEVEL_CHAIN: "disk,gha"`, and both levels earn their place. Drop the disk level and every hit is a network round-trip. Drop the GHA level and one eviction is a cold compile.
+- Measured on the GHA-only design: 95.20% hits (Rust 97.05%), 147 real compilations out of 3564 requests, and `Average cache read hit 0.208 s`. The step was never rebuilding dependencies. It was fetching 2915 already-cached objects one at a time, about 607s of latency inside a 15m23s compile.
+- `actions/cache` restores the disk level in one download before the compile. That is the only prefetch available here. An sccache key is a hash of preprocessed input. It does not exist until the build reaches that unit. So no key can be fetched ahead of need on its own.
+- Actions cache entries are immutable and are evicted WHOLE. So the disk level must never be the only copy. The GHA level holds the same objects individually. A disk level that is stale, trimmed or evicted falls through to it rather than recompiling.
+- Sizing is against the repository's 10 GB. `SCCACHE_CACHE_SIZE` is 2G, and 3G on the key `build-test` and `pty-e2e` share, whose store measures 2.0 GB. One generation is about 7 GB. So a lockfile bump leaves a superseded generation for LRU to drop before it reaches a live one.
+- `SCCACHE_IDLE_TIMEOUT: "0"` is what makes any of this observable. The server exits after 600s idle, and the test step is a longer gap than that. The post-job `--show-stats` then reports a fresh server's zeroes instead of the build's numbers.
+- The runner is an EPYC 7763 with 2 physical cores plus SMT, 15 GiB, and 337/394 MB/s sequential disk. A developer box with 4 physical cores is faster. So a local build time is optimistic and does not transfer as an equal.
+
 ## Why build-test is not on the self-hosted runner
 
 Pointing `build-test` at `vars.CI_RUNNER` turns ~20 tests red, because they assert on host semantics the org's lean image does not provide. Measured on that runner, with unmodified test sources:
