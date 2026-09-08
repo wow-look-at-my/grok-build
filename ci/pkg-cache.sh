@@ -63,9 +63,24 @@ fi
 # so it is hashed as well. A key that misses either one serves an artifact of the older source.
 # `target` and `.git` are pruned. A build script's crate directory is the package root, and a
 # package that holds its own target directory otherwise hashes the output of the build it is part of.
+# Memoised on the directory. Hashing one crate's sources measured 0.9 s, and a workspace build makes
+# thousands of rustc calls over the same directories, so recomputing it per call costs more than the
+# compiles this cache exists to skip. Sources cannot change while a build runs, so the memo is safe
+# for the life of the store.
+MEMO="$STORE/../pkg-hashes"
+mkdir -p "$MEMO" 2>/dev/null
 hash_tree() {
-	find "$1" \( -name target -o -name .git \) -prune -o -type f -print0 2>/dev/null |
-		sort -z | xargs -0 -r sha256sum 2>/dev/null | sha256sum
+	local memo
+	memo="$MEMO/$(printf '%s' "$1" | sha256sum | cut -d' ' -f1)"
+	if [ -s "$memo" ]; then
+		cat "$memo"
+		return
+	fi
+	local h
+	h="$(find "$1" \( -name target -o -name .git \) -prune -o -type f -print0 2>/dev/null |
+		sort -z | xargs -0 -r sha256sum 2>/dev/null | sha256sum)"
+	printf '%s' "$h" > "$memo.$$" 2>/dev/null && mv -f "$memo.$$" "$memo" 2>/dev/null
+	printf '%s' "$h"
 }
 crate_dir="$(dirname "$crate_src")"
 case "$crate_dir" in
@@ -76,7 +91,16 @@ if [ -n "${OUT_DIR:-}" ] && [ -d "${OUT_DIR:-}" ]; then
 	content="$content $(hash_tree "$OUT_DIR")"
 fi
 
-key="$(printf '%s\0' "$("$REAL" -vV)" "${key_args[@]}" "$content" | sha256sum | cut -d' ' -f1)"
+# Memoised for the same reason: one fork per rustc call, for a string that cannot change mid-build.
+VERFILE="$MEMO/rustc-version"
+if [ -s "$VERFILE" ]; then
+	rustc_version="$(cat "$VERFILE")"
+else
+	rustc_version="$("$REAL" -vV)"
+	printf '%s' "$rustc_version" > "$VERFILE.$$" 2>/dev/null && mv -f "$VERFILE.$$" "$VERFILE" 2>/dev/null
+fi
+
+key="$(printf '%s\0' "$rustc_version" "${key_args[@]}" "$content" | sha256sum | cut -d' ' -f1)"
 entry="$STORE/$key"
 
 # Counted, not silent: a remote layer that quietly stops answering looks exactly like a slow build.
