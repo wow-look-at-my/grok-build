@@ -202,6 +202,12 @@ slot=$(( $$ % SLOTS ))
 	"$REAL" "$@" || st=$?
 	printf '%s\n' "$st" > "$STATUS"
 } {slot_fd}< "$SLOTDIR/slot.$slot"
+# Bash leaves a {var}< redirection open after the command it was written on, and the detached
+# upload below inherits every open descriptor. The lock is released when the last descriptor on it
+# closes, so without this the upload holds a COMPILE slot for its whole transfer: measured, one
+# upload left slot.0 held after the wrapper had exited, and twelve calls took 4267 ms against 54 ms
+# for one, with concurrent uploads pinned at PKG_SLOTS however high their own cap was set.
+exec {slot_fd}<&-
 code=""
 read -r code < "$STATUS" || true
 [ -z "$code" ] && exit 2
