@@ -127,7 +127,7 @@ jobs:
           "$PAGER_BINARY" --version
 
       # Fails if the sub-crate split is undone or the -j3 unified compile is removed. ci/ram-guard.sh has the measurements.
-      - name: RAM guard (sub-crate split + unified --no-run at -j3 intact)
+      - name: RAM guard (sub-crate split + unified --no-run + the compile gate intact)
         run: |
           set -euo pipefail
           # bundle/builtin must stay out of the shell crate.
