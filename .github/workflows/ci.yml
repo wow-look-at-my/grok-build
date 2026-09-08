@@ -45,6 +45,16 @@ jobs:
           chmod +x "$RUNNER_TEMP/binpazer"
           echo "BINPAZER=$RUNNER_TEMP/binpazer" >> "$GITHUB_ENV"
 
+      # The runner gives the cache service env to action processes only, never to a run step.
+      - uses: wow-look-at-my/actions@typescript#latest
+        with:
+          script: |
+            for (const key of ["ACTIONS_RESULTS_URL", "ACTIONS_CACHE_URL", "ACTIONS_RUNTIME_TOKEN"]) {
+              const value = process.env[key];
+              if (value) core.exportVariable(key, value);
+              core.info(`${key}: ${value ? "present" : "absent"}`);
+            }
+
       - name: Round trip one entry through the cache service
         run: ci/cache-probe.sh
 

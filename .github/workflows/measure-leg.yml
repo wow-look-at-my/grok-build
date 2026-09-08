@@ -56,6 +56,16 @@ jobs:
           echo "BINPAZER=$RUNNER_TEMP/binpazer" >> "$GITHUB_ENV"
           "$RUNNER_TEMP/binpazer" --version
 
+      # The runner gives the cache service env to action processes only, never to a run step.
+      - uses: wow-look-at-my/actions@typescript#latest
+        with:
+          script: |
+            for (const key of ["ACTIONS_RESULTS_URL", "ACTIONS_CACHE_URL", "ACTIONS_RUNTIME_TOKEN"]) {
+              const value = process.env[key];
+              if (value) core.exportVariable(key, value);
+              core.info(`${key}: ${value ? "present" : "absent"}`);
+            }
+
       # ci/measure-compile.sh owns the timing and the reporting, so nothing here decides anything.
       - name: Time the compile and report what the cache served
         env:

@@ -26,6 +26,12 @@ TOKEN="${ACTIONS_RUNTIME_TOKEN:-}"
 # Only the transfers need the service. Printing a manifest does not, which is what lets a test
 # check the packing rules off a runner.
 if [ "$op" != manifest ]; then
+	# This client speaks the v2 twirp API, which lives at ACTIONS_RESULTS_URL. A runner offering
+	# only the v1 URL is a different protocol, not a missing one, and says so rather than reading
+	# as an absent service.
+	if [ -z "$BASE" ] && [ -n "${ACTIONS_CACHE_URL:-}" ]; then
+		echo "pkg-remote: runner offers cache v1 only; this client speaks v2" >&2
+	fi
 	[ -n "$BASE" ] && [ -n "$TOKEN" ] || exit 3
 fi
 
