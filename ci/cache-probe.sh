@@ -15,6 +15,11 @@ mkdir -p "$src" "$dst"
 echo "PROBE cache-url-set ${ACTIONS_RESULTS_URL:+yes}${ACTIONS_RESULTS_URL:-no}"
 echo "PROBE cache-token-set ${ACTIONS_RUNTIME_TOKEN:+yes}${ACTIONS_RUNTIME_TOKEN:-no}"
 echo "PROBE binpazer $("${BINPAZER:-binpazer}" --version 2>/dev/null || echo MISSING)"
+# The toolkit picks v2 only when this is set, and v1 is a different API at a different path.
+echo "PROBE cache-service-v2 ${ACTIONS_CACHE_SERVICE_V2:-unset}"
+echo "PROBE cache-mode ${ACTIONS_CACHE_MODE:-unset}"
+echo "PROBE results-url ${ACTIONS_RESULTS_URL:-unset}"
+echo "PROBE cache-url ${ACTIONS_CACHE_URL:-unset}"
 
 # Three files, the shape of a real entry: rlib, rmeta and dep-info.
 head -c 200000 /dev/urandom > "$src/libprobe-deadbeef.rlib"
