@@ -38,15 +38,31 @@ mkdir -p "$DIR"
 # flock runs the compiler while holding the slot and the kernel drops the lock when that process
 # ends, however it ends. A killed compile therefore cannot strand a slot nothing owns.
 #
-# --conflict-exit-code is what separates "the slot was busy" from "the compiler exited 1". Without
-# it a failing compile reads as contention and the build silently retries it on the next slot.
+# The compiler's own status goes in a file rather than through flock's exit code. Reading it off
+# the exit code needs a --conflict-exit-code value to mean "busy", and a compiler that exits with
+# that same number then reads as contention and is retried forever. Here the inner shell always
+# exits 0, so BUSY means only ever a busy slot.
 BUSY=99
+STATUS="$(mktemp)"
+trap 'rm -f "$STATUS"' EXIT
+
 while :; do
 	for ((i = 0; i < SLOTS; i++)); do
-		flock --nonblock --conflict-exit-code "$BUSY" "$DIR/slot.$i" "$REAL" "$@"
-		rc=$?
-		if [ "$rc" -ne "$BUSY" ]; then
-			exit "$rc"
+		flock --nonblock --conflict-exit-code "$BUSY" "$DIR/slot.$i" \
+			bash -c 'st=0; "$@" || st=$?; printf "%s\n" "$st" > "$0"; exit 0' \
+			"$STATUS" "$REAL" "$@"
+		if [ $? -ne "$BUSY" ]; then
+			# An empty file means flock never reached the compiler, which is a broken lock
+			# directory rather than a compile result. Failing is the honest answer.
+			# `read` reports non-zero at end of file even having read the value, so its status
+			# says nothing here and discarding the value on it loses every result.
+			code=""
+			read -r code < "$STATUS" || true
+			if [ -z "$code" ]; then
+				echo "rustc-gate: flock could not run the compiler under $DIR/slot.$i" >&2
+				exit 2
+			fi
+			exit "$code"
 		fi
 	done
 	sleep 0.05
