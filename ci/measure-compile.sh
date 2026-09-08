@@ -35,6 +35,12 @@ cargo test --locked --workspace --no-run --no-fail-fast
 rc=$?
 wall=$(( $(date +%s) - start ))
 
+# The uploads are detached from the compiles that made them, so the wall above is the compile and
+# nothing else. They still have to land before the index names them.
+drain_start=$(date +%s)
+"$(cd "$(dirname "$0")" && pwd)/pkg-cache.sh" drain
+drain=$(( $(date +%s) - drain_start ))
+
 # The store's entry names are the keys, so publishing the index is listing it. A leg that never gets
 # here leaves its entries unreachable, which the next leg reports as remote-no-index.
 index_put=1
@@ -58,6 +64,7 @@ say "cache-token-set ${ACTIONS_RUNTIME_TOKEN:+yes}${ACTIONS_RUNTIME_TOKEN:-no}"
 say "binpazer $("${BINPAZER:-binpazer}" --version 2>/dev/null || echo MISSING)"
 say "store $(du -sm "${PKG_CACHE_DIR:-/nonexistent}" 2>/dev/null | cut -f1) MB"
 say "target $(du -sm target 2>/dev/null | cut -f1) MB"
+say "upload-drain $drain s"
 say "index-get rc=$index_rc entries=$(wc -l < "$INDEX" 2>/dev/null || echo 0)"
 say "index-put rc=$index_put"
 for c in local-hit remote-hit remote-miss remote-no-index remote-not-held compiled remote-put remote-put-failed remote-finalize-failed remote-unavailable remote-429; do

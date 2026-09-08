@@ -17,12 +17,24 @@ shift
 
 STORE="${PKG_CACHE_DIR:-${RUNNER_TEMP:-/tmp}/pkg-cache}"
 SLOTS="${PKG_SLOTS:-3}"
+UPLOADS="${PKG_UPLOAD_SLOTS:-8}"
 SLOTDIR="${PKG_SLOT_DIR:-${RUNNER_TEMP:-/tmp}/pkg-slots}"
 mkdir -p "$STORE" "$SLOTDIR"
 # The locks are opened read-only, so they have to exist before anybody waits on one.
 for ((_s = 0; _s < SLOTS; _s++)); do
 	[ -e "$SLOTDIR/slot.$_s" ] || : >> "$SLOTDIR/slot.$_s"
 done
+for ((_u = 0; _u < UPLOADS; _u++)); do
+	[ -e "$SLOTDIR/up.$_u" ] || : >> "$SLOTDIR/up.$_u"
+done
+[ -e "$SLOTDIR/uploads" ] || : >> "$SLOTDIR/uploads"
+
+# Uploads outlive the wrapper calls that started them, so the job waits here before it ends. Each
+# upload holds the shared lock; the exclusive one is granted only once every upload has released.
+if [ "$REAL" = drain ]; then
+	flock -x "$SLOTDIR/uploads" true
+	exit 0
+fi
 
 # A probe reads a value out of the compiler. It writes no artifact, so there is nothing to cache
 # and nothing to ration.
@@ -204,22 +216,38 @@ if [ "$code" = 0 ]; then
 	if [ -e "${mine[0]}" ] && mkdir -p "$tmp" &&
 		cp -al "${mine[@]}" "$tmp"/ 2>/dev/null &&
 		mv -T "$tmp" "$entry" 2>/dev/null; then
+		# The upload is detached, because cargo holds this call's job slot until the wrapper exits.
+		# An inline upload therefore spends a compile thread on the network, and the entry is
+		# already on disk for this build: nothing here waits on the answer.
+		#
+		# It holds a SHARED lock for its lifetime. `pkg-cache.sh drain` takes the exclusive one,
+		# which is what lets the job wait for every upload without counting them.
+		#
+		# Its own slots cap how many run at once, so a wide outer -j cannot open 16 sockets at a
+		# time and earn a 429 that reads as a slow compile.
 		if [ -n "$REMOTE" ] && [ -x "$REMOTE" ]; then
-			"$REMOTE" put "$key" "$entry"
-			put=$?
-			# Counted apart, because a cache service nobody wired up looks exactly like one
-			# rejecting every upload, and only one of those is a bug in this script.
-			if [ "$put" = 9 ]; then
-				tally remote-429
-			elif [ "$put" = 3 ]; then
-				tally remote-unavailable
-			elif [ "$put" = 4 ]; then
-				tally remote-finalize-failed
-			elif [ "$put" = 0 ]; then
-				tally remote-put
-			else
-				tally remote-put-failed
-			fi
+			{
+				exec {ufd}< "$SLOTDIR/uploads"
+				flock -s "$ufd"
+				exec {upfd}< "$SLOTDIR/up.$(($$ % UPLOADS))"
+				flock "$upfd"
+				"$REMOTE" put "$key" "$entry"
+				put=$?
+				# Counted apart, because a cache service nobody wired up looks exactly like one
+				# rejecting every upload, and only one of those is a bug in this script.
+				if [ "$put" = 9 ]; then
+					tally remote-429
+				elif [ "$put" = 3 ]; then
+					tally remote-unavailable
+				elif [ "$put" = 4 ]; then
+					tally remote-finalize-failed
+				elif [ "$put" = 0 ]; then
+					tally remote-put
+				else
+					tally remote-put-failed
+				fi
+			} > /dev/null 2>&1 < /dev/null &
+			disown
 		fi
 	else
 		rm -rf "$tmp"
