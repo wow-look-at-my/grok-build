@@ -57,6 +57,8 @@ say() { echo "MEASURE $TECHNIQUE $PHASE $*"; }
 count() { [ -f "$STATS/$1" ] && wc -l < "$STATS/$1" || echo 0; }
 
 say "salt ${PKG_CACHE_SALT:-none}"
+# A timing that does not carry the knobs it ran under cannot be compared against another one.
+say "config jobs=${CARGO_BUILD_JOBS:-default} slots=${PKG_SLOTS:-default} upload-slots=${PKG_UPLOAD_SLOTS:-default} wrapper=${WRAPPER:-none}"
 say "wall $wall s rc=$rc"
 # A leg that ran the disk out reads as a slow or dead compile unless the free space is on the record.
 say "disk-free-kb $(df -Pk . | tail -1 | tr -s ' ' | cut -d' ' -f4)"
