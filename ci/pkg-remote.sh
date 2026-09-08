@@ -31,17 +31,31 @@ API="${BASE%/}/twirp/github.actions.results.api.v1.CacheService"
 # rather than restore a tarball this script cannot read.
 VERSION="$(printf 'pkg-cache-tar-zstd-v1' | sha256sum | cut -d' ' -f1)"
 
+# A 429 is reported, never folded into the miss path: a throttled fetch reads as a slow compile, and
+# that is the one failure a timing run must not absorb quietly.
+THROTTLED=9
 rpc() {
-	curl -fsS --max-time 60 -X POST "$API/$1" \
+	local body code
+	body="$(curl -sS --max-time 60 -X POST "$API/$1" \
 		-H "Authorization: Bearer $TOKEN" \
 		-H "Content-Type: application/json" \
-		-d "$2" 2>/dev/null
+		-d "$2" -w '\n%{http_code}' 2>/dev/null)"
+	code="${body##*$'\n'}"
+	if [ "$code" = 429 ]; then
+		echo "pkg-remote: the cache service answered 429 on $1" >&2
+		return "$THROTTLED"
+	fi
+	[ "$code" = 200 ] || return 1
+	printf '%s' "${body%$'\n'*}"
 }
 
 case "$op" in
 get)
 	body="$(printf '{"key":"%s","restore_keys":[],"version":"%s"}' "$key" "$VERSION")"
-	url="$(rpc GetCacheEntryDownloadURL "$body" | jq -r 'select(.ok == true) | .signed_download_url // empty')"
+	answer="$(rpc GetCacheEntryDownloadURL "$body")"
+	rc=$?
+	[ "$rc" = "$THROTTLED" ] && exit "$THROTTLED"
+	url="$(printf '%s' "$answer" | jq -r 'select(.ok == true) | .signed_download_url // empty')"
 	[ -n "$url" ] || exit 1
 	mkdir -p "$dir" || exit 1
 	curl -fsS --max-time 300 "$url" 2>/dev/null | tar -x --zstd -C "$dir" 2>/dev/null || exit 1
@@ -53,7 +67,10 @@ put)
 	size="$(stat -c %s "$tmp")"
 
 	body="$(printf '{"key":"%s","version":"%s"}' "$key" "$VERSION")"
-	url="$(rpc CreateCacheEntry "$body" | jq -r 'select(.ok == true) | .signed_upload_url // empty')"
+	answer="$(rpc CreateCacheEntry "$body")"
+	rc=$?
+	[ "$rc" = "$THROTTLED" ] && exit "$THROTTLED"
+	url="$(printf '%s' "$answer" | jq -r 'select(.ok == true) | .signed_upload_url // empty')"
 	# A key another job already wrote answers not-ok. That is a hit, not a failure.
 	[ -n "$url" ] || exit 1
 

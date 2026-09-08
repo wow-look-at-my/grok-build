@@ -102,11 +102,17 @@ REMOTE="$(dirname "$0")/pkg-remote.sh"
 # PKG_NO_REMOTE keeps a measurement honest: entries an earlier run uploaded make a cold pass warm.
 [ -n "${PKG_NO_REMOTE:-}" ] && REMOTE=""
 if [ -n "$REMOTE" ] && [ -x "$REMOTE" ]; then
-	if "$REMOTE" get "$key" "$entry" 2>/dev/null && restore "$entry"; then
+	"$REMOTE" get "$key" "$entry"
+	got=$?
+	# A throttle is not a miss. Counting it as one hides the wait inside the compile time.
+	if [ "$got" = 9 ]; then
+		tally remote-429
+	elif [ "$got" = 0 ] && restore "$entry"; then
 		tally remote-hit
 		exit 0
+	else
+		tally remote-miss
 	fi
-	tally remote-miss
 fi
 
 # A miss from here on, so it waits for a slot before it compiles.

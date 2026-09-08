@@ -29,124 +29,63 @@ env:
   BUILDHOST_PROJECT: grok-build
 
 jobs:
-  # Each leg times the same compile cold, then again warm, so one run fills the table. Never on master.
-  measure-cold:
-    name: Cold ${{ matrix.technique }}
+  # Three colds run together; each warm waits only on its own cold, never on the slowest leg.
+  measure-cold-nocache-j3:
     if: github.ref != 'refs/heads/master'
-    runs-on: ubuntu-latest
-    timeout-minutes: 120
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - technique: no-cache-j3
-            jobs: "3"
-            wrapper: ""
-          - technique: no-cache-j16
-            jobs: "16"
-            wrapper: ""
-          - technique: pkg-cache-j16-slots3
-            jobs: "16"
-            wrapper: "ci/pkg-cache.sh"
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+    uses: ./.github/workflows/measure-leg.yml
+    with:
+      technique: nocache-j3
+      phase: cold
+      jobs: "3"
+      wrapper: ""
 
-      - name: Install protoc (pinned v29.3)
-        run: |
-          curl -fsSL -o "$RUNNER_TEMP/protoc.zip" \
-            https://github.com/protocolbuffers/protobuf/releases/download/v29.3/protoc-29.3-linux-x86_64.zip
-          echo "3e866620c5be27664f3d2fa2d656b5f3e09b5152b42f1bedbf427b333e90021a  $RUNNER_TEMP/protoc.zip" | sha256sum -c -
-          unzip -q -o "$RUNNER_TEMP/protoc.zip" -d "$RUNNER_TEMP/protoc"
-          echo "PROTOC=$RUNNER_TEMP/protoc/bin/protoc" >> "$GITHUB_ENV"
-
-      - name: Install Rust toolchain (pinned by rust-toolchain.toml)
-        run: rustup show
-
-      - name: Install mold
-        run: sudo apt-get install -y mold
-
-      # Cold and warm are the first run and a re-run of this same commit: the entries are what carry across a fresh VM.
-      - name: Time the compile and report what the cache served
-        env:
-          CARGO_BUILD_JOBS: ${{ matrix.jobs }}
-          PKG_SLOTS: "3"
-          PKG_CACHE_DIR: ${{ runner.temp }}/pkg-cache
-          PKG_STATS_DIR: ${{ runner.temp }}/pkg-stats
-          WRAPPER: ${{ matrix.wrapper }}
-        run: |
-          set -uo pipefail
-          [ -n "$WRAPPER" ] && export RUSTC_WRAPPER="$GITHUB_WORKSPACE/$WRAPPER"
-          compile() {
-            local label="$1" start rc
-            start=$(date +%s)
-            cargo test --locked --workspace --no-run --no-fail-fast
-            rc=$?
-            echo "MEASURE ${{ matrix.technique }} $label wall $(( $(date +%s) - start )) s rc=$rc"
-            return $rc
-          }
-          compile pass || exit 1
-          echo "MEASURE ${{ matrix.technique }} store $(du -sm "$PKG_CACHE_DIR" 2>/dev/null | cut -f1) MB"
-          echo "MEASURE ${{ matrix.technique }} target $(du -sm target 2>/dev/null | cut -f1) MB"
-          for c in local-hit remote-hit remote-miss compiled remote-put remote-put-failed; do
-            echo "MEASURE ${{ matrix.technique }} $c $(wc -l < "$PKG_STATS_DIR/$c" 2>/dev/null || echo 0)"
-          done
-
-  # A fresh VM after the cold job filled the cache, so this measures what the entries actually serve.
-  measure-warm:
-    name: Warm ${{ matrix.technique }}
-    needs: measure-cold
+  measure-warm-nocache-j3:
     if: github.ref != 'refs/heads/master'
-    runs-on: ubuntu-latest
-    timeout-minutes: 120
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - technique: no-cache-j3
-            jobs: "3"
-            wrapper: ""
-          - technique: no-cache-j16
-            jobs: "16"
-            wrapper: ""
-          - technique: pkg-cache-j16-slots3
-            jobs: "16"
-            wrapper: "ci/pkg-cache.sh"
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+    needs: measure-cold-nocache-j3
+    uses: ./.github/workflows/measure-leg.yml
+    with:
+      technique: nocache-j3
+      phase: warm
+      jobs: "3"
+      wrapper: ""
 
-      - name: Install protoc (pinned v29.3)
-        run: |
-          curl -fsSL -o "$RUNNER_TEMP/protoc.zip" \
-            https://github.com/protocolbuffers/protobuf/releases/download/v29.3/protoc-29.3-linux-x86_64.zip
-          echo "3e866620c5be27664f3d2fa2d656b5f3e09b5152b42f1bedbf427b333e90021a  $RUNNER_TEMP/protoc.zip" | sha256sum -c -
-          unzip -q -o "$RUNNER_TEMP/protoc.zip" -d "$RUNNER_TEMP/protoc"
-          echo "PROTOC=$RUNNER_TEMP/protoc/bin/protoc" >> "$GITHUB_ENV"
+  measure-cold-nocache-j16:
+    if: github.ref != 'refs/heads/master'
+    uses: ./.github/workflows/measure-leg.yml
+    with:
+      technique: nocache-j16
+      phase: cold
+      jobs: "16"
+      wrapper: ""
 
-      - name: Install Rust toolchain (pinned by rust-toolchain.toml)
-        run: rustup show
+  measure-warm-nocache-j16:
+    if: github.ref != 'refs/heads/master'
+    needs: measure-cold-nocache-j16
+    uses: ./.github/workflows/measure-leg.yml
+    with:
+      technique: nocache-j16
+      phase: warm
+      jobs: "16"
+      wrapper: ""
 
-      - name: Install mold
-        run: sudo apt-get install -y mold
+  measure-cold-pkgcache-j16-slots3:
+    if: github.ref != 'refs/heads/master'
+    uses: ./.github/workflows/measure-leg.yml
+    with:
+      technique: pkgcache-j16-slots3
+      phase: cold
+      jobs: "16"
+      wrapper: "ci/pkg-cache.sh"
 
-      - name: Time the compile and report what the cache served
-        env:
-          CARGO_BUILD_JOBS: ${{ matrix.jobs }}
-          PKG_SLOTS: "3"
-          PKG_CACHE_DIR: ${{ runner.temp }}/pkg-cache
-          PKG_STATS_DIR: ${{ runner.temp }}/pkg-stats
-          WRAPPER: ${{ matrix.wrapper }}
-        run: |
-          set -uo pipefail
-          [ -n "$WRAPPER" ] && export RUSTC_WRAPPER="$GITHUB_WORKSPACE/$WRAPPER"
-          start=$(date +%s)
-          cargo test --locked --workspace --no-run --no-fail-fast
-          rc=$?
-          echo "MEASURE ${{ matrix.technique }} warm wall $(( $(date +%s) - start )) s rc=$rc"
-          echo "MEASURE ${{ matrix.technique }} warm store $(du -sm "$PKG_CACHE_DIR" 2>/dev/null | cut -f1) MB"
-          for c in local-hit remote-hit remote-miss compiled remote-put remote-put-failed; do
-            echo "MEASURE ${{ matrix.technique }} warm $c $(wc -l < "$PKG_STATS_DIR/$c" 2>/dev/null || echo 0)"
-          done
-          exit $rc
+  measure-warm-pkgcache-j16-slots3:
+    if: github.ref != 'refs/heads/master'
+    needs: measure-cold-pkgcache-j16-slots3
+    uses: ./.github/workflows/measure-leg.yml
+    with:
+      technique: pkgcache-j16-slots3
+      phase: warm
+      jobs: "16"
+      wrapper: "ci/pkg-cache.sh"
 
   build-test:
     name: Build & test
