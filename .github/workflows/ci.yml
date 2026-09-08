@@ -58,15 +58,11 @@ jobs:
 
       # Streamed live, because Actions withholds a job's log until every leg of the run has finished.
       - name: Round trip one entry through the cache service
-        if: secrets.LOG_STREAMER_STREAM_KEY != ''
         uses: wow-look-at-my/log-streamer/.github/actions/stream@master
         with:
-          stream-key: ${{ secrets.LOG_STREAMER_STREAM_KEY }}
+          stream-key: ${{ secrets.LOG_STREAMER_API_KEY }}
+          name: cache-probe
           run: ci/cache-probe.sh
-
-      - name: Round trip one entry through the cache service (unstreamed)
-        if: secrets.LOG_STREAMER_STREAM_KEY == ''
-        run: ci/cache-probe.sh
 
   # Three colds run together; each warm waits only on its own cold, never on the slowest leg.
   measure-cold-nocache-j3:
@@ -77,6 +73,7 @@ jobs:
       phase: cold
       jobs: "3"
       wrapper: ""
+    secrets: inherit
 
   measure-warm-nocache-j3:
     if: github.ref != 'refs/heads/master'
@@ -87,6 +84,7 @@ jobs:
       phase: warm
       jobs: "3"
       wrapper: ""
+    secrets: inherit
 
   measure-cold-nocache-j16:
     if: github.ref != 'refs/heads/master'
@@ -96,6 +94,7 @@ jobs:
       phase: cold
       jobs: "16"
       wrapper: ""
+    secrets: inherit
 
   measure-warm-nocache-j16:
     if: github.ref != 'refs/heads/master'
@@ -106,6 +105,7 @@ jobs:
       phase: warm
       jobs: "16"
       wrapper: ""
+    secrets: inherit
 
   measure-cold-pkgcache-j16-slots3:
     if: github.ref != 'refs/heads/master'
@@ -115,6 +115,7 @@ jobs:
       phase: cold
       jobs: "16"
       wrapper: "ci/pkg-cache.sh"
+    secrets: inherit
 
   measure-warm-pkgcache-j16-slots3:
     if: github.ref != 'refs/heads/master'
@@ -125,6 +126,7 @@ jobs:
       phase: warm
       jobs: "16"
       wrapper: "ci/pkg-cache.sh"
+    secrets: inherit
 
   build-test:
     name: Build & test

@@ -67,8 +67,13 @@ jobs:
               core.info(`${key}: ${value ? "present" : "absent"}`);
             }
 
-      # ci/measure-compile.sh owns the timing and the reporting, so nothing here decides anything.
+      # Streamed under a per-leg name, because matrix legs share GITHUB_JOB and would share a stream.
       - name: Time the compile and report what the cache served
+        uses: wow-look-at-my/log-streamer/.github/actions/stream@master
+        with:
+          stream-key: ${{ secrets.LOG_STREAMER_API_KEY }}
+          name: ${{ inputs.phase }}-${{ inputs.technique }}
+          run: ci/measure-compile.sh
         env:
           CARGO_BUILD_JOBS: ${{ inputs.jobs }}
           PKG_SLOTS: "3"
