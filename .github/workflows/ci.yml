@@ -84,27 +84,6 @@ jobs:
       wrapper: ""
     secrets: inherit
 
-  measure-cold-nocache-j16:
-    if: github.ref != 'refs/heads/master'
-    uses: ./.github/workflows/measure-leg.yml
-    with:
-      technique: nocache-j16
-      phase: cold
-      jobs: "16"
-      wrapper: ""
-    secrets: inherit
-
-  measure-warm-nocache-j16:
-    if: github.ref != 'refs/heads/master'
-    needs: measure-cold-nocache-j16
-    uses: ./.github/workflows/measure-leg.yml
-    with:
-      technique: nocache-j16
-      phase: warm
-      jobs: "16"
-      wrapper: ""
-    secrets: inherit
-
   measure-cold-pkgcache-j16-slots3:
     if: github.ref != 'refs/heads/master'
     uses: ./.github/workflows/measure-leg.yml
@@ -176,6 +155,17 @@ jobs:
           tar -xzf "$RUNNER_TEMP/nextest.tar.gz" -C "$RUNNER_TEMP/nextest-bin"
           echo "$RUNNER_TEMP/nextest-bin" >> "$GITHUB_PATH"
 
+      # A run step is not given the cache service env, so without this the remote layer never runs here.
+      - name: Export the cache service env for the shell steps
+        uses: wow-look-at-my/actions@typescript#latest
+        with:
+          script: |
+            for (const key of ["ACTIONS_RESULTS_URL", "ACTIONS_CACHE_URL", "ACTIONS_RUNTIME_TOKEN"]) {
+              const value = process.env[key];
+              if (value) core.exportVariable(key, value);
+              core.info(`${key}: ${value ? "present" : "absent"}`);
+            }
+
       # PKG_SLOTS caps the compiles that hold memory, so the outer -j is wide and paces free restores.
       - name: Build test harnesses (compile, no-run)
         env:
@@ -185,10 +175,18 @@ jobs:
           PKG_CACHE_DIR: ${{ runner.temp }}/pkg-cache
           PKG_STATS_DIR: ${{ runner.temp }}/pkg-stats
         run: |
+          mkdir -p "$PKG_CACHE_DIR"
+          # Which keys the remote holds, so a miss answers from a list instead of a round trip.
+          ci/pkg-remote.sh get pkg-index "$PKG_CACHE_DIR/../pkg-index-dl" \
+            && cp "$PKG_CACHE_DIR/../pkg-index-dl/keys" "$PKG_CACHE_DIR/../pkg-index"
           start=$(date +%s)
           cargo test --locked --workspace --no-run --no-fail-fast
           cargo build --locked -p xai-grok-pager-bin
           echo "PKG-CACHE compile wall: $(( $(date +%s) - start )) s"
+          mkdir -p "$PKG_CACHE_DIR/../pkg-index-up"
+          find "$PKG_CACHE_DIR" -maxdepth 1 -mindepth 1 -type d -printf '%f\n' > "$PKG_CACHE_DIR/../pkg-index-up/keys"
+          ci/pkg-remote.sh put pkg-index "$PKG_CACHE_DIR/../pkg-index-up"
+          echo "PKG-CACHE index-put rc: $?"
           echo "PKG-CACHE entries: $(ls "$PKG_CACHE_DIR" 2>/dev/null | wc -l)"
           echo "PKG-CACHE store: $(du -sh "$PKG_CACHE_DIR" 2>/dev/null | cut -f1)"
           echo "PKG-CACHE target: $(du -sh target 2>/dev/null | cut -f1)"

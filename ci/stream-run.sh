@@ -29,14 +29,16 @@ if [ -n "${LOG_STREAMER_STREAM_KEY:-}" ]; then
 	done
 fi
 
+# The stream is a COPY, never the step's own output. Letting the client own stdout cost a
+# measurement: its socket reset mid-step and the tally lines behind it never reached the job log,
+# so a 3116 s leg reported its wall and nothing that says which phase it was.
 if [ -n "$have_client" ]; then
 	if token="$("$client" token derive --name "$name" 2>/dev/null)" && [ -n "$token" ]; then
 		echo "::add-mask::$token"
-		script="${RUNNER_TEMP:-/tmp}/stream-run-$$.sh"
-		printf '%s\n' "$*" > "$script"
-		LOG_STREAMER_SERVER="${LOG_STREAMER_SERVER:-wss://logs.pazer.io}" \
-			LOG_STREAMER_TOKEN="$token" "$client" shell "$script"
-		exit $?
+		export LOG_STREAMER_SERVER="${LOG_STREAMER_SERVER:-wss://logs.pazer.io}"
+		export LOG_STREAMER_TOKEN="$token"
+		"$@" 2>&1 | tee >("$client" send > /dev/null 2>&1 || true)
+		exit "${PIPESTATUS[0]}"
 	fi
 	echo "stream-run: token derive failed, running unstreamed" >&2
 else
