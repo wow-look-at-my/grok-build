@@ -102,7 +102,8 @@ write_manifest() {
 	printf '{"type_id":2,"flags":["critical"],"data":%s}' "$names_json"
 	for f in "$d"/*; do
 		[ -f "$f" ] || continue
-		printf ',{"type_id":1,"flags":["has_crc"],"codec":"zstd","file":%s}' "$(printf '%s' "$f" | jq -Rs .)"
+		printf ',{"type_id":1,"flags":["has_crc"],"codec":"zstd","file":%s}' \
+			"$(printf '%s' "$(basename "$f")" | jq -Rs .)"
 	done
 	printf '],"index":true}'
 }
@@ -174,7 +175,9 @@ get)
 	;;
 put)
 	tmp="$(mktemp)" || exit 1
-	man="$(mktemp)" || exit 1
+	# binpazer resolves a manifest's file paths against the manifest's own directory, so the
+	# manifest lives beside the artifacts and names them bare.
+	man="$dir/.pkg-manifest.json"
 	trap 'rm -f "$tmp" "$man"' EXIT
 	write_manifest "$dir" > "$man" || exit 1
 	"$BINPAZER" pack "$man" -o "$tmp" >/dev/null 2>&1 || exit 1
