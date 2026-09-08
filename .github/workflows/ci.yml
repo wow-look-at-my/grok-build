@@ -10,9 +10,7 @@ on:
 permissions:
   contents: read
 
-# A master run is never cancelled: a rapid merge must not strand a commit with no CI, or kill a publish mid-upload.
-# Every run finishes. A cancelled run reports step timestamps that read as durations and measure
-# nothing, so cancelling on a new push destroys the timing this workflow exists to produce.
+# A cancelled run reports step timestamps that read as durations and measure nothing, so every run finishes.
 concurrency:
   group: ci-${{ github.ref }}-${{ github.sha }}
   cancel-in-progress: false
