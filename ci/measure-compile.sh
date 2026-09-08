@@ -24,6 +24,7 @@ wall=$(( $(date +%s) - start ))
 say() { echo "MEASURE $TECHNIQUE $PHASE $*"; }
 count() { wc -l < "$STATS/$1" 2>/dev/null || echo 0; }
 
+say "salt ${PKG_CACHE_SALT:-none}"
 say "wall $wall s rc=$rc"
 say "store $(du -sm "${PKG_CACHE_DIR:-/nonexistent}" 2>/dev/null | cut -f1) MB"
 say "target $(du -sm target 2>/dev/null | cut -f1) MB"

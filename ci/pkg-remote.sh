@@ -31,7 +31,11 @@ API="$ORIGIN/twirp/github.actions.results.api.v1.CacheService"
 
 # The version field scopes a key to the archive format that wrote it. Changing the format must miss
 # rather than restore a tarball this script cannot read.
-VERSION="$(printf 'pkg-cache-tar-zstd-v1' | sha256sum | cut -d' ' -f1)"
+#
+# PKG_CACHE_SALT scopes it further. A measurement sets it per run, so the cold leg meets an empty
+# keyspace and the warm leg behind it meets what that cold leg wrote. Without it a cold leg is cold
+# exactly once, and every later one is served by an earlier run while still calling itself cold.
+VERSION="$(printf 'pkg-cache-tar-zstd-v1%s' "${PKG_CACHE_SALT:-}" | sha256sum | cut -d' ' -f1)"
 
 # A 429 is reported, never folded into the miss path: a throttled fetch reads as a slow compile, and
 # that is the one failure a timing run must not absorb quietly.

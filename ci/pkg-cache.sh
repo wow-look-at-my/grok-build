@@ -139,7 +139,16 @@ while :; do
 					[ -n "$(ls -A "$tmp" 2>/dev/null)" ] &&
 					mv -T "$tmp" "$entry" 2>/dev/null; then
 					if [ -n "$REMOTE" ] && [ -x "$REMOTE" ]; then
-						"$REMOTE" put "$key" "$entry" 2>/dev/null && tally remote-put || tally remote-put-failed
+						"$REMOTE" put "$key" "$entry"
+						put=$?
+						# A throttle on the way up is the same event as one on the way down.
+						if [ "$put" = 9 ]; then
+							tally remote-429
+						elif [ "$put" = 0 ]; then
+							tally remote-put
+						else
+							tally remote-put-failed
+						fi
 					fi
 				else
 					rm -rf "$tmp"
