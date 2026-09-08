@@ -25,7 +25,9 @@ BASE="${ACTIONS_RESULTS_URL:-}"
 TOKEN="${ACTIONS_RUNTIME_TOKEN:-}"
 [ -n "$BASE" ] && [ -n "$TOKEN" ] || exit 3
 
-API="${BASE%/}/twirp/github.actions.results.api.v1.CacheService"
+# The official client resolves /twirp against the base URL, which discards any path the base carries.
+ORIGIN="$(printf '%s' "$BASE" | cut -d/ -f1-3)"
+API="$ORIGIN/twirp/github.actions.results.api.v1.CacheService"
 
 # The version field scopes a key to the archive format that wrote it. Changing the format must miss
 # rather than restore a tarball this script cannot read.
@@ -55,7 +57,7 @@ get)
 	answer="$(rpc GetCacheEntryDownloadURL "$body")"
 	rc=$?
 	[ "$rc" = "$THROTTLED" ] && exit "$THROTTLED"
-	url="$(printf '%s' "$answer" | jq -r 'select(.ok == true) | .signed_download_url // empty')"
+	url="$(printf '%s' "$answer" | jq -r 'select(.ok == true) | .signed_download_url // .signedDownloadUrl // empty')"
 	[ -n "$url" ] || exit 1
 	mkdir -p "$dir" || exit 1
 	curl -fsS --max-time 300 "$url" 2>/dev/null | tar -x --zstd -C "$dir" 2>/dev/null || exit 1
@@ -70,7 +72,7 @@ put)
 	answer="$(rpc CreateCacheEntry "$body")"
 	rc=$?
 	[ "$rc" = "$THROTTLED" ] && exit "$THROTTLED"
-	url="$(printf '%s' "$answer" | jq -r 'select(.ok == true) | .signed_upload_url // empty')"
+	url="$(printf '%s' "$answer" | jq -r 'select(.ok == true) | .signed_upload_url // .signedUploadUrl // empty')"
 	# A key another job already wrote answers not-ok. That is a hit, not a failure.
 	[ -n "$url" ] || exit 1
 
