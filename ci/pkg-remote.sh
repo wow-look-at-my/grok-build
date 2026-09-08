@@ -91,6 +91,10 @@ rpc() {
 		echo "pkg-remote: the cache service answered 429 on $1" >&2
 		return "$THROTTLED"
 	fi
+	# The body is the only thing that says WHY a call was refused, so a debug run keeps it.
+	if [ -n "${PKG_REMOTE_DEBUG:-}" ] && [ "$code" != 200 ]; then
+		echo "pkg-remote: $1 answered HTTP $code: ${body%$'\n'*}" >&2
+	fi
 	[ "$code" = 200 ] || return 1
 	printf '%s' "${body%$'\n'*}"
 }
@@ -140,7 +144,10 @@ put)
 	[ "$rc" = "$THROTTLED" ] && exit "$THROTTLED"
 	url="$(printf '%s' "$answer" | jq -r 'select(.ok == true) | .signed_upload_url // .signedUploadUrl // empty')"
 	# A key another job already wrote answers not-ok. That is a hit, not a failure.
-	[ -n "$url" ] || exit 1
+	if [ -z "$url" ]; then
+		[ -n "${PKG_REMOTE_DEBUG:-}" ] && echo "pkg-remote: CreateCacheEntry gave no url: $answer" >&2
+		exit 1
+	fi
 
 	# One Put Blob, not a block list. An entry is a few MB, far under the 256 MB single-shot limit,
 	# and the block/blocklist pair was two chances to get a commit wrong for no gain.
