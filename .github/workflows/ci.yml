@@ -74,9 +74,9 @@ jobs:
       - name: Install ripgrep
         uses: wow-look-at-my/actions@cache-rg#latest
 
-      # jail_bwrap_e2e drives the `--sandbox` command builder against real bwrap, and reports a skip without it.
-      - name: Install bubblewrap
-        run: sudo apt-get install -y bubblewrap
+      # bubblewrap: jail_bwrap_e2e drives the `--sandbox` command builder against real bwrap, and reports a skip without it. mold: .cargo/config.toml links x86_64-unknown-linux-gnu with it.
+      - name: Install bubblewrap and mold
+        run: sudo apt-get install -y bubblewrap mold
 
       # Each test runs in its own process under a per-test timeout (.config/nextest.toml), which cargo test has none of.
       - name: Install cargo-nextest
@@ -184,6 +184,10 @@ jobs:
           tar -xzf "$RUNNER_TEMP/nextest.tar.gz" -C "$RUNNER_TEMP/nextest-bin"
           echo "$RUNNER_TEMP/nextest-bin" >> "$GITHUB_PATH"
 
+      # .cargo/config.toml links x86_64-unknown-linux-gnu with mold.
+      - name: Install mold
+        run: sudo apt-get install -y mold
+
       - name: Run sccache-cache
         uses: mozilla-actions/sccache-action@v0.0.11
         with:
@@ -238,6 +242,10 @@ jobs:
 
       - name: Install Rust toolchain (pinned by rust-toolchain.toml)
         run: rustup show
+
+      # .cargo/config.toml links x86_64-unknown-linux-gnu with mold.
+      - name: Install mold
+        run: sudo apt-get install -y mold
 
       - name: Run sccache-cache
         uses: mozilla-actions/sccache-action@v0.0.11
@@ -332,6 +340,10 @@ jobs:
         # Same 'v' prefix requirement as build-test: the tag is v0.17.0.
         with:
           version: v0.17.0
+
+      # This job cross-compiles, but its build scripts and proc macros are host artifacts and take the linux-gnu rustflags, so mold is needed here too.
+      - name: Install mold
+        run: sudo apt-get install -y mold
 
       # The darwin target's objects are its own: a shared key would miss on every lookup and evict the linux entries for nothing.
       - name: Restore the sccache objects

@@ -31,8 +31,11 @@ rustflags = [
     "link-args=-ObjC",
 ]
 
+# fuse-ld=mold: `cargo test --workspace` links 240 test binaries, and linking is
+# the one part of a build sccache can never cache. Needs mold on PATH
+# (apt install mold). The darwin sections below keep their own linker.
 [target.x86_64-unknown-linux-gnu]
-rustflags = ["-C", "force-unwind-tables=yes"]
+rustflags = ["-C", "force-unwind-tables=yes", "-C", "link-arg=-fuse-ld=mold"]
 
 [target.aarch64-unknown-linux-gnu]
 rustflags = ["-C", "target-cpu=neoverse-v2", "-C", "force-unwind-tables=yes"]
