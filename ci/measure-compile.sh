@@ -34,7 +34,7 @@ say "cache-token-set ${ACTIONS_RUNTIME_TOKEN:+yes}${ACTIONS_RUNTIME_TOKEN:-no}"
 say "binpazer $("${BINPAZER:-binpazer}" --version 2>/dev/null || echo MISSING)"
 say "store $(du -sm "${PKG_CACHE_DIR:-/nonexistent}" 2>/dev/null | cut -f1) MB"
 say "target $(du -sm target 2>/dev/null | cut -f1) MB"
-for c in local-hit remote-hit remote-miss compiled remote-put remote-put-failed remote-unavailable remote-429; do
+for c in local-hit remote-hit remote-miss compiled remote-put remote-put-failed remote-finalize-failed remote-unavailable remote-429; do
 	say "$c $(count "$c")"
 done
 

@@ -136,16 +136,20 @@ put)
 	# A key another job already wrote answers not-ok. That is a hit, not a failure.
 	[ -n "$url" ] || exit 1
 
-	curl -fsS --max-time 300 -X PUT "$url&comp=block&blockid=$(printf 'block0' | base64 -w0)" \
-		-H "x-ms-blob-type: BlockBlob" \
-		--data-binary "@$tmp" >/dev/null 2>&1 || exit 1
-	curl -fsS --max-time 60 -X PUT "$url&comp=blocklist" \
-		-H "Content-Type: application/xml" \
-		--data "<?xml version=\"1.0\" encoding=\"utf-8\"?><BlockList><Latest>$(printf 'block0' | base64 -w0)</Latest></BlockList>" \
-		>/dev/null 2>&1 || exit 1
+	# One Put Blob, not a block list. An entry is a few MB, far under the 256 MB single-shot limit,
+	# and the block/blocklist pair was two chances to get a commit wrong for no gain.
+	# PKG_REMOTE_DEBUG puts the transfer's own errors on the log, because a failed upload is
+	# otherwise indistinguishable from a service nobody wired up.
+	if [ -n "${PKG_REMOTE_DEBUG:-}" ]; then
+		curl -fsS --max-time 300 -X PUT "$url" -H "x-ms-blob-type: BlockBlob" \
+			--data-binary "@$tmp" >/dev/null || { echo "pkg-remote: upload failed for $key" >&2; exit 1; }
+	else
+		curl -fsS --max-time 300 -X PUT "$url" -H "x-ms-blob-type: BlockBlob" \
+			--data-binary "@$tmp" >/dev/null 2>&1 || exit 1
+	fi
 
 	final="$(printf '{"key":"%s","size_bytes":%s,"version":"%s"}' "$key" "$size" "$VERSION")"
-	rpc FinalizeCacheEntryUpload "$final" | jq -e '.ok == true' >/dev/null 2>&1 || exit 1
+	rpc FinalizeCacheEntryUpload "$final" | jq -e '.ok == true' >/dev/null 2>&1 || exit 4
 	;;
 *) exit 2 ;;
 esac
