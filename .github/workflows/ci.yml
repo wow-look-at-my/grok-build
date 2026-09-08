@@ -23,10 +23,6 @@ env:
   # sccache caches per compilation unit and cannot cache incremental, so this must stay 0 for it to hit at all.
   CARGO_INCREMENTAL: "0"
   RUSTC_WRAPPER: "sccache"
-  # Cargo runs `$RUSTC_WRAPPER $RUSTC <args>`, so sccache execs this gate only when it is going to compile and a cache hit never reaches it. ci/rustc-gate.sh has the rest.
-  RUSTC: ${{ github.workspace }}/ci/rustc-gate.sh
-  # The RAM cap, moved off cargo onto the compiles alone: two monolith crates peak near 7.8 and 7.4 GiB against the runner's 15 GiB.
-  GATE_SLOTS: "3"
   # Disk only. The GHA layer writes one Actions cache entry per compilation unit, and this workspace is ~1800 of them per job; against the documented 200-entry-per-minute ceiling that is minutes of throttling, and once the jobs got fast enough to finish together it failed a job outright with `CreateCacheEntry: (429) Too Many Requests`. actions/cache carries the same objects in ONE entry per job, so the second layer only ever added traffic.
   SCCACHE_DIR: ${{ github.workspace }}/.sccache
   # Budget arithmetic, not a guess: the repo gets 10 GB of Actions cache and the disk-layer keys are now the only thing in it. Bounding each key keeps one generation near 7 GB, so Actions LRU only ever has a superseded generation to drop, and sccache's LRU trims oldest-first inside a key.
@@ -104,13 +100,13 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ github.workspace }}/.sccache
-          key: sccache-dev-linux-${{ hashFiles('**/Cargo.lock', 'rust-toolchain.toml') }}
-          restore-keys: sccache-dev-linux-
+          key: measA-dev-linux-${{ hashFiles('**/Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: measA-dev-linux-
 
       # One unified --workspace --no-run, and -j is high on purpose: it paces cache lookups, which cost no memory, while GATE_SLOTS caps the compiles.
       - name: Build test harnesses (compile, no-run)
         env:
-          CARGO_BUILD_JOBS: "16"
+          CARGO_BUILD_JOBS: "3"
         run: |
           cargo test --locked --workspace --no-run --no-fail-fast
           # Built once here, rather than once per nextest process on cargo's package lock.
@@ -146,15 +142,8 @@ jobs:
             END { exit (compile && !splitbad) ? 0 : 1 }
           ' .github/workflows/ci.yml \
             || { echo "RAM GUARD: FAIL — build must be a single unified --no-run, no exclude/-p split"; exit 1; }
-          # All four hold together: the gate is reached only because RUSTC names it, and it rations misses only because sccache execs it.
-          [ -x ci/rustc-gate.sh ] \
-            || { echo "RAM GUARD: FAIL — ci/rustc-gate.sh must exist and be executable"; exit 1; }
-          grep -q 'RUSTC: ${{ github.workspace }}/ci/rustc-gate.sh' .github/workflows/ci.yml \
-            || { echo "RAM GUARD: FAIL — RUSTC must point at ci/rustc-gate.sh, or nothing rations compiles"; exit 1; }
-          grep -q 'RUSTC_WRAPPER: "sccache"' .github/workflows/ci.yml \
-            || { echo "RAM GUARD: FAIL — sccache must be the wrapper: it is what execs the gate on a miss"; exit 1; }
-          grep -q 'GATE_SLOTS: "3"' .github/workflows/ci.yml \
-            || { echo "RAM GUARD: FAIL — GATE_SLOTS must stay 3"; exit 1; }
+          grep -q 'CARGO_BUILD_JOBS: "3"' .github/workflows/ci.yml \
+            || { echo "RAM GUARD: FAIL — missing -j3 on compile step"; exit 1; }
           grep -qF -- 'cargo nextest run --locked --workspace --profile ci' .github/workflows/ci.yml \
             || { echo "RAM GUARD: FAIL — run step missing"; exit 1; }
           echo "RAM GUARD: PASS — sub-crate split + unified --no-run compile at -j3 intact, run step fast-passes"
@@ -210,8 +199,8 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ github.workspace }}/.sccache
-          key: sccache-dev-linux-${{ hashFiles('**/Cargo.lock', 'rust-toolchain.toml') }}
-          restore-keys: sccache-dev-linux-
+          key: measA-dev-linux-${{ hashFiles('**/Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: measA-dev-linux-
 
       # Built once here, rather than once per nextest process on cargo's package lock.
       - name: Build the PTY harnesses and the pager binary
@@ -270,8 +259,8 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ github.workspace }}/.sccache
-          key: sccache-release-linux-${{ hashFiles('**/Cargo.lock', 'rust-toolchain.toml') }}
-          restore-keys: sccache-release-linux-
+          key: measA-release-linux-${{ hashFiles('**/Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: measA-release-linux-
 
       - name: Build release binary
         run: cargo build --locked --release -p xai-grok-pager-bin
@@ -362,8 +351,8 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ github.workspace }}/.sccache
-          key: sccache-darwin-arm64-${{ hashFiles('**/Cargo.lock', 'rust-toolchain.toml') }}
-          restore-keys: sccache-darwin-arm64-
+          key: measA-darwin-arm64-${{ hashFiles('**/Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: measA-darwin-arm64-
 
       # cc-rs reads these per-target. ci/zig-cc replaces the target cc-rs chooses, which zig rejects; ar and ranlib take no target.
       - name: Point the C toolchain at zig
