@@ -19,7 +19,9 @@ STORE="${PKG_CACHE_DIR:-${RUNNER_TEMP:-/tmp}/pkg-cache}"
 SLOTS="${PKG_SLOTS:-3}"
 UPLOADS="${PKG_UPLOAD_SLOTS:-8}"
 SLOTDIR="${PKG_SLOT_DIR:-${RUNNER_TEMP:-/tmp}/pkg-slots}"
-mkdir -p "$STORE" "$SLOTDIR"
+# Tested before created. mkdir is a process, this runs once per rustc call, and after the first
+# call the answer is always yes.
+[ -d "$STORE" ] && [ -d "$SLOTDIR" ] || mkdir -p "$STORE" "$SLOTDIR"
 # The locks are opened read-only, so they have to exist before anybody waits on one.
 for ((_s = 0; _s < SLOTS; _s++)); do
 	[ -e "$SLOTDIR/slot.$_s" ] || : >> "$SLOTDIR/slot.$_s"
@@ -84,7 +86,7 @@ fi
 # compiles this cache exists to skip. Sources cannot change while a build runs, so the memo is safe
 # for the life of the store.
 MEMO="$STORE/../pkg-hashes"
-mkdir -p "$MEMO" 2>/dev/null
+[ -d "$MEMO" ] || mkdir -p "$MEMO" 2>/dev/null
 #
 # The memo is named by substitution rather than by a hash of the path, and read with the shell's
 # own read: both spend no process. A wrapper runs thousands of times in one build, so a fork it
@@ -127,7 +129,7 @@ entry="$STORE/$key"
 
 # Counted, not silent: a remote layer that quietly stops answering looks exactly like a slow build.
 STATS="${PKG_STATS_DIR:-$STORE/../pkg-stats}"
-mkdir -p "$STATS" 2>/dev/null
+[ -d "$STATS" ] || mkdir -p "$STATS" 2>/dev/null
 tally() { echo x >> "$STATS/$1" 2>/dev/null; }
 
 # An empty entry must never read as a hit. Restoring nothing and reporting success hands cargo a
@@ -148,7 +150,7 @@ fi
 
 # A runner is a fresh VM, so the local store is empty on the first build of a run. This is where a
 # later run gets its warmth from.
-REMOTE="$(dirname "$0")/pkg-remote.sh"
+REMOTE="${0%/*}/pkg-remote.sh"
 # PKG_NO_REMOTE keeps a measurement honest: entries an earlier run uploaded make a cold pass warm.
 [ -n "${PKG_NO_REMOTE:-}" ] && REMOTE=""
 # The index says which keys the remote actually holds, so a miss costs no round trip. Asking the
