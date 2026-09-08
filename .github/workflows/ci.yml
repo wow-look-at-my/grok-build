@@ -19,9 +19,13 @@ env:
   # sccache caches per compilation unit and cannot cache incremental, so this must stay 0 for it to hit at all.
   CARGO_INCREMENTAL: "0"
   RUSTC_WRAPPER: "sccache"
-  # Local disk, not the GHA backend: measured at 95% hits but 0.208s per hit, so 2915 hits spent ~607s of round-trips. One cache entry restores the same objects in one download.
+  # Two layers, not one. GHA alone was measured at 95% hits and 0.208s a hit, so 2915 hits spent ~607s blocking on round-trips; disk alone would put every object in one entry that Actions evicts whole, turning one eviction into a cold compile.
+  SCCACHE_MULTILEVEL_CHAIN: "disk,gha"
+  SCCACHE_GHA_ENABLED: "true"
+  # The disk layer is restored in one sequential download before the compile, so the common case never touches the network, and anything missing from it falls through to the GHA layer's individual objects instead of recompiling.
   SCCACHE_DIR: ${{ github.workspace }}/.sccache
-  SCCACHE_CACHE_SIZE: "6G"
+  # Budget arithmetic, not a guess: the repo gets 10 GB of Actions cache and three disk-layer keys share it with the GHA layer's own objects. Bounding each key keeps one generation near 7 GB, so Actions LRU only ever has a superseded generation to drop, and sccache's LRU trims oldest-first inside a key.
+  SCCACHE_CACHE_SIZE: "2G"
   # Without this the server idles out during the test step, and the post-job --show-stats reports a fresh server's 0 requests instead of the build's.
   SCCACHE_IDLE_TIMEOUT: "0"
   # Debuginfo on every test binary needs >37 GB of target/ against a runner's ~14 GB, and ld then dies on a bus error.
@@ -31,26 +35,6 @@ env:
   BUILDHOST_PROJECT: grok-build
 
 jobs:
-  # Throwaway: records what a hosted runner actually is, so a local timing can be compared to a CI one instead of assumed equal. Delete once read.
-  runner-bench:
-    name: Runner benchmark (temporary)
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: CPU and memory
-        run: |
-          lscpu | grep -E 'Model name|^CPU\(s\)|Thread|Core|Socket|MHz|BogoMIPS|L3 cache|Flags' | head -12
-          free -h
-      - name: Single-core throughput
-        run: openssl speed -evp sha256 -seconds 3 2>&1 | tail -4
-      - name: Disk sequential and random
-        run: |
-          d="$RUNNER_TEMP/bench"; mkdir -p "$d"
-          dd if=/dev/zero of="$d/seq" bs=1M count=2048 oflag=direct 2>&1 | tail -1
-          dd if="$d/seq" of=/dev/null bs=1M iflag=direct 2>&1 | tail -1
-          dd if="$d/seq" of=/dev/null bs=4k count=20000 iflag=direct,nocache 2>&1 | tail -1
-          rm -rf "$d"
-
   build-test:
     name: Build & test
     # Hosted deliberately: this suite asserts host semantics the org's lean self-hosted image lacks. See AGENTS.md.
@@ -58,6 +42,8 @@ jobs:
     # A ceiling, not a target: a job needing more than this has a hung test, which nextest fails in 60s.
     timeout-minutes: 45
     env:
+      # This key holds the whole workspace's test objects, measured at 2.0 GB, so it gets the larger share of the 10 GB budget. The two single-binary keys keep the 2G default.
+      SCCACHE_CACHE_SIZE: "3G"
       # The harness builds this itself when unset, once per nextest process, all queued on cargo's package lock.
       PAGER_BINARY: ${{ github.workspace }}/target/debug/xai-grok-pager
       # No global CARGO_BUILD_JOBS: the compile-RAM cap belongs to the build step alone. See ci/ram-guard.sh.
@@ -168,6 +154,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
+      # Same key as build-test, so the same ceiling: a smaller one here would trim objects build-test still wants.
+      SCCACHE_CACHE_SIZE: "3G"
       PAGER_BINARY: ${{ github.workspace }}/target/debug/xai-grok-pager
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
