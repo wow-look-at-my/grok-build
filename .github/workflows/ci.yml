@@ -29,6 +29,25 @@ env:
   BUILDHOST_PROJECT: grok-build
 
 jobs:
+  # Seconds, not a whole build: it names the failing step of a cache round trip while that is cheap.
+  cache-probe:
+    name: Cache round trip
+    if: github.ref != 'refs/heads/master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Install binpazer
+        run: |
+          curl -fSsL --location-trusted \
+            "https://dl.pazer.build/bin-file-fmt/binpazer?os=linux&arch=amd64" -o "$RUNNER_TEMP/binpazer"
+          chmod +x "$RUNNER_TEMP/binpazer"
+          echo "BINPAZER=$RUNNER_TEMP/binpazer" >> "$GITHUB_ENV"
+
+      - name: Round trip one entry through the cache service
+        run: ci/cache-probe.sh
+
   # Three colds run together; each warm waits only on its own cold, never on the slowest leg.
   measure-cold-nocache-j3:
     if: github.ref != 'refs/heads/master'
