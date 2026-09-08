@@ -23,6 +23,14 @@ env:
   # sccache caches per compilation unit and cannot cache incremental, so this must stay 0 for it to hit at all.
   CARGO_INCREMENTAL: "0"
   RUSTC_WRAPPER: "sccache"
+  # Cargo runs `$RUSTC_WRAPPER $RUSTC <args>`, so sccache receives this gate as its compiler and
+  # execs it only when it is going to compile. A cache hit is answered from the cache and never
+  # reaches it. That is what lets CARGO_BUILD_JOBS below run wide over the lookups while the
+  # compiles that actually cost memory stay rationed. ci/rustc-gate.sh has the rest.
+  RUSTC: ${{ github.workspace }}/ci/rustc-gate.sh
+  # The RAM cap, moved off cargo and onto the compiles alone. Two monolith crates peak near 7.8 and
+  # 7.4 GiB against the runner's 15 GiB, which is what fixes this at three.
+  GATE_SLOTS: "3"
   # Disk only. The GHA layer writes one Actions cache entry per compilation unit, and this workspace is ~1800 of them per job; against the documented 200-entry-per-minute ceiling that is minutes of throttling, and once the jobs got fast enough to finish together it failed a job outright with `CreateCacheEntry: (429) Too Many Requests`. actions/cache carries the same objects in ONE entry per job, so the second layer only ever added traffic.
   SCCACHE_DIR: ${{ github.workspace }}/.sccache
   # Budget arithmetic, not a guess: the repo gets 10 GB of Actions cache and the disk-layer keys are now the only thing in it. Bounding each key keeps one generation near 7 GB, so Actions LRU only ever has a superseded generation to drop, and sccache's LRU trims oldest-first inside a key.
@@ -103,10 +111,11 @@ jobs:
           key: sccache-dev-linux-${{ hashFiles('**/Cargo.lock', 'rust-toolchain.toml') }}
           restore-keys: sccache-dev-linux-
 
-      # One unified --workspace --no-run at -j3: an --exclude/-p split re-unifies features and recompiles cold at -j16.
+      # One unified --workspace --no-run: an --exclude/-p split re-unifies features and recompiles cold at -j16.
+      # -j is high on purpose now. It paces cache LOOKUPS, which cost no memory, and this workspace is about 1800 of them; the RAM cap moved to GATE_SLOTS, which sccache applies to the compiles it actually runs.
       - name: Build test harnesses (compile, no-run)
         env:
-          CARGO_BUILD_JOBS: "3"
+          CARGO_BUILD_JOBS: "16"
         run: |
           cargo test --locked --workspace --no-run --no-fail-fast
           # Built once here, rather than once per nextest process on cargo's package lock.
@@ -142,8 +151,17 @@ jobs:
             END { exit (compile && !splitbad) ? 0 : 1 }
           ' .github/workflows/ci.yml \
             || { echo "RAM GUARD: FAIL — build must be a single unified --no-run, no exclude/-p split"; exit 1; }
-          grep -q 'CARGO_BUILD_JOBS: "3"' .github/workflows/ci.yml \
-            || { echo "RAM GUARD: FAIL — missing -j3 on compile step"; exit 1; }
+          # The cap moved off cargo and onto the compiles sccache actually runs, so the guard follows it.
+          # All three must hold together: the gate is only reached because RUSTC points at it, and it only
+          # rations misses because sccache is the wrapper that execs it.
+          [ -x ci/rustc-gate.sh ] \
+            || { echo "RAM GUARD: FAIL — ci/rustc-gate.sh must exist and be executable"; exit 1; }
+          grep -q 'RUSTC: ${{ github.workspace }}/ci/rustc-gate.sh' .github/workflows/ci.yml \
+            || { echo "RAM GUARD: FAIL — RUSTC must point at ci/rustc-gate.sh, or nothing rations compiles"; exit 1; }
+          grep -q 'RUSTC_WRAPPER: "sccache"' .github/workflows/ci.yml \
+            || { echo "RAM GUARD: FAIL — sccache must be the wrapper: it is what execs the gate on a miss"; exit 1; }
+          grep -q 'GATE_SLOTS: "3"' .github/workflows/ci.yml \
+            || { echo "RAM GUARD: FAIL — GATE_SLOTS must stay 3"; exit 1; }
           grep -qF -- 'cargo nextest run --locked --workspace --profile ci' .github/workflows/ci.yml \
             || { echo "RAM GUARD: FAIL — run step missing"; exit 1; }
           echo "RAM GUARD: PASS — sub-crate split + unified --no-run compile at -j3 intact, run step fast-passes"

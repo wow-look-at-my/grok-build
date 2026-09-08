@@ -137,7 +137,12 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 
 ## CI compile-cache notes
 
-- The cache is a chain, `SCCACHE_MULTILEVEL_CHAIN: "disk,gha"`, and both levels earn their place. Drop the disk level and every hit is a network round-trip. Drop the GHA level and one eviction is a cold compile.
+- **Cargo's `-j` is high and the RAM cap lives elsewhere.** A cache hit costs a lookup and no memory. One `-j` governing hits and compiles alike therefore throttles the case that needs no throttling. This workspace is about 1800 lookups.
+- `RUSTC` points at `ci/rustc-gate.sh` and `RUSTC_WRAPPER` stays `sccache`. So cargo runs `sccache <gate> <args>`, and sccache execs the gate ONLY when it is going to compile. A hit never reaches it. The gate holds one of `GATE_SLOTS` flock slots for the life of the compile, which is where the old `-j3` went.
+- Measured on a probe crate: a cold pass reached the gate for 30 crate compiles and a warm pass for 21. The difference was exactly the 9 cache misses.
+- The gate's cap has a negative control. Launching 12 against 12 slots peaks at 12. Launching 12 against 3 slots peaks at 3, and all 12 still run.
+- sccache reports no per-invocation hit or miss to its caller. The exit code and both streams are the compiler's, and only `--show-stats` is cumulative. Being the compiler sccache calls is therefore the only place a miss can be gated from outside it.
+- Do NOT re-add `SCCACHE_GHA_ENABLED`. That layer writes one Actions cache entry per compilation unit, about 1800 per job, against a documented ceiling of 200 uploads per minute per repository. Once the disk layer made the jobs fast enough to finish together, it failed a job outright with `CreateCacheEntry: (429) Too Many Requests`. `actions/cache` carries the same objects in ONE entry per job.
 - Measured on the GHA-only design: 95.20% hits (Rust 97.05%), 147 real compilations out of 3564 requests, and `Average cache read hit 0.208 s`. The step was never rebuilding dependencies. It was fetching 2915 already-cached objects one at a time, about 607s of latency inside a 15m23s compile.
 - `actions/cache` restores the disk level in one download before the compile. That is the only prefetch available here. An sccache key is a hash of preprocessed input. It does not exist until the build reaches that unit. So no key can be fetched ahead of need on its own.
 - Actions cache entries are immutable and are evicted WHOLE. So the disk level must never be the only copy. The GHA level holds the same objects individually. A disk level that is stale, trimmed or evicted falls through to it rather than recompiling.
