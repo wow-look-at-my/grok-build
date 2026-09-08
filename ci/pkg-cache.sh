@@ -139,7 +139,25 @@ fi
 REMOTE="$(dirname "$0")/pkg-remote.sh"
 # PKG_NO_REMOTE keeps a measurement honest: entries an earlier run uploaded make a cold pass warm.
 [ -n "${PKG_NO_REMOTE:-}" ] && REMOTE=""
-if [ -n "$REMOTE" ] && [ -x "$REMOTE" ]; then
+# The index says which keys the remote actually holds, so a miss costs no round trip. Asking the
+# service per key made every miss a network wait, and a cold pass is nothing but misses: 2543 calls
+# against an empty keyspace measured 348 s of pure asking.
+#
+# No index means the remote holds nothing this pass can use, and the gets are skipped rather than
+# spent. A leg that died before publishing its index therefore leaves its entries unreachable to the
+# next one. That is a miss, never a wrong answer, and it is counted so it cannot pass unseen.
+INDEX="$STORE/../pkg-index"
+may_get=1
+if [ -z "$REMOTE" ] || [ ! -x "$REMOTE" ]; then
+	may_get=""
+elif [ ! -f "$INDEX" ]; then
+	may_get=""
+	tally remote-no-index
+elif ! grep -qxF "$key" "$INDEX"; then
+	may_get=""
+	tally remote-not-held
+fi
+if [ -n "$REMOTE" ] && [ -x "$REMOTE" ] && [ -n "$may_get" ]; then
 	"$REMOTE" get "$key" "$entry"
 	got=$?
 	# A throttle is not a miss. Counting it as one hides the wait inside the compile time.
