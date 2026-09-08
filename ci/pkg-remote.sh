@@ -29,15 +29,53 @@ if [ "$op" != manifest ]; then
 	# This client speaks the v2 twirp API, which lives at ACTIONS_RESULTS_URL. A runner offering
 	# only the v1 URL is a different protocol, not a missing one, and says so rather than reading
 	# as an absent service.
-	if [ -z "$BASE" ] && [ -n "${ACTIONS_CACHE_URL:-}" ]; then
-		echo "pkg-remote: runner offers cache v1 only; this client speaks v2" >&2
-	fi
-	[ -n "$BASE" ] && [ -n "$TOKEN" ] || exit 3
+	[ -n "$TOKEN" ] || exit 3
+	[ -n "$BASE" ] || [ -n "${ACTIONS_CACHE_URL:-}" ] || exit 3
 fi
 
 # The official client resolves /twirp against the base URL, which discards any path the base carries.
 ORIGIN="$(printf '%s' "$BASE" | cut -d/ -f1-3)"
 API="$ORIGIN/twirp/github.actions.results.api.v1.CacheService"
+
+# The toolkit picks v2 only when ACTIONS_CACHE_SERVICE_V2 is set. A runner without it serves v1 at
+# ACTIONS_CACHE_URL, whose path carries its own scope, so the two are different APIs and not one
+# endpoint with two names.
+V1_BASE="${ACTIONS_CACHE_URL:-}"
+if [ -z "${ACTIONS_CACHE_SERVICE_V2:-}" ] && [ -n "$V1_BASE" ]; then
+	USE_V1=1
+else
+	USE_V1=
+fi
+
+# v1 reserve, upload, commit. A reserve that is refused means the key already exists, which is a hit.
+v1_put() {
+	local reserved id
+	reserved="$(curl -sS --max-time 60 -X POST "${V1_BASE%/}_apis/artifactcache/caches" \
+		-H "Authorization: Bearer $TOKEN" -H "Accept: application/json;api-version=6.0-preview.1" \
+		-H "Content-Type: application/json" \
+		-d "$(printf '{"key":"%s","version":"%s","cacheSize":%s}' "$key" "$VERSION" "$3")" 2>/dev/null)"
+	id="$(printf '%s' "$reserved" | jq -r '.cacheId // empty')"
+	if [ -z "$id" ]; then
+		[ -n "${PKG_REMOTE_DEBUG:-}" ] && echo "pkg-remote: v1 reserve refused: $reserved" >&2
+		return 1
+	fi
+	curl -fsS --max-time 300 -X PATCH "${V1_BASE%/}_apis/artifactcache/caches/$id" \
+		-H "Authorization: Bearer $TOKEN" -H "Accept: application/json;api-version=6.0-preview.1" \
+		-H "Content-Type: application/octet-stream" \
+		-H "Content-Range: bytes 0-$(($3 - 1))/*" --data-binary "@$2" >/dev/null 2>&1 || return 1
+	curl -fsS --max-time 60 -X POST "${V1_BASE%/}_apis/artifactcache/caches/$id" \
+		-H "Authorization: Bearer $TOKEN" -H "Accept: application/json;api-version=6.0-preview.1" \
+		-H "Content-Type: application/json" \
+		-d "$(printf '{"size":%s}' "$3")" >/dev/null 2>&1 || return 4
+}
+
+# v1 lookup answers with the archive location, or 204 and an empty body when nothing matches.
+v1_get_url() {
+	curl -sS --max-time 60 -G "${V1_BASE%/}_apis/artifactcache/cache" \
+		-H "Authorization: Bearer $TOKEN" -H "Accept: application/json;api-version=6.0-preview.1" \
+		--data-urlencode "keys=$key" --data-urlencode "version=$VERSION" 2>/dev/null |
+		jq -r '.archiveLocation // empty'
+}
 
 # binpazer, not tar: it carries a Block Index, so a reader seeks to one artifact instead of
 # decompressing the whole member to reach it, and each block carries its own CRC and codec.
@@ -107,11 +145,15 @@ manifest)
 	exit $?
 	;;
 get)
-	body="$(printf '{"key":"%s","restore_keys":[],"version":"%s"}' "$key" "$VERSION")"
-	answer="$(rpc GetCacheEntryDownloadURL "$body")"
-	rc=$?
-	[ "$rc" = "$THROTTLED" ] && exit "$THROTTLED"
-	url="$(printf '%s' "$answer" | jq -r 'select(.ok == true) | .signed_download_url // .signedDownloadUrl // empty')"
+	if [ -n "$USE_V1" ]; then
+		url="$(v1_get_url)"
+	else
+		body="$(printf '{"key":"%s","restore_keys":[],"version":"%s"}' "$key" "$VERSION")"
+		answer="$(rpc GetCacheEntryDownloadURL "$body")"
+		rc=$?
+		[ "$rc" = "$THROTTLED" ] && exit "$THROTTLED"
+		url="$(printf '%s' "$answer" | jq -r 'select(.ok == true) | .signed_download_url // .signedDownloadUrl // empty')"
+	fi
 	[ -n "$url" ] || exit 1
 	mkdir -p "$dir" || exit 1
 	blob="$(mktemp)" || exit 1
@@ -137,6 +179,11 @@ put)
 	write_manifest "$dir" > "$man" || exit 1
 	"$BINPAZER" pack "$man" -o "$tmp" >/dev/null 2>&1 || exit 1
 	size="$(stat -c %s "$tmp")"
+
+	if [ -n "$USE_V1" ]; then
+		v1_put "$key" "$tmp" "$size"
+		exit $?
+	fi
 
 	body="$(printf '{"key":"%s","version":"%s"}' "$key" "$VERSION")"
 	answer="$(rpc CreateCacheEntry "$body")"
