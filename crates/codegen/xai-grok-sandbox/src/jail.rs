@@ -627,8 +627,11 @@ pub fn bwrap_command(plan: &JailPlan) -> std::process::Command {
     // The platform read-only base. `--ro-bind-try` swallows an absent path;
     // a config `system = "rw"` binds it read-write instead (the user's explicit
     // choice to weaken the jail).
+    // `from_config` maps only "ro" and "rw" onto `system`, so a `Deny` cannot
+    // arrive from config. Read one as the read-only base: a jail with no system
+    // base execs nothing, so `Ro` is the floor this field can mean.
     let system_flag = match plan.defaults.system {
-        Access::Ro => "--ro-bind-try",
+        Access::Ro | Access::Deny => "--ro-bind-try",
         Access::Rw => "--bind",
     };
     for path in SYSTEM_RO_BASE {
@@ -656,31 +659,32 @@ pub fn bwrap_command(plan: &JailPlan) -> std::process::Command {
     }
     for mount in &plan.mounts {
         match mount.access {
-            Access::Ro => cmd
-                .arg("--ro-bind")
-                .arg(&mount.path)
-                .arg(&mount.path),
-            Access::Rw => cmd
-                .arg("--bind")
-                .arg(&mount.path)
-                .arg(&mount.path),
-            // Deny mounts are not bound here; they are applied last, after
-            // every visible bind, as an empty read-only sink over the path.
+            Access::Ro => {
+                cmd.arg("--ro-bind").arg(&mount.path).arg(&mount.path);
+            }
+            Access::Rw => {
+                cmd.arg("--bind").arg(&mount.path).arg(&mount.path);
+            }
+            // A deny is not bound here. It is applied last, after every
+            // visible bind, as an empty read-only sink over the path.
             Access::Deny => {}
         }
     }
     // `$GROK_HOME`, bound after the user mounts. A config `grok_home = "ro"`
     // binds it read-only; the release default (`rw`) is unchanged. Because it
     // is bound last it survives a user `--ro` aimed at it either way.
+    // As with `system`, `from_config` maps only "ro" and "rw" onto `grok_home`,
+    // so a `Deny` cannot arrive from config. Bind one read-only: the session
+    // reads its own config out of `$GROK_HOME`.
     match plan.defaults.grok_home {
-        Access::Rw => cmd
-            .arg("--bind")
-            .arg(&plan.grok_home)
-            .arg(&plan.grok_home),
-        Access::Ro => cmd
-            .arg("--ro-bind")
-            .arg(&plan.grok_home)
-            .arg(&plan.grok_home),
+        Access::Rw => {
+            cmd.arg("--bind").arg(&plan.grok_home).arg(&plan.grok_home);
+        }
+        Access::Ro | Access::Deny => {
+            cmd.arg("--ro-bind")
+                .arg(&plan.grok_home)
+                .arg(&plan.grok_home);
+        }
     }
     cmd.arg("--ro-bind-try")
         .arg(&plan.self_exe)

@@ -1,7 +1,11 @@
 name: CI
 
 on:
+  # Matches every branch and no tag, so the publish job cannot re-enter on its own tag.
   push:
+    branches: ['**']
+  # Build one tree twice: rerunning a finished run is denied to every session credential.
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -16,10 +20,8 @@ env:
   # xai-grok-sandbox's `fails_closed_on_non_utf8_*` hit errno 84 under a non-UTF-8 locale.
   LANG: C.UTF-8
   LC_ALL: C.UTF-8
-  # sccache caches per compilation unit and cannot cache incremental, so this must stay 0 for it to hit at all.
+  # Cargo reuses its own per-package artifacts in target/, which a compilation cache in front of it cannot do: a hit there still runs a process and writes the object out.
   CARGO_INCREMENTAL: "0"
-  SCCACHE_GHA_ENABLED: "true"
-  RUSTC_WRAPPER: "sccache"
   # Debuginfo on every test binary needs >37 GB of target/ against a runner's ~14 GB, and ld then dies on a bus error.
   CARGO_PROFILE_DEV_DEBUG: "0"
   CARGO_PROFILE_TEST_DEBUG: "0"
@@ -34,8 +36,6 @@ jobs:
     # A ceiling, not a target: a job needing more than this has a hung test, which nextest fails in 60s.
     timeout-minutes: 45
     env:
-      # Namespaces this job's sccache entries away from darwin's, and the 0.17.0 token must match the pinned version below.
-      SCCACHE_GHA_VERSION: sccache-v0.17.0-x86_64-unknown-linux-gnu
       # The harness builds this itself when unset, once per nextest process, all queued on cargo's package lock.
       PAGER_BINARY: ${{ github.workspace }}/target/debug/xai-grok-pager
       # No global CARGO_BUILD_JOBS: the compile-RAM cap belongs to the build step alone. See ci/ram-guard.sh.
@@ -45,17 +45,9 @@ jobs:
       # After the checkout: it reads the workspace, and an empty one enforces nothing.
       - uses: wow-look-at-my/actions@yaml-comment-block#latest
 
-      # A stock runner's ~14 GB free is not enough for this build, and the job hangs on ld/rustc I/O stalls at a full disk.
-      - name: Free up disk space before build
-        uses: jlumbroso/free-disk-space@main
-        with:
-          tool-cache: false
-          large-packages: true
-          swap-storage: true
-          docker-images: true
-          android: true
-          dotnet: true
-          haskell: true
+      # The runner starts with ~86 GB free and CARGO_PROFILE_*_DEBUG=0 holds target/ near 4 GB, so the 2m11s delete step this replaces was freeing 26 GB nobody needed.
+      - name: Report disk before build
+        run: df -h /
 
       - name: Install protoc (pinned v29.3)
         run: |
@@ -74,9 +66,9 @@ jobs:
       - name: Install ripgrep
         uses: wow-look-at-my/actions@cache-rg#latest
 
-      # jail_bwrap_e2e drives the `--sandbox` command builder against real bwrap, and reports a skip without it.
-      - name: Install bubblewrap
-        run: sudo apt-get install -y bubblewrap
+      # bubblewrap: jail_bwrap_e2e drives the `--sandbox` command builder against real bwrap, and reports a skip without it. mold: .cargo/config.toml links x86_64-unknown-linux-gnu with it.
+      - name: Install bubblewrap and mold
+        run: sudo apt-get install -y bubblewrap mold
 
       # Each test runs in its own process under a per-test timeout (.config/nextest.toml), which cargo test has none of.
       - name: Install cargo-nextest
@@ -87,14 +79,7 @@ jobs:
           tar -xzf "$RUNNER_TEMP/nextest.tar.gz" -C "$RUNNER_TEMP/nextest-bin"
           echo "$RUNNER_TEMP/nextest-bin" >> "$GITHUB_PATH"
 
-      # sccache keys on the real compilation inputs, where rust-cache restores a target/ tarball cargo recompiles anyway.
-      - name: Run sccache-cache
-        uses: mozilla-actions/sccache-action@v0.0.11
-        # The leading 'v' is load-bearing: the download URL is built from this and only the tag v0.17.0 exists.
-        with:
-          version: v0.17.0
-
-      # One unified --workspace --no-run at -j3: an --exclude/-p split re-unifies features and recompiles cold at -j16.
+      # Interim, and not the design: with no wrapper there is nothing to cap a miss, so the outer -j is the only limit left. It goes back up when the per-package wrapper carries the semaphore.
       - name: Build test harnesses (compile, no-run)
         env:
           CARGO_BUILD_JOBS: "3"
@@ -103,14 +88,13 @@ jobs:
           # Built once here, rather than once per nextest process on cargo's package lock.
           cargo build --locked -p xai-grok-pager-bin
 
-      # The ci profile sets fail-fast = false, so one failure does not hide the rest, and --version smoke-tests the binary.
       - name: Run tests (workspace)
         run: |
           cargo nextest run --locked --workspace --profile ci
           "$PAGER_BINARY" --version
 
       # Fails if the sub-crate split is undone or the -j3 unified compile is removed. ci/ram-guard.sh has the measurements.
-      - name: RAM guard (sub-crate split + unified --no-run at -j3 intact)
+      - name: RAM guard (sub-crate split + unified --no-run + the compile gate intact)
         run: |
           set -euo pipefail
           # bundle/builtin must stay out of the shell crate.
@@ -129,6 +113,7 @@ jobs:
             END { exit (compile && !splitbad) ? 0 : 1 }
           ' .github/workflows/ci.yml \
             || { echo "RAM GUARD: FAIL — build must be a single unified --no-run, no exclude/-p split"; exit 1; }
+          # Until the per-package wrapper lands, cargo makes every compile itself and -j is the only cap.
           grep -q 'CARGO_BUILD_JOBS: "3"' .github/workflows/ci.yml \
             || { echo "RAM GUARD: FAIL — missing -j3 on compile step"; exit 1; }
           grep -qF -- 'cargo nextest run --locked --workspace --profile ci' .github/workflows/ci.yml \
@@ -142,21 +127,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
-      SCCACHE_GHA_VERSION: sccache-v0.17.0-x86_64-unknown-linux-gnu
       PAGER_BINARY: ${{ github.workspace }}/target/debug/xai-grok-pager
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - name: Free up disk space before build
-        uses: jlumbroso/free-disk-space@main
-        with:
-          tool-cache: false
-          large-packages: true
-          swap-storage: true
-          docker-images: true
-          android: true
-          dotnet: true
-          haskell: true
+      - name: Report disk before build
+        run: df -h /
 
       - name: Install protoc (pinned v29.3)
         run: |
@@ -179,12 +155,10 @@ jobs:
           tar -xzf "$RUNNER_TEMP/nextest.tar.gz" -C "$RUNNER_TEMP/nextest-bin"
           echo "$RUNNER_TEMP/nextest-bin" >> "$GITHUB_PATH"
 
-      - name: Run sccache-cache
-        uses: mozilla-actions/sccache-action@v0.0.11
-        with:
-          version: v0.17.0
+      # .cargo/config.toml links x86_64-unknown-linux-gnu with mold.
+      - name: Install mold
+        run: sudo apt-get install -y mold
 
-      # Built once here, rather than once per nextest process on cargo's package lock.
       - name: Build the PTY harnesses and the pager binary
         run: |
           cargo test --locked -p xai-grok-pager --no-run \
@@ -193,7 +167,6 @@ jobs:
             --test pty_e2e_minimal
           cargo build --locked -p xai-grok-pager-bin
 
-      # Every case spawns a process, so cap the workers rather than fanning out to the core count.
       - name: Test (PTY end-to-end)
         run: |
           cargo nextest run --locked -p xai-grok-pager --profile ci \
@@ -207,9 +180,6 @@ jobs:
     # ubuntu-22.04 ships glibc 2.35, which holds every GLIBC_x.y dependency at or below what a 22.04 user has.
     runs-on: ubuntu-22.04
     timeout-minutes: 45
-    env:
-      # Per-target namespace so neither target evicts the other, and the 0.17.0 token must match the pinned version below.
-      SCCACHE_GHA_VERSION: sccache-v0.17.0-x86_64-unknown-linux-gnu
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
@@ -226,11 +196,9 @@ jobs:
       - name: Install Rust toolchain (pinned by rust-toolchain.toml)
         run: rustup show
 
-      - name: Run sccache-cache
-        uses: mozilla-actions/sccache-action@v0.0.11
-        # Same 'v' prefix requirement as build-test: the tag is v0.17.0.
-        with:
-          version: v0.17.0
+      # .cargo/config.toml links x86_64-unknown-linux-gnu with mold.
+      - name: Install mold
+        run: sudo apt-get install -y mold
 
       - name: Build release binary
         run: cargo build --locked --release -p xai-grok-pager-bin
@@ -266,7 +234,6 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 45
     env:
-      SCCACHE_GHA_VERSION: sccache-v0.17.0-x86_64-unknown-linux-gnu-darwin
       SDKROOT: ${{ github.workspace }}/.darwin-sdk
       GROK_DARWIN_LINK_BUNDLE: ${{ github.workspace }}/.darwin-link
     steps:
@@ -307,11 +274,8 @@ jobs:
           mkdir -p "$SDKROOT"
           tar -xJf "$RUNNER_TEMP/sdk.tar.xz" -C "$SDKROOT" --strip-components=1
 
-      - name: Run sccache-cache
-        uses: mozilla-actions/sccache-action@v0.0.11
-        # Same 'v' prefix requirement as build-test: the tag is v0.17.0.
-        with:
-          version: v0.17.0
+      - name: Install mold
+        run: sudo apt-get install -y mold
 
       # cc-rs reads these per-target. ci/zig-cc replaces the target cc-rs chooses, which zig rejects; ar and ranlib take no target.
       - name: Point the C toolchain at zig
