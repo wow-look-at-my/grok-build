@@ -1,6 +1,7 @@
 use super::support::{create_test_actor, test_agent_with_user_message_template};
 use super::{
-    date_rollover_reminder, laziness_injection_active, resolve_reminder_policy, todo_gate_active,
+    date_rollover_reminder, laziness_injection_active, resolve_reminder_policy,
+    todo_gate_applicable, todo_stop_gate_enabled,
 };
 use crate::session::persistence::PersistenceMsg;
 use crate::util::config::RemoteSettings;
@@ -130,7 +131,6 @@ use crate::session::goal_tracker::GoalStatus;
 #[test]
 fn laziness_injection_active_predicate_matrix() {
     let def = def_with_template(TemplateOverride::None);
-    let policy_on = policy_with_gate(true);
     for (goal_harness_enabled, goal_status, expect) in [
         (false, None, false),
         (false, Some(GoalStatus::Active), false),
@@ -144,62 +144,75 @@ fn laziness_injection_active_predicate_matrix() {
             expect,
             "goal_harness_enabled={goal_harness_enabled} status={goal_status:?}",
         );
-        assert!(
-            !todo_gate_active(
-                &policy_on,
-                PromptAudience::Primary,
-                &def,
-                goal_harness_enabled,
-                goal_status,
-            ),
-            "todo gate must be suppressed during the active goal loop",
-        );
+        if expect {
+            assert!(
+                !todo_gate_applicable(
+                    PromptAudience::Primary,
+                    &def,
+                    goal_harness_enabled,
+                    goal_status,
+                ),
+                "todo gate must be suppressed during the active goal loop",
+            );
+        }
     }
 }
+/// The built-in todo-stop gate ships ON: the persisted
+/// `[ui].stop_gate_unfinished_todos` toggle is the switch, and the `todo_gate`
+/// opt-in is an OR on top. ANDing the two is what left the shipped default
+/// unable to fire at all.
 #[test]
-fn todo_gate_active_predicate_matrix() {
+fn todo_stop_gate_ships_enabled_without_the_opt_in() {
+    let shipped = resolve_reminder_policy(None, false);
+    assert!(
+        !shipped.todo_gate.enabled,
+        "the todo_gate opt-in is still off by default",
+    );
+    assert!(
+        todo_stop_gate_enabled(&shipped),
+        "the stop gate must fire on a default session, with no --todo-gate",
+    );
+
+    // The opt-in force-enables a session whose persisted toggle is off.
+    let mut toggle_off = policy_with_gate(true);
+    toggle_off.stop_gate_unfinished_todos = false;
+    assert!(todo_stop_gate_enabled(&toggle_off));
+
+    // Toggle off and no opt-in: the user turned it off, so it stays off.
+    let mut both_off = policy_with_gate(false);
+    both_off.stop_gate_unfinished_todos = false;
+    assert!(!todo_stop_gate_enabled(&both_off));
+}
+#[test]
+fn todo_gate_applicable_predicate_matrix() {
     let def = def_with_template(TemplateOverride::None);
-    let policy_off = policy_with_gate(false);
-    let policy_on = policy_with_gate(true);
-    for (policy, audience, goal_harness_enabled, goal_status, expect) in [
-        (&policy_off, PromptAudience::Primary, true, None, false),
-        (&policy_off, PromptAudience::Subagent, true, None, false),
+    for (audience, goal_harness_enabled, goal_status, expect) in [
+        (PromptAudience::Primary, true, None, false),
+        (PromptAudience::Subagent, true, None, false),
         (
-            &policy_off,
             PromptAudience::Primary,
             true,
             Some(GoalStatus::Active),
             false,
         ),
         (
-            &policy_on,
-            PromptAudience::Primary,
-            true,
-            Some(GoalStatus::Active),
-            false,
-        ),
-        (
-            &policy_on,
             PromptAudience::Subagent,
             true,
             Some(GoalStatus::Active),
             false,
         ),
-        (&policy_on, PromptAudience::Primary, false, None, false),
+        (PromptAudience::Primary, false, None, false),
         (
-            &policy_on,
             PromptAudience::Primary,
             false,
             Some(GoalStatus::Active),
             false,
         ),
-        (&policy_on, PromptAudience::Primary, true, None, false),
     ] {
         assert_eq!(
-            todo_gate_active(policy, audience, &def, goal_harness_enabled, goal_status),
+            todo_gate_applicable(audience, &def, goal_harness_enabled, goal_status),
             expect,
-            "gate.enabled={} audience={audience:?} goal_harness_enabled={goal_harness_enabled} status={goal_status:?}",
-            policy.todo_gate.enabled
+            "audience={audience:?} goal_harness_enabled={goal_harness_enabled} status={goal_status:?}",
         );
     }
     for status in [
@@ -211,17 +224,11 @@ fn todo_gate_active_predicate_matrix() {
         GoalStatus::BudgetLimited,
     ] {
         assert!(
-            !todo_gate_active(
-                &policy_on,
-                PromptAudience::Primary,
-                &def,
-                true,
-                Some(status)
-            ),
+            !todo_gate_applicable(PromptAudience::Primary, &def, true, Some(status)),
             "non-active status {status:?} must not enable gate"
         );
     }
-    let mut templates = vec![
+    let templates = [
         TemplateOverride::None,
         TemplateOverride::Codex,
         TemplateOverride::Custom("custom".into()),
@@ -230,7 +237,7 @@ fn todo_gate_active_predicate_matrix() {
         let def = def_with_template(tpl);
         for audience in [PromptAudience::Primary, PromptAudience::Subagent] {
             assert!(
-                !todo_gate_active(&policy_on, audience, &def, true, None),
+                !todo_gate_applicable(audience, &def, true, None),
                 "built-in template without active goal must not enable gate"
             );
         }
