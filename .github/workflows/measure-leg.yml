@@ -57,7 +57,8 @@ jobs:
           "$RUNNER_TEMP/binpazer" --version
 
       # The runner gives the cache service env to action processes only, never to a run step.
-      - uses: wow-look-at-my/actions@typescript#latest
+      - name: Export the cache service env for the shell steps
+        uses: wow-look-at-my/actions@typescript#latest
         with:
           script: |
             for (const key of ["ACTIONS_RESULTS_URL", "ACTIONS_CACHE_URL", "ACTIONS_RUNTIME_TOKEN"]) {
