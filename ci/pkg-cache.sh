@@ -19,6 +19,10 @@ STORE="${PKG_CACHE_DIR:-${RUNNER_TEMP:-/tmp}/pkg-cache}"
 SLOTS="${PKG_SLOTS:-3}"
 SLOTDIR="${PKG_SLOT_DIR:-${RUNNER_TEMP:-/tmp}/pkg-slots}"
 mkdir -p "$STORE" "$SLOTDIR"
+# The locks are opened read-only, so they have to exist before anybody waits on one.
+for _s in $(seq 0 $((SLOTS - 1))); do
+	[ -e "$SLOTDIR/slot.$_s" ] || : >> "$SLOTDIR/slot.$_s"
+done
 
 # A probe reads a value out of the compiler. It writes no artifact, so there is nothing to cache
 # and nothing to ration.
@@ -140,46 +144,50 @@ if [ -n "$REMOTE" ] && [ -x "$REMOTE" ]; then
 fi
 
 # A miss from here on, so it waits for a slot before it compiles.
-BUSY=99
+#
+# The wait BLOCKS on one lock rather than polling a set of them. Polling forked flock once per slot
+# every 50 ms per waiting call, and a wide outer -j leaves most calls waiting, so the semaphore was
+# spending the two cores that the compiles it paces need.
+#
+# Blocking needs one lock per slot to still admit SLOTS at a time, so the slot is picked by this
+# process id. That spreads callers evenly without anybody reading the other slots.
 STATUS="$(mktemp)"
 trap 'rm -f "$STATUS"' EXIT
-while :; do
-	for ((i = 0; i < SLOTS; i++)); do
-		flock --nonblock --conflict-exit-code "$BUSY" "$SLOTDIR/slot.$i" \
-			bash -c 'st=0; "$@" || st=$?; printf "%s\n" "$st" > "$0"; exit 0' \
-			"$STATUS" "$REAL" "$@"
-		if [ $? -ne "$BUSY" ]; then
-			code=""
-			read -r code < "$STATUS" || true
-			[ -z "$code" ] && exit 2
-			# Only a compile that succeeded may be served to a later run.
-			if [ "$code" = 0 ]; then
-				tally compiled
-				tmp="$entry.$$"
-				# Storing an empty directory is what makes a later run restore nothing and call it
-				# a hit, so a set that matched no output is thrown away instead.
-				if mkdir -p "$tmp" &&
-					find "$out_dir" -maxdepth 1 -name "*$suffix*" -exec cp -a {} "$tmp"/ \; 2>/dev/null &&
-					[ -n "$(ls -A "$tmp" 2>/dev/null)" ] &&
-					mv -T "$tmp" "$entry" 2>/dev/null; then
-					if [ -n "$REMOTE" ] && [ -x "$REMOTE" ]; then
-						"$REMOTE" put "$key" "$entry"
-						put=$?
-						# A throttle on the way up is the same event as one on the way down.
-						if [ "$put" = 9 ]; then
-							tally remote-429
-						elif [ "$put" = 0 ]; then
-							tally remote-put
-						else
-							tally remote-put-failed
-						fi
-					fi
-				else
-					rm -rf "$tmp"
-				fi
+slot=$(( $$ % SLOTS ))
+{
+	flock "$slot_fd"
+	st=0
+	"$REAL" "$@" || st=$?
+	printf '%s\n' "$st" > "$STATUS"
+} {slot_fd}< "$SLOTDIR/slot.$slot"
+code=""
+read -r code < "$STATUS" || true
+[ -z "$code" ] && exit 2
+
+# Only a compile that succeeded may be served to a later run.
+if [ "$code" = 0 ]; then
+	tally compiled
+	tmp="$entry.$$"
+	# Storing an empty directory is what makes a later run restore nothing and call it a hit, so a
+	# set that matched no output is thrown away instead.
+	if mkdir -p "$tmp" &&
+		find "$out_dir" -maxdepth 1 -name "*$suffix*" -exec cp -a {} "$tmp"/ \; 2>/dev/null &&
+		[ -n "$(ls -A "$tmp" 2>/dev/null)" ] &&
+		mv -T "$tmp" "$entry" 2>/dev/null; then
+		if [ -n "$REMOTE" ] && [ -x "$REMOTE" ]; then
+			"$REMOTE" put "$key" "$entry"
+			put=$?
+			# A throttle on the way up is the same event as one on the way down.
+			if [ "$put" = 9 ]; then
+				tally remote-429
+			elif [ "$put" = 0 ]; then
+				tally remote-put
+			else
+				tally remote-put-failed
 			fi
-			exit "$code"
 		fi
-	done
-	sleep 0.05
-done
+	else
+		rm -rf "$tmp"
+	fi
+fi
+exit "$code"
