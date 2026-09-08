@@ -20,6 +20,8 @@ env:
   CARGO_INCREMENTAL: "0"
   SCCACHE_GHA_ENABLED: "true"
   RUSTC_WRAPPER: "sccache"
+  # Without this the server idles out during the test step, and the post-job --show-stats reports a fresh server's 0 requests instead of the build's.
+  SCCACHE_IDLE_TIMEOUT: "0"
   # Debuginfo on every test binary needs >37 GB of target/ against a runner's ~14 GB, and ld then dies on a bus error.
   CARGO_PROFILE_DEV_DEBUG: "0"
   CARGO_PROFILE_TEST_DEBUG: "0"
@@ -102,6 +104,10 @@ jobs:
           cargo test --locked --workspace --no-run --no-fail-fast
           # Built once here, rather than once per nextest process on cargo's package lock.
           cargo build --locked -p xai-grok-pager-bin
+
+      # Read here, not post-job: this is the compile these numbers describe, and a low hit rate is why a run is slow.
+      - name: sccache stats (compile)
+        run: sccache --show-stats
 
       # The ci profile sets fail-fast = false, so one failure does not hide the rest, and --version smoke-tests the binary.
       - name: Run tests (workspace)
@@ -192,6 +198,9 @@ jobs:
             --test pty_e2e_config_ui \
             --test pty_e2e_minimal
           cargo build --locked -p xai-grok-pager-bin
+
+      - name: sccache stats (compile)
+        run: sccache --show-stats
 
       # Every case spawns a process, so cap the workers rather than fanning out to the core count.
       - name: Test (PTY end-to-end)
