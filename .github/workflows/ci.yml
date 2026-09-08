@@ -6,6 +6,12 @@ on:
     branches: ['**']
   # Build one tree twice: rerunning a finished run is denied to every session credential.
   workflow_dispatch:
+    inputs:
+      # SCCACHE_RECACHE makes sccache ignore every hit and compile, then overwrite the entry. That is a cold build measured against the same keys, so timing one costs no change to how anything is cached.
+      cold:
+        description: Compile everything, ignoring cache hits
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -29,6 +35,8 @@ env:
   GATE_SLOTS: "3"
   # Counts every invocation the gate actually gated, so a run says whether the cap saw the traffic it was meant to.
   GATE_LOG: ${{ github.workspace }}/gate-invocations.log
+  # Empty on a normal run, so sccache reads its cache as usual. Set by the dispatch input above to time a cold build.
+  SCCACHE_RECACHE: ${{ inputs.cold && '1' || '' }}
   # The store is the GHA layer's own per-object entries. A bulk actions/cache of this directory was tried and removed: an Actions cache entry is immutable, so the key froze at 109 MB while the store it held reached 1.97 GB, and every run discarded the objects it had just compiled.
   SCCACHE_DIR: ${{ github.workspace }}/.sccache
   # Budget arithmetic, not a guess: the repo gets 10 GB of Actions cache and the disk-layer keys are now the only thing in it. Bounding each key keeps one generation near 7 GB, so Actions LRU only ever has a superseded generation to drop, and sccache's LRU trims oldest-first inside a key.
