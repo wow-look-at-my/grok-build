@@ -29,10 +29,10 @@ env:
   BUILDHOST_PROJECT: grok-build
 
 jobs:
-  # Dispatch-only: each leg times the same compile cold, then again warm, so one run fills the table.
+  # Each leg times the same compile cold, then again warm, so one run fills the table. Never on master.
   measure:
     name: Measure ${{ matrix.technique }}
-    if: github.event_name == 'workflow_dispatch'
+    if: github.ref != 'refs/heads/master'
     runs-on: ubuntu-latest
     timeout-minutes: 120
     strategy:
@@ -65,8 +65,8 @@ jobs:
       - name: Install mold
         run: sudo apt-get install -y mold
 
-      # The second pass keeps the store and throws target/ away, so it measures restore, not cargo's own reuse.
-      - name: Time a cold compile and then a warm one
+      # Cold and warm are the first run and a re-run of this same commit: the entries are what carry across a fresh VM.
+      - name: Time the compile and report what the cache served
         env:
           CARGO_BUILD_JOBS: ${{ matrix.jobs }}
           PKG_SLOTS: "3"
@@ -84,11 +84,9 @@ jobs:
             echo "MEASURE ${{ matrix.technique }} $label wall $(( $(date +%s) - start )) s rc=$rc"
             return $rc
           }
-          compile cold || exit 1
+          compile pass || exit 1
           echo "MEASURE ${{ matrix.technique }} store $(du -sm "$PKG_CACHE_DIR" 2>/dev/null | cut -f1) MB"
           echo "MEASURE ${{ matrix.technique }} target $(du -sm target 2>/dev/null | cut -f1) MB"
-          rm -rf target
-          compile warm || exit 1
           for c in local-hit remote-hit remote-miss compiled remote-put remote-put-failed; do
             echo "MEASURE ${{ matrix.technique }} $c $(wc -l < "$PKG_STATS_DIR/$c" 2>/dev/null || echo 0)"
           done

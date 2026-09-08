@@ -99,7 +99,9 @@ fi
 # A runner is a fresh VM, so the local store is empty on the first build of a run. This is where a
 # later run gets its warmth from.
 REMOTE="$(dirname "$0")/pkg-remote.sh"
-if [ -x "$REMOTE" ]; then
+# PKG_NO_REMOTE keeps a measurement honest: entries an earlier run uploaded make a cold pass warm.
+[ -n "${PKG_NO_REMOTE:-}" ] && REMOTE=""
+if [ -n "$REMOTE" ] && [ -x "$REMOTE" ]; then
 	if "$REMOTE" get "$key" "$entry" 2>/dev/null && restore "$entry"; then
 		tally remote-hit
 		exit 0
@@ -130,7 +132,7 @@ while :; do
 					find "$out_dir" -maxdepth 1 -name "*$suffix*" -exec cp -a {} "$tmp"/ \; 2>/dev/null &&
 					[ -n "$(ls -A "$tmp" 2>/dev/null)" ] &&
 					mv -T "$tmp" "$entry" 2>/dev/null; then
-					if [ -x "$REMOTE" ]; then
+					if [ -n "$REMOTE" ] && [ -x "$REMOTE" ]; then
 						"$REMOTE" put "$key" "$entry" 2>/dev/null && tally remote-put || tally remote-put-failed
 					fi
 				else
