@@ -84,4 +84,3 @@ jobs:
           PHASE: ${{ inputs.phase }}
           # Every job of one run shares this, so the warm leg reads exactly what its own cold leg wrote.
           PKG_CACHE_SALT: ${{ github.run_id }}
-        run: ci/measure-compile.sh
