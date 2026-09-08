@@ -18,8 +18,10 @@ env:
   LC_ALL: C.UTF-8
   # sccache caches per compilation unit and cannot cache incremental, so this must stay 0 for it to hit at all.
   CARGO_INCREMENTAL: "0"
-  SCCACHE_GHA_ENABLED: "true"
   RUSTC_WRAPPER: "sccache"
+  # Local disk, not the GHA backend: measured at 95% hits but 0.208s per hit, so 2915 hits spent ~607s of round-trips. One cache entry restores the same objects in one download.
+  SCCACHE_DIR: ${{ github.workspace }}/.sccache
+  SCCACHE_CACHE_SIZE: "6G"
   # Without this the server idles out during the test step, and the post-job --show-stats reports a fresh server's 0 requests instead of the build's.
   SCCACHE_IDLE_TIMEOUT: "0"
   # Debuginfo on every test binary needs >37 GB of target/ against a runner's ~14 GB, and ld then dies on a bus error.
@@ -36,8 +38,6 @@ jobs:
     # A ceiling, not a target: a job needing more than this has a hung test, which nextest fails in 60s.
     timeout-minutes: 45
     env:
-      # Namespaces this job's sccache entries away from darwin's, and the 0.17.0 token must match the pinned version below.
-      SCCACHE_GHA_VERSION: sccache-v0.17.0-x86_64-unknown-linux-gnu
       # The harness builds this itself when unset, once per nextest process, all queued on cargo's package lock.
       PAGER_BINARY: ${{ github.workspace }}/target/debug/xai-grok-pager
       # No global CARGO_BUILD_JOBS: the compile-RAM cap belongs to the build step alone. See ci/ram-guard.sh.
@@ -96,6 +96,14 @@ jobs:
         with:
           version: v0.17.0
 
+      # Keyed on the lockfile, so it is written once per dependency change and read on every run after: the objects it holds only go stale when a dependency moves.
+      - name: Restore the sccache objects
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.sccache
+          key: sccache-dev-linux-${{ hashFiles('**/Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: sccache-dev-linux-
+
       # One unified --workspace --no-run at -j3: an --exclude/-p split re-unifies features and recompiles cold at -j16.
       - name: Build test harnesses (compile, no-run)
         env:
@@ -148,7 +156,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
-      SCCACHE_GHA_VERSION: sccache-v0.17.0-x86_64-unknown-linux-gnu
       PAGER_BINARY: ${{ github.workspace }}/target/debug/xai-grok-pager
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -190,6 +197,14 @@ jobs:
         with:
           version: v0.17.0
 
+      # Same key as build-test: both compile the same dev-profile objects, so they share one entry rather than each paying for their own.
+      - name: Restore the sccache objects
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.sccache
+          key: sccache-dev-linux-${{ hashFiles('**/Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: sccache-dev-linux-
+
       # Built once here, rather than once per nextest process on cargo's package lock.
       - name: Build the PTY harnesses and the pager binary
         run: |
@@ -216,9 +231,6 @@ jobs:
     # ubuntu-22.04 ships glibc 2.35, which holds every GLIBC_x.y dependency at or below what a 22.04 user has.
     runs-on: ubuntu-22.04
     timeout-minutes: 45
-    env:
-      # Per-target namespace so neither target evicts the other, and the 0.17.0 token must match the pinned version below.
-      SCCACHE_GHA_VERSION: sccache-v0.17.0-x86_64-unknown-linux-gnu
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
@@ -240,6 +252,14 @@ jobs:
         # Same 'v' prefix requirement as build-test: the tag is v0.17.0.
         with:
           version: v0.17.0
+
+      # Release objects are built with different flags than the dev jobs', so they get their own key rather than sharing and missing.
+      - name: Restore the sccache objects
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.sccache
+          key: sccache-release-linux-${{ hashFiles('**/Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: sccache-release-linux-
 
       - name: Build release binary
         run: cargo build --locked --release -p xai-grok-pager-bin
@@ -275,7 +295,6 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 45
     env:
-      SCCACHE_GHA_VERSION: sccache-v0.17.0-x86_64-unknown-linux-gnu-darwin
       SDKROOT: ${{ github.workspace }}/.darwin-sdk
       GROK_DARWIN_LINK_BUNDLE: ${{ github.workspace }}/.darwin-link
     steps:
@@ -321,6 +340,14 @@ jobs:
         # Same 'v' prefix requirement as build-test: the tag is v0.17.0.
         with:
           version: v0.17.0
+
+      # The darwin target's objects are its own: a shared key would miss on every lookup and evict the linux entries for nothing.
+      - name: Restore the sccache objects
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.sccache
+          key: sccache-darwin-arm64-${{ hashFiles('**/Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: sccache-darwin-arm64-
 
       # cc-rs reads these per-target. ci/zig-cc replaces the target cc-rs chooses, which zig rejects; ar and ranlib take no target.
       - name: Point the C toolchain at zig
