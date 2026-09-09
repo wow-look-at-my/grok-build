@@ -260,6 +260,8 @@ if [ "$code" = 0 ]; then
 					tally remote-unavailable
 				elif [ "$put" = 4 ]; then
 					tally remote-finalize-failed
+				elif [ "$put" = 5 ]; then
+					tally remote-put-exists
 				elif [ "$put" = 0 ]; then
 					tally remote-put
 				else

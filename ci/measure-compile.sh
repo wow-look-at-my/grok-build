@@ -19,13 +19,27 @@ fi
 STORE="${PKG_CACHE_DIR:-${RUNNER_TEMP:-/tmp}/pkg-cache}"
 REMOTE="$(cd "$(dirname "$0")" && pwd)/pkg-remote.sh"
 INDEX="$STORE/../pkg-index"
+# The index key names the TECHNIQUE. One shared key does not work: a cache entry is immutable, so
+# the first leg to publish freezes it for every other. A leg that runs no wrapper compiles nothing
+# into the store, and its empty index reached the pkgcache warm leg, which then held every key to be
+# absent and recompiled the workspace while reporting success.
+INDEXKEY="pkg-index-$TECHNIQUE"
+
+# A leg with no wrapper has no store to index, so it neither fetches nor publishes one.
+USE_INDEX=1
+[ -n "${WRAPPER:-}" ] || USE_INDEX=""
+[ -z "${PKG_NO_REMOTE:-}" ] || USE_INDEX=""
+[ -x "$REMOTE" ] || USE_INDEX=""
 
 # One fetch, before the build, of the list of keys the remote holds. The wrapper then answers a miss
 # from that list instead of asking the service per key.
 mkdir -p "$STORE"
+# A fetch that fails must leave no index. Otherwise one left by an earlier leg answers for a service
+# that holds nothing, and the wrapper asks for keys against a list it has no reason to trust.
+rm -f "$INDEX"
 index_rc=1
-if [ -z "${PKG_NO_REMOTE:-}" ] && [ -x "$REMOTE" ]; then
-	"$REMOTE" get pkg-index "$STORE/../pkg-index-dl"
+if [ -n "$USE_INDEX" ]; then
+	"$REMOTE" get "$INDEXKEY" "$STORE/../pkg-index-dl"
 	index_rc=$?
 	[ "$index_rc" = 0 ] && cp "$STORE/../pkg-index-dl/keys" "$INDEX"
 fi
@@ -44,10 +58,10 @@ drain=$(( $(date +%s) - drain_start ))
 # The store's entry names are the keys, so publishing the index is listing it. A leg that never gets
 # here leaves its entries unreachable, which the next leg reports as remote-no-index.
 index_put=1
-if [ -z "${PKG_NO_REMOTE:-}" ] && [ -x "$REMOTE" ]; then
+if [ -n "$USE_INDEX" ]; then
 	mkdir -p "$STORE/../pkg-index-up"
 	find "$STORE" -maxdepth 1 -mindepth 1 -type d -printf '%f\n' > "$STORE/../pkg-index-up/keys"
-	"$REMOTE" put pkg-index "$STORE/../pkg-index-up"
+	"$REMOTE" put "$INDEXKEY" "$STORE/../pkg-index-up"
 	index_put=$?
 fi
 
@@ -71,7 +85,7 @@ say "target $(du -sm target 2>/dev/null | cut -f1) MB"
 say "upload-drain $drain s"
 say "index-get rc=$index_rc entries=$(wc -l < "$INDEX" 2>/dev/null || echo 0)"
 say "index-put rc=$index_put"
-for c in local-hit remote-hit remote-miss remote-restore-failed remote-no-index remote-not-held compiled remote-put remote-put-failed remote-finalize-failed remote-unavailable remote-429 remote-429-retried; do
+for c in local-hit remote-hit remote-miss remote-restore-failed remote-no-index remote-not-held compiled remote-put remote-put-exists remote-put-failed remote-finalize-failed remote-unavailable remote-429 remote-429-retried; do
 	say "$c $(count "$c")"
 done
 
@@ -80,6 +94,22 @@ done
 # run recompiles it and the pair of legs measures two different workloads.
 if [ "$(count remote-429)" -gt 0 ]; then
 	say "FAILED: an upload gave up on a 429, so the cache is missing entries this timing assumes"
+	exit 1
+fi
+
+# A warm leg exists to time what the cache serves. One that served nothing timed a cold build under
+# a warm name, and it reported success: the counters said so and no check read them. Both legs of
+# the pair then carry the same number and the technique looks like it does nothing.
+if [ -n "$USE_INDEX" ] && [ "$PHASE" = warm ] &&
+	[ "$(( $(count remote-hit) + $(count local-hit) ))" = 0 ]; then
+	say "FAILED: the warm leg served no entry, so it timed a cold build"
+	exit 1
+fi
+
+# The warm leg reads this index. A cold leg that does not publish one leaves its partner nothing to
+# find, which is exactly the run that produced the line above.
+if [ -n "$USE_INDEX" ] && [ "$PHASE" = cold ] && [ "$index_put" != 0 ]; then
+	say "FAILED: the index was not published, so the warm leg cannot reach this leg's entries"
 	exit 1
 fi
 exit "$rc"

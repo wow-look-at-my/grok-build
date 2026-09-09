@@ -127,6 +127,9 @@ VERSION="$(printf 'pkg-cache-binpazer-v2%s' "${PKG_CACHE_SALT:-}" | sha256sum | 
 # A 429 is reported, never folded into the miss path: a throttled fetch reads as a slow compile, and
 # that is the one failure a timing run must not absorb quietly.
 THROTTLED=9
+# The service already holds this key. Entries are immutable, so this is the normal answer whenever
+# two legs compile the same unit.
+EXISTS=5
 THROTTLE_WAIT="${PKG_THROTTLE_WAIT:-2}"
 rpc() {
 	local body code
@@ -238,10 +241,12 @@ put_once)
 	rc=$?
 	[ "$rc" = "$THROTTLED" ] && exit "$THROTTLED"
 	url="$(printf '%s' "$answer" | jq -r 'select(.ok == true) | .signed_upload_url // .signedUploadUrl // empty')"
-	# A key another job already wrote answers not-ok. That is a hit, not a failure.
+	# A key another job already wrote answers not-ok. That is a hit, not a failure, so it gets its
+	# own code: folded into the failures it made a leg report thousands of broken uploads, and a
+	# real upload failure had nowhere to show.
 	if [ -z "$url" ]; then
 		[ -n "${PKG_REMOTE_DEBUG:-}" ] && echo "pkg-remote: CreateCacheEntry gave no url: $answer" >&2
-		exit 1
+		exit "$EXISTS"
 	fi
 
 	# One Put Blob, not a block list. An entry is a few MB, far under the 256 MB single-shot limit,
