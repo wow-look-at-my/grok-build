@@ -1,5 +1,6 @@
 //! Turn-execution concern for `SessionActor` (`handle_prompt`, turn-end,
 //! sampling loop).
+use super::stop_gate::todo_stop_gate_blocks;
 use super::*;
 use crate::util::dual_clock::DualClock;
 use xai_grok_tools::implementations::grok_build::LoopFireMode;
@@ -918,7 +919,55 @@ impl SessionActor {
                     .run_stop_gate(prompt_id, stop_continuations_this_turn)
                     .await
                 {
-                    StopGateDecision::AllowStop => break round,
+                    StopGateDecision::AllowStop => {
+                        // The built-in todo-stop gate is just another stop
+                        // hook: it fires after the user hooks allowed the
+                        // stop, consumes the SAME continuation budget (a
+                        // model that never engages its todos still stops
+                        // after MAX_STOP_HOOK_CONTINUATIONS_PER_TURN
+                        // continuations), and its feedback rides the same
+                        // stop_hook_feedback user message.
+                        if !self.todo_stop_gate_active() {
+                            break round;
+                        }
+                        let collected = self.collect_todo_gate_input(prompt_id).await;
+                        let input = collected.as_input();
+                        if !todo_stop_gate_blocks(
+                            true,
+                            stop_continuations_this_turn,
+                            &evaluate_todo_gate(&input),
+                        ) {
+                            break round;
+                        }
+                        stop_continuations_this_turn += 1;
+                        let reminder =
+                            build_todo_gate_reminder(&input.pending, &input.in_progress_unbacked);
+                        let rendered = self
+                            .tool_bridge_handle()
+                            .render_prompt(&reminder, &serde_json::json!({}))
+                            .await
+                            .unwrap_or(reminder);
+                        tracing::info!(
+                            prompt_id = %prompt_id,
+                            continuations = stop_continuations_this_turn,
+                            cap = MAX_STOP_HOOK_CONTINUATIONS_PER_TURN,
+                            pending = input.pending.len(),
+                            in_progress = input.in_progress_unbacked.len()
+                                + input.in_progress_backed.len(),
+                            "stop gate: unfinished todos, continuing the turn"
+                        );
+                        self.events
+                            .emit(crate::session::events::Event::TodoGateFired {
+                                fires: stop_continuations_this_turn,
+                                pending: input.pending.len(),
+                                in_progress: input.in_progress_unbacked.len()
+                                    + input.in_progress_backed.len(),
+                                reason: "stop_gate",
+                            });
+                        self.chat_state_handle
+                            .push_user_message(ConversationItem::stop_hook_feedback(rendered));
+                        continue;
+                    }
                     StopGateDecision::KeepWorking { feedback } => {
                         stop_continuations_this_turn += 1;
                         self.chat_state_handle
@@ -1999,7 +2048,6 @@ impl SessionActor {
         let mut tool_turn_count: usize = 1;
         let mut loop_index: u32 = 0;
         let mut identical_tool_calls = IdenticalToolCallRun::default();
-        let mut todo_gate_fires: u32 = 0;
         let mut auth_retry_schedule = AuthRetrySchedule::new();
         let mut turn_span_totals = TurnSpanTotals::default();
         let mut model_fingerprint: Option<String> = None;
@@ -2626,60 +2674,6 @@ impl SessionActor {
             }
             self.send_buffered_xai_update(response_completed).await;
             if tool_calls.is_empty() {
-                if !schema_ok
-                    && !turn_refused
-                    && let Some(gate_cfg) = self.todo_gate_policy()
-                {
-                    let collected = self.collect_todo_gate_input(req_id).await;
-                    let input = collected.as_input();
-                    if let TodoGateDecision::Nudge { reminder, reason } = evaluate_todo_gate(&input)
-                    {
-                        if todo_gate_fires < gate_cfg.max_fires_per_prompt {
-                            todo_gate_fires += 1;
-                            tracing::info!(
-                                prompt_id = %req_id,
-                                pending = ?input.pending,
-                                unbacked_in_progress = ?input.in_progress_unbacked,
-                                backed_in_progress = ?input.in_progress_backed,
-                                backing_task_count = input.backing_task_count,
-                                todo_gate_fires,
-                                reason = reason.as_str(),
-                                "turn-end TodoGate: nudging model to advance remaining todos"
-                            );
-                            self.events
-                                .emit(crate::session::events::Event::TodoGateFired {
-                                    fires: todo_gate_fires,
-                                    pending: input.pending.len(),
-                                    in_progress: input.in_progress_unbacked.len()
-                                        + input.in_progress_backed.len(),
-                                    reason: reason.as_str(),
-                                });
-                            let rendered = self
-                                .tool_bridge_handle()
-                                .render_prompt(&reminder, &serde_json::json!({}))
-                                .await
-                                .unwrap_or(reminder);
-                            self.push_system_reminder(&rendered);
-                            continue;
-                        }
-                        let cap = gate_cfg.max_fires_per_prompt;
-                        tracing::warn!(
-                            prompt_id = %req_id,
-                            todo_gate_cap = cap,
-                            "turn-end TodoGate: exhausted retries, falling through"
-                        );
-                        self.events
-                            .emit(crate::session::events::Event::TodoGateExhausted {
-                                pending: input.pending.len(),
-                            });
-                        self.push_system_reminder(&format!(
-                            "The agent attempted to end this turn {cap} times \
-                             with todos still pending or in_progress. Falling through \
-                             to user. If you want autonomous progress, prompt the agent \
-                             to continue explicitly, or clean up the todo list."
-                        ));
-                    }
-                }
                 if self.drain_pending_interjections().await {
                     tracing::info!("Drained interjection(s) before turn completion — continuing");
                     continue;

@@ -75,6 +75,9 @@ fn is_urgent_token(token: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::is_urgent_token;
+    use crate::app::actions::Action;
+    use crate::slash::command::{CommandResult, SlashCommand};
+    use crate::slash::commands::todo::TodoCommand;
 
     #[test]
     fn only_all_caps_todo_is_urgent() {
@@ -82,6 +85,52 @@ mod tests {
         assert!(is_urgent_token("/TODO"));
         for token in ["todo", "Todo", "ToDo", "tODO", "toDO"] {
             assert!(!is_urgent_token(token), "{token} must not be urgent");
+        }
+    }
+
+    #[test]
+    fn run_with_token_marks_all_caps_as_urgent() {
+        use crate::acp::model_state::ModelState;
+        use crate::app::ScreenMode;
+        use crate::app::bundle::BundleState;
+
+        let cmd = TodoCommand;
+        let models = ModelState::default();
+        let bundle = BundleState::default();
+        let mode = ScreenMode::Fullscreen;
+        // A dispatch-resolved /TODO passes the typed all-caps token through,
+        // which must mark the capture urgent (front-of-list prepend). (TodoCommand
+        // never touches ctx; a minimal one is enough to prove the token wiring.)
+        match cmd.run_with_token(&mut todo_ctx(&models, &bundle, mode), "TODO", "finish the polish")
+        {
+            CommandResult::Action(Action::SendTodo { urgent, .. }) => {
+                assert!(urgent, "/TODO must be urgent");
+            }
+            other => panic!("expected SendTodo urgent, got {other:?}"),
+        }
+        // Lowercase is a normal append.
+        match cmd.run_with_token(&mut todo_ctx(&models, &bundle, mode), "todo", "finish the polish")
+        {
+            CommandResult::Action(Action::SendTodo { urgent, .. }) => {
+                assert!(!urgent, "/todo must not be urgent");
+            }
+            other => panic!("expected SendTodo normal, got {other:?}"),
+        }
+    }
+
+    fn todo_ctx<'a>(
+        models: &'a crate::acp::model_state::ModelState,
+        bundle: &'a crate::app::bundle::BundleState,
+        mode: crate::app::ScreenMode,
+    ) -> crate::slash::command::CommandExecCtx<'a> {
+        crate::slash::command::CommandExecCtx {
+            models,
+            session_id: None,
+            bundle_state: bundle,
+            screen_mode: mode,
+            billing_surface_visible: true,
+            usage_command_visible: true,
+            pager_state: crate::settings::PagerLocalSnapshot::default(),
         }
     }
 

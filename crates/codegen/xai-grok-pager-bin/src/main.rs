@@ -1820,8 +1820,17 @@ fn dispatch_doctor_if_requested(args: &PagerArgs) -> bool {
     true
 }
 fn main() {
-    // Before anything else: a bare `--sandbox` replaces this process with
-    // itself inside bwrap or Seatbelt. Anything started first would run
+    // A `--sandbox` session starts on the host (outside the jail), where we
+    // spawn an unsandboxed `gh` CI-status worker and hand its stream fd into
+    // the jail. The worker is a re-entry of this binary that must run ONLY
+    // the worker loop and exit — before the jail re-exec, or it would try to
+    // sandbox itself and fork another worker.
+    if xai_grok_sandbox::ci_host::is_ci_host_subprocess() {
+        xai_grok_sandbox::ci_host::run_ci_host_worker();
+        std::process::exit(0);
+    }
+    // Before anything else: a `--sandbox=pathbox` (or any `--ro`/`--rw`/`--rn`
+    // path flag) replaces this process with itself inside bwrap or Seatbelt. Anything started first would run
     // outside the jail, and telemetry would count the process twice.
     xai_grok_sandbox::jail::maybe_reexec_into_jail();
     xai_grok_telemetry::startup::mark_process_start();
@@ -1832,6 +1841,13 @@ fn main() {
         std::process::exit(code);
     }
     let args = PagerArgs::parse_cli();
+    // The pathbox CLI contract (bare --sandbox invalid, profile+path-flag mix
+    // invalid) is enforced first by the raw-argv jail pass; this is the
+    // belt-and-suspenders check for any path that reached clap without it.
+    if let Err(msg) = args.validate_sandbox() {
+        eprintln!("error: {msg}");
+        std::process::exit(2);
+    }
     if dispatch_version_if_requested(&args) || dispatch_doctor_if_requested(&args) {
         return;
     }

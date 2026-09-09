@@ -706,10 +706,11 @@ pub struct PagerArgs {
         value_parser = clap::value_parser!(u64).range(1..)
     )]
     pub background_wait_timeout_secs: u64,
-    /// Sandbox profile for filesystem and network access. With no PROFILE,
-    /// run the whole session inside an OS jail (bwrap on Linux, Seatbelt on
-    /// macOS) that binds only `~/.grok`, a dedicated tmpfs, a read-only system
-    /// base, and whatever `--ro`/`--rw` name.
+    /// Sandbox profile for filesystem and network access. `pathbox` selects the
+    /// re-exec jail (bwrap on Linux, Seatbelt on macOS) that binds only
+    /// `~/.grok`, a dedicated tmpfs, a read-only system base, and whatever
+    /// `--ro`/`--rw`/`--rn` name; any other value is a built-in or custom
+    /// grok-build sandbox profile. A `--sandbox` with NO value is invalid.
     #[arg(
         long,
         env = "GROK_SANDBOX",
@@ -718,15 +719,19 @@ pub struct PagerArgs {
         default_missing_value = ""
     )]
     pub sandbox: Option<String>,
-    /// Bind PATH into the `--sandbox` jail read-only. Repeatable. A later
+    /// Bind PATH into the pathbox jail read-only. Repeatable. A later
     /// `--ro`/`--rw` overrides an earlier one for the same path or for a path
-    /// inside it. Implies a bare `--sandbox`.
+    /// inside it. Implies `--sandbox=pathbox`.
     #[arg(long = "ro", value_name = "PATH")]
     pub sandbox_ro: Vec<PathBuf>,
-    /// Bind PATH into the `--sandbox` jail read-write. See `--ro` for
-    /// precedence.
+    /// Bind PATH into the pathbox jail read-write. See `--ro` for precedence.
     #[arg(long = "rw", value_name = "PATH")]
     pub sandbox_rw: Vec<PathBuf>,
+    /// Hide PATH from the pathbox jail (acts as an active deny even when the
+    /// path sits under a visible `--ro`/`--rw` mount or the working directory).
+    /// Repeatable. Implies `--sandbox=pathbox`.
+    #[arg(long = "rn", value_name = "PATH")]
+    pub sandbox_rn: Vec<PathBuf>,
     /// Session storage mode: local or writeback.
     #[arg(long = "storage-mode", value_name = "MODE", hide = true)]
     pub storage_mode: Option<String>,
@@ -1036,6 +1041,32 @@ impl PagerArgs {
             (None, saved) => SandboxStartup::Apply(saved),
         }
     }
+    /// Enforce the pathbox CLI contract (independent of the raw-argv jail pass,
+    /// which stays authoritative for the re-exec):
+    ///  - a `--sandbox` with no value is invalid everywhere;
+    ///  - a non-pathbox `--sandbox <profile>` cannot be combined with
+    ///    `--ro`/`--rw`/`--rn` path flags;
+    ///  - `--sandbox=pathbox` and path flags alone are valid (the pathbox jail).
+    /// Returns `Ok(())` for a valid request or a user-facing error otherwise.
+    pub fn validate_sandbox(&self) -> Result<(), String> {
+        let has_path_flags =
+            !(self.sandbox_ro.is_empty() && self.sandbox_rw.is_empty() && self.sandbox_rn.is_empty());
+        match self.sandbox.as_deref() {
+            Some("") => Err(
+                "a bare `--sandbox` (no profile value) is no longer valid; \
+                 use --sandbox=pathbox for the path-mount jail, or \
+                 --sandbox <profile> for a sandbox profile"
+                    .to_owned(),
+            ),
+            Some(profile) if profile != xai_grok_sandbox::jail::PATHBOX_PROFILE && has_path_flags => {
+                Err(format!(
+                    "cannot combine sandbox profile '{profile}' with --ro/--rw/--rn \
+                     path flags; use --sandbox=pathbox for path mounts"
+                ))
+            }
+            _ => Ok(()),
+        }
+    }
     /// The initial interactive prompt from the positional argument, trimmed.
     ///
     /// Returns `None` when no positional prompt was given or it is only
@@ -1270,27 +1301,43 @@ mod tests {
             SandboxStartup::Apply(None)
         );
     }
-    /// A bare `--sandbox` asks the jail for confinement, not for a profile.
-    /// It must still parse, and it must leave the profile alone.
+    /// A bare `--sandbox` (no value) still *parses* at the clap layer (clap turns
+    /// it into an empty string) but is now an invalid request: it must be
+    /// rejected by `validate_sandbox`, never silently treated as a jail.
     #[test]
-    fn bare_sandbox_parses_and_selects_no_profile() {
+    fn bare_sandbox_parses_but_is_rejected_by_validation() {
         let args = PagerArgs::try_parse_from(["grok", "--sandbox"]).unwrap();
         assert_eq!(args.sandbox.as_deref(), Some(""));
-        assert_eq!(
-            args.startup_sandbox_profile(None),
-            SandboxStartup::Apply(None)
-        );
+        assert!(args.validate_sandbox().is_err(), "bare --sandbox must be invalid");
+        let empty = PagerArgs::try_parse_from(["grok", "--sandbox", ""]).unwrap();
+        assert!(empty.validate_sandbox().is_err(), "--sandbox '' must be invalid");
     }
     #[test]
-    fn ro_and_rw_paths_parse() {
-        let args =
-            PagerArgs::try_parse_from(["grok", "--sandbox", "--rw", "/a", "--ro", "/b", "--rw=/c"])
-                .unwrap();
+    fn ro_rw_rn_paths_parse_and_imply_pathbox() {
+        let args = PagerArgs::try_parse_from(["grok", "--rw", "/a", "--ro", "/b", "--rw=/c", "--rn", "/a/secrets"]).unwrap();
         assert_eq!(
             args.sandbox_rw,
             vec![PathBuf::from("/a"), PathBuf::from("/c")]
         );
         assert_eq!(args.sandbox_ro, vec![PathBuf::from("/b")]);
+        assert_eq!(args.sandbox_rn, vec![PathBuf::from("/a/secrets")]);
+        // Path flags alone mean the pathbox jail: valid, no sandbox profile set.
+        assert!(args.validate_sandbox().is_ok());
+        assert_eq!(args.sandbox.as_deref(), None);
+    }
+    #[test]
+    fn validate_sandbox_rejects_profile_plus_path_flags_and_accepts_pathbox() {
+        // pathbox is valid, alone or with path flags.
+        let ok = PagerArgs::try_parse_from(["grok", "--sandbox=pathbox"]).unwrap();
+        assert!(ok.validate_sandbox().is_ok());
+        let ok = PagerArgs::try_parse_from(["grok", "--sandbox=pathbox", "--rn", "/s"]).unwrap();
+        assert!(ok.validate_sandbox().is_ok());
+        // A real (non-pathbox) profile combined with any path flag is invalid.
+        let bad = PagerArgs::try_parse_from(["grok", "--sandbox", "strict", "--rw", "/a"]).unwrap();
+        assert!(bad.validate_sandbox().is_err());
+        // A plain profile with no path flags is valid.
+        let plain = PagerArgs::try_parse_from(["grok", "--sandbox", "strict"]).unwrap();
+        assert!(plain.validate_sandbox().is_ok());
     }
     #[test]
     fn launch_directory_anchoring_precedes_cwd_change() {

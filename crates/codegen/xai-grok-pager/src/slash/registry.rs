@@ -229,8 +229,14 @@ impl CommandRegistry {
     /// command (the shell may advertise a same-named command with different
     /// semantics).
     pub fn get_for_dispatch(&self, key: &str) -> Option<&Arc<dyn SlashCommand>> {
-        self.key_to_index
-            .get(key)
+        let mut found = self.key_to_index.get(key);
+        if found.is_none() && key.chars().any(|c| c.is_uppercase()) {
+            // Dispatch-tier resolution is case-insensitive: a typed /TODO or
+            // /Todo must reach the lowercase-named `todo` command so the
+            // typed case survives to `run_with_token` (urgent /TODO).
+            found = self.key_to_index.get(&key.to_ascii_lowercase());
+        }
+        found
             .and_then(|idx| self.commands.get(*idx))
             .filter(|cmd| !self.hidden.contains(cmd.name()))
             .filter(|cmd| !self.restricted_match(cmd))
@@ -674,6 +680,23 @@ mod tests {
     }
 
     #[test]
+    fn dispatch_lookup_matches_a_lowercase_name_case_insensitively() {
+        // A typed /TODO or /Todo must reach the (lowercase-named) todo
+        // command, and the case-sensitive typed token must survive to
+        // `run_with_token`. This pins the dispatch-key behavior that makes
+        // `/TODO` urgent rather than an unknown command.
+        let cmd: Arc<dyn SlashCommand> = Arc::new(DummyCommand {
+            name: "todo",
+            aliases: &[],
+        });
+        let registry = CommandRegistry::new(vec![cmd]);
+        // dispatch-tier lookup resolves the uppercase typed name to "todo".
+        assert!(registry.get_for_dispatch("TODO").is_some());
+        assert!(registry.get_for_dispatch("Todo").is_some());
+        assert!(registry.get_for_dispatch("todo").is_some());
+    }
+
+    #[test]
     fn lookup_by_alias() {
         let cmd: Arc<dyn SlashCommand> = Arc::new(DummyCommand {
             name: "exit",
@@ -998,8 +1021,10 @@ mod tests {
         )]);
         assert_eq!(registry.command_count(), 1);
         assert!(registry.is_builtin("login"));
-        assert!(registry.get("Login").is_none());
+        // The colliding ACP "Login" was skipped, so dispatch never resolves it;
+        // case-insensitive dispatch still reaches the builtin `login`.
         assert!(registry.get("local:login").is_none());
+        assert!(registry.get("Login").is_some());
     }
 
     #[test]

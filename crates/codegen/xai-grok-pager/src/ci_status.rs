@@ -379,7 +379,107 @@ fn gh_run_list(repo_root: &Path, branch: &str) -> Option<Vec<GhRun>> {
     (!runs.is_empty()).then_some(runs)
 }
 
+/// Talk to the unsandboxed CI-status host worker for a sandboxed session,
+/// returning an [`Output`] shaped like a `gh` run's stdout.
+///
+/// It is authoritative: when the worker replies with the nothing-usable
+/// sentinel, we hand the caller an `Output` whose body attenuates to "no
+/// runs", so the dot degrades to the "off" state rather than falling through
+/// to an in-jail `gh` spawn. Only a genuinely absent/unusable worker
+/// connection returns `None`.
+fn run_gh_via_ci_host(
+    repo_root: &Path,
+    args: &[&str],
+    fd: i32,
+) -> Option<std::process::Output> {
+    #[cfg(unix)]
+    {
+        let _ = repo_root;
+        let branch = args
+            .windows(2)
+            .find(|pair| pair[0] == "--branch")
+            .map(|pair| pair[1]);
+        let Some(branch) = branch else {
+            return None;
+        };
+        let stream = ci_host_stream(fd)?;
+        let body = xai_grok_sandbox::ci_host::query_ci_host_stream(stream, branch)?;
+        // Carry the payload the same way a real `gh` stdout would, plus a
+        // synthetic success status so the caller's parse path is unchanged.
+        return Some(std::process::Output {
+            status: success_exit_status(),
+            stdout: body,
+            stderr: Vec::new(),
+        });
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (repo_root, args, fd);
+        None
+    }
+}
+
+/// The inherited host-worker stream, opened once per fd and reused for every
+/// poll (the worker is long-lived and full-duplex). Keyed by fd so a fresh
+/// connection (a session restart, or a distinct test peer) gets its own
+/// socket; cloning per call hands each query an owned handle to the same
+/// underlying stream.
+#[cfg(unix)]
+fn ci_host_stream(fd: i32) -> Option<std::os::unix::net::UnixStream> {
+    use std::os::unix::io::FromRawFd as _;
+    static STREAMS: LazyLock<Mutex<HashMap<i32, std::os::unix::net::UnixStream>>> =
+        LazyLock::new(|| Mutex::new(HashMap::new()));
+    let mut map = STREAMS.lock().ok()?;
+    // SAFETY: `fd` names a real socket opened by `spawn_ci_host` on the host
+    // and inherited into this (jailed) process; we take ownership of that fd
+    // exactly once, here, and keep the stream alive for the whole session.
+    let stream = map
+        .entry(fd)
+        .or_insert_with(|| unsafe { std::os::unix::net::UnixStream::from_raw_fd(fd) });
+    stream.try_clone().ok()
+}
+
+/// A successful [`std::process::ExitStatus`] to wrap a host-worker answer so
+/// it reads like a real `gh` run that returned 0.
+fn success_exit_status() -> std::process::ExitStatus {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt as _;
+        std::process::ExitStatus::from_raw(0)
+    }
+    #[cfg(not(unix))]
+    {
+        std::process::ExitStatus::default()
+    }
+}
+
+/// Run the real `gh` CI-status command. Inside a `--sandbox` session this is
+/// answered by the unsandboxed host worker (see [`run_gh_via_ci_host`]) and is
+/// authoritative — a worker that reports nothing usable degrades to "off".
+/// In a normal session it spawns `gh` directly, exactly as before.
 fn run_gh(repo_root: &Path, args: &[&str]) -> Option<std::process::Output> {
+    if let Some(fd) = ci_host_fd() {
+        // Sandboxed: the host worker is the only way to reach `gh`. A result
+        // it reports (or its nothing-usable sentinel) is the answer; never
+        // fall back to spawning `gh` inside the jail, where it may be
+        // confined or reach the wrong environment.
+        return run_gh_via_ci_host(repo_root, args, fd);
+    }
+    run_gh_direct(repo_root, args)
+}
+
+/// The inherited host-worker fd, if this process is a sandboxed session that
+/// was handed one at jail entry.
+fn ci_host_fd() -> Option<i32> {
+    std::env::var(xai_grok_sandbox::ci_host::CI_HOST_FD_ENV)
+        .ok()?
+        .parse()
+        .ok()
+}
+
+/// The direct, unsandboxed `gh` invocation used when no host worker was
+/// handed to us (a normal session).
+fn run_gh_direct(repo_root: &Path, args: &[&str]) -> Option<std::process::Output> {
     let mut cmd = std::process::Command::new("gh");
     cmd.args(args)
         .current_dir(repo_root)
@@ -536,6 +636,7 @@ pub(crate) fn seed_for_test(repo_root: &Path, branch: &str, status: CiStatus, ag
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{Read, Write};
 
     fn run(status: &str, conclusion: &str) -> GhRun {
         run_in("CI", status, conclusion)
@@ -778,6 +879,178 @@ mod tests {
         if let Ok(mut slot) = CI_CHANGE_TX.lock() {
             *slot = None;
         }
+    }
+
+    /// Drive `run_gh_via_ci_host` against an in-process peer speaking the real
+    /// host-worker protocol, returning the `Output` it would hand a caller.
+    /// The peer consumes a request, replies with one JSON line, and verifies
+    /// it was handed the exact `--branch` we asked for (confinement).
+    fn host_peer_reply(json: &'static [u8]) -> std::process::Output {
+        use std::os::unix::net::UnixStream;
+        let (ours, theirs) = UnixStream::pair().expect("pair");
+        let ours_raw = std::os::unix::io::AsRawFd::as_raw_fd(&ours);
+        std::thread::spawn(move || {
+            let mut peer = theirs;
+            let mut buf = [0u8; 8192];
+            let n = peer.read(&mut buf).unwrap();
+            let req = String::from_utf8_lossy(&buf[..n]).to_string();
+            // The request must be the fixed `gh-status <branch>` shape — the
+            // confined worker never accepts anything else. Assert the branch
+            // arrived intact so a mangled token would fail the test.
+            let branch = req
+                .strip_prefix("gh-status ")
+                .expect("request must use the gh-status prefix")
+                .trim_end();
+            assert_eq!(branch, "master", "branch token must survive intact");
+            peer.write_all(json).unwrap();
+            peer.write_all(b"\n").unwrap();
+            peer.flush().unwrap();
+        });
+        // Present the fd to the transport exactly the way the jail boundary
+        // does. `run_gh_via_ci_host` reads it, roots the (real) transport,
+        // and clones one handle per call.
+        unsafe {
+            std::env::set_var(xai_grok_sandbox::ci_host::CI_HOST_FD_ENV, ours_raw.to_string());
+        }
+        let output = run_gh_via_ci_host(
+            Path::new("/repo"),
+            &["run", "list", "--branch", "master"],
+            ours_raw,
+        )
+        .expect("host result");
+        unsafe {
+            std::env::remove_var(xai_grok_sandbox::ci_host::CI_HOST_FD_ENV);
+        }
+        // Leak `ours` so its fd stays open and unique for this test process.
+        // The transport's per-fd cache keys on the fd number; if the fd were
+        // freed here and the OS reused the number for a later test's socket,
+        // the cache would serve the stale stream. Production never reuses a
+        // session's single worker fd, so leaking the test's is exact.
+        std::mem::forget(ours);
+        output
+    }
+
+    #[test]
+    fn sandboxed_query_reduces_a_host_result_to_a_real_status() {
+        // A host worker answering exactly what `gh run list --json` emits: the
+        // shipped `gh_ci_status` reduction must read it and produce Green, not
+        // Off — proving the dot works through the sandbox transport.
+        let json = br#"[{"status":"completed","conclusion":"success","headBranch":"master","workflowName":"CI"}]"#;
+        let output = host_peer_reply(json);
+        // The transport produced a synthetic success `Output` shaped like a
+        // real `gh` run; feed it through the same pure parser the TUI uses.
+        let runs = parse_gh_runs(&output.stdout).expect("parse host JSON");
+        assert_eq!(ci_from_runs(runs.iter().cloned()), CiStatus::Green);
+        assert!(output.status.success(), "host result must read as success");
+    }
+
+    #[test]
+    fn sandboxed_query_yellow_on_an_in_progress_host_result() {
+        let json = br#"[{"status":"in_progress","conclusion":"","headBranch":"master","workflowName":"CI"}]"#;
+        let output = host_peer_reply(json);
+        let runs = parse_gh_runs(&output.stdout).expect("parse host JSON");
+        assert_eq!(ci_from_runs(runs.iter().cloned()), CiStatus::Yellow);
+    }
+
+    #[test]
+    fn sandboxed_query_degrades_to_off_on_a_malformed_host_answer() {
+        // A worker replying with the "." sentinel (its `gh` failed / the
+        // branch had no runs) must read back as no status at all — the
+        // transport reports `None`, so the dot degrades to "off". It must
+        // never panic nor fall through to an in-jail `gh` spawn.
+        use std::os::unix::net::UnixStream;
+        let (ours, theirs) = UnixStream::pair().expect("pair");
+        let ours_raw = std::os::unix::io::AsRawFd::as_raw_fd(&ours);
+        std::thread::spawn(move || {
+            let mut peer = theirs;
+            let mut buf = [0u8; 64];
+            let _ = peer.read(&mut buf);
+            peer.write_all(b".\n").unwrap();
+            peer.flush().unwrap();
+        });
+        unsafe {
+            std::env::set_var(xai_grok_sandbox::ci_host::CI_HOST_FD_ENV, ours_raw.to_string());
+        }
+        let got = run_gh_via_ci_host(
+            Path::new("/repo"),
+            &["run", "list", "--branch", "master"],
+            ours_raw,
+        );
+        unsafe {
+            std::env::remove_var(xai_grok_sandbox::ci_host::CI_HOST_FD_ENV);
+        }
+        std::mem::forget(ours);
+        assert_eq!(got, None, "sentinel must degrade to no status (off)");
+    }
+
+    #[test]
+    fn repeated_polls_reuse_one_host_connection_and_stay_correct() {
+        // The session must poll more than once (continuous refresh), and each
+        // poll must get a fresh, correct answer over the same connection.
+        use std::os::unix::net::UnixStream;
+        let (ours, theirs) = UnixStream::pair().expect("pair");
+        let ours_raw = std::os::unix::io::AsRawFd::as_raw_fd(&ours);
+        std::thread::spawn(move || {
+            let mut peer = theirs;
+            let ok: &[u8] =
+                b"[{\"status\":\"completed\",\"conclusion\":\"success\",\"headBranch\":\"feat/x\",\"workflowName\":\"CI\"}]";
+            let run: &[u8] =
+                b"[{\"status\":\"in_progress\",\"conclusion\":\"\",\"headBranch\":\"feat/x\",\"workflowName\":\"CI\"}]";
+            for answer in [ok, run, ok] {
+                let mut buf = [0u8; 64];
+                let _ = peer.read(&mut buf);
+                peer.write_all(answer).unwrap();
+                peer.write_all(b"\n").unwrap();
+                peer.flush().unwrap();
+            }
+        });
+        unsafe {
+            std::env::set_var(xai_grok_sandbox::ci_host::CI_HOST_FD_ENV, ours_raw.to_string());
+        }
+        // Three successive polls over the single inherited connection. The
+        // first poll's success transitions to the in-progress yellow the dot
+        // animates, then settles green — a mini session lifecycle.
+        let first = run_gh_via_ci_host(
+            Path::new("/repo"),
+            &["run", "list", "--branch", "feat/x"],
+            ours_raw,
+        )
+        .expect("first");
+        let second = run_gh_via_ci_host(
+            Path::new("/repo"),
+            &["run", "list", "--branch", "feat/x"],
+            ours_raw,
+        )
+        .expect("second");
+        let third = run_gh_via_ci_host(
+            Path::new("/repo"),
+            &["run", "list", "--branch", "feat/x"],
+            ours_raw,
+        )
+        .expect("third");
+        unsafe {
+            std::env::remove_var(xai_grok_sandbox::ci_host::CI_HOST_FD_ENV);
+        }
+        // Keep this test's worker fd unique across the process; see the
+        // sibling `host_peer_reply` for why.
+        std::mem::forget(ours);
+
+        let s1 = ci_from_runs(parse_gh_runs(&first.stdout).expect("a").iter().cloned());
+        let s2 = ci_from_runs(parse_gh_runs(&second.stdout).expect("b").iter().cloned());
+        let s3 = ci_from_runs(parse_gh_runs(&third.stdout).expect("c").iter().cloned());
+        assert_eq!(s1, CiStatus::Green);
+        assert_eq!(s2, CiStatus::Yellow);
+        assert_eq!(s3, CiStatus::Green);
+    }
+
+    #[test]
+    fn sandboxed_query_with_no_branch_is_degraded_off() {
+        // Without a `--branch` in the args there is nothing to ask the worker
+        // for; the transport must refuse rather than query garbage.
+        assert_eq!(
+            run_gh_via_ci_host(Path::new("/repo"), &["run", "list"], 0),
+            None
+        );
     }
 
     #[test]

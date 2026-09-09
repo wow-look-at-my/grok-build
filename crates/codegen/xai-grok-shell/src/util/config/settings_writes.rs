@@ -31,6 +31,11 @@ pub async fn set_confirm_before_rewind(value: bool) -> Result<()> {
     update_config(|cfg| cfg.ui.confirm_before_rewind = Some(value)).await
 }
 
+/// Persist `[ui].stop_gate_unfinished_todos` via `update_config`.
+pub async fn set_stop_gate_unfinished_todos(value: bool) -> Result<()> {
+    update_config(|cfg| cfg.ui.stop_gate_unfinished_todos = Some(value)).await
+}
+
 /// Persist `[ui].combine_queued_prompts` via `update_config`.
 pub async fn set_combine_queued_prompts(value: bool) -> Result<()> {
     update_config(|cfg| cfg.ui.combine_queued_prompts = Some(value)).await

@@ -1513,6 +1513,12 @@ pub fn apply_sandbox(
             xai_grok_sandbox::ProfileName::Off
         });
     xai_grok_sandbox::set_configured_profile(&resolved.value);
+    // The pathbox jail is the re-exec jail (jail.rs), applied before this
+    // function runs. It is reported as a confining profile (so leader/workspace
+    // gates treat it as confined) but never drives a nono `SandboxManager`.
+    if sandbox_profile == xai_grok_sandbox::ProfileName::Pathbox {
+        return;
+    }
     let workspace = cwd
         .and_then(|p| dunce::canonicalize(p).ok())
         .or_else(|| std::env::current_dir().ok())

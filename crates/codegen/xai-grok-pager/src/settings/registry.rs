@@ -523,6 +523,9 @@ pub fn current_value_for(
             crate::appearance::cache::load_combine_queued_prompts(),
         )),
         "confirm_before_rewind" => Some(SettingValue::Bool(ui.confirm_before_rewind_enabled())),
+        "stop_gate_unfinished_todos" => Some(SettingValue::Bool(
+            ui.stop_gate_unfinished_todos_enabled(),
+        )),
         "simple_mode" => Some(SettingValue::Bool(ui.simple_mode.unwrap_or(true))),
         // Per-tip contextual hints — `None` (inherit) reads as the default ON.
         "contextual_hints.undo" => {
@@ -848,6 +851,13 @@ mod tests {
                         *default,
                         ui.confirm_before_rewind_enabled(),
                         "confirm_before_rewind default drifts from UiConfig::default()"
+                    );
+                }
+                ("stop_gate_unfinished_todos", SettingKind::Bool { default }) => {
+                    assert_eq!(
+                        *default,
+                        ui.stop_gate_unfinished_todos_enabled(),
+                        "stop_gate_unfinished_todos default drifts from UiConfig::default()"
                     );
                 }
                 ("combine_queued_prompts", SettingKind::Bool { default }) => {

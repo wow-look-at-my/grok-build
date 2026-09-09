@@ -21,16 +21,19 @@ grok --sandbox strict
 
 ---
 
-## Whole-process jail (`--sandbox` with no profile)
+## The pathbox jail (`--sandbox=pathbox` or a path flag)
 
-`--sandbox` with no profile name puts the whole session inside an OS jail. Grok replaces itself with `bwrap` on Linux, or `sandbox-exec` on macOS, before it starts any work. The agent runs in the jail, and so does every command it spawns.
+The **pathbox** jail puts the whole session inside an OS jail. Grok replaces itself with `bwrap` on Linux, or `sandbox-exec` on macOS, before it starts any work. The agent runs in the jail, and so does every command it spawns. It is a reserved profile name: `--sandbox=pathbox` selects it, and it cannot be redefined by a custom `sandbox.toml` profile.
 
 ```bash
 # Nothing but ~/.grok, a tmpfs, and a read-only system base
-grok --sandbox
+grok --sandbox=pathbox
 
 # Work in this directory, but keep one subtree readable only
-grok --sandbox --rw . --ro ./secrets
+grok --sandbox=pathbox --rw . --ro ./secrets
+
+# The path flags alone imply the pathbox jail:
+grok --rw . --ro ./secrets
 ```
 
 The jail binds these paths, in this order:
@@ -44,11 +47,11 @@ Order is precedence. A later flag beats an earlier one for the same path, and fo
 
 Nothing else is bound. Your home directory, other checkouts, and `/data` are absent from the jail. The working directory must be bound. Grok refuses to start when nothing binds it.
 
-macOS confines writes only. The Seatbelt profile allows reads and denies every write. It then gives back the `--rw` paths, `~/.grok` and a dedicated temp directory. `--ro` means "not writable" there. Linux confines both reads and writes.
+macOS confines writes only. The Seatbelt profile allows reads and denies every write. It then gives back the `--rw` paths, `~/.grok` and a dedicated temp directory. `--ro` means "not writable" there. Linux confines both reads and writes. A `--rn` path is hidden on both.
 
-One spelling to avoid: `grok --sandbox "fix the bug"` reads the prompt as a profile name. `--sandbox` takes the next word as its value when that word is not a flag. Put another flag after it, or put the prompt first: `grok "fix the bug" --sandbox`.
+A bare `--sandbox` with no value is **invalid** — use `--sandbox=pathbox` (or a path flag) for the jail, or `--sandbox <profile>` for a profile. Nor can you mix the two on one command line: `--sandbox <profile>` plus any `--ro`/`--rw`/`--rn` is rejected. One spelling to still avoid: the profile form `--sandbox <profile>` takes the next word as its value when that word is not a flag, so `grok --sandbox "fix the bug"` reads the prompt as a profile name. Put another flag after it, or put the prompt first.
 
-This jail and the profiles below are separate features. `--sandbox <profile>` selects a profile and builds no jail. Pass a profile name to get the `deny` lists and the child-network rules.
+The pathbox jail and the profiles below are separate features. `--sandbox <profile>` selects a profile and builds no jail. Pass a profile name to get the `deny` lists and the child-network rules.
 
 ---
 

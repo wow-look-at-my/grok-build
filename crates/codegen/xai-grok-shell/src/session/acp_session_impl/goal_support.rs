@@ -1823,9 +1823,13 @@ impl SessionActor {
         )
     }
 
-    /// Push the tool-layer `GoalLoopActive` flag so per-tool-call bg-task /
-    /// subagent completion reminders suppress themselves while the goal loop
-    /// drives the turn. Mirrors the `CurrentPromptIdResource` push.
+    /// Push the tool-layer `GoalLoopActive` flag so per-tool-call SUBAGENT
+    /// completion reminders suppress themselves while the goal loop drives the
+    /// turn (the loop consumes its own subagent results). Background bash/monitor
+    /// completions are NOT gated here — they surface at the next tool-call
+    /// boundary regardless, since a reminder riding a tool result interrupts
+    /// nothing; only the notification bridge's auto-wake prompt (which does
+    /// interrupt) stays goal-gated. Mirrors the `CurrentPromptIdResource` push.
     ///
     /// Also mirrors the value into `tool_context.goal_loop_active_gate`, the
     /// shared `Arc<AtomicBool>` the notification bridge (bash auto-wake) and

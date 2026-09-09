@@ -51,6 +51,13 @@ pub struct UiConfig {
     /// Written by the pager's settings modal / rewind "Yes, and don't ask again".
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub confirm_before_rewind: Option<bool>,
+    /// Gate the model's turn end on unfinished todos: like a stop hook, the
+    /// model is sent back to finish or close them, and only after the stop-hook
+    /// continuation budget is exhausted can it stop anyway. `None` = on
+    /// (default). Written by the pager's settings modal
+    /// (`[ui].stop_gate_unfinished_todos`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stop_gate_unfinished_todos: Option<bool>,
     /// Theme to use when the OS is in dark mode. Written by the pager's theme persist module.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auto_dark_theme: Option<String>,
@@ -262,6 +269,7 @@ impl Default for UiConfig {
             show_timeline: None,
             page_flip_on_send: None,
             confirm_before_rewind: None,
+            stop_gate_unfinished_todos: None,
             auto_dark_theme: None,
             auto_light_theme: None,
             scroll_speed: None,
@@ -328,6 +336,14 @@ impl UiConfig {
             .unwrap_or(Self::CONFIRM_BEFORE_REWIND_DEFAULT)
     }
 
+    /// Default for [`Self::stop_gate_unfinished_todos`] when unset.
+    pub const STOP_GATE_UNFINISHED_TODOS_DEFAULT: bool = true;
+
+    pub fn stop_gate_unfinished_todos_enabled(&self) -> bool {
+        self.stop_gate_unfinished_todos
+            .unwrap_or(Self::STOP_GATE_UNFINISHED_TODOS_DEFAULT)
+    }
+
     /// True when the highlight should not timer-dismiss (`hold` / `word_select`,
     /// or legacy duration 0).
     pub fn keep_text_selection_enabled(&self) -> bool {
@@ -360,6 +376,16 @@ mod tests {
             ..Default::default()
         };
         assert!(!off.confirm_before_rewind_enabled());
+    }
+
+    #[test]
+    fn stop_gate_unfinished_todos_defaults_on() {
+        assert!(UiConfig::default().stop_gate_unfinished_todos_enabled());
+        let off = UiConfig {
+            stop_gate_unfinished_todos: Some(false),
+            ..Default::default()
+        };
+        assert!(!off.stop_gate_unfinished_todos_enabled());
     }
 
     #[test]

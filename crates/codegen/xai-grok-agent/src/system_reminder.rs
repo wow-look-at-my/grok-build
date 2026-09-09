@@ -18,6 +18,11 @@ pub struct ReminderPolicy {
     pub todo_nudge: TodoNudgeConfig,
     /// Configuration for the runtime turn-end TodoGate.
     pub todo_gate: TodoGateConfig,
+    /// Master switch for the built-in todo-stop gate: at the turn-end stop
+    /// gate the model is sent back to its unfinished todos (consuming the same
+    /// continuation budget as stop hooks) before being allowed to stop.
+    /// Default ON; driven by the persisted `[ui].stop_gate_unfinished_todos`.
+    pub stop_gate_unfinished_todos: bool,
 }
 
 impl Default for ReminderPolicy {
@@ -26,6 +31,7 @@ impl Default for ReminderPolicy {
             enabled: true,
             todo_nudge: TodoNudgeConfig::default(),
             todo_gate: TodoGateConfig::default(),
+            stop_gate_unfinished_todos: true,
         }
     }
 }
