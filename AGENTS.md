@@ -147,6 +147,8 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - **The index fetch and publish have an offline test.** A stub service backed by a directory drives `measure-compile.sh` through both legs. That is what found the drain race. It needs no network and no runner.
 - **A cap that changes nothing is not the limiter.** Give every cap a second leg that raises it. Watching the peak stay put is what named the descriptor above.
 - **The compile-slot picker needs no fixing.** `$$ % SLOTS` reaches full utilisation under load. Process-id collisions do not cost a slot at these sizes.
+- **A restored artifact keeps its content and loses its mode.** binpazer stores payloads and models no permission. The names block carries the mode beside the name for that reason. Without it a build script's own binary comes back unexecutable. Cargo then answers `Permission denied ... (never executed)` on a hit. A local hit hardlinks and keeps the bit. So only an entry from the service was affected.
+- **`diff -r` cannot see a lost permission.** The round-trip probe compared content alone. It passed every run while that defect shipped. It now packs an executable and compares the modes apart from the content.
 - **The restore path is not what makes a warm build slow.** A warm pass over a populated store is all wrapper and no compiler. A CI runner is a fresh VM, and its local store is empty. So every hit there is a network fetch. That is the cost worth attacking. The measurements below come from a box with more cores than the runner. They bound the wrapper. They do not bound the runner.
 
 ```

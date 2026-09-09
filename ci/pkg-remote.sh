@@ -86,14 +86,19 @@ BINPAZER="${BINPAZER:-binpazer}"
 TYPE_ARTIFACT=1
 TYPE_NAMES=2
 
-# The names block. binpazer stores payloads and does not model a file name, so the names travel as
-# their own critical block, in the order the artifact blocks were written.
+# The names block. binpazer stores payloads and does not model a file name or a permission, so both
+# travel as their own critical block, in the order the artifact blocks were written.
+#
+# The mode rides with the name because a package's artifact set includes the build script's own
+# binary. Restored without its execute bit, cargo answers "could not execute process ... (never
+# executed) ... Permission denied" and the build dies on a hit. A local hit hardlinks and never lost
+# it, so this reaches only the entries that come back from the service.
 write_manifest() {
 	local d="$1" f names_json=""
 	local list=""
 	for f in "$d"/*; do
 		[ -f "$f" ] || continue
-		list="$list$(basename "$f")
+		list="$list$(stat -c %a "$f") $(basename "$f")
 "
 	done
 	[ -n "$list" ] || return 1
@@ -117,7 +122,7 @@ write_manifest() {
 # PKG_CACHE_SALT scopes it further. A measurement sets it per run, so the cold leg meets an empty
 # keyspace and the warm leg behind it meets what that cold leg wrote. Without it a cold leg is cold
 # exactly once, and every later one is served by an earlier run while still calling itself cold.
-VERSION="$(printf 'pkg-cache-binpazer-v1%s' "${PKG_CACHE_SALT:-}" | sha256sum | cut -d' ' -f1)"
+VERSION="$(printf 'pkg-cache-binpazer-v2%s' "${PKG_CACHE_SALT:-}" | sha256sum | cut -d' ' -f1)"
 
 # A 429 is reported, never folded into the miss path: a throttled fetch reads as a slow compile, and
 # that is the one failure a timing run must not absorb quietly.
@@ -182,9 +187,14 @@ get_once)
 	namefile="$blob.names"
 	"$BINPAZER" extract "$blob" --type "$TYPE_NAMES" -o "$namefile" 2>/dev/null || exit 1
 	i=0
-	while IFS= read -r name; do
-		[ -n "$name" ] || continue
+	# Each line is the mode, a space, then the name. A name may hold spaces, a mode may not, so the
+	# split is on the FIRST space only.
+	while IFS= read -r line; do
+		[ -n "$line" ] || continue
+		mode="${line%% *}"
+		name="${line#* }"
 		"$BINPAZER" extract "$blob" --type "$TYPE_ARTIFACT" --index "$i" -o "$dir/$name" 2>/dev/null || exit 1
+		chmod "$mode" "$dir/$name" || exit 1
 		i=$((i + 1))
 	done < "$namefile"
 	rm -f "$namefile"
