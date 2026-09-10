@@ -753,7 +753,18 @@ pub(crate) async fn spawn_session_actor(
         ),
         two_pass_enabled,
     };
-    let reminder_policy = resolve_reminder_policy(remote_settings.as_ref(), todo_gate);
+    // The persisted `[ui].stop_gate_unfinished_todos` toggle (default ON,
+    // written by the pager's settings modal) is the master switch for the
+    // built-in todo-stop gate: it participates in the turn-end stop gate and
+    // consumes the same continuation budget the stop hooks use. The CLI
+    // `--todo-gate` flag stays a session-scoped opt-in on top.
+    let mut reminder_policy = resolve_reminder_policy(remote_settings.as_ref(), todo_gate);
+    reminder_policy.stop_gate_unfinished_todos = effective_cfg
+        .as_ref()
+        .and_then(|cfg| cfg.get("ui"))
+        .and_then(|ui| ui.get("stop_gate_unfinished_todos"))
+        .and_then(toml::Value::as_bool)
+        .unwrap_or(true);
     let (user_question_tx, user_question_rx) = tokio::sync::mpsc::unbounded_channel::<
         xai_grok_tools::implementations::grok_build::ask_user_question::types::UserQuestionRequest,
     >();

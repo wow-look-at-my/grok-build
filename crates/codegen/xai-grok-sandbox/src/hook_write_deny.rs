@@ -16,7 +16,9 @@ use crate::paths::grok_home;
 use crate::profiles::ProfileName;
 
 pub fn profile_enforces_hook_write_deny(profile: &ProfileName) -> bool {
-    !matches!(profile, ProfileName::Devbox | ProfileName::Off)
+    // The pathbox jail is not a nono/SandboxManager profile and does not engage
+    // this hook; devbox and off never enforce it either.
+    !matches!(profile, ProfileName::Devbox | ProfileName::Off | ProfileName::Pathbox)
 }
 
 #[derive(Debug, thiserror::Error)]

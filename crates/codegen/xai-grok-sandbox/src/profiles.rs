@@ -71,6 +71,11 @@ pub enum ProfileName {
     Devbox,
     ReadOnly,
     Strict,
+    /// The reserved re-exec **jail** (path mounts via `--ro`/`--rw`/`--rn`), not
+    /// a nono/Landlock/Seatbelt profile. Magic and un-overridable: a project or
+    /// custom `sandbox.toml` profile cannot redefine it, and it never builds a
+    /// `SandboxProfile`/`SandboxManager`.
+    Pathbox,
     Off,
     Custom(String),
 }
@@ -88,6 +93,7 @@ impl std::fmt::Display for ProfileName {
             Self::Devbox => write!(f, "devbox"),
             Self::ReadOnly => write!(f, "read-only"),
             Self::Strict => write!(f, "strict"),
+            Self::Pathbox => write!(f, "pathbox"),
             Self::Off => write!(f, "off"),
             Self::Custom(name) => write!(f, "{name}"),
         }
@@ -102,6 +108,7 @@ impl std::str::FromStr for ProfileName {
             "devbox" => Ok(Self::Devbox),
             "read-only" | "readonly" => Ok(Self::ReadOnly),
             "strict" => Ok(Self::Strict),
+            "pathbox" => Ok(Self::Pathbox),
             "off" | "none" => Ok(Self::Off),
             // Anything else is treated as a custom profile name.
             // Validation happens when we try to load it from config.
@@ -349,6 +356,15 @@ impl ProfileName {
                  choose a built-in base (workspace, devbox, read-only, strict)"
             ),
 
+            // The pathbox jail is not a nono/Landlock/Seatbelt profile: it is
+            // applied by the re-exec jail (jail.rs) and `apply_sandbox` returns
+            // before reaching resolve. Reaching here means a call site skipped
+            // that interception — fail closed rather than build a hollow profile.
+            Self::Pathbox => anyhow::bail!(
+                "sandbox profile 'pathbox' is the path-mount jail, not a resolvable \
+                 deny profile; it is applied by the re-exec jail, not SandboxManager"
+            ),
+
             Self::Workspace => Ok(SandboxProfile {
                 name: "workspace".to_string(),
                 read_only: vec![],
@@ -538,6 +554,10 @@ mod tests {
         );
         assert_eq!("off".parse::<ProfileName>().unwrap(), ProfileName::Off);
         assert_eq!("none".parse::<ProfileName>().unwrap(), ProfileName::Off);
+        assert_eq!(
+            "pathbox".parse::<ProfileName>().unwrap(),
+            ProfileName::Pathbox
+        );
         // Unknown names become Custom profiles
         assert_eq!(
             "my-custom-profile".parse::<ProfileName>().unwrap(),

@@ -135,6 +135,41 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - `output_config.effort` is 4.6-and-later too. So the older dialect sends the effort as `budget_tokens` instead and nothing beside it. `output_config.format` is untouched — structured outputs are not what 4.6 changed.
 - A budget must clear the API's 1024 floor and stay under `max_tokens`. One that cannot do both leaves thinking off with a warning, rather than sending a request the API answers with a 400.
 
+## CI compile-cache notes
+
+- **A bulk `actions/cache` of `SCCACHE_DIR` does not work, and was removed.** An Actions cache entry is immutable. A key naming only the lockfile is therefore written one time and frozen. Measured: the restored entry stayed at 109 MB while the store reached 1.97 GB. The disk layer served 331 hits against 2450 misses. Every run discarded the 1389 objects it had just compiled. The store is the GHA layer's own per-object entries.
+- **`RUSTC: ci/rustc-gate.sh` does NOT cap cache misses.** Measured on the full workspace: 484 gate invocations. Against that, 491 non-cacheable calls and 2374 Rust misses. sccache execs the compiler it was handed only for calls it refuses to cache. A cacheable miss compiles without passing through the gate. So the semaphore caps the wrong set and the outer `-j` runs unguarded.
+- A probe crate said the opposite, and it was wrong. There a cold pass reached the gate 30 times and a warm pass 21, and the difference matched the 9 misses. Do not generalise gate behaviour from a small crate.
+- The gate's cap itself is sound and has a negative control. Launching 12 against 12 slots peaks at 12. Launching 12 against 3 slots peaks at 3, and all 12 still run. What is unsound is what reaches it.
+- **A detached upload inherits the compile slot unless the wrapper closes it.** Bash leaves a `{var}<` redirection open after the command it is written on. A lock is released only when its last descriptor closes. So the upload held a compile slot for its whole transfer. `exec {slot_fd}<&-` after the compile block fixes it.
+- **A lock a forked child needs is taken before the fork.** The upload took its shared lock inside the child. A drain that arrived between the wrapper exiting and the child locking returned early. The entry then reached no service, and the next run recompiled it while the warm leg called it a hit.
+- **A fetch that lands and fails to restore is not a miss.** Both spell compile it again. Only one says the service lacks the entry. `remote-restore-failed` is counted apart so a warm leg names which end broke.
+- **The index fetch and publish have an offline test.** A stub service backed by a directory drives `measure-compile.sh` through both legs. That is what found the drain race. It needs no network and no runner.
+- **A cap that changes nothing is not the limiter.** Give every cap a second leg that raises it. Watching the peak stay put is what named the descriptor above.
+- **The compile-slot picker needs no fixing.** `$$ % SLOTS` reaches full utilisation under load. Process-id collisions do not cost a slot at these sizes.
+- **A restored artifact keeps its content and loses its mode.** binpazer stores payloads and models no permission. The names block carries the mode beside the name for that reason. Without it a build script's own binary comes back unexecutable. Cargo then answers `Permission denied ... (never executed)` on a hit. A local hit hardlinks and keeps the bit. So only an entry from the service was affected.
+- **`diff -r` cannot see a lost permission.** The round-trip probe compared content alone. It passed every run while that defect shipped. It now packs an executable and compares the modes apart from the content.
+- **The index key names the technique.** A cache entry is immutable, so one shared key is frozen by whichever leg publishes first. A leg that runs no wrapper stores nothing. Its empty index reached the warm pkgcache leg, which held every key to be absent and recompiled the workspace. A leg with no wrapper now publishes no index at all.
+- **A warm leg that serves nothing must fail.** It reported success, because the only guard read the throttle counter. Its wall time then reads as the technique's warm cost and is a cold build. The guard now reads the hit counters. A cold leg that cannot publish its index fails for the same reason.
+- **The restore path is not what makes a warm build slow.** A warm pass over a populated store is all wrapper and no compiler. A CI runner is a fresh VM, and its local store is empty. So every hit there is a network fetch. That is the cost worth attacking. The measurements below come from a box with more cores than the runner. They bound the wrapper. They do not bound the runner.
+
+```
+detached upload, stub upload of 1 s, 12 calls   before: 4267 ms   after: 171 ms   one call: 54 ms
+  concurrent uploads, cap 3 -> cap 8            before: 3 -> 3    after: 3 -> 7
+compile slots reached, 12 calls / 3 slots       3        24 calls / 8 slots      8
+warm pass, 2836 entries, -j16, no cache service 12660 ms  4 ms/call  2836 hits  5672 files
+```
+
+- **A cold full build at `-j16` with no compile cache cannot finish here.** Measured 8 times out of 8, on eight separate runners: the compile is killed with exit 143 after the runner's 15 GiB is exhausted. That leg is gone from `ci.yml` because its answer is settled, not because it was inconvenient. `-j16` is usable only behind the wrapper's compile semaphore, which caps the compiles that hold memory while restores stay unpaced.
+- **A cold full build exceeds `timeout-minutes: 45`.** Measured at `-j16`: build-test compiled for 1935 s and the job was cancelled 745 s into its tests. Cold compile steps were 1935 s, 1676 s, 1623 s and 1247 s.
+- `workflow_dispatch` takes a `cold` input that sets `SCCACHE_RECACHE`. A cold build can therefore be timed against the same keys without touching any of them.
+- A cancelled step still carries both timestamps, so its duration reads as a plausible measurement and is not one. Check `conclusion` before quoting any step time.
+- `actions/cache` restores the disk level in one download before the compile. That is the only prefetch available here. An sccache key is a hash of preprocessed input. It does not exist until the build reaches that unit. So no key can be fetched ahead of need on its own.
+- Actions cache entries are immutable and are evicted WHOLE. So the disk level must never be the only copy. The GHA level holds the same objects individually. A disk level that is stale, trimmed or evicted falls through to it rather than recompiling.
+- Sizing is against the repository's 10 GB. `SCCACHE_CACHE_SIZE` is 2G, and 3G on the key `build-test` and `pty-e2e` share, whose store measures 2.0 GB. One generation is about 7 GB. So a lockfile bump leaves a superseded generation for LRU to drop before it reaches a live one.
+- `SCCACHE_IDLE_TIMEOUT: "0"` is what makes any of this observable. The server exits after 600s idle, and the test step is a longer gap than that. The post-job `--show-stats` then reports a fresh server's zeroes instead of the build's numbers.
+- The runner is an EPYC 7763 with 2 physical cores plus SMT, 15 GiB, and 337/394 MB/s sequential disk. A developer box with 4 physical cores is faster. So a local build time is optimistic and does not transfer as an equal.
+
 ## Why build-test is not on the self-hosted runner
 
 Pointing `build-test` at `vars.CI_RUNNER` turns ~20 tests red, because they assert on host semantics the org's lean image does not provide. Measured on that runner, with unmodified test sources:
@@ -144,6 +179,13 @@ Pointing `build-test` at `vars.CI_RUNNER` turns ~20 tests red, because they asse
 - no UTF-8 locale by default, so `xai-grok-sandbox`'s `fails_closed_on_non_utf8_*` hit errno 84.
 
 Every one of those is the test doing its job. Making them pass there means weakening what they check, so the fix belongs to the runner image (an init/reaper, a real filesystem for `/tmp`) and that image is the fleet's, not this repo's. Revisit the runner once it has one. Until then this job is `runs-on: ubuntu-latest`, which is what `master` builds green on.
+
+## Todo-stop-gate notes
+
+- The built-in todo gate is a participant in the turn-end STOP-HOOK gate, not a mechanism beside it (`acp_session_impl/turn.rs`, on `StopGateDecision::AllowStop`). It fires only after the user hooks allowed the stop. Its reminder rides the same `stop_hook_feedback` user message a hook block uses. It consumes the SAME `stop_continuations_this_turn` budget. So `MAX_STOP_HOOK_CONTINUATIONS_PER_TURN` is the stuck-release: a model that never engages its todos stops anyway.
+- Two switches, and they are ORed, not ANDed (`todo_stop_gate_enabled`). The persisted `[ui].stop_gate_unfinished_todos` toggle ships ON and is the switch. `todo_gate.enabled` (remote `todo_gate_enabled`, or the `--todo-gate` CLI force-enable) is an opt-in on top, for a session whose toggle the user turned off. ANDing them is what shipped the feature dead: `TodoGateConfig::default().enabled` is false, so every default session took the `None` arm and the gate never ran.
+- `todo_gate_applicable` is the other half and still binds. It allows no gate while the goal loop is active, because the continuation directive drives the loop there. It allows no gate for a prompt that carries no `<task_completion_discipline>` block.
+- `todo_stop_gate_blocks` is pure and table-tested. The actor supplies the toggle, the shared continuation counter, and `evaluate_todo_gate` over the live todo state.
 
 ## Workflow agent-concurrency notes
 

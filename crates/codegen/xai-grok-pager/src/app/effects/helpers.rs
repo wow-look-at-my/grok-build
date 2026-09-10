@@ -1085,6 +1085,14 @@ pub(crate) async fn persist_setting(
                 .await
                 .map_err(|e| e.to_string())
         }
+        "stop_gate_unfinished_todos" => {
+            let SettingValue::Bool(b) = value else {
+                return Err(kind_mismatch("stop_gate_unfinished_todos", "Bool", &value));
+            };
+            xai_grok_shell::util::config::set_stop_gate_unfinished_todos(b)
+                .await
+                .map_err(|e| e.to_string())
+        }
         "combine_queued_prompts" => {
             let SettingValue::Bool(b) = value else {
                 return Err(kind_mismatch("combine_queued_prompts", "Bool", &value));

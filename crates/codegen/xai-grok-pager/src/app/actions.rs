@@ -554,6 +554,10 @@ pub enum Action {
     SetPageFlipOnSend(bool),
     /// Set `[ui].confirm_before_rewind` (default ON). Persists via `Effect::PersistSetting`.
     SetConfirmBeforeRewind(bool),
+    /// Set `[ui].stop_gate_unfinished_todos` (default ON). Persists via
+    /// `Effect::PersistSetting`. Gates the session Stop gesture while the todo
+    /// list has unfinished items.
+    SetStopGateUnfinishedTodos(bool),
     /// Set whether the drain call site merges the run of leading queued
     /// `Prompt` entries into one turn instead of sending them one by one.
     /// SHARED-owned: updates the process-wide cache mirror (read by the

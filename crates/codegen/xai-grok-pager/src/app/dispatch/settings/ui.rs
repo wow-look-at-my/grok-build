@@ -11,7 +11,8 @@ use super::setters::{
     set_multiline_mode, set_page_flip_on_send_inner, set_prompt_suggestions_inner,
     set_remember_tool_approvals_inner, set_render_mermaid_inner, set_respect_manual_folds_inner,
     set_screen_mode_inner, set_scroll_lines_inner, set_scroll_mode_inner, set_scroll_speed_inner,
-    set_show_thinking_blocks_inner, set_show_tips_inner, set_simple_mode_inner, set_theme_inner,
+    set_show_thinking_blocks_inner, set_show_tips_inner, set_simple_mode_inner,
+    set_stop_gate_unfinished_todos_inner, set_theme_inner,
     set_timeline_inner, set_timestamps, set_timestamps_inner, set_vim_mode_inner,
     set_voice_capture_mode_inner, set_voice_keybind_enabled_inner, set_voice_stt_language_inner,
 };
@@ -761,6 +762,9 @@ pub(in crate::app::dispatch) fn action_for_reset(
         ("confirm_before_rewind", SettingValue::Bool(b)) => {
             Some(Action::SetConfirmBeforeRewind(*b))
         }
+        ("stop_gate_unfinished_todos", SettingValue::Bool(b)) => {
+            Some(Action::SetStopGateUnfinishedTodos(*b))
+        }
         ("combine_queued_prompts", SettingValue::Bool(b)) => {
             Some(Action::SetCombineQueuedPrompts(*b))
         }
@@ -959,6 +963,9 @@ pub(in crate::app::dispatch) fn apply_setting_rollback(
         ("page_flip_on_send", SettingValue::Bool(b)) => set_page_flip_on_send_inner(app, *b),
         ("confirm_before_rewind", SettingValue::Bool(b)) => {
             set_confirm_before_rewind_inner(app, *b)
+        }
+        ("stop_gate_unfinished_todos", SettingValue::Bool(b)) => {
+            set_stop_gate_unfinished_todos_inner(app, *b)
         }
         ("combine_queued_prompts", SettingValue::Bool(b)) => {
             set_combine_queued_prompts_inner(app, *b)

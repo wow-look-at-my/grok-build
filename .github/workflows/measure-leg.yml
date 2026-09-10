@@ -1,0 +1,83 @@
+name: Measure leg
+
+# One leg of the caching measurement: time a full workspace compile and report what the cache served.
+on:
+  workflow_call:
+    inputs:
+      technique:
+        description: Name this leg reports itself as.
+        required: true
+        type: string
+      phase:
+        description: cold or warm, which is what the reader compares.
+        required: true
+        type: string
+      jobs:
+        description: The outer cargo -j.
+        required: true
+        type: string
+      wrapper:
+        description: RUSTC_WRAPPER path relative to the workspace, empty for none.
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  leg:
+    name: ${{ inputs.phase }} ${{ inputs.technique }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Install protoc (pinned v29.3)
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/protoc.zip" \
+            https://github.com/protocolbuffers/protobuf/releases/download/v29.3/protoc-29.3-linux-x86_64.zip
+          echo "3e866620c5be27664f3d2fa2d656b5f3e09b5152b42f1bedbf427b333e90021a  $RUNNER_TEMP/protoc.zip" | sha256sum -c -
+          unzip -q -o "$RUNNER_TEMP/protoc.zip" -d "$RUNNER_TEMP/protoc"
+          echo "PROTOC=$RUNNER_TEMP/protoc/bin/protoc" >> "$GITHUB_ENV"
+
+      - name: Install Rust toolchain (pinned by rust-toolchain.toml)
+        run: rustup show
+
+      - name: Install mold
+        run: sudo apt-get install -y mold
+
+      # The cache container format. Without it every remote call fails and the leg silently measures no cache.
+      - name: Install binpazer
+        run: |
+          curl -fSsL --location-trusted \
+            "https://dl.pazer.build/bin-file-fmt/binpazer?os=linux&arch=amd64" -o "$RUNNER_TEMP/binpazer"
+          chmod +x "$RUNNER_TEMP/binpazer"
+          echo "BINPAZER=$RUNNER_TEMP/binpazer" >> "$GITHUB_ENV"
+          "$RUNNER_TEMP/binpazer" --version
+
+      # The runner gives the cache service env to action processes only, never to a run step.
+      - name: Export the cache service env for the shell steps
+        uses: wow-look-at-my/actions@typescript#latest
+        with:
+          script: |
+            for (const key of ["ACTIONS_RESULTS_URL", "ACTIONS_CACHE_URL", "ACTIONS_RUNTIME_TOKEN"]) {
+              const value = process.env[key];
+              if (value) core.exportVariable(key, value);
+              core.info(`${key}: ${value ? "present" : "absent"}`);
+            }
+
+      # Streamed under a per-leg name, because legs of one run would otherwise share a stream.
+      - name: Time the compile and report what the cache served
+        run: ci/stream-run.sh "${PHASE}-${TECHNIQUE}" ci/measure-compile.sh
+        env:
+          LOG_STREAMER_STREAM_KEY: ${{ secrets.LOG_STREAMER_API_KEY }}
+          CARGO_BUILD_JOBS: ${{ inputs.jobs }}
+          PKG_SLOTS: "3"
+          PKG_CACHE_DIR: ${{ runner.temp }}/pkg-cache
+          PKG_STATS_DIR: ${{ runner.temp }}/pkg-stats
+          WRAPPER: ${{ inputs.wrapper }}
+          TECHNIQUE: ${{ inputs.technique }}
+          PHASE: ${{ inputs.phase }}
+          # Every job of one run shares this, so the warm leg reads exactly what its own cold leg wrote.
+          PKG_CACHE_SALT: ${{ github.run_id }}

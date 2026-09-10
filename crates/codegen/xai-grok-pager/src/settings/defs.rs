@@ -647,6 +647,33 @@ pub fn default_settings() -> Vec<SettingMeta> {
             hidden_in_minimal: false,
         },
         SettingMeta {
+            key: "stop_gate_unfinished_todos",
+            category: SettingCategory::Agent,
+            owner: SettingOwner::Shared,
+            label: "Stop gate for unfinished todos",
+            description: "The model cannot end its turn while the todo list still has \
+                          unfinished items: like a stop hook, it is sent back to finish or \
+                          close them, and only after repeated attempts does it stop anyway \
+                          (the same continuation budget stop hooks use). Turn off to let \
+                          the model stop freely.",
+            keywords: &[
+                "stop",
+                "todo",
+                "todos",
+                "gate",
+                "unfinished",
+                "interrupt",
+                "esc",
+                "cancel",
+                "latch",
+            ],
+            kind: SettingKind::Bool {
+                default: ui_default.stop_gate_unfinished_todos_enabled(),
+            },
+            restart_required: false,
+            hidden_in_minimal: false,
+        },
+        SettingMeta {
             // Persisted key stays `simple_mode`; the user-facing label
             // distinguishes the PROMPT vim-mode (this setting) from the
             // scrollback `vim_mode` keybindings below.

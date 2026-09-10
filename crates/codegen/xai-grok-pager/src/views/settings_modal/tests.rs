@@ -667,6 +667,9 @@ fn rows_contain_categories_and_settings_through_pr_14() {
             // voice_keybind_enabled + voice_capture_mode + voice_stt_language
             // hidden when the voice gate is off.
             // SHELL-owned permission_mode (Agent category).
+            // PAGER-owned stop_gate_unfinished_todos (Agent category,
+            // declares before permission_mode).
+            "stop_gate_unfinished_todos",
             "permission_mode",
             // SHELL-owned remember_tool_approvals (Agent category,
             // registered right after permission_mode).
