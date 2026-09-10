@@ -296,6 +296,10 @@ jobs:
 
   build-release:
     name: Build release binary (linux/amd64)
+    # Depends on publish-create so the release number buildhost assigned there
+    # can be stamped into the binary as GROK_VERSION below — the number the
+    # site lists must equal `grok --version`.
+    needs: publish-create
     # ubuntu-22.04 ships glibc 2.35, which holds every GLIBC_x.y dependency at or below what a 22.04 user has.
     runs-on: ubuntu-22.04
     timeout-minutes: 45
@@ -320,7 +324,29 @@ jobs:
         run: sudo apt-get install -y mold
 
       - name: Build release binary
+        env:
+          # Stamp the release number buildhost assigned in publish-create into
+          # the binary. This is what makes `grok --version` (and the pager's
+          # VERSION_WITH_COMMIT) match the number pazer.build lists for this
+          # release. GROK_VERSION presence also flips folder-trust and the
+          # other release-gated features ON for shipped binaries — the same
+          # behavior the previous builds had, just with a real number now.
+          GROK_VERSION: ${{ needs.publish-create.outputs.version }}
         run: cargo build --locked --release -p xai-grok-pager-bin
+
+      - name: Verify stamped release version
+        # The whole point of the publish-create->build-release ordering: the
+        # binary must report the same number the site does. Fail loudly rather
+        # than letting a mismatch sail silently through to a release build.
+        run: |
+          got="$("$PWD/target/release/xai-grok-pager" --version)"
+          want="grok ${{ needs.publish-create.outputs.version }}"
+          echo "buildhost release: $want"
+          echo "binary reports:    $got"
+          case "$got" in
+            "$want"*) echo "PASS: version stamp matches buildhost release" ;;
+            *) echo "FAIL: binary version does not match the buildhost release" ; exit 1 ;;
+          esac
 
       # Guards the floor the build above buys: a symbol newer than 2.35 is a load error on Ubuntu 22.04.
       - name: Verify glibc symbols are <= 2.35 (linux/amd64)
@@ -416,6 +442,13 @@ jobs:
 
       # The link at the end of this records itself into GROK_DARWIN_LINK_BUNDLE rather than running.
       - name: Compile every crate for darwin/arm64
+        env:
+          # GROK_VERSION is a compile-time stamp (option_env! in xai-grok-version), so
+          # it must be set here, where the cross-compile happens — link-darwin only
+          # replays the recorded link and cannot change the version baked into the
+          # binary. Same number buildhost assigned in publish-create, so the darwin
+          # binary reports the same version the site lists, like the linux one.
+          GROK_VERSION: ${{ needs.publish-create.outputs.version }}
         run: cargo build --locked --release --target aarch64-apple-darwin -p xai-grok-pager-bin
 
       - name: Bundle the recorded link
@@ -453,7 +486,15 @@ jobs:
 
   publish-create:
     name: Create buildhost release
-    needs: [build-test, build-release, link-darwin]
+    # Run as soon as tests pass, BEFORE the release binary is built. buildhost
+    # assigns the release number here (POST .../releases increments to the next
+    # auto version); the number is stamped into the binary as GROK_VERSION so
+    # `grok --version` reports the same number the site does. Not gated on
+    # build-release: that job needs this job's number, so the edge has to point
+    # this direction. Gating on pty-e2e is intentionally omitted — it exercises
+    # the UI, not the publish path, and holding the number hostage to it would
+    # burn a number on every flaky UI test.
+    needs: [build-test]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -470,7 +511,7 @@ jobs:
 
   publish-upload:
     name: Upload ${{ matrix.target_os }}/${{ matrix.target_arch }} binary
-    needs: publish-create
+    needs: [publish-create, build-release]
     runs-on: ubuntu-latest
     permissions:
       contents: read
