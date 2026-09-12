@@ -1,0 +1,14 @@
+name: Set up Cargo timings
+description: Make every Cargo compilation command emit a timing report
+runs:
+  using: composite
+  steps:
+    - name: Install Rust toolchain (pinned by rust-toolchain.toml)
+      shell: bash
+      run: |
+        rustup show
+        # Cargo has no stable environment variable equivalent to --timings.
+        # Put the repository wrapper first on PATH so every Cargo invocation
+        # in this job, including commands in CI scripts, gets a timing report.
+        echo "CARGO_TIMINGS_REAL=$(command -v cargo)" >> "$GITHUB_ENV"
+        echo "$GITHUB_WORKSPACE/ci" >> "$GITHUB_PATH"

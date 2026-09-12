@@ -135,14 +135,7 @@ jobs:
           echo "PROTOC=$RUNNER_TEMP/protoc/bin/protoc" >> "$GITHUB_ENV"
           "$RUNNER_TEMP/protoc/bin/protoc" --version
 
-      - name: Install Rust toolchain (pinned by rust-toolchain.toml)
-        run: |
-          rustup show
-          # Cargo has no stable environment variable equivalent to --timings.
-          # Put the repository wrapper first on PATH so every Cargo invocation
-          # in this job, including commands in CI scripts, gets a timing report.
-          echo "CARGO_TIMINGS_REAL=$(command -v cargo)" >> "$GITHUB_ENV"
-          echo "$GITHUB_WORKSPACE/ci" >> "$GITHUB_PATH"
+      - uses: ./.github/actions/setup-cargo-timings
 
       # rg_path() ends at a bare "rg" on PATH, so without this the grep and glob tests fail on empty output.
       - name: Install ripgrep
@@ -277,11 +270,7 @@ jobs:
           echo "PROTOC=$RUNNER_TEMP/protoc/bin/protoc" >> "$GITHUB_ENV"
           "$RUNNER_TEMP/protoc/bin/protoc" --version
 
-      - name: Install Rust toolchain (pinned by rust-toolchain.toml)
-        run: |
-          rustup show
-          echo "CARGO_TIMINGS_REAL=$(command -v cargo)" >> "$GITHUB_ENV"
-          echo "$GITHUB_WORKSPACE/ci" >> "$GITHUB_PATH"
+      - uses: ./.github/actions/setup-cargo-timings
 
       - name: Install cargo-nextest
         run: |
@@ -337,11 +326,7 @@ jobs:
           echo "PROTOC=$RUNNER_TEMP/protoc/bin/protoc" >> "$GITHUB_ENV"
           "$RUNNER_TEMP/protoc/bin/protoc" --version
 
-      - name: Install Rust toolchain (pinned by rust-toolchain.toml)
-        run: |
-          rustup show
-          echo "CARGO_TIMINGS_REAL=$(command -v cargo)" >> "$GITHUB_ENV"
-          echo "$GITHUB_WORKSPACE/ci" >> "$GITHUB_PATH"
+      - uses: ./.github/actions/setup-cargo-timings
 
       # .cargo/config.toml links x86_64-unknown-linux-gnu with mold.
       - name: Install mold
