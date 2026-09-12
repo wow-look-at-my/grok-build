@@ -13543,6 +13543,7 @@ dependencies = [
  "xai-file-utils",
  "xai-grok-config",
  "xai-grok-extra-ca",
+ "xai-grok-sandbox",
  "xai-grok-telemetry",
  "xai-grok-tools",
  "xai-grok-version",

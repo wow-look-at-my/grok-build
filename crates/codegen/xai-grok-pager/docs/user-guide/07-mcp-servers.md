@@ -14,6 +14,48 @@ See the [MCP specification](https://modelcontextprotocol.io) for protocol detail
 
 ---
 
+## MCP servers under a sandbox profile
+
+A stdio MCP server is often launched through a **package runner** — `uvx kagimcp`,
+`npx -y some-server`, `bunx`. The runner downloads the package into a cache of its
+own before the server starts, and every one of those caches defaults under your
+home directory (`~/.cache/uv`, `~/.npm`, `~/.bun/install`).
+
+No write-confining sandbox profile grants your home directory. `workspace`,
+`read-only` and `strict` allow writes only to the working directory, `~/.grok/`
+and the temp dirs. So under any of them the runner cannot create its cache, exits
+during startup, and the MCP client reports only a closed pipe:
+
+```text
+error: Failed to initialize cache at `/Users/you/.cache/uv`
+  Caused by: failed to open file `/Users/you/.cache/uv/sdists-v9/.git`:
+             Operation not permitted (os error 1)
+```
+
+```text
+MCP server 'kagi' handshake failed: ... Broken pipe (os error 32),
+when send initialize request
+```
+
+Grok handles this for you: when a session is write-confined and a stdio MCP server
+is launched by a known package runner, those cache locations are mapped onto the
+session's writable temp storage before the child starts. Caches are scratch state,
+so they live on scratch storage and are discarded with it; nothing is written to
+your home directory, and the profile's write set does not widen.
+
+Two details worth knowing:
+
+- **The redirect applies to the MCP child only.** A runner you invoke yourself
+  through `bash` keeps its normal caches.
+- **Your own config wins.** If the server's `env` already sets one of these
+  variables (for example an explicit `UV_CACHE_DIR`), Grok leaves that value
+  alone.
+
+`devbox` is unaffected: it already grants writes to your home directory, so its
+runners need no redirection. The same is true of an unsandboxed session.
+
+---
+
 ## Configuration
 
 MCP servers are configured in `~/.grok/config.toml` under `[mcp_servers.<name>]` sections.

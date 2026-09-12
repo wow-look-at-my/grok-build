@@ -4089,6 +4089,61 @@ fn plan_stdio_spawn(
     (OsString::from(command), args.to_vec())
 }
 
+/// Point a package-runner MCP child at caches the sandbox can write.
+///
+/// `uvx`, `npx`, `bunx` and friends resolve the server they run from a package
+/// index, into caches that default under `$HOME`. No write-confining sandbox
+/// profile grants `$HOME` (see `xai_grok_sandbox::confines_home_writes`), so the
+/// runner dies creating its cache and the client sees only a broken pipe — the
+/// "server shows but doesn't work" failure. Map those caches onto the session's
+/// writable temp storage (tmpfs), which every confining profile already grants.
+///
+/// Thin wrapper over [`apply_runner_cache_env`] that reads the two pieces of
+/// process state (confinement, scratch root); the logic and its tests live in
+/// the pure function so a test never touches process-global sandbox state.
+fn apply_sandbox_runner_cache_env(cmd: &mut Command, program: &str) {
+    let Some(scratch) = xai_grok_sandbox::package_cache::scratch_root() else {
+        return;
+    };
+    apply_runner_cache_env(
+        cmd,
+        program,
+        xai_grok_sandbox::confines_home_writes(),
+        &scratch,
+    );
+}
+
+/// The injectable core of [`apply_sandbox_runner_cache_env`].
+///
+/// Nothing is set when the session is not write-confined (no redirection is
+/// necessary, and a user's own cache layout should not move for no reason), when
+/// `program` is not a package runner (a plain binary needs no cache), or when
+/// the server's own config already set a variable (an explicit value wins).
+fn apply_runner_cache_env(
+    cmd: &mut Command,
+    program: &str,
+    confined: bool,
+    scratch: &std::path::Path,
+) {
+    if !confined || !xai_grok_sandbox::package_cache::is_package_runner(program) {
+        return;
+    }
+    let root = xai_grok_sandbox::package_cache::cache_root(scratch);
+    for (name, value) in xai_grok_sandbox::package_cache::cache_env(&root) {
+        // A variable counts as configured only when it carries a VALUE.
+        // `get_envs` also yields explicitly *removed* variables with `None`, and
+        // treating one of those as "already set" would skip the redirect and
+        // leave the runner failing exactly as before.
+        let already_set = cmd
+            .as_std()
+            .get_envs()
+            .any(|(k, v)| k == name.as_os_str() && v.is_some());
+        if !already_set {
+            cmd.env(name, value);
+        }
+    }
+}
+
 fn is_figma_mcp(server_name: &str, url: &str) -> bool {
     if server_name.eq_ignore_ascii_case("figma") {
         return true;
@@ -4200,6 +4255,7 @@ pub async fn start_mcp_server(
             for env_variable in &env {
                 cmd.env(&env_variable.name, &env_variable.value);
             }
+            apply_sandbox_runner_cache_env(&mut cmd, command_str.as_str());
             xai_grok_tools::util::detach_command(&mut cmd);
 
             let (transport, stderr_handle) = SafeTokioChildProcess::spawn(
@@ -4615,6 +4671,157 @@ mod tests {
         assert_eq!(spawn_args, args);
     }
 
+    /// The spawn path must map a package runner's caches onto the session's
+    /// writable temp storage whenever the session is write-confined, because the
+    /// runner's default caches (`~/.cache/uv`, `~/.npm`) sit under a `$HOME` no
+    /// confining profile grants — which is the EPERM that made `uvx kagimcp` and
+    /// `npx tampermonkey-mcp` fail their MCP handshake with "Broken pipe".
+    ///
+    /// Drives the shipped `apply_runner_cache_env` (the core the spawn site
+    /// calls) against a real `tokio::process::Command`, and asserts on what the
+    /// child would actually receive.
+    #[tokio::test]
+    async fn sandboxed_package_runner_gets_tmp_cache_env() {
+        let scratch = std::env::temp_dir().join(format!(
+            "grok-mcp-runner-cache-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&scratch).unwrap();
+
+        let mut cmd = Command::new("uvx");
+        apply_runner_cache_env(&mut cmd, "uvx", true, &scratch);
+
+        let envs: Vec<(String, String)> = cmd
+            .as_std()
+            .get_envs()
+            .map(|(k, v)| {
+                (
+                    k.to_string_lossy().into_owned(),
+                    v.map(|v| v.to_string_lossy().into_owned())
+                        .unwrap_or_default(),
+                )
+            })
+            .collect();
+
+        // Every variable the runner families read must be present: setting only
+        // some of them leaves `uvx` dying on the tree that was missed.
+        for name in [
+            "UV_CACHE_DIR",
+            "UV_TOOL_DIR",
+            "UV_TOOL_BIN_DIR",
+            "UV_PYTHON_INSTALL_DIR",
+            "npm_config_cache",
+            "npm_config_prefix",
+            "PNPM_STORE_DIR",
+            "npm_config_store_dir",
+            "BUN_INSTALL_CACHE_DIR",
+            "BUN_INSTALL",
+        ] {
+            let value = envs
+                .iter()
+                .find(|(k, _)| k == name)
+                .map(|(_, v)| v.clone())
+                .unwrap_or_else(|| panic!("{name} must be set for a confined runner"));
+            let dir = std::path::Path::new(&value);
+            assert!(
+                dir.is_dir(),
+                "{name} must point at a directory the runner can write: {value}"
+            );
+            assert!(
+                dir.starts_with(&scratch),
+                "{name} must be mapped onto the injected scratch root, got {value}"
+            );
+            // The whole point of the redirect: never back into the session's own
+            // state directory (nor the home tree a confining profile refuses).
+            let grok_home = xai_grok_tools::util::grok_home();
+            assert!(
+                !dir.starts_with(&grok_home),
+                "{name} must not point into $GROK_HOME: {value}"
+            );
+        }
+
+        let _ = std::fs::remove_dir_all(&scratch);
+    }
+
+    /// An unconfined session gets no redirection (nothing is confined, and a
+    /// user's own cache layout must not move for no reason); a plain non-runner
+    /// binary gets none (it fetches nothing); and a variable the server's own
+    /// config already set keeps the configured value.
+    #[tokio::test]
+    async fn runner_cache_env_skips_unconfined_non_runners_and_explicit_config() {
+        let scratch = std::env::temp_dir().join(format!(
+            "grok-mcp-runner-skip-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&scratch).unwrap();
+
+        // Unconfined runner: untouched.
+        let mut cmd = Command::new("uvx");
+        apply_runner_cache_env(&mut cmd, "uvx", false, &scratch);
+        assert!(
+            cmd.as_std().get_envs().next().is_none(),
+            "an unconfined session must not have its runner caches redirected"
+        );
+
+        // Confined but not a package runner: untouched.
+        let mut cmd = Command::new("/usr/local/bin/kagimcp");
+        apply_runner_cache_env(&mut cmd, "/usr/local/bin/kagimcp", true, &scratch);
+        assert!(
+            cmd.as_std().get_envs().next().is_none(),
+            "a non-runner binary must not be given package-cache variables"
+        );
+
+        // Confined runner whose config already set a cache dir: that value wins.
+        let mut cmd = Command::new("uvx");
+        cmd.env("UV_CACHE_DIR", "/custom/uv-cache");
+        apply_runner_cache_env(&mut cmd, "uvx", true, &scratch);
+        let configured = cmd
+            .as_std()
+            .get_envs()
+            .find(|(k, _)| *k == std::ffi::OsStr::new("UV_CACHE_DIR"))
+            .and_then(|(_, v)| v)
+            .map(|v| v.to_string_lossy().into_owned());
+
+        assert_eq!(
+            configured.as_deref(),
+            Some("/custom/uv-cache"),
+            "an explicitly configured cache dir must win over the sandbox default"
+        );
+
+        // A variable explicitly REMOVED from the child must still be redirected.
+        // `get_envs` reports a removed variable as present-with-`None`; reading
+        // that as "already configured" silently skips the redirect and leaves
+        // the runner failing on the unwritable `$HOME` cache it was removed from.
+        let mut cmd = Command::new("uvx");
+        cmd.env_remove("UV_CACHE_DIR");
+        apply_runner_cache_env(&mut cmd, "uvx", true, &scratch);
+        let after_remove = cmd
+            .as_std()
+            .get_envs()
+            .find(|(k, _)| *k == std::ffi::OsStr::new("UV_CACHE_DIR"))
+            .and_then(|(_, v)| v)
+            .map(|v| v.to_string_lossy().into_owned());
+
+        assert!(
+            after_remove.is_some(),
+            "a removed UV_CACHE_DIR must be redirected, not treated as configured"
+        );
+        assert!(
+            std::path::Path::new(after_remove.as_deref().unwrap()).starts_with(&scratch),
+            "the redirect must land under the injected scratch root, got {after_remove:?}"
+        );
+
+        let _ = std::fs::remove_dir_all(&scratch);
+    }
+
     #[test]
     fn stdio_path_override_matches_path_case_insensitively() {
         let mk = |name: &str, value: &str| acp::EnvVariable::new(name, value);
@@ -4627,6 +4834,81 @@ mod tests {
 
         let env_none = vec![mk("FOO", "bar")];
         assert_eq!(stdio_path_override(&env_none), None);
+    }
+
+    /// End-to-end: the environment the shipped function installs must make a
+    /// REAL package runner initialize its cache where the sandbox cannot write
+    /// `$HOME`.
+    ///
+    /// The condition under test is exactly the one a sandboxed session creates:
+    /// the runner's default cache root is unreachable. Here that is enforced
+    /// portably by pointing `HOME` at a directory with no write permission, so
+    /// the same test is meaningful on CI and on a developer machine. `uv tool
+    /// list` is used because it is offline, deterministic and finishes in
+    /// milliseconds, and because it refuses to start when it cannot read its
+    /// cache — the same startup path `uvx kagimcp` failed on.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn shipped_runner_env_lets_a_real_runner_start_without_a_writable_home() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let Some(uv) = which::which("uv").ok() else {
+            eprintln!("skipping: `uv` is not installed on this host");
+            return;
+        };
+
+        let fixture = std::env::temp_dir().join(format!(
+            "grok-mcp-runner-e2e-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let readonly_home = fixture.join("home");
+        std::fs::create_dir_all(&readonly_home).unwrap();
+        // Read and traverse, but not write: the sandbox condition, portably.
+        std::fs::set_permissions(&readonly_home, std::fs::Permissions::from_mode(0o500)).unwrap();
+
+        // Baseline: with the un-remapped `HOME`, the runner cannot start. This
+        // half is what makes the assertion below non-vacuous.
+        let baseline = tokio::process::Command::new(&uv)
+            .arg("tool")
+            .arg("list")
+            .env("HOME", &readonly_home)
+            .env_remove("UV_CACHE_DIR")
+            .env_remove("UV_TOOL_DIR")
+            .output()
+            .await
+            .expect("spawn baseline uv");
+        assert!(
+            !baseline.status.success(),
+            "baseline must fail so the fix is proven: {}",
+            String::from_utf8_lossy(&baseline.stderr)
+        );
+
+        // Now build the child exactly as the spawn site does: start from the
+        // baseline environment, then let the shipped function install its
+        // redirects.
+        let mut cmd = Command::new(&uv);
+        cmd.arg("tool").arg("list").env("HOME", &readonly_home);
+        for unset in ["UV_CACHE_DIR", "UV_TOOL_DIR", "UV_TOOL_BIN_DIR", "UV_PYTHON_INSTALL_DIR"] {
+            cmd.env_remove(unset);
+        }
+        apply_runner_cache_env(&mut cmd, "uv", true, &fixture);
+
+        let fixed = cmd.output().await.expect("spawn fixed uv");
+        // Restore permissions before cleaning up so the removal can succeed.
+        let _ = std::fs::set_permissions(&readonly_home, std::fs::Permissions::from_mode(0o700));
+        let cleanup = fixture.clone();
+        let stderr = String::from_utf8_lossy(&fixed.stderr).into_owned();
+        let _ = std::fs::remove_dir_all(cleanup);
+
+        assert!(
+            fixed.status.success(),
+            "with the shipped redirects the runner must start despite a read-only HOME; \
+             stderr: {stderr}"
+        );
     }
 
     #[test]
