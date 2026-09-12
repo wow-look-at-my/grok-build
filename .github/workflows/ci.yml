@@ -120,15 +120,7 @@ jobs:
       - name: Report disk before build
         run: df -h /
 
-      - name: Install protoc (pinned v29.3)
-        run: |
-          # bin/protoc is the source of truth for this artifact and its sha256. Update both together.
-          curl -fsSL -o "$RUNNER_TEMP/protoc.zip" \
-            https://github.com/protocolbuffers/protobuf/releases/download/v29.3/protoc-29.3-linux-x86_64.zip
-          echo "3e866620c5be27664f3d2fa2d656b5f3e09b5152b42f1bedbf427b333e90021a  $RUNNER_TEMP/protoc.zip" | sha256sum -c -
-          unzip -q -o "$RUNNER_TEMP/protoc.zip" -d "$RUNNER_TEMP/protoc"
-          echo "PROTOC=$RUNNER_TEMP/protoc/bin/protoc" >> "$GITHUB_ENV"
-          "$RUNNER_TEMP/protoc/bin/protoc" --version
+      - uses: ./.github/actions/setup-protoc
 
       - uses: ./.github/actions/setup-cargo-timings
 
@@ -202,13 +194,9 @@ jobs:
           cargo nextest run --locked --workspace --profile ci
           "$PAGER_BINARY" --version
 
-      - name: Upload Cargo timing reports
-        if: ${{ always() }}
-        uses: actions/upload-artifact@v4
+      - uses: ./.github/actions/upload-cargo-timings
         with:
           name: cargo-timings-build-test
-          path: target/cargo-timings/
-          if-no-files-found: warn
 
       # Fails if the sub-crate split is undone or the -j3 unified compile is removed. ci/ram-guard.sh has the measurements.
       - name: RAM guard (sub-crate split + unified --no-run + the compile gate intact)
@@ -255,15 +243,7 @@ jobs:
       - name: Report disk before build
         run: df -h /
 
-      - name: Install protoc (pinned v29.3)
-        run: |
-          # bin/protoc is the source of truth for this artifact and its sha256. Update both together.
-          curl -fsSL -o "$RUNNER_TEMP/protoc.zip" \
-            https://github.com/protocolbuffers/protobuf/releases/download/v29.3/protoc-29.3-linux-x86_64.zip
-          echo "3e866620c5be27664f3d2fa2d656b5f3e09b5152b42f1bedbf427b333e90021a  $RUNNER_TEMP/protoc.zip" | sha256sum -c -
-          unzip -q -o "$RUNNER_TEMP/protoc.zip" -d "$RUNNER_TEMP/protoc"
-          echo "PROTOC=$RUNNER_TEMP/protoc/bin/protoc" >> "$GITHUB_ENV"
-          "$RUNNER_TEMP/protoc/bin/protoc" --version
+      - uses: ./.github/actions/setup-protoc
 
       - uses: ./.github/actions/setup-cargo-timings
 
@@ -295,13 +275,9 @@ jobs:
             --test pty_e2e_minimal \
             --run-ignored all --test-threads 4
 
-      - name: Upload Cargo timing reports
-        if: ${{ always() }}
-        uses: actions/upload-artifact@v4
+      - uses: ./.github/actions/upload-cargo-timings
         with:
           name: cargo-timings-pty-e2e
-          path: target/cargo-timings/
-          if-no-files-found: warn
 
   build-release:
     name: Build release binary (linux/amd64)
@@ -311,15 +287,7 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - name: Install protoc (pinned v29.3)
-        run: |
-          # bin/protoc is the source of truth for this artifact and its sha256. Update both together.
-          curl -fsSL -o "$RUNNER_TEMP/protoc.zip" \
-            https://github.com/protocolbuffers/protobuf/releases/download/v29.3/protoc-29.3-linux-x86_64.zip
-          echo "3e866620c5be27664f3d2fa2d656b5f3e09b5152b42f1bedbf427b333e90021a  $RUNNER_TEMP/protoc.zip" | sha256sum -c -
-          unzip -q -o "$RUNNER_TEMP/protoc.zip" -d "$RUNNER_TEMP/protoc"
-          echo "PROTOC=$RUNNER_TEMP/protoc/bin/protoc" >> "$GITHUB_ENV"
-          "$RUNNER_TEMP/protoc/bin/protoc" --version
+      - uses: ./.github/actions/setup-protoc
 
       - uses: ./.github/actions/setup-cargo-timings
 
@@ -345,13 +313,9 @@ jobs:
           fi
           echo "PASS: max GLIBC $max_glibc <= 2.35, runs on Ubuntu 22.04"
 
-      - name: Upload Cargo timing reports
-        if: ${{ always() }}
-        uses: actions/upload-artifact@v4
+      - uses: ./.github/actions/upload-cargo-timings
         with:
           name: cargo-timings-build-release
-          path: target/cargo-timings/
-          if-no-files-found: warn
 
       - name: Stage artifact
         run: |
@@ -374,18 +338,10 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - name: Install protoc (pinned v29.3)
-        run: |
-          # protoc runs on the HOST, so this cross build takes the linux one. bin/protoc pins the same artifact and sha256.
-          curl -fsSL -o "$RUNNER_TEMP/protoc.zip" \
-            https://github.com/protocolbuffers/protobuf/releases/download/v29.3/protoc-29.3-linux-x86_64.zip
-          echo "3e866620c5be27664f3d2fa2d656b5f3e09b5152b42f1bedbf427b333e90021a  $RUNNER_TEMP/protoc.zip" | sha256sum -c -
-          unzip -q -o "$RUNNER_TEMP/protoc.zip" -d "$RUNNER_TEMP/protoc"
-          echo "PROTOC=$RUNNER_TEMP/protoc/bin/protoc" >> "$GITHUB_ENV"
-          "$RUNNER_TEMP/protoc/bin/protoc" --version
+      # protoc runs on the host for this cross build; the shared action installs the Linux binary.
+      - uses: ./.github/actions/setup-protoc
 
-      - name: Install Rust toolchain (pinned by rust-toolchain.toml)
-        run: rustup show
+      - uses: ./.github/actions/setup-cargo-timings
 
       - name: Add the darwin target
         run: |
@@ -437,13 +393,9 @@ jobs:
       - name: Compile every crate for darwin/arm64
         run: cargo build --locked --release --target aarch64-apple-darwin -p xai-grok-pager-bin
 
-      - name: Upload Cargo timing reports
-        if: ${{ always() }}
-        uses: actions/upload-artifact@v4
+      - uses: ./.github/actions/upload-cargo-timings
         with:
           name: cargo-timings-build-darwin-objects
-          path: target/cargo-timings/
-          if-no-files-found: warn
 
       - name: Bundle the recorded link
         run: ci/darwin-bundle.sh "$GROK_DARWIN_LINK_BUNDLE" dist/darwin-link.tar
