@@ -136,7 +136,13 @@ jobs:
           "$RUNNER_TEMP/protoc/bin/protoc" --version
 
       - name: Install Rust toolchain (pinned by rust-toolchain.toml)
-        run: rustup show
+        run: |
+          rustup show
+          # Cargo has no stable environment variable equivalent to --timings.
+          # Put the repository wrapper first on PATH so every Cargo invocation
+          # in this job, including commands in CI scripts, gets a timing report.
+          echo "CARGO_TIMINGS_REAL=$(command -v cargo)" >> "$GITHUB_ENV"
+          echo "$GITHUB_WORKSPACE/ci" >> "$GITHUB_PATH"
 
       # rg_path() ends at a bare "rg" on PATH, so without this the grep and glob tests fail on empty output.
       - name: Install ripgrep
@@ -208,6 +214,14 @@ jobs:
           cargo nextest run --locked --workspace --profile ci
           "$PAGER_BINARY" --version
 
+      - name: Upload Cargo timing reports
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: cargo-timings-build-test
+          path: target/cargo-timings/
+          if-no-files-found: warn
+
       # Fails if the sub-crate split is undone or the -j3 unified compile is removed. ci/ram-guard.sh has the measurements.
       - name: RAM guard (sub-crate split + unified --no-run + the compile gate intact)
         run: |
@@ -264,7 +278,10 @@ jobs:
           "$RUNNER_TEMP/protoc/bin/protoc" --version
 
       - name: Install Rust toolchain (pinned by rust-toolchain.toml)
-        run: rustup show
+        run: |
+          rustup show
+          echo "CARGO_TIMINGS_REAL=$(command -v cargo)" >> "$GITHUB_ENV"
+          echo "$GITHUB_WORKSPACE/ci" >> "$GITHUB_PATH"
 
       - name: Install cargo-nextest
         run: |
@@ -294,6 +311,14 @@ jobs:
             --test pty_e2e_minimal \
             --run-ignored all --test-threads 4
 
+      - name: Upload Cargo timing reports
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: cargo-timings-pty-e2e
+          path: target/cargo-timings/
+          if-no-files-found: warn
+
   build-release:
     name: Build release binary (linux/amd64)
     # ubuntu-22.04 ships glibc 2.35, which holds every GLIBC_x.y dependency at or below what a 22.04 user has.
@@ -313,7 +338,10 @@ jobs:
           "$RUNNER_TEMP/protoc/bin/protoc" --version
 
       - name: Install Rust toolchain (pinned by rust-toolchain.toml)
-        run: rustup show
+        run: |
+          rustup show
+          echo "CARGO_TIMINGS_REAL=$(command -v cargo)" >> "$GITHUB_ENV"
+          echo "$GITHUB_WORKSPACE/ci" >> "$GITHUB_PATH"
 
       # .cargo/config.toml links x86_64-unknown-linux-gnu with mold.
       - name: Install mold
@@ -336,6 +364,14 @@ jobs:
             exit 1
           fi
           echo "PASS: max GLIBC $max_glibc <= 2.35, runs on Ubuntu 22.04"
+
+      - name: Upload Cargo timing reports
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: cargo-timings-build-release
+          path: target/cargo-timings/
+          if-no-files-found: warn
 
       - name: Stage artifact
         run: |
@@ -372,7 +408,10 @@ jobs:
         run: rustup show
 
       - name: Add the darwin target
-        run: rustup target add aarch64-apple-darwin
+        run: |
+          rustup target add aarch64-apple-darwin
+          echo "CARGO_TIMINGS_REAL=$(command -v cargo)" >> "$GITHUB_ENV"
+          echo "$GITHUB_WORKSPACE/ci" >> "$GITHUB_PATH"
 
       # zig compiles the C in the build scripts for macOS. It never links here: xai-darwin-link records that step instead.
       - name: Install zig (pinned 0.14.1)
@@ -417,6 +456,14 @@ jobs:
       # The link at the end of this records itself into GROK_DARWIN_LINK_BUNDLE rather than running.
       - name: Compile every crate for darwin/arm64
         run: cargo build --locked --release --target aarch64-apple-darwin -p xai-grok-pager-bin
+
+      - name: Upload Cargo timing reports
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: cargo-timings-build-darwin-objects
+          path: target/cargo-timings/
+          if-no-files-found: warn
 
       - name: Bundle the recorded link
         run: ci/darwin-bundle.sh "$GROK_DARWIN_LINK_BUNDLE" dist/darwin-link.tar
