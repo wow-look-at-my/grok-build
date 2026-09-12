@@ -1383,9 +1383,10 @@ impl SessionActor {
             }
         };
         let cancel_token = tokio_util::sync::CancellationToken::new();
+        let spawn_id = uuid::Uuid::now_v7().to_string();
         self.goal_tracker
             .lock()
-            .start_planner_run(cancel_token.clone());
+            .start_planner_run(cancel_token.clone(), spawn_id.clone(), event_tx.clone());
 
         let attempt_objective = if steering.is_empty() {
             objective.to_owned()
@@ -1425,7 +1426,7 @@ impl SessionActor {
         let inherit_tool_names = tool_names.clone();
         let spawner: std::sync::Arc<dyn crate::session::goal_planner::GoalPlannerSpawner> =
             std::sync::Arc::new(crate::session::goal_planner::ChannelSpawner {
-                event_tx,
+                event_tx: event_tx.clone(),
                 foreground_wait: Some(crate::tools::tool_context::subagent_foreground_wait(
                     self.tool_context.blocking_wait_depth.clone(),
                 )),
@@ -1461,12 +1462,10 @@ impl SessionActor {
         // represented by its own turn). No-op when the spawn recorded nothing.
         self.chat_state_handle.flush_harness_trace_turn();
 
-        let planner_state = self.goal_tracker.lock().take_planner_run();
-        if let Some(state) = planner_state
-            && !state.steering.is_empty()
-        {
-            return PlannerAttemptStep::Steered(state.steering);
-        }
+        // Steering is delivered directly to the live planner child as an
+        // interjection. Do not restart the child here: doing so discards its
+        // accumulated investigation and was the source of repeated replans.
+        let _ = self.goal_tracker.lock().take_planner_run();
 
         PlannerAttemptStep::Ran {
             goal_id,

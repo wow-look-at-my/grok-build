@@ -1997,6 +1997,13 @@ pub(super) async fn run_session(
                                 .await;
                             }
                         }
+                        SessionCommand::InterjectWithoutCancel { text } => {
+                            session.pending_interjections.push(PendingInterjection {
+                                text,
+                                attachments: Vec::new(),
+                            });
+                            tracing::info!("Queued planner context without cancelling child stream");
+                        }
                         SessionCommand::GoalSummaryTurn { prompt_text } => {
                             // Queue a synthetic prompt so the model gets a turn
                             // to print a visible progress summary. Mirrors the

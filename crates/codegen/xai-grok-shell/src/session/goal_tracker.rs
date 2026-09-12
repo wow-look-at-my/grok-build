@@ -706,6 +706,10 @@ pub struct GoalTracker {
 pub(crate) struct GoalPlannerRunState {
     pub(crate) cancel: tokio_util::sync::CancellationToken,
     pub(crate) steering: Vec<String>,
+    pub(crate) subagent_id: String,
+    pub(crate) event_tx: tokio::sync::mpsc::UnboundedSender<
+        xai_grok_tools::implementations::grok_build::task::types::SubagentEvent,
+    >,
 }
 
 impl GoalTracker {
@@ -794,10 +798,19 @@ impl GoalTracker {
         self.orchestration.as_ref()
     }
 
-    pub(crate) fn start_planner_run(&mut self, cancel: tokio_util::sync::CancellationToken) {
+    pub(crate) fn start_planner_run(
+        &mut self,
+        cancel: tokio_util::sync::CancellationToken,
+        subagent_id: String,
+        event_tx: tokio::sync::mpsc::UnboundedSender<
+            xai_grok_tools::implementations::grok_build::task::types::SubagentEvent,
+        >,
+    ) {
         self.planner_run = Some(GoalPlannerRunState {
             cancel,
             steering: Vec::new(),
+            subagent_id,
+            event_tx,
         });
     }
 
@@ -812,8 +825,13 @@ impl GoalTracker {
         if steering.is_empty() {
             return;
         }
-        run.steering.push(steering);
-        run.cancel.cancel();
+        run.steering.push(steering.clone());
+        let _ = run.event_tx.send(
+            xai_grok_tools::implementations::grok_build::task::types::SubagentEvent::Interject {
+                subagent_id: run.subagent_id.clone(),
+                text: format!("Additional user context for the current plan:\n\n{steering}"),
+            },
+        );
     }
 
     pub(crate) fn snapshot_mut(&mut self) -> Option<&mut GoalOrchestration> {
@@ -1463,7 +1481,8 @@ mod tests {
     fn empty_steering_does_not_cancel_planner() {
         let mut tracker = make_tracker();
         let cancel = tokio_util::sync::CancellationToken::new();
-        tracker.start_planner_run(cancel.clone());
+        let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
+        tracker.start_planner_run(cancel.clone(), "test-planner".into(), event_tx);
 
         tracker.steer_planner(String::new());
 

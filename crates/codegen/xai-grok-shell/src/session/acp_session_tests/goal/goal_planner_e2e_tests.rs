@@ -35,6 +35,13 @@ enum SpawnBehaviour {
         objectives: StdArc<std::sync::Mutex<Vec<String>>>,
         body: &'static [u8],
     },
+    WaitForContextThenWrite {
+        started: tokio::sync::mpsc::UnboundedSender<usize>,
+        objectives: StdArc<std::sync::Mutex<Vec<String>>>,
+        context: StdArc<std::sync::Mutex<Vec<String>>>,
+        notify: StdArc<tokio::sync::Notify>,
+        body: &'static [u8],
+    },
     /// Reply success but never write the file.
     NoWriteThenDone,
     /// Reply with subagent runtime failure.
@@ -95,6 +102,13 @@ fn spawn_planner_coordinator_capturing(
                 }
                 continue;
             }
+            if let SubagentEvent::Interject { text, .. } = ev {
+                if let SpawnBehaviour::WaitForContextThenWrite { context, notify, .. } = &behaviour {
+                    context.lock().unwrap().push(text);
+                    notify.notify_one();
+                }
+                continue;
+            }
             if let SubagentEvent::Spawn(req) = ev {
                 count_task.fetch_add(1, SeqOrd::SeqCst);
                 fork_log.lock().unwrap().push(req.fork_context);
@@ -109,6 +123,28 @@ fn spawn_planner_coordinator_capturing(
                         if let Some(p) = plan_path.as_deref() {
                             let _ =
                                 std::fs::create_dir_all(std::path::Path::new(p).parent().unwrap());
+                            let _ = std::fs::write(p, body);
+                        }
+                        SubagentResult {
+                            success: true,
+                            output: StdArc::from("Done"),
+                            subagent_id: req.id.clone(),
+                            child_session_id: req.id.clone(),
+                            ..Default::default()
+                        }
+                    }
+                    SpawnBehaviour::WaitForContextThenWrite {
+                        started,
+                        objectives,
+                        context,
+                        notify,
+                        body,
+                    } => {
+                        objectives.lock().unwrap().push(req.prompt.clone());
+                        let _ = started.send(count_task.load(SeqOrd::SeqCst));
+                        notify.notified().await;
+                        if let Some(p) = plan_path.as_deref() {
+                            let _ = std::fs::create_dir_all(std::path::Path::new(p).parent().unwrap());
                             let _ = std::fs::write(p, body);
                         }
                         SubagentResult {
@@ -293,17 +329,20 @@ fn create_test_goal(actor: &SessionActor) {
 
 #[tokio::test(flavor = "current_thread")]
 #[serial]
-async fn send_now_restarts_planner_with_all_steering() {
+async fn send_now_queues_planner_context_without_restart() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
             let (started_tx, mut started_rx) = tokio::sync::mpsc::unbounded_channel();
             let objectives = StdArc::new(std::sync::Mutex::new(Vec::new()));
+            let context = StdArc::new(std::sync::Mutex::new(Vec::new()));
+            let notify = StdArc::new(tokio::sync::Notify::new());
             let (tx, spawn_count) =
-                spawn_planner_coordinator(SpawnBehaviour::WaitForCancelsThenWrite {
-                    cancels: 2,
+                spawn_planner_coordinator(SpawnBehaviour::WaitForContextThenWrite {
                     started: started_tx,
                     objectives: StdArc::clone(&objectives),
+                    context: StdArc::clone(&context),
+                    notify: StdArc::clone(&notify),
                     body: b"# Plan\n",
                 });
             let (actor, _tmp) = make_planner_actor(Some(tx), true).await;

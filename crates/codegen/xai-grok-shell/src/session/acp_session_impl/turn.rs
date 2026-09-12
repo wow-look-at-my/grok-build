@@ -377,6 +377,17 @@ impl SessionActor {
                     } => {
                         xai_grok_telemetry::session_ctx::log_event(slash_used);
                         let reminder = self.setup_goal(&objective, token_budget).await;
+                        if self.goal_tracker.lock().status()
+                            != Some(crate::session::goal_tracker::GoalStatus::Active)
+                        {
+                            self.persist_host_turn_user_echo(&original_prompt_text, prompt_id);
+                            self.mark_front_message_committed().await;
+                            self.send_host_turn_slash_command_output(
+                                "Goal planning paused; resume with /goal to retry.",
+                            )
+                            .await;
+                            return ok_end_turn(0, None);
+                        }
                         vec![text_block(reminder)]
                     }
                     BuiltinAction::GoalResume => {

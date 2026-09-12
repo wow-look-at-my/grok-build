@@ -38,6 +38,8 @@ pub trait ChildControl: 'static {
 
     fn progress(&self) -> Self::ProgressFuture;
     fn cancel(&self);
+    /// Queue text into the live child without tearing down its session.
+    fn interject(&self, text: String);
 }
 
 /// Data reported when runtime initialization has produced a live child.
@@ -463,6 +465,8 @@ pub(super) trait ForegroundChild {
     fn mark_backgrounded(&mut self);
     /// Cancel the child's execution (token + active control where present).
     fn cancel(&mut self);
+    /// Queue text into an active child without cancelling its current turn.
+    fn interject(&mut self, text: String);
 }
 
 impl ForegroundChild for PendingChild {
@@ -498,6 +502,8 @@ impl ForegroundChild for PendingChild {
     fn cancel(&mut self) {
         self.cancellation.cancel();
     }
+
+    fn interject(&mut self, _text: String) {}
 }
 
 impl<C: ChildControl> ForegroundChild for ActiveChild<C> {
@@ -533,6 +539,10 @@ impl<C: ChildControl> ForegroundChild for ActiveChild<C> {
     fn cancel(&mut self) {
         self.cancellation.cancel();
         self.control.cancel();
+    }
+
+    fn interject(&mut self, text: String) {
+        self.control.interject(text);
     }
 }
 

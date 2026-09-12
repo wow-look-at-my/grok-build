@@ -476,6 +476,12 @@ impl ChildControl for ShellChildRuntime {
             crate::session::ShutdownKind::Graceful,
         ));
     }
+    fn interject(&self, text: String) {
+        let _ = self
+            .child_handle
+            .cmd_tx
+            .send(SessionCommand::InterjectWithoutCancel { text });
+    }
 }
 #[derive(Default)]
 pub(crate) struct ShellCompletionData {

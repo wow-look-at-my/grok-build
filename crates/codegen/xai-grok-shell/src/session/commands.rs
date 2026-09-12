@@ -808,6 +808,8 @@ pub enum SessionCommand {
         /// text-only / older clients.
         images: Vec<acp::ImageContent>,
     },
+    /// Inject text into a running child turn without cancelling its sampler.
+    InterjectWithoutCancel { text: String },
     /// Trigger a model turn so the model can print a visible goal progress
     /// summary.  The goal orchestrator injects a system reminder into context
     /// (via `push_parent_reminder`) *before* sending this command.  The session

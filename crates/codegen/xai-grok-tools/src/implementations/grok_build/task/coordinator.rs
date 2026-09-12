@@ -279,6 +279,13 @@ impl<R: ChildRunner> SubagentCoordinator<R> {
                     .collect();
                 let _ = request.respond_to.send(completions);
             }
+            SubagentEvent::Interject { subagent_id, text } => {
+                if let Some(child) = self.active.get_mut(&subagent_id) {
+                    child.control.interject(text);
+                } else if let Some(child) = self.pending.get_mut(&subagent_id) {
+                    tracing::debug!(subagent_id = %child.request.id, "ignored planner interjection before child started");
+                }
+            }
             SubagentEvent::TeardownSession {
                 parent_session_id,
                 respond_to,
@@ -556,8 +563,10 @@ impl<R: ChildRunner> SubagentCoordinator<R> {
         let (queued_for, foreground_deadline) = match origin {
             StartOrigin::Direct => (
                 None,
-                (spawn_reply.is_some() && request.awaits_in_foreground())
-                    .then(|| tokio::time::Instant::now() + self.config.foreground_budget),
+                (spawn_reply.is_some() && request.awaits_in_foreground()).then(|| {
+                    tokio::time::Instant::now()
+                        + request.foreground_wait_budget(self.config.foreground_budget)
+                }),
             ),
             StartOrigin::Dequeued {
                 queued_for,

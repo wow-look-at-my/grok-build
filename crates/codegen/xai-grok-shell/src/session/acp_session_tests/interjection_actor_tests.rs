@@ -73,7 +73,12 @@ async fn goal_send_now_routes_text_and_image_as_planner_steering_and_interjectio
                 None,
             );
             let cancel = tokio_util::sync::CancellationToken::new();
-            actor.goal_tracker.lock().start_planner_run(cancel.clone());
+            let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
+            actor.goal_tracker.lock().start_planner_run(
+                cancel.clone(),
+                "test-planner".into(),
+                event_tx,
+            );
 
             let (respond_to, response_rx) = tokio::sync::oneshot::channel();
             let cancelled = actor
