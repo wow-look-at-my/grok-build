@@ -92,7 +92,7 @@ pub async fn handle(_agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
 async fn handle_pr_status(cwd: &str, branch: &str) -> anyhow::Result<PrStatusResponse> {
     // A sandboxed session cannot spawn `gh` in the jail: the host worker is
     // the only route, and its answer (or nothing-usable sentinel) is final.
-    let pr = match xai_grok_sandbox::ci_host::inherited_host_fd() {
+    let pr = match xai_grok_sandbox::ci_host::ci_host_fd() {
         Some(fd) => pr_via_ci_host(fd, branch).await,
         None => gh_pr_view_by_branch(cwd, branch).await,
     };
@@ -119,8 +119,7 @@ fn pr_state(state: Option<&str>, is_draft: bool) -> &'static str {
 async fn pr_via_ci_host(fd: i32, branch: &str) -> Option<PrData> {
     let branch = branch.to_owned();
     let body = tokio::task::spawn_blocking(move || {
-        let stream = xai_grok_sandbox::ci_host::inherited_host_stream(fd)?;
-        xai_grok_sandbox::ci_host::query_ci_host_stream_pr(stream, &branch)
+        xai_grok_sandbox::ci_host::query_ci_host_pr(fd, &branch)
     })
     .await
     .ok()??;
