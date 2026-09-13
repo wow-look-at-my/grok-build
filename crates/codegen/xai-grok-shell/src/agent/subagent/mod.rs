@@ -476,6 +476,16 @@ impl ChildControl for ShellChildRuntime {
             crate::session::ShutdownKind::Graceful,
         ));
     }
+    /// Hand a mid-turn message to the child's own session actor, which buffers
+    /// it into the running turn (or, if the child has already gone idle, runs
+    /// it as its next prompt) — the same path a user interjection takes.
+    fn interject(&self, text: &str) {
+        let _ = self.child_handle.cmd_tx.send(SessionCommand::Interject {
+            text: text.to_owned(),
+            id: None,
+            images: Vec::new(),
+        });
+    }
 }
 #[derive(Default)]
 pub(crate) struct ShellCompletionData {
