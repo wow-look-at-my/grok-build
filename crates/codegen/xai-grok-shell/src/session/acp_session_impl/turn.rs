@@ -2,7 +2,6 @@
 //! sampling loop).
 use super::stop_gate::todo_stop_gate_blocks;
 use super::*;
-use super::stop_gate::todo_stop_gate_blocks;
 use crate::util::dual_clock::DualClock;
 use xai_grok_tools::implementations::grok_build::LoopFireMode;
 /// Synthetic tool the model calls to return its schema-constrained final answer

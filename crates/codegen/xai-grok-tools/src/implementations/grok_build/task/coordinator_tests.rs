@@ -12,6 +12,9 @@ use tokio_util::sync::CancellationToken;
 #[derive(Clone)]
 struct TestControl {
     cancellation: CancellationToken,
+    /// Every mid-turn message the coordinator delivered to this child, in
+    /// order (`SubagentEvent::Interject`).
+    interjections: mpsc::UnboundedSender<String>,
 }
 
 impl ChildControl for TestControl {
@@ -32,6 +35,10 @@ impl ChildControl for TestControl {
     fn cancel(&self) {
         self.cancellation.cancel();
     }
+
+    fn interject(&self, text: &str) {
+        let _ = self.interjections.send(text.to_owned());
+    }
 }
 
 struct TestRunner {
@@ -43,6 +50,7 @@ struct TestRunner {
     requests: mpsc::UnboundedSender<SubagentRequest>,
     started: mpsc::UnboundedSender<String>,
     queue_waits: mpsc::UnboundedSender<(String, Option<std::time::Duration>, usize)>,
+    interjections: mpsc::UnboundedSender<String>,
 }
 
 impl ChildRunner for TestRunner {
@@ -60,6 +68,7 @@ impl ChildRunner for TestRunner {
         let requests = self.requests.clone();
         let started = self.started.clone();
         let queue_waits = self.queue_waits.clone();
+        let interjections = self.interjections.clone();
         Box::pin(async move {
             let ChildRunRequest {
                 request,
@@ -97,6 +106,7 @@ impl ChildRunner for TestRunner {
                     definition_background: request.subagent_type == "background-default",
                     control: TestControl {
                         cancellation: cancellation.clone(),
+                        interjections,
                     },
                 })
                 .await
@@ -194,6 +204,7 @@ struct Harness {
     requests: mpsc::UnboundedReceiver<SubagentRequest>,
     started: mpsc::UnboundedReceiver<String>,
     queue_waits: mpsc::UnboundedReceiver<(String, Option<std::time::Duration>, usize)>,
+    interjections: mpsc::UnboundedReceiver<String>,
     actor: tokio::task::JoinHandle<()>,
 }
 
@@ -223,6 +234,7 @@ fn harness_with_options(
     let (request_tx, requests) = mpsc::unbounded_channel();
     let (started_tx, started) = mpsc::unbounded_channel();
     let (queue_wait_tx, queue_waits) = mpsc::unbounded_channel();
+    let (interjection_tx, interjections) = mpsc::unbounded_channel();
     let actor = tokio::spawn(
         SubagentCoordinator::new(
             command_rx,
@@ -235,6 +247,7 @@ fn harness_with_options(
                 requests: request_tx,
                 started: started_tx,
                 queue_waits: queue_wait_tx,
+                interjections: interjection_tx,
             },
             config,
         )
@@ -251,6 +264,7 @@ fn harness_with_options(
         requests,
         started,
         queue_waits,
+        interjections,
         actor,
     }
 }
@@ -286,6 +300,56 @@ async fn outstanding(backend: &ChannelBackend, prompt_id: &str) -> SubagentOutst
         }))
         .expect("actor command channel open");
     response_rx.await.expect("outstanding response")
+}
+
+/// A mid-turn interjection (`SubagentEvent::Interject`) is delivered to the
+/// active child its id names, and an id with no active child is dropped rather
+/// than handed to whoever happens to be live.
+#[tokio::test]
+async fn interject_reaches_the_active_child_named_by_id() {
+    let mut harness = harness(false, std::time::Duration::from_secs(60));
+    let spawn = tokio::spawn({
+        let backend = harness.backend.clone();
+        async move { backend.spawn(request("planner", false)).await }
+    });
+    // The child is addressable only once its run has reported started.
+    let started = harness.started.recv().await.expect("child started");
+    assert_eq!(started, "planner");
+
+    const CONTEXT: &str = "Additional user context for the current plan:\n\nfocus on the merge";
+    harness
+        .backend
+        .sender()
+        .send(SubagentEvent::Interject {
+            subagent_id: "planner".to_owned(),
+            text: CONTEXT.to_owned(),
+        })
+        .expect("actor command channel open");
+    // Commands are handled in channel order, so a round trip on the same
+    // channel is the barrier that proves the interjection was handled.
+    let _ = loop_unit_active(&harness.backend, "unrelated").await;
+    assert_eq!(
+        harness.interjections.try_recv().expect("delivered to planner"),
+        CONTEXT
+    );
+
+    harness
+        .backend
+        .sender()
+        .send(SubagentEvent::Interject {
+            subagent_id: "ghost".to_owned(),
+            text: "must not arrive".to_owned(),
+        })
+        .expect("actor command channel open");
+    let _ = loop_unit_active(&harness.backend, "unrelated").await;
+    assert!(
+        harness.interjections.try_recv().is_err(),
+        "an unknown id must not be delivered to a live child"
+    );
+
+    let _ = harness.finish.send(());
+    assert!(spawn.await.unwrap().unwrap().success);
+    harness.actor.abort();
 }
 
 #[tokio::test]

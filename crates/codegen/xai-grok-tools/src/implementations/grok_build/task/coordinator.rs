@@ -212,6 +212,9 @@ impl<R: ChildRunner> SubagentCoordinator<R> {
     fn handle_command(&mut self, command: SubagentEvent) {
         match command {
             SubagentEvent::Spawn(command) => self.handle_spawn(command),
+            SubagentEvent::Interject { subagent_id, text } => {
+                self.handle_interject(&subagent_id, &text);
+            }
             SubagentEvent::Query(query) => {
                 self.handle_query(
                     query.subagent_id,
@@ -462,6 +465,21 @@ impl<R: ChildRunner> SubagentCoordinator<R> {
                 });
                 let _ = request.respond_to.send(is_active);
             }
+        }
+    }
+
+    /// Deliver a mid-turn user message to one child by coordinator id
+    /// (`SubagentEvent::Interject`). The parent's Send Now addresses the
+    /// planner child it is steering, so an id that is not an active child has
+    /// nowhere to receive the text: it is logged and dropped rather than
+    /// buffered for a child that may never start.
+    fn handle_interject(&self, subagent_id: &str, text: &str) {
+        match self.active.get(subagent_id) {
+            Some(child) => child.control.interject(text),
+            None => tracing::warn!(
+                subagent_id,
+                "subagent interject addressed an id with no active child; dropped",
+            ),
         }
     }
 

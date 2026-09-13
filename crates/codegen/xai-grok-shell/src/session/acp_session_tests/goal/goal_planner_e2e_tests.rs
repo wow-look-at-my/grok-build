@@ -121,8 +121,8 @@ fn spawn_planner_coordinator_capturing(
                 if let SpawnBehaviour::WaitForContextThenWrite { notify, body, .. } = &behaviour {
                     let notify = StdArc::clone(notify);
                     let body = *body;
-                    let result_tx = req.result_tx;
                     let subagent_id = req.id.clone();
+                    let result_tx = req.result_tx;
                     let plan_path = plan_path.clone();
                     let spawn = count_task.load(SeqOrd::SeqCst);
                     let started = match &behaviour {
@@ -147,6 +147,8 @@ fn spawn_planner_coordinator_capturing(
                     continue;
                 }
                 let result = match &behaviour {
+                    // Handled above: waits for the Send Now context, then writes.
+                    SpawnBehaviour::WaitForContextThenWrite { .. } => unreachable!(),
                     SpawnBehaviour::WritePlanThenDone { body } => {
                         if let Some(p) = plan_path.as_deref() {
                             let _ =
