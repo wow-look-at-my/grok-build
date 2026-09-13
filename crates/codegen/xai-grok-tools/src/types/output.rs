@@ -647,6 +647,7 @@ pub enum ToolOutput {
     SchedulerDelete(crate::implementations::grok_build::scheduler::delete::SchedulerDeleteOutput),
     SchedulerList(crate::implementations::grok_build::scheduler::list::SchedulerListOutput),
     UpdateGoal(crate::implementations::grok_build::update_goal::UpdateGoalOutput),
+    Ci(crate::implementations::grok_build::ci::CiOutput),
     Workflow(crate::implementations::grok_build::workflow::WorkflowToolOutput),
     /// Dynamic output for runtime-registered tools (MCP, test tools, etc.)
     Dynamic(DynamicOutput),
@@ -995,6 +996,12 @@ impl ToolOutput {
                 }
             }
             ToolOutput::UpdateGoal(o) => o.summary.clone(),
+            // The summary leads, because it says what to do next. The runs and
+            // the log text follow it as JSON for a model that wants the detail.
+            ToolOutput::Ci(o) => match serde_json::to_string_pretty(o) {
+                Ok(json) => format!("{}\n{json}", o.summary),
+                Err(_) => o.summary.clone(),
+            },
             ToolOutput::Workflow(o) => o.message.clone(),
             ToolOutput::Dynamic(v) => serde_json::to_string_pretty(&v.value).unwrap_or_default(),
             ToolOutput::Text(text) => text.text.clone(),
