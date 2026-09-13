@@ -880,11 +880,6 @@ pub enum SubagentEvent {
     ListActive(SubagentListActiveRequest),
     ListRunning(SubagentListRunningRequest),
     Completions(SubagentCompletionsRequest),
-    /// Deliver text to one active child without cancelling its current turn.
-    Interject {
-        subagent_id: String,
-        text: String,
-    },
     /// Cancel children of `parent_session_id` and drop its buffered completions.
     /// `respond_to`, if set, resolves when no children remain (caller should
     /// time-bound the wait).
