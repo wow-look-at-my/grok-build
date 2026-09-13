@@ -91,11 +91,21 @@ fn ci_host_worker_serves_a_request_over_an_inherited_socketpair() {
     let _ = (child_stdin.into_raw_fd(), child_stdout.into_raw_fd(), theirs.into_raw_fd());
     let mut child = child.spawn().expect("spawn worker child");
 
-    // Ask the worker for a branch. Whatever `gh` does (present or not), the
-    // client must get a framed one-line answer and never hang.
-    let got = xai_grok_sandbox::ci_host::query_ci_host_stream(ours, "feature/ci-host");
-    // `query_ci_host_stream` owns `ours`; dropping it on return closes our end
-    // of the socket, so the worker's persistent read loop hits EOF and exits.
+    // Ask the worker for a branch, then run an allowlisted `gh` over the same
+    // connection. Whatever `gh` does (present or not), each request must get a
+    // framed one-line answer and never hang.
+    let our_fd = {
+        use std::os::unix::io::AsRawFd as _;
+        ours.as_raw_fd()
+    };
+    std::mem::forget(ours); // the transport owns the fd from here.
+    let got = xai_grok_sandbox::ci_host::query_ci_host(our_fd, "feature/ci-host");
+    let gh = xai_grok_sandbox::ci_host::query_gh_host(our_fd, &["auth", "status"]);
+    // A refused command must come back as the sentinel, from the real worker.
+    let refused = xai_grok_sandbox::ci_host::query_gh_host(our_fd, &["run", "cancel", "1"]);
+    assert_eq!(refused, None, "the worker must refuse a write");
+    // Closing our end is what makes the worker's read loop hit EOF and exit.
+    xai_grok_sandbox::ci_host::close_host_connection(our_fd);
     // Bound the wait so a hung worker fails the test instead of hanging CI.
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
     loop {
@@ -116,6 +126,14 @@ fn ci_host_worker_serves_a_request_over_an_inherited_socketpair() {
             let parsed: Result<serde_json::Value, _> = serde_json::from_slice(&body);
             assert!(parsed.is_ok(), "a worker JSON answer must parse");
         }
+    }
+    // `gh auth status` exits non-zero when nobody is logged in, so only the
+    // framing is asserted: an answer arrived, decoded, and named an exit code.
+    if let Some(response) = gh {
+        assert!(
+            response.stdout.len() + response.stderr.len() < 1 << 21,
+            "a worker response must stay bounded"
+        );
     }
 }
 
