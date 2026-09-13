@@ -558,6 +558,10 @@ pub enum Action {
     /// `Effect::PersistSetting`. Gates the session Stop gesture while the todo
     /// list has unfinished items.
     SetStopGateUnfinishedTodos(bool),
+    /// Set `[ui].stop_gate_ci_failing` (default ON). Persists via
+    /// `Effect::PersistSetting`. Gates the turn end while the branch has a
+    /// failing CI run.
+    SetStopGateCiFailing(bool),
     /// Set whether the drain call site merges the run of leading queued
     /// `Prompt` entries into one turn instead of sending them one by one.
     /// SHARED-owned: updates the process-wide cache mirror (read by the

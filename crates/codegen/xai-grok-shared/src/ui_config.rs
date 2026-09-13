@@ -58,6 +58,13 @@ pub struct UiConfig {
     /// (`[ui].stop_gate_unfinished_todos`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stop_gate_unfinished_todos: Option<bool>,
+    /// Gate the model's turn end on red CI for the branch it pushed: the model
+    /// is sent back to read the failing logs and fix them, and only after the
+    /// stop-hook continuation budget is exhausted can it stop anyway. A branch
+    /// with no runs, or with runs still in flight, never blocks a stop.
+    /// `None` = on (default). (`[ui].stop_gate_ci_failing`.)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stop_gate_ci_failing: Option<bool>,
     /// Theme to use when the OS is in dark mode. Written by the pager's theme persist module.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auto_dark_theme: Option<String>,
@@ -270,6 +277,7 @@ impl Default for UiConfig {
             page_flip_on_send: None,
             confirm_before_rewind: None,
             stop_gate_unfinished_todos: None,
+            stop_gate_ci_failing: None,
             auto_dark_theme: None,
             auto_light_theme: None,
             scroll_speed: None,
@@ -344,6 +352,14 @@ impl UiConfig {
             .unwrap_or(Self::STOP_GATE_UNFINISHED_TODOS_DEFAULT)
     }
 
+    /// Default for [`Self::stop_gate_ci_failing`] when unset.
+    pub const STOP_GATE_CI_FAILING_DEFAULT: bool = true;
+
+    pub fn stop_gate_ci_failing_enabled(&self) -> bool {
+        self.stop_gate_ci_failing
+            .unwrap_or(Self::STOP_GATE_CI_FAILING_DEFAULT)
+    }
+
     /// True when the highlight should not timer-dismiss (`hold` / `word_select`,
     /// or legacy duration 0).
     pub fn keep_text_selection_enabled(&self) -> bool {
@@ -386,6 +402,16 @@ mod tests {
             ..Default::default()
         };
         assert!(!off.stop_gate_unfinished_todos_enabled());
+    }
+
+    #[test]
+    fn stop_gate_ci_failing_defaults_on() {
+        assert!(UiConfig::default().stop_gate_ci_failing_enabled());
+        let off = UiConfig {
+            stop_gate_ci_failing: Some(false),
+            ..Default::default()
+        };
+        assert!(!off.stop_gate_ci_failing_enabled());
     }
 
     #[test]

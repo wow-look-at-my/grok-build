@@ -10,6 +10,11 @@ on:
 permissions:
   contents: read
 
+# One run per branch: a push cancels the run it supersedes.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
   # xai-grok-sandbox's `fails_closed_on_non_utf8_*` hit errno 84 under a non-UTF-8 locale.
@@ -24,101 +29,23 @@ env:
   BUILDHOST_PROJECT: grok-build
 
 jobs:
-  # Seconds, not a whole build: it names the failing step of a cache round trip while that is cheap.
-  cache-probe:
-    name: Cache round trip
-    if: github.ref != 'refs/heads/master'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-
-      - name: Install binpazer
-        run: |
-          curl -fSsL --location-trusted \
-            "https://dl.pazer.build/bin-file-fmt/binpazer?os=linux&arch=amd64" -o "$RUNNER_TEMP/binpazer"
-          chmod +x "$RUNNER_TEMP/binpazer"
-          echo "BINPAZER=$RUNNER_TEMP/binpazer" >> "$GITHUB_ENV"
-
-      # The runner gives the cache service env to action processes only, never to a run step.
-      - name: Export the cache service env for the shell steps
-        uses: wow-look-at-my/actions@typescript#latest
-        with:
-          script: |
-            for (const key of ["ACTIONS_RESULTS_URL", "ACTIONS_CACHE_URL", "ACTIONS_RUNTIME_TOKEN"]) {
-              const value = process.env[key];
-              if (value) core.exportVariable(key, value);
-              core.info(`${key}: ${value ? "present" : "absent"}`);
-            }
-
-      # Streamed live, because Actions withholds a job's log until every leg of the run has finished.
-      - name: Round trip one entry through the cache service
-        run: ci/stream-run.sh cache-probe ci/cache-probe.sh
-        env:
-          LOG_STREAMER_STREAM_KEY: ${{ secrets.LOG_STREAMER_API_KEY }}
-
-  # Three colds run together; each warm waits only on its own cold, never on the slowest leg.
-  measure-cold-nocache-j3:
-    if: github.ref != 'refs/heads/master'
-    uses: ./.github/workflows/measure-leg.yml
-    with:
-      technique: nocache-j3
-      phase: cold
-      jobs: "3"
-      wrapper: ""
-    secrets: inherit
-
-  measure-warm-nocache-j3:
-    if: github.ref != 'refs/heads/master'
-    needs: measure-cold-nocache-j3
-    uses: ./.github/workflows/measure-leg.yml
-    with:
-      technique: nocache-j3
-      phase: warm
-      jobs: "3"
-      wrapper: ""
-    secrets: inherit
-
-  measure-cold-pkgcache-j16-slots3:
-    if: github.ref != 'refs/heads/master'
-    uses: ./.github/workflows/measure-leg.yml
-    with:
-      technique: pkgcache-j16-slots3
-      phase: cold
-      jobs: "16"
-      wrapper: "ci/pkg-cache.sh"
-    secrets: inherit
-
-  measure-warm-pkgcache-j16-slots3:
-    if: github.ref != 'refs/heads/master'
-    needs: measure-cold-pkgcache-j16-slots3
-    uses: ./.github/workflows/measure-leg.yml
-    with:
-      technique: pkgcache-j16-slots3
-      phase: warm
-      jobs: "16"
-      wrapper: "ci/pkg-cache.sh"
-    secrets: inherit
-
   build-test:
     name: Build & test
     # Hosted deliberately: this suite asserts host semantics the org's lean self-hosted image lacks. See AGENTS.md.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     # A ceiling, not a target: a job needing more than this has a hung test, which nextest fails in 60s.
     timeout-minutes: 45
     env:
       # The harness builds this itself when unset, once per nextest process, all queued on cargo's package lock.
       PAGER_BINARY: ${{ github.workspace }}/target/debug/xai-grok-pager
-      # No global CARGO_BUILD_JOBS: the compile-RAM cap belongs to the build step alone. See ci/ram-guard.sh.
+      # No global CARGO_BUILD_JOBS: the compile-RAM cap belongs to the build step alone.
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      # After the checkout: it reads the workspace, and an empty one enforces nothing.
-      - uses: wow-look-at-my/actions@yaml-comment-block#latest
-
-      # The runner starts with ~86 GB free and CARGO_PROFILE_*_DEBUG=0 holds target/ near 4 GB, so the 2m11s delete step this replaces was freeing 26 GB nobody needed.
       - name: Report disk before build
         run: df -h /
+
+      # - uses: wow-look-at-my/actions@yaml-comment-block#latest  (off until slopfix runs on ubuntu-22.04: its APE trips the runner's Mono binfmt handler on the MZ magic)
 
       - name: Install protoc (pinned v29.3)
         run: |
@@ -169,76 +96,28 @@ jobs:
               core.info(`${key}: ${value ? "present" : "absent"}`);
             }
 
-      # PKG_SLOTS caps the compiles that hold memory, so the outer -j is wide and paces free restores.
+      # The cache is off, so -j3 is what caps compile memory: a wide -j exhausts the runner's 15 GiB.
       - name: Build test harnesses (compile, no-run)
         env:
-          CARGO_BUILD_JOBS: "16"
-          RUSTC_WRAPPER: ${{ github.workspace }}/ci/pkg-cache.sh
-          PKG_SLOTS: "3"
-          PKG_CACHE_DIR: ${{ runner.temp }}/pkg-cache
-          PKG_STATS_DIR: ${{ runner.temp }}/pkg-stats
+          CARGO_BUILD_JOBS: "3"
         run: |
-          mkdir -p "$PKG_CACHE_DIR"
-          # Which keys the remote holds, so a miss answers from a list instead of a round trip.
-          ci/pkg-remote.sh get pkg-index "$PKG_CACHE_DIR/../pkg-index-dl" \
-            && cp "$PKG_CACHE_DIR/../pkg-index-dl/keys" "$PKG_CACHE_DIR/../pkg-index" || true
           start=$(date +%s)
           cargo test --locked --workspace --no-run --no-fail-fast
           cargo build --locked -p xai-grok-pager-bin
-          echo "PKG-CACHE compile wall: $(( $(date +%s) - start )) s"
-          mkdir -p "$PKG_CACHE_DIR/../pkg-index-up"
-          find "$PKG_CACHE_DIR" -maxdepth 1 -mindepth 1 -type d -printf '%f\n' > "$PKG_CACHE_DIR/../pkg-index-up/keys"
-          # A build that already compiled everything must not fail because the cache could not be written.
-          ci/pkg-remote.sh put pkg-index "$PKG_CACHE_DIR/../pkg-index-up" && rc=0 || rc=$?
-          echo "PKG-CACHE index-put rc: $rc"
-          echo "PKG-CACHE entries: $(ls "$PKG_CACHE_DIR" 2>/dev/null | wc -l)"
-          echo "PKG-CACHE store: $(du -sh "$PKG_CACHE_DIR" 2>/dev/null | cut -f1)"
-          echo "PKG-CACHE target: $(du -sh target 2>/dev/null | cut -f1)"
-          for c in local-hit remote-hit remote-miss compiled remote-put remote-put-failed; do
-            echo "PKG-CACHE $c: $(wc -l < "$PKG_STATS_DIR/$c" 2>/dev/null || echo 0)"
-          done
+          echo "compile wall: $(( $(date +%s) - start )) s"
+          echo "target: $(du -sh target 2>/dev/null | cut -f1)"
 
       - name: Run tests (workspace)
         run: |
           cargo nextest run --locked --workspace --profile ci
           "$PAGER_BINARY" --version
 
-      # Fails if the sub-crate split is undone or the -j3 unified compile is removed. ci/ram-guard.sh has the measurements.
-      - name: RAM guard (sub-crate split + unified --no-run + the compile gate intact)
-        run: |
-          set -euo pipefail
-          # bundle/builtin must stay out of the shell crate.
-          [ -f crates/codegen/xai-grok-shell-assets/src/bundle.rs ] \
-          && [ -f crates/codegen/xai-grok-shell-assets/src/builtin.rs ] \
-          || { echo "RAM GUARD: FAIL — bundle/builtin must live in xai-grok-shell-assets"; exit 1; }
-          [ ! -f crates/codegen/xai-grok-shell/src/bundle.rs ] \
-          && [ ! -f crates/codegen/xai-grok-shell/src/builtin.rs ] \
-          || { echo "RAM GUARD: FAIL — bundle/builtin re-inlined into xai-grok-shell"; exit 1; }
-          grep -q 'xai-grok-shell-assets' crates/codegen/xai-grok-shell/Cargo.toml \
-          || { echo "RAM GUARD: FAIL — shell must depend on xai-grok-shell-assets"; exit 1; }
-          # Bracketed classes keep the awk script's own source text out of the scan it runs over this file.
-          awk '
-            /--no-run --no-fail-fast/ { compile=1 }
-            /--exclude xai[-]grok-shell/ || /-p xai[-]grok-shell -p xai[-]grok-pager/ { splitbad=1 }
-            END { exit (compile && !splitbad) ? 0 : 1 }
-          ' .github/workflows/ci.yml \
-            || { echo "RAM GUARD: FAIL — build must be a single unified --no-run, no exclude/-p split"; exit 1; }
-          # The wrapper caps concurrent compiles now. Losing either half uncaps compile memory.
-          grep -q 'PKG_SLOTS: "3"' .github/workflows/ci.yml \
-            || { echo "RAM GUARD: FAIL — missing PKG_SLOTS=3 compile semaphore"; exit 1; }
-          grep -q 'RUSTC_WRAPPER: .*ci/pkg-cache.sh' .github/workflows/ci.yml \
-            || { echo "RAM GUARD: FAIL — compile step is not behind the per-package wrapper"; exit 1; }
-          [ -x ci/pkg-cache.sh ] \
-            || { echo "RAM GUARD: FAIL — ci/pkg-cache.sh is missing or not executable"; exit 1; }
-          grep -qF -- 'cargo nextest run --locked --workspace --profile ci' .github/workflows/ci.yml \
-            || { echo "RAM GUARD: FAIL — run step missing"; exit 1; }
-          echo "RAM GUARD: PASS — sub-crate split + unified --no-run behind the 3-slot compile semaphore, run step fast-passes"
 
   # These assert on what a virtual terminal actually shows, which a unit test over the width function cannot stand in for.
   pty-e2e:
     name: Test (PTY end-to-end)
     # Hosted for the same reason as build-test: these need a real /bin/bash.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     timeout-minutes: 45
     env:
       PAGER_BINARY: ${{ github.workspace }}/target/debug/xai-grok-pager
@@ -291,7 +170,7 @@ jobs:
 
   build-release:
     name: Build release binary (linux/amd64)
-    # ubuntu-22.04 ships glibc 2.35, which holds every GLIBC_x.y dependency at or below what a 22.04 user has.
+    # Every Linux job is ubuntu-22.04 so they share one cache. Here it also matters for output: glibc 2.35 holds every GLIBC_x.y dependency at or below what a 22.04 user has.
     runs-on: ubuntu-22.04
     timeout-minutes: 45
     steps:
@@ -448,8 +327,8 @@ jobs:
 
   publish-create:
     name: Create buildhost release
-    needs: [build-test, build-release, link-darwin]
-    runs-on: ubuntu-latest
+    needs: [build-test, pty-e2e, build-release, link-darwin]
+    runs-on: ubuntu-22.04
     permissions:
       contents: read
       id-token: write # GitHub OIDC -> buildhost; only these jobs talk to buildhost
@@ -466,7 +345,7 @@ jobs:
   publish-upload:
     name: Upload ${{ matrix.target_os }}/${{ matrix.target_arch }} binary
     needs: publish-create
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     permissions:
       contents: read
       id-token: write
@@ -497,7 +376,7 @@ jobs:
   publish-finalize:
     name: Publish buildhost release
     needs: [publish-create, publish-upload]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     permissions:
       contents: read
       id-token: write

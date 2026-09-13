@@ -670,6 +670,7 @@ fn rows_contain_categories_and_settings_through_pr_14() {
             // PAGER-owned stop_gate_unfinished_todos (Agent category,
             // declares before permission_mode).
             "stop_gate_unfinished_todos",
+            "stop_gate_ci_failing",
             "permission_mode",
             // SHELL-owned remember_tool_approvals (Agent category,
             // registered right after permission_mode).
