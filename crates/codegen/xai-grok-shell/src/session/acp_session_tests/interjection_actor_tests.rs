@@ -53,8 +53,12 @@ async fn queue_send_now_keeps_prompt_block_images_on_promoted_row() {
         .await;
 }
 
+/// Send Now during an active goal turn merges into the turn and steers the
+/// planner that is ALREADY running: the planner run is neither cancelled nor
+/// replaced, and the text (with its images) still reaches the parent turn as an
+/// interjection.
 #[tokio::test]
-async fn goal_send_now_routes_text_and_image_as_planner_steering_and_interjection() {
+async fn goal_send_now_steers_the_live_planner_without_restarting_it() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
@@ -95,14 +99,19 @@ async fn goal_send_now_routes_text_and_image_as_planner_steering_and_interjectio
                 })
                 .await;
 
-            assert!(!cancelled);
-            assert!(cancel.is_cancelled());
+            assert!(!cancelled, "a goal send-now merges into the running turn");
+            assert!(
+                !cancel.is_cancelled(),
+                "the live planner is steered, never restarted"
+            );
             assert!(matches!(
                 response_rx.await.unwrap().unwrap().completion_kind,
                 PromptCompletionKind::RemovedFromQueue
             ));
-            let run = actor.goal_tracker.lock().take_planner_run().unwrap();
-            assert_eq!(run.steering, ["steer"]);
+            assert!(
+                actor.goal_tracker.lock().take_planner_run().is_some(),
+                "the planner run survives the send-now"
+            );
             let interjections = actor.pending_interjections.drain_all();
             assert_eq!(interjections.len(), 1);
             assert_eq!(interjections[0].text, "steer");

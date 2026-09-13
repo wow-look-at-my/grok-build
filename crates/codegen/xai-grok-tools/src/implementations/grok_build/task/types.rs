@@ -874,6 +874,7 @@ pub struct SubagentDescribeRequest {
 /// Coordinator message enum. Kept exhaustive so every actor command is handled.
 pub enum SubagentEvent {
     Spawn(SubagentSpawnRequest),
+    Interject { subagent_id: String, text: String },
     Query(SubagentQueryRequest),
     Cancel(SubagentCancelRequest),
     ListActive(SubagentListActiveRequest),
