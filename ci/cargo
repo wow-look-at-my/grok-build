@@ -8,6 +8,11 @@ set -euo pipefail
 
 : "${CARGO_TIMINGS_REAL:?CARGO_TIMINGS_REAL must name the real cargo executable}"
 
+if [[ "$(realpath "$CARGO_TIMINGS_REAL")" == "$(realpath "${BASH_SOURCE[0]}")" ]]; then
+  echo "ci/cargo: CARGO_TIMINGS_REAL points at this wrapper; it must name the real cargo" >&2
+  exit 1
+fi
+
 subcommand_index=-1
 for ((i = 1; i <= $#; i++)); do
   arg="${!i}"

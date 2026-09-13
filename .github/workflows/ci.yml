@@ -222,8 +222,6 @@ jobs:
       - name: Add the darwin target
         run: |
           rustup target add aarch64-apple-darwin
-          echo "CARGO_TIMINGS_REAL=$(command -v cargo)" >> "$GITHUB_ENV"
-          echo "$GITHUB_WORKSPACE/ci" >> "$GITHUB_PATH"
 
       # zig compiles the C in the build scripts for macOS. It never links here: xai-darwin-link records that step instead.
       - name: Install zig (pinned 0.14.1)
