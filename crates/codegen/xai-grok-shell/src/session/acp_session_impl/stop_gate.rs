@@ -196,8 +196,9 @@ impl SessionActor {
 
     /// Read the branch and its CI state off the host worker.
     ///
-    /// Every failure mode — no git, no `gh`, no runs — comes back as `None`,
-    /// which the gate reads as "nothing to hold the model for".
+    /// No git and no runs both come back as `None`, which the gate reads as
+    /// "nothing to hold the model for". A `gh` that fails is `None` too, but it
+    /// is logged: the gate cannot hold a turn over an answer it never got.
     pub(crate) async fn collect_ci_gate_state(
         &self,
     ) -> Option<(String, xai_grok_sandbox::ci_state::CiStatus)> {
@@ -206,7 +207,13 @@ impl SessionActor {
         tokio::task::spawn_blocking(move || {
             use xai_grok_tools::implementations::grok_build::ci;
             let branch = ci::current_branch(&cwd)?;
-            let runs = ci::fetch_runs(&cwd, &branch, 10)?;
+            let runs = match ci::fetch_runs(&cwd, &branch, 10) {
+                Ok(runs) => runs,
+                Err(error) => {
+                    tracing::warn!(branch = %branch, %error, "stop gate: could not read CI, allowing the stop");
+                    return None;
+                }
+            };
             let status = xai_grok_sandbox::ci_state::ci_from_runs(runs);
             Some((branch, status))
         })

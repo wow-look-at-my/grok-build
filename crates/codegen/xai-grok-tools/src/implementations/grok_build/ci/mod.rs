@@ -132,23 +132,63 @@ pub fn run_list_args<'a>(branch: &'a str, limit: &'a str) -> Vec<&'a str> {
     ]
 }
 
+/// Why a run list could not be read. A branch with no runs is not one of these: that is an empty `Ok`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CiQueryError {
+    /// No `gh` could be run at all: none installed, or the host worker refused the request.
+    Unreachable,
+    /// `gh` ran and failed. A dead token and a rate limit both land here, with what `gh` said.
+    Failed { code: i32, stderr: String },
+    /// `gh` exited 0 with a body that is not a run list.
+    Unparseable { stdout: String },
+}
+
+impl std::fmt::Display for CiQueryError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CiQueryError::Unreachable => write!(
+                f,
+                "Could not run `gh`. In a sandboxed session the host worker answers these queries; outside one, `gh` must be installed."
+            ),
+            CiQueryError::Failed { code, stderr } => {
+                write!(f, "`gh run list` failed (exit {code}): {}", stderr.trim())
+            }
+            CiQueryError::Unparseable { stdout } => {
+                write!(f, "`gh run list` returned something that is not a run list: {}", stdout.trim())
+            }
+        }
+    }
+}
+
 /// Read a branch's runs through whichever `gh` path this process can reach.
 ///
-/// `None` covers every way the answer can be missing — no `gh`, no auth, no
-/// runs — and each of those means the same thing to a caller: this branch has
-/// no CI signal to act on.
-pub fn fetch_runs(cwd: &std::path::Path, branch: &str, limit: u32) -> Option<Vec<ci_state::GhRun>> {
+/// An empty `Ok` means the branch has no runs. Every failure to ask is an `Err` that says what `gh` said, so a dead token never reads as "nothing pushed".
+pub fn fetch_runs(
+    cwd: &std::path::Path,
+    branch: &str,
+    limit: u32,
+) -> Result<Vec<ci_state::GhRun>, CiQueryError> {
     let limit = limit.clamp(1, MAX_RUN_LIMIT).to_string();
-    let response = xai_grok_sandbox::ci_host::run_gh(cwd, &run_list_args(branch, &limit))?;
+    let response = xai_grok_sandbox::ci_host::run_gh(cwd, &run_list_args(branch, &limit))
+        .ok_or(CiQueryError::Unreachable)?;
     if !response.success() {
-        tracing::debug!(stderr = %response.stderr, "gh run list failed");
-        return None;
+        return Err(CiQueryError::Failed {
+            code: response.code,
+            stderr: response.stderr,
+        });
     }
-    let mut runs = ci_state::parse_gh_runs(response.stdout.as_bytes())?;
+    if response.stdout.trim() == "[]" {
+        return Ok(Vec::new());
+    }
+    let Some(mut runs) = ci_state::parse_gh_runs(response.stdout.as_bytes()) else {
+        return Err(CiQueryError::Unparseable {
+            stdout: response.stdout,
+        });
+    };
     // `--branch` filters server-side; this is the belt to those suspenders,
     // because one cancelled run from another branch is enough to report red.
     runs.retain(|run| run.head_branch.as_deref().is_none_or(|head| head == branch));
-    (!runs.is_empty()).then_some(runs)
+    Ok(runs)
 }
 
 /// The branch the session is on, read from git rather than guessed.
@@ -305,18 +345,31 @@ fn run_blocking(
     };
     let limit = input.limit.unwrap_or(DEFAULT_RUN_LIMIT);
     match input.action {
-        CiAction::Status => Ok(status_output(cwd, &branch, limit)),
-        CiAction::Runs => Ok(status_output(cwd, &branch, limit)),
-        CiAction::Wait => Ok(wait_output(cwd, &branch, limit, input.timeout_secs)),
+        CiAction::Status | CiAction::Runs => status_output(cwd, &branch, limit),
+        CiAction::Wait => wait_output(cwd, &branch, limit, input.timeout_secs),
         CiAction::Logs => logs_output(cwd, &branch, input.run_id.as_deref()),
         CiAction::Checks => Ok(checks_output(cwd, &branch)),
     }
 }
 
-fn status_output(cwd: &std::path::Path, branch: &str, limit: u32) -> CiOutput {
-    let runs = fetch_runs(cwd, branch, limit).unwrap_or_default();
+/// A failed `gh` query is the tool's error, never an empty answer.
+fn query_error(error: CiQueryError) -> xai_tool_runtime::ToolError {
+    let code = match error {
+        CiQueryError::Unreachable => "ci_gh_unavailable",
+        CiQueryError::Failed { .. } => "ci_gh_failed",
+        CiQueryError::Unparseable { .. } => "ci_gh_unparseable",
+    };
+    xai_tool_runtime::ToolError::custom(code, error.to_string())
+}
+
+fn status_output(
+    cwd: &std::path::Path,
+    branch: &str,
+    limit: u32,
+) -> Result<CiOutput, xai_tool_runtime::ToolError> {
+    let runs = fetch_runs(cwd, branch, limit).map_err(query_error)?;
     let state = ci_state::ci_from_runs(runs.iter().cloned().collect::<Vec<_>>());
-    CiOutput {
+    Ok(CiOutput {
         state: state.as_str().to_string(),
         branch: branch.to_string(),
         settled: state.is_terminal(),
@@ -324,7 +377,7 @@ fn status_output(cwd: &std::path::Path, branch: &str, limit: u32) -> CiOutput {
         text: None,
         truncated: false,
         summary: state_summary(state, branch),
-    }
+    })
 }
 
 /// Poll until the branch's runs settle or the budget runs out.
@@ -336,24 +389,24 @@ fn wait_output(
     branch: &str,
     limit: u32,
     timeout_secs: Option<u64>,
-) -> CiOutput {
+) -> Result<CiOutput, xai_tool_runtime::ToolError> {
     let budget = std::time::Duration::from_secs(
         timeout_secs.unwrap_or(DEFAULT_WAIT_SECS).min(MAX_WAIT_SECS),
     );
     let deadline = std::time::Instant::now() + budget;
     loop {
-        let output = status_output(cwd, branch, limit);
+        let output = status_output(cwd, branch, limit)?;
         if output.settled || std::time::Instant::now() >= deadline {
             if !output.settled {
-                return CiOutput {
+                return Ok(CiOutput {
                     summary: format!(
                         "Waited {}s and CI is still running on {branch}. Do other work and ask again.",
                         budget.as_secs()
                     ),
                     ..output
-                };
+                });
             }
-            return output;
+            return Ok(output);
         }
         std::thread::sleep(std::time::Duration::from_secs(WAIT_POLL_SECS));
     }
@@ -364,7 +417,7 @@ fn logs_output(
     branch: &str,
     run_id: Option<&str>,
 ) -> Result<CiOutput, xai_tool_runtime::ToolError> {
-    let runs = fetch_runs(cwd, branch, DEFAULT_RUN_LIMIT).unwrap_or_default();
+    let runs = fetch_runs(cwd, branch, DEFAULT_RUN_LIMIT).map_err(query_error)?;
     let state = ci_state::ci_from_runs(runs.iter().cloned().collect::<Vec<_>>());
     let run_id = match run_id {
         Some(id) => id.to_string(),
@@ -452,6 +505,25 @@ mod tests {
             workflow_name: workflow.to_string(),
             database_id: Some(id),
         }
+    }
+
+    /// A dead token answers with exit 1 and a reason on stderr. The model must
+    /// read that reason, never "no runs".
+    #[test]
+    fn a_failed_gh_is_an_error_that_carries_what_gh_said() {
+        let error = query_error(CiQueryError::Failed {
+            code: 1,
+            stderr: "HTTP 403: API rate limit exceeded\n".into(),
+        });
+        let text = error.to_string();
+        assert!(text.contains("exit 1"), "{text}");
+        assert!(text.contains("API rate limit exceeded"), "{text}");
+        assert!(!text.contains("No CI runs"), "{text}");
+        assert!(
+            query_error(CiQueryError::Unreachable)
+                .to_string()
+                .contains("Could not run `gh`")
+        );
     }
 
     #[test]
