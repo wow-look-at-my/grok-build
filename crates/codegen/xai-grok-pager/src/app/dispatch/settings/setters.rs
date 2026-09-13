@@ -1027,6 +1027,30 @@ pub(in crate::app::dispatch) fn set_stop_gate_unfinished_todos(
     }]
 }
 
+pub(in crate::app::dispatch) fn set_stop_gate_ci_failing_inner(app: &mut AppView, new: bool) {
+    app.current_ui.stop_gate_ci_failing = Some(new);
+}
+
+/// SHARED: `[ui].stop_gate_ci_failing` via `Effect::PersistSetting`.
+pub(in crate::app::dispatch) fn set_stop_gate_ci_failing(
+    app: &mut AppView,
+    new: bool,
+) -> Vec<Effect> {
+    let prev = app.current_ui.stop_gate_ci_failing_enabled();
+    if prev == new {
+        return vec![];
+    }
+    set_stop_gate_ci_failing_inner(app, new);
+    refresh_open_settings_modals(app);
+    tracing::info!(target: "settings", key = "stop_gate_ci_failing", value = new, "setting changed");
+    app.show_toast(&save_success_toast("Stop gate for failing CI", new));
+    vec![Effect::PersistSetting {
+        key: "stop_gate_ci_failing",
+        value: crate::settings::SettingValue::Bool(new),
+        rollback_value: crate::settings::SettingValue::Bool(prev),
+    }]
+}
+
 pub(super) fn set_combine_queued_prompts_inner(app: &mut AppView, new: bool) {
     app.current_ui.combine_queued_prompts = Some(new);
     crate::appearance::cache::set_combine_queued_prompts(new);
