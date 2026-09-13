@@ -42,12 +42,10 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      # After the checkout: it reads the workspace, and an empty one enforces nothing.
-      - uses: wow-look-at-my/actions@yaml-comment-block#latest
-
-      # The runner starts with ~86 GB free and CARGO_PROFILE_*_DEBUG=0 holds target/ near 4 GB, so the 2m11s delete step this replaces was freeing 26 GB nobody needed.
       - name: Report disk before build
         run: df -h /
+
+      # - uses: wow-look-at-my/actions@yaml-comment-block#latest  (off until slopfix runs on ubuntu-22.04: its APE trips the runner's Mono binfmt handler on the MZ magic)
 
       - name: Install protoc (pinned v29.3)
         run: |
