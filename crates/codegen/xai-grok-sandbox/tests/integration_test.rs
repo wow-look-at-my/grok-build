@@ -60,36 +60,45 @@ fn test_profile_capability_set_construction() {
 /// request round-trips through the real shipped worker loop to a real client.
 #[test]
 fn ci_host_worker_serves_a_request_over_an_inherited_socketpair() {
-    use std::os::unix::io::{FromRawFd, IntoRawFd};
+    use std::os::unix::io::IntoRawFd;
     use std::os::unix::net::UnixStream;
 
     let (ours, theirs) = UnixStream::pair().expect("socketpair");
-    // Two handles to the worker's end of the socket: one for the child's
-    // stdin, one for its stdout — both the same connection, exactly as the
-    // host-side `spawn_ci_host` wires them before the jail exec.
-    let child_stdin = theirs.try_clone().expect("clone stdin");
-    let child_stdout = theirs.try_clone().expect("clone stdout");
-    let stdin_fd: std::os::unix::io::RawFd = {
-        use std::os::unix::io::AsRawFd as _;
-        child_stdin.as_raw_fd()
-    };
-    let stdout_fd: std::os::unix::io::RawFd = {
-        use std::os::unix::io::AsRawFd as _;
-        child_stdout.as_raw_fd()
-    };
+    // The worker's end rides a fd of its own rather than stdin/stdout.
+    // Production hands the worker fd 0 and fd 1, but this child is the TEST
+    // BINARY: its harness prints progress lines to stdout, and each one would
+    // reach the client as a fake answer and put every later answer a request
+    // behind. The protocol is what this test covers, so it gets a clean fd.
+    let theirs_fd = theirs.into_raw_fd();
+    const WORKER_FD: std::os::unix::io::RawFd = 3;
 
     let exe = std::env::current_exe().expect("current test binary");
     let mut child = std::process::Command::new(exe);
     child
         .env(xai_grok_sandbox::ci_host::CI_HOST_MARKER_ENV, "1")
+        .env(WORKER_FD_ENV, WORKER_FD.to_string())
         .arg("--exact")
         .arg("ci_host_worker_self_entry")
-        .stdin(unsafe { std::process::Stdio::from_raw_fd(stdin_fd) })
-        .stdout(unsafe { std::process::Stdio::from_raw_fd(stdout_fd) })
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
-    // `into_raw_fd` prevents the parent's copies from closing the peer.
-    let _ = (child_stdin.into_raw_fd(), child_stdout.into_raw_fd(), theirs.into_raw_fd());
+    unsafe {
+        // SAFETY: the closure runs between fork and exec and calls only the
+        // async-signal-safe `dup2`. `dup2` also clears CLOEXEC on the new fd,
+        // which is what carries the socket across the exec.
+        std::os::unix::process::CommandExt::pre_exec(&mut child, move || {
+            if libc::dup2(theirs_fd, WORKER_FD) < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
     let mut child = child.spawn().expect("spawn worker child");
+    // Close the parent's copy so the child owns the only writer: otherwise the
+    // worker never sees EOF and the exit check below times out.
+    unsafe {
+        libc::close(theirs_fd);
+    }
 
     // Ask the worker for a branch, then run an allowlisted `gh` over the same
     // connection. Whatever `gh` does (present or not), each request must get a
@@ -137,13 +146,26 @@ fn ci_host_worker_serves_a_request_over_an_inherited_socketpair() {
     }
 }
 
+/// Names the fd the parent handed this child its socket on.
+const WORKER_FD_ENV: &str = "GROK_CI_HOST_TEST_FD";
+
 /// Delegate that the parent spawns: re-enter the real shipped worker loop.
 #[test]
 fn ci_host_worker_self_entry() {
+    use std::os::unix::io::FromRawFd;
     if !xai_grok_sandbox::ci_host::is_ci_host_subprocess() {
         return; // only meaningful when spawned as the worker
     }
-    xai_grok_sandbox::ci_host::run_ci_host_worker();
+    let Some(fd) = std::env::var(WORKER_FD_ENV)
+        .ok()
+        .and_then(|raw| raw.parse::<std::os::unix::io::RawFd>().ok())
+    else {
+        return;
+    };
+    // SAFETY: the parent dup2'd its socketpair end onto this fd before exec,
+    // and nothing else in this process owns it.
+    let stream = unsafe { std::os::unix::net::UnixStream::from_raw_fd(fd) };
+    xai_grok_sandbox::ci_host::run_ci_host_worker_on(stream);
 }
 
 #[test]

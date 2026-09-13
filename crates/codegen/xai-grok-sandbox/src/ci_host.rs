@@ -220,9 +220,26 @@ fn dup2_to_stdin_stdout(fd: std::os::unix::io::RawFd) {
 /// the jailed process's session, tools, or file system beyond `repo_root`
 /// (its cwd); the sole external action is the fixed `gh` invocation.
 pub fn run_ci_host_worker() {
-    let stdin = std::io::stdin();
-    let stdout = std::io::stdout();
-    let mut reader = BufReader::new(stdin);
+    serve(std::io::stdin(), std::io::stdout());
+}
+
+/// Serve the worker protocol on one socket instead of stdin/stdout.
+///
+/// Production hands the worker its socket as fd 0 and fd 1, so it reads and
+/// writes the standard streams. A caller whose stdout carries something else
+/// (a test harness prints its own progress there, and every such line reaches
+/// the client as a fake answer) passes the socket here instead.
+#[cfg(unix)]
+pub fn run_ci_host_worker_on(stream: UnixStream) {
+    let Ok(write_half) = stream.try_clone() else {
+        return;
+    };
+    serve(stream, write_half);
+}
+
+fn serve<R: std::io::Read, W: Write>(input: R, output: W) {
+    let mut reader = BufReader::new(input);
+    let mut out = output;
     loop {
         let mut line = String::new();
         match reader.read_line(&mut line) {
@@ -234,7 +251,6 @@ pub fn run_ci_host_worker() {
         if line.is_empty() {
             continue;
         }
-        let mut out = stdout.lock();
         handle_request(line, &mut out);
         let _ = out.flush();
     }
@@ -245,23 +261,37 @@ pub fn run_ci_host_worker() {
 /// the `.` nothing-usable sentinel for anything else (confinement).
 pub fn handle_request<W: Write>(line: &str, out: &mut W) {
     if let Some(branch) = line.strip_prefix("gh-status ") {
-        let payload = query_branch(branch).unwrap_or_else(|| vec![b'.']);
         // A lone `.` is the "nothing usable" sentinel (see module docs).
-        let _ = out.write_all(&payload);
-        let _ = out.write_all(b"\n");
+        write_one_line(out, query_branch(branch).unwrap_or_else(|| vec![b'.']));
         return;
     }
     if let Some(json) = line.strip_prefix("gh ") {
         let payload = run_allowlisted(json)
             .and_then(|response| serde_json::to_vec(&response).ok())
             .unwrap_or_else(|| vec![b'.']);
-        let _ = out.write_all(&payload);
-        let _ = out.write_all(b"\n");
+        write_one_line(out, payload);
         return;
     }
     // Unknown request: answer nothing usable so the jailed side
     // degrades to "off" rather than hanging or trusting us.
-    let _ = out.write_all(b".\n");
+    write_one_line(out, vec![b'.']);
+}
+
+/// Write one response as exactly one line.
+///
+/// The trim is what holds the framing. `gh run list --json` ends its stdout
+/// with a newline of its own, so appending one wrote a blank line after every
+/// answer. The caller then read that blank line as the NEXT answer, and every
+/// response after the first arrived one request behind.
+fn write_one_line<W: Write>(out: &mut W, mut payload: Vec<u8>) {
+    while matches!(payload.last(), Some(b'\n' | b'\r')) {
+        payload.pop();
+    }
+    if payload.is_empty() {
+        payload.push(b'.');
+    }
+    let _ = out.write_all(&payload);
+    let _ = out.write_all(b"\n");
 }
 
 /// Parse a `gh <json argv>` request, check it against the allowlist, and run
@@ -411,8 +441,12 @@ fn valid_branch_token(branch: &str) -> bool {
 /// then one response. Two callers writing at once interleave two requests into
 /// one socket and read each other's answers. Keyed by fd so a distinct
 /// connection (a session restart, or a test peer) gets its own lock.
+/// A reader is held with the connection rather than built per call. A
+/// `BufReader` reads ahead, so one built per call takes whatever followed the
+/// newline into a buffer it then drops, and the next call reads a truncated
+/// answer.
 #[cfg(unix)]
-type HostStream = std::sync::Arc<std::sync::Mutex<UnixStream>>;
+type HostStream = std::sync::Arc<std::sync::Mutex<BufReader<UnixStream>>>;
 
 #[cfg(unix)]
 static HOST_STREAMS: std::sync::LazyLock<
@@ -427,9 +461,11 @@ fn host_stream(fd: i32) -> Option<HostStream> {
     // SAFETY: `fd` names a real socket opened by `spawn_ci_host` on the host
     // and inherited into this (jailed) process; we take ownership of that fd
     // exactly once, here, and keep the stream alive for the whole session.
-    let stream = map
-        .entry(fd)
-        .or_insert_with(|| Arc::new(Mutex::new(unsafe { UnixStream::from_raw_fd(fd) })));
+    let stream = map.entry(fd).or_insert_with(|| {
+        Arc::new(Mutex::new(BufReader::new(unsafe {
+            UnixStream::from_raw_fd(fd)
+        })))
+    });
     Some(Arc::clone(stream))
 }
 
@@ -443,22 +479,28 @@ fn exchange(fd: i32, request: &str) -> Option<Vec<u8>> {
     let mut line = String::with_capacity(request.len() + 1);
     line.push_str(request);
     line.push('\n');
-    guard.write_all(line.as_bytes()).ok()?;
-    guard.flush().ok()?;
+    guard.get_mut().write_all(line.as_bytes()).ok()?;
+    guard.get_mut().flush().ok()?;
 
-    // One worker response is one line. The reader borrows the stream so the
-    // shared connection keeps owning it.
-    let mut reader = BufReader::new(&*guard);
+    // One worker response is one line. A blank line is skipped rather than
+    // read as an answer: reading one would put every later answer a request
+    // behind, which is worse than the stray line it came from.
     let mut response = Vec::new();
-    match reader.read_until(b'\n', &mut response) {
-        // 0 is a true EOF: the worker exited without answering.
-        Ok(0) | Err(_) => return None,
-        Ok(_) => {}
+    loop {
+        response.clear();
+        match guard.read_until(b'\n', &mut response) {
+            // 0 is a true EOF: the worker exited without answering.
+            Ok(0) | Err(_) => return None,
+            Ok(_) => {}
+        }
+        while matches!(response.last(), Some(b'\n' | b'\r')) {
+            response.pop();
+        }
+        if !response.is_empty() {
+            break;
+        }
     }
-    if response.last() == Some(&b'\n') {
-        response.pop();
-    }
-    (!response.is_empty() && response != b".").then_some(response)
+    (response != b".").then_some(response)
 }
 
 /// Drop this process's handle on a host connection, closing our end of the
@@ -679,6 +721,39 @@ mod tests {
         // Malformed JSON is a refusal too, never a panic.
         assert_eq!(answer("gh not-json"), b".\n");
         assert_eq!(answer(r#"gh {"run":"list"}"#), b".\n");
+    }
+
+    #[test]
+    fn a_payload_that_already_ends_in_a_newline_still_writes_one_line() {
+        // `gh run list --json` ends its stdout with a newline. Appending a
+        // second one wrote a blank line after the answer, and the caller read
+        // that blank line as the NEXT answer — so every response after the
+        // first arrived one request behind.
+        let mut sink = Sink(Vec::new());
+        write_one_line(&mut sink, b"[{\"status\":\"completed\"}]\n".to_vec());
+        assert_eq!(sink.0, b"[{\"status\":\"completed\"}]\n");
+        // A payload that trims away to nothing is the sentinel, never a blank
+        // line that would desynchronise the stream the same way.
+        let mut blank = Sink(Vec::new());
+        write_one_line(&mut blank, b"\n\n".to_vec());
+        assert_eq!(blank.0, b".\n");
+    }
+
+    #[test]
+    fn a_stray_blank_line_does_not_shift_later_answers() {
+        // The reader skips a blank line instead of reporting it as an answer,
+        // so one stray newline on the wire cannot put every later caller a
+        // request behind.
+        // The blank line rides the same answer, because a worker only writes
+        // after a request. That is how the real stray one reached the wire.
+        let fd = peer(vec![
+            "\n{\"code\":0,\"stdout\":\"first\",\"stderr\":\"\",\"truncated\":false}",
+            r#"{"code":0,"stdout":"second","stderr":"","truncated":false}"#,
+        ]);
+        let first = query_gh_host(fd, &["run", "list"]).expect("first");
+        assert_eq!(first.stdout, "first");
+        let second = query_gh_host(fd, &["run", "list"]).expect("second");
+        assert_eq!(second.stdout, "second");
     }
 
     #[test]
