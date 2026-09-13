@@ -284,6 +284,7 @@ fn default_grok_build_toolset() -> ToolServerConfig {
             (&search_tool::SearchTool).into(),
             (&use_tool::UseTool).into(),
             (&grok_build::UpdateGoalTool).into(),
+            (&grok_build::CiTool).into(),
             (&grok_build::WorkflowTool).into(),
         ],
         behavior_preset: None,
@@ -307,6 +308,7 @@ fn grok_build_concise_toolset() -> ToolServerConfig {
             (&grok_build::SchedulerListTool).into(),
             (&grok_build::MonitorTool).into(),
             (&grok_build::UpdateGoalTool).into(),
+            (&grok_build::CiTool).into(),
             (&grok_build::WorkflowTool).into(),
         ],
         behavior_preset: None,
@@ -339,6 +341,7 @@ pub fn grok_build_hashline_toolset(
         (&search_tool::SearchTool).into(),
         (&use_tool::UseTool).into(),
         (&grok_build::UpdateGoalTool).into(),
+        (&grok_build::CiTool).into(),
         (&grok_build::WorkflowTool).into(),
     ]);
     ToolServerConfig {
@@ -426,6 +429,7 @@ fn grok_build_plan_toolset() -> ToolServerConfig {
             (&search_tool::SearchTool).into(),
             (&use_tool::UseTool).into(),
             (&grok_build::UpdateGoalTool).into(),
+            (&grok_build::CiTool).into(),
             (&grok_build::WorkflowTool).into(),
             // Plan mode tools
             (&grok_build::EnterPlanModeTool).into(),
@@ -463,6 +467,7 @@ fn orchestrator_toolset() -> ToolServerConfig {
             (&grok_build::ExitPlanModeTool).into(),
             (&grok_build::AskUserQuestionTool).into(),
             (&grok_build::UpdateGoalTool).into(),
+            (&grok_build::CiTool).into(),
             (&grok_build::WorkflowTool).into(),
             // Scheduling and monitoring
             (&grok_build::SchedulerCreateTool).into(),
@@ -514,6 +519,7 @@ fn grok_build_plan_no_subagents_toolset() -> ToolServerConfig {
             (&search_tool::SearchTool).into(),
             (&use_tool::UseTool).into(),
             (&grok_build::UpdateGoalTool).into(),
+            (&grok_build::CiTool).into(),
             (&grok_build::WorkflowTool).into(),
             // Plan mode tools
             (&grok_build::EnterPlanModeTool).into(),
@@ -549,6 +555,7 @@ fn grok_build_ask_user_toolset() -> ToolServerConfig {
             (&search_tool::SearchTool).into(),
             (&use_tool::UseTool).into(),
             (&grok_build::UpdateGoalTool).into(),
+            (&grok_build::CiTool).into(),
             (&grok_build::WorkflowTool).into(),
             // Ask user tool (without plan mode)
             (&grok_build::AskUserQuestionTool).into(),

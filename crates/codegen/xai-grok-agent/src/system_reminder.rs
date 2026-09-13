@@ -23,6 +23,11 @@ pub struct ReminderPolicy {
     /// continuation budget as stop hooks) before being allowed to stop.
     /// Default ON; driven by the persisted `[ui].stop_gate_unfinished_todos`.
     pub stop_gate_unfinished_todos: bool,
+    /// Master switch for the built-in CI-stop gate: at the turn-end stop gate a
+    /// model whose branch has a failing run is sent back to read the logs and
+    /// fix them, consuming the same continuation budget as stop hooks.
+    /// Default ON; driven by the persisted `[ui].stop_gate_ci_failing`.
+    pub stop_gate_ci_failing: bool,
 }
 
 impl Default for ReminderPolicy {
@@ -32,6 +37,7 @@ impl Default for ReminderPolicy {
             todo_nudge: TodoNudgeConfig::default(),
             todo_gate: TodoGateConfig::default(),
             stop_gate_unfinished_todos: true,
+            stop_gate_ci_failing: true,
         }
     }
 }

@@ -927,6 +927,19 @@ impl SessionActor {
                         // after MAX_STOP_HOOK_CONTINUATIONS_PER_TURN
                         // continuations), and its feedback rides the same
                         // stop_hook_feedback user message.
+                        // The CI gate is the second built-in participant, and
+                        // it runs before the todo gate so a red branch is
+                        // reported even on a turn whose todos are all closed.
+                        // Both consume the same continuation budget.
+                        if let Some(feedback) = self
+                            .ci_stop_gate_feedback(prompt_id, stop_continuations_this_turn)
+                            .await
+                        {
+                            stop_continuations_this_turn += 1;
+                            self.chat_state_handle
+                                .push_user_message(ConversationItem::stop_hook_feedback(feedback));
+                            continue;
+                        }
                         if !self.todo_stop_gate_active() {
                             break round;
                         }

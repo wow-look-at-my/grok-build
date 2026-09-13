@@ -975,6 +975,7 @@ pub(super) fn action_for_bool(key: SettingKey, new: bool) -> Option<Action> {
         "page_flip_on_send" => Some(Action::SetPageFlipOnSend(new)),
         "confirm_before_rewind" => Some(Action::SetConfirmBeforeRewind(new)),
         "stop_gate_unfinished_todos" => Some(Action::SetStopGateUnfinishedTodos(new)),
+        "stop_gate_ci_failing" => Some(Action::SetStopGateCiFailing(new)),
         "combine_queued_prompts" => Some(Action::SetCombineQueuedPrompts(new)),
         "invert_scroll" => Some(Action::SetInvertScroll(new)),
         "show_tips" => Some(Action::SetShowTips(new)),
