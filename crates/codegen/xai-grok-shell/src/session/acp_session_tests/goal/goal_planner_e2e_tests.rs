@@ -118,6 +118,11 @@ fn spawn_planner_coordinator_capturing(
                     .unwrap()
                     .push(req.runtime_overrides.model.clone());
                 let plan_path = plan_path_from_prompt(&req.prompt);
+                if let SpawnBehaviour::WaitForContextThenWrite { objectives, .. } = &behaviour {
+                    // Record what the planner was actually spawned with, so the
+                    // test can prove the objective carries no folded-in steering.
+                    objectives.lock().unwrap().push(req.prompt.clone());
+                }
                 if let SpawnBehaviour::WaitForContextThenWrite { notify, body, .. } = &behaviour {
                     let notify = StdArc::clone(notify);
                     let body = *body;

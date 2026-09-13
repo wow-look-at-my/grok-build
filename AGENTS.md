@@ -124,7 +124,7 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 
 ## Goal-planner cancellation notes
 
-- Only steering replans. `run_goal_planner_attempt` returns `Steered` whenever there is any, so an `Interrupted` reaching the loop is a bare cancel and is terminal — retrying one spawned four dead planners in 2.3 s before the attempt cap paused the goal.
+- Nothing replans. A Send Now delivers its text to the planner already running (`SubagentEvent::Interject`, routed by the coordinator id the spawn publishes on the goal tracker) instead of cancelling it, so an `Interrupted` reaching the loop is a bare cancel and is terminal — retrying one spawned four dead planners in 2.3 s before the attempt cap paused the goal.
 - The planner runs off a slash command, not a turn, and a user Stop latches the session's Task spawns closed until a turn reopens them (`open_subagent_spawn_admission`). `maybe_run_goal_planner` reopens them itself. Without that, `/goal resume` after a Stop is rejected before a subagent exists, at latency 0, for every message the session has left.
 - A pause the user asked for says so (`planner_cancelled_pause_message`). "Planning failed" on a cancel sends the reader hunting a broken planner that is doing exactly what it was told.
 
