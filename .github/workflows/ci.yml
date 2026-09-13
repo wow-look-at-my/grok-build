@@ -10,6 +10,11 @@ on:
 permissions:
   contents: read
 
+# One run per branch: a push cancels the run it supersedes.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
   # xai-grok-sandbox's `fails_closed_on_non_utf8_*` hit errno 84 under a non-UTF-8 locale.
@@ -24,86 +29,10 @@ env:
   BUILDHOST_PROJECT: grok-build
 
 jobs:
-  # Seconds, not a whole build: it names the failing step of a cache round trip while that is cheap.
-  cache-probe:
-    name: Cache round trip
-    if: github.ref != 'refs/heads/master'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-
-      - name: Install binpazer
-        run: |
-          curl -fSsL --location-trusted \
-            "https://dl.pazer.build/bin-file-fmt/binpazer?os=linux&arch=amd64" -o "$RUNNER_TEMP/binpazer"
-          chmod +x "$RUNNER_TEMP/binpazer"
-          echo "BINPAZER=$RUNNER_TEMP/binpazer" >> "$GITHUB_ENV"
-
-      # The runner gives the cache service env to action processes only, never to a run step.
-      - name: Export the cache service env for the shell steps
-        uses: wow-look-at-my/actions@typescript#latest
-        with:
-          script: |
-            for (const key of ["ACTIONS_RESULTS_URL", "ACTIONS_CACHE_URL", "ACTIONS_RUNTIME_TOKEN"]) {
-              const value = process.env[key];
-              if (value) core.exportVariable(key, value);
-              core.info(`${key}: ${value ? "present" : "absent"}`);
-            }
-
-      # Streamed live, because Actions withholds a job's log until every leg of the run has finished.
-      - name: Round trip one entry through the cache service
-        run: ci/stream-run.sh cache-probe ci/cache-probe.sh
-        env:
-          LOG_STREAMER_STREAM_KEY: ${{ secrets.LOG_STREAMER_API_KEY }}
-
-  # Three colds run together; each warm waits only on its own cold, never on the slowest leg.
-  measure-cold-nocache-j3:
-    if: github.ref != 'refs/heads/master'
-    uses: ./.github/workflows/measure-leg.yml
-    with:
-      technique: nocache-j3
-      phase: cold
-      jobs: "3"
-      wrapper: ""
-    secrets: inherit
-
-  measure-warm-nocache-j3:
-    if: github.ref != 'refs/heads/master'
-    needs: measure-cold-nocache-j3
-    uses: ./.github/workflows/measure-leg.yml
-    with:
-      technique: nocache-j3
-      phase: warm
-      jobs: "3"
-      wrapper: ""
-    secrets: inherit
-
-  measure-cold-pkgcache-j16-slots3:
-    if: github.ref != 'refs/heads/master'
-    uses: ./.github/workflows/measure-leg.yml
-    with:
-      technique: pkgcache-j16-slots3
-      phase: cold
-      jobs: "16"
-      wrapper: "ci/pkg-cache.sh"
-    secrets: inherit
-
-  measure-warm-pkgcache-j16-slots3:
-    if: github.ref != 'refs/heads/master'
-    needs: measure-cold-pkgcache-j16-slots3
-    uses: ./.github/workflows/measure-leg.yml
-    with:
-      technique: pkgcache-j16-slots3
-      phase: warm
-      jobs: "16"
-      wrapper: "ci/pkg-cache.sh"
-    secrets: inherit
-
   build-test:
     name: Build & test
     # Hosted deliberately: this suite asserts host semantics the org's lean self-hosted image lacks. See AGENTS.md.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     # A ceiling, not a target. The compile is cold every run (measured 31 min at -j3) and a hung test is failed by nextest in 60s, so a job past this is broken, not slow.
     timeout-minutes: 75
     env:
@@ -113,12 +42,10 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      # After the checkout: it reads the workspace, and an empty one enforces nothing.
-      - uses: wow-look-at-my/actions@yaml-comment-block#latest
-
-      # The runner starts with ~86 GB free and CARGO_PROFILE_*_DEBUG=0 holds target/ near 4 GB, so the 2m11s delete step this replaces was freeing 26 GB nobody needed.
       - name: Report disk before build
         run: df -h /
+
+      # - uses: wow-look-at-my/actions@yaml-comment-block#latest  (off until slopfix runs on ubuntu-22.04: its APE trips the runner's Mono binfmt handler on the MZ magic)
 
       - name: Install protoc (pinned v29.3)
         run: |
@@ -150,14 +77,36 @@ jobs:
           tar -xzf "$RUNNER_TEMP/nextest.tar.gz" -C "$RUNNER_TEMP/nextest-bin"
           echo "$RUNNER_TEMP/nextest-bin" >> "$GITHUB_PATH"
 
-      # No compile cache: every run compiles cold. -j3 is the widest -j the runner's 15 GiB holds.
+      # Without the container format the wrapper packs into, every upload here fails before the wire.
+      - name: Install binpazer
+        run: |
+          curl -fSsL --location-trusted \
+            "https://dl.pazer.build/bin-file-fmt/binpazer?os=linux&arch=amd64" -o "$RUNNER_TEMP/binpazer"
+          chmod +x "$RUNNER_TEMP/binpazer"
+          echo "BINPAZER=$RUNNER_TEMP/binpazer" >> "$GITHUB_ENV"
+
+      # A run step is not given the cache service env, so without this the remote layer never runs here.
+      - name: Export the cache service env for the shell steps
+        uses: wow-look-at-my/actions@typescript#latest
+        with:
+          script: |
+            for (const key of ["ACTIONS_RESULTS_URL", "ACTIONS_CACHE_URL", "ACTIONS_RUNTIME_TOKEN"]) {
+              const value = process.env[key];
+              if (value) core.exportVariable(key, value);
+              core.info(`${key}: ${value ? "present" : "absent"}`);
+            }
+
+      # -j3 is the widest -j the runner's 15 GiB holds.
       - name: Build test harnesses (compile, no-run)
         env:
           CARGO_BUILD_JOBS: "3"
         run: |
+          start=$(date +%s)
           cargo test --locked --workspace --no-run --no-fail-fast
           # Built once here, rather than once per nextest process on cargo's package lock.
           cargo build --locked -p xai-grok-pager-bin
+          echo "compile wall: $(( $(date +%s) - start )) s"
+          echo "target: $(du -sh target 2>/dev/null | cut -f1)"
 
       - name: Run tests (workspace)
         run: |
@@ -168,7 +117,7 @@ jobs:
   pty-e2e:
     name: Test (PTY end-to-end)
     # Hosted for the same reason as build-test: these need a real /bin/bash.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     timeout-minutes: 45
     env:
       PAGER_BINARY: ${{ github.workspace }}/target/debug/xai-grok-pager
@@ -221,7 +170,7 @@ jobs:
 
   build-release:
     name: Build release binary (linux/amd64)
-    # ubuntu-22.04 ships glibc 2.35, which holds every GLIBC_x.y dependency at or below what a 22.04 user has.
+    # Every Linux job is ubuntu-22.04 so they share one cache. Here it also matters for output: glibc 2.35 holds every GLIBC_x.y dependency at or below what a 22.04 user has.
     runs-on: ubuntu-22.04
     timeout-minutes: 45
     steps:
@@ -378,8 +327,8 @@ jobs:
 
   publish-create:
     name: Create buildhost release
-    needs: [build-test, build-release, link-darwin]
-    runs-on: ubuntu-latest
+    needs: [build-test, pty-e2e, build-release, link-darwin]
+    runs-on: ubuntu-22.04
     permissions:
       contents: read
       id-token: write # GitHub OIDC -> buildhost; only these jobs talk to buildhost
@@ -396,7 +345,7 @@ jobs:
   publish-upload:
     name: Upload ${{ matrix.target_os }}/${{ matrix.target_arch }} binary
     needs: publish-create
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     permissions:
       contents: read
       id-token: write
@@ -427,7 +376,7 @@ jobs:
   publish-finalize:
     name: Publish buildhost release
     needs: [publish-create, publish-upload]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     permissions:
       contents: read
       id-token: write

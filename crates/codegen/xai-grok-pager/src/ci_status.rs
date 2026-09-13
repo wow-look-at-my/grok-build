@@ -41,7 +41,11 @@ use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
-use serde::Deserialize;
+// The pure run→state reduction is shared with the agent's `ci` tool, so the
+// dot and the tool can never disagree about what red means.
+pub use xai_grok_sandbox::ci_state::{
+    CiStatus, GhRun, ci_from_runs, map_ci_status, parse_gh_runs,
+};
 
 /// Minimum interval between off-thread `gh` refreshes for the same target, so
 /// a per-frame caller can't spawn a storm of `gh` subprocesses.
@@ -77,200 +81,7 @@ static CI_CACHE: LazyLock<Mutex<HashMap<CiCacheKey, CiCacheEntry>>> =
 static CI_CHANGE_TX: LazyLock<Mutex<Option<tokio::sync::mpsc::UnboundedSender<()>>>> =
     LazyLock::new(|| Mutex::new(None));
 
-/// The tri-state CI color for a branch, plus the "no CI" absent state.
-///
-/// Rendered as a single colored dot (red / yellow / green) beside the branch.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CiStatus {
-    /// No CI signal: `gh` unavailable, unauthenticated, no runs, or the
-    /// branch has no workflow runs at all. The dot is simply not drawn (or
-    /// drawn in a neutral dim style).
-    Off,
-    /// A run has failed or errored (failing/errored/cancelled/timed-out).
-    Red,
-    /// A run is currently in progress / queued / pending (non-terminal).
-    Yellow,
-    /// A run has concluded successfully.
-    Green,
-}
-
-/// A single workflow run as reported by `gh run list --json`.
-///
-/// `gh` emits camelCase keys (`headBranch`, `workflowName`); without the
-/// rename every non-single-word field silently deserialized to its default.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GhRun {
-    /// GitHub `status` of the run: `queued`, `in_progress`, `completed`,
-    /// `requested`, `waiting`, `pending` … — `""` when unknown.
-    #[serde(default)]
-    pub status: String,
-    /// GitHub `conclusion` of a completed run: `success`, `failure`,
-    /// `cancelled`, `neutral`, `skipped`, `timed_out`, `action_required`,
-    /// `stale`, `startup_failure` … — empty (`""`) or null while the run is
-    /// still in progress.
-    #[serde(default)]
-    pub conclusion: String,
-    /// Branch this run was triggered against. `--branch` already filters
-    /// server-side; [`gh_run_list`] re-checks it so a run for another branch
-    /// can never color this branch's dot.
-    #[serde(default)]
-    pub head_branch: Option<String>,
-    /// Workflow this run belongs to (`""` when unknown). A branch normally
-    /// has several — CI, release, previews — and they must be folded
-    /// separately: see [`newest_run_per_workflow`].
-    #[serde(default)]
-    pub workflow_name: String,
-}
-
-impl GhRun {
-    /// A run that finished in a failing or errored state.
-    fn is_terminal_failure(&self) -> bool {
-        matches!(
-            self.conclusion.as_str(),
-            "failure" | "cancelled" | "timed_out" | "action_required" | "stale" | "startup_failure"
-        )
-    }
-
-    /// A run that is still running / queued (non-terminal).
-    ///
-    /// Anything not yet `completed` (queued/in_progress/pending/requested/
-    /// waiting) is a live, moving CI signal → yellow. A `completed` run that
-    /// is still missing a final conclusion is also treated as in-flight.
-    fn is_in_progress(&self) -> bool {
-        let status_pending =
-            !self.status.is_empty() && !self.status.eq_ignore_ascii_case("completed");
-        status_pending || (self.conclusion.is_empty() && !self.status.is_empty())
-    }
-
-    /// A run that concluded successfully.
-    fn is_success(&self) -> bool {
-        self.conclusion.eq_ignore_ascii_case("success")
-    }
-}
-
-/// Pure status→color mapping for a single run's `status`/`conclusion`.
-///
-/// This is the thin, dependency-free unit from criterion 2 and is exercised
-/// directly by the unit tests against representative CI states:
-///   - failing/errored conclusion → [`CiStatus::Red`]
-///   - non-terminal status (in progress / pending / queued) → [`CiStatus::Yellow`]
-///   - successful conclusion → [`CiStatus::Green`]
-///   - no signal → [`CiStatus::Off`]
-pub fn map_ci_status(status: Option<&str>, conclusion: Option<&str>) -> CiStatus {
-    let conclusion = conclusion.unwrap_or("");
-    let status = status.unwrap_or("");
-    // No status *and* no conclusion → unknown/no signal.
-    if status.is_empty() && conclusion.is_empty() {
-        return CiStatus::Off;
-    }
-    let run = GhRun {
-        status: status.to_string(),
-        conclusion: conclusion.to_string(),
-        head_branch: None,
-        workflow_name: String::new(),
-    };
-    ci_from_runs(std::iter::once(run))
-}
-
-/// Fold a set of runs (as returned by `gh run list`) into one tri-state color.
-///
-/// Only the newest run of each workflow counts — see
-/// [`newest_run_per_workflow`]. Across those, precedence (two passes, so a
-/// failing workflow reports red even while another is still in progress):
-///   1. any failing/errored run → [`CiStatus::Red`]
-///   2. else any in-progress/pending run → [`CiStatus::Yellow`]
-///   3. else any successful run → [`CiStatus::Green`]
-///   4. else → [`CiStatus::Off`]
-pub fn ci_from_runs<I>(runs: I) -> CiStatus
-where
-    I: IntoIterator<Item = GhRun>,
-{
-    let runs = newest_run_per_workflow(runs);
-    if runs.is_empty() {
-        return CiStatus::Off;
-    }
-    // Pass 1 — a branch's CI is red while any run has failed/errored.
-    if runs.iter().any(GhRun::is_terminal_failure) {
-        return CiStatus::Red;
-    }
-    // Pass 2 — otherwise the branch is yellow while any run is still moving.
-    if runs.iter().any(GhRun::is_in_progress) {
-        return CiStatus::Yellow;
-    }
-    // Pass 3 — otherwise green when a run concluded successfully.
-    if runs.iter().any(GhRun::is_success) {
-        return CiStatus::Green;
-    }
-    // Only neutral/skipped/no-op runs on this branch → nothing conclusive.
-    CiStatus::Off
-}
-
-/// Keep the newest run of each workflow, dropping the ones it superseded.
-///
-/// `gh run list` returns newest first and reaches back ten runs, so a branch
-/// that has been pushed twice reports both. Pushing cancels the run in flight
-/// (`concurrency.cancel-in-progress`), and a cancelled run is a failure — so
-/// folding over the raw list paints the dot red off a run the newer push
-/// already replaced, and it stays red however green the branch gets.
-///
-/// Runs are grouped by workflow rather than collapsed to one, because a
-/// branch's workflows are independent: a failing test workflow must still
-/// show red while a release workflow is mid-upload.
-fn newest_run_per_workflow<I>(runs: I) -> Vec<GhRun>
-where
-    I: IntoIterator<Item = GhRun>,
-{
-    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-    runs.into_iter()
-        .filter(|run| seen.insert(run.workflow_name.clone()))
-        .collect()
-}
-
-/// Parse the raw stdout of `gh run list --json` into runs + a tri-state color.
-///
-/// Pure and headless-safe. Returns `None` when `gh` produced no usable JSON
-/// (or the output decodes to empty), so callers degrade to "no CI status"
-/// instead of panicking.
-pub fn parse_gh_runs(stdout: &[u8]) -> Option<Vec<GhRun>> {
-    // `gh` can colourise piped JSON (e.g. `GH_FORCE_TTY`, `--color always`),
-    // which would break serde parsing; strip ANSI CSI just as the PR status
-    // extension does.
-    let runs = strip_ansi_csi(stdout);
-    let parsed = match serde_json::from_slice::<Vec<GhRun>>(&runs) {
-        Ok(runs) => runs,
-        Err(error) => {
-            tracing::debug!(error = %error, "gh run list output did not parse as JSON");
-            return None;
-        }
-    };
-    if parsed.is_empty() {
-        return None;
-    }
-    Some(parsed)
-}
-
-/// Best-effort decode of a raw ANSI-encoded byte buffer to plain bytes.
-/// Mirrors the `gh` colourising workaround used by the PR-status extension.
-fn strip_ansi_csi(bytes: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == 0x1b && bytes.get(i + 1) == Some(&b'[') {
-            i += 2;
-            while i < bytes.len() && !(0x40..=0x7e).contains(&bytes[i]) {
-                i += 1;
-            }
-            i += 1;
-        } else {
-            out.push(bytes[i]);
-            i += 1;
-        }
-    }
-    out
-}
-
-/// Pure sine-wave factor used to animate the "CI running" dot's HS**V** value.
+/// Sine-wave factor that animates the "CI running" dot's HSV value.
 ///
 /// Returns a value in `[min, max]` (each in `0..=1`) that oscillates over the
 /// render tick, `min` + `(max-min)·(1+sin)/2`. Kept dependency-free and
@@ -402,8 +213,12 @@ fn run_gh_via_ci_host(
         let Some(branch) = branch else {
             return None;
         };
+<<<<<<< HEAD
         let stream = xai_grok_sandbox::ci_host::inherited_host_stream(fd)?;
         let body = xai_grok_sandbox::ci_host::query_ci_host_stream(stream, branch)?;
+=======
+        let body = xai_grok_sandbox::ci_host::query_ci_host(fd, branch)?;
+>>>>>>> origin/master
         // Carry the payload the same way a real `gh` stdout would, plus a
         // synthetic success status so the caller's parse path is unchanged.
         return Some(std::process::Output {
@@ -448,11 +263,15 @@ fn run_gh(repo_root: &Path, args: &[&str]) -> Option<std::process::Output> {
     run_gh_direct(repo_root, args)
 }
 
+<<<<<<< HEAD
 /// The inherited host-worker fd, if this process is a sandboxed session that
 /// was handed one at jail entry.
 fn ci_host_fd() -> Option<i32> {
     xai_grok_sandbox::ci_host::inherited_host_fd()
 }
+=======
+use xai_grok_sandbox::ci_host::ci_host_fd;
+>>>>>>> origin/master
 
 /// The direct, unsandboxed `gh` invocation used when no host worker was
 /// handed to us (a normal session).
@@ -625,6 +444,9 @@ mod tests {
             conclusion: conclusion.to_string(),
             head_branch: Some("feature/x".into()),
             workflow_name: workflow.to_string(),
+            // The dot folds runs to a colour and never addresses one, so it
+            // asks `gh` for no id. The `ci` tool does, to read a run's logs.
+            database_id: None,
         }
     }
 
