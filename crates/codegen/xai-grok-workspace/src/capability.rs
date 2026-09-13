@@ -104,6 +104,7 @@ pub(crate) const ALL_TOOL_KINDS: &[ToolKind] = &[
     ToolKind::Monitor,
     ToolKind::GoalUpdate,
     ToolKind::Workflow,
+    ToolKind::Ci,
     ToolKind::Other,
 ];
 
@@ -140,8 +141,9 @@ pub(crate) fn kind_allowed(mode: CapabilityMode, kind: ToolKind) -> bool {
             matches!(mode, M::ReadOnly | M::ReadWrite | M::Execute)
         }
 
-        // Inspect class.
-        Lsp | ListDir | List => matches!(mode, M::ReadOnly | M::ReadWrite | M::Execute),
+        // Inspect class. `Ci` reads GitHub state and mutates nothing, so it
+        // belongs with the other read-only inspections.
+        Lsp | ListDir | List | Ci => matches!(mode, M::ReadOnly | M::ReadWrite | M::Execute),
 
         // Edit class.
         Edit | Write | Delete | Move | ImageGen | VideoGen | ImageToVideo | ReferenceToVideo

@@ -69,6 +69,7 @@ impl ToolKind {
             ToolKind::Monitor => "Monitor",
             ToolKind::GoalUpdate => "Update Goal",
             ToolKind::Workflow => "Workflow",
+            ToolKind::Ci => "CI Status",
             ToolKind::Other => "Tool",
         }
     }
@@ -89,6 +90,7 @@ impl ToolKind {
             | ToolKind::WebFetch
             | ToolKind::EnterPlan
             | ToolKind::ExitPlan
+            | ToolKind::Ci
             | ToolKind::AskUser => true,
             ToolKind::Edit
             | ToolKind::Delete

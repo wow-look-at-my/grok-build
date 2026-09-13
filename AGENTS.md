@@ -56,6 +56,19 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
   - `set_change_notifier` gives the poller a way to ask for one repaint, and only when the color actually changed.
   - `ci_dot_animating` makes `tick_demand` report Slow while a run is in flight, which is what supplies the frames the pulse animates over.
 
+## CI pipeline notes: the `gh` host worker, the `ci` tool, and the CI stop gate
+
+- The unsandboxed host worker (`xai-grok-sandbox/src/ci_host.rs`) is the only way anything in a `--sandbox` session reaches `gh`. A jail re-execs the whole binary. A `gh` spawned from inside it reaches neither the host credentials nor the network. The host starts the worker moments before the re-exec and hands it in as an open socketpair fd.
+- The worker serves `gh-status <branch>` for the dot and `gh <json argv>` for an allowlisted run. `ALLOWED_COMMANDS` and `ALLOWED_FLAGS` keep the surface read-only. The check runs on the WORKER. A jailed session that writes its own request line gets the same refusal. `gh api` is admitted because the flag allowlist refuses every flag that carries a method or a body.
+- One connection, one mutex (`host_stream`). The dot polls off a blocking thread while the `ci` tool runs its own queries. Callers that write at the same time interleave their requests and read each other's answers. `concurrent_callers_never_read_each_others_answers` covers it.
+- The run-to-state reduction lives in `ci_state.rs`. The dot and the tool share it. So the two cannot disagree about what red means.
+- Only the newest run per workflow counts. A push cancels the run in flight. A cancelled run reads as a failure. Folding the raw list therefore leaves a branch red forever after its second push.
+- The `ci` tool (`xai-grok-tools/.../grok_build/ci/`) is the model's half: `status`, `runs`, `wait`, `logs`, `checks`. `logs` defaults to the newest FAILING run, not to the newest run. A `wait` that runs out of budget reports the state it last saw. A timeout therefore reads as "still running" and not as a broken tool.
+- The CI stop gate (`acp_session_impl/stop_gate.rs`) is the enforcement half. It is a participant in the turn-end STOP-HOOK gate, not a mechanism beside it. It fires only after the user hooks allow the stop. It consumes the SAME `stop_continuations_this_turn` budget. Its reminder rides the same `stop_hook_feedback` user message. So `MAX_STOP_HOOK_CONTINUATIONS_PER_TURN` is the stuck-release: a model that cannot get CI green stops anyway.
+- Only RED blocks. Green, no runs, and a run still in flight each allow the stop. A gate on yellow spends the whole continuation budget on a wait for a verdict. And a repository with no workflows then never ends a turn.
+- The gate is off for a subagent. A subagent does not own the branch. Sending one back over a failure its parent pushed has it fixing work it cannot see.
+- The switch is the persisted `[ui].stop_gate_ci_failing` toggle, default ON. The gate reads it before the `gh` call. So a session that turns the gate off spends nothing on it per turn end.
+
 ## `/debug` feature notes
 
 - `/debug <question>` injects the question plus an execution-context snapshot (`slash/commands/debug_context.rs`) through `CommandResult::InjectSkill`. Only `scroll`, `fps` and `log` are reserved. Everything else is free text. So a question must never come back as an "unknown option" error again.
@@ -179,7 +192,7 @@ Pointing `build-test` at `vars.CI_RUNNER` turns ~20 tests red, because they asse
 - overlayfs reports `st_blocks=2` for every file, so `disk_usage_cmd` and `fs_size` measure ~1 KiB for anything.
 - no UTF-8 locale by default, so `xai-grok-sandbox`'s `fails_closed_on_non_utf8_*` hit errno 84.
 
-Every one of those is the test doing its job. Making them pass there means weakening what they check, so the fix belongs to the runner image (an init/reaper, a real filesystem for `/tmp`) and that image is the fleet's, not this repo's. Revisit the runner once it has one. Until then this job is `runs-on: ubuntu-latest`, which is what `master` builds green on.
+Every one of those is the test doing its job. Making them pass there means weakening what they check, so the fix belongs to the runner image (an init/reaper, a real filesystem for `/tmp`) and that image is the fleet's, not this repo's. Revisit the runner once it has one. Until then this job is `runs-on: ubuntu-22.04`, like every other Linux job in the workflow, which is what `master` builds green on.
 
 ## Todo-stop-gate notes
 

@@ -526,6 +526,7 @@ pub fn current_value_for(
         "stop_gate_unfinished_todos" => Some(SettingValue::Bool(
             ui.stop_gate_unfinished_todos_enabled(),
         )),
+        "stop_gate_ci_failing" => Some(SettingValue::Bool(ui.stop_gate_ci_failing_enabled())),
         "simple_mode" => Some(SettingValue::Bool(ui.simple_mode.unwrap_or(true))),
         // Per-tip contextual hints — `None` (inherit) reads as the default ON.
         "contextual_hints.undo" => {
@@ -858,6 +859,13 @@ mod tests {
                         *default,
                         ui.stop_gate_unfinished_todos_enabled(),
                         "stop_gate_unfinished_todos default drifts from UiConfig::default()"
+                    );
+                }
+                ("stop_gate_ci_failing", SettingKind::Bool { default }) => {
+                    assert_eq!(
+                        *default,
+                        ui.stop_gate_ci_failing_enabled(),
+                        "stop_gate_ci_failing default drifts from UiConfig::default()"
                     );
                 }
                 ("combine_queued_prompts", SettingKind::Bool { default }) => {
