@@ -1376,18 +1376,13 @@ impl SessionActor {
             }
         };
         let cancel_token = tokio_util::sync::CancellationToken::new();
-<<<<<<< HEAD
-        let spawn_id = uuid::Uuid::now_v7().to_string();
-        self.goal_tracker
-=======
         // The cell the spawn publishes the planner's coordinator id into: a
         // Send Now landing mid-run addresses its context there rather than
         // restarting the planner.
         let planner_subagent_id = self
             .goal_tracker
->>>>>>> origin/master
             .lock()
-            .start_planner_run(cancel_token.clone(), spawn_id.clone(), event_tx.clone());
+            .start_planner_run(cancel_token.clone());
 
         let model_id = self
             .chat_state_handle
@@ -1421,7 +1416,7 @@ impl SessionActor {
         let inherit_tool_names = tool_names.clone();
         let spawner: std::sync::Arc<dyn crate::session::goal_planner::GoalPlannerSpawner> =
             std::sync::Arc::new(crate::session::goal_planner::ChannelSpawner {
-                event_tx: event_tx.clone(),
+                event_tx,
                 foreground_wait: Some(crate::tools::tool_context::subagent_foreground_wait(
                     self.tool_context.blocking_wait_depth.clone(),
                 )),
@@ -1458,14 +1453,8 @@ impl SessionActor {
         // represented by its own turn). No-op when the spawn recorded nothing.
         self.chat_state_handle.flush_harness_trace_turn();
 
-<<<<<<< HEAD
-        // Steering is delivered directly to the live planner child as an
-        // interjection. Do not restart the child here: doing so discards its
-        // accumulated investigation and was the source of repeated replans.
-=======
         // Drop the run (and with it the planner's coordinator id): a Send Now
         // arriving after this point has no live planner to address.
->>>>>>> origin/master
         let _ = self.goal_tracker.lock().take_planner_run();
 
         PlannerAttemptStep::Ran {

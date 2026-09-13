@@ -102,15 +102,9 @@ fn spawn_planner_coordinator_capturing(
                 }
                 continue;
             }
-<<<<<<< HEAD
-            if let SubagentEvent::Interject { text, .. } = ev {
-                if let SpawnBehaviour::WaitForContextThenWrite { context, notify, .. } = &behaviour {
-                    context.lock().unwrap().push(text);
-=======
             if let SubagentEvent::Interject { text, .. } = &ev {
                 if let SpawnBehaviour::WaitForContextThenWrite { context, notify, .. } = &behaviour {
                     context.lock().unwrap().push(text.clone());
->>>>>>> origin/master
                     notify.notify_one();
                 }
                 continue;
@@ -164,28 +158,6 @@ fn spawn_planner_coordinator_capturing(
                         if let Some(p) = plan_path.as_deref() {
                             let _ =
                                 std::fs::create_dir_all(std::path::Path::new(p).parent().unwrap());
-                            let _ = std::fs::write(p, body);
-                        }
-                        SubagentResult {
-                            success: true,
-                            output: StdArc::from("Done"),
-                            subagent_id: req.id.clone(),
-                            child_session_id: req.id.clone(),
-                            ..Default::default()
-                        }
-                    }
-                    SpawnBehaviour::WaitForContextThenWrite {
-                        started,
-                        objectives,
-                        context,
-                        notify,
-                        body,
-                    } => {
-                        objectives.lock().unwrap().push(req.prompt.clone());
-                        let _ = started.send(count_task.load(SeqOrd::SeqCst));
-                        notify.notified().await;
-                        if let Some(p) = plan_path.as_deref() {
-                            let _ = std::fs::create_dir_all(std::path::Path::new(p).parent().unwrap());
                             let _ = std::fs::write(p, body);
                         }
                         SubagentResult {

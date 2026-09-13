@@ -62,7 +62,14 @@ async fn goal_send_now_steers_the_live_planner_without_restarting_it() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let (actor, _rx) = build_actor().await;
+            let (gateway_tx, _gateway_rx) =
+                tokio::sync::mpsc::unbounded_channel::<xai_acp_lib::AcpClientMessage>();
+            let (persistence_tx, _persistence_rx) =
+                tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
+            let (coordinator_tx, mut coordinator_rx) = tokio::sync::mpsc::unbounded_channel();
+            let mut actor = create_test_actor(0, 256_000, 85, gateway_tx, persistence_tx).await;
+            actor.tool_context.subagent_event_tx = Some(coordinator_tx);
+            let actor = std::sync::Arc::new(actor);
             {
                 let mut state = actor.state.lock().await;
                 state.pending_inputs.push_back(user_item("running", "A"));
@@ -77,12 +84,8 @@ async fn goal_send_now_steers_the_live_planner_without_restarting_it() {
                 None,
             );
             let cancel = tokio_util::sync::CancellationToken::new();
-            let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
-            actor.goal_tracker.lock().start_planner_run(
-                cancel.clone(),
-                "test-planner".into(),
-                event_tx,
-            );
+            let planner_id = actor.goal_tracker.lock().start_planner_run(cancel.clone());
+            *planner_id.lock().unwrap() = Some("live-planner".to_owned());
 
             let (respond_to, response_rx) = tokio::sync::oneshot::channel();
             let cancelled = actor
@@ -111,6 +114,27 @@ async fn goal_send_now_steers_the_live_planner_without_restarting_it() {
             assert!(
                 actor.goal_tracker.lock().take_planner_run().is_some(),
                 "the planner run survives the send-now"
+            );
+            match coordinator_rx.try_recv() {
+                Ok(
+                    xai_grok_tools::implementations::grok_build::task::types::SubagentEvent::Interject {
+                        subagent_id,
+                        text,
+                    },
+                ) => {
+                    assert_eq!(subagent_id, "live-planner", "addressed at the live planner");
+                    assert_eq!(
+                        text,
+                        crate::session::goal_planner::planner_context_message("steer"),
+                        "the planner receives the send-now text as context"
+                    );
+                }
+                Ok(_) => panic!("send-now must reach the planner as an Interject"),
+                Err(err) => panic!("send-now never reached the planner: {err:?}"),
+            }
+            assert!(
+                coordinator_rx.try_recv().is_err(),
+                "one send-now is one planner interjection"
             );
             let interjections = actor.pending_interjections.drain_all();
             assert_eq!(interjections.len(), 1);
