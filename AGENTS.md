@@ -38,7 +38,7 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 
 ## The darwin binary is compiled on Linux and linked on macOS
 
-- A macOS runner bills at ten times the Linux rate, so `build-darwin-objects` (ubuntu-22.04) compiles every crate for `aarch64-apple-darwin`, and `link-darwin` (macos-14) runs one `cc`. That second job is the only macOS minute this workflow spends.
+- A macOS runner bills at ten times the Linux rate, so `build-darwin-objects` (ubuntu-22.04) compiles every crate for `aarch64-apple-darwin`, and `link-darwin` (macos-14) runs one `cc`. The other macOS job is `test-darwin-sandbox`. It runs `cargo test -p xai-grok-sandbox` natively, because the jail and the CI host worker have a Seatbelt half that only a Mac executes. That crate is small. The job stays cheap.
 - Compiling for darwin on Linux works. Linking does not. Every cross-linker that reads the Apple SDK also rewrites the search paths rustc passes. Each build script's own static library then drops out of the link: aws-lc, ring, jemalloc, libgit2, the tree-sitter grammars.
 - So `xai-darwin-link` stands in as rustc's linker and records the command instead of running it. It copies every input into a bundle, because rustc deletes its temporary object directory the moment the linker returns.
 - Paths in the recorded list are written as `@BUNDLE@` and `@OUT@`. The replay host mounts the bundle somewhere else, and `ci/darwin-relink.sh` substitutes both.
