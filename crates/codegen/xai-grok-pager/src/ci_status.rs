@@ -431,6 +431,9 @@ mod tests {
             conclusion: conclusion.to_string(),
             head_branch: Some("feature/x".into()),
             workflow_name: workflow.to_string(),
+            // The dot folds runs to a colour and never addresses one, so it
+            // asks `gh` for no id. The `ci` tool does, to read a run's logs.
+            database_id: None,
         }
     }
 
