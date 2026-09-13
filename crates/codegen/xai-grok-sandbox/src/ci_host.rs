@@ -419,13 +419,38 @@ mod tests {
     }
 
     #[test]
-    fn worker_answers_dot_dot_for_the_gh_pr_shape() {
-        // The `gh-pr` token must be validated and the shape served, but on this
-        // host there may be no `gh`, so the answer is the nothing-usable
-        // sentinel rather than an executed arbitrary command. The `gh-status`
-        // shape stays byte-identical to fill both arms of confinement.
-        assert_eq!(answer("gh-pr missing/../branch"), b".\n");
-        assert_eq!(answer("gh-status branch"), b".\n");
+    fn valid_tokens_are_accepted_and_junk_rejected() {
+        assert!(valid_branch_token("feature/gh-ci-monitor"));
+        assert!(valid_branch_token("master"));
+        assert!(valid_branch_token("release/2026-09"));
+        assert!(!valid_branch_token(""));
+        let long = "a".repeat(300);
+        assert!(!valid_branch_token(&long));
+        assert!(!valid_branch_token("evil\nbranch"));
+        assert!(!valid_branch_token("evil\rbranch"));
+        assert!(!valid_branch_token("has space"));
+    }
+
+    #[test]
+    fn query_ci_host_stream_roundtrips_a_result() {
+        // A real host worker does the same: read a request line, answer one
+        // JSON line. Drive the jailed-side reader against that contract.
+        let (ours, theirs) = UnixStream::pair().expect("pair");
+        std::thread::spawn(move || {
+            let mut stream = theirs;
+            let mut buf = [0u8; 8192];
+            let n = stream.read(&mut buf).unwrap();
+            let req = String::from_utf8_lossy(&buf[..n]).to_string();
+            assert!(
+                req.starts_with("gh-status "),
+                "must be the fixed gh-status shape, got {req:?}"
+            );
+            let _ = stream.write_all(b"[{\"status\":\"completed\",\"conclusion\":\"success\"}]\n");
+            let _ = stream.flush();
+        });
+        let got = query_ci_host_stream(ours, "master").expect("read");
+        let text = String::from_utf8(got).expect("utf8");
+        assert!(text.contains("\"success\""));
     }
 
     #[test]

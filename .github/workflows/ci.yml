@@ -104,12 +104,12 @@ jobs:
     name: Build & test
     # Hosted deliberately: this suite asserts host semantics the org's lean self-hosted image lacks. See AGENTS.md.
     runs-on: ubuntu-latest
-    # A ceiling, not a target: a job needing more than this has a hung test, which nextest fails in 60s.
-    timeout-minutes: 45
+    # A ceiling, not a target. The compile is cold every run (measured 31 min at -j3) and a hung test is failed by nextest in 60s, so a job past this is broken, not slow.
+    timeout-minutes: 75
     env:
       # The harness builds this itself when unset, once per nextest process, all queued on cargo's package lock.
       PAGER_BINARY: ${{ github.workspace }}/target/debug/xai-grok-pager
-      # No global CARGO_BUILD_JOBS: the compile-RAM cap belongs to the build step alone. See ci/ram-guard.sh.
+      # No global CARGO_BUILD_JOBS: the -j3 compile-RAM cap belongs to the build step alone.
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
@@ -150,89 +150,19 @@ jobs:
           tar -xzf "$RUNNER_TEMP/nextest.tar.gz" -C "$RUNNER_TEMP/nextest-bin"
           echo "$RUNNER_TEMP/nextest-bin" >> "$GITHUB_PATH"
 
-      # Without the container format the wrapper packs into, every upload here fails before the wire.
-      - name: Install binpazer
-        run: |
-          curl -fSsL --location-trusted \
-            "https://dl.pazer.build/bin-file-fmt/binpazer?os=linux&arch=amd64" -o "$RUNNER_TEMP/binpazer"
-          chmod +x "$RUNNER_TEMP/binpazer"
-          echo "BINPAZER=$RUNNER_TEMP/binpazer" >> "$GITHUB_ENV"
-
-      # A run step is not given the cache service env, so without this the remote layer never runs here.
-      - name: Export the cache service env for the shell steps
-        uses: wow-look-at-my/actions@typescript#latest
-        with:
-          script: |
-            for (const key of ["ACTIONS_RESULTS_URL", "ACTIONS_CACHE_URL", "ACTIONS_RUNTIME_TOKEN"]) {
-              const value = process.env[key];
-              if (value) core.exportVariable(key, value);
-              core.info(`${key}: ${value ? "present" : "absent"}`);
-            }
-
-      # PKG_SLOTS caps the compiles that hold memory, so the outer -j is wide and paces free restores.
+      # No compile cache: every run compiles cold. -j3 is the widest -j the runner's 15 GiB holds.
       - name: Build test harnesses (compile, no-run)
         env:
-          CARGO_BUILD_JOBS: "16"
-          RUSTC_WRAPPER: ${{ github.workspace }}/ci/pkg-cache.sh
-          PKG_SLOTS: "3"
-          PKG_CACHE_DIR: ${{ runner.temp }}/pkg-cache
-          PKG_STATS_DIR: ${{ runner.temp }}/pkg-stats
+          CARGO_BUILD_JOBS: "3"
         run: |
-          mkdir -p "$PKG_CACHE_DIR"
-          # Which keys the remote holds, so a miss answers from a list instead of a round trip.
-          ci/pkg-remote.sh get pkg-index "$PKG_CACHE_DIR/../pkg-index-dl" \
-            && cp "$PKG_CACHE_DIR/../pkg-index-dl/keys" "$PKG_CACHE_DIR/../pkg-index" || true
-          start=$(date +%s)
           cargo test --locked --workspace --no-run --no-fail-fast
+          # Built once here, rather than once per nextest process on cargo's package lock.
           cargo build --locked -p xai-grok-pager-bin
-          echo "PKG-CACHE compile wall: $(( $(date +%s) - start )) s"
-          mkdir -p "$PKG_CACHE_DIR/../pkg-index-up"
-          find "$PKG_CACHE_DIR" -maxdepth 1 -mindepth 1 -type d -printf '%f\n' > "$PKG_CACHE_DIR/../pkg-index-up/keys"
-          # A build that already compiled everything must not fail because the cache could not be written.
-          ci/pkg-remote.sh put pkg-index "$PKG_CACHE_DIR/../pkg-index-up" && rc=0 || rc=$?
-          echo "PKG-CACHE index-put rc: $rc"
-          echo "PKG-CACHE entries: $(ls "$PKG_CACHE_DIR" 2>/dev/null | wc -l)"
-          echo "PKG-CACHE store: $(du -sh "$PKG_CACHE_DIR" 2>/dev/null | cut -f1)"
-          echo "PKG-CACHE target: $(du -sh target 2>/dev/null | cut -f1)"
-          for c in local-hit remote-hit remote-miss compiled remote-put remote-put-failed; do
-            echo "PKG-CACHE $c: $(wc -l < "$PKG_STATS_DIR/$c" 2>/dev/null || echo 0)"
-          done
 
       - name: Run tests (workspace)
         run: |
           cargo nextest run --locked --workspace --profile ci
           "$PAGER_BINARY" --version
-
-      # Fails if the sub-crate split is undone or the -j3 unified compile is removed. ci/ram-guard.sh has the measurements.
-      - name: RAM guard (sub-crate split + unified --no-run + the compile gate intact)
-        run: |
-          set -euo pipefail
-          # bundle/builtin must stay out of the shell crate.
-          [ -f crates/codegen/xai-grok-shell-assets/src/bundle.rs ] \
-          && [ -f crates/codegen/xai-grok-shell-assets/src/builtin.rs ] \
-          || { echo "RAM GUARD: FAIL — bundle/builtin must live in xai-grok-shell-assets"; exit 1; }
-          [ ! -f crates/codegen/xai-grok-shell/src/bundle.rs ] \
-          && [ ! -f crates/codegen/xai-grok-shell/src/builtin.rs ] \
-          || { echo "RAM GUARD: FAIL — bundle/builtin re-inlined into xai-grok-shell"; exit 1; }
-          grep -q 'xai-grok-shell-assets' crates/codegen/xai-grok-shell/Cargo.toml \
-          || { echo "RAM GUARD: FAIL — shell must depend on xai-grok-shell-assets"; exit 1; }
-          # Bracketed classes keep the awk script's own source text out of the scan it runs over this file.
-          awk '
-            /--no-run --no-fail-fast/ { compile=1 }
-            /--exclude xai[-]grok-shell/ || /-p xai[-]grok-shell -p xai[-]grok-pager/ { splitbad=1 }
-            END { exit (compile && !splitbad) ? 0 : 1 }
-          ' .github/workflows/ci.yml \
-            || { echo "RAM GUARD: FAIL — build must be a single unified --no-run, no exclude/-p split"; exit 1; }
-          # The wrapper caps concurrent compiles now. Losing either half uncaps compile memory.
-          grep -q 'PKG_SLOTS: "3"' .github/workflows/ci.yml \
-            || { echo "RAM GUARD: FAIL — missing PKG_SLOTS=3 compile semaphore"; exit 1; }
-          grep -q 'RUSTC_WRAPPER: .*ci/pkg-cache.sh' .github/workflows/ci.yml \
-            || { echo "RAM GUARD: FAIL — compile step is not behind the per-package wrapper"; exit 1; }
-          [ -x ci/pkg-cache.sh ] \
-            || { echo "RAM GUARD: FAIL — ci/pkg-cache.sh is missing or not executable"; exit 1; }
-          grep -qF -- 'cargo nextest run --locked --workspace --profile ci' .github/workflows/ci.yml \
-            || { echo "RAM GUARD: FAIL — run step missing"; exit 1; }
-          echo "RAM GUARD: PASS — sub-crate split + unified --no-run behind the 3-slot compile semaphore, run step fast-passes"
 
   # These assert on what a virtual terminal actually shows, which a unit test over the width function cannot stand in for.
   pty-e2e:

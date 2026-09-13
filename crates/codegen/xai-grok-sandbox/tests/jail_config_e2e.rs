@@ -105,7 +105,7 @@ fn config_subprocess() {
 
     #[cfg(target_os = "linux")]
     {
-        let mut cmd = xai_grok_sandbox::jail::bwrap_command(&plan);
+        let cmd = xai_grok_sandbox::jail::bwrap_command(&plan);
         let argv: Vec<String> =
             cmd.get_args().map(|a| a.to_string_lossy().to_string()).collect();
         println!("bwrap argv: {argv:?}");
