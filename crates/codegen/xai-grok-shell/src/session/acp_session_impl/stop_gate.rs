@@ -32,6 +32,60 @@ pub(crate) fn todo_stop_gate_blocks(
         && matches!(gate_decision, TodoGateDecision::Nudge { .. })
 }
 
+/// What the CI stop gate found on the branch, and whether that blocks a stop.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CiGateDecision {
+    /// CI is green, absent, or still running: nothing to send the model back
+    /// for. A branch with no runs is not the same as a passing one, but it is
+    /// equally not a failure to fix, and a run still in flight has not failed
+    /// yet — blocking on one would spend the whole budget waiting.
+    Allow,
+    /// A run on this branch failed. The model is sent back to read the logs.
+    Nudge,
+}
+
+/// Whether the built-in CI stop gate blocks this stop.
+///
+/// The CI gate is a second participant in the same turn-end gate the todo gate
+/// rides: it fires after the user hooks allowed the stop, it consumes the SAME
+/// continuation budget ([`MAX_STOP_HOOK_CONTINUATIONS_PER_TURN`] — a model that
+/// cannot get CI green still stops eventually), and its feedback rides the same
+/// `stop_hook_feedback` user message. The persisted `[ui].stop_gate_ci_failing`
+/// toggle (default ON) is the master switch.
+pub(crate) fn ci_stop_gate_blocks(
+    toggle_enabled: bool,
+    continuations_this_turn: u32,
+    decision: CiGateDecision,
+) -> bool {
+    toggle_enabled
+        && continuations_this_turn < MAX_STOP_HOOK_CONTINUATIONS_PER_TURN
+        && matches!(decision, CiGateDecision::Nudge)
+}
+
+/// Read the branch's CI state and decide whether it blocks a stop.
+///
+/// Only [`CiStatus::Red`] blocks. Every other state — green, still running, or
+/// no runs at all — allows the stop, so a repository with no workflows and a
+/// session that has pushed nothing are both unaffected by this gate.
+pub(crate) fn ci_gate_decision(status: Option<xai_grok_sandbox::ci_state::CiStatus>) -> CiGateDecision {
+    match status {
+        Some(xai_grok_sandbox::ci_state::CiStatus::Red) => CiGateDecision::Nudge,
+        _ => CiGateDecision::Allow,
+    }
+}
+
+/// The message the model is sent back with. It names the tool that answers the
+/// next question, because a nudge that only says "CI is red" leaves the model
+/// to rediscover how to read a log from inside a sandbox.
+pub(crate) fn build_ci_gate_reminder(branch: &str) -> String {
+    format!(
+        "<system-reminder>CI is failing on `{branch}`. Do not stop yet. Call the `ci` tool with \
+         action `logs` to read the failing steps, fix what they report, then commit and push. If \
+         the failure is genuinely not caused by your change, say so explicitly and stop.\
+         </system-reminder>"
+    )
+}
+
 const SESSION_END_STOP_BUDGET: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// `command` is a shell-only field, so a monitor's watch command is carried in
@@ -130,6 +184,71 @@ pub(super) fn demote_ignored_blocks(
 }
 
 impl SessionActor {
+    /// Whether the built-in CI-stop gate runs for this session.
+    ///
+    /// A subagent is excluded: it does not own the branch, and sending one back
+    /// over a failure its parent pushed would have it fixing work it cannot
+    /// see.
+    pub(crate) fn ci_stop_gate_active(&self) -> bool {
+        !self.startup_hints.is_subagent
+            && self.agent.borrow().reminder_policy().stop_gate_ci_failing
+    }
+
+    /// Read the branch and its CI state off the host worker.
+    ///
+    /// Every failure mode — no git, no `gh`, no runs — comes back as `None`,
+    /// which the gate reads as "nothing to hold the model for".
+    pub(crate) async fn collect_ci_gate_state(
+        &self,
+    ) -> Option<(String, xai_grok_sandbox::ci_state::CiStatus)> {
+        let cwd = self.tool_context.cwd.as_path().to_path_buf();
+        // The query shells out to `git` and `gh`, so it runs off the executor.
+        tokio::task::spawn_blocking(move || {
+            use xai_grok_tools::implementations::grok_build::ci;
+            let branch = ci::current_branch(&cwd)?;
+            let runs = ci::fetch_runs(&cwd, &branch, 10)?;
+            let status = xai_grok_sandbox::ci_state::ci_from_runs(runs);
+            Some((branch, status))
+        })
+        .await
+        .ok()
+        .flatten()
+    }
+
+    /// The CI gate's whole turn-end decision: the feedback to send the model
+    /// back with, or `None` to let the stop proceed.
+    ///
+    /// The toggle is checked before anything else so a session that turned the
+    /// gate off spends no `gh` call on every turn end.
+    pub(crate) async fn ci_stop_gate_feedback(
+        &self,
+        prompt_id: &str,
+        continuations_this_turn: u32,
+    ) -> Option<String> {
+        if !self.ci_stop_gate_active()
+            || continuations_this_turn >= MAX_STOP_HOOK_CONTINUATIONS_PER_TURN
+        {
+            return None;
+        }
+        let (branch, status) = self.collect_ci_gate_state().await?;
+        if !ci_stop_gate_blocks(true, continuations_this_turn, ci_gate_decision(Some(status))) {
+            return None;
+        }
+        tracing::info!(
+            prompt_id = %prompt_id,
+            branch = %branch,
+            continuations = continuations_this_turn + 1,
+            cap = MAX_STOP_HOOK_CONTINUATIONS_PER_TURN,
+            "stop gate: CI is failing, continuing the turn"
+        );
+        let reminder = build_ci_gate_reminder(&branch);
+        self.send_hook_annotation(&format!(
+            "\u{21a9} Stop blocked: CI is failing on {branch}, continuing"
+        ))
+        .await;
+        Some(reminder)
+    }
+
     /// Dispatch the observe-only session-end `Stop`: runs in stop-gate mode so
     /// exit code 2 parses as a block, but the decision is discarded (no turn
     /// left to continue).
@@ -520,6 +639,62 @@ mod stop_gate_snapshot_tests {
         );
         assert!(matches!(&results[1], HookRunResult::Failed { .. }));
         assert!(matches!(&results[2], HookRunResult::Skipped { .. }));
+    }
+}
+
+#[cfg(test)]
+mod ci_stop_gate_tests {
+    use super::*;
+    use xai_grok_sandbox::ci_state::CiStatus;
+
+    #[test]
+    fn only_a_failing_branch_blocks_a_stop() {
+        assert_eq!(ci_gate_decision(Some(CiStatus::Red)), CiGateDecision::Nudge);
+        // A run still in flight has not failed. Blocking on one would spend
+        // the whole continuation budget waiting for a verdict.
+        assert_eq!(
+            ci_gate_decision(Some(CiStatus::Yellow)),
+            CiGateDecision::Allow
+        );
+        assert_eq!(
+            ci_gate_decision(Some(CiStatus::Green)),
+            CiGateDecision::Allow
+        );
+        // No runs, and no CI signal at all: a repository without workflows
+        // must never be held open by this gate.
+        assert_eq!(ci_gate_decision(Some(CiStatus::Off)), CiGateDecision::Allow);
+        assert_eq!(ci_gate_decision(None), CiGateDecision::Allow);
+    }
+
+    #[test]
+    fn blocks_only_on_toggle_and_budget_and_red() {
+        let red = CiGateDecision::Nudge;
+        assert!(ci_stop_gate_blocks(true, 0, red));
+        assert!(ci_stop_gate_blocks(
+            true,
+            MAX_STOP_HOOK_CONTINUATIONS_PER_TURN - 1,
+            red
+        ));
+        // Toggle off: the model stops freely on a red branch.
+        assert!(!ci_stop_gate_blocks(false, 0, red));
+        // The shared budget is the stuck-release: a model that cannot get CI
+        // green stops anyway, exactly like the stop hooks themselves.
+        assert!(!ci_stop_gate_blocks(
+            true,
+            MAX_STOP_HOOK_CONTINUATIONS_PER_TURN,
+            red
+        ));
+        assert!(!ci_stop_gate_blocks(true, 0, CiGateDecision::Allow));
+    }
+
+    #[test]
+    fn the_reminder_names_the_branch_and_the_next_tool_call() {
+        let reminder = build_ci_gate_reminder("feat/x");
+        assert!(reminder.contains("feat/x"));
+        // A nudge that only says "CI is red" leaves the model to rediscover
+        // how to read a log from inside a sandbox.
+        assert!(reminder.contains("`ci`"));
+        assert!(reminder.contains("logs"));
     }
 }
 
