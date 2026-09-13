@@ -213,12 +213,7 @@ fn run_gh_via_ci_host(
         let Some(branch) = branch else {
             return None;
         };
-<<<<<<< HEAD
-        let stream = xai_grok_sandbox::ci_host::inherited_host_stream(fd)?;
-        let body = xai_grok_sandbox::ci_host::query_ci_host_stream(stream, branch)?;
-=======
         let body = xai_grok_sandbox::ci_host::query_ci_host(fd, branch)?;
->>>>>>> origin/master
         // Carry the payload the same way a real `gh` stdout would, plus a
         // synthetic success status so the caller's parse path is unchanged.
         return Some(std::process::Output {
@@ -263,15 +258,7 @@ fn run_gh(repo_root: &Path, args: &[&str]) -> Option<std::process::Output> {
     run_gh_direct(repo_root, args)
 }
 
-<<<<<<< HEAD
-/// The inherited host-worker fd, if this process is a sandboxed session that
-/// was handed one at jail entry.
-fn ci_host_fd() -> Option<i32> {
-    xai_grok_sandbox::ci_host::inherited_host_fd()
-}
-=======
 use xai_grok_sandbox::ci_host::ci_host_fd;
->>>>>>> origin/master
 
 /// The direct, unsandboxed `gh` invocation used when no host worker was
 /// handed to us (a normal session).
