@@ -358,6 +358,20 @@ jobs:
           name: grok-darwin-arm64
           path: dist/grok-darwin-arm64
 
+  # The jail and the CI host worker have a macOS half (Seatbelt, sandbox-exec) that a Linux runner cannot execute. This crate is small enough to compile natively here.
+  test-darwin-sandbox:
+    name: Test sandbox crate (macOS)
+    runs-on: macos-14
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Install Rust toolchain (pinned by rust-toolchain.toml)
+        run: rustup show
+
+      - name: Test xai-grok-sandbox on macOS
+        run: cargo test --locked -p xai-grok-sandbox
+
   publish-create:
     name: Create buildhost release
     # Run as soon as tests pass, BEFORE the release binary is built. buildhost
@@ -365,9 +379,10 @@ jobs:
     # auto version); the number is stamped into the binary as GROK_VERSION so
     # `grok --version` reports the same number the site does. Not gated on
     # build-release: that job needs this job's number, so the edge has to point
-    # this direction. Gating on pty-e2e is intentionally omitted — it exercises
-    # the UI, not the publish path, and holding the number hostage to it would
-    # burn a number on every flaky UI test.
+    # this direction. Gating on pty-e2e and test-darwin-sandbox is intentionally
+    # omitted — they exercise the UI and the sandbox crate, not the publish path,
+    # and holding the number hostage to them would burn a number on every flaky
+    # test.
     needs: [build-test]
     runs-on: ubuntu-22.04
     permissions:
