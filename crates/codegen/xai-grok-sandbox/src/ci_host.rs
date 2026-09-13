@@ -163,6 +163,8 @@ pub fn spawn_ci_host(repo_root: &Path) -> Option<i32> {
     let exe = std::env::current_exe().ok()?;
     let (ours, theirs) = UnixStream::pair().ok()?;
     let our_fd: RawFd = ours.as_raw_fd();
+    // The pair is created close-on-exec, and the jail is entered by exec. Without this the fd is gone before the jailed pager reads the env var that names it.
+    inherit_across_exec(our_fd)?;
     let theirs_fd: RawFd = theirs.into_raw_fd();
 
     let mut cmd = std::process::Command::new(exe);
@@ -198,6 +200,18 @@ pub fn spawn_ci_host(repo_root: &Path) -> Option<i32> {
             None
         }
     }
+}
+
+/// Clear `FD_CLOEXEC` on `fd` so it stays open in the process this one execs into.
+#[cfg(unix)]
+fn inherit_across_exec(fd: std::os::unix::io::RawFd) -> Option<()> {
+    // SAFETY: fcntl on an fd this process owns; F_GETFD and F_SETFD only touch its flags.
+    let flags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
+    if flags < 0 {
+        return None;
+    }
+    let rc = unsafe { libc::fcntl(fd, libc::F_SETFD, flags & !libc::FD_CLOEXEC) };
+    (rc >= 0).then_some(())
 }
 
 /// `pre_exec` helper: point stdin (0) and stdout (1) at the given fd.
@@ -575,6 +589,33 @@ mod tests {
         let mut sink = Sink(Vec::new());
         handle_request(line, &mut sink);
         sink.0
+    }
+
+    /// The jailed pager is a process this one execs into, so the worker fd must survive an exec.
+    #[test]
+    fn worker_fd_survives_an_exec() {
+        use std::io::Read as _;
+        use std::os::unix::io::AsRawFd as _;
+        let (mut ours, theirs) = UnixStream::pair().expect("socketpair");
+        let fd = theirs.as_raw_fd();
+        // `sh` execs into a fresh image and writes to the numbered fd it inherited.
+        let write_to_fd = |fd: i32| {
+            std::process::Command::new("sh")
+                .arg("-c")
+                .arg(format!("printf alive >&{fd}"))
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .expect("spawn sh")
+        };
+        assert!(!write_to_fd(fd).success(), "the fd must be closed on exec before the fix");
+
+        inherit_across_exec(fd).expect("fcntl");
+        assert!(write_to_fd(fd).success());
+        drop(theirs);
+        let mut got = String::new();
+        ours.read_to_string(&mut got).expect("read");
+        assert_eq!(got, "alive");
     }
 
     #[test]
