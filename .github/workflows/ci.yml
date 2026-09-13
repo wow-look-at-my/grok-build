@@ -329,7 +329,7 @@ jobs:
 
   publish-create:
     name: Create buildhost release
-    needs: [build-test, build-release, link-darwin]
+    needs: [build-test, pty-e2e, build-release, link-darwin]
     runs-on: ubuntu-latest
     permissions:
       contents: read
