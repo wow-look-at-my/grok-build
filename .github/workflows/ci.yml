@@ -32,7 +32,7 @@ jobs:
   build-test:
     name: Build & test
     # Hosted deliberately: this suite asserts host semantics the org's lean self-hosted image lacks. See AGENTS.md.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     # A ceiling, not a target: a job needing more than this has a hung test, which nextest fails in 60s.
     timeout-minutes: 45
     env:
@@ -119,7 +119,7 @@ jobs:
   pty-e2e:
     name: Test (PTY end-to-end)
     # Hosted for the same reason as build-test: these need a real /bin/bash.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     timeout-minutes: 45
     env:
       PAGER_BINARY: ${{ github.workspace }}/target/debug/xai-grok-pager
@@ -172,7 +172,7 @@ jobs:
 
   build-release:
     name: Build release binary (linux/amd64)
-    # ubuntu-22.04 ships glibc 2.35, which holds every GLIBC_x.y dependency at or below what a 22.04 user has.
+    # Every Linux job is ubuntu-22.04 so they share one cache. Here it also matters for output: glibc 2.35 holds every GLIBC_x.y dependency at or below what a 22.04 user has.
     runs-on: ubuntu-22.04
     timeout-minutes: 45
     steps:
@@ -330,7 +330,7 @@ jobs:
   publish-create:
     name: Create buildhost release
     needs: [build-test, pty-e2e, build-release, link-darwin]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     permissions:
       contents: read
       id-token: write # GitHub OIDC -> buildhost; only these jobs talk to buildhost
@@ -347,7 +347,7 @@ jobs:
   publish-upload:
     name: Upload ${{ matrix.target_os }}/${{ matrix.target_arch }} binary
     needs: publish-create
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     permissions:
       contents: read
       id-token: write
@@ -378,7 +378,7 @@ jobs:
   publish-finalize:
     name: Publish buildhost release
     needs: [publish-create, publish-upload]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     permissions:
       contents: read
       id-token: write
