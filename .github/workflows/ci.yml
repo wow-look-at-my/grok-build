@@ -64,7 +64,7 @@ jobs:
 
   # Three colds run together; each warm waits only on its own cold, never on the slowest leg.
   measure-cold-nocache-j3:
-    if: github.ref != 'refs/heads/master'
+    if: false
     uses: ./.github/workflows/measure-leg.yml
     with:
       technique: nocache-j3
@@ -74,7 +74,7 @@ jobs:
     secrets: inherit
 
   measure-warm-nocache-j3:
-    if: github.ref != 'refs/heads/master'
+    if: false
     needs: measure-cold-nocache-j3
     uses: ./.github/workflows/measure-leg.yml
     with:
@@ -85,7 +85,7 @@ jobs:
     secrets: inherit
 
   measure-cold-pkgcache-j16-slots3:
-    if: github.ref != 'refs/heads/master'
+    if: false
     uses: ./.github/workflows/measure-leg.yml
     with:
       technique: pkgcache-j16-slots3
@@ -95,7 +95,7 @@ jobs:
     secrets: inherit
 
   measure-warm-pkgcache-j16-slots3:
-    if: github.ref != 'refs/heads/master'
+    if: false
     needs: measure-cold-pkgcache-j16-slots3
     uses: ./.github/workflows/measure-leg.yml
     with:
