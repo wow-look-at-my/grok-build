@@ -51,6 +51,10 @@ jobs:
               core.info(`${key}: ${value ? "present" : "absent"}`);
             }
 
+      # No service and no network past loopback, so it runs before the probe and fails fast.
+      - name: A failed fetch must leave no cache entry
+        run: ci/pkg-remote-test.sh
+
       # Streamed live, because Actions withholds a job's log until every leg of the run has finished.
       - name: Round trip one entry through the cache service
         run: ci/stream-run.sh cache-probe ci/cache-probe.sh
