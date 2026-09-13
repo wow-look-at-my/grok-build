@@ -302,7 +302,7 @@ impl ChildControl for SoakControl {
         self.cancellation.cancel();
     }
 
-    fn interject(&self, _text: String) {}
+    fn interject(&self, _text: &str) {}
 }
 
 struct SoakRunner {

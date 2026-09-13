@@ -705,11 +705,9 @@ pub struct GoalTracker {
 #[derive(Debug)]
 pub(crate) struct GoalPlannerRunState {
     pub(crate) cancel: tokio_util::sync::CancellationToken,
-    pub(crate) steering: Vec<String>,
-    pub(crate) subagent_id: String,
-    pub(crate) event_tx: tokio::sync::mpsc::UnboundedSender<
-        xai_grok_tools::implementations::grok_build::task::types::SubagentEvent,
-    >,
+    /// Where a Send Now addresses its context: the live planner child, by the
+    /// coordinator id the run's spawn publishes.
+    pub(crate) context: std::sync::Arc<crate::session::goal_planner::PlannerContextRoute>,
 }
 
 impl GoalTracker {
@@ -798,40 +796,40 @@ impl GoalTracker {
         self.orchestration.as_ref()
     }
 
+    /// Register a planner run and hand back the route its spawn publishes the
+    /// planner child's coordinator id into.
     pub(crate) fn start_planner_run(
         &mut self,
         cancel: tokio_util::sync::CancellationToken,
-        subagent_id: String,
         event_tx: tokio::sync::mpsc::UnboundedSender<
             xai_grok_tools::implementations::grok_build::task::types::SubagentEvent,
         >,
-    ) {
+    ) -> std::sync::Arc<crate::session::goal_planner::PlannerContextRoute> {
+        let context = std::sync::Arc::new(crate::session::goal_planner::PlannerContextRoute::new(
+            event_tx,
+        ));
         self.planner_run = Some(GoalPlannerRunState {
             cancel,
-            steering: Vec::new(),
-            subagent_id,
-            event_tx,
+            context: context.clone(),
         });
+        context
     }
 
     pub(crate) fn take_planner_run(&mut self) -> Option<GoalPlannerRunState> {
         self.planner_run.take()
     }
 
-    pub(crate) fn steer_planner(&mut self, steering: String) {
-        let Some(run) = self.planner_run.as_mut() else {
+    /// Hand Send Now text to the running planner as mid-turn context. The
+    /// planner is never cancelled or restarted for it. With no run registered
+    /// there is no planner to steer.
+    pub(crate) fn steer_planner(&self, steering: &str) {
+        let Some(run) = self.planner_run.as_ref() else {
             return;
         };
         if steering.is_empty() {
             return;
         }
-        run.steering.push(steering.clone());
-        let _ = run.event_tx.send(
-            xai_grok_tools::implementations::grok_build::task::types::SubagentEvent::Interject {
-                subagent_id: run.subagent_id.clone(),
-                text: format!("Additional user context for the current plan:\n\n{steering}"),
-            },
-        );
+        run.context.deliver(steering);
     }
 
     pub(crate) fn snapshot_mut(&mut self) -> Option<&mut GoalOrchestration> {
@@ -1477,17 +1475,107 @@ mod tests {
         GoalTracker::new(PathBuf::from("/tmp/test-goal-session"))
     }
 
+    /// Pull every `Interject` off the coordinator channel as `(id, text)`.
+    fn drain_interjections(
+        rx: &mut tokio::sync::mpsc::UnboundedReceiver<
+            xai_grok_tools::implementations::grok_build::task::types::SubagentEvent,
+        >,
+    ) -> Vec<(String, String)> {
+        let mut out = Vec::new();
+        while let Ok(event) = rx.try_recv() {
+            match event {
+                xai_grok_tools::implementations::grok_build::task::types::SubagentEvent::Interject {
+                    subagent_id,
+                    text,
+                } => out.push((subagent_id, text)),
+                _ => panic!("the planner route sends only interjections"),
+            }
+        }
+        out
+    }
+
     #[test]
     fn empty_steering_does_not_cancel_planner() {
         let mut tracker = make_tracker();
         let cancel = tokio_util::sync::CancellationToken::new();
-        let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
-        tracker.start_planner_run(cancel.clone(), "test-planner".into(), event_tx);
+        let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
+        let route = tracker.start_planner_run(cancel.clone(), event_tx);
+        route.publish("test-planner");
 
-        tracker.steer_planner(String::new());
+        tracker.steer_planner("");
 
         assert!(!cancel.is_cancelled());
-        assert!(tracker.take_planner_run().unwrap().steering.is_empty());
+        assert!(drain_interjections(&mut event_rx).is_empty());
+        assert!(tracker.take_planner_run().is_some());
+    }
+
+    /// Steering reaches the live planner by the id its spawn published, and
+    /// never cancels it.
+    #[test]
+    fn steering_is_interjected_into_the_published_planner() {
+        let mut tracker = make_tracker();
+        let cancel = tokio_util::sync::CancellationToken::new();
+        let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
+        let route = tracker.start_planner_run(cancel.clone(), event_tx);
+        route.publish("planner-1");
+
+        tracker.steer_planner("focus on the merge");
+
+        assert!(!cancel.is_cancelled(), "steering must not restart the planner");
+        assert_eq!(
+            drain_interjections(&mut event_rx),
+            [(
+                "planner-1".to_owned(),
+                crate::session::goal_planner::planner_context_message("focus on the merge"),
+            )]
+        );
+    }
+
+    /// Steering that lands before the spawn has published the planner's id is
+    /// held and sent, in order, the moment the id is published.
+    #[test]
+    fn steering_before_the_spawn_is_held_until_the_id_is_published() {
+        let mut tracker = make_tracker();
+        let cancel = tokio_util::sync::CancellationToken::new();
+        let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
+        let route = tracker.start_planner_run(cancel.clone(), event_tx);
+
+        tracker.steer_planner("first");
+        tracker.steer_planner("second");
+        assert!(
+            drain_interjections(&mut event_rx).is_empty(),
+            "nothing can be addressed before the id exists"
+        );
+
+        route.publish("planner-1");
+        tracker.steer_planner("third");
+
+        assert!(!cancel.is_cancelled());
+        let message = crate::session::goal_planner::planner_context_message;
+        assert_eq!(
+            drain_interjections(&mut event_rx),
+            [
+                ("planner-1".to_owned(), message("first")),
+                ("planner-1".to_owned(), message("second")),
+                ("planner-1".to_owned(), message("third")),
+            ]
+        );
+    }
+
+    /// A finished run is gone: later steering addresses nothing.
+    #[test]
+    fn steering_after_the_run_is_taken_is_not_sent() {
+        let mut tracker = make_tracker();
+        let cancel = tokio_util::sync::CancellationToken::new();
+        let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
+        let route = tracker.start_planner_run(cancel, event_tx);
+        route.publish("planner-1");
+        drop(route);
+        tracker.take_planner_run();
+
+        tracker.steer_planner("too late");
+
+        assert!(drain_interjections(&mut event_rx).is_empty());
     }
 
     fn activate_tracker(t: &mut GoalTracker) {

@@ -476,11 +476,13 @@ impl ChildControl for ShellChildRuntime {
             crate::session::ShutdownKind::Graceful,
         ));
     }
-    fn interject(&self, text: String) {
+    fn interject(&self, text: &str) {
         let _ = self
             .child_handle
             .cmd_tx
-            .send(SessionCommand::InterjectWithoutCancel { text });
+            .send(SessionCommand::InterjectWithoutCancel {
+                text: text.to_owned(),
+            });
     }
 }
 #[derive(Default)]

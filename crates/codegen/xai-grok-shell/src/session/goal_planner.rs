@@ -239,11 +239,12 @@ pub(crate) enum GoalPlannerOutcome {
         latency_ms: u64,
     },
     /// Produced only by the planner's [`ChannelSpawner`], whose `cancel_token`
-    /// is wired to user steering / Send Now through `start_planner_run`; when
-    /// that token fires mid-spawn the attempt returns `Interrupted` so the loop
-    /// replans. The strategist and summarizer spawners pass a fresh,
-    /// never-cancelled token, so their equivalent cancel arms are unreachable in
-    /// practice.
+    /// is wired to `start_planner_run`; when the token fires mid-spawn (a user
+    /// Stop, or the turn being cancelled) the attempt returns `Interrupted`.
+    /// A Send Now does NOT cancel the planner; it delivers context to the live
+    /// planner as an interjection. The strategist and
+    /// summarizer spawners pass a fresh, never-cancelled token, so their
+    /// equivalent cancel arms are unreachable in practice.
     Interrupted,
     FailClosed {
         reason: GoalPlannerFailClosedReason,
@@ -284,7 +285,7 @@ impl std::fmt::Display for SpawnError {
                     "subagent runtime error (cancelled={cancelled}): {message}"
                 )
             }
-            Self::Interrupted => f.write_str("planner interrupted by user steering"),
+            Self::Interrupted => f.write_str("planner interrupted before completion"),
         }
     }
 }
@@ -295,6 +296,96 @@ impl std::fmt::Display for SpawnError {
 /// fatal on its own — the runner gates on the plan file's presence.
 pub(crate) fn parse_terminal_response(text: &str) -> bool {
     text.trim() == "Done"
+}
+
+// Send Now context
+
+/// Prefix on the mid-turn message a Send Now delivers to the live planner.
+/// The planner is mid-turn on its own prompt, so the text has to say what it
+/// is and what to do with it.
+const PLANNER_CONTEXT_PREFIX: &str = "Additional user context for the current plan:";
+
+/// Wrap a Send Now's text as the message the coordinator hands to the running
+/// planner child.
+pub(crate) fn planner_context_message(text: &str) -> String {
+    format!("{PLANNER_CONTEXT_PREFIX}\n\n{text}")
+}
+
+/// Addresses Send Now context at one planner run's live child, by the
+/// coordinator id its spawn runs under. Context that arrives before the spawn
+/// has published that id is held here and sent, in order, when it does.
+#[derive(Debug)]
+pub(crate) struct PlannerContextRoute {
+    event_tx: tokio::sync::mpsc::UnboundedSender<
+        xai_grok_tools::implementations::grok_build::task::types::SubagentEvent,
+    >,
+    state: parking_lot::Mutex<PlannerContextRouteState>,
+}
+
+#[derive(Debug, Default)]
+struct PlannerContextRouteState {
+    subagent_id: Option<String>,
+    held: Vec<String>,
+}
+
+impl PlannerContextRoute {
+    pub(crate) fn new(
+        event_tx: tokio::sync::mpsc::UnboundedSender<
+            xai_grok_tools::implementations::grok_build::task::types::SubagentEvent,
+        >,
+    ) -> Self {
+        Self {
+            event_tx,
+            state: parking_lot::Mutex::new(PlannerContextRouteState::default()),
+        }
+    }
+
+    /// Record the coordinator id the planner child runs under and send the
+    /// context that was waiting for it. Called only once the child's `Spawn`
+    /// is on the coordinator channel, so nothing sent here can overtake it.
+    pub(crate) fn publish(&self, subagent_id: &str) {
+        let mut state = self.state.lock();
+        state.subagent_id = Some(subagent_id.to_owned());
+        for message in std::mem::take(&mut state.held) {
+            self.send(subagent_id, message);
+        }
+    }
+
+    /// Send `text` to the planner child as mid-turn context, or hold it until
+    /// the child's id is published.
+    pub(crate) fn deliver(&self, text: &str) {
+        let message = planner_context_message(text);
+        let mut state = self.state.lock();
+        match state.subagent_id.clone() {
+            Some(subagent_id) => self.send(&subagent_id, message),
+            None => state.held.push(message),
+        }
+    }
+
+    fn send(&self, subagent_id: &str, text: String) {
+        let event = xai_grok_tools::implementations::grok_build::task::types::SubagentEvent::Interject {
+            subagent_id: subagent_id.to_owned(),
+            text,
+        };
+        if self.event_tx.send(event).is_err() {
+            tracing::warn!(
+                subagent_id,
+                "subagent coordinator channel closed; planner context dropped",
+            );
+        }
+    }
+}
+
+impl Drop for PlannerContextRoute {
+    fn drop(&mut self) {
+        let held = self.state.get_mut().held.len();
+        if held > 0 {
+            tracing::warn!(
+                held,
+                "planner run ended before its child was spawned; Send Now context dropped",
+            );
+        }
+    }
 }
 
 // Production spawner
@@ -315,6 +406,9 @@ pub(crate) struct ChannelSpawner {
     /// historic `::default()` spawn behavior.
     pub(crate) role_override: RoleSpawnOverride,
     pub(crate) cancel_token: tokio_util::sync::CancellationToken,
+    /// Route a Send Now uses to reach the live planner child. Each spawn
+    /// publishes its coordinator id into it. `None` when nothing steers.
+    pub(crate) context_route: Option<Arc<PlannerContextRoute>>,
     /// Event sink for the spawn-and-retry-once fail-open telemetry; `None`
     /// in tests / when no event log is wired.
     pub(crate) events: Option<EventWriter>,
@@ -410,20 +504,34 @@ impl ChannelSpawner {
         };
         let backend = ChannelBackend::new(self.event_tx.clone());
         let cancel = self.cancel_token.clone();
-        let result = tokio::select! {
-            biased;
-            _ = cancel.cancelled() => {
-                let _ = tokio::time::timeout(
-                    GOAL_PLANNER_CANCEL_ACK_TIMEOUT,
-                    backend.cancel(id),
-                )
-                .await;
-                return Err(SpawnError::Interrupted);
-            }
-            result = backend.spawn_with_foreground_wait(request, self.foreground_wait.as_ref()) => {
-                result.map_err(|error| SpawnError::Transport(error.to_string()))?
-            }
+        if cancel.is_cancelled() {
+            return Err(SpawnError::Interrupted);
+        }
+        let spawn = backend.spawn_with_foreground_wait(request, self.foreground_wait.as_ref());
+        tokio::pin!(spawn);
+        // The first poll puts the `Spawn` on the coordinator channel. Context
+        // published after it reaches the coordinator behind its child, which
+        // holds it until the child starts.
+        let first_poll = futures::poll!(spawn.as_mut());
+        if let Some(route) = &self.context_route {
+            route.publish(id);
+        }
+        let result = match first_poll {
+            std::task::Poll::Ready(result) => result,
+            std::task::Poll::Pending => tokio::select! {
+                biased;
+                _ = cancel.cancelled() => {
+                    let _ = tokio::time::timeout(
+                        GOAL_PLANNER_CANCEL_ACK_TIMEOUT,
+                        backend.cancel(id),
+                    )
+                    .await;
+                    return Err(SpawnError::Interrupted);
+                }
+                result = &mut spawn => result,
+            },
         };
+        let result = result.map_err(|error| SpawnError::Transport(error.to_string()))?;
         if result.backgrounded {
             let _ = tokio::time::timeout(
                 GOAL_PLANNER_CANCEL_ACK_TIMEOUT,
@@ -715,6 +823,7 @@ mod tests {
             trace_sink: None,
             role_override: RoleSpawnOverride::default(),
             cancel_token: tokio_util::sync::CancellationToken::new(),
+            context_route: None,
             events: None,
         };
         let handle = tokio::spawn(async move {
@@ -1338,6 +1447,7 @@ mod tests {
                 agent_type: Some("cursor".into()),
             },
             cancel_token: tokio_util::sync::CancellationToken::new(),
+            context_route: None,
             events: None,
         };
         let handle = tokio::spawn(async move {
@@ -1665,6 +1775,7 @@ mod tests {
                 agent_type: Some("general-purpose".into()),
             },
             cancel_token: tokio_util::sync::CancellationToken::new(),
+            context_route: None,
             events: None,
         });
         let (_log, emit) = collect_events();
@@ -1731,6 +1842,7 @@ mod tests {
                 agent_type: Some("general-purpose".into()),
             },
             cancel_token: tokio_util::sync::CancellationToken::new(),
+            context_route: None,
             events: None,
         });
         let (_log, emit) = collect_events();
