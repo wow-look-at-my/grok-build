@@ -32,7 +32,7 @@ jobs:
   # Seconds, not a whole build: it names the failing step of a cache round trip while that is cheap.
   cache-probe:
     name: Cache round trip
-    if: github.ref != 'refs/heads/master'
+    if: false
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -174,34 +174,16 @@ jobs:
               core.info(`${key}: ${value ? "present" : "absent"}`);
             }
 
-      # PKG_SLOTS caps the compiles that hold memory, so the outer -j is wide and paces free restores.
+      # The cache is off, so -j3 is what caps compile memory: a wide -j exhausts the runner's 15 GiB.
       - name: Build test harnesses (compile, no-run)
         env:
-          CARGO_BUILD_JOBS: "16"
-          RUSTC_WRAPPER: ${{ github.workspace }}/ci/pkg-cache.sh
-          PKG_SLOTS: "3"
-          PKG_CACHE_DIR: ${{ runner.temp }}/pkg-cache
-          PKG_STATS_DIR: ${{ runner.temp }}/pkg-stats
+          CARGO_BUILD_JOBS: "3"
         run: |
-          mkdir -p "$PKG_CACHE_DIR"
-          # Which keys the remote holds, so a miss answers from a list instead of a round trip.
-          ci/pkg-remote.sh get pkg-index "$PKG_CACHE_DIR/../pkg-index-dl" \
-            && cp "$PKG_CACHE_DIR/../pkg-index-dl/keys" "$PKG_CACHE_DIR/../pkg-index" || true
           start=$(date +%s)
           cargo test --locked --workspace --no-run --no-fail-fast
           cargo build --locked -p xai-grok-pager-bin
-          echo "PKG-CACHE compile wall: $(( $(date +%s) - start )) s"
-          mkdir -p "$PKG_CACHE_DIR/../pkg-index-up"
-          find "$PKG_CACHE_DIR" -maxdepth 1 -mindepth 1 -type d -printf '%f\n' > "$PKG_CACHE_DIR/../pkg-index-up/keys"
-          # A build that already compiled everything must not fail because the cache could not be written.
-          ci/pkg-remote.sh put pkg-index "$PKG_CACHE_DIR/../pkg-index-up" && rc=0 || rc=$?
-          echo "PKG-CACHE index-put rc: $rc"
-          echo "PKG-CACHE entries: $(ls "$PKG_CACHE_DIR" 2>/dev/null | wc -l)"
-          echo "PKG-CACHE store: $(du -sh "$PKG_CACHE_DIR" 2>/dev/null | cut -f1)"
-          echo "PKG-CACHE target: $(du -sh target 2>/dev/null | cut -f1)"
-          for c in local-hit remote-hit remote-miss compiled remote-put remote-put-failed; do
-            echo "PKG-CACHE $c: $(wc -l < "$PKG_STATS_DIR/$c" 2>/dev/null || echo 0)"
-          done
+          echo "compile wall: $(( $(date +%s) - start )) s"
+          echo "target: $(du -sh target 2>/dev/null | cut -f1)"
 
       - name: Run tests (workspace)
         run: |
@@ -228,13 +210,11 @@ jobs:
             END { exit (compile && !splitbad) ? 0 : 1 }
           ' .github/workflows/ci.yml \
             || { echo "RAM GUARD: FAIL — build must be a single unified --no-run, no exclude/-p split"; exit 1; }
-          # The wrapper caps concurrent compiles now. Losing either half uncaps compile memory.
-          grep -q 'PKG_SLOTS: "3"' .github/workflows/ci.yml \
-            || { echo "RAM GUARD: FAIL — missing PKG_SLOTS=3 compile semaphore"; exit 1; }
-          grep -q 'RUSTC_WRAPPER: .*ci/pkg-cache.sh' .github/workflows/ci.yml \
-            || { echo "RAM GUARD: FAIL — compile step is not behind the per-package wrapper"; exit 1; }
-          [ -x ci/pkg-cache.sh ] \
-            || { echo "RAM GUARD: FAIL — ci/pkg-cache.sh is missing or not executable"; exit 1; }
+          # With no wrapper there is no compile semaphore, so the outer -j is the only memory cap.
+          grep -q 'CARGO_BUILD_JOBS: "3"' .github/workflows/ci.yml \
+            || { echo "RAM GUARD: FAIL — compile step must stay at -j3 while the cache is off"; exit 1; }
+          ! grep -q '^ *RUSTC_WRAPPER:' .github/workflows/ci.yml \
+            || { echo "RAM GUARD: FAIL — a wrapper is set but no compile semaphore caps it"; exit 1; }
           grep -qF -- 'cargo nextest run --locked --workspace --profile ci' .github/workflows/ci.yml \
             || { echo "RAM GUARD: FAIL — run step missing"; exit 1; }
           echo "RAM GUARD: PASS — sub-crate split + unified --no-run behind the 3-slot compile semaphore, run step fast-passes"
