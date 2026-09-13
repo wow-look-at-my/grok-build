@@ -49,6 +49,7 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 
 - The GitHub CI-status dot lives in `crates/codegen/xai-grok-pager/src/ci_status.rs` (pure `gh` invocation + tri-state mapping + HSV-value animation) and is wired into the session status bar in `src/app/agent_view/render.rs`.
 - The yellow "in progress" dot animates its HSV value in a sine wave between 25% and 80% (see `ci_status::animate_value`).
+- A `--sandbox` session cannot spawn `gh` in the jail. The host worker (`xai-grok-sandbox/src/ci_host.rs`) answers fixed request shapes over the inherited fd: `gh-status` feeds the dot, `gh-pr` feeds the shell's `x.ai/pr/status` (`extensions/pr.rs`). `gh pr checks` puts its verdict in the exit code (1 failed, 8 pending) and prints the list either way, so both paths accept those codes.
 
 - The dot is only realtime because three things outside the render path keep it moving. Drop any one and it freezes at its last color, silently, on exactly the idle session that is watching CI:
   - the event loop's CI poll timer (`CI_POLL_INTERVAL`) keeps polling when no frame is being drawn — the render path refreshes only on frames it draws.
@@ -139,7 +140,7 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 
 ## Goal-planner cancellation notes
 
-- Only steering replans. `run_goal_planner_attempt` returns `Steered` whenever there is any, so an `Interrupted` reaching the loop is a bare cancel and is terminal — retrying one spawned four dead planners in 2.3 s before the attempt cap paused the goal.
+- Nothing replans. A Send Now delivers its text to the planner already running (`SubagentEvent::Interject`, routed by the coordinator id the spawn publishes on the goal tracker) instead of cancelling it, so an `Interrupted` reaching the loop is a bare cancel and is terminal — retrying one spawned four dead planners in 2.3 s before the attempt cap paused the goal.
 - The planner runs off a slash command, not a turn, and a user Stop latches the session's Task spawns closed until a turn reopens them (`open_subagent_spawn_admission`). `maybe_run_goal_planner` reopens them itself. Without that, `/goal resume` after a Stop is rejected before a subagent exists, at latency 0, for every message the session has left.
 - A pause the user asked for says so (`planner_cancelled_pause_message`). "Planning failed" on a cancel sends the reader hunting a broken planner that is doing exactly what it was told.
 
