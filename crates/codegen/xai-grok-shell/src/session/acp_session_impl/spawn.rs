@@ -765,6 +765,12 @@ pub(crate) async fn spawn_session_actor(
         .and_then(|ui| ui.get("stop_gate_unfinished_todos"))
         .and_then(toml::Value::as_bool)
         .unwrap_or(true);
+    reminder_policy.stop_gate_ci_failing = effective_cfg
+        .as_ref()
+        .and_then(|cfg| cfg.get("ui"))
+        .and_then(|ui| ui.get("stop_gate_ci_failing"))
+        .and_then(toml::Value::as_bool)
+        .unwrap_or(true);
     let (user_question_tx, user_question_rx) = tokio::sync::mpsc::unbounded_channel::<
         xai_grok_tools::implementations::grok_build::ask_user_question::types::UserQuestionRequest,
     >();

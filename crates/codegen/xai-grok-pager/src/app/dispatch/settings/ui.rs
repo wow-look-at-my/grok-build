@@ -12,7 +12,7 @@ use super::setters::{
     set_remember_tool_approvals_inner, set_render_mermaid_inner, set_respect_manual_folds_inner,
     set_screen_mode_inner, set_scroll_lines_inner, set_scroll_mode_inner, set_scroll_speed_inner,
     set_show_thinking_blocks_inner, set_show_tips_inner, set_simple_mode_inner,
-    set_stop_gate_unfinished_todos_inner, set_theme_inner,
+    set_stop_gate_ci_failing_inner, set_stop_gate_unfinished_todos_inner, set_theme_inner,
     set_timeline_inner, set_timestamps, set_timestamps_inner, set_vim_mode_inner,
     set_voice_capture_mode_inner, set_voice_keybind_enabled_inner, set_voice_stt_language_inner,
 };
@@ -765,6 +765,7 @@ pub(in crate::app::dispatch) fn action_for_reset(
         ("stop_gate_unfinished_todos", SettingValue::Bool(b)) => {
             Some(Action::SetStopGateUnfinishedTodos(*b))
         }
+        ("stop_gate_ci_failing", SettingValue::Bool(b)) => Some(Action::SetStopGateCiFailing(*b)),
         ("combine_queued_prompts", SettingValue::Bool(b)) => {
             Some(Action::SetCombineQueuedPrompts(*b))
         }
@@ -967,6 +968,7 @@ pub(in crate::app::dispatch) fn apply_setting_rollback(
         ("stop_gate_unfinished_todos", SettingValue::Bool(b)) => {
             set_stop_gate_unfinished_todos_inner(app, *b)
         }
+        ("stop_gate_ci_failing", SettingValue::Bool(b)) => set_stop_gate_ci_failing_inner(app, *b),
         ("combine_queued_prompts", SettingValue::Bool(b)) => {
             set_combine_queued_prompts_inner(app, *b)
         }

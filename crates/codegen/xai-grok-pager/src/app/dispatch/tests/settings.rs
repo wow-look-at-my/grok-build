@@ -1578,6 +1578,10 @@ fn move_setting_away_from_default(app: &mut AppView, key: crate::settings::Setti
             let away = !app.current_ui.stop_gate_unfinished_todos_enabled();
             let _ = dispatch(Action::SetStopGateUnfinishedTodos(away), app);
         }
+        "stop_gate_ci_failing" => {
+            let away = !app.current_ui.stop_gate_ci_failing_enabled();
+            let _ = dispatch(Action::SetStopGateCiFailing(away), app);
+        }
         "combine_queued_prompts" => {
             let away = !crate::appearance::cache::load_combine_queued_prompts();
             let _ = dispatch(Action::SetCombineQueuedPrompts(away), app);

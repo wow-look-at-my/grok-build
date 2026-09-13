@@ -674,6 +674,33 @@ pub fn default_settings() -> Vec<SettingMeta> {
             hidden_in_minimal: false,
         },
         SettingMeta {
+            key: "stop_gate_ci_failing",
+            category: SettingCategory::Agent,
+            owner: SettingOwner::Shared,
+            label: "Stop gate for failing CI",
+            description: "The model cannot end its turn while the branch it pushed has a \
+                          failing CI run: it is sent back to read the failing logs and fix \
+                          them, and only after repeated attempts does it stop anyway (the \
+                          same continuation budget stop hooks use). A branch that is green, \
+                          still running, or has no runs never blocks. Turn off to let the \
+                          model stop on red.",
+            keywords: &[
+                "stop",
+                "ci",
+                "gate",
+                "failing",
+                "red",
+                "github",
+                "actions",
+                "build",
+            ],
+            kind: SettingKind::Bool {
+                default: ui_default.stop_gate_ci_failing_enabled(),
+            },
+            restart_required: false,
+            hidden_in_minimal: false,
+        },
+        SettingMeta {
             // Persisted key stays `simple_mode`; the user-facing label
             // distinguishes the PROMPT vim-mode (this setting) from the
             // scrollback `vim_mode` keybindings below.
