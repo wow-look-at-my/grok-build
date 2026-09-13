@@ -301,6 +301,8 @@ impl ChildControl for SoakControl {
     fn cancel(&self) {
         self.cancellation.cancel();
     }
+
+    fn interject(&self, _text: String) {}
 }
 
 struct SoakRunner {
