@@ -373,9 +373,7 @@ fn flag_allowed(flag: &str) -> bool {
 fn valid_arg(arg: &str) -> bool {
     !arg.is_empty()
         && arg.len() <= MAX_ARG_BYTES
-        && arg
-            .bytes()
-            .all(|b| b.is_ascii_graphic() || b == b' ')
+        && arg.bytes().all(|b| b.is_ascii_graphic() || b == b' ')
 }
 
 /// Run `gh run list --json` for `branch` in the worker's cwd and return the
@@ -709,7 +707,9 @@ mod tests {
         let long = "a".repeat(MAX_ARG_BYTES + 1);
         assert!(!gh_args_allowed(&args(&["run", "list", "--branch", &long])));
         // A newline would break the protocol's own framing.
-        assert!(!gh_args_allowed(&args(&["run", "list", "--branch", "a\nb"])));
+        assert!(!gh_args_allowed(&args(&[
+            "run", "list", "--branch", "a\nb"
+        ])));
     }
 
     #[test]
@@ -758,7 +758,10 @@ mod tests {
 
     #[test]
     fn tail_lossy_keeps_the_end_of_an_oversized_body() {
-        assert_eq!(tail_lossy(b"noise error: the real failure", 23), "error: the real failure");
+        assert_eq!(
+            tail_lossy(b"noise error: the real failure", 23),
+            "error: the real failure"
+        );
         assert_eq!(tail_lossy(b"short", 100), "short");
     }
 

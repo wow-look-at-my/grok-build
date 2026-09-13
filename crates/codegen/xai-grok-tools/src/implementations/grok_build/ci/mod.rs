@@ -31,7 +31,9 @@ const MAX_RUN_LIMIT: u32 = 50;
 // Input schema
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum CiAction {
     /// Fold the branch's runs into one state: passing, failing, in_progress,
@@ -278,7 +280,10 @@ impl xai_tool_runtime::Tool for CiTool {
         tokio::task::spawn_blocking(move || run_blocking(&cwd, input))
             .await
             .map_err(|error| {
-                xai_tool_runtime::ToolError::custom("ci_join", format!("ci query panicked: {error}"))
+                xai_tool_runtime::ToolError::custom(
+                    "ci_join",
+                    format!("ci query panicked: {error}"),
+                )
             })?
     }
 }
@@ -332,8 +337,9 @@ fn wait_output(
     limit: u32,
     timeout_secs: Option<u64>,
 ) -> CiOutput {
-    let budget =
-        std::time::Duration::from_secs(timeout_secs.unwrap_or(DEFAULT_WAIT_SECS).min(MAX_WAIT_SECS));
+    let budget = std::time::Duration::from_secs(
+        timeout_secs.unwrap_or(DEFAULT_WAIT_SECS).min(MAX_WAIT_SECS),
+    );
     let deadline = std::time::Instant::now() + budget;
     loop {
         let output = status_output(cwd, branch, limit);
@@ -405,14 +411,12 @@ fn logs_output(
 fn checks_output(cwd: &std::path::Path, branch: &str) -> CiOutput {
     // `gh pr checks` exits non-zero when a check is failing, so its exit code
     // carries meaning and is not an error to report as one.
-    let response =
-        xai_grok_sandbox::ci_host::run_gh(cwd, &["pr", "checks", branch]).unwrap_or_else(|| {
-            xai_grok_sandbox::ci_host::GhHostResponse {
-                code: -1,
-                stdout: String::new(),
-                stderr: "could not reach `gh`".to_string(),
-                truncated: false,
-            }
+    let response = xai_grok_sandbox::ci_host::run_gh(cwd, &["pr", "checks", branch])
+        .unwrap_or_else(|| xai_grok_sandbox::ci_host::GhHostResponse {
+            code: -1,
+            stdout: String::new(),
+            stderr: "could not reach `gh`".to_string(),
+            truncated: false,
         });
     let body = if response.stdout.trim().is_empty() {
         response.stderr.clone()

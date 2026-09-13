@@ -252,7 +252,10 @@ mod tests {
     fn terminal_states_are_the_ones_worth_no_more_waiting() {
         assert!(!CiStatus::Yellow.is_terminal());
         for settled in [CiStatus::Red, CiStatus::Green, CiStatus::Off] {
-            assert!(settled.is_terminal(), "{settled:?} cannot change on its own");
+            assert!(
+                settled.is_terminal(),
+                "{settled:?} cannot change on its own"
+            );
         }
     }
 
