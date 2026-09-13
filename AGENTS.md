@@ -38,7 +38,7 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 
 ## The darwin binary is compiled on Linux and linked on macOS
 
-- A macOS runner bills at ten times the Linux rate, so `build-darwin-objects` (ubuntu-22.04) compiles every crate for `aarch64-apple-darwin`, and `link-darwin` (macos-14) runs one `cc`. That second job is the only macOS minute this workflow spends.
+- A macOS runner bills at ten times the Linux rate, so `build-darwin-objects` (ubuntu-22.04) compiles every crate for `aarch64-apple-darwin`, and `link-darwin` (macos-14) runs one `cc`. The other macOS job is `test-darwin-sandbox`. It runs `cargo test -p xai-grok-sandbox` natively, because the jail and the CI host worker have a Seatbelt half that only a Mac executes. That crate is small. The job stays cheap.
 - Compiling for darwin on Linux works. Linking does not. Every cross-linker that reads the Apple SDK also rewrites the search paths rustc passes. Each build script's own static library then drops out of the link: aws-lc, ring, jemalloc, libgit2, the tree-sitter grammars.
 - So `xai-darwin-link` stands in as rustc's linker and records the command instead of running it. It copies every input into a bundle, because rustc deletes its temporary object directory the moment the linker returns.
 - Paths in the recorded list are written as `@BUNDLE@` and `@OUT@`. The replay host mounts the bundle somewhere else, and `ci/darwin-relink.sh` substitutes both.
@@ -59,6 +59,8 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 ## CI pipeline notes: the `gh` host worker, the `ci` tool, and the CI stop gate
 
 - The unsandboxed host worker (`xai-grok-sandbox/src/ci_host.rs`) is the only way anything in a `--sandbox` session reaches `gh`. A jail re-execs the whole binary. A `gh` spawned from inside it reaches neither the host credentials nor the network. The host starts the worker moments before the re-exec and hands it in as an open socketpair fd.
+- That fd is created close-on-exec. The jail is entered by exec. So `spawn_ci_host` clears `FD_CLOEXEC` on it (`inherit_across_exec`). Without that the jailed pager reads a dead fd off `GROK_CI_HOST_FD` and the dot never shows. `worker_fd_survives_an_exec` is the guard.
+- A `gh` that fails is never "no runs". `ci::fetch_runs` answers `Err(CiQueryError)` with what `gh` said. The tool reports that as its error. A dead token or a rate limit then reaches the model as such, not as "nothing has been pushed". The stop gate reads the same `Err` as "cannot tell" and allows the stop.
 - The worker serves `gh-status <branch>` for the dot and `gh <json argv>` for an allowlisted run. `ALLOWED_COMMANDS` and `ALLOWED_FLAGS` keep the surface read-only. The check runs on the WORKER. A jailed session that writes its own request line gets the same refusal. `gh api` is admitted because the flag allowlist refuses every flag that carries a method or a body.
 - One connection, one mutex (`host_stream`). The dot polls off a blocking thread while the `ci` tool runs its own queries. Callers that write at the same time interleave their requests and read each other's answers. `concurrent_callers_never_read_each_others_answers` covers it.
 - The run-to-state reduction lives in `ci_state.rs`. The dot and the tool share it. So the two cannot disagree about what red means.

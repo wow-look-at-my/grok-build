@@ -435,13 +435,7 @@ impl SessionContextFactory for WorkspaceSessionContextFactory {
                                 zdr_video_output_s3: None,
                                 tier_restricted: false,
                             },
-                            WebSearchConfig::Enabled {
-                                api_key: token,
-                                base_url: url.clone(),
-                                model: default_web_search_model(),
-                                extra_headers: headers,
-                                alpha_test_key: None,
-                            },
+                            web_search_config(&token, url, headers),
                             AppBuilderDeployerConfig::default(),
                         )
                     }
@@ -541,6 +535,57 @@ fn build_web_fetch_config() -> xai_grok_tools::implementations::grok_build::web_
 }
 fn default_web_search_model() -> String {
     std::env::var("GROK_WEB_SEARCH_MODEL").unwrap_or_else(|_| "grok-4.5".to_string())
+}
+
+/// The `web_search` backend for a session.
+///
+/// `[web_search] provider = "kagi"` (which resolves to
+/// `GROK_WEB_SEARCH_PROVIDER=kagi`) routes the tool through Kagi's Search API.
+/// Kagi returns results already filtered, ranked, and snippet-ed, so no
+/// synthesis model is called and none has to be configured.
+///
+/// Kagi takes its own credential — `Authorization: Bot <token>`, not the
+/// session bearer — so the token is read from `KAGI_API_KEY`. Without one this
+/// falls back to the default backend rather than silently disabling search.
+fn web_search_config(
+    token: &str,
+    api_base_url: &str,
+    headers: indexmap::IndexMap<String, String>,
+) -> xai_grok_tools::implementations::web_search::WebSearchConfig {
+    use xai_grok_tools::implementations::web_search::WebSearchConfig;
+    if kagi_web_search_selected()
+        && let Some(api_key) = std::env::var("KAGI_API_KEY")
+            .ok()
+            .map(|key| key.trim().to_string())
+            .filter(|key| !key.is_empty())
+    {
+        return WebSearchConfig::Kagi {
+            api_key,
+            base_url: xai_grok_tools::implementations::web_search::default_kagi_base_url(),
+            limit: web_search_result_limit(),
+            extra_headers: indexmap::IndexMap::new(),
+        };
+    }
+    WebSearchConfig::Enabled {
+        api_key: token.to_string(),
+        base_url: api_base_url.to_string(),
+        model: default_web_search_model(),
+        extra_headers: headers,
+        alpha_test_key: None,
+    }
+}
+
+/// Whether `web_search` should use Kagi rather than the Responses API.
+fn kagi_web_search_selected() -> bool {
+    std::env::var("GROK_WEB_SEARCH_PROVIDER")
+        .is_ok_and(|value| value.trim().eq_ignore_ascii_case("kagi"))
+}
+
+/// Results per query to ask Kagi for; unset uses Kagi's own default.
+fn web_search_result_limit() -> Option<usize> {
+    std::env::var("GROK_WEB_SEARCH_LIMIT")
+        .ok()
+        .and_then(|value| value.trim().parse().ok())
 }
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support {
