@@ -27,6 +27,71 @@ mod yolo_toggle_report_tests {
         assert_eq!(yolo_toggle_report(true, true), None);
     }
 }
+/// What an interjection does to a model stream that is in flight when it
+/// lands in a running turn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InFlightStream {
+    /// Cut the stream so the text reaches the very next request
+    /// (`SessionCommand::Interject`, the user's own interjection).
+    Cancel,
+    /// Leave the stream alone; the text waits for the turn's next drain point
+    /// (`SessionCommand::InterjectWithoutCancel`, context handed to a live
+    /// subagent such as the goal planner).
+    Keep,
+}
+/// Deliver an interjection to this session. A running turn buffers it; with
+/// no turn running it becomes its own prompt turn, so it cannot strand.
+async fn deliver_interjection(
+    session: &Arc<SessionActor>,
+    completion_tx: &mpsc::UnboundedSender<(String, PromptTurnResult)>,
+    text: String,
+    id: Option<String>,
+    images: Vec<acp::ImageContent>,
+    in_flight: InFlightStream,
+) {
+    // Broadcast to every attached client so all panes viewing this session
+    // render the interjection block, not just the originating client. The
+    // originator dedups this echo by `id` against its optimistic local block;
+    // viewers render it.
+    session.broadcast_interjection(&text, id.as_deref());
+    // Telemetry at enqueue (not drain) so it is recorded even when a cancel
+    // clears the buffer before the next drain point.
+    session.events.emit(crate::session::events::Event::Interjected {
+        source: crate::session::events::InterjectionSource::Direct,
+        image_count: images.len() as u32,
+        redirect_kind: crate::session::events::RedirectKind::Interjection,
+    });
+    // Buffer only into an actually-running turn: the buffer is drained
+    // exclusively by the turn loop, so an interjection arriving while idle
+    // (the pager's running-state check races turn end) would strand forever
+    // and silently drop the message. Run it as its own prompt turn instead.
+    let turn_running = session
+        .current_prompt_id
+        .lock()
+        .ok()
+        .and_then(|g| g.clone())
+        .is_some();
+    if !turn_running {
+        session
+            .queue_interjection_fallback_prompt(text, images, true)
+            .await;
+        SessionActor::maybe_start_running_task(session.clone(), completion_tx.clone()).await;
+        return;
+    }
+    session.pending_interjections.push(PendingInterjection {
+        text,
+        attachments: images,
+    });
+    match in_flight {
+        InFlightStream::Cancel => {
+            tracing::info!("Queued mid-turn interjection");
+            session.cancel_in_flight_stream_for_interjection();
+        }
+        InFlightStream::Keep => {
+            tracing::info!("Queued mid-turn interjection; in-flight stream kept");
+        }
+    }
+}
 /// Best-effort removal of this session's per-session scratch staging on
 /// teardown. A no-op in builds without a scratch producer.
 fn cleanup_session_scratch(_session: &SessionActor) {}
@@ -1953,56 +2018,26 @@ pub(super) async fn run_session(
                             });
                         }
                         SessionCommand::Interject { text, id, images } => {
-                            // Broadcast to every attached client so all panes
-                            // viewing this session render the interjection block
-                            // — not just the originating client. The originator
-                            // dedups this echo by `id` against its optimistic
-                            // local block; viewers render it.
-                            session.broadcast_interjection(&text, id.as_deref());
-                            // Telemetry at enqueue (not drain) so it is recorded
-                            // even when a cancel clears the buffer before the
-                            // next drain point.
-                            session.events.emit(crate::session::events::Event::Interjected {
-                                source: crate::session::events::InterjectionSource::Direct,
-                                image_count: images.len() as u32,
-                                redirect_kind: crate::session::events::RedirectKind::Interjection,
-                            });
-                            // Buffer only into an actually-running turn — the
-                            // buffer is drained exclusively by the turn loop, so
-                            // an interjection arriving while idle (the pager's
-                            // running-state check races turn end) would strand
-                            // forever and silently drop the user's message. Run
-                            // it as its own prompt turn instead.
-                            let turn_running = session
-                                .current_prompt_id
-                                .lock()
-                                .ok()
-                                .and_then(|g| g.clone())
-                                .is_some();
-                            if turn_running {
-                                session.pending_interjections.push(PendingInterjection {
-                                    text,
-                                    attachments: images,
-                                });
-                                tracing::info!("Queued mid-turn interjection");
-                                session.cancel_in_flight_stream_for_interjection();
-                            } else {
-                                session
-                                    .queue_interjection_fallback_prompt(text, images, true)
-                                    .await;
-                                SessionActor::maybe_start_running_task(
-                                    session.clone(),
-                                    completion_tx.clone(),
-                                )
-                                .await;
-                            }
+                            deliver_interjection(
+                                &session,
+                                &completion_tx,
+                                text,
+                                id,
+                                images,
+                                InFlightStream::Cancel,
+                            )
+                            .await;
                         }
                         SessionCommand::InterjectWithoutCancel { text } => {
-                            session.pending_interjections.push(PendingInterjection {
+                            deliver_interjection(
+                                &session,
+                                &completion_tx,
                                 text,
-                                attachments: Vec::new(),
-                            });
-                            tracing::info!("Queued planner context without cancelling child stream");
+                                None,
+                                Vec::new(),
+                                InFlightStream::Keep,
+                            )
+                            .await;
                         }
                         SessionCommand::GoalSummaryTurn { prompt_text } => {
                             // Queue a synthetic prompt so the model gets a turn

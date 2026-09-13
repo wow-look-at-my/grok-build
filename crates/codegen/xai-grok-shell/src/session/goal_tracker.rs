@@ -705,9 +705,17 @@ pub struct GoalTracker {
 #[derive(Debug)]
 pub(crate) struct GoalPlannerRunState {
     pub(crate) cancel: tokio_util::sync::CancellationToken,
+<<<<<<< HEAD
     /// Where a Send Now addresses its context: the live planner child, by the
     /// coordinator id the run's spawn publishes.
     pub(crate) context: std::sync::Arc<crate::session::goal_planner::PlannerContextRoute>,
+=======
+    /// Filled by the planner's spawn with the coordinator id of the live
+    /// planner child. Send Now reads it to address the user's context at the
+    /// running planner — nothing is restarted (see
+    /// [`GoalTracker::planner_subagent_id`]).
+    pub(crate) subagent_id: std::sync::Arc<std::sync::Mutex<Option<String>>>,
+>>>>>>> origin/master
 }
 
 impl GoalTracker {
@@ -796,6 +804,7 @@ impl GoalTracker {
         self.orchestration.as_ref()
     }
 
+<<<<<<< HEAD
     /// Register a planner run and hand back the route its spawn publishes the
     /// planner child's coordinator id into.
     pub(crate) fn start_planner_run(
@@ -813,12 +822,27 @@ impl GoalTracker {
             context: context.clone(),
         });
         context
+=======
+    /// Register a planner run and hand back the cell its spawn publishes the
+    /// coordinator id into.
+    pub(crate) fn start_planner_run(
+        &mut self,
+        cancel: tokio_util::sync::CancellationToken,
+    ) -> std::sync::Arc<std::sync::Mutex<Option<String>>> {
+        let subagent_id = std::sync::Arc::new(std::sync::Mutex::new(None));
+        self.planner_run = Some(GoalPlannerRunState {
+            cancel,
+            subagent_id: subagent_id.clone(),
+        });
+        subagent_id
+>>>>>>> origin/master
     }
 
     pub(crate) fn take_planner_run(&mut self) -> Option<GoalPlannerRunState> {
         self.planner_run.take()
     }
 
+<<<<<<< HEAD
     /// Hand Send Now text to the running planner as mid-turn context. The
     /// planner is never cancelled or restarted for it. With no run registered
     /// there is no planner to steer.
@@ -830,6 +854,16 @@ impl GoalTracker {
             return;
         }
         run.context.deliver(steering);
+=======
+    /// Coordinator id of the planner child spawned for the registered run, or
+    /// `None` when no run is registered or its spawn has not published an id
+    /// yet. A run that finished clears with [`Self::take_planner_run`], so a
+    /// stale id is never addressed after the planner is gone.
+    pub(crate) fn planner_subagent_id(&self) -> Option<String> {
+        self.planner_run
+            .as_ref()
+            .and_then(|run| run.subagent_id.lock().ok().and_then(|id| id.clone()))
+>>>>>>> origin/master
     }
 
     pub(crate) fn snapshot_mut(&mut self) -> Option<&mut GoalOrchestration> {
@@ -1475,6 +1509,7 @@ mod tests {
         GoalTracker::new(PathBuf::from("/tmp/test-goal-session"))
     }
 
+<<<<<<< HEAD
     /// Pull every `Interject` off the coordinator channel as `(id, text)`.
     fn drain_interjections(
         rx: &mut tokio::sync::mpsc::UnboundedReceiver<
@@ -1494,10 +1529,15 @@ mod tests {
         out
     }
 
+=======
+    /// The planner's coordinator id is addressable exactly while the run is
+    /// registered and its spawn has published one.
+>>>>>>> origin/master
     #[test]
-    fn empty_steering_does_not_cancel_planner() {
+    fn planner_subagent_id_tracks_the_registered_run() {
         let mut tracker = make_tracker();
         let cancel = tokio_util::sync::CancellationToken::new();
+<<<<<<< HEAD
         let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
         let route = tracker.start_planner_run(cancel.clone(), event_tx);
         route.publish("test-planner");
@@ -1576,6 +1616,17 @@ mod tests {
         tracker.steer_planner("too late");
 
         assert!(drain_interjections(&mut event_rx).is_empty());
+=======
+        let published = tracker.start_planner_run(cancel.clone());
+
+        assert_eq!(tracker.planner_subagent_id(), None, "no spawn yet");
+
+        *published.lock().unwrap() = Some("planner-1".to_string());
+        assert_eq!(tracker.planner_subagent_id().as_deref(), Some("planner-1"));
+
+        tracker.take_planner_run();
+        assert_eq!(tracker.planner_subagent_id(), None, "finished run is gone");
+>>>>>>> origin/master
     }
 
     fn activate_tracker(t: &mut GoalTracker) {

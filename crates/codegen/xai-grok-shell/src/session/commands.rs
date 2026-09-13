@@ -808,7 +808,9 @@ pub enum SessionCommand {
         /// text-only / older clients.
         images: Vec<acp::ImageContent>,
     },
-    /// Inject text into a running child turn without cancelling its sampler.
+    /// [`Self::Interject`] without cutting the running turn's in-flight model
+    /// stream: the text is read at the turn's next drain point. A session with
+    /// no turn running takes it as its own prompt turn, like `Interject`.
     InterjectWithoutCancel { text: String },
     /// Trigger a model turn so the model can print a visible goal progress
     /// summary.  The goal orchestrator injects a system reminder into context

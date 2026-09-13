@@ -102,9 +102,15 @@ fn spawn_planner_coordinator_capturing(
                 }
                 continue;
             }
+<<<<<<< HEAD
             if let SubagentEvent::Interject { text, .. } = ev {
                 if let SpawnBehaviour::WaitForContextThenWrite { context, notify, .. } = &behaviour {
                     context.lock().unwrap().push(text);
+=======
+            if let SubagentEvent::Interject { text, .. } = &ev {
+                if let SpawnBehaviour::WaitForContextThenWrite { context, notify, .. } = &behaviour {
+                    context.lock().unwrap().push(text.clone());
+>>>>>>> origin/master
                     notify.notify_one();
                 }
                 continue;
@@ -118,7 +124,42 @@ fn spawn_planner_coordinator_capturing(
                     .unwrap()
                     .push(req.runtime_overrides.model.clone());
                 let plan_path = plan_path_from_prompt(&req.prompt);
+                if let SpawnBehaviour::WaitForContextThenWrite { objectives, .. } = &behaviour {
+                    // Record what the planner was actually spawned with, so the
+                    // test can prove the objective carries no folded-in steering.
+                    objectives.lock().unwrap().push(req.prompt.clone());
+                }
+                if let SpawnBehaviour::WaitForContextThenWrite { notify, body, .. } = &behaviour {
+                    let notify = StdArc::clone(notify);
+                    let body = *body;
+                    let subagent_id = req.id.clone();
+                    let result_tx = req.result_tx;
+                    let plan_path = plan_path.clone();
+                    let spawn = count_task.load(SeqOrd::SeqCst);
+                    let started = match &behaviour {
+                        SpawnBehaviour::WaitForContextThenWrite { started, .. } => started,
+                        _ => unreachable!(),
+                    };
+                    let _ = started.send(spawn);
+                    tokio::task::spawn_local(async move {
+                        notify.notified().await;
+                        if let Some(p) = plan_path.as_deref() {
+                            let _ = std::fs::create_dir_all(std::path::Path::new(p).parent().unwrap());
+                            let _ = std::fs::write(p, body);
+                        }
+                        let _ = result_tx.send(SubagentResult {
+                            success: true,
+                            output: StdArc::from("Done"),
+                            subagent_id: subagent_id.clone(),
+                            child_session_id: subagent_id,
+                            ..Default::default()
+                        });
+                    });
+                    continue;
+                }
                 let result = match &behaviour {
+                    // Handled above: waits for the Send Now context, then writes.
+                    SpawnBehaviour::WaitForContextThenWrite { .. } => unreachable!(),
                     SpawnBehaviour::WritePlanThenDone { body } => {
                         if let Some(p) = plan_path.as_deref() {
                             let _ =
@@ -363,13 +404,13 @@ async fn send_now_queues_planner_context_without_restart() {
                 tokio::task::spawn_local(async move { actor.setup_goal("do X", None).await })
             };
 
-            for (spawn, text) in [(1, "first"), (2, "second")] {
-                assert_eq!(
-                    tokio::time::timeout(std::time::Duration::from_secs(5), started_rx.recv())
-                        .await
-                        .expect("planner spawn"),
-                    Some(spawn),
-                );
+            assert_eq!(
+                tokio::time::timeout(std::time::Duration::from_secs(5), started_rx.recv())
+                    .await
+                    .expect("planner spawn"),
+                Some(1),
+            );
+            for text in ["first", "second"] {
                 let (respond_to, response_rx) = tokio::sync::oneshot::channel();
                 assert!(
                     !actor
@@ -377,7 +418,7 @@ async fn send_now_queues_planner_context_without_restart() {
                             send_now: true,
                             ..queue_input_request(
                                 vec![acp::ContentBlock::Text(acp::TextContent::new(text))],
-                                &format!("user-steer-{spawn}"),
+                                &format!("user-steer-{text}"),
                                 respond_to,
                             )
                         })
@@ -389,11 +430,16 @@ async fn send_now_queues_planner_context_without_restart() {
                 ));
             }
 
+            notify.notify_one();
             tokio::time::timeout(std::time::Duration::from_secs(5), planner)
                 .await
                 .expect("planner completion")
                 .unwrap();
-            assert_eq!(spawn_count.load(SeqOrd::SeqCst), 3);
+            assert_eq!(spawn_count.load(SeqOrd::SeqCst), 1);
+            assert_eq!(context.lock().unwrap().as_slice(), [
+                "Additional user context for the current plan:\n\nfirst",
+                "Additional user context for the current plan:\n\nsecond",
+            ]);
             let prompts = objectives.lock().unwrap();
             let objectives = prompts
                 .iter()
@@ -407,14 +453,7 @@ async fn send_now_queues_planner_context_without_restart() {
                         .0
                 })
                 .collect::<Vec<_>>();
-            assert_eq!(
-                objectives,
-                [
-                    "do X",
-                    "do X\n\nUser steering:\nfirst",
-                    "do X\n\nUser steering:\nfirst\n\nsecond",
-                ]
-            );
+            assert_eq!(objectives, ["do X"]);
 
             // Staged files (`plan-<uuid>.md`, `plan-baseline-<uuid>.md`) are
             // `TempPath`s: interrupted attempts drop theirs and the winner

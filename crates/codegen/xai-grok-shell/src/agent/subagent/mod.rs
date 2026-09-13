@@ -476,6 +476,11 @@ impl ChildControl for ShellChildRuntime {
             crate::session::ShutdownKind::Graceful,
         ));
     }
+    /// Hand a mid-turn message to the child's own session actor, which buffers
+    /// it into the running turn without cutting the model stream in flight (or,
+    /// if the child has already gone idle, runs it as its next prompt). The
+    /// child keeps the work it is streaming and reads the text at its next
+    /// drain point.
     fn interject(&self, text: &str) {
         let _ = self
             .child_handle

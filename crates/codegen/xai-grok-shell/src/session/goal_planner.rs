@@ -241,8 +241,13 @@ pub(crate) enum GoalPlannerOutcome {
     /// Produced only by the planner's [`ChannelSpawner`], whose `cancel_token`
     /// is wired to `start_planner_run`; when the token fires mid-spawn (a user
     /// Stop, or the turn being cancelled) the attempt returns `Interrupted`.
+<<<<<<< HEAD
     /// A Send Now does NOT cancel the planner; it delivers context to the live
     /// planner as an interjection. The strategist and
+=======
+    /// A Send Now does NOT cancel the planner — it delivers context to the live
+    /// planner instead (see [`planner_context_message`]). The strategist and
+>>>>>>> origin/master
     /// summarizer spawners pass a fresh, never-cancelled token, so their
     /// equivalent cancel arms are unreachable in practice.
     Interrupted,
@@ -306,11 +311,17 @@ pub(crate) fn parse_terminal_response(text: &str) -> bool {
 const PLANNER_CONTEXT_PREFIX: &str = "Additional user context for the current plan:";
 
 /// Wrap a Send Now's text as the message the coordinator hands to the running
+<<<<<<< HEAD
 /// planner child.
+=======
+/// planner child. Nothing is restarted: the planner folds the context into the
+/// plan it is already writing.
+>>>>>>> origin/master
 pub(crate) fn planner_context_message(text: &str) -> String {
     format!("{PLANNER_CONTEXT_PREFIX}\n\n{text}")
 }
 
+<<<<<<< HEAD
 /// Addresses Send Now context at one planner run's live child, by the
 /// coordinator id its spawn runs under. Context that arrives before the spawn
 /// has published that id is held here and sent, in order, when it does.
@@ -388,6 +399,8 @@ impl Drop for PlannerContextRoute {
     }
 }
 
+=======
+>>>>>>> origin/master
 // Production spawner
 
 pub(crate) struct ChannelSpawner {
@@ -406,9 +419,16 @@ pub(crate) struct ChannelSpawner {
     /// historic `::default()` spawn behavior.
     pub(crate) role_override: RoleSpawnOverride,
     pub(crate) cancel_token: tokio_util::sync::CancellationToken,
+<<<<<<< HEAD
     /// Route a Send Now uses to reach the live planner child. Each spawn
     /// publishes its coordinator id into it. `None` when nothing steers.
     pub(crate) context_route: Option<Arc<PlannerContextRoute>>,
+=======
+    /// Cell published with the coordinator id this spawn runs under, so a Send
+    /// Now can address the live planner child (the goal tracker owns the cell;
+    /// see `GoalTracker::planner_subagent_id`). `None` when nothing needs it.
+    pub(crate) subagent_id_slot: Option<std::sync::Arc<std::sync::Mutex<Option<String>>>>,
+>>>>>>> origin/master
     /// Event sink for the spawn-and-retry-once fail-open telemetry; `None`
     /// in tests / when no event log is wired.
     pub(crate) events: Option<EventWriter>,
@@ -421,6 +441,13 @@ impl GoalPlannerSpawner for ChannelSpawner {
         id: &str,
         prompt: RoleRenderedPrompt,
     ) -> Result<String, SpawnError> {
+        // Publish the coordinator id BEFORE awaiting the child: a Send Now that
+        // lands at any point during the run has to be able to address it.
+        if let Some(slot) = &self.subagent_id_slot
+            && let Ok(mut published) = slot.lock()
+        {
+            *published = Some(id.to_string());
+        }
         // Clone the primary render for the trace pair only when tracing; the
         // wrapper moves each render into its attempt (no other clone).
         let trace_prompt = self.trace_sink.as_ref().map(|_| prompt.primary.clone());
@@ -823,7 +850,11 @@ mod tests {
             trace_sink: None,
             role_override: RoleSpawnOverride::default(),
             cancel_token: tokio_util::sync::CancellationToken::new(),
+<<<<<<< HEAD
             context_route: None,
+=======
+            subagent_id_slot: None,
+>>>>>>> origin/master
             events: None,
         };
         let handle = tokio::spawn(async move {
@@ -1447,7 +1478,11 @@ mod tests {
                 agent_type: Some("cursor".into()),
             },
             cancel_token: tokio_util::sync::CancellationToken::new(),
+<<<<<<< HEAD
             context_route: None,
+=======
+            subagent_id_slot: None,
+>>>>>>> origin/master
             events: None,
         };
         let handle = tokio::spawn(async move {
@@ -1775,7 +1810,11 @@ mod tests {
                 agent_type: Some("general-purpose".into()),
             },
             cancel_token: tokio_util::sync::CancellationToken::new(),
+<<<<<<< HEAD
             context_route: None,
+=======
+            subagent_id_slot: None,
+>>>>>>> origin/master
             events: None,
         });
         let (_log, emit) = collect_events();
@@ -1842,7 +1881,11 @@ mod tests {
                 agent_type: Some("general-purpose".into()),
             },
             cancel_token: tokio_util::sync::CancellationToken::new(),
+<<<<<<< HEAD
             context_route: None,
+=======
+            subagent_id_slot: None,
+>>>>>>> origin/master
             events: None,
         });
         let (_log, emit) = collect_events();

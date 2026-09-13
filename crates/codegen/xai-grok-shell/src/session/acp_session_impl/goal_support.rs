@@ -8,8 +8,10 @@ use super::*;
 /// Compile-time constant for v1; remote tunability is a deferred follow-up.
 pub(super) const GOAL_CONTINUATION_BACKOFF_THRESHOLD: u32 = 3;
 
-/// Upper bound on planner attempts per `maybe_run_goal_planner` call, so
-/// repeated steering / interruptions cannot spin the retry loop forever.
+/// Upper bound on planner attempts per `maybe_run_goal_planner` call. A plan
+/// attempt now runs once — Send Now steers the live planner instead of
+/// replanning, and a cancel is terminal — so this is the backstop that keeps
+/// any future retry path from spinning the loop.
 pub(super) const GOAL_PLANNER_MAX_ATTEMPTS: u32 = 5;
 
 #[derive(Debug, Clone, Copy)]
@@ -36,8 +38,6 @@ enum PlannerAttemptStep {
     /// Nothing to run or keep (disabled, no coordinator, goal changed/gone, plan
     /// present, or staging failed) — break.
     Stop,
-    /// Interrupted with new steering — fold it in and replan.
-    Steered(Vec<String>),
     /// Ran to a terminal outcome — the loop decides publish/pause.
     Ran {
         goal_id: String,
@@ -1093,7 +1093,6 @@ impl SessionActor {
     /// On `FailClosed` the goal is paused with the canonical reason.
     pub(super) async fn maybe_run_goal_planner(&self, objective: &str) {
         let objective = objective.to_owned();
-        let mut steering = Vec::new();
         let run_goal_id = self
             .goal_tracker
             .lock()
@@ -1132,14 +1131,10 @@ impl SessionActor {
             attempt += 1;
 
             let (goal_id, plan_file, attempt_file, outcome) = match self
-                .run_goal_planner_attempt(&objective, &steering, run_goal_id.as_deref(), attempt)
+                .run_goal_planner_attempt(&objective, run_goal_id.as_deref(), attempt)
                 .await
             {
                 PlannerAttemptStep::Stop => break,
-                PlannerAttemptStep::Steered(extra) => {
-                    steering.extend(extra);
-                    continue;
-                }
                 PlannerAttemptStep::Ran {
                     goal_id,
                     plan_file,
@@ -1167,12 +1162,12 @@ impl SessionActor {
                     }
                     // The subagent produced a plan and we are committing to
                     // publish it. `run_goal_planner_attempt` already took the
-                    // planner run, so steering can no longer replan — a late
-                    // Send Now landing in the publish window is correctly
-                    // delivered only as an interjection. Turn the "planning…"
-                    // badge off NOW, before the plan/baseline I/O below, instead
-                    // of only at the very end, so the UI never advertises
-                    // "planning" while it can no longer replan.
+                    // planner run, so a late Send Now finds no live planner to
+                    // address and is correctly delivered only as a turn
+                    // interjection. Turn the "planning…" badge off NOW, before
+                    // the plan/baseline I/O below, instead of only at the very
+                    // end, so the UI never advertises "planning" for a planner
+                    // that is already done.
                     self.clear_goal_planning_latch(run_goal_id.as_deref()).await;
                     if attempt_file.persist(&plan_file).is_err() {
                         let still_same_goal =
@@ -1247,11 +1242,10 @@ impl SessionActor {
                         }
                     }
                 }
-                // Only steering replans, and `run_goal_planner_attempt` has
-                // already returned `Steered` when there was any. What is left
-                // is a bare cancel: the user asked for the planner to stop, so
-                // spawning another one is doing the opposite of what was asked,
-                // onto a session whose spawns the same Stop just latched shut.
+                // A cancel is terminal: the user asked for the planner to
+                // stop, so spawning another one is doing the opposite of what
+                // was asked, onto a session whose spawns the same Stop just
+                // latched shut.
                 crate::session::goal_planner::GoalPlannerOutcome::Interrupted => {
                     let _ = self
                         .auto_pause_goal_if_matches_with_message(
@@ -1282,7 +1276,7 @@ impl SessionActor {
 
         // Catch-all latch reset for every exit path that did NOT already clear
         // it at the commit-to-publish point (Stop / cap-exhausted / fail-closed /
-        // steered-retry, or a publish that broke out before committing). The
+        // cancel, or a publish that broke out before committing). The
         // conditional emit inside the helper keeps the success path's earlier
         // clear from being re-emitted as a duplicate `planning=None`; a no-op if
         // the orchestration has since vanished or the goal was replaced.
@@ -1296,8 +1290,8 @@ impl SessionActor {
     ///
     /// Two call sites in [`Self::maybe_run_goal_planner`] share this: the
     /// commit-to-publish point (once the planner run is taken and a plan is
-    /// being published, steering can no longer replan, so the planning phase is
-    /// over — turn the badge off BEFORE the publish/baseline I/O) and the
+    /// being published the planning phase is over — turn the badge off BEFORE
+    /// the publish/baseline I/O) and the
     /// catch-all on every other exit path. The conditional emit keeps the two
     /// sites from double-emitting a redundant `planning=None`.
     async fn clear_goal_planning_latch(&self, run_goal_id: Option<&str>) -> bool {
@@ -1325,7 +1319,6 @@ impl SessionActor {
     async fn run_goal_planner_attempt(
         &self,
         objective: &str,
-        steering: &[String],
         run_goal_id: Option<&str>,
         attempt: u32,
     ) -> PlannerAttemptStep {
@@ -1383,16 +1376,18 @@ impl SessionActor {
             }
         };
         let cancel_token = tokio_util::sync::CancellationToken::new();
+<<<<<<< HEAD
         let spawn_id = uuid::Uuid::now_v7().to_string();
         self.goal_tracker
+=======
+        // The cell the spawn publishes the planner's coordinator id into: a
+        // Send Now landing mid-run addresses its context there rather than
+        // restarting the planner.
+        let planner_subagent_id = self
+            .goal_tracker
+>>>>>>> origin/master
             .lock()
             .start_planner_run(cancel_token.clone(), spawn_id.clone(), event_tx.clone());
-
-        let attempt_objective = if steering.is_empty() {
-            objective.to_owned()
-        } else {
-            format!("{objective}\n\nUser steering:\n{}", steering.join("\n\n"))
-        };
 
         let model_id = self
             .chat_state_handle
@@ -1436,6 +1431,7 @@ impl SessionActor {
                 trace_sink: Some((self.chat_state_handle.clone(), task_tool_name)),
                 role_override,
                 cancel_token,
+                subagent_id_slot: Some(planner_subagent_id),
                 events: Some(self.events.writer()),
             });
 
@@ -1445,7 +1441,7 @@ impl SessionActor {
         let outcome = crate::session::goal_planner::run_goal_planner(
             spawner,
             crate::session::goal_planner::GoalPlannerInputs {
-                objective: &attempt_objective,
+                objective,
                 context: &context,
                 plan_file: &attempt_plan_file,
                 attempt,
@@ -1462,9 +1458,14 @@ impl SessionActor {
         // represented by its own turn). No-op when the spawn recorded nothing.
         self.chat_state_handle.flush_harness_trace_turn();
 
+<<<<<<< HEAD
         // Steering is delivered directly to the live planner child as an
         // interjection. Do not restart the child here: doing so discards its
         // accumulated investigation and was the source of repeated replans.
+=======
+        // Drop the run (and with it the planner's coordinator id): a Send Now
+        // arriving after this point has no live planner to address.
+>>>>>>> origin/master
         let _ = self.goal_tracker.lock().take_planner_run();
 
         PlannerAttemptStep::Ran {
