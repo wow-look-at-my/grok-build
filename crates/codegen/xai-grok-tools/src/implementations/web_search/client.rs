@@ -5,11 +5,25 @@ use async_openai::types::responses as rs;
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue};
 /// A minimal, purpose-built HTTP client for calling the Responses API
 /// with web search capability.
+/// Which API the configured provider speaks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SearchBackend {
+    /// A model synthesizes an answer over the Responses API (`/responses`).
+    Responses,
+    /// Kagi's own ranked results (`/search`). No model is involved: Kagi
+    /// returns them already filtered, ranked, and snippet-ed.
+    Kagi,
+}
+
 #[derive(Clone)]
 pub struct WebSearchClient {
     http: reqwest::Client,
     base_url: String,
+    /// Synthesis model. Empty for [`SearchBackend::Kagi`], which has none.
     model: String,
+    backend: SearchBackend,
+    /// Results per query on [`SearchBackend::Kagi`]; `None` uses Kagi's default.
+    kagi_limit: Option<usize>,
     api_key_provider: Option<SharedApiKeyProvider>,
     /// Optional 401-attribution hook. Callers can wire this so a 401
     /// from the Responses API emits an `auth_401_attribution` event
@@ -24,24 +38,53 @@ impl WebSearchClient {
         config: &WebSearchConfig,
         api_key_provider: Option<SharedApiKeyProvider>,
     ) -> Result<Self, xai_tool_runtime::ToolError> {
-        let WebSearchConfig::Enabled {
-            api_key,
-            base_url,
-            model,
-            extra_headers,
-            alpha_test_key,
-        } = config
-        else {
-            return Err(xai_tool_runtime::ToolError::execution(
-                xai_tool_protocol::ToolId::new("web_search").expect("valid"),
-                "Cannot create WebSearchClient from disabled config".to_string(),
-            ));
+        // Each arm carries its own auth scheme: the Responses API wants a
+        // bearer token, Kagi's Search API wants `Bot <token>`.
+        let (api_key, base_url, model, extra_headers, backend, kagi_limit, scheme) = match config {
+            WebSearchConfig::Disabled => {
+                return Err(xai_tool_runtime::ToolError::execution(
+                    xai_tool_protocol::ToolId::new("web_search").expect("valid"),
+                    "Cannot create WebSearchClient from disabled config".to_string(),
+                ));
+            }
+            WebSearchConfig::Enabled {
+                api_key,
+                base_url,
+                model,
+                extra_headers,
+                alpha_test_key,
+            } => {
+                let _ = alpha_test_key;
+                (
+                    api_key,
+                    base_url,
+                    model.clone(),
+                    extra_headers,
+                    SearchBackend::Responses,
+                    None,
+                    "Bearer",
+                )
+            }
+            WebSearchConfig::Kagi {
+                api_key,
+                base_url,
+                limit,
+                extra_headers,
+            } => (
+                api_key,
+                base_url,
+                String::new(),
+                extra_headers,
+                SearchBackend::Kagi,
+                *limit,
+                "Bot",
+            ),
         };
         let mut headers = HeaderMap::new();
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
         headers.insert(
             AUTHORIZATION,
-            HeaderValue::from_str(&format!("Bearer {api_key}")).map_err(|e| {
+            HeaderValue::from_str(&format!("{scheme} {api_key}")).map_err(|e| {
                 xai_tool_runtime::ToolError::execution(
                     xai_tool_protocol::ToolId::new("web_search").expect("valid"),
                     format!("Invalid API key for header: {e}"),
@@ -63,7 +106,6 @@ impl WebSearchClient {
             })?;
             headers.insert(header_name, header_value);
         }
-        let _ = alpha_test_key;
         let http = xai_grok_extra_ca::with_extra_root_certificates(
             reqwest::Client::builder().default_headers(headers),
         )
@@ -77,7 +119,9 @@ impl WebSearchClient {
         Ok(Self {
             http,
             base_url: base_url.clone(),
-            model: model.clone(),
+            model,
+            backend,
+            kagi_limit,
             api_key_provider,
             attribution_callback: None,
         })
@@ -110,6 +154,10 @@ impl WebSearchClient {
         query: &str,
         allowed_domains: Option<Vec<String>>,
     ) -> Result<(String, Vec<String>), xai_tool_runtime::ToolError> {
+        if self.backend == SearchBackend::Kagi {
+            let (content, pairs) = self.kagi_results(query, allowed_domains).await?;
+            return Ok((content, pairs.into_iter().map(|(_title, url)| url).collect()));
+        }
         let web_search = rs::WebSearchToolArgs::default()
             .filters(rs::WebSearchToolFilters { allowed_domains })
             .build()
@@ -205,6 +253,9 @@ impl WebSearchClient {
         query: &str,
         allowed_domains: Option<Vec<String>>,
     ) -> Result<(String, Vec<(String, String)>), xai_tool_runtime::ToolError> {
+        if self.backend == SearchBackend::Kagi {
+            return self.kagi_results(query, allowed_domains).await;
+        }
         let web_search = rs::WebSearchToolArgs::default()
             .filters(rs::WebSearchToolFilters { allowed_domains })
             .build()
@@ -288,6 +339,161 @@ impl WebSearchClient {
         let pairs = extract_citation_pairs(&response_obj);
         Ok((content, pairs))
     }
+
+    // ── Kagi backend ────────────────────────────────────────────────────
+
+    /// Fetch Kagi's ranked results and render them as `(content, (title, url))`.
+    ///
+    /// Nothing is synthesized: Kagi returns these already ranked, filtered, and
+    /// snippet-ed, so the payload is the results themselves.
+    async fn kagi_results(
+        &self,
+        query: &str,
+        allowed_domains: Option<Vec<String>>,
+    ) -> Result<(String, Vec<(String, String)>), xai_tool_runtime::ToolError> {
+        let body = self.fetch_kagi(query).await?;
+        let allowed = allowed_domains.as_deref();
+        let results: Vec<&KagiItem> = body
+            .data
+            .iter()
+            .filter(|item| item.t == KAGI_RESULT)
+            .filter(|item| {
+                item.url
+                    .as_deref()
+                    .is_some_and(|url| kagi_domain_allowed(url, allowed))
+            })
+            .collect();
+        let related: Vec<&str> = body
+            .data
+            .iter()
+            .filter(|item| item.t == KAGI_RELATED)
+            .flat_map(|item| item.list.iter().map(String::as_str))
+            .collect();
+        Ok(format_kagi_results(&results, &related))
+    }
+
+    /// One `GET /search` against Kagi's Search API.
+    async fn fetch_kagi(&self, query: &str) -> Result<KagiSearchBody, xai_tool_runtime::ToolError> {
+        let url = format!("{}/search", self.base_url.trim_end_matches('/'));
+        let mut params: Vec<(&str, String)> = vec![("q", query.to_string())];
+        if let Some(limit) = self.kagi_limit {
+            params.push(("limit", limit.to_string()));
+        }
+        let response = self
+            .http
+            .get(&url)
+            .query(&params)
+            .send()
+            .await
+            .map_err(|e| kagi_error(format!("Kagi search request failed: {e}")))?;
+        let status = response.status();
+        if !status.is_success() {
+            let body = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "Failed to read error body".to_string());
+            return Err(kagi_error(format!(
+                "Kagi search returned {status}: {body}"
+            )));
+        }
+        let bytes = response
+            .bytes()
+            .await
+            .map_err(|e| kagi_error(format!("Failed to read Kagi response body: {e}")))?;
+        serde_json::from_slice(&bytes)
+            .map_err(|e| kagi_error(format!("Failed to parse Kagi response: {e}")))
+    }
+}
+
+/// A `web_search` tool error tagged with the tool id.
+fn kagi_error(message: String) -> xai_tool_runtime::ToolError {
+    xai_tool_runtime::ToolError::execution(
+        xai_tool_protocol::ToolId::new("web_search").expect("valid"),
+        message,
+    )
+}
+
+/// Kagi `data` entry type: a search result.
+const KAGI_RESULT: i64 = 0;
+/// Kagi `data` entry type: a related-searches list.
+const KAGI_RELATED: i64 = 1;
+
+/// One Kagi Search API response body.
+///
+/// Kagi types each `data` entry with an integer `t`, so the fields are modelled
+/// flat and matched on `t` rather than as a serde-tagged enum (serde's internal
+/// tagging wants a string tag).
+#[derive(Debug, serde::Deserialize)]
+struct KagiSearchBody {
+    #[serde(default)]
+    data: Vec<KagiItem>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct KagiItem {
+    t: i64,
+    #[serde(default)]
+    url: Option<String>,
+    #[serde(default)]
+    title: Option<String>,
+    #[serde(default)]
+    snippet: Option<String>,
+    #[serde(default)]
+    list: Vec<String>,
+}
+
+/// Render Kagi's results as the text the model reads, plus the citation pairs.
+///
+/// Each result becomes its title, URL, and snippet, so the model sees what Kagi
+/// returned without a synthesis pass. Related searches carry no URL, so they
+/// ride the text and never a citation.
+fn format_kagi_results(
+    results: &[&KagiItem],
+    related: &[&str],
+) -> (String, Vec<(String, String)>) {
+    let mut blocks = Vec::with_capacity(results.len() + 1);
+    let mut pairs = Vec::with_capacity(results.len());
+    for item in results {
+        let Some(url) = item.url.as_deref() else {
+            continue;
+        };
+        let title = item.title.as_deref().unwrap_or(url);
+        pairs.push((title.to_string(), url.to_string()));
+        match item.snippet.as_deref().filter(|snippet| !snippet.is_empty()) {
+            Some(snippet) => blocks.push(format!("{title}\n{url}\n{snippet}")),
+            None => blocks.push(format!("{title}\n{url}")),
+        }
+    }
+    if !related.is_empty() {
+        blocks.push(format!("Related searches: {}", related.join(", ")));
+    }
+    if blocks.is_empty() {
+        return ("No search results found.".to_string(), Vec::new());
+    }
+    (blocks.join("\n\n"), pairs)
+}
+
+/// Whether `url`'s host falls under any of the caller's `allowed_domains`.
+///
+/// Kagi's Search API takes no per-request domain filter, so the tool's
+/// `allowed_domains` argument is applied here rather than silently dropped.
+/// `None` (or an empty list) is unrestricted; a subdomain of an allowed domain
+/// matches, as the Responses-API filter does.
+fn kagi_domain_allowed(url: &str, allowed: Option<&[String]>) -> bool {
+    let Some(allowed) = allowed.filter(|list| !list.is_empty()) else {
+        return true;
+    };
+    let Ok(parsed) = url::Url::parse(url) else {
+        return false;
+    };
+    let Some(host) = parsed.host_str() else {
+        return false;
+    };
+    let host = host.trim_start_matches("www.");
+    allowed.iter().any(|domain| {
+        let domain = domain.trim().trim_start_matches("www.");
+        !domain.is_empty() && (host == domain || host.ends_with(&format!(".{domain}")))
+    })
 }
 /// Extract citation URLs from the Response output items.
 /// The async-openai crate doesn't provide a helper for this, and the `url` field
@@ -757,5 +963,153 @@ mod tests {
         }));
         let citations = extract_citations(&response);
         assert!(citations.is_empty());
+    }
+
+    // ── Kagi backend ────────────────────────────────────────────────────
+
+    /// The Kagi backend is one `GET /search` carrying the `Bot` scheme, and the
+    /// text the tool returns is Kagi's own results — no model call is made.
+    #[tokio::test]
+    async fn kagi_backend_requests_search_and_renders_results() {
+        use wiremock::matchers::{header, method, path, query_param};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/search"))
+            .and(query_param("q", "borrow checker"))
+            .and(query_param("limit", "3"))
+            .and(header("Authorization", "Bot kagi-token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "meta": { "id": "m", "node": "us", "ms": 12 },
+                "data": [
+                    {
+                        "t": 0,
+                        "url": "https://doc.rust-lang.org/nomicon/borrow-splitting.html",
+                        "title": "Borrow splitting",
+                        "snippet": "Splitting borrows is sound."
+                    },
+                    { "t": 1, "list": ["nll", "polonius"] }
+                ]
+            })))
+            .mount(&server)
+            .await;
+        let config = WebSearchConfig::Kagi {
+            api_key: "kagi-token".to_string(),
+            base_url: server.uri(),
+            limit: Some(3),
+            extra_headers: IndexMap::new(),
+        };
+        let client = WebSearchClient::new(&config, None).expect("client should build");
+        let (content, citations) = client
+            .search("borrow checker", None)
+            .await
+            .expect("kagi search must succeed");
+        assert!(content.contains("Borrow splitting"), "content: {content}");
+        assert!(
+            content.contains("Splitting borrows is sound."),
+            "content: {content}"
+        );
+        assert!(
+            content.contains("Related searches: nll, polonius"),
+            "content: {content}"
+        );
+        assert_eq!(
+            citations,
+            vec!["https://doc.rust-lang.org/nomicon/borrow-splitting.html".to_string()]
+        );
+    }
+
+    /// Kagi's Search API takes no per-request domain filter, so the tool's
+    /// `allowed_domains` argument is applied to the returned results rather
+    /// than silently dropped.
+    #[tokio::test]
+    async fn kagi_backend_applies_allowed_domains() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/search"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "data": [
+                    { "t": 0, "url": "https://docs.rs/serde/latest/serde/", "title": "serde" },
+                    { "t": 0, "url": "https://example.com/other", "title": "other" }
+                ]
+            })))
+            .mount(&server)
+            .await;
+        let config = WebSearchConfig::Kagi {
+            api_key: "k".to_string(),
+            base_url: server.uri(),
+            limit: None,
+            extra_headers: IndexMap::new(),
+        };
+        let client = WebSearchClient::new(&config, None).expect("client should build");
+        let (content, citations) = client
+            .search("serde", Some(vec!["docs.rs".to_string()]))
+            .await
+            .expect("kagi search must succeed");
+        assert_eq!(
+            citations,
+            vec!["https://docs.rs/serde/latest/serde/".to_string()]
+        );
+        assert!(!content.contains("example.com"), "content: {content}");
+    }
+
+    /// `search_with_titles` keeps the titles Kagi supplied.
+    #[tokio::test]
+    async fn kagi_backend_returns_title_url_pairs() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/search"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "data": [{ "t": 0, "url": "https://a.example/x", "title": "A page" }]
+            })))
+            .mount(&server)
+            .await;
+        let config = WebSearchConfig::Kagi {
+            api_key: "k".to_string(),
+            base_url: server.uri(),
+            limit: None,
+            extra_headers: IndexMap::new(),
+        };
+        let client = WebSearchClient::new(&config, None).expect("client should build");
+        let (content, pairs) = client
+            .search_with_titles("anything", None)
+            .await
+            .expect("kagi search must succeed");
+        assert_eq!(
+            pairs,
+            vec![("A page".to_string(), "https://a.example/x".to_string())]
+        );
+        assert!(content.contains("A page"));
+    }
+
+    /// A Kagi failure surfaces as a Kagi error, never as a silent empty result.
+    #[tokio::test]
+    async fn kagi_backend_surfaces_http_errors() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/search"))
+            .respond_with(ResponseTemplate::new(401).set_body_string("invalid token"))
+            .mount(&server)
+            .await;
+        let config = WebSearchConfig::Kagi {
+            api_key: "bad".to_string(),
+            base_url: server.uri(),
+            limit: None,
+            extra_headers: IndexMap::new(),
+        };
+        let client = WebSearchClient::new(&config, None).expect("client should build");
+        let err = client
+            .search("q", None)
+            .await
+            .expect_err("a 401 must be an error");
+        let text = format!("{err:?}");
+        assert!(text.contains("Kagi search returned"), "err: {text}");
+        assert!(text.contains("invalid token"), "err: {text}");
     }
 }
