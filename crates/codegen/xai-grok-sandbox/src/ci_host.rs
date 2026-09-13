@@ -1,38 +1,5 @@
 //! Unsandboxed `gh` host worker for `--sandbox` (pathbox) sessions.
 //!
-<<<<<<< HEAD
-//! A `--sandbox=pathbox` / path-flag jail re-execs the whole binary inside
-//! bwrap / Seatbelt, so
-//! an in-process `gh` call (or any `Command::new("gh")` reached from the
-//! jailed renderer) runs *inside* the jail, where it cannot reach the host
-//! credentials / git remote / network that power the real CI dot. Yet the dot
-//! must keep polling all session long, and it must stay read-only and bounded.
-//!
-//! The fix is a long-lived host worker started on the *host* side, moments
-//! before the re-exec, and handed into the jail as an already-open Unix
-//! socketpair FD that survives `exec`. The worker's one and only privilege is
-//! to run a fixed set of read-only `gh` queries for the current branch in the
-//! session repo; it can never run arbitrary commands, only those query shapes.
-//! The jailed pager asks it for fresh results on every poll and never spawns
-//! `gh` itself while sandboxed.
-//!
-//! Two fixed request shapes are served, each framing one branch token:
-//!   - `gh-status <HEAD_BRANCH>`  → the raw `gh run list --json` array, the
-//!     data behind the session's CI-status dot;
-//!   - `gh-pr    <BRANCH>`        → a single JSON object carrying the branch's
-//!     pull request (`gh pr view`) and its check-runs (`gh pr checks`), the
-//!     data behind the shell's `x.ai/pr/status` answer in a sandboxed session.
-//!
-//! Protocol (one `UnixStream`, newline-delimited, request/response):
-//!   request  : one of the two lines above
-//!   response : one line of JSON for that shape, or a single `.` when the
-//!              query produced nothing usable (unknown shape, bad token, `gh`
-//!              failed, no such PR, or an oversized reply).
-//!
-//! The worker loops until its stream write end closes (the jailed process
-//! exited), then exits. Nothing is ever trusted from a request beyond the
-//! tracked branch token; the query shapes are fixed in this module.
-=======
 //! A jail re-execs the whole binary, so a `gh` spawned from the jailed process
 //! reaches neither the host credentials nor the network. The worker is started
 //! on the host moments before the re-exec and handed in as an open socketpair
@@ -43,7 +10,6 @@
 //!   request  : `gh-status <HEAD_BRANCH>\n`   — the CI dot's fixed query
 //!   request  : `gh <JSON array of argv>\n`   — an allowlisted `gh` run
 //!   response : one line, or `.` when the request produced nothing usable.
->>>>>>> origin/master
 
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
@@ -197,6 +163,8 @@ pub fn spawn_ci_host(repo_root: &Path) -> Option<i32> {
     let exe = std::env::current_exe().ok()?;
     let (ours, theirs) = UnixStream::pair().ok()?;
     let our_fd: RawFd = ours.as_raw_fd();
+    // The pair is created close-on-exec, and the jail is entered by exec. Without this the fd is gone before the jailed pager reads the env var that names it.
+    inherit_across_exec(our_fd)?;
     let theirs_fd: RawFd = theirs.into_raw_fd();
 
     let mut cmd = std::process::Command::new(exe);
@@ -232,6 +200,18 @@ pub fn spawn_ci_host(repo_root: &Path) -> Option<i32> {
             None
         }
     }
+}
+
+/// Clear `FD_CLOEXEC` on `fd` so it stays open in the process this one execs into.
+#[cfg(unix)]
+fn inherit_across_exec(fd: std::os::unix::io::RawFd) -> Option<()> {
+    // SAFETY: fcntl on an fd this process owns; F_GETFD and F_SETFD only touch its flags.
+    let flags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
+    if flags < 0 {
+        return None;
+    }
+    let rc = unsafe { libc::fcntl(fd, libc::F_SETFD, flags & !libc::FD_CLOEXEC) };
+    (rc >= 0).then_some(())
 }
 
 /// `pre_exec` helper: point stdin (0) and stdout (1) at the given fd.
