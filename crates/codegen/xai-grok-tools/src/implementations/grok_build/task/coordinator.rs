@@ -513,6 +513,10 @@ impl<R: ChildRunner> SubagentCoordinator<R> {
                     let _ = respond_to.send(false);
                     return;
                 }
+                let held = self.held_interjections.remove(&subagent_id).unwrap_or_default();
+                for text in &held {
+                    child.control.interject(text);
+                }
                 self.active.insert(
                     subagent_id,
                     ActiveChild {
@@ -533,13 +537,6 @@ impl<R: ChildRunner> SubagentCoordinator<R> {
                         control: child.control,
                     },
                 );
-                if let Some(held) = self.held_interjections.remove(&subagent_id)
-                    && let Some(child) = self.active.get(&subagent_id)
-                {
-                    for text in &held {
-                        child.control.interject(text);
-                    }
-                }
                 let _ = respond_to.send(true);
             }
             InternalEvent::ResumeSource {
