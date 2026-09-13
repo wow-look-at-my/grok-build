@@ -33,12 +33,12 @@ jobs:
     name: Build & test
     # Hosted deliberately: this suite asserts host semantics the org's lean self-hosted image lacks. See AGENTS.md.
     runs-on: ubuntu-22.04
-    # A ceiling, not a target: a job needing more than this has a hung test, which nextest fails in 60s.
-    timeout-minutes: 45
+    # A ceiling, not a target. The compile is cold every run (measured 31 min at -j3) and a hung test is failed by nextest in 60s, so a job past this is broken, not slow.
+    timeout-minutes: 75
     env:
       # The harness builds this itself when unset, once per nextest process, all queued on cargo's package lock.
       PAGER_BINARY: ${{ github.workspace }}/target/debug/xai-grok-pager
-      # No global CARGO_BUILD_JOBS: the compile-RAM cap belongs to the build step alone.
+      # No global CARGO_BUILD_JOBS: the -j3 compile-RAM cap belongs to the build step alone.
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
@@ -85,13 +85,14 @@ jobs:
               core.info(`${key}: ${value ? "present" : "absent"}`);
             }
 
-      # The cache is off, so -j3 is what caps compile memory: a wide -j exhausts the runner's 15 GiB.
+      # -j3 is the widest -j the runner's 15 GiB holds.
       - name: Build test harnesses (compile, no-run)
         env:
           CARGO_BUILD_JOBS: "3"
         run: |
           start=$(date +%s)
           cargo test --locked --workspace --no-run --no-fail-fast
+          # Built once here, rather than once per nextest process on cargo's package lock.
           cargo build --locked -p xai-grok-pager-bin
           echo "compile wall: $(( $(date +%s) - start )) s"
           echo "target: $(du -sh target 2>/dev/null | cut -f1)"
@@ -104,7 +105,6 @@ jobs:
       - uses: ./.github/actions/upload-cargo-timings
         with:
           name: cargo-timings-build-test
-
   # These assert on what a virtual terminal actually shows, which a unit test over the width function cannot stand in for.
   pty-e2e:
     name: Test (PTY end-to-end)

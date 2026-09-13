@@ -279,7 +279,7 @@ impl SessionActor {
             && goal_active
             && Self::extract_bash_command(&item.prompt_blocks).is_none();
         if merge_into_goal {
-            self.enqueue_prompt_as_planner_steering(&item);
+            self.enqueue_prompt_as_planner_context(&item);
             self.enqueue_prompt_as_interjection(
                 item,
                 crate::session::events::InterjectionSource::Direct,
@@ -539,8 +539,15 @@ impl SessionActor {
         state.running_prompt_id().is_some() && !goal_active && !Self::front_awaiting_commit(state)
     }
 
-    fn enqueue_prompt_as_planner_steering(&self, item: &InputItem) {
-        let steering = item
+    /// Send Now during an active goal turn: hand the text to the planner that
+    /// is ALREADY running as mid-turn context. Nothing is cancelled or
+    /// restarted — a planner respawn would throw away the work in flight and
+    /// make the user's message arrive as a fresh objective instead of an
+    /// addition to the plan being written. With no planner in flight (none
+    /// registered yet, or already finished) there is nothing to steer, and the
+    /// text still reaches the parent agent through the turn interjection.
+    fn enqueue_prompt_as_planner_context(&self, item: &InputItem) {
+        let text = item
             .prompt_blocks
             .iter()
             .filter_map(|block| match block {
@@ -550,7 +557,23 @@ impl SessionActor {
             .filter(|text| !text.is_empty())
             .collect::<Vec<_>>()
             .join("\n\n");
-        self.goal_tracker.lock().steer_planner(steering);
+        if text.is_empty() {
+            return;
+        }
+        let Some(subagent_id) = self.goal_tracker.lock().planner_subagent_id() else {
+            tracing::debug!("send-now: no planner in flight; nothing to steer");
+            return;
+        };
+        let Some(event_tx) = self.tool_context.subagent_event_tx.clone() else {
+            tracing::debug!("send-now: no subagent coordinator channel; planner context dropped");
+            return;
+        };
+        let _ = event_tx.send(
+            xai_grok_tools::implementations::grok_build::task::types::SubagentEvent::Interject {
+                subagent_id,
+                text: crate::session::goal_planner::planner_context_message(&text),
+            },
+        );
     }
 
     fn enqueue_prompt_as_interjection(
@@ -655,7 +678,8 @@ impl SessionActor {
     /// [`SessionCommand::Interject`]'s broadcast-then-buffer. An uncommitted
     /// front is never cancelled; the promoted row still runs next.
     ///
-    /// During an active goal, plain prompts become steering while bash stays queued.
+    /// During an active goal, plain prompts become mid-turn context for the
+    /// live planner plus a turn interjection, while bash stays queued.
     /// Missing, stale, running, or foreign rows are benign no-ops.
     ///
     /// Always re-broadcasts `x.ai/queue/changed` so every client reconciles
@@ -707,7 +731,7 @@ impl SessionActor {
                 && goal_active
                 && Self::extract_bash_command(&item.prompt_blocks).is_none();
             if merge_into_goal {
-                self.enqueue_prompt_as_planner_steering(&item);
+                self.enqueue_prompt_as_planner_context(&item);
                 self.enqueue_prompt_as_interjection(
                     item,
                     crate::session::events::InterjectionSource::Queue,
