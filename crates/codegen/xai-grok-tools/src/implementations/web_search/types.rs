@@ -18,12 +18,34 @@ pub enum WebSearchConfig {
         #[serde(skip_serializing_if = "Option::is_none")]
         alpha_test_key: Option<String>,
     },
+    /// Kagi's own search index instead of an LLM-synthesized answer.
+    ///
+    /// Kagi returns ranked, already-filtered results with snippets, so no
+    /// model call is made and no synthesis model has to be configured. Auth is
+    /// a Search API token (`Authorization: Bot <token>`), a different scheme and
+    /// credential from the Responses-API bearer the other arms use.
+    Kagi {
+        api_key: String,
+        #[serde(default = "default_kagi_base_url")]
+        base_url: String,
+        /// Results to request per query. Kagi's own default applies when unset.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        limit: Option<usize>,
+        #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+        extra_headers: IndexMap<String, String>,
+    },
+}
+
+/// Kagi's Search API root. Matches the documented example host; overridable so
+/// the path can be pointed at a mock server in tests.
+pub fn default_kagi_base_url() -> String {
+    "https://kagi.com/api/v1".to_string()
 }
 
 impl WebSearchConfig {
-    /// Returns `true` when the config is the `Enabled` variant.
+    /// Returns `true` when the config is an enabled arm.
     pub fn is_enabled(&self) -> bool {
-        matches!(self, Self::Enabled { .. })
+        matches!(self, Self::Enabled { .. } | Self::Kagi { .. })
     }
 
     /// Return a copy safe for returning to clients.
@@ -44,6 +66,17 @@ impl WebSearchConfig {
                 model: model.clone(),
                 extra_headers: extra_headers.clone(),
                 alpha_test_key: None,
+            },
+            Self::Kagi {
+                base_url,
+                limit,
+                extra_headers,
+                ..
+            } => Self::Kagi {
+                api_key: "***REDACTED***".to_string(),
+                base_url: base_url.clone(),
+                limit: *limit,
+                extra_headers: extra_headers.clone(),
             },
         }
     }

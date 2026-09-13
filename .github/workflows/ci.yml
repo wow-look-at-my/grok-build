@@ -337,9 +337,23 @@ jobs:
           name: grok-darwin-arm64
           path: dist/grok-darwin-arm64
 
+  # The jail and the CI host worker have a macOS half (Seatbelt, sandbox-exec) that a Linux runner cannot execute. This crate is small enough to compile natively here.
+  test-darwin-sandbox:
+    name: Test sandbox crate (macOS)
+    runs-on: macos-14
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Install Rust toolchain (pinned by rust-toolchain.toml)
+        run: rustup show
+
+      - name: Test xai-grok-sandbox on macOS
+        run: cargo test --locked -p xai-grok-sandbox
+
   publish-create:
     name: Create buildhost release
-    needs: [build-test, pty-e2e, build-release, link-darwin]
+    needs: [build-test, pty-e2e, build-release, link-darwin, test-darwin-sandbox]
     runs-on: ubuntu-22.04
     permissions:
       contents: read
