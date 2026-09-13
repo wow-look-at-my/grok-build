@@ -352,6 +352,49 @@ async fn interject_reaches_the_active_child_named_by_id() {
     harness.actor.abort();
 }
 
+/// An interjection that lands while the child is still pending (spawned, not
+/// yet started) is held and delivered the moment the child reports started,
+/// in order. The planner publishes its id before its child starts, so this
+/// window is real.
+#[tokio::test]
+async fn interject_before_start_is_delivered_on_start() {
+    let mut harness = harness(true, std::time::Duration::from_secs(60));
+    let spawn = tokio::spawn({
+        let backend = harness.backend.clone();
+        async move { backend.spawn(request("planner", false)).await }
+    });
+    // The run has the request but has not reported started: the child is pending.
+    let pending = harness.requests.recv().await.expect("child pending");
+    assert_eq!(pending.id, "planner");
+
+    for text in ["first", "second"] {
+        harness
+            .backend
+            .sender()
+            .send(SubagentEvent::Interject {
+                subagent_id: "planner".to_owned(),
+                text: text.to_owned(),
+            })
+            .expect("actor command channel open");
+    }
+    let _ = loop_unit_active(&harness.backend, "unrelated").await;
+    assert!(
+        harness.interjections.try_recv().is_err(),
+        "nothing is delivered before the child starts"
+    );
+
+    let _ = harness.start.send(());
+    let started = harness.started.recv().await.expect("child started");
+    assert_eq!(started, "planner");
+    let _ = loop_unit_active(&harness.backend, "unrelated").await;
+    assert_eq!(harness.interjections.try_recv().expect("first"), "first");
+    assert_eq!(harness.interjections.try_recv().expect("second"), "second");
+
+    let _ = harness.finish.send(());
+    assert!(spawn.await.unwrap().unwrap().success);
+    harness.actor.abort();
+}
+
 #[tokio::test]
 async fn foreground_completion_is_delivered_inline() {
     let mut harness = harness(false, std::time::Duration::from_secs(60));

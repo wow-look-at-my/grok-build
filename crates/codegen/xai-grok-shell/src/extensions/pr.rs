@@ -26,6 +26,31 @@ pub(crate) struct PrData {
     pub is_in_merge_queue: bool,
     pub number: Option<u64>,
     pub title: Option<String>,
+    /// The pull request's check runs, as `gh pr checks --json` reports them.
+    pub checks: Vec<PrCheck>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct PrCheck {
+    pub name: String,
+    pub state: String,
+    #[serde(default)]
+    pub conclusion: Option<String>,
+}
+
+/// The one-line document the sandbox host worker answers a `gh-pr` request
+/// with (`xai_grok_sandbox::ci_host`): `gh pr view` fields plus the checks.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct HostPrResponse {
+    state: Option<String>,
+    url: Option<String>,
+    is_draft: Option<bool>,
+    number: Option<u64>,
+    title: Option<String>,
+    #[serde(default)]
+    checks: Vec<PrCheck>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -65,10 +90,54 @@ pub async fn handle(_agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
 }
 
 async fn handle_pr_status(cwd: &str, branch: &str) -> anyhow::Result<PrStatusResponse> {
+    // A sandboxed session cannot spawn `gh` in the jail: the host worker is
+    // the only route, and its answer (or nothing-usable sentinel) is final.
+    let pr = match xai_grok_sandbox::ci_host::inherited_host_fd() {
+        Some(fd) => pr_via_ci_host(fd, branch).await,
+        None => gh_pr_view_by_branch(cwd, branch).await,
+    };
     Ok(PrStatusResponse {
-        pr: gh_pr_view_by_branch(cwd, branch).await,
+        pr,
         updated_session_ids: Vec::new(),
     })
+}
+
+/// The `state` the client shows, from `gh pr view`'s `state` and `isDraft`.
+fn pr_state(state: Option<&str>, is_draft: bool) -> &'static str {
+    match state.map(str::to_ascii_lowercase).as_deref() {
+        Some("merged") => "merged",
+        Some("closed") => "closed",
+        _ if is_draft => "draft",
+        _ => "open",
+    }
+}
+
+/// Ask the sandbox host worker for the branch's pull request and checks
+/// (`gh-pr`). The worker runs no GraphQL, so the merge-queue flag is not
+/// known there and reads false.
+#[cfg(unix)]
+async fn pr_via_ci_host(fd: i32, branch: &str) -> Option<PrData> {
+    let branch = branch.to_owned();
+    let body = tokio::task::spawn_blocking(move || {
+        let stream = xai_grok_sandbox::ci_host::inherited_host_stream(fd)?;
+        xai_grok_sandbox::ci_host::query_ci_host_stream_pr(stream, &branch)
+    })
+    .await
+    .ok()??;
+    let parsed = serde_json::from_slice::<HostPrResponse>(&body).ok()?;
+    Some(PrData {
+        url: parsed.url?,
+        state: pr_state(parsed.state.as_deref(), parsed.is_draft.unwrap_or(false)).to_string(),
+        is_in_merge_queue: false,
+        number: parsed.number,
+        title: parsed.title,
+        checks: parsed.checks,
+    })
+}
+
+#[cfg(not(unix))]
+async fn pr_via_ci_host(_fd: i32, _branch: &str) -> Option<PrData> {
+    None
 }
 
 async fn gh_pr_view_by_branch(cwd: &str, branch: &str) -> Option<PrData> {
@@ -100,18 +169,9 @@ async fn gh_pr_view_by_branch(cwd: &str, branch: &str) -> Option<PrData> {
     let parsed =
         serde_json::from_slice::<GhPrViewResponse>(&strip_ansi_csi(&output.stdout)).ok()?;
     let url = parsed.url?;
-    let state = match parsed
-        .state
-        .as_deref()
-        .map(str::to_ascii_lowercase)
-        .as_deref()
-    {
-        Some("merged") => "merged",
-        Some("closed") => "closed",
-        _ if parsed.is_draft.unwrap_or(false) => "draft",
-        _ => "open",
-    };
+    let state = pr_state(parsed.state.as_deref(), parsed.is_draft.unwrap_or(false));
     let is_in_merge_queue = state == "open" && gh_pr_is_in_merge_queue(cwd, &url).await;
+    let checks = gh_pr_checks(cwd, branch).await;
 
     Some(PrData {
         url,
@@ -119,7 +179,30 @@ async fn gh_pr_view_by_branch(cwd: &str, branch: &str) -> Option<PrData> {
         is_in_merge_queue,
         number: parsed.number,
         title: parsed.title,
+        checks,
     })
+}
+
+/// `gh pr checks --json` for `branch`. The exit code is the verdict (1: a
+/// check failed, 8: a check is pending) and the list is printed either way,
+/// so only an unparseable stdout reads as no checks.
+async fn gh_pr_checks(cwd: &str, branch: &str) -> Vec<PrCheck> {
+    let mut cmd = tokio::process::Command::new("gh");
+    cmd.args(["pr", "checks", branch, "--json", "name,state,conclusion"])
+        .current_dir(cwd)
+        .stdin(std::process::Stdio::null());
+    xai_grok_tools::util::detach_command(&mut cmd);
+    cmd.envs(xai_grok_tools::util::pager_env());
+    cmd.env("NO_COLOR", "1");
+    cmd.env("CLICOLOR_FORCE", "0");
+    cmd.env_remove("GH_FORCE_TTY");
+    let Ok(output) = cmd.output().await else {
+        return Vec::new();
+    };
+    if !matches!(output.status.code(), Some(0 | 1 | 8)) {
+        return Vec::new();
+    }
+    serde_json::from_slice(&strip_ansi_csi(&output.stdout)).unwrap_or_default()
 }
 
 /// `gh pr view --json` does not expose `isInMergeQueue`; query GraphQL via `gh api`.
@@ -197,6 +280,37 @@ fn strip_ansi_csi(bytes: &[u8]) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The host worker's one-line `gh-pr` document maps onto the same
+    /// `PrData` the direct `gh` path builds, checks included.
+    #[test]
+    fn host_worker_pr_document_parses_to_pr_data() {
+        let body = br#"{"state":"OPEN","merged":false,"isDraft":true,"url":"https://github.com/o/r/pull/7","number":7,"title":"t","checks":[{"name":"CI","state":"PENDING","conclusion":null}]}"#;
+        let parsed = serde_json::from_slice::<HostPrResponse>(body).unwrap();
+        assert_eq!(
+            pr_state(parsed.state.as_deref(), parsed.is_draft.unwrap_or(false)),
+            "draft"
+        );
+        assert_eq!(parsed.url.as_deref(), Some("https://github.com/o/r/pull/7"));
+        assert_eq!(parsed.number, Some(7));
+        assert_eq!(
+            parsed.checks,
+            [PrCheck {
+                name: "CI".into(),
+                state: "PENDING".into(),
+                conclusion: None,
+            }]
+        );
+    }
+
+    #[test]
+    fn pr_state_prefers_merged_and_closed_over_draft() {
+        assert_eq!(pr_state(Some("MERGED"), true), "merged");
+        assert_eq!(pr_state(Some("CLOSED"), true), "closed");
+        assert_eq!(pr_state(Some("OPEN"), true), "draft");
+        assert_eq!(pr_state(Some("OPEN"), false), "open");
+        assert_eq!(pr_state(None, false), "open");
+    }
 
     #[test]
     fn gh_pr_view_json_parses_after_stripping_forced_color() {

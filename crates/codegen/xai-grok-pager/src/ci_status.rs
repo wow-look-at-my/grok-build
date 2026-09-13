@@ -402,7 +402,7 @@ fn run_gh_via_ci_host(
         let Some(branch) = branch else {
             return None;
         };
-        let stream = ci_host_stream(fd)?;
+        let stream = xai_grok_sandbox::ci_host::inherited_host_stream(fd)?;
         let body = xai_grok_sandbox::ci_host::query_ci_host_stream(stream, branch)?;
         // Carry the payload the same way a real `gh` stdout would, plus a
         // synthetic success status so the caller's parse path is unchanged.
@@ -417,26 +417,6 @@ fn run_gh_via_ci_host(
         let _ = (repo_root, args, fd);
         None
     }
-}
-
-/// The inherited host-worker stream, opened once per fd and reused for every
-/// poll (the worker is long-lived and full-duplex). Keyed by fd so a fresh
-/// connection (a session restart, or a distinct test peer) gets its own
-/// socket; cloning per call hands each query an owned handle to the same
-/// underlying stream.
-#[cfg(unix)]
-fn ci_host_stream(fd: i32) -> Option<std::os::unix::net::UnixStream> {
-    use std::os::unix::io::FromRawFd as _;
-    static STREAMS: LazyLock<Mutex<HashMap<i32, std::os::unix::net::UnixStream>>> =
-        LazyLock::new(|| Mutex::new(HashMap::new()));
-    let mut map = STREAMS.lock().ok()?;
-    // SAFETY: `fd` names a real socket opened by `spawn_ci_host` on the host
-    // and inherited into this (jailed) process; we take ownership of that fd
-    // exactly once, here, and keep the stream alive for the whole session.
-    let stream = map
-        .entry(fd)
-        .or_insert_with(|| unsafe { std::os::unix::net::UnixStream::from_raw_fd(fd) });
-    stream.try_clone().ok()
 }
 
 /// A successful [`std::process::ExitStatus`] to wrap a host-worker answer so
@@ -471,10 +451,7 @@ fn run_gh(repo_root: &Path, args: &[&str]) -> Option<std::process::Output> {
 /// The inherited host-worker fd, if this process is a sandboxed session that
 /// was handed one at jail entry.
 fn ci_host_fd() -> Option<i32> {
-    std::env::var(xai_grok_sandbox::ci_host::CI_HOST_FD_ENV)
-        .ok()?
-        .parse()
-        .ok()
+    xai_grok_sandbox::ci_host::inherited_host_fd()
 }
 
 /// The direct, unsandboxed `gh` invocation used when no host worker was

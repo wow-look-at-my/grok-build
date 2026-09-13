@@ -19,8 +19,8 @@
 //!   - `gh-status <HEAD_BRANCH>`  → the raw `gh run list --json` array, the
 //!     data behind the session's CI-status dot;
 //!   - `gh-pr    <BRANCH>`        → a single JSON object carrying the branch's
-//!     pull request state (`gh pr view`) and its check-runs
-//!     (`gh pr checks`), the data behind a model-facing PR/checks query.
+//!     pull request (`gh pr view`) and its check-runs (`gh pr checks`), the
+//!     data behind the shell's `x.ai/pr/status` answer in a sandboxed session.
 //!
 //! Protocol (one `UnixStream`, newline-delimited, request/response):
 //!   request  : one of the two lines above
@@ -155,7 +155,7 @@ pub fn run_ci_host_worker() {
 
 /// Serve one request line, writing the single-line answer to `out`. Pure and
 /// testable: drives the fixed `gh` queries (`gh-status <branch>` for the CI
-/// dot, `gh-pr <branch>` for the model-facing PR/checks query) and answers
+/// dot, `gh-pr <branch>` for the shell's `x.ai/pr/status`) and answers
 /// the `.` nothing-usable sentinel for anything else (confinement).
 pub fn handle_request<W: Write>(line: &str, out: &mut W) {
     if let Some(branch) = line.strip_prefix("gh-status ") {
@@ -184,23 +184,26 @@ fn query_branch(branch: &str) -> Option<Vec<u8>> {
     if !valid_branch_token(branch) {
         return None;
     }
-    let stdout = run_gh_safely(&[
-        "run",
-        "list",
-        "--branch",
-        branch,
-        "--limit",
-        "10",
-        "--json",
-        "status,conclusion,headBranch,workflowName",
-    ])?;
+    let stdout = run_gh_safely(
+        &[
+            "run",
+            "list",
+            "--branch",
+            branch,
+            "--limit",
+            "10",
+            "--json",
+            "status,conclusion,headBranch,workflowName",
+        ],
+        &[0],
+    )?;
     bounded_json(stdout)
 }
 
 /// Run the fixed PR/checks query for `branch`: the branch's pull request
-/// state (`gh pr view`) and its check runs (`gh pr checks`), combined into a
-/// single JSON object on one line:
-///   `{"state":"OPEN","merged":false,"checks":[...]}`
+/// (`gh pr view`) and its check runs (`gh pr checks`), combined into a single
+/// JSON object on one line:
+///   `{"state":"OPEN","merged":false,"isDraft":false,"url":..,"number":..,"title":..,"checks":[...]}`
 ///
 /// Returns `None` when `gh` is unavailable, the branch has no pull request
 /// (`gh pr view` exits non-zero), or the combined document overflows the cap
@@ -210,13 +213,16 @@ fn query_pr_checks(branch: &str) -> Option<Vec<u8>> {
     if !valid_branch_token(branch) {
         return None;
     }
-    let pr_view = run_gh_safely(&[
-        "pr",
-        "view",
-        branch,
-        "--json",
-        "state,merged,isDraft",
-    ])?;
+    let pr_view = run_gh_safely(
+        &[
+            "pr",
+            "view",
+            branch,
+            "--json",
+            "state,merged,isDraft,url,number,title",
+        ],
+        &[0],
+    )?;
     let pr: serde_json::Value = serde_json::from_slice(&pr_view).ok()?;
     let state = pr.get("state").and_then(serde_json::Value::as_str).unwrap_or("");
     let merged = pr
@@ -228,22 +234,25 @@ fn query_pr_checks(branch: &str) -> Option<Vec<u8>> {
         .and_then(serde_json::Value::as_bool)
         .unwrap_or(false);
 
-    let checks = run_gh_safely(&[
-        "pr",
-        "checks",
-        branch,
-        "--json",
-        "name,state,conclusion",
-    ]).unwrap_or_else(|| b"[]".to_vec());
+    // `gh pr checks` reports its verdict in the exit code (1: a check failed,
+    // 8: a check is pending) and still prints the full list. Only a `gh` that
+    // printed no array is an empty list.
+    let checks = run_gh_safely(
+        &["pr", "checks", branch, "--json", "name,state,conclusion"],
+        &[0, 1, 8],
+    )
+    .and_then(|body| serde_json::from_slice::<serde_json::Value>(&body).ok())
+    .filter(serde_json::Value::is_array)
+    .unwrap_or_else(|| serde_json::Value::Array(vec![]));
 
     let doc = serde_json::json!({
         "state": state,
         "merged": merged,
         "isDraft": is_draft,
-        "checks": match serde_json::from_slice::<serde_json::Value>(&checks) {
-            Ok(v) => v,
-            Err(_) => serde_json::Value::Array(vec![]),
-        },
+        "url": pr.get("url").cloned().unwrap_or(serde_json::Value::Null),
+        "number": pr.get("number").cloned().unwrap_or(serde_json::Value::Null),
+        "title": pr.get("title").cloned().unwrap_or(serde_json::Value::Null),
+        "checks": checks,
     });
     let bytes = serde_json::to_vec(&doc).ok()?;
     if bytes.len() > MAX_RESPONSE_BYTES {
@@ -253,9 +262,10 @@ fn query_pr_checks(branch: &str) -> Option<Vec<u8>> {
 }
 
 /// Run a fixed argument vector of `gh` in the worker's cwd, color forced off,
-/// stdin closed, and return the raw stdout bytes on a clean exit. The args are
-/// a compile-time constant per query shape — never derived from a request.
-fn run_gh_safely(args: &[&str]) -> Option<Vec<u8>> {
+/// stdin closed, and return the raw stdout bytes when the exit code is one of
+/// `ok_codes`. The args are a compile-time constant per query shape — never
+/// derived from a request.
+fn run_gh_safely(args: &[&str], ok_codes: &[i32]) -> Option<Vec<u8>> {
     let mut cmd = std::process::Command::new("gh");
     cmd.args(args)
         .stdin(std::process::Stdio::null())
@@ -265,7 +275,8 @@ fn run_gh_safely(args: &[&str]) -> Option<Vec<u8>> {
     cmd.env("CLICOLOR_FORCE", "0");
     cmd.env_remove("GH_FORCE_TTY");
     let output = cmd.output().ok()?;
-    if !output.status.success() {
+    let code = output.status.code()?;
+    if !ok_codes.contains(&code) {
         return None;
     }
     Some(output.stdout)
@@ -289,6 +300,32 @@ fn valid_branch_token(branch: &str) -> bool {
             .all(|b| b.is_ascii_graphic() && b != b'\n' && b != b'\r')
 }
 
+/// The inherited host-worker fd, when this process is a sandboxed session
+/// that was handed one at jail entry.
+pub fn inherited_host_fd() -> Option<i32> {
+    std::env::var(CI_HOST_FD_ENV).ok()?.parse().ok()
+}
+
+/// The inherited host-worker stream for `fd`, opened once per fd and reused
+/// for every query (the worker is long-lived and full-duplex). Keyed by fd so
+/// a fresh connection (a session restart, or a distinct test peer) gets its
+/// own socket; each call gets an owned clone of the same underlying stream.
+#[cfg(unix)]
+pub fn inherited_host_stream(fd: i32) -> Option<UnixStream> {
+    use std::os::unix::io::FromRawFd as _;
+    use std::sync::{LazyLock, Mutex};
+    static STREAMS: LazyLock<Mutex<std::collections::HashMap<i32, UnixStream>>> =
+        LazyLock::new(|| Mutex::new(std::collections::HashMap::new()));
+    let mut map = STREAMS.lock().ok()?;
+    // SAFETY: `fd` names a socket opened by `spawn_ci_host` on the host and
+    // inherited into this (jailed) process. Ownership is taken exactly once,
+    // here, and the stream lives for the whole session.
+    let stream = map
+        .entry(fd)
+        .or_insert_with(|| unsafe { UnixStream::from_raw_fd(fd) });
+    stream.try_clone().ok()
+}
+
 /// Jailed-side read: query the host worker over the inherited stream for
 /// `branch`'s CI run-list, returning the raw single-line JSON array, or `None`
 /// so the caller degrades to the "off" state (worker missing, failed, or
@@ -301,7 +338,7 @@ pub fn query_ci_host_stream(stream: std::os::unix::net::UnixStream, branch: &str
     query_ci_host_stream_shape(stream, "gh-status", branch)
 }
 
-/// Jailed-side read for the model-facing PR/checks query: ask the host worker
+/// Jailed-side read for the shell's `x.ai/pr/status`: ask the host worker
 /// for `branch`'s pull-request state + check runs (`gh-pr`), returning the raw
 /// single-line JSON object, or `None` on the nothing-usable sentinel. Shares
 /// the run-list framing (one request line, one bounded JSON line) so both

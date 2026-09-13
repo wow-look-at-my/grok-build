@@ -76,6 +76,10 @@ pub struct SubagentCoordinator<R: ChildRunner> {
     spawn_blocked_sessions: HashSet<String>,
     usage_not_applied_prompts: HashSet<PromptScope>,
     pending_completions: Vec<BufferedCompletion>,
+    /// Interjections addressed to a child that is queued or pending, in order.
+    /// Delivered when the child reports started. Dropped, with a warning,
+    /// when the child finishes without ever starting.
+    held_interjections: HashMap<String, Vec<String>>,
     runs: FuturesUnordered<
         TaggedFuture<futures::future::CatchUnwind<std::panic::AssertUnwindSafe<R::RunFuture>>>,
     >,
@@ -140,6 +144,7 @@ impl<R: ChildRunner> SubagentCoordinator<R> {
             spawn_blocked_sessions: HashSet::new(),
             usage_not_applied_prompts: HashSet::new(),
             pending_completions: Vec::new(),
+            held_interjections: HashMap::new(),
             runs: FuturesUnordered::new(),
             validations: FuturesUnordered::new(),
             descriptions: FuturesUnordered::new(),
@@ -469,18 +474,27 @@ impl<R: ChildRunner> SubagentCoordinator<R> {
     }
 
     /// Deliver a mid-turn user message to one child by coordinator id
-    /// (`SubagentEvent::Interject`). The parent's Send Now addresses the
-    /// planner child it is steering, so an id that is not an active child has
-    /// nowhere to receive the text: it is logged and dropped rather than
-    /// buffered for a child that may never start.
-    fn handle_interject(&self, subagent_id: &str, text: &str) {
-        match self.active.get(subagent_id) {
-            Some(child) => child.control.interject(text),
-            None => tracing::warn!(
-                subagent_id,
-                "subagent interject addressed an id with no active child; dropped",
-            ),
+    /// (`SubagentEvent::Interject`). A child that is queued or pending has no
+    /// control yet, so its text is held and delivered on `Started`. An id
+    /// that names no child at all is logged and dropped.
+    fn handle_interject(&mut self, subagent_id: &str, text: &str) {
+        if let Some(child) = self.active.get(subagent_id) {
+            child.control.interject(text);
+            return;
         }
+        let known = self.pending.contains_key(subagent_id)
+            || self.queued.iter().any(|queued| queued.request.id == subagent_id);
+        if !known {
+            tracing::warn!(
+                subagent_id,
+                "subagent interject addressed an id with no child; dropped",
+            );
+            return;
+        }
+        self.held_interjections
+            .entry(subagent_id.to_owned())
+            .or_default()
+            .push(text.to_owned());
     }
 
     fn handle_internal(&mut self, event: InternalEvent<R::Control>) {
@@ -519,6 +533,13 @@ impl<R: ChildRunner> SubagentCoordinator<R> {
                         control: child.control,
                     },
                 );
+                if let Some(held) = self.held_interjections.remove(&subagent_id)
+                    && let Some(child) = self.active.get(&subagent_id)
+                {
+                    for text in &held {
+                        child.control.interject(text);
+                    }
+                }
                 let _ = respond_to.send(true);
             }
             InternalEvent::ResumeSource {
@@ -637,6 +658,13 @@ impl<R: ChildRunner> SubagentCoordinator<R> {
         } else {
             return;
         };
+        if let Some(held) = self.held_interjections.remove(id) {
+            tracing::warn!(
+                subagent_id = id,
+                held = held.len(),
+                "subagent finished before its held interjections were delivered; dropped",
+            );
+        }
 
         let request = record.request().clone();
         let explicitly_killed = record.explicitly_killed();
