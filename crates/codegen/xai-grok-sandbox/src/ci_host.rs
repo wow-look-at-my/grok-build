@@ -35,6 +35,16 @@ const MAX_REQUEST_ARGS: usize = 32;
 /// The longest single argument one `gh` request may carry.
 const MAX_ARG_BYTES: usize = 512;
 
+/// The max size of a single worker response we accept. A run list is a few KB,
+/// but `gh run view --log-failed` is a whole job log, so this is what bounds
+/// how much one request may push into the jail.
+const MAX_RESPONSE_BYTES: usize = 1 << 20; // 1 MiB
+
+/// The most arguments one `gh` request may carry.
+const MAX_REQUEST_ARGS: usize = 32;
+/// The longest single argument one `gh` request may carry.
+const MAX_ARG_BYTES: usize = 512;
+
 /// One allowlisted `gh` run, as the worker executed it.
 ///
 /// Serialized as a single JSON line, so a log with embedded newlines rides the
