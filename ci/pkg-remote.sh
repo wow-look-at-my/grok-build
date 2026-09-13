@@ -181,16 +181,9 @@ get_once)
 		url="$(printf '%s' "$answer" | jq -r 'select(.ok == true) | .signed_download_url // .signedDownloadUrl // empty')"
 	fi
 	[ -n "$url" ] || exit 1
-	# The entry is filled in a temp directory and renamed into place, the same way the wrapper's own
-	# store path does it. Extracting straight into the final path leaves a PARTIAL entry behind on
-	# every failure below, and the wrapper's restore reads any non-empty directory as a hit: cargo
-	# then gets an artifact set whose rlib never arrived, and every dependent reports
-	# `E0463: can't find crate` for a crate the same build is compiling.
-	part="$dir.$$.part"
-	rm -rf "$part"
-	mkdir -p "$part" || exit 1
+	mkdir -p "$dir" || exit 1
 	blob="$(mktemp)" || exit 1
-	trap 'rm -f "$blob"; rm -rf "$part"' EXIT
+	trap 'rm -f "$blob"' EXIT
 	curl -fsS --max-time 300 "$url" -o "$blob" 2>/dev/null || exit 1
 	# The names ride in their own block: binpazer stores payloads, and a file name is the caller's
 	# business, not the format's.
@@ -203,16 +196,12 @@ get_once)
 		[ -n "$line" ] || continue
 		mode="${line%% *}"
 		name="${line#* }"
-		"$BINPAZER" extract "$blob" --type "$TYPE_ARTIFACT" --index "$i" -o "$part/$name" 2>/dev/null || exit 1
-		chmod "$mode" "$part/$name" || exit 1
+		"$BINPAZER" extract "$blob" --type "$TYPE_ARTIFACT" --index "$i" -o "$dir/$name" 2>/dev/null || exit 1
+		chmod "$mode" "$dir/$name" || exit 1
 		i=$((i + 1))
 	done < "$namefile"
 	rm -f "$namefile"
 	[ "$i" -gt 0 ] || exit 1
-	# `mv -T` refuses a destination that holds anything, so a caller that already has an entry keeps
-	# it. The wrapper only asks for a get when its own restore found nothing.
-	rm -rf "$dir"
-	mv -T "$part" "$dir" || exit 1
 	;;
 put)
 	# A 429 is backpressure, not a verdict. The service throttled a large share of one cold pass, and

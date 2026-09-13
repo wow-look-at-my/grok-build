@@ -229,7 +229,6 @@ if [ "$code" = 0 ]; then
 	mine=("$out_dir"/*"$suffix"*)
 	if [ -e "${mine[0]}" ] && mkdir -p "$tmp" &&
 		cp -al "${mine[@]}" "$tmp"/ 2>/dev/null &&
-		printf '%s\n' "${mine[@]##*/}" > "$tmp/$MANIFEST" &&
 		mv -T "$tmp" "$entry" 2>/dev/null; then
 		# The upload is detached, because cargo holds this call's job slot until the wrapper exits.
 		# An inline upload therefore spends a compile thread on the network, and the entry is

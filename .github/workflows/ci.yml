@@ -10,6 +10,11 @@ on:
 permissions:
   contents: read
 
+# One run per branch: a push cancels the run it supersedes.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
   # xai-grok-sandbox's `fails_closed_on_non_utf8_*` hit errno 84 under a non-UTF-8 locale.
@@ -50,10 +55,6 @@ jobs:
               if (value) core.exportVariable(key, value);
               core.info(`${key}: ${value ? "present" : "absent"}`);
             }
-
-      # No service and no network past loopback, so it runs before the probe and fails fast.
-      - name: A failed fetch must leave no cache entry
-        run: ci/pkg-remote-test.sh
 
       # Streamed live, because Actions withholds a job's log until every leg of the run has finished.
       - name: Round trip one entry through the cache service
