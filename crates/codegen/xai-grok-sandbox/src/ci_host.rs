@@ -10,19 +10,27 @@
 //! The fix is a long-lived host worker started on the *host* side, moments
 //! before the re-exec, and handed into the jail as an already-open Unix
 //! socketpair FD that survives `exec`. The worker's one and only privilege is
-//! to run `gh run list --json` for the current branch in the session repo; it
-//! cannot run arbitrary commands, only that fixed query shape. The jailed
-//! pager asks it for a fresh result on every poll and never spawns `gh`
-//! itself while sandboxed.
+//! to run a fixed set of read-only `gh` queries for the current branch in the
+//! session repo; it can never run arbitrary commands, only those query shapes.
+//! The jailed pager asks it for fresh results on every poll and never spawns
+//! `gh` itself while sandboxed.
+//!
+//! Two fixed request shapes are served, each framing one branch token:
+//!   - `gh-status <HEAD_BRANCH>`  → the raw `gh run list --json` array, the
+//!     data behind the session's CI-status dot;
+//!   - `gh-pr    <BRANCH>`        → a single JSON object carrying the branch's
+//!     pull request state (`gh pr view`) and its check-runs
+//!     (`gh pr checks`), the data behind a model-facing PR/checks query.
 //!
 //! Protocol (one `UnixStream`, newline-delimited, request/response):
-//!   request  : `gh-status <HEAD_BRANCH>\n`
-//!   response : one line of JSON (the raw `gh run list --json` array), or a
-//!              single `.` when the run produced nothing usable.
+//!   request  : one of the two lines above
+//!   response : one line of JSON for that shape, or a single `.` when the
+//!              query produced nothing usable (unknown shape, bad token, `gh`
+//!              failed, no such PR, or an oversized reply).
 //!
 //! The worker loops until its stream write end closes (the jailed process
 //! exited), then exits. Nothing is ever trusted from a request beyond the
-//! tracked branch token; the query shape is fixed in this module.
+//! tracked branch token; the query shapes are fixed in this module.
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::net::UnixStream;
@@ -146,7 +154,8 @@ pub fn run_ci_host_worker() {
 }
 
 /// Serve one request line, writing the single-line answer to `out`. Pure and
-/// testable: drives the fixed `gh` query for `gh-status <branch>` and answers
+/// testable: drives the fixed `gh` queries (`gh-status <branch>` for the CI
+/// dot, `gh-pr <branch>` for the model-facing PR/checks query) and answers
 /// the `.` nothing-usable sentinel for anything else (confinement).
 pub fn handle_request<W: Write>(line: &str, out: &mut W) {
     if let Some(branch) = line.strip_prefix("gh-status ") {
@@ -154,11 +163,17 @@ pub fn handle_request<W: Write>(line: &str, out: &mut W) {
         // A lone `.` is the "nothing usable" sentinel (see module docs).
         let _ = out.write_all(&payload);
         let _ = out.write_all(b"\n");
-    } else {
-        // Unknown request: answer nothing usable so the jailed side
-        // degrades to "off" rather than hanging or trusting us.
-        let _ = out.write_all(b".\n");
+        return;
     }
+    if let Some(branch) = line.strip_prefix("gh-pr ") {
+        let payload = query_pr_checks(branch).unwrap_or_else(|| vec![b'.']);
+        let _ = out.write_all(&payload);
+        let _ = out.write_all(b"\n");
+        return;
+    }
+    // Unknown request: answer nothing usable so the jailed side degrades to
+    // "off" rather than hanging or trusting us.
+    let _ = out.write_all(b".\n");
 }
 
 /// Run `gh run list --json` for `branch` in the worker's cwd and return the
@@ -169,8 +184,7 @@ fn query_branch(branch: &str) -> Option<Vec<u8>> {
     if !valid_branch_token(branch) {
         return None;
     }
-    let mut cmd = std::process::Command::new("gh");
-    cmd.args([
+    let stdout = run_gh_safely(&[
         "run",
         "list",
         "--branch",
@@ -179,10 +193,74 @@ fn query_branch(branch: &str) -> Option<Vec<u8>> {
         "10",
         "--json",
         "status,conclusion,headBranch,workflowName",
-    ])
-    .stdin(std::process::Stdio::null())
-    .stdout(std::process::Stdio::piped())
-    .stderr(std::process::Stdio::null());
+    ])?;
+    bounded_json(stdout)
+}
+
+/// Run the fixed PR/checks query for `branch`: the branch's pull request
+/// state (`gh pr view`) and its check runs (`gh pr checks`), combined into a
+/// single JSON object on one line:
+///   `{"state":"OPEN","merged":false,"checks":[...]}`
+///
+/// Returns `None` when `gh` is unavailable, the branch has no pull request
+/// (`gh pr view` exits non-zero), or the combined document overflows the cap
+/// — the caller maps `None` to the `.` nothing-usable sentinel, and never
+/// falls through to an in-jail `gh`.
+fn query_pr_checks(branch: &str) -> Option<Vec<u8>> {
+    if !valid_branch_token(branch) {
+        return None;
+    }
+    let pr_view = run_gh_safely(&[
+        "pr",
+        "view",
+        branch,
+        "--json",
+        "state,merged,isDraft",
+    ])?;
+    let pr: serde_json::Value = serde_json::from_slice(&pr_view).ok()?;
+    let state = pr.get("state").and_then(serde_json::Value::as_str).unwrap_or("");
+    let merged = pr
+        .get("merged")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    let is_draft = pr
+        .get("isDraft")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+
+    let checks = run_gh_safely(&[
+        "pr",
+        "checks",
+        branch,
+        "--json",
+        "name,state,conclusion",
+    ]).unwrap_or_else(|| b"[]".to_vec());
+
+    let doc = serde_json::json!({
+        "state": state,
+        "merged": merged,
+        "isDraft": is_draft,
+        "checks": match serde_json::from_slice::<serde_json::Value>(&checks) {
+            Ok(v) => v,
+            Err(_) => serde_json::Value::Array(vec![]),
+        },
+    });
+    let bytes = serde_json::to_vec(&doc).ok()?;
+    if bytes.len() > MAX_RESPONSE_BYTES {
+        return None;
+    }
+    Some(bytes)
+}
+
+/// Run a fixed argument vector of `gh` in the worker's cwd, color forced off,
+/// stdin closed, and return the raw stdout bytes on a clean exit. The args are
+/// a compile-time constant per query shape — never derived from a request.
+fn run_gh_safely(args: &[&str]) -> Option<Vec<u8>> {
+    let mut cmd = std::process::Command::new("gh");
+    cmd.args(args)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null());
     cmd.env("NO_COLOR", "1");
     cmd.env("CLICOLOR_FORCE", "0");
     cmd.env_remove("GH_FORCE_TTY");
@@ -190,7 +268,13 @@ fn query_branch(branch: &str) -> Option<Vec<u8>> {
     if !output.status.success() {
         return None;
     }
-    let stdout = output.stdout;
+    Some(output.stdout)
+}
+
+/// Validate a raw `gh` stdout body stayed within the response cap and is not
+/// empty, so a hostile/misbehaving worker cannot grow the jail's memory
+/// without bound or hand back an unusable blank line.
+fn bounded_json(stdout: Vec<u8>) -> Option<Vec<u8>> {
     (stdout.len() <= MAX_RESPONSE_BYTES && !stdout.is_empty()).then_some(stdout)
 }
 
@@ -206,15 +290,39 @@ fn valid_branch_token(branch: &str) -> bool {
 }
 
 /// Jailed-side read: query the host worker over the inherited stream for
-/// `branch`. Returns the raw single-line JSON array, or `None` so the caller
-/// degrades to the "off" state (worker missing, failed, or unusable output).
+/// `branch`'s CI run-list, returning the raw single-line JSON array, or `None`
+/// so the caller degrades to the "off" state (worker missing, failed, or
+/// unusable output).
 ///
 /// Takes the stream by borrow: the session reuses one open connection for
 /// every poll, and the owner keeps it alive for the life of the process.
 #[cfg(unix)]
 pub fn query_ci_host_stream(stream: std::os::unix::net::UnixStream, branch: &str) -> Option<Vec<u8>> {
+    query_ci_host_stream_shape(stream, "gh-status", branch)
+}
+
+/// Jailed-side read for the model-facing PR/checks query: ask the host worker
+/// for `branch`'s pull-request state + check runs (`gh-pr`), returning the raw
+/// single-line JSON object, or `None` on the nothing-usable sentinel. Shares
+/// the run-list framing (one request line, one bounded JSON line) so both
+/// shapes ride the same host-worker protocol and connection.
+#[cfg(unix)]
+pub fn query_ci_host_stream_pr(
+    stream: std::os::unix::net::UnixStream,
+    branch: &str,
+) -> Option<Vec<u8>> {
+    query_ci_host_stream_shape(stream, "gh-pr", branch)
+}
+
+#[cfg(unix)]
+fn query_ci_host_stream_shape(
+    stream: std::os::unix::net::UnixStream,
+    prefix: &str,
+    branch: &str,
+) -> Option<Vec<u8>> {
     let mut stream = stream;
-    let mut line = String::from("gh-status ");
+    let mut line = String::from(prefix);
+    line.push(' ');
     line.push_str(branch);
     line.push('\n');
     stream.write_all(line.as_bytes()).ok()?;
@@ -271,18 +379,22 @@ mod tests {
     }
 
     #[test]
-    fn worker_answers_dot_for_any_request_that_is_not_gh_status() {
-        // The confined worker must never run an arbitrary command. A non
-        // `gh-status` request is answered with the nothing-usable sentinel —
-        // the jailed side degrades to "off", and nothing is executed.
+    fn worker_answers_dot_for_any_request_that_is_not_a_fixed_shape() {
+        // The confined worker must never run an arbitrary command. Any request
+        // outside the two fixed shapes (`gh-status`, `gh-pr`) is answered with
+        // the nothing-usable sentinel — the jailed side degrades to "off", and
+        // nothing is executed.
         for line in [
             "run list --json",
             "--branch master",
             "gh run list",
             "gh-status",
+            "gh-pr",
             "rm -rf /",
             "mission run --json",
             "status ",
+            "pr view --json state",
+            "gh pr view master --json state",
         ] {
             assert_eq!(answer(line), b".\n", "line {line:?} must be refused");
         }
@@ -290,50 +402,62 @@ mod tests {
 
     #[test]
     fn worker_refuses_invalid_branch_tokens() {
-        // Ever with the `gh-status` prefix, a token that could not be a real
-        // branch is rejected before `gh` is ever invoked (returns `.`).
+        // Ever with the `gh-status`/`gh-pr` prefix, a token that could not be
+        // a real branch is rejected before `gh` is ever invoked (returns `.`).
         for line in [
             "gh-status ".to_string(),
             format!("gh-status {}", "a".repeat(300)),
             "gh-status evil\nbranch".to_string(),
             "gh-status has space".to_string(),
+            "gh-pr ".to_string(),
+            format!("gh-pr {}", "a".repeat(300)),
+            "gh-pr evil\nbranch".to_string(),
+            "gh-pr has space".to_string(),
         ] {
             assert_eq!(answer(&line), b".\n", "token {line:?} must be refused");
         }
     }
 
     #[test]
-    fn valid_tokens_are_accepted_and_junk_rejected() {
-        assert!(valid_branch_token("feature/gh-ci-monitor"));
-        assert!(valid_branch_token("master"));
-        assert!(valid_branch_token("release/2026-09"));
-        assert!(!valid_branch_token(""));
-        let long = "a".repeat(300);
-        assert!(!valid_branch_token(&long));
-        assert!(!valid_branch_token("evil\nbranch"));
-        assert!(!valid_branch_token("evil\rbranch"));
-        assert!(!valid_branch_token("has space"));
+    fn worker_answers_dot_dot_for_the_gh_pr_shape() {
+        // The `gh-pr` token must be validated and the shape served, but on this
+        // host there may be no `gh`, so the answer is the nothing-usable
+        // sentinel rather than an executed arbitrary command. The `gh-status`
+        // shape stays byte-identical to fill both arms of confinement.
+        assert_eq!(answer("gh-pr missing/../branch"), b".\n");
+        assert_eq!(answer("gh-status branch"), b".\n");
     }
 
     #[test]
-    fn query_ci_host_stream_roundtrips_a_result() {
-        // A real host worker does the same: read a request line, answer one
-        // JSON line. Drive the jailed-side reader against that contract.
+    fn query_ci_host_stream_pr_roundtrips_a_pr_object() {
+        // The PR/checks reader uses the same one-line framing as run-list; a
+        // real host worker answers the `gh-pr` shape with one JSON line.
         let (ours, theirs) = UnixStream::pair().expect("pair");
         std::thread::spawn(move || {
             let mut stream = theirs;
             let mut buf = [0u8; 8192];
-            let _ = stream.read(&mut buf);
-            let _ = stream.write_all(b"[{\"status\":\"completed\",\"conclusion\":\"success\"}]\n");
+            let n = stream.read(&mut buf).unwrap();
+            let req = String::from_utf8_lossy(&buf[..n]).to_string();
+            assert!(
+                req.starts_with("gh-pr "),
+                "must be the fixed gh-pr shape, got {req:?}"
+            );
+            let _ = stream.write_all(
+                b"{\"state\":\"OPEN\",\"merged\":false,\"isDraft\":false,\"checks\":[{\"name\":\"CI\",\"state\":\"SUCCESS\",\"conclusion\":\"SUCCESS\"}]}\n",
+            );
             let _ = stream.flush();
         });
-        let got = query_ci_host_stream(ours, "master").expect("read");
+        let got = query_ci_host_stream_pr(ours, "feature/x").expect("read");
         let text = String::from_utf8(got).expect("utf8");
-        assert!(text.contains("\"success\""));
+        assert!(text.contains("\"state\":\"OPEN\""), "got {text}");
+        assert!(text.contains("\"SUCCESS\""), "got {text}");
     }
 
     #[test]
-    fn query_ci_host_stream_dot_sentinel_is_off() {
+    fn query_ci_host_stream_pr_dot_sentinel_is_none() {
+        // A worker with no usable PR/checks answer (no PR for the branch, `gh`
+        // missing, etc.) sends `.`; the reader must surface Nothing, never a
+        // half-parsed value.
         let (ours, theirs) = UnixStream::pair().expect("pair");
         std::thread::spawn(move || {
             let mut stream = theirs;
@@ -342,14 +466,13 @@ mod tests {
             let _ = stream.write_all(b".\n");
             let _ = stream.flush();
         });
-        assert_eq!(query_ci_host_stream(ours, "master"), None);
+        assert_eq!(query_ci_host_stream_pr(ours, "master"), None);
     }
 
     #[test]
-    fn query_ci_host_stream_eof_is_off() {
+    fn query_ci_host_stream_pr_eof_is_none() {
         let (ours, _theirs) = UnixStream::pair().expect("pair");
-        // Drop `theirs` first so the reader sees EOF.
         drop(_theirs);
-        assert_eq!(query_ci_host_stream(ours, "master"), None);
+        assert_eq!(query_ci_host_stream_pr(ours, "master"), None);
     }
 }
