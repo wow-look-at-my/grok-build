@@ -127,6 +127,11 @@ key="$(printf '%s\0' "$rustc_version" "${key_args[@]}" "$content" | sha256sum)"
 key="${key%% *}"
 entry="$STORE/$key"
 
+# The names an entry holds, written beside them. Not a dotfile: the upload packs an entry by globbing
+# it, and a dotfile would stay behind, so a fetched entry would carry no list and read as a miss
+# forever.
+MANIFEST="pkg-files.list"
+
 # Counted, not silent: a remote layer that quietly stops answering looks exactly like a slow build.
 STATS="${PKG_STATS_DIR:-$STORE/../pkg-stats}"
 [ -d "$STATS" ] || mkdir -p "$STATS" 2>/dev/null
@@ -138,9 +143,22 @@ tally() { echo x >> "$STATS/$1" 2>/dev/null; }
 # cold build, so a second copy of every package's artifacts is both the disk and the I/O this cache
 # was meant to save. A rust artifact is written once and never edited, so sharing the inode is safe.
 restore() {
-	local -a have=("$1"/*)
-	[ -e "${have[0]}" ] || return 1
-	cp -al "$1"/. "$out_dir"/ 2>/dev/null || cp -a "$1"/. "$out_dir"/ 2>/dev/null
+	local entry="$1" name
+	local -a want=()
+	# An entry says what it holds. Without that list "is anything here" is the only question this can
+	# ask, and an entry missing its rlib answers yes: cargo is told the package is built, and every
+	# dependent then fails with `E0463: can't find crate` for a crate the same build is compiling.
+	# An entry with no list is of unknown provenance and reads as a miss, which costs a recompile and
+	# never a broken build.
+	[ -f "$entry/$MANIFEST" ] || return 1
+	while IFS= read -r name; do
+		[ -n "$name" ] || continue
+		[ -e "$entry/$name" ] || return 1
+		want+=("$entry/$name")
+	done < "$entry/$MANIFEST"
+	[ "${#want[@]}" -gt 0 ] || return 1
+	# Only the listed names are copied, so the list itself stays out of the build directory.
+	cp -al "${want[@]}" "$out_dir"/ 2>/dev/null || cp -a "${want[@]}" "$out_dir"/ 2>/dev/null
 }
 
 if restore "$entry"; then
@@ -229,6 +247,7 @@ if [ "$code" = 0 ]; then
 	mine=("$out_dir"/*"$suffix"*)
 	if [ -e "${mine[0]}" ] && mkdir -p "$tmp" &&
 		cp -al "${mine[@]}" "$tmp"/ 2>/dev/null &&
+		printf '%s\n' "${mine[@]##*/}" > "$tmp/$MANIFEST" &&
 		mv -T "$tmp" "$entry" 2>/dev/null; then
 		# The upload is detached, because cargo holds this call's job slot until the wrapper exits.
 		# An inline upload therefore spends a compile thread on the network, and the entry is
