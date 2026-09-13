@@ -1839,6 +1839,7 @@ fn registry_kind_membership_through_pr_14() {
             "show_timestamps",
             "page_flip_on_send",
             "confirm_before_rewind",
+            "stop_gate_unfinished_todos",
             "combine_queued_prompts",
             "simple_mode",
             "vim_mode",
@@ -2094,6 +2095,7 @@ fn settings_value_payload_matches_kind() {
             | SettingsKeyOutcome::Action(Action::SetTimeline(_))
             | SettingsKeyOutcome::Action(Action::SetPageFlipOnSend(_))
             | SettingsKeyOutcome::Action(Action::SetConfirmBeforeRewind(_))
+            | SettingsKeyOutcome::Action(Action::SetStopGateUnfinishedTodos(_))
             | SettingsKeyOutcome::Action(Action::SetCombineQueuedPrompts(_))
             | SettingsKeyOutcome::Action(Action::SetSimpleMode(_))
             | SettingsKeyOutcome::Action(Action::SetMultilineMode(_))

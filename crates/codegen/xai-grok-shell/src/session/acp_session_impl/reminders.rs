@@ -473,23 +473,34 @@ fn format_workflow_completion_reminder(
     }
     buf
 }
-/// TodoGate when enabled and the prompt carries `<task_completion_discipline>`
-/// (`{DISCIPLINE_BLOCK}`), but NOT while the goal loop is active — the
-/// continuation directive drives the loop there (see the body).
-pub(super) fn todo_gate_active(
-    policy: &xai_grok_agent::system_reminder::ReminderPolicy,
+/// Whether a todo gate fits THIS agent and goal state, independent of any
+/// enable switch: the prompt must carry `<task_completion_discipline>`
+/// (`{DISCIPLINE_BLOCK}`), and the goal loop must not be active — the
+/// continuation directive drives the loop there.
+///
+/// Applicability is kept separate from [`todo_stop_gate_enabled`] so the
+/// enable switch can change without touching what the gate applies to.
+pub(super) fn todo_gate_applicable(
     audience: xai_grok_agent::prompt::context::PromptAudience,
     definition: &AgentDefinition,
     goal_harness_enabled: bool,
     goal_status: Option<crate::session::goal_tracker::GoalStatus>,
 ) -> bool {
-    if !policy.todo_gate.enabled {
-        return false;
-    }
     if laziness_injection_active(goal_harness_enabled, goal_status) {
         return false;
     }
     definition.carries_task_completion_discipline(audience)
+}
+/// The enable half of the built-in todo-stop gate.
+///
+/// The switch is the persisted `[ui].stop_gate_unfinished_todos` toggle, which
+/// ships ON. The `todo_gate` opt-in (remote `todo_gate_enabled`, or the
+/// `--todo-gate` CLI force-enable) is an OR on top, not an AND: ANDing the two
+/// leaves the shipped default unable to fire at all.
+pub(super) fn todo_stop_gate_enabled(
+    policy: &xai_grok_agent::system_reminder::ReminderPolicy,
+) -> bool {
+    policy.stop_gate_unfinished_todos || policy.todo_gate.enabled
 }
 impl SessionActor {
     /// Injects a one-shot date-rollover `<system-reminder>` when a long session crosses local
@@ -759,38 +770,34 @@ impl SessionActor {
         let reminder = crate::terminal::format_resumed_tasks_reminder(&entries);
         self.push_system_reminder(&reminder);
     }
-    /// The persisted `[ui].stop_gate_unfinished_todos` toggle (default ON),
-    /// carried on the agent's reminder policy from spawn. Master switch for
-    /// the built-in todo-stop gate; the CLI/remote `todo_gate` opt-in is
-    /// independent.
-    pub(super) fn stop_gate_unfinished_todos_enabled(&self) -> bool {
-        self.agent.borrow().reminder_policy().stop_gate_unfinished_todos
-    }
-
-    /// Turn-end TodoGate config, or `None` when [`todo_gate_active`] is false.
-    pub(super) fn todo_gate_policy(        &self,
-    ) -> Option<xai_grok_agent::system_reminder::TodoGateConfig> {
+    /// Whether the built-in todo-stop gate runs for this session.
+    ///
+    /// The switch is the persisted `[ui].stop_gate_unfinished_todos` toggle,
+    /// which ships ON — so the gate must NOT be ANDed with the opt-in
+    /// `todo_gate.enabled` flag, or the shipped default never fires. That flag
+    /// (remote `todo_gate_enabled`, or the `--todo-gate` CLI force-enable)
+    /// stays an opt-in ON TOP: it turns the gate back on for a session whose
+    /// persisted toggle is off.
+    pub(super) fn todo_stop_gate_active(&self) -> bool {
         let goal_status = self.goal_tracker.lock().status();
         let agent = self.agent.borrow();
         let policy = agent.reminder_policy();
-        let active = todo_gate_active(
-            policy,
+        let enabled = todo_stop_gate_enabled(policy);
+        let applicable = todo_gate_applicable(
             agent.prompt_audience(),
             agent.definition(),
             self.goal_harness_enabled(),
             goal_status,
         );
         tracing::debug!(
-            enabled = policy.todo_gate.enabled,
+            stop_gate_unfinished_todos = policy.stop_gate_unfinished_todos,
+            todo_gate_opt_in = policy.todo_gate.enabled,
             goal_harness_enabled = self.goal_harness_enabled(),
             ?goal_status,
-            active,
-            "todo_gate_policy"
+            applicable,
+            "todo_stop_gate_active"
         );
-        if !active {
-            return None;
-        }
-        Some(policy.todo_gate)
+        enabled && applicable
     }
     /// Gather the inputs needed by `evaluate_todo_gate` from live session
     /// state.

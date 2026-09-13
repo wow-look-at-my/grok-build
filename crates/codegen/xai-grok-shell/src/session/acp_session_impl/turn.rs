@@ -1,5 +1,6 @@
 //! Turn-execution concern for `SessionActor` (`handle_prompt`, turn-end,
 //! sampling loop).
+use super::stop_gate::todo_stop_gate_blocks;
 use super::*;
 use super::stop_gate::todo_stop_gate_blocks;
 use crate::util::dual_clock::DualClock;
@@ -927,14 +928,9 @@ impl SessionActor {
                         // after MAX_STOP_HOOK_CONTINUATIONS_PER_TURN
                         // continuations), and its feedback rides the same
                         // stop_hook_feedback user message.
-                        let toggle_on = self.stop_gate_unfinished_todos_enabled();
-                        if !toggle_on {
+                        if !self.todo_stop_gate_active() {
                             break round;
                         }
-                        let gate_cfg = match self.todo_gate_policy() {
-                            Some(cfg) => cfg,
-                            None => break round,
-                        };
                         let collected = self.collect_todo_gate_input(prompt_id).await;
                         let input = collected.as_input();
                         if !todo_stop_gate_blocks(
@@ -945,10 +941,8 @@ impl SessionActor {
                             break round;
                         }
                         stop_continuations_this_turn += 1;
-                        let reminder = build_todo_gate_reminder(
-                            &input.pending,
-                            &input.in_progress_unbacked,
-                        );
+                        let reminder =
+                            build_todo_gate_reminder(&input.pending, &input.in_progress_unbacked);
                         let rendered = self
                             .tool_bridge_handle()
                             .render_prompt(&reminder, &serde_json::json!({}))
