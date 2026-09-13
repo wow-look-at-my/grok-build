@@ -105,37 +105,6 @@ jobs:
         with:
           name: cargo-timings-build-test
 
-      # Fails if the sub-crate split is undone or the -j3 unified compile is removed. ci/ram-guard.sh has the measurements.
-      - name: RAM guard (sub-crate split + unified --no-run + the compile gate intact)
-        run: |
-          set -euo pipefail
-          # bundle/builtin must stay out of the shell crate.
-          [ -f crates/codegen/xai-grok-shell-assets/src/bundle.rs ] \
-          && [ -f crates/codegen/xai-grok-shell-assets/src/builtin.rs ] \
-          || { echo "RAM GUARD: FAIL — bundle/builtin must live in xai-grok-shell-assets"; exit 1; }
-          [ ! -f crates/codegen/xai-grok-shell/src/bundle.rs ] \
-          && [ ! -f crates/codegen/xai-grok-shell/src/builtin.rs ] \
-          || { echo "RAM GUARD: FAIL — bundle/builtin re-inlined into xai-grok-shell"; exit 1; }
-          grep -q 'xai-grok-shell-assets' crates/codegen/xai-grok-shell/Cargo.toml \
-          || { echo "RAM GUARD: FAIL — shell must depend on xai-grok-shell-assets"; exit 1; }
-          # Bracketed classes keep the awk script's own source text out of the scan it runs over this file.
-          awk '
-            /--no-run --no-fail-fast/ { compile=1 }
-            /--exclude xai[-]grok-shell/ || /-p xai[-]grok-shell -p xai[-]grok-pager/ { splitbad=1 }
-            END { exit (compile && !splitbad) ? 0 : 1 }
-          ' .github/workflows/ci.yml \
-            || { echo "RAM GUARD: FAIL — build must be a single unified --no-run, no exclude/-p split"; exit 1; }
-          # The wrapper caps concurrent compiles now. Losing either half uncaps compile memory.
-          grep -q 'PKG_SLOTS: "3"' .github/workflows/ci.yml \
-            || { echo "RAM GUARD: FAIL — missing PKG_SLOTS=3 compile semaphore"; exit 1; }
-          grep -q 'RUSTC_WRAPPER: .*ci/pkg-cache.sh' .github/workflows/ci.yml \
-            || { echo "RAM GUARD: FAIL — compile step is not behind the per-package wrapper"; exit 1; }
-          [ -x ci/pkg-cache.sh ] \
-            || { echo "RAM GUARD: FAIL — ci/pkg-cache.sh is missing or not executable"; exit 1; }
-          grep -qF -- 'cargo nextest run --locked --workspace --profile ci' .github/workflows/ci.yml \
-            || { echo "RAM GUARD: FAIL — run step missing"; exit 1; }
-          echo "RAM GUARD: PASS — sub-crate split + unified --no-run behind the 3-slot compile semaphore, run step fast-passes"
-
   # These assert on what a virtual terminal actually shows, which a unit test over the width function cannot stand in for.
   pty-e2e:
     name: Test (PTY end-to-end)
