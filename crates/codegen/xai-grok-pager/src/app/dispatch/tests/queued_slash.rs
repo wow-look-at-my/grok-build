@@ -415,6 +415,37 @@ fn bare_enter_leaves_a_queued_command_to_its_own_turn() {
     );
 }
 
+/// Gating (3d): a SHELL-advertised command keeps the send-now route. The shell
+/// resolves it when the prompt's own turn starts, so force-sending it must stay
+/// immediate rather than being turned into a queued command — and the payload is
+/// a prompt the shell consumes, never text the model reads.
+#[test]
+fn send_now_on_a_shell_command_keeps_the_immediate_route() {
+    let mut app = test_app_with_agent();
+    let id = AgentId(0);
+    register_shell_command(&mut app, id, "pr-cleanup");
+    running_agent_with_a_queued_message(&mut app, id);
+
+    let effects = dispatch(
+        Action::SendPromptNow {
+            text: "/pr-cleanup fix the branch".into(),
+            images: vec![],
+            wire_blocks: None,
+        },
+        &mut app,
+    );
+
+    assert!(
+        matches!(effects.as_slice(), [Effect::SendPromptNow { .. }]),
+        "a shell-resolved command still cancels-and-sends: {effects:?}"
+    );
+    assert_eq!(
+        local_texts(&app, id),
+        Vec::<String>::new(),
+        "it is not queued: the shell runs it now"
+    );
+}
+
 /// Regression (4): the unaffected paths keep their behavior. `/plan <desc>` on
 /// an idle session bundles the mode switch with the prompt; `/compact` queues as
 /// a command row and is never interjected; a plain prompt sends immediately; a
