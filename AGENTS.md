@@ -84,6 +84,15 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - Closing the ring (past the last identity stop) DOES drop yolo before entering Plan. Plan+yolo matches no arm of the `(in_plan, in_auto, in_yolo)` match, so leaving it set sends the next press into the catch-all and lands on Normal instead of Auto.
 - The composer flag row is additive, so an orchestrating yolo session correctly reads `always-approve · orchestrator` (`agent_view/render.rs`).
 
+## Goal-plan seeding notes
+
+- The implementing session no longer transcribes the plan into its todo list. The planner names the steps, and the harness puts them on the session's list as the plan is published (`seed_goal_todos_from_plan` in `acp_session_impl/goal_support.rs`, called from the `Planned` publish branch of `maybe_run_goal_planner`, before the goal-start reminder is rendered).
+- The planner is told to build its OWN list with the session's todo tool (`{TODO_TOOL}` in `templates/goal_planner_prompt.md`). A child session keeps its own `State<TodoState>`, so `run_shell_child` reads it into the new `SubagentResult.todos` before the child is torn down, and it rides back through `GoalPlannerSpawner` / `GoalPlannerOutcome::Planned`. The child's items WIN over the plan body: that channel is what makes this the planner's `todo_write` and not a re-parse of the file.
+- When the planner named nothing (any harness whose toolset has no todo tool, or a planner that did not call it), the plan body is parsed instead (`goal_next_step::plan_todo_items`): the `## Task checklist` boxes, unchecked only, wrapped lines joined, or the `## Acceptance criteria` entries when there is no checklist. An empty or malformed body names nothing — seeding never invents work.
+- Once per goal, append-only. `GoalOrchestration::plan_todos_seeded` is claimed under the tracker lock before any I/O, and the append is deduped against the live list by content. Existing items keep their id, text and status; a retry, a resume or a direct re-entry adds nothing. `Plan: <path>` still renders on every plan-aware reminder — only the manual "seed todos" directive is gone, replaced by a statement that the steps are already on the list.
+- The append goes through the session's own todo path (`append_capture_todos`, `add_only_todo_args_with_prefix` with a `plan-` id prefix), so the persisted state and the client's `Plan` update move exactly as a model-written `todo_write` does. Seeding is best-effort: a session with no append-capable todo tool logs and returns, and never fails the goal.
+- A fail-closed planner publishes no plan, so nothing is seeded and `plan_todos_seeded` stays false. Red/unseeded is the honest state there.
+
 ## `/todo` capture feature notes
 
 - `/todo <request>` rides the `/btw` path, not the prompt queue: `Action::SendTodo` → `x.ai/todo` → `SessionCommand::TodoCapture`, spawned on the session's LocalSet (`session/acp_session_impl/todo_capture.rs`). The running turn is never interrupted. And the parent conversation is never mutated — the capture agent works from a snapshot of it.
