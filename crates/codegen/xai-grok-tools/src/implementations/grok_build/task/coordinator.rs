@@ -592,8 +592,10 @@ impl<R: ChildRunner> SubagentCoordinator<R> {
         let (queued_for, foreground_deadline) = match origin {
             StartOrigin::Direct => (
                 None,
-                (spawn_reply.is_some() && request.awaits_in_foreground())
-                    .then(|| tokio::time::Instant::now() + self.config.foreground_budget),
+                (spawn_reply.is_some() && request.awaits_in_foreground()).then(|| {
+                    tokio::time::Instant::now()
+                        + request.foreground_wait_budget(self.config.foreground_budget)
+                }),
             ),
             StartOrigin::Dequeued {
                 queued_for,

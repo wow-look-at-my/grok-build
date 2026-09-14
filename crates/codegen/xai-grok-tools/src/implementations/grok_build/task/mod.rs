@@ -494,6 +494,7 @@ impl xai_tool_runtime::Tool for TaskTool {
                 completion_output_cap: None,
                 spawn_depth: None,
                 output_token_budget: None,
+                foreground_wait_budget_ms: None,
                 output_schema: None,
                 loop_task_id: None,
             },

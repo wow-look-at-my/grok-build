@@ -963,7 +963,8 @@ impl SessionActor {
                     self.maybe_run_goal_planner(&objective).await;
                     if self.goal_tracker.lock().status() != Some(GoalStatus::Active) {
                         return GoalResumeOutcome::Message(
-                            "Planning failed again; goal paused.".to_string(),
+                            "Planning failed again; goal paused. Resume with /goal to retry."
+                                .to_string(),
                         );
                     }
                 }
