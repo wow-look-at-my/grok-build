@@ -87,6 +87,17 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - Closing the ring (past the last identity stop) DOES drop yolo before entering Plan. Plan+yolo matches no arm of the `(in_plan, in_auto, in_yolo)` match, so leaving it set sends the next press into the catch-all and lands on Normal instead of Auto.
 - The composer flag row is additive, so an orchestrating yolo session correctly reads `always-approve · orchestrator` (`agent_view/render.rs`).
 
+## Goal-plan-to-todos notes
+
+- The implementing session no longer transcribes the plan into its todo list. The planner lists the plan's work on its OWN todo list, and the harness puts those items on the session's list as the plan is published (`apply_planner_todos` in `acp_session_impl/goal_support.rs`, called from the `Planned` publish branch of `maybe_run_goal_planner`, before the goal-start reminder is rendered).
+- The planner is told to make that call — `## Todo list — REQUIRED` in `templates/goal_planner_prompt.md`, with the tool named by `{TODO_TOOL}` (`RoleToolNames`, resolved per harness so a `name_override` is honored). A child session keeps its OWN `State<TodoState>`, so a planner-issued `todo_write` lands on the child's list rather than the session's: `run_shell_child` reads that list into the new `SubagentResult.todos` before the child is torn down, and it rides back through `GoalPlannerSpawner` / `GoalPlannerOutcome::Planned`, which is the only route by which the session can see it. That round trip is what makes the session's list the planner's own items.
+- The harness never mines the plan prose for items. A planning run that named none seeds nothing and leaves `plan_todos_seeded` false, so an unfollowed instruction degrades to "the main agent keeps its own list" instead of machinery inventing work. `a_planner_that_named_no_items_leaves_the_list_untouched` is the guard.
+- Once per goal, append-only. `GoalOrchestration::plan_todos_seeded` is claimed under the tracker lock before any I/O, and the append is deduped against the live list by content. Existing items keep their id, text and status; a retry, a resume or a direct re-entry adds nothing.
+- The append goes through the session's own todo path (`append_capture_todos`, `add_only_todo_args_with_prefix` with a `plan-` id prefix), so the persisted state and the client's `Plan` update move exactly as a model-written `todo_write` does. Seeding is best-effort: no append-capable todo tool, or a failed append, logs and returns, and never fails the goal.
+- The child's list is read through the shared workspace handle (`WorkspaceOps::workspace_handle` → the session's `toolset().resources`), so it needs LOCAL mode. A proxied session (the workspace server owns sessions) has no handle here, the read returns empty, and the feature degrades to the main agent keeping its own list. Nothing breaks; nothing is populated either.
+- `Plan: <path>` still renders on every plan-aware reminder — only the manual seed-todos directive is gone, replaced by a statement that the steps are already on the list.
+- A fail-closed planner publishes no plan, so nothing is seeded. Red/unseeded is the honest state there.
+
 ## `/todo` capture feature notes
 
 - `/todo <request>` rides the `/btw` path, not the prompt queue: `Action::SendTodo` → `x.ai/todo` → `SessionCommand::TodoCapture`, spawned on the session's LocalSet (`session/acp_session_impl/todo_capture.rs`). The running turn is never interrupted. And the parent conversation is never mutated — the capture agent works from a snapshot of it.

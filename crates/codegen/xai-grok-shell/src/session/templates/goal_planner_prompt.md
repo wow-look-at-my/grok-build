@@ -232,6 +232,17 @@ checkboxes in any other section.
 **Risks / Contradictions** (optional) — one bullet per genuine internal
 contradiction or environment infeasibility; omit when none.
 
+## Todo list — REQUIRED
+
+Before your terminal response, put the plan's steps on YOUR todo list with
+`{TODO_TOOL}`: one item per `## Task checklist` line, in plan order, each
+`pending`. When the plan has no checklist (an `analysis`/`research` goal), list
+its `## Acceptance criteria` entries instead, one item each. Your list and the
+plan must name the same steps: the session's todo list is populated from what you
+leave here, so a step you omit from the list is a step the implementer never
+sees. Send only the plan's own steps through the tool — do not track your
+research with it.
+
 Your terminal response must be exactly:
 
 ```

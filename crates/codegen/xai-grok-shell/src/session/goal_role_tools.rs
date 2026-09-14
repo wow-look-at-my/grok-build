@@ -47,6 +47,10 @@ pub(crate) struct RoleToolNames {
     pub web_search: String,
     /// `{WEB_FETCH_TOOL}` — `ToolKind::WebFetch` (planner template only).
     pub web_fetch: String,
+    /// `{TODO_TOOL}` — `ToolKind::Plan`. The planner template names it because
+    /// the planner builds its OWN todo list with that tool as it writes the
+    /// plan; the parent then merges the child's list into the session's.
+    pub todo: String,
     /// `{TOOLSET_TOOLS}` block (verifier-only placeholder; the planner and
     /// strategist templates do not reference it). Empty on the inherit path.
     pub toolset_tools: String,
@@ -60,6 +64,7 @@ impl RoleToolNames {
     const EXECUTE_FALLBACK: &'static str = "run_terminal_command";
     const WEB_SEARCH_FALLBACK: &'static str = "web_search";
     const WEB_FETCH_FALLBACK: &'static str = "web_fetch";
+    const TODO_FALLBACK: &'static str = "todo_write";
 
     /// Single fallback+sanitize applier shared by every constructor (no
     /// per-path duplication): each name is sanitized, and any `None` or unsafe
@@ -72,6 +77,7 @@ impl RoleToolNames {
         execute: Option<String>,
         web_search: Option<String>,
         web_fetch: Option<String>,
+        todo: Option<String>,
         toolset_tools: String,
     ) -> Self {
         Self {
@@ -82,6 +88,7 @@ impl RoleToolNames {
             execute: sanitized_or_default(execute, Self::EXECUTE_FALLBACK),
             web_search: sanitized_or_default(web_search, Self::WEB_SEARCH_FALLBACK),
             web_fetch: sanitized_or_default(web_fetch, Self::WEB_FETCH_FALLBACK),
+            todo: sanitized_or_default(todo, Self::TODO_FALLBACK),
             toolset_tools,
         }
     }
@@ -89,7 +96,17 @@ impl RoleToolNames {
     /// All-fallback names with an empty `{TOOLSET_TOOLS}` block. Used as the
     /// per-index default when no assignment exists, and by tests.
     pub(crate) fn inherit_defaults() -> Self {
-        Self::from_parts(None, None, None, None, None, None, None, String::new())
+        Self::from_parts(
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            String::new(),
+        )
     }
 
     /// Inherit / fail-open path: the role runs on the parent toolset, so the
@@ -117,8 +134,19 @@ impl RoleToolNames {
             execute,
             web_search,
             web_fetch,
+            None,
             String::new(),
         )
+    }
+
+    /// Set `{TODO_TOOL}` from the parent bridge's `Plan`-kind tool name.
+    ///
+    /// A builder rather than another `from_parent` argument: the planner's
+    /// prompt is the only one that names the todo tool, so the other roles'
+    /// call sites (and their tests) keep the literal default.
+    pub(crate) fn with_todo(mut self, todo: Option<String>) -> Self {
+        self.todo = sanitized_or_default(todo, Self::TODO_FALLBACK);
+        self
     }
 
     /// Explicit-pair path: names come from the role's `describe_subagent_type`
@@ -143,6 +171,9 @@ impl RoleToolNames {
             get(ToolKind::Execute),
             get(ToolKind::WebSearch),
             get(ToolKind::WebFetch),
+            // The planner builds its own list with the todo tool, so the
+            // explicit-harness render must name THAT harness's todo tool.
+            get(ToolKind::Plan),
             enumerate_toolset_tools(&summary.tool_names),
         )
     }
@@ -169,6 +200,7 @@ impl RoleToolNames {
                 "EXECUTE_TOOL" => self.execute.as_str(),
                 "WEB_SEARCH_TOOL" => self.web_search.as_str(),
                 "WEB_FETCH_TOOL" => self.web_fetch.as_str(),
+                "TODO_TOOL" => self.todo.as_str(),
                 "TOOLSET_TOOLS" => self.toolset_tools.as_str(),
                 _ => return None,
             })
@@ -306,7 +338,31 @@ pub(crate) mod tests {
         assert_eq!(tn.execute, "run_terminal_command");
         assert_eq!(tn.web_search, "web_search");
         assert_eq!(tn.web_fetch, "web_fetch");
+        assert_eq!(tn.todo, "todo_write");
         assert_eq!(tn.toolset_tools, "", "inherit path omits the toolset block");
+    }
+
+    /// The planner's `{TODO_TOOL}` resolves to the harness's own todo tool on
+    /// both paths: from the describe summary when an explicit harness is
+    /// committed, and from the parent bridge via [`RoleToolNames::with_todo`]
+    /// otherwise.
+    #[test]
+    fn todo_tool_resolves_from_the_summary_and_from_the_parent_bridge() {
+        let summary = RoleToolNames::from_summary(&summary_with(&[
+            (ToolKind::Read, "read_file"),
+            (ToolKind::Plan, "cursor_todo"),
+        ]));
+        assert_eq!(summary.todo, "cursor_todo");
+
+        let parent = RoleToolNames::from_parent(None, None, None, None, None, None, None, None)
+            .with_todo(Some("parent_todo".into()));
+        assert_eq!(parent.todo, "parent_todo");
+
+        // Absent or unsafe ⇒ the literal default, never an unresolved token.
+        let absent = RoleToolNames::from_summary(&summary_with(&[(ToolKind::Read, "read_file")]));
+        assert_eq!(absent.todo, "todo_write");
+        let unsafe_name = RoleToolNames::inherit_defaults().with_todo(Some("bad name".into()));
+        assert_eq!(unsafe_name.todo, "todo_write");
     }
 
     #[test]
@@ -572,11 +628,12 @@ pub(crate) mod tests {
             (ToolKind::Execute, "ex"),
             (ToolKind::WebSearch, "ws"),
             (ToolKind::WebFetch, "wf"),
+            (ToolKind::Plan, "tw"),
         ]));
         let template = "{READ_TOOL} {LIST_TOOL} {SEARCH_TOOL} {WRITE_TOOL} {EXECUTE_TOOL} \
-             {WEB_SEARCH_TOOL} {WEB_FETCH_TOOL}{TOOLSET_TOOLS}";
+             {WEB_SEARCH_TOOL} {WEB_FETCH_TOOL} {TODO_TOOL}{TOOLSET_TOOLS}";
         let out = tn.apply(template);
-        assert!(out.starts_with("rd ls gr wr ex ws wf"));
+        assert!(out.starts_with("rd ls gr wr ex ws wf tw"));
         assert!(out.contains("Tools available to you for this review:"));
         assert_no_tool_placeholders(&out);
     }

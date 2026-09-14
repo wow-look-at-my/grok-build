@@ -156,11 +156,32 @@ fn parse_tool_arguments(arguments: &str) -> serde_json::Value {
 /// the list. Existing items keep their place, so the append-only guarantee is
 /// the same at either end.
 fn add_only_todo_args(contents: &[String], urgent: bool) -> serde_json::Value {
+    add_only_todo_args_with_prefix(contents, urgent, CAPTURE_ID_PREFIX)
+}
+
+/// Item id prefix a `/todo` capture mints. Provenance on the list and in the
+/// model's view of it; the goal-planner seed uses its own (see
+/// [`PLAN_SEED_ID_PREFIX`]).
+const CAPTURE_ID_PREFIX: &str = "capture";
+
+/// Item id prefix the goal harness mints for the items it copies off the
+/// planner's own list ([`SessionActor::apply_planner_todos`]). Distinct from
+/// the `/todo` capture's so the list says where an item came from.
+pub(super) const PLAN_SEED_ID_PREFIX: &str = "plan";
+
+/// [`add_only_todo_args`] with an explicit id prefix, so callers that append
+/// their own kind of item (a `/todo` capture, the goal planner's seed) keep
+/// their provenance while sharing one append-only argument shape.
+pub(super) fn add_only_todo_args_with_prefix(
+    contents: &[String],
+    urgent: bool,
+    id_prefix: &str,
+) -> serde_json::Value {
     let todos: Vec<serde_json::Value> = contents
         .iter()
         .map(|content| {
             serde_json::json!({
-                "id": format!("capture-{}", &uuid::Uuid::new_v4().simple().to_string()[..6]),
+                "id": format!("{id_prefix}-{}", &uuid::Uuid::new_v4().simple().to_string()[..6]),
                 "content": content,
                 "status": "pending",
             })
@@ -679,7 +700,7 @@ impl SessionActor {
     /// which is exactly what a harness preset uses to rename tools per
     /// provider, and why nothing here may compare against the literal
     /// `todo_write`.
-    async fn resolve_capture_todo_tool(
+    pub(super) async fn resolve_capture_todo_tool(
         &self,
         bridge: &xai_grok_tools::bridge::ToolBridge,
     ) -> Result<String, TodoCaptureError> {
@@ -802,7 +823,12 @@ impl SessionActor {
     /// names: the registry reverse-maps client names onto canonical ones and
     /// leaves everything else alone, so canonical keys arrive as themselves
     /// under any rename.
-    async fn append_capture_todos(
+    ///
+    /// `pub(super)`: the goal harness
+    /// ([`SessionActor::apply_planner_todos`]) appends through this same
+    /// path, so an item it puts on the list reaches the persisted state and the
+    /// client's `Plan` view exactly as a model-written `todo_write` does.
+    pub(super) async fn append_capture_todos(
         &self,
         todo_tool: &str,
         call_id: &str,

@@ -29,6 +29,13 @@ enum SpawnBehaviour {
     /// Parse `{PLAN_FILE}` out of the prompt, write `body` there,
     /// then respond `Done`.
     WritePlanThenDone { body: &'static [u8] },
+    /// Like [`Self::WritePlanThenDone`], but the planner child also reports the
+    /// todo list it built for ITSELF with `todo_write` while planning — the
+    /// items a real child would have left on its own `State<TodoState>`.
+    WritePlanThenDoneWithTodos {
+        body: &'static [u8],
+        todos: &'static [&'static str],
+    },
     WaitForCancelsThenWrite {
         cancels: usize,
         started: tokio::sync::mpsc::UnboundedSender<usize>,
@@ -67,6 +74,9 @@ struct PlannerSpawnCapture {
     fork_context: StdArc<std::sync::Mutex<Vec<bool>>>,
     surface_completion: StdArc<std::sync::Mutex<Vec<bool>>>,
     model: StdArc<std::sync::Mutex<Vec<Option<String>>>>,
+    /// Every prompt the coordinator was asked to spawn a planner with, so a
+    /// test can assert what the planner's run was actually told to do.
+    prompt: StdArc<std::sync::Mutex<Vec<String>>>,
 }
 
 /// Stand up a coordinator that handles exactly the spawn behaviours
@@ -97,6 +107,7 @@ fn spawn_planner_coordinator_capturing(
     let capture = PlannerSpawnCapture::default();
     let fork_log = StdArc::clone(&capture.fork_context);
     let surface_log = StdArc::clone(&capture.surface_completion);
+    let prompt_log = StdArc::clone(&capture.prompt);
     let model_log = StdArc::clone(&capture.model);
     tokio::task::spawn_local(async move {
         while let Some(ev) = rx.recv().await {
@@ -116,6 +127,7 @@ fn spawn_planner_coordinator_capturing(
                 count_task.fetch_add(1, SeqOrd::SeqCst);
                 fork_log.lock().unwrap().push(req.fork_context);
                 surface_log.lock().unwrap().push(req.surface_completion);
+                prompt_log.lock().unwrap().push(req.prompt.clone());
                 model_log
                     .lock()
                     .unwrap()
@@ -157,17 +169,25 @@ fn spawn_planner_coordinator_capturing(
                 let result = match &behaviour {
                     // Handled above: waits for the Send Now context, then writes.
                     SpawnBehaviour::WaitForContextThenWrite { .. } => unreachable!(),
-                    SpawnBehaviour::WritePlanThenDone { body } => {
+                    SpawnBehaviour::WritePlanThenDone { body }
+                    | SpawnBehaviour::WritePlanThenDoneWithTodos { body, .. } => {
                         if let Some(p) = plan_path.as_deref() {
                             let _ =
                                 std::fs::create_dir_all(std::path::Path::new(p).parent().unwrap());
                             let _ = std::fs::write(p, body);
                         }
+                        let todos = match &behaviour {
+                            SpawnBehaviour::WritePlanThenDoneWithTodos { todos, .. } => {
+                                todos.iter().map(|t| (*t).to_string()).collect()
+                            }
+                            _ => Vec::new(),
+                        };
                         SubagentResult {
                             success: true,
                             output: StdArc::from("Done"),
                             subagent_id: req.id.clone(),
                             child_session_id: req.id.clone(),
+                            todos,
                             ..Default::default()
                         }
                     }
@@ -341,6 +361,510 @@ fn create_test_goal(actor: &SessionActor) {
         "2026-01-01T00:00:00Z".into(),
         None,
     );
+}
+
+/// Every todo on the session's LIVE list, as `(id, content, status)`.
+///
+/// Read through the session's own tool bridge, which is where `todo_write`
+/// keeps it — the same state the model and the pager see.
+async fn live_todos(
+    actor: &SessionActor,
+) -> Vec<(String, String, crate::tools::todo::TodoStatus)> {
+    use crate::tools::todo::TodoState;
+    use xai_grok_tools::types::resources::State;
+    actor
+        .agent
+        .borrow()
+        .tool_bridge()
+        .read_resource::<State<TodoState>>()
+        .await
+        .map(|state| {
+            state
+                .0
+                .todo_items_with_ids()
+                .map(|(id, item)| (id.clone(), item.content.clone(), item.status))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Just the contents of the live list, in order.
+async fn live_todo_contents(actor: &SessionActor) -> Vec<String> {
+    live_todos(actor)
+        .await
+        .into_iter()
+        .map(|(_id, content, _status)| content)
+        .collect()
+}
+
+/// Register the real grok-build `todo_write` tool and bind this session's
+/// toolset into the workspace, so a seeded append dispatches onto the session's
+/// live `State<TodoState>` exactly as it does in a real session.
+async fn arm_todo_writes(actor: &SessionActor) {
+    *actor.agent.borrow_mut() = test_grok_build_agent_with_todo().await;
+    actor
+        .workspace_ops
+        .bind_local_session(
+            &actor.session_id_string(),
+            actor.tool_context.cwd.as_path().to_path_buf(),
+            actor.tool_context.hunk_tracker_handle.clone(),
+            actor.agent.borrow().tool_bridge().toolset(),
+            None,
+        )
+        .expect("bind_local_session");
+}
+
+/// Write one item the way the main agent (or the user) writes it, so a seeding
+/// test can prove it survives untouched.
+async fn write_existing_todo(actor: &SessionActor, id: &str, content: &str) {
+    actor
+        .workspace_ops
+        .call_tool(
+            "todo_write",
+            serde_json::json!({
+                "merge": true,
+                "todos": [{"id": id, "content": content, "status": "in_progress"}],
+            }),
+            "test-seed",
+            Some(&actor.session_info.id.0),
+        )
+        .await
+        .expect("an existing todo must be writable");
+}
+
+/// The three work items the scripted planner puts on its OWN todo list with
+/// `todo_write` while it plans — the source of the session's seeded list.
+const PLANNER_TODOS: &[&str] = &[
+    "add the plan parser",
+    "wire it into the publish path",
+    "cover it with an end-to-end test",
+];
+
+/// A plan whose `## Task checklist` names those same three steps, the way the
+/// planner prompt asks a real planner to write it.
+const CHECKLIST_PLAN: &[u8] = b"# Plan: ship the exporter\n\n## Goal kind\ncode-change\n\n\
+## Task checklist\n\
+- [ ] add the plan parser\n\
+- [ ] wire it into the publish path\n\
+- [ ] cover it with an end-to-end test\n";
+
+/// The scripted planner the seeding tests drive: it writes [`CHECKLIST_PLAN`]
+/// and reports the same steps on ITS OWN list with `todo_write`, which is what
+/// the planner prompt asks a real planner to do.
+fn scripted_planner_with_todos() -> SpawnBehaviour {
+    SpawnBehaviour::WritePlanThenDoneWithTodos {
+        body: CHECKLIST_PLAN,
+        todos: PLANNER_TODOS,
+    }
+}
+
+/// Like [`make_planner_actor`] but retains the session's event receiver, so a
+/// test can read the notifications the actor enqueued for the client — the same
+/// FIFO the session's event loop forwards to the pager.
+async fn make_planner_actor_with_events(
+    coordinator_tx: Option<tokio::sync::mpsc::UnboundedSender<SubagentEvent>>,
+    planner_enabled: bool,
+) -> (
+    StdArc<SessionActor>,
+    TempDir,
+    tokio::sync::mpsc::UnboundedReceiver<SessionEvent>,
+) {
+    let tmp = TempDir::new().expect("tempdir");
+    let (gateway_tx, _gateway_rx) =
+        tokio::sync::mpsc::unbounded_channel::<xai_acp_lib::AcpClientMessage>();
+    let (persistence_tx, _persistence_rx) =
+        tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
+    let (mut actor, event_rx) =
+        create_test_actor_ex(0, 256_000, 85, gateway_tx, persistence_tx).await;
+    actor.events = crate::session::events::EventTracker::new(tmp.path());
+    actor.goal_enabled = true;
+    set_goal_harness_for_tests(&actor);
+    actor.goal_planner_enabled = planner_enabled;
+    actor.goal_tracker = Arc::new(parking_lot::Mutex::new(
+        crate::session::goal_tracker::GoalTracker::new(tmp.path().to_path_buf()),
+    ));
+    if let Some(tx) = coordinator_tx {
+        actor.tool_context.subagent_event_tx = Some(tx);
+    }
+    (StdArc::new(actor), tmp, event_rx)
+}
+
+/// Every `Plan` session update the actor enqueued for the client, in order — the
+/// view the pager renders the todo list from.
+fn plan_updates(
+    rx: &mut tokio::sync::mpsc::UnboundedReceiver<SessionEvent>,
+) -> Vec<Vec<acp::PlanEntry>> {
+    let mut plans = Vec::new();
+    while let Ok(event) = rx.try_recv() {
+        let SessionEvent::Notification(SessionNotification::Acp(n)) = event else {
+            continue;
+        };
+        if let acp::SessionUpdate::Plan(plan) = n.update {
+            plans.push(plan.entries);
+        }
+    }
+    plans
+}
+
+/// A seeded item is a todo like any other: the seed dispatches through the
+/// session's own `todo_write`, so the same `Plan` session update a
+/// model-written list produces is enqueued for the client, carrying the items
+/// the planner listed.
+#[tokio::test(flavor = "current_thread")]
+#[serial]
+async fn the_seed_reaches_the_client_as_a_plan_update() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (tx, _c) = spawn_planner_coordinator(scripted_planner_with_todos());
+            let (actor, _tmp, mut event_rx) = make_planner_actor_with_events(Some(tx), true).await;
+            arm_todo_writes(&actor).await;
+
+            let _ = actor.setup_goal("ship the exporter", None).await;
+
+            let plans = plan_updates(&mut event_rx);
+            let entries = plans
+                .last()
+                .expect("the seed must enqueue a client-visible Plan update");
+            assert_eq!(
+                entries
+                    .iter()
+                    .map(|e| e.content.as_str())
+                    .collect::<Vec<_>>(),
+                PLANNER_TODOS.to_vec(),
+                "the Plan update carries the planner's items",
+            );
+            assert!(
+                entries
+                    .iter()
+                    .all(|e| matches!(e.status, acp::PlanEntryStatus::Pending)),
+                "seeded items are pending: {entries:?}",
+            );
+        })
+        .await;
+}
+
+/// The gate for criterion 2's "the run's tool calls include it": the real spawn
+/// path hands the planner a prompt that tells it to list the plan's work with
+/// the session's own todo tool — the instruction the whole feature rests on,
+/// asserted on the prompt the coordinator was actually given rather than on a
+/// template rendered in isolation.
+#[tokio::test(flavor = "current_thread")]
+#[serial]
+async fn the_planner_is_spawned_with_the_todo_instruction() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (tx, _count, capture) =
+                spawn_planner_coordinator_capturing(scripted_planner_with_todos());
+            let (actor, _tmp) = make_planner_actor(Some(tx), true).await;
+            arm_todo_writes(&actor).await;
+
+            let _ = actor.setup_goal("ship the exporter", None).await;
+
+            let prompts = capture.prompt.lock().unwrap().clone();
+            assert_eq!(prompts.len(), 1, "one planner spawn for one goal");
+            let prompt = &prompts[0];
+            assert!(
+                prompt.contains("## Todo list — REQUIRED"),
+                "the planner's own prompt must carry the todo-list section",
+            );
+            assert!(
+                prompt.contains("`todo_write`"),
+                "and name the session's todo tool — the session advertises it as \
+                 `todo_write`, so `{{TODO_TOOL}}` must have resolved through the live \
+                 bridge: {prompt}",
+            );
+            assert!(
+                prompt.contains("one item per `## Task checklist` line"),
+                "one item per plan step, in order",
+            );
+            assert!(
+                !prompt.contains("{TODO_TOOL}"),
+                "an unresolved placeholder would name no tool at all",
+            );
+        })
+        .await;
+}
+
+/// The shipped reader that carries a planner child's items back
+/// ([`crate::agent::subagent::session_todo_contents`]), driven against a real
+/// bound session whose list was written through the real tool — and against an
+/// id that was never bound, which is the proxy-mode / no-child case.
+#[tokio::test(flavor = "current_thread")]
+#[serial]
+async fn the_child_todo_reader_reads_a_bound_sessions_live_list() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (actor, _tmp) = make_planner_actor(None, false).await;
+            arm_todo_writes(&actor).await;
+            write_existing_todo(&actor, "t1", "the user's own item").await;
+            write_existing_todo(&actor, "t2", "a second item").await;
+
+            let read = crate::agent::subagent::session_todo_contents(
+                &actor.workspace_ops,
+                &actor.session_id_string(),
+            )
+            .await;
+            assert_eq!(
+                read,
+                vec!["the user's own item".to_string(), "a second item".to_string()],
+                "the reader must return the session's own live items, in order",
+            );
+            assert!(
+                crate::agent::subagent::session_todo_contents(&actor.workspace_ops, "never-bound")
+                    .await
+                    .is_empty(),
+                "an unbound session reads empty, which is what the merge treats as \
+                 `nothing to carry over`",
+            );
+        })
+        .await;
+}
+
+/// The gate for the objective's first two criteria: one `setup_goal` call —
+/// with no model turn of its own — leaves the session's LIVE todo list carrying
+/// the planner's items, each a fresh pending harness-minted item.
+#[tokio::test(flavor = "current_thread")]
+#[serial]
+async fn setup_goal_seeds_the_planners_own_items_without_a_model_turn() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (tx, _c) = spawn_planner_coordinator(scripted_planner_with_todos());
+            let (actor, _tmp) = make_planner_actor(Some(tx), true).await;
+            arm_todo_writes(&actor).await;
+
+            // The whole point: `setup_goal` returns the reminder, so no model
+            // turn has run — and the list is already populated when it does.
+            let reminder = actor.setup_goal("ship the exporter", None).await;
+
+            let snap = actor.goal_tracker.lock().snapshot().cloned().unwrap();
+            assert!(
+                snap.plan_file.is_some(),
+                "the scripted planner wrote a plan, so the outcome must be Planned",
+            );
+            assert!(snap.plan_todos_seeded, "the publish path must record the seed");
+
+            let todos = live_todos(&actor).await;
+            // Printed so `--nocapture` captures the observed list: the
+            // assertions are the gate, this is the evidence a reader audits.
+            println!(
+                "=== session todo list after setup_goal, from the planner's own items ===\n\
+                 {todos:?}\n"
+            );
+            assert_eq!(
+                todos
+                    .iter()
+                    .map(|(_id, content, _status)| content.as_str())
+                    .collect::<Vec<_>>(),
+                PLANNER_TODOS.to_vec(),
+                "the planner's items, in its own order: {todos:?}",
+            );
+            for (id, _content, status) in &todos {
+                assert!(
+                    id.starts_with("plan-"),
+                    "the harness minted this id, so the main agent did not write it: {id}",
+                );
+                assert_eq!(*status, crate::tools::todo::TodoStatus::Pending);
+            }
+            assert!(
+                reminder.contains("Plan: "),
+                "the reminder still points at the plan:\n{reminder}",
+            );
+        })
+        .await;
+}
+
+/// The items come from the planner's own `todo_write`, not from the harness
+/// reading the plan: the plan body names a different step, and only the child's
+/// items land.
+#[tokio::test(flavor = "current_thread")]
+#[serial]
+async fn the_planner_childs_own_items_are_the_source_not_the_plan_prose() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (tx, _c) = spawn_planner_coordinator(
+                SpawnBehaviour::WritePlanThenDoneWithTodos {
+                    body: b"# Plan\n\n## Task checklist\n- [ ] a step the plan body names\n",
+                    todos: &["the child's first step", "the child's second step"],
+                },
+            );
+            let (actor, _tmp) = make_planner_actor(Some(tx), true).await;
+            arm_todo_writes(&actor).await;
+
+            let _ = actor.setup_goal("ship it", None).await;
+
+            let landed = live_todo_contents(&actor).await;
+            println!(
+                "=== plan prose names `a step the plan body names`; session list ===\n{landed:?}\n"
+            );
+            assert_eq!(
+                landed,
+                vec![
+                    "the child's first step".to_string(),
+                    "the child's second step".to_string(),
+                ],
+                "the planner's own list is what lands on the session's list",
+            );
+        })
+        .await;
+}
+
+/// The negative half of the same gate: a planning run that made no todo call
+/// leaves the list alone. The harness must not mine the plan prose for items —
+/// an unfollowed instruction is not silently replaced by machinery.
+#[tokio::test(flavor = "current_thread")]
+#[serial]
+async fn a_planner_that_named_no_items_leaves_the_list_untouched() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            // Writes a plan with a full checklist, but reports no todo list:
+            // the planner never called `todo_write`.
+            let (tx, _c) =
+                spawn_planner_coordinator(SpawnBehaviour::WritePlanThenDone { body: CHECKLIST_PLAN });
+            let (actor, _tmp) = make_planner_actor(Some(tx), true).await;
+            arm_todo_writes(&actor).await;
+
+            let _ = actor.setup_goal("ship the exporter", None).await;
+
+            let snap = actor.goal_tracker.lock().snapshot().cloned().unwrap();
+            assert!(snap.plan_file.is_some(), "the plan was still published");
+            assert!(
+                !snap.plan_todos_seeded,
+                "nothing was seeded, so the goal must not claim it was",
+            );
+            println!(
+                "=== plan published, but the planner listed no items; session list ===\n{:?}\n",
+                live_todos(&actor).await
+            );
+            assert!(
+                live_todos(&actor).await.is_empty(),
+                "no todo call means no items — the plan prose is not mined for them",
+            );
+        })
+        .await;
+}
+
+/// Seeding is append-only and once per goal: a pre-existing item keeps its id,
+/// text and status, and re-running the seed over the same items adds nothing.
+#[tokio::test(flavor = "current_thread")]
+#[serial]
+async fn goal_seeding_is_append_only_and_idempotent() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (tx, _c) = spawn_planner_coordinator(scripted_planner_with_todos());
+            let (actor, _tmp) = make_planner_actor(Some(tx), true).await;
+            arm_todo_writes(&actor).await;
+            write_existing_todo(&actor, "t1", "the user's own item").await;
+            // Printed so `--nocapture` captures the before/after lists: the
+            // assertions are the gate, this is the evidence a reader audits.
+            println!(
+                "=== todo list BEFORE planning ===\n{:?}\n",
+                live_todos(&actor).await
+            );
+
+            let _ = actor.setup_goal("ship the exporter", None).await;
+            let after_publish = live_todos(&actor).await;
+            println!("=== todo list AFTER planning ===\n{after_publish:?}\n");
+
+            let (seed_id, seed_content, seed_status) = after_publish
+                .iter()
+                .find(|(id, _, _)| id == "t1")
+                .expect("the pre-existing item must survive seeding")
+                .clone();
+            assert_eq!(seed_id, "t1");
+            assert_eq!(seed_content, "the user's own item");
+            assert_eq!(
+                seed_status,
+                crate::tools::todo::TodoStatus::InProgress,
+                "seeding must not touch a status it did not write",
+            );
+            assert_eq!(
+                after_publish
+                    .iter()
+                    .filter(|(id, _, _)| id != "t1")
+                    .map(|(id, _, _)| id.as_str())
+                    .count(),
+                PLANNER_TODOS.len(),
+                "one new item per item the planner listed: {after_publish:?}",
+            );
+            let seeded_ids: Vec<&str> = after_publish
+                .iter()
+                .filter(|(id, _, _)| id != "t1")
+                .map(|(id, _, _)| id.as_str())
+                .collect();
+            assert!(
+                seeded_ids.iter().all(|id| id.starts_with("plan-")),
+                "seeded ids are harness-minted, so none collides with an existing one: \
+                 {seeded_ids:?}",
+            );
+
+            // A resume/retry reaches the planner through this entry point. The
+            // plan is already published, so it is a no-op — and even a direct
+            // re-run of the seed must be too.
+            actor.maybe_run_goal_planner("ship the exporter").await;
+            let items: Vec<String> = PLANNER_TODOS.iter().map(|s| (*s).to_string()).collect();
+            actor.apply_planner_todos("g-test", &items).await;
+
+            let second = live_todos(&actor).await;
+            println!("=== todo list AFTER the retry ===\n{second:?}\n");
+            assert_eq!(
+                second.iter().map(|(id, _, _)| id.clone()).collect::<Vec<_>>(),
+                after_publish
+                    .iter()
+                    .map(|(id, _, _)| id.clone())
+                    .collect::<Vec<_>>(),
+                "a retry must add no new item ids: {second:?}",
+            );
+            assert_eq!(
+                live_todo_contents(&actor).await,
+                after_publish
+                    .iter()
+                    .map(|(_, content, _)| content.clone())
+                    .collect::<Vec<_>>(),
+                "and must not duplicate contents",
+            );
+        })
+        .await;
+}
+
+/// A planner that fails closed writes no plan, so there is nothing to seed and
+/// the list is exactly as it was.
+#[tokio::test(flavor = "current_thread")]
+#[serial]
+async fn a_failed_planner_leaves_the_todo_list_untouched() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (tx, _c) = spawn_planner_coordinator(SpawnBehaviour::NoWriteThenDone);
+            let (actor, _tmp) = make_planner_actor(Some(tx), true).await;
+            arm_todo_writes(&actor).await;
+            write_existing_todo(&actor, "t1", "the user's own item").await;
+
+            let _ = actor.setup_goal("ship the exporter", None).await;
+
+            let snap = actor.goal_tracker.lock().snapshot().cloned().unwrap();
+            assert!(snap.plan_file.is_none(), "fail-closed publishes no plan");
+            assert!(
+                !snap.plan_todos_seeded,
+                "nothing was seeded, so the goal must not claim it was",
+            );
+            assert_eq!(
+                live_todos(&actor).await,
+                vec![(
+                    "t1".to_string(),
+                    "the user's own item".to_string(),
+                    crate::tools::todo::TodoStatus::InProgress,
+                )],
+                "the list must be exactly as it was",
+            );
+        })
+        .await;
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -1418,8 +1942,9 @@ async fn lifecycle_resume_with_plan_does_not_re_fire_planner() {
 
 /// End-to-end gate (enabled side): when the planner is on and writes a
 /// plan, `setup_goal`'s reminder folds in the plan-aware block carrying
-/// the actual `plan_path()` pointer plus the seed-todos / `## Deviations`
-/// / verifier-threading instructions, with the legacy discipline intact.
+/// the actual `plan_path()` pointer, the "already on your list" statement
+/// (NOT a manual seed directive), the `## Deviations` instruction, and the
+/// legacy discipline intact.
 #[tokio::test(flavor = "current_thread")]
 #[serial]
 async fn setup_goal_reminder_is_plan_aware_when_planner_enabled() {
@@ -1433,6 +1958,10 @@ async fn setup_goal_reminder_is_plan_aware_when_planner_enabled() {
             let plan_path = actor.goal_tracker.lock().plan_path();
 
             let reminder = actor.setup_goal("ship it", None).await;
+            // Printed so `cargo test -- --nocapture` captures the exact reminder
+            // text for review: the assertions below are the gate, this is the
+            // artifact a reader (or the goal's verification) reads.
+            println!("=== plan-aware setup_goal reminder ===\n{reminder}\n=== end ===\n");
 
             let snap = actor.goal_tracker.lock().snapshot().cloned().unwrap();
             assert_eq!(snap.plan_file.as_deref(), Some(plan_path.as_path()));
@@ -1442,8 +1971,13 @@ async fn setup_goal_reminder_is_plan_aware_when_planner_enabled() {
                 "reminder must carry the plan pointer line `{expected}`:\n{reminder}"
             );
             assert!(
-                reminder.contains(PLAN_SEED_TODOS_PHRASE),
-                "reminder must seed todos from the plan:\n{reminder}"
+                !reminder.contains(PLAN_SEED_TODOS_PHRASE),
+                "the manual seed-todos directive must be gone — the harness \
+                 populates the list itself:\n{reminder}"
+            );
+            assert!(
+                reminder.contains(PLAN_TODOS_ALREADY_SEEDED_PHRASE),
+                "the reminder must say the plan's steps are already on the list:\n{reminder}"
             );
             assert!(
                 reminder.contains("append a bullet to the plan's single"),
@@ -1471,6 +2005,7 @@ async fn setup_goal_reminder_is_no_plan_when_planner_disabled() {
             let (actor, _tmp) = make_planner_actor(None, false).await;
 
             let reminder = actor.setup_goal("ship it", None).await;
+            println!("=== no-plan setup_goal reminder ===\n{reminder}\n=== end ===\n");
 
             let snap = actor.goal_tracker.lock().snapshot().cloned().unwrap();
             assert!(snap.plan_file.is_none(), "planner off writes no plan");
@@ -1522,6 +2057,7 @@ async fn goal_resume_reminder_is_plan_aware_when_planner_enabled() {
             let GoalResumeOutcome::Inference { reminder, .. } = actor.resume_goal().await else {
                 panic!("resumed paused goal must flow through to inference");
             };
+            println!("=== plan-aware /goal resume reminder ===\n{reminder}\n=== end ===\n");
 
             assert!(
                 reminder.contains("Continue working now."),
@@ -1533,8 +2069,12 @@ async fn goal_resume_reminder_is_plan_aware_when_planner_enabled() {
                 "resume reminder must carry the plan pointer `{expected}`:\n{reminder}"
             );
             assert!(
-                reminder.contains(PLAN_SEED_TODOS_PHRASE),
-                "resume reminder must be plan-aware:\n{reminder}"
+                !reminder.contains(PLAN_SEED_TODOS_PHRASE),
+                "resume reminder must not re-issue the manual seed directive:\n{reminder}"
+            );
+            assert!(
+                reminder.contains(PLAN_TODOS_ALREADY_SEEDED_PHRASE),
+                "resume reminder must say the plan's steps are already on the list:\n{reminder}"
             );
         })
         .await;

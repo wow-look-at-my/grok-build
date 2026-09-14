@@ -428,6 +428,14 @@ pub struct SubagentResult {
     /// `get_command_or_subagent_output`), so the tool returns a `task_id` notice
     /// instead of a completion. Never set for natively backgrounded subagents.
     pub backgrounded: bool,
+    /// Item contents of the child's OWN todo list when it finished, in order.
+    ///
+    /// Read from the child's live `State<TodoState>` at completion, before its
+    /// session is torn down; empty for a child that kept no list. A `/goal`
+    /// planner builds its list with `todo_write` while it works, and this is
+    /// the channel that carries those items back to the session that spawned
+    /// it, so the parent can merge them into its own list.
+    pub todos: Vec<String>,
 }
 
 impl Default for SubagentResult {
@@ -448,6 +456,7 @@ impl Default for SubagentResult {
             output_usage_incomplete: false,
             worktree_path: None,
             backgrounded: false,
+            todos: Vec::new(),
         }
     }
 }
