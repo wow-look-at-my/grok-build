@@ -47,18 +47,9 @@ jobs:
 
       # - uses: wow-look-at-my/actions@yaml-comment-block#latest  (off until slopfix runs on ubuntu-22.04: its APE trips the runner's Mono binfmt handler on the MZ magic)
 
-      - name: Install protoc (pinned v29.3)
-        run: |
-          # bin/protoc is the source of truth for this artifact and its sha256. Update both together.
-          curl -fsSL -o "$RUNNER_TEMP/protoc.zip" \
-            https://github.com/protocolbuffers/protobuf/releases/download/v29.3/protoc-29.3-linux-x86_64.zip
-          echo "3e866620c5be27664f3d2fa2d656b5f3e09b5152b42f1bedbf427b333e90021a  $RUNNER_TEMP/protoc.zip" | sha256sum -c -
-          unzip -q -o "$RUNNER_TEMP/protoc.zip" -d "$RUNNER_TEMP/protoc"
-          echo "PROTOC=$RUNNER_TEMP/protoc/bin/protoc" >> "$GITHUB_ENV"
-          "$RUNNER_TEMP/protoc/bin/protoc" --version
+      - uses: ./.github/actions/setup-protoc
 
-      - name: Install Rust toolchain (pinned by rust-toolchain.toml)
-        run: rustup show
+      - uses: ./.github/actions/setup-cargo-timings
 
       # rg_path() ends at a bare "rg" on PATH, so without this the grep and glob tests fail on empty output.
       - name: Install ripgrep
@@ -113,6 +104,10 @@ jobs:
           cargo nextest run --locked --workspace --profile ci
           "$PAGER_BINARY" --version
 
+      - uses: ./.github/actions/upload-cargo-timings
+        with:
+          name: cargo-timings-build-test
+
   # These assert on what a virtual terminal actually shows, which a unit test over the width function cannot stand in for.
   pty-e2e:
     name: Test (PTY end-to-end)
@@ -127,18 +122,9 @@ jobs:
       - name: Report disk before build
         run: df -h /
 
-      - name: Install protoc (pinned v29.3)
-        run: |
-          # bin/protoc is the source of truth for this artifact and its sha256. Update both together.
-          curl -fsSL -o "$RUNNER_TEMP/protoc.zip" \
-            https://github.com/protocolbuffers/protobuf/releases/download/v29.3/protoc-29.3-linux-x86_64.zip
-          echo "3e866620c5be27664f3d2fa2d656b5f3e09b5152b42f1bedbf427b333e90021a  $RUNNER_TEMP/protoc.zip" | sha256sum -c -
-          unzip -q -o "$RUNNER_TEMP/protoc.zip" -d "$RUNNER_TEMP/protoc"
-          echo "PROTOC=$RUNNER_TEMP/protoc/bin/protoc" >> "$GITHUB_ENV"
-          "$RUNNER_TEMP/protoc/bin/protoc" --version
+      - uses: ./.github/actions/setup-protoc
 
-      - name: Install Rust toolchain (pinned by rust-toolchain.toml)
-        run: rustup show
+      - uses: ./.github/actions/setup-cargo-timings
 
       - name: Install cargo-nextest
         run: |
@@ -168,6 +154,10 @@ jobs:
             --test pty_e2e_minimal \
             --run-ignored all --test-threads 4
 
+      - uses: ./.github/actions/upload-cargo-timings
+        with:
+          name: cargo-timings-pty-e2e
+
   build-release:
     name: Build release binary (linux/amd64)
     # Depends on publish-create so the release number buildhost assigned there
@@ -180,18 +170,9 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - name: Install protoc (pinned v29.3)
-        run: |
-          # bin/protoc is the source of truth for this artifact and its sha256. Update both together.
-          curl -fsSL -o "$RUNNER_TEMP/protoc.zip" \
-            https://github.com/protocolbuffers/protobuf/releases/download/v29.3/protoc-29.3-linux-x86_64.zip
-          echo "3e866620c5be27664f3d2fa2d656b5f3e09b5152b42f1bedbf427b333e90021a  $RUNNER_TEMP/protoc.zip" | sha256sum -c -
-          unzip -q -o "$RUNNER_TEMP/protoc.zip" -d "$RUNNER_TEMP/protoc"
-          echo "PROTOC=$RUNNER_TEMP/protoc/bin/protoc" >> "$GITHUB_ENV"
-          "$RUNNER_TEMP/protoc/bin/protoc" --version
+      - uses: ./.github/actions/setup-protoc
 
-      - name: Install Rust toolchain (pinned by rust-toolchain.toml)
-        run: rustup show
+      - uses: ./.github/actions/setup-cargo-timings
 
       # .cargo/config.toml links x86_64-unknown-linux-gnu with mold.
       - name: Install mold
@@ -237,6 +218,10 @@ jobs:
           fi
           echo "PASS: max GLIBC $max_glibc <= 2.35, runs on Ubuntu 22.04"
 
+      - uses: ./.github/actions/upload-cargo-timings
+        with:
+          name: cargo-timings-build-release
+
       - name: Stage artifact
         run: |
           mkdir -p dist
@@ -258,18 +243,10 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - name: Install protoc (pinned v29.3)
-        run: |
-          # protoc runs on the HOST, so this cross build takes the linux one. bin/protoc pins the same artifact and sha256.
-          curl -fsSL -o "$RUNNER_TEMP/protoc.zip" \
-            https://github.com/protocolbuffers/protobuf/releases/download/v29.3/protoc-29.3-linux-x86_64.zip
-          echo "3e866620c5be27664f3d2fa2d656b5f3e09b5152b42f1bedbf427b333e90021a  $RUNNER_TEMP/protoc.zip" | sha256sum -c -
-          unzip -q -o "$RUNNER_TEMP/protoc.zip" -d "$RUNNER_TEMP/protoc"
-          echo "PROTOC=$RUNNER_TEMP/protoc/bin/protoc" >> "$GITHUB_ENV"
-          "$RUNNER_TEMP/protoc/bin/protoc" --version
+      # protoc runs on the host for this cross build; the shared action installs the Linux binary.
+      - uses: ./.github/actions/setup-protoc
 
-      - name: Install Rust toolchain (pinned by rust-toolchain.toml)
-        run: rustup show
+      - uses: ./.github/actions/setup-cargo-timings
 
       - name: Add the darwin target
         run: rustup target add aarch64-apple-darwin
@@ -324,6 +301,10 @@ jobs:
           # binary reports the same version the site lists, like the linux one.
           GROK_VERSION: ${{ needs.publish-create.outputs.version }}
         run: cargo build --locked --release --target aarch64-apple-darwin -p xai-grok-pager-bin
+
+      - uses: ./.github/actions/upload-cargo-timings
+        with:
+          name: cargo-timings-build-darwin-objects
 
       - name: Bundle the recorded link
         run: ci/darwin-bundle.sh "$GROK_DARWIN_LINK_BUNDLE" dist/darwin-link.tar

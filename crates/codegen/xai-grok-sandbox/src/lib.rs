@@ -34,6 +34,7 @@ mod hook_write_deny;
 pub mod jail;
 mod logging;
 mod network_policy;
+pub mod package_cache;
 mod paths;
 mod profiles;
 mod types;
@@ -69,6 +70,7 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
+pub use jail::is_jailed;
 static SANDBOX: OnceLock<GlobalSandboxState> = OnceLock::new();
 static CONFIGURED_PROFILE: OnceLock<String> = OnceLock::new();
 static AUTO_ALLOW_BASH: AtomicBool = AtomicBool::new(false);
@@ -121,6 +123,43 @@ pub fn requested_confinement_profile() -> Option<&'static str> {
 fn profile_confines(name: &str) -> bool {
     name.parse::<ProfileName>()
         .is_ok_and(|profile| profile != ProfileName::Off)
+}
+
+/// Whether this process is confined by a profile that restricts **writes** to
+/// the workspace, `$GROK_HOME` and the temp dirs (`workspace`, `read-only`,
+/// `strict`, the `pathbox` jail, or a custom profile that extends one of them).
+///
+/// The child-process spawn paths read this to decide whether a package runner
+/// (`uvx`, `npx`, …) needs its default cache locations redirected somewhere the
+/// profile can write: those tools default into `$HOME` (e.g. `~/.cache/uv`,
+/// `~/.npm`), which no built-in profile grants, so the runner dies at startup
+/// with EPERM and the MCP server never completes its handshake.
+///
+/// This is deliberately the *write* question, not "is a sandbox active". The
+/// `devbox` profile grants writes nearly everywhere (including `$HOME`), so its
+/// runners need no redirection and get none.
+pub fn confines_home_writes() -> bool {
+    if is_jailed() {
+        return true;
+    }
+    configured_profile_name().is_some_and(profile_confines_home_writes)
+}
+
+/// Whether a profile name restricts writes away from un-remapped `$HOME`.
+///
+/// `devbox` grants writes to every top-level directory including `$HOME`, so it
+/// is the one confining-style profile that does not need cache redirection.
+/// `off`/`none` confine nothing. Anything unrecognized is treated as confining
+/// (fail closed): a custom profile inherits the write set of the built-in base
+/// it extends, and the built-in bases other than `devbox` all exclude `$HOME`.
+fn profile_confines_home_writes(name: &str) -> bool {
+    match name.parse::<ProfileName>() {
+        Ok(ProfileName::Off) | Ok(ProfileName::Devbox) => false,
+        Ok(_) => true,
+        // An unknown name is a custom profile: it extends a built-in base and
+        // therefore inherits that base's write set.
+        Err(_) => true,
+    }
 }
 /// Whether the sandbox was successfully applied to this process.
 pub fn is_active() -> bool {
@@ -823,6 +862,34 @@ mod tests {
         assert!(super::profile_confines("readonly"));
         assert!(super::profile_confines("pathbox"));
         assert!(super::profile_confines("my-custom-profile"));
+    }
+
+    /// The write-confining classification is what decides whether a package
+    /// runner's caches get redirected. `devbox` grants writes to `$HOME`, so its
+    /// runners must be left alone; `off` confines nothing; every other built-in
+    /// profile (and any custom profile, which extends one) writes only to the
+    /// workspace, `$GROK_HOME` and temp.
+    #[test]
+    fn home_write_confinement_matches_the_profile_write_sets() {
+        for confining in [
+            "workspace",
+            "read-only",
+            "readonly",
+            "strict",
+            "pathbox",
+            "a-custom-profile",
+        ] {
+            assert!(
+                super::profile_confines_home_writes(confining),
+                "{confining} does not write to $HOME and must confine it"
+            );
+        }
+        for open in ["off", "none", "devbox"] {
+            assert!(
+                !super::profile_confines_home_writes(open),
+                "{open} writes to $HOME and must not confine it"
+            );
+        }
     }
     #[test]
     fn known_launch_guard_is_linux_only() {

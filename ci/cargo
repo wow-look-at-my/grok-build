@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# Run Cargo compilation commands with the stable --timings flag.
+#
+# CI prepends this wrapper to PATH so direct Cargo invocations and tools that
+# invoke Cargo through PATH collect the same diagnostics. Non-compilation
+# commands are passed through because --timings is not valid for them.
+set -euo pipefail
+
+: "${CARGO_TIMINGS_REAL:?CARGO_TIMINGS_REAL must name the real cargo executable}"
+
+if [[ "$(realpath "$CARGO_TIMINGS_REAL")" == "$(realpath "${BASH_SOURCE[0]}")" ]]; then
+  echo "ci/cargo: CARGO_TIMINGS_REAL points at this wrapper; it must name the real cargo" >&2
+  exit 1
+fi
+
+subcommand_index=-1
+for ((i = 1; i <= $#; i++)); do
+  arg="${!i}"
+  case "$arg" in
+    build|check|test|bench|run|clippy|doc)
+      subcommand_index=$i
+      break
+      ;;
+  esac
+done
+
+if (( subcommand_index < 0 )); then
+  exec "$CARGO_TIMINGS_REAL" "$@"
+fi
+
+for arg in "$@"; do
+  if [[ "$arg" == "--timings" || "$arg" == --timings=* ]]; then
+    exec "$CARGO_TIMINGS_REAL" "$@"
+  fi
+done
+
+args=()
+for ((i = 1; i <= $#; i++)); do
+  if (( i == subcommand_index + 1 )); then
+    args+=(--timings)
+  fi
+  args+=("${!i}")
+done
+
+exec "$CARGO_TIMINGS_REAL" "${args[@]}"
