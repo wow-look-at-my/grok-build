@@ -164,9 +164,9 @@ fn add_only_todo_args(contents: &[String], urgent: bool) -> serde_json::Value {
 /// [`PLAN_SEED_ID_PREFIX`]).
 const CAPTURE_ID_PREFIX: &str = "capture";
 
-/// Item id prefix the goal-harness plan seed mints
-/// ([`SessionActor::seed_goal_todos_from_plan`]). Distinct from the `/todo`
-/// capture's so the list says where an item came from.
+/// Item id prefix the goal harness mints for the items it copies off the
+/// planner's own list ([`SessionActor::apply_planner_todos`]). Distinct from
+/// the `/todo` capture's so the list says where an item came from.
 pub(super) const PLAN_SEED_ID_PREFIX: &str = "plan";
 
 /// [`add_only_todo_args`] with an explicit id prefix, so callers that append
@@ -824,10 +824,10 @@ impl SessionActor {
     /// leaves everything else alone, so canonical keys arrive as themselves
     /// under any rename.
     ///
-    /// `pub(super)`: the goal-harness plan seed
-    /// ([`SessionActor::seed_goal_todos_from_plan`]) appends through this same
-    /// path, so a seeded item reaches the persisted state and the client's
-    /// `Plan` view exactly as a model-written `todo_write` does.
+    /// `pub(super)`: the goal harness
+    /// ([`SessionActor::apply_planner_todos`]) appends through this same
+    /// path, so an item it puts on the list reaches the persisted state and the
+    /// client's `Plan` view exactly as a model-written `todo_write` does.
     pub(super) async fn append_capture_todos(
         &self,
         todo_tool: &str,

@@ -564,6 +564,12 @@ async fn setup_goal_seeds_the_planners_own_items_without_a_model_turn() {
             assert!(snap.plan_todos_seeded, "the publish path must record the seed");
 
             let todos = live_todos(&actor).await;
+            // Printed so `--nocapture` captures the observed list: the
+            // assertions are the gate, this is the evidence a reader audits.
+            println!(
+                "=== session todo list after setup_goal, from the planner's own items ===\n\
+                 {todos:?}\n"
+            );
             assert_eq!(
                 todos
                     .iter()
@@ -607,8 +613,12 @@ async fn the_planner_childs_own_items_are_the_source_not_the_plan_prose() {
 
             let _ = actor.setup_goal("ship it", None).await;
 
+            let landed = live_todo_contents(&actor).await;
+            println!(
+                "=== plan prose names `a step the plan body names`; session list ===\n{landed:?}\n"
+            );
             assert_eq!(
-                live_todo_contents(&actor).await,
+                landed,
                 vec![
                     "the child's first step".to_string(),
                     "the child's second step".to_string(),
@@ -642,6 +652,10 @@ async fn a_planner_that_named_no_items_leaves_the_list_untouched() {
             assert!(
                 !snap.plan_todos_seeded,
                 "nothing was seeded, so the goal must not claim it was",
+            );
+            println!(
+                "=== plan published, but the planner listed no items; session list ===\n{:?}\n",
+                live_todos(&actor).await
             );
             assert!(
                 live_todos(&actor).await.is_empty(),
