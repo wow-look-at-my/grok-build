@@ -1277,9 +1277,7 @@ async fn plain_queue_during_goal_turn_is_harvested_like_any_other_turn() {
             assert!(!cancel, "a plain enqueue never cancels the running turn");
 
             assert!(
-                actor
-                    .harvest_queued_prompts_into_interjections(false)
-                    .await,
+                actor.harvest_queued_prompts_into_interjections(false).await,
                 "the plain row must be harvestable during an active goal, \
                  exactly as it would be outside goal mode"
             );

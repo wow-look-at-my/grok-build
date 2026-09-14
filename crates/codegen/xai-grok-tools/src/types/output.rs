@@ -649,6 +649,7 @@ pub enum ToolOutput {
     UpdateGoal(crate::implementations::grok_build::update_goal::UpdateGoalOutput),
     Ci(crate::implementations::grok_build::ci::CiOutput),
     Workflow(crate::implementations::grok_build::workflow::WorkflowToolOutput),
+    SendMessage(crate::implementations::grok_build::send_message::SendMessageOutput),
     /// Dynamic output for runtime-registered tools (MCP, test tools, etc.)
     Dynamic(DynamicOutput),
     /// Generic text output for tools that produce simple formatted text
@@ -1003,6 +1004,7 @@ impl ToolOutput {
                 Err(_) => o.summary.clone(),
             },
             ToolOutput::Workflow(o) => o.message.clone(),
+            ToolOutput::SendMessage(o) => o.summary.clone(),
             ToolOutput::Dynamic(v) => serde_json::to_string_pretty(&v.value).unwrap_or_default(),
             ToolOutput::Text(text) => text.text.clone(),
             ToolOutput::ImageGen(m) => m.prompt_text("Image generated"),

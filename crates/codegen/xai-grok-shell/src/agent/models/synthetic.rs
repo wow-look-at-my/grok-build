@@ -166,7 +166,11 @@ mod tests {
             result.reasoning_efforts.iter().map(|o| o.value).collect();
         assert_eq!(
             values,
-            vec![ReasoningEffort::None, ReasoningEffort::High, ReasoningEffort::Max]
+            vec![
+                ReasoningEffort::None,
+                ReasoningEffort::High,
+                ReasoningEffort::Max
+            ]
         );
     }
 

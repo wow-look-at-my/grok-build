@@ -284,6 +284,7 @@ fn default_grok_build_toolset() -> ToolServerConfig {
             (&search_tool::SearchTool).into(),
             (&use_tool::UseTool).into(),
             (&grok_build::UpdateGoalTool).into(),
+            (&grok_build::SendMessageTool).into(),
             (&grok_build::CiTool).into(),
             (&grok_build::WorkflowTool).into(),
         ],
@@ -308,6 +309,7 @@ fn grok_build_concise_toolset() -> ToolServerConfig {
             (&grok_build::SchedulerListTool).into(),
             (&grok_build::MonitorTool).into(),
             (&grok_build::UpdateGoalTool).into(),
+            (&grok_build::SendMessageTool).into(),
             (&grok_build::CiTool).into(),
             (&grok_build::WorkflowTool).into(),
         ],
@@ -341,6 +343,7 @@ pub fn grok_build_hashline_toolset(
         (&search_tool::SearchTool).into(),
         (&use_tool::UseTool).into(),
         (&grok_build::UpdateGoalTool).into(),
+        (&grok_build::SendMessageTool).into(),
         (&grok_build::CiTool).into(),
         (&grok_build::WorkflowTool).into(),
     ]);
@@ -368,7 +371,10 @@ fn codex_toolset() -> ToolServerConfig {
 }
 /// Read-only toolset for the **explore** subagent.
 ///
-/// Genuinely read-only: `read_file` (Read), `list_dir` (Glob), `grep` (Grep).
+/// Genuinely read-only over the workspace: `read_file` (Read), `list_dir`
+/// (Glob), `grep` (Grep). `send_message` is here too — it writes nothing, and
+/// without it an explorer cannot answer the session that spawned it until its
+/// run ends.
 /// `run_terminal_command` (Bash) is intentionally omitted so exploration cannot
 /// mutate the workspace — the read-only guarantee is enforced by the toolset,
 /// not merely by the prompt. With no `BashTool`, the background-task helpers
@@ -379,6 +385,7 @@ fn explore_toolset() -> ToolServerConfig {
             (&grok_build::ReadFileTool).into(),
             (&grok_build::ListDirTool).into(),
             (&grok_build::GrepTool).into(),
+            (&grok_build::SendMessageTool).into(),
         ],
         behavior_preset: None,
     }
@@ -396,6 +403,7 @@ fn plan_toolset() -> ToolServerConfig {
             (&grok_build::GrepTool).into(),
             // (&grok_build::SkillTool).into(),
             (&grok_build::TodoWriteTool).into(),
+            (&grok_build::SendMessageTool).into(),
             // search_replace + run_terminal_command intentionally omitted (read-only)
         ],
         behavior_preset: None,
@@ -429,6 +437,7 @@ fn grok_build_plan_toolset() -> ToolServerConfig {
             (&search_tool::SearchTool).into(),
             (&use_tool::UseTool).into(),
             (&grok_build::UpdateGoalTool).into(),
+            (&grok_build::SendMessageTool).into(),
             (&grok_build::CiTool).into(),
             (&grok_build::WorkflowTool).into(),
             // Plan mode tools
@@ -467,6 +476,7 @@ fn orchestrator_toolset() -> ToolServerConfig {
             (&grok_build::ExitPlanModeTool).into(),
             (&grok_build::AskUserQuestionTool).into(),
             (&grok_build::UpdateGoalTool).into(),
+            (&grok_build::SendMessageTool).into(),
             (&grok_build::CiTool).into(),
             (&grok_build::WorkflowTool).into(),
             // Scheduling and monitoring
@@ -519,6 +529,7 @@ fn grok_build_plan_no_subagents_toolset() -> ToolServerConfig {
             (&search_tool::SearchTool).into(),
             (&use_tool::UseTool).into(),
             (&grok_build::UpdateGoalTool).into(),
+            (&grok_build::SendMessageTool).into(),
             (&grok_build::CiTool).into(),
             (&grok_build::WorkflowTool).into(),
             // Plan mode tools
@@ -555,6 +566,7 @@ fn grok_build_ask_user_toolset() -> ToolServerConfig {
             (&search_tool::SearchTool).into(),
             (&use_tool::UseTool).into(),
             (&grok_build::UpdateGoalTool).into(),
+            (&grok_build::SendMessageTool).into(),
             (&grok_build::CiTool).into(),
             (&grok_build::WorkflowTool).into(),
             // Ask user tool (without plan mode)

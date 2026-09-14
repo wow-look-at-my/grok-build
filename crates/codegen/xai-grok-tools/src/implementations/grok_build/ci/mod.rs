@@ -154,7 +154,11 @@ impl std::fmt::Display for CiQueryError {
                 write!(f, "`gh run list` failed (exit {code}): {}", stderr.trim())
             }
             CiQueryError::Unparseable { stdout } => {
-                write!(f, "`gh run list` returned something that is not a run list: {}", stdout.trim())
+                write!(
+                    f,
+                    "`gh run list` returned something that is not a run list: {}",
+                    stdout.trim()
+                )
             }
         }
     }

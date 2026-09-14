@@ -353,11 +353,18 @@ mod tests {
             "/path/to/data",
         );
 
-        assert_eq!(specs.len(), 1, "Claude Code-shape inline hooks must parse to specs");
+        assert_eq!(
+            specs.len(),
+            1,
+            "Claude Code-shape inline hooks must parse to specs"
+        );
         assert!(specs[0].name.starts_with("plugin/claude-shape-plugin/"));
         // The command resolves to the plugin root via the injected env var.
         assert_eq!(
-            specs[0].command.as_deref().map(|p| p.to_string_lossy().into_owned()),
+            specs[0]
+                .command
+                .as_deref()
+                .map(|p| p.to_string_lossy().into_owned()),
             Some("/path/to/plugin/hook.sh".to_string())
         );
         // Both the native and Claude-compat plugin env vars are set on the spec.
