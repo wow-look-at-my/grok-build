@@ -162,6 +162,10 @@ pub struct ToolContext {
             xai_grok_tools::implementations::grok_build::task::types::SubagentEvent,
         >,
     >,
+    /// Route from this session to the one that spawned it, read by
+    /// `send_message`. Set on a child's context at spawn; `None` for a
+    /// top-level session, which has no parent to message.
+    pub parent_messenger: Option<xai_grok_tools::implementations::grok_build::ParentMessenger>,
     /// Shared LSP runtime — cloned cheaply (Arc) from parent to child.
     /// Same pattern as `fs` and `terminal`.
     pub lsp: Option<Arc<dyn xai_grok_tools::implementations::lsp::LspBackend>>,
@@ -285,6 +289,7 @@ impl ToolContext {
             prompt_index: Arc::new(tokio::sync::Mutex::new(0)),
             subagent_depth: 0,
             subagent_event_tx: None,
+            parent_messenger: None,
             lsp: None,
             lsp_server_names: Vec::new(),
             is_turn_active: None,
@@ -375,6 +380,7 @@ mod tests {
                 prompt_index: Arc::new(tokio::sync::Mutex::new(0)),
                 subagent_depth: 0,
                 subagent_event_tx: None,
+                parent_messenger: None,
                 lsp: None,
                 lsp_server_names: Vec::new(),
                 is_turn_active: None,
