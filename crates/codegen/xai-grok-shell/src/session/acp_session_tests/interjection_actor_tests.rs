@@ -58,7 +58,8 @@ async fn queue_send_now_keeps_prompt_block_images_on_promoted_row() {
 /// replaced, and the text (with its images) still reaches the parent turn as an
 /// interjection.
 #[tokio::test]
-async fn goal_send_now_steers_the_live_planner_without_restarting_it() {    let local = tokio::task::LocalSet::new();
+async fn goal_send_now_steers_the_live_planner_without_restarting_it() {
+    let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
             let (gateway_tx, _gateway_rx) =

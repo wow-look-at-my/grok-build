@@ -539,10 +539,7 @@ pub(crate) fn user_item(id: &str, owner: &str) -> InputItem {
 pub(crate) fn slash_command_item(id: &str, command: &str) -> InputItem {
     let mut item = user_item(id, "A");
     item.prompt_blocks = vec![acp::ContentBlock::Text(acp::TextContent::new(command))];
-    item.queue_meta
-        .as_mut()
-        .expect("user rows carry meta")
-        .text = command.to_string();
+    item.queue_meta.as_mut().expect("user rows carry meta").text = command.to_string();
     item
 }
 #[cfg(test)]

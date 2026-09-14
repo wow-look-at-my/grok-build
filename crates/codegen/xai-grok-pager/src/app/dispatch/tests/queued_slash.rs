@@ -147,14 +147,20 @@ fn only_payload_free_slash_rows_own_their_turn() {
         wire_blocks: Some(vec![text_block("<skill_information/>")]),
         ..QueuedPrompt::plain(3, "/imagine a cat", QueueEntryKind::Prompt)
     };
-    assert!(!expanded.is_slash_command(), "the payload replaced the text");
+    assert!(
+        !expanded.is_slash_command(),
+        "the payload replaced the text"
+    );
     assert!(!expanded.is_steering_text(), "client-expanded payload");
 
     let with_image = QueuedPrompt {
         images: vec![test_pasted_image()],
         ..QueuedPrompt::plain(4, "/gboom stats", QueueEntryKind::Prompt)
     };
-    assert!(with_image.is_slash_command(), "an attachment is not a reply");
+    assert!(
+        with_image.is_slash_command(),
+        "an attachment is not a reply"
+    );
 
     let own = QueuedPrompt {
         own_turn: true,
@@ -197,7 +203,10 @@ fn a_queued_slash_command_is_not_hoisted_to_the_shell_as_plain_text() {
     register_shell_command(&mut app, id, "pr-cleanup");
     running_agent_with_a_queued_message(&mut app, id);
 
-    let submitted = dispatch(Action::SendPrompt("/pr-cleanup fix the branch".into()), &mut app);
+    let submitted = dispatch(
+        Action::SendPrompt("/pr-cleanup fix the branch".into()),
+        &mut app,
+    );
     assert_eq!(
         model_bound_payloads(&submitted),
         Vec::<String>::new(),
@@ -441,7 +450,10 @@ fn bare_enter_leaves_a_queued_command_to_its_own_turn() {
     let id = AgentId(0);
     register_shell_command(&mut app, id, "pr-cleanup");
     running_agent_with_a_queued_message(&mut app, id);
-    dispatch(Action::SendPrompt("/pr-cleanup fix the branch".into()), &mut app);
+    dispatch(
+        Action::SendPrompt("/pr-cleanup fix the branch".into()),
+        &mut app,
+    );
 
     let outcome = app
         .agents
@@ -472,7 +484,8 @@ fn bare_enter_leaves_a_queued_command_to_its_own_turn() {
 /// immediate rather than being turned into a queued command — and the payload is
 /// a prompt the shell consumes, never text the model reads.
 #[test]
-fn send_now_on_a_shell_command_keeps_the_immediate_route() {    let mut app = test_app_with_agent();
+fn send_now_on_a_shell_command_keeps_the_immediate_route() {
+    let mut app = test_app_with_agent();
     let id = AgentId(0);
     register_shell_command(&mut app, id, "pr-cleanup");
     running_agent_with_a_queued_message(&mut app, id);

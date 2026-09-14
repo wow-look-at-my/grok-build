@@ -270,8 +270,7 @@ pub(super) fn dispatch_send_prompt_now(
                 .get(&id)
                 .and_then(|agent| agent.session.pending_prompts.back())
                 .map(|row| row.id);
-            let effects =
-                super::prompt::dispatch_send_prompt_inner(app, text, false, false, false);
+            let effects = super::prompt::dispatch_send_prompt_inner(app, text, false, false, false);
             park_command_images(app, id, queued_before, images);
             return effects;
         }

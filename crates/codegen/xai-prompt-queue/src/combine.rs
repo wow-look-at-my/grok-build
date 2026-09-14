@@ -266,7 +266,10 @@ mod tests {
         // body's leading token is the plain row's, so `resolve` never sees it.
         assert_eq!(
             combine_prefix_len(
-                [plain("a", "look at this"), command("cmd", "/pr-cleanup fix")],
+                [
+                    plain("a", "look at this"),
+                    command("cmd", "/pr-cleanup fix")
+                ],
                 &[]
             ),
             1

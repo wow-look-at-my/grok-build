@@ -106,10 +106,14 @@ impl AgentView {
     pub(crate) fn queue_has_interjectable_row(&self) -> bool {
         let running = self.session.current_prompt_id.as_deref();
         let server = self.shared_queue.iter().any(|e| {
-            Some(e.id.as_str()) != running
-                && crate::views::queue_pane::wire_row_is_steering_text(e)
+            Some(e.id.as_str()) != running && crate::views::queue_pane::wire_row_is_steering_text(e)
         });
-        server || self.session.pending_prompts.iter().any(|p| p.is_steering_text())
+        server
+            || self
+                .session
+                .pending_prompts
+                .iter()
+                .any(|p| p.is_steering_text())
     }
 
     /// The turn is parked in a wait the shell aborts as soon as the user

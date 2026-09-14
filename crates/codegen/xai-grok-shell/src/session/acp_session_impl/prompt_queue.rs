@@ -241,9 +241,8 @@ impl SessionActor {
         // A command line means something only as the LEADING token of its own
         // turn (`resolve`), so it must never be steered into another turn as
         // text — see the goal merge below.
-        let is_slash_invocation = slash_commands::is_slash_invocation(
-            &Self::queue_text_from_blocks(&prompt_blocks),
-        );
+        let is_slash_invocation =
+            slash_commands::is_slash_invocation(&Self::queue_text_from_blocks(&prompt_blocks));
         let mut item = InputItem {
             prompt_id,
             prompt_blocks,
