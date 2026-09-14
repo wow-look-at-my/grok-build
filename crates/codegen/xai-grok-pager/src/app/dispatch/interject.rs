@@ -4,6 +4,7 @@
 
 use super::voice::voice_stop_on_submit;
 use crate::app::actions::Effect;
+use crate::app::agent::AgentId;
 use crate::app::agent_view::AgentView;
 use crate::app::app_view::{ActiveView, AppView};
 use crate::scrollback::block::RenderBlock;
@@ -252,23 +253,27 @@ pub(super) fn dispatch_send_prompt_now(
 
     // A payload-free pager-builtin invocation: hand it to the submit path,
     // which resolves the registry (pager builtins execute; shell commands land
-    // back on the local queue and run as their own turn). Images are not
-    // diverted — the submit path has no place for a payload the producer
-    // already drained — so a command carrying an attachment keeps the old
-    // route rather than losing the image.
-    if wire_blocks.is_none() && images.is_empty() {
+    // back on the local queue and run as their own turn). A row carrying a
+    // client-expanded payload keeps the old route — that payload IS the send.
+    if wire_blocks.is_none() {
         let pager_owned = app
             .agents
             .get(&id)
             .is_some_and(|agent| is_pager_owned_slash_invocation(agent, &text));
         if pager_owned {
-            return super::prompt::dispatch_send_prompt_inner(
-                app,
-                text,
-                /* consume_input */ false,
-                /* literal */ false,
-                /* is_follow_up */ false,
-            );
+            // The producer already took the text (and any attachment) out of
+            // the composer, so hand the attachment to the row this command
+            // queues — what the Enter path does with composer images
+            // (`drain_prompt_state_to_last_queued`).
+            let queued_before = app
+                .agents
+                .get(&id)
+                .and_then(|agent| agent.session.pending_prompts.back())
+                .map(|row| row.id);
+            let effects =
+                super::prompt::dispatch_send_prompt_inner(app, text, false, false, false);
+            park_command_images(app, id, queued_before, images);
+            return effects;
         }
     }
 
@@ -333,6 +338,44 @@ fn is_pager_owned_slash_invocation(agent: &AgentView, text: &str) -> bool {
             .registry()
             .is_builtin(invocation.token)
     })
+}
+
+/// Give a command's force-sent attachments to the row the command just queued.
+///
+/// The composer producer drains the text and its images before dispatching, so
+/// a command that runs through the registry has to be told where the
+/// attachment goes: onto the prompt row it queued (the `/plan <description>`
+/// description), or nowhere. `queued_before` is the queue's back row as the
+/// command was dispatched, so only a row the command itself created is
+/// touched. A command that queues nothing — a local action like `/theme` — has
+/// no row to carry an image and says so rather than dropping it silently,
+/// mirroring the submit path's "Images removed (skill prompt)" policy.
+fn park_command_images(
+    app: &mut AppView,
+    id: AgentId,
+    queued_before: Option<u64>,
+    images: Vec<crate::prompt_images::PastedImage>,
+) {
+    if images.is_empty() {
+        return;
+    }
+    let Some(agent) = app.agents.get_mut(&id) else {
+        return;
+    };
+    let carried = match agent.session.pending_prompts.back_mut() {
+        Some(row)
+            if Some(row.id) != queued_before
+                && row.kind == crate::app::agent::QueueEntryKind::Prompt
+                && row.wire_blocks.is_none() =>
+        {
+            row.images = images;
+            true
+        }
+        _ => false,
+    };
+    if !carried {
+        agent.show_toast("Images removed (command)");
+    }
 }
 
 /// Record an interjection in prompt history (Ctrl+R finds interjections).

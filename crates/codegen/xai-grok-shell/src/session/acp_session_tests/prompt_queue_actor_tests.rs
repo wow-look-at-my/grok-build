@@ -185,6 +185,44 @@ fn combine_front_skips_client_expanded_skill() {
     );
 }
 
+/// A queued command row never merges: `resolve` reads a prompt's LEADING token
+/// only, so a `/cmd args` folded in behind a plain row would reach the model as
+/// literal prose and the command would never run.
+#[test]
+fn combine_front_stops_at_a_command_row() {
+    let mut pending = std::collections::VecDeque::from([
+        user_item("p1", "A"),
+        slash_command_item("cmd1", "/pr-cleanup fix the branch"),
+        user_item("p3", "A"),
+    ]);
+
+    SessionActor::combine_front_pending_inputs(&mut pending, &[]);
+
+    assert_eq!(pending.len(), 3, "the command row keeps its own turn");
+    assert_eq!(pending[1].prompt_id, "cmd1");
+    assert_eq!(
+        SessionActor::queue_text_from_blocks(&pending[0].prompt_blocks),
+        "text for p1",
+        "the front absorbs nothing — its body must not grow a command line"
+    );
+
+    // As the front it absorbs nobody either, so its own turn resolves it.
+    let mut command_front = std::collections::VecDeque::from([
+        slash_command_item("cmd1", "/compact keep the auth notes"),
+        user_item("p2", "A"),
+    ]);
+    SessionActor::combine_front_pending_inputs(&mut command_front, &[]);
+    assert_eq!(command_front.len(), 2, "a command front absorbs nobody");
+
+    // A raw skill slash row is one of these: its payload IS its display text.
+    let mut raw_skill = std::collections::VecDeque::from([
+        user_item("p1", "A"),
+        slash_command_item("sk1", "/commit fix it"),
+    ]);
+    SessionActor::combine_front_pending_inputs(&mut raw_skill, &[]);
+    assert_eq!(raw_skill.len(), 2, "a raw skill row is not prose");
+}
+
 #[test]
 fn combine_front_skips_edit_hold() {
     let (p1, _) = user_item_with_rx("p1", "A");

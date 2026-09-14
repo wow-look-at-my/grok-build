@@ -1157,6 +1157,12 @@ impl AgentSession {
                 is_expanded_skill: !p.wire_matches_display(),
                 is_bash: p.kind == QueueEntryKind::BashCommand,
                 has_images: !p.images.is_empty(),
+                // A command row must not merge into another row's turn: only
+                // the turn's LEADING token is resolved as a command, so merging
+                // it behind a plain row would deliver the literal `/cmd args`
+                // as prose. Text-only: this holds however the row is shaped
+                // (a raw skill row's payload IS its display text).
+                is_slash_invocation: crate::slash::is_slash_invocation(&p.text),
                 text: p.text.as_str(),
             })
             .collect();
@@ -1562,6 +1568,36 @@ mod tests {
             ..QueuedPrompt::plain(4, "/commit fix", QueueEntryKind::Prompt)
         };
         assert!(!multi_block.wire_matches_display(), "multi-block payload");
+    }
+    /// A slash-invocation row never merges into a neighbour's turn, whether it
+    /// is the front or a follower: only a turn's LEADING token is resolved as a
+    /// command, so a command line folded into a merged body reaches the model as
+    /// prose. Setting-independent — `dequeue_combined_prompt` is the same
+    /// function `maybe_drain_queue` calls.
+    #[test]
+    fn combined_dequeue_leaves_a_command_row_alone() {
+        let mut s = test_session();
+        s.enqueue_prompt("look at this".into());
+        s.enqueue_prompt("/pr-cleanup fix the branch".into());
+        s.enqueue_prompt("and one more".into());
+
+        let front = s.dequeue_combined_prompt(None).expect("front row");
+        assert_eq!(front.text, "look at this");
+        assert!(
+            front.combined_texts.is_empty(),
+            "the command row must not merge in behind the plain one"
+        );
+
+        let command = s.dequeue_combined_prompt(None).expect("command row");
+        assert_eq!(command.text, "/pr-cleanup fix the branch");
+        assert!(
+            command.combined_texts.is_empty(),
+            "the command row owns its turn and absorbs nobody"
+        );
+
+        let follower = s.dequeue_combined_prompt(None).expect("last row");
+        assert_eq!(follower.text, "and one more");
+        assert!(s.pending_prompts.is_empty(), "every row drained once");
     }
     #[test]
     fn enqueue_prompt_wire_blocks_defaults_to_none() {

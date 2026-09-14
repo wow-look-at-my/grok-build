@@ -22,13 +22,26 @@ pub struct CombineGate<'a> {
     pub is_bash: bool,
     /// Followers must have no images; front may keep its own.
     pub has_images: bool,
+    /// The row's text is a slash invocation (`/cmd args`).
+    ///
+    /// A command line means something only as the LEADING token of its own
+    /// turn: `resolve` reads the prompt's first token, so a row merged behind
+    /// another row delivers the literal `/cmd args` as prose and the command
+    /// never runs. Such a row therefore never merges — not as a front and not
+    /// as a follower.
+    pub is_slash_invocation: bool,
     /// Non-empty display / body text required to participate.
     pub text: &'a str,
 }
 
 /// Front of a combine run: plain user prompt; may carry images.
 pub fn can_merge_front(g: &CombineGate<'_>) -> bool {
-    g.is_plain_prompt && !g.is_synthetic && !g.is_expanded_skill && !g.is_bash && !g.text.is_empty()
+    g.is_plain_prompt
+        && !g.is_synthetic
+        && !g.is_expanded_skill
+        && !g.is_bash
+        && !g.is_slash_invocation
+        && !g.text.is_empty()
 }
 
 /// Follower: same as front, no images, and not under edit hold.
@@ -104,6 +117,7 @@ mod tests {
             is_expanded_skill: false,
             is_bash: false,
             has_images: false,
+            is_slash_invocation: false,
             text,
         }
     }
@@ -124,6 +138,7 @@ mod tests {
             is_expanded_skill: false,
             is_bash: true,
             has_images: false,
+            is_slash_invocation: false,
             text: "ls",
         };
         let items = [
@@ -144,6 +159,7 @@ mod tests {
             is_expanded_skill: false,
             is_bash: false,
             has_images: false,
+            is_slash_invocation: false,
             text: "/compact",
         };
         assert_eq!(
@@ -161,6 +177,7 @@ mod tests {
             is_expanded_skill: true,
             is_bash: false,
             has_images: false,
+            is_slash_invocation: false,
             text: "/commit",
         };
         assert_eq!(
@@ -178,6 +195,7 @@ mod tests {
             is_expanded_skill: false,
             is_bash: false,
             has_images: true,
+            is_slash_invocation: false,
             text: "see",
         };
         assert_eq!(
@@ -192,6 +210,7 @@ mod tests {
             is_expanded_skill: false,
             is_bash: false,
             has_images: true,
+            is_slash_invocation: false,
             text: "with image",
         };
         assert_eq!(combine_prefix_len([front_img, plain("b", "two")], &[]), 2);
@@ -232,6 +251,37 @@ mod tests {
     }
 
     #[test]
+    fn stops_at_slash_invocation() {
+        let command = |id: &'static str, text: &'static str| CombineGate {
+            id,
+            is_plain_prompt: true,
+            is_synthetic: false,
+            is_expanded_skill: false,
+            is_bash: false,
+            has_images: false,
+            is_slash_invocation: true,
+            text,
+        };
+        // A command behind a plain row would be delivered as prose: the merged
+        // body's leading token is the plain row's, so `resolve` never sees it.
+        assert_eq!(
+            combine_prefix_len(
+                [plain("a", "look at this"), command("cmd", "/pr-cleanup fix")],
+                &[]
+            ),
+            1
+        );
+        // A command as the front is taken alone, and the row behind it stays.
+        assert_eq!(
+            combine_prefix_len(
+                [command("cmd", "/pr-cleanup fix"), plain("b", "then this")],
+                &[]
+            ),
+            1
+        );
+    }
+
+    #[test]
     fn ineligible_front_is_taken_alone() {
         let bash = CombineGate {
             id: "b",
@@ -240,6 +290,7 @@ mod tests {
             is_expanded_skill: false,
             is_bash: true,
             has_images: false,
+            is_slash_invocation: false,
             text: "pwd",
         };
         assert_eq!(combine_prefix_len([bash, plain("a", "x")], &[]), 1);

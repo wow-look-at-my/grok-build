@@ -811,17 +811,6 @@ async fn a_row_arriving_mid_turn_reaches_the_asap_buffer_unprompted() {
         .await;
 }
 
-/// A row whose text is a slash command, with both its wire blocks and its
-/// queue metadata carrying the command line (what the pager's PassThrough row
-/// sends).
-#[cfg(test)]
-fn slash_command_item(id: &str, command: &str) -> InputItem {
-    let mut item = user_item(id, "A");
-    item.prompt_blocks = vec![acp::ContentBlock::Text(acp::TextContent::new(command))];
-    item.queue_meta.as_mut().expect("user rows carry meta").text = command.to_string();
-    item
-}
-
 /// A queued slash command is NOT folded into the running turn: the drain
 /// expands skills but resolves no builtin, so `/cmd args` would reach the model
 /// as literal user text (and `/plan <description>` would swallow the prompt of

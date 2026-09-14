@@ -226,17 +226,25 @@ fn a_queued_slash_command_is_not_hoisted_to_the_shell_as_plain_text() {
     );
 
     // Once the turn ends the command runs as its own turn's prompt, where the
-    // shell resolves it.
+    // shell resolves it — alone. Merging it into a neighbour's turn would put
+    // the command line mid-body, where `resolve` never looks (`combine` merely
+    // joins the texts), so the row behind it must be untouched too.
     let agent = app.agents.get_mut(&id).unwrap();
     agent.session.state = AgentState::Idle;
     agent.session.current_prompt_id = None;
     agent.shared_queue.clear();
     let drained = dispatch(Action::DrainQueue, &mut app);
     assert!(
-        model_bound_payloads(&drained)
-            .iter()
-            .any(|text| text.starts_with("/pr-cleanup fix the branch")),
-        "the command heads its own turn's prompt: {drained:?}"
+        matches!(
+            drained.as_slice(),
+            [Effect::SendPrompt { text, .. }] if text == "/pr-cleanup fix the branch"
+        ),
+        "the command drains as its own turn, unmerged: {drained:?}"
+    );
+    assert_eq!(
+        local_texts(&app, id),
+        vec!["and one more".to_string()],
+        "the following plain row keeps its own turn"
     );
 }
 
@@ -340,6 +348,50 @@ fn send_now_on_a_pager_command_runs_the_command() {
     );
 }
 
+/// Gating (3a, with an attachment): the chord's producer drains the pasted
+/// image along with the text, so the command is force-sent carrying one. The
+/// command must still run — the literal `/plan <description>` never becomes a
+/// prompt — and the attachment must land somewhere real: on the row the
+/// command queued, exactly as pressing Enter with that image does.
+#[test]
+fn send_now_on_a_pager_command_with_an_image_runs_the_command() {
+    let mut app = test_app_with_agent();
+    let id = AgentId(0);
+    running_agent_with_a_queued_message(&mut app, id);
+
+    let effects = dispatch(
+        Action::SendPromptNow {
+            text: "/plan implement the auth flow".into(),
+            images: vec![test_pasted_image()],
+            wire_blocks: None,
+        },
+        &mut app,
+    );
+
+    assert!(
+        matches!(
+            effects.as_slice(),
+            [Effect::SetSessionMode { mode_id, .. }] if &*mode_id.0 == "plan"
+        ),
+        "the command ran instead of becoming a prompt: {effects:?}"
+    );
+    assert_eq!(app.agents[&id].plan_mode_pending, Some(true));
+    assert_eq!(
+        local_texts(&app, id),
+        vec!["implement the auth flow".to_string()],
+        "the description is the following turn's prompt"
+    );
+    assert_eq!(
+        app.agents[&id].session.pending_prompts[0].images.len(),
+        1,
+        "the pasted image rides with the description instead of being dropped"
+    );
+    assert!(
+        app.agents[&id].toast.is_none(),
+        "nothing was dropped, so nothing is reported as dropped"
+    );
+}
+
 /// Gating (3b), queue-pane send-now of a command row: the row leaves the queue
 /// and the command runs. Its text never becomes a `sendNow` prompt, so a
 /// pager-owned command cannot reach the model as `/plan <description>`.
@@ -420,8 +472,7 @@ fn bare_enter_leaves_a_queued_command_to_its_own_turn() {
 /// immediate rather than being turned into a queued command — and the payload is
 /// a prompt the shell consumes, never text the model reads.
 #[test]
-fn send_now_on_a_shell_command_keeps_the_immediate_route() {
-    let mut app = test_app_with_agent();
+fn send_now_on_a_shell_command_keeps_the_immediate_route() {    let mut app = test_app_with_agent();
     let id = AgentId(0);
     register_shell_command(&mut app, id, "pr-cleanup");
     running_agent_with_a_queued_message(&mut app, id);
@@ -510,7 +561,6 @@ fn unaffected_paths_keep_their_routing() {
 
     // Plain prompt mid-turn: still delivered to the running turn ASAP.
     let mut app = test_app_with_agent();
-    let id = AgentId(0);
     dispatch(Action::SendPrompt("first".into()), &mut app);
     let effects = dispatch(Action::SendPrompt("read this next".into()), &mut app);
     assert!(

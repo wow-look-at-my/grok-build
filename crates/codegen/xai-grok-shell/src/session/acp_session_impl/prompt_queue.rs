@@ -981,6 +981,18 @@ impl SessionActor {
             .as_ref()
             .map(|m| m.text.as_str())
             .unwrap_or("");
+        let text = if text.is_empty() {
+            // Fall back so empty meta still participates when blocks have text.
+            item.prompt_blocks
+                .iter()
+                .find_map(|b| match b {
+                    acp::ContentBlock::Text(t) if !t.text.is_empty() => Some(t.text.as_str()),
+                    _ => None,
+                })
+                .unwrap_or("")
+        } else {
+            text
+        };
         xai_prompt_queue::CombineGate {
             id: item.prompt_id.as_str(),
             // A row with its own override can't merge into another turn (that would drop its bound).
@@ -992,18 +1004,11 @@ impl SessionActor {
             is_expanded_skill,
             is_bash,
             has_images,
-            text: if text.is_empty() {
-                // Fall back so empty meta still participates when blocks have text.
-                item.prompt_blocks
-                    .iter()
-                    .find_map(|b| match b {
-                        acp::ContentBlock::Text(t) if !t.text.is_empty() => Some(t.text.as_str()),
-                        _ => None,
-                    })
-                    .unwrap_or("")
-            } else {
-                text
-            },
+            // Only the turn's leading token is resolved as a command, so a row
+            // merged behind another one would reach the model as the literal
+            // `/cmd args`. Mirrors the pager's `is_slash_invocation` gate.
+            is_slash_invocation: slash_commands::is_slash_invocation(text),
+            text,
         }
     }
 
