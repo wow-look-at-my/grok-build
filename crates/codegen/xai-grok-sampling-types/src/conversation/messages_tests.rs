@@ -638,13 +638,13 @@ fn request_text(req: &ConversationRequest) -> String {
         .join("\n")
 }
 
-/// Switching an in-flight conversation onto another model used to resend that
-/// conversation's thinking blocks, which the Messages API answers with
-/// "Invalid `signature` in `thinking` block" — a 400 on every later turn, since
-/// the blocks stay in history. The signature cannot be re-minted, so the block
-/// is what gives; the rest of the turn stays.
+/// Replaying another model's thinking block is a 400 the Messages API answers
+/// with "Invalid `signature` in `thinking` block", on every later turn, since
+/// the block stays in history. The signature cannot be re-minted, so the BLOCK
+/// gives. Its words do not: they ride as ordinary assistant text, and the rest
+/// of the turn is untouched.
 #[test]
-fn thinking_minted_by_another_model_is_left_off_the_wire() {
+fn thinking_minted_by_another_model_rides_as_text() {
     let req = ConversationRequest::from_items(switched_model_conversation(Some("grok-4-fast")))
         .with_model("claude-opus-5");
 
@@ -653,10 +653,14 @@ fn thinking_minted_by_another_model_is_left_off_the_wire() {
         "a thinking block from grok-4-fast must not be replayed to claude-opus-5",
     );
 
-    let json = serde_json::to_value(build_messages_request(&req)).unwrap();
-    assert_eq!(
-        json["messages"][1]["content"][0]["text"], "The answer.",
-        "only the thinking block goes, not the turn it belongs to: {json:#}",
+    let text = request_text(&req);
+    assert!(
+        text.contains("The answer."),
+        "the turn the block belongs to stays: {text}",
+    );
+    assert!(
+        text.contains("<thinking>"),
+        "and its words reach the model as text: {text}",
     );
 }
 
@@ -770,12 +774,23 @@ fn a_tool_loop_that_lost_its_thinking_turns_thinking_off() {
     assert!(thinking_blocks(&req).is_empty());
 
     let json = serde_json::to_value(&msgs).unwrap();
-    assert_eq!(
-        json["messages"][1]["content"][0]["type"], "tool_use",
+    let block_types = |msg: usize| -> Vec<String> {
+        json["messages"][msg]["content"]
+            .as_array()
+            .map(|blocks| {
+                blocks
+                    .iter()
+                    .filter_map(|b| b["type"].as_str().map(str::to_owned))
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    assert!(
+        block_types(1).contains(&"tool_use".to_string()),
         "the tool call still has to reach the model: {json:#}",
     );
-    assert_eq!(
-        json["messages"][2]["content"][0]["type"], "tool_result",
+    assert!(
+        block_types(2).contains(&"tool_result".to_string()),
         "and so does its result: {json:#}",
     );
     assert_eq!(
