@@ -35,10 +35,14 @@ enum SpawnBehaviour {
         objectives: StdArc<std::sync::Mutex<Vec<String>>>,
         body: &'static [u8],
     },
+    /// Hold the planner open until the test fires `notify`, reporting every
+    /// `Interject` addressed to it on `context` as it arrives. An arriving
+    /// interjection never releases the planner: only the test decides when
+    /// the plan is written.
     WaitForContextThenWrite {
         started: tokio::sync::mpsc::UnboundedSender<usize>,
         objectives: StdArc<std::sync::Mutex<Vec<String>>>,
-        context: StdArc<std::sync::Mutex<Vec<String>>>,
+        context: tokio::sync::mpsc::UnboundedSender<String>,
         notify: StdArc<tokio::sync::Notify>,
         body: &'static [u8],
     },
@@ -103,9 +107,8 @@ fn spawn_planner_coordinator_capturing(
                 continue;
             }
             if let SubagentEvent::Interject { text, .. } = &ev {
-                if let SpawnBehaviour::WaitForContextThenWrite { context, notify, .. } = &behaviour {
-                    context.lock().unwrap().push(text.clone());
-                    notify.notify_one();
+                if let SpawnBehaviour::WaitForContextThenWrite { context, .. } = &behaviour {
+                    let _ = context.send(text.clone());
                 }
                 continue;
             }
@@ -348,13 +351,13 @@ async fn send_now_queues_planner_context_without_restart() {
         .run_until(async {
             let (started_tx, mut started_rx) = tokio::sync::mpsc::unbounded_channel();
             let objectives = StdArc::new(std::sync::Mutex::new(Vec::new()));
-            let context = StdArc::new(std::sync::Mutex::new(Vec::new()));
+            let (context_tx, mut context_rx) = tokio::sync::mpsc::unbounded_channel();
             let notify = StdArc::new(tokio::sync::Notify::new());
             let (tx, spawn_count) =
                 spawn_planner_coordinator(SpawnBehaviour::WaitForContextThenWrite {
                     started: started_tx,
                     objectives: StdArc::clone(&objectives),
-                    context: StdArc::clone(&context),
+                    context: context_tx,
                     notify: StdArc::clone(&notify),
                     body: b"# Plan\n",
                 });
@@ -402,16 +405,31 @@ async fn send_now_queues_planner_context_without_restart() {
                 ));
             }
 
+            // Both Send Nows reach the planner while it is still running; it is
+            // released only after they have been delivered.
+            let mut delivered = Vec::new();
+            for _ in 0..2 {
+                delivered.push(
+                    tokio::time::timeout(std::time::Duration::from_secs(5), context_rx.recv())
+                        .await
+                        .expect("planner context delivered")
+                        .expect("planner coordinator stub alive"),
+                );
+            }
+            assert_eq!(delivered, [
+                "Additional user context for the current plan:\n\nfirst",
+                "Additional user context for the current plan:\n\nsecond",
+            ]);
             notify.notify_one();
             tokio::time::timeout(std::time::Duration::from_secs(5), planner)
                 .await
                 .expect("planner completion")
                 .unwrap();
             assert_eq!(spawn_count.load(SeqOrd::SeqCst), 1);
-            assert_eq!(context.lock().unwrap().as_slice(), [
-                "Additional user context for the current plan:\n\nfirst",
-                "Additional user context for the current plan:\n\nsecond",
-            ]);
+            assert!(
+                context_rx.try_recv().is_err(),
+                "each Send Now reaches the planner exactly once"
+            );
             let prompts = objectives.lock().unwrap();
             let objectives = prompts
                 .iter()
