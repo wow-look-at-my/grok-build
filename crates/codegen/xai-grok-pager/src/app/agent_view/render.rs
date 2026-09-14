@@ -1636,15 +1636,15 @@ impl AgentView {
                 let fg = match status {
                     crate::ci_status::CiStatus::Red => Some(theme.accent_error),
                     crate::ci_status::CiStatus::Yellow => {
-                        // While CI is running, pulse the yellow dot's HSV value
-                        // in a sine wave (25% → 80%) so it visibly "thinks".
-                        let tick = self.scrollback.animation_tick() as u64;
-                        let dyn_col = crate::ci_status::animate_value(
-                            tick,
-                            rgb_of(theme.warning),
-                            0.25,
-                            0.80,
-                        );
+                        // While CI is running, pulse the yellow dot's HSV
+                        // value so it visibly "thinks". The phase is wall-clock
+                        // time, not the animation tick: the tick cadence
+                        // follows whatever else the UI is doing (Slow on an
+                        // idle session, ~30 fps while streaming), so a
+                        // tick-counted pulse breathes at a different speed
+                        // depending on how busy the screen is.
+                        let dyn_col =
+                            crate::ci_status::in_progress_dot_color(rgb_of(theme.warning));
                         Some(ratatui::style::Color::Rgb(dyn_col.0, dyn_col.1, dyn_col.2))
                     }
                     crate::ci_status::CiStatus::Green => Some(theme.accent_success),

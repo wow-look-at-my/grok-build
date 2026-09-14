@@ -209,8 +209,13 @@ pub fn spawn_ci_host(repo_root: &Path) -> Option<i32> {
 }
 
 /// Clear `FD_CLOEXEC` on `fd` so it stays open in the process this one execs into.
+///
+/// Public because it is half of the jail boundary's contract and the other half
+/// is a `Command` the tests drive: a socketpair is created close-on-exec, the
+/// jail is entered by exec, and a worker connection that does not survive that
+/// exec leaves the jailed pager reading a dead fd off `GROK_CI_HOST_FD`.
 #[cfg(unix)]
-fn inherit_across_exec(fd: std::os::unix::io::RawFd) -> Option<()> {
+pub fn inherit_across_exec(fd: std::os::unix::io::RawFd) -> Option<()> {
     // SAFETY: fcntl on an fd this process owns; F_GETFD and F_SETFD only touch its flags.
     let flags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
     if flags < 0 {

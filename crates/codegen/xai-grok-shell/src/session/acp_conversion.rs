@@ -629,6 +629,27 @@ pub(crate) fn acp_tool_update(
                 .status(Some(acp::ToolCallStatus::Completed))
                 .raw_output(raw_output_json(output, rewriter)),
         )),
+        // The CI tool's answer is the whole point of the call: without this arm
+        // it fell into the catch-all below, so the transcript row was left
+        // pending forever with no result. A red CI state is still a *completed*
+        // tool call — the query ran; the branch is what is red.
+        ToolOutput::Ci(ci) => {
+            let mut content = vec![acp::ToolCallContent::from(acp::ContentBlock::Text(
+                acp::TextContent::new(ci.summary.clone()),
+            ))];
+            if let Some(text) = ci.text.as_deref().filter(|text| !text.is_empty()) {
+                content.push(acp::ToolCallContent::from(acp::ContentBlock::Text(
+                    acp::TextContent::new(text.to_string()),
+                )));
+            }
+            Some(acp::ToolCallUpdate::new(
+                acp::ToolCallId::new(Arc::from(tool_call_id)),
+                acp::ToolCallUpdateFields::new()
+                    .status(Some(acp::ToolCallStatus::Completed))
+                    .content(Some(content))
+                    .raw_output(raw_output_json(output, rewriter)),
+            ))
+        }
         // Internal tools (open_page, browse_page, etc.) are not used in the
         // shell — they are server-only.  This arm covers variants that appear
         // when Cargo unifies the optional web-tools feature across the workspace.
@@ -767,6 +788,48 @@ mod tests {
         let update = acp_tool_update(&output, "call-1", None, None).unwrap();
         assert_eq!(update.fields.status, Some(acp::ToolCallStatus::Completed));
         assert!(update.fields.content.is_some());
+    }
+
+    /// The `ci` tool's result must reach the client: before this arm it hit the
+    /// catch-all, so the row stayed pending with no result at all.
+    #[test]
+    fn test_acp_tool_update_ci_returns_the_result() {
+        use xai_grok_tools::implementations::grok_build::ci::{CiOutput, CiRunSummary};
+        let output = ToolOutput::Ci(CiOutput {
+            state: "failing".to_string(),
+            branch: "fix/darwin-version-stamp".to_string(),
+            settled: true,
+            runs: vec![CiRunSummary {
+                workflow: "CI".to_string(),
+                status: "completed".to_string(),
+                conclusion: "failure".to_string(),
+                run_id: Some(34816917810),
+            }],
+            text: Some("FAIL step: run tests".to_string()),
+            truncated: false,
+            summary: "failing: CI is red on fix/darwin-version-stamp".to_string(),
+        });
+        let update = acp_tool_update(&output, "call-ci", None, None)
+            .expect("a CI output must produce an update, not be dropped");
+        // A red branch is a completed query: the tool ran, and it is the branch
+        // that is failing.
+        assert_eq!(update.fields.status, Some(acp::ToolCallStatus::Completed));
+        let content = update.fields.content.expect("the result must be shown");
+        let rendered = format!("{content:?}");
+        assert!(
+            rendered.contains("failing: CI is red on fix/darwin-version-stamp"),
+            "the summary must reach the transcript: {rendered}"
+        );
+        assert!(
+            rendered.contains("FAIL step: run tests"),
+            "the returned log/check text must reach the transcript: {rendered}"
+        );
+        let raw = update
+            .fields
+            .raw_output
+            .expect("the typed output must ride along as raw_output");
+        assert_eq!(raw["state"], "failing");
+        assert_eq!(raw["branch"], "fix/darwin-version-stamp");
     }
 
     #[test]
