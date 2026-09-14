@@ -434,6 +434,97 @@ const CHECKLIST_PLAN: &[u8] = b"# Plan: ship the exporter\n\n## Goal kind\ncode-
 - [ ] wire it into the publish path\n\
 - [ ] cover it with an end-to-end test\n";
 
+/// Like [`make_planner_actor`] but retains the session's event receiver, so a
+/// test can read the notifications the actor enqueued for the client — the same
+/// FIFO the session's event loop forwards to the pager.
+async fn make_planner_actor_with_events(
+    coordinator_tx: Option<tokio::sync::mpsc::UnboundedSender<SubagentEvent>>,
+    planner_enabled: bool,
+) -> (
+    StdArc<SessionActor>,
+    TempDir,
+    tokio::sync::mpsc::UnboundedReceiver<SessionEvent>,
+) {
+    let tmp = TempDir::new().expect("tempdir");
+    let (gateway_tx, _gateway_rx) =
+        tokio::sync::mpsc::unbounded_channel::<xai_acp_lib::AcpClientMessage>();
+    let (persistence_tx, _persistence_rx) =
+        tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
+    let (mut actor, event_rx) =
+        create_test_actor_ex(0, 256_000, 85, gateway_tx, persistence_tx).await;
+    actor.events = crate::session::events::EventTracker::new(tmp.path());
+    actor.goal_enabled = true;
+    set_goal_harness_for_tests(&actor);
+    actor.goal_planner_enabled = planner_enabled;
+    actor.goal_tracker = Arc::new(parking_lot::Mutex::new(
+        crate::session::goal_tracker::GoalTracker::new(tmp.path().to_path_buf()),
+    ));
+    if let Some(tx) = coordinator_tx {
+        actor.tool_context.subagent_event_tx = Some(tx);
+    }
+    (StdArc::new(actor), tmp, event_rx)
+}
+
+/// Every `Plan` session update the actor enqueued for the client, in order — the
+/// view the pager renders the todo list from.
+fn plan_updates(
+    rx: &mut tokio::sync::mpsc::UnboundedReceiver<SessionEvent>,
+) -> Vec<Vec<acp::PlanEntry>> {
+    let mut plans = Vec::new();
+    while let Ok(event) = rx.try_recv() {
+        let SessionEvent::Notification(SessionNotification::Acp(n)) = event else {
+            continue;
+        };
+        if let acp::SessionUpdate::Plan(plan) = n.update {
+            plans.push(plan.entries);
+        }
+    }
+    plans
+}
+
+/// A seeded item is a todo like any other: the seed dispatches through the
+/// session's own `todo_write`, so the same `Plan` session update a
+/// model-written list produces is enqueued for the client, carrying the plan's
+/// steps.
+#[tokio::test(flavor = "current_thread")]
+#[serial]
+async fn the_seed_reaches_the_client_as_a_plan_update() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (tx, _c) =
+                spawn_planner_coordinator(SpawnBehaviour::WritePlanThenDone { body: CHECKLIST_PLAN });
+            let (actor, _tmp, mut event_rx) = make_planner_actor_with_events(Some(tx), true).await;
+            arm_todo_writes(&actor).await;
+
+            let _ = actor.setup_goal("ship the exporter", None).await;
+
+            let plans = plan_updates(&mut event_rx);
+            let entries = plans
+                .last()
+                .expect("the seed must enqueue a client-visible Plan update");
+            assert_eq!(
+                entries
+                    .iter()
+                    .map(|e| e.content.as_str())
+                    .collect::<Vec<_>>(),
+                vec![
+                    "add the plan parser",
+                    "wire it into the publish path",
+                    "cover it with an end-to-end test",
+                ],
+                "the Plan update carries the seeded steps",
+            );
+            assert!(
+                entries
+                    .iter()
+                    .all(|e| matches!(e.status, acp::PlanEntryStatus::Pending)),
+                "seeded items are pending: {entries:?}",
+            );
+        })
+        .await;
+}
+
 #[tokio::test(flavor = "current_thread")]
 #[serial]
 async fn setup_goal_seeds_one_todo_per_plan_step_without_a_model_turn() {
