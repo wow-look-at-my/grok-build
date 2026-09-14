@@ -556,12 +556,11 @@ async fn goal_seeding_is_append_only_and_idempotent() {
             // plan is already published, so it is a no-op — and even a direct
             // re-run of the seed must be too.
             actor.maybe_run_goal_planner("ship the exporter").await;
+            // Bind the path before the call: the tracker guard must not be held
+            // across the seed's own `lock()`, which is not reentrant.
+            let plan_path = actor.goal_tracker.lock().plan_path();
             actor
-                .seed_goal_todos_from_plan(
-                    "g-test",
-                    actor.goal_tracker.lock().plan_path().as_path(),
-                    &[],
-                )
+                .seed_goal_todos_from_plan("g-test", plan_path.as_path(), &[])
                 .await;
 
             let second = live_todos(&actor).await;
