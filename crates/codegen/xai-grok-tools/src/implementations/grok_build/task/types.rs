@@ -880,10 +880,43 @@ pub struct SubagentDescribeRequest {
     pub respond_to: oneshot::Sender<SubagentDescribeOutcome>,
 }
 
+/// What became of a model-sent message to one subagent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SubagentMessageOutcome {
+    /// Handed to a running child.
+    Delivered,
+    /// The child is queued or still starting; the text is held for it.
+    Queued,
+    /// The id names a child of a different parent session.
+    NotOwned,
+    /// No child with that id, under any parent.
+    NotFound,
+}
+
+/// A message addressed to one subagent by the session that spawned it.
+///
+/// Unlike [`SubagentEvent::Interject`], which the host sends on the user's
+/// behalf, this arrives from a model tool. It is therefore scoped: a child of
+/// another session answers `NotOwned`, and the sender gets a real outcome
+/// instead of a silent drop.
+#[derive(Educe)]
+#[educe(Debug)]
+pub struct SubagentMessageChildRequest {
+    pub parent_session_id: String,
+    pub subagent_id: String,
+    pub text: String,
+    #[educe(Debug(ignore))]
+    pub respond_to: oneshot::Sender<SubagentMessageOutcome>,
+}
+
 /// Coordinator message enum. Kept exhaustive so every actor command is handled.
 pub enum SubagentEvent {
     Spawn(SubagentSpawnRequest),
-    Interject { subagent_id: String, text: String },
+    Interject {
+        subagent_id: String,
+        text: String,
+    },
+    MessageChild(SubagentMessageChildRequest),
     Query(SubagentQueryRequest),
     Cancel(SubagentCancelRequest),
     ListActive(SubagentListActiveRequest),

@@ -217,6 +217,15 @@ Every one of those is the test doing its job. Making them pass there means weake
 - `todo_gate_applicable` is the other half and still binds. It allows no gate while the goal loop is active, because the continuation directive drives the loop there. It allows no gate for a prompt that carries no `<task_completion_discipline>` block.
 - `todo_stop_gate_blocks` is pure and table-tested. The actor supplies the toggle, the shared continuation counter, and `evaluate_todo_gate` over the live todo state.
 
+## `send_message` notes
+
+- One tool carries both directions (`grok_build/send_message/`). `to` is a subagent id from `task` to reach a child. `to` is `parent` to reach the session that spawned this one. The recipient reads the text as a mid-turn user message. It keeps the work it is streaming and reads at its next drain point.
+- The parent-to-child leg is `SubagentEvent::MessageChild`, NOT the host's `SubagentEvent::Interject`. `MessageChild` is scoped by `parent_session_id`. A child of another session answers `NotOwned` instead of taking a stranger's instruction. Every path also answers on a oneshot. The model reads `Delivered`, `Queued`, `NotOwned` or `NotFound` in place of a silent success over a dropped message. `Interject` stays unscoped and silent because the user owns it.
+- A child that has not started holds the message in `held_interjections` and answers `Queued`. The held text goes out on `Started`, in order, through the path the user's interjections use.
+- The child-to-parent leg is a host-supplied closure, `ParentMessenger`. It is not a channel the tool can address. The host owns the provenance line. A child session does not know which subagent it is. Without that line the parent reads an unattributed message as the user's own. The closure wraps `ctx.parent_cmd_tx` and sends `SessionCommand::InterjectWithoutCancel`.
+- `ParentMessenger` rides `AgentRebuildSpec`. One `update_resource` after spawn is not enough. An agent rebuild builds a fresh tool bridge. A mode switch or a model switch triggers one. A resource registered one time is gone after that rebuild. The child then loses its way to answer its parent. Nothing reports the loss.
+- `ToolKind::SendMessage` is a meta kind in `kind_allowed`. Every `CapabilityMode` allows it. The tool writes nothing. And a read-only explorer still has to answer the session that spawned it.
+
 ## Workflow agent-concurrency notes
 
 - `WorkflowHostParams.agent_slots` is a semaphore owned by `WorkflowManager` and shared by every run it launches (`session/workflow/manager.rs`), not one fresh semaphore per run. Up to `WORKFLOW_MAX_ACTIVE_RUNS_PER_SESSION` runs can be active at once, so a per-run semaphore will let total live agent-spawned LLM requests scale with active run count instead of staying under the configured cap (`GROK_WORKFLOW_MAX_CONCURRENT_AGENTS` / `workflow_max_concurrent_agents`) — the knob operators lower to stay under a hard per-host concurrent-request limit.
