@@ -618,6 +618,26 @@ fn thinking_blocks(req: &ConversationRequest) -> Vec<(String, String)> {
         .collect()
 }
 
+/// Every text block the built request carries, joined. It says what reached
+/// the model as ordinary words rather than as a typed block.
+fn request_text(req: &ConversationRequest) -> String {
+    build_messages_request(req)
+        .messages
+        .iter()
+        .flat_map(|m| match &m.content {
+            crate::messages::MessageContent::Blocks(blocks) => blocks
+                .iter()
+                .filter_map(|b| match b {
+                    crate::messages::ContentBlock::Text { text, .. } => Some(text.clone()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>(),
+            crate::messages::MessageContent::Text(t) => vec![t.clone()],
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// Switching an in-flight conversation onto another model used to resend that
 /// conversation's thinking blocks, which the Messages API answers with
 /// "Invalid `signature` in `thinking` block" — a 400 on every later turn, since
@@ -688,19 +708,29 @@ fn thinking_without_a_recorded_origin_is_replayed() {
 }
 
 /// The recovery the sampler applies when the server rejects a signature
-/// anyway: the reasoning goes, the turn it belongs to stays.
+/// anyway: the block stops being thinking, its words stay as assistant text,
+/// and the turn it belongs to stays.
 #[test]
-fn strip_reasoning_drops_only_the_reasoning_siblings() {
+fn reasoning_to_plain_text_keeps_the_words_and_drops_the_signature() {
     let mut req = ConversationRequest::from_items(switched_model_conversation(Some("grok-4-fast")))
         .with_model("claude-opus-5");
 
-    assert_eq!(req.strip_reasoning(), 1);
-    assert_eq!(req.strip_reasoning(), 0, "nothing left to strip");
+    assert_eq!(req.reasoning_to_plain_text(), 1);
+    assert_eq!(req.reasoning_to_plain_text(), 0, "no reasoning left");
     assert!(thinking_blocks(&req).is_empty());
     assert_eq!(
         req.items.len(),
-        3,
-        "user, assistant and follow-up survive: {:?}",
+        4,
+        "the reasoning became a fourth item, as assistant text: {:?}",
+        req.items
+    );
+    let has_thinking_text = req.items.iter().any(|item| match item {
+        ConversationItem::Assistant(a) => a.content.contains("<thinking>"),
+        _ => false,
+    });
+    assert!(
+        has_thinking_text,
+        "the reasoning text must survive as a plain message: {:?}",
         req.items
     );
 }
@@ -785,8 +815,8 @@ fn a_tool_loop_that_kept_its_thinking_keeps_thinking_on() {
 }
 
 /// A closed loop — its results answered and the user back with a follow-up —
-/// is not the turn the model is being asked to continue, so only the foreign
-/// thinking goes; thinking itself stays on for the new turn.
+/// is not the turn the model is being asked to continue, so the foreign
+/// thinking stops being a thinking block; thinking stays on for the new turn.
 #[test]
 fn a_closed_tool_loop_leaves_thinking_on() {
     let mut req = ConversationRequest::from_items(vec![
@@ -812,6 +842,36 @@ fn a_closed_tool_loop_leaves_thinking_on() {
 
     assert!(build_messages_request(&req).thinking.is_some());
     assert!(thinking_blocks(&req).is_empty());
+    assert!(
+        request_text(&req).contains("planning the call"),
+        "the words of a block this model cannot verify still reach it as text"
+    );
+}
+
+/// A signature-only block (a `tco_*` backend blob) carries no words, so there
+/// is nothing to send as text and it is the one thing that genuinely goes.
+#[test]
+fn a_signature_only_block_has_nothing_to_send_as_text() {
+    let mut req = ConversationRequest::from_items(vec![
+        ConversationItem::user("q1"),
+        reasoning_sibling("tco_1", "", Some("sig-from-the-first-model")),
+        ConversationItem::Assistant(AssistantItem {
+            content: "answer".into(),
+            tool_calls: Vec::new(),
+            model_id: Some("grok-4-fast".into()),
+            model_fingerprint: None,
+            reasoning_effort: None,
+        }),
+        ConversationItem::user("q2"),
+    ])
+    .with_model("claude-opus-5");
+    req.reasoning_effort = Some(crate::ReasoningEffort::High);
+
+    assert!(thinking_blocks(&req).is_empty());
+    assert!(
+        !request_text(&req).contains("<thinking>"),
+        "an empty block must not become an empty thinking message"
+    );
 }
 
 /// The Messages API is the one backend that rejects thinking blocks it was not

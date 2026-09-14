@@ -945,11 +945,18 @@ impl SessionActor {
             && error.status_code == Some(400)
             && error.message.contains("encrypted_content")
         {
+            if self.flatten_history_for_this_model().await {
+                return Ok(SamplerFailureRecovery::FlattenAndResubmit);
+            }
+            // The history is already plain text, so the blob the model named is
+            // not in it. Flattening again would change nothing.
             self.signals_handle()
                 .record_error_typed("encrypted_content_mismatch");
-            let friendly = "This session's conversation history is incompatible \
-                            with the current model. Please start a new session."
-                .to_string();
+            let friendly = format!(
+                "The model rejected this conversation's history and it carries no tool calls \
+                 or reasoning left to convert: {}",
+                error.message
+            );
             self.log_terminal_failure("encrypted_content_mismatch", error.status_code, &friendly);
             self.send_xai_notification(XaiSessionUpdate::RetryState(
                 crate::extensions::notification::RetryState::Failed {
@@ -1205,6 +1212,46 @@ impl SessionActor {
     /// Targets 70% of the window (mirrors the compaction input ladder's own
     /// `InputStage::Lossy` budget) so the resubmit has real headroom rather
     /// than landing exactly on the edge.
+    /// Rewrite the conversation to plain text so the current model can read it.
+    ///
+    /// Returns false when the history holds nothing to convert — the caller
+    /// then has a rejection this cannot explain, and says so rather than
+    /// resubmitting the same bytes forever. That is also the loop bound: one
+    /// flattening leaves nothing for a second to find.
+    async fn flatten_history_for_this_model(self: &Arc<Self>) -> bool {
+        let conversation = self.chat_state_handle.get_conversation().await;
+        if !xai_grok_sampling_types::conversation::needs_flattening(&conversation) {
+            return false;
+        }
+        let (flattened, report) =
+            xai_grok_sampling_types::conversation::flatten_conversation(conversation);
+        tracing::warn!(
+            session_id = %self.session_info.id.0,
+            items_before = report.items_before,
+            items_after = report.items_after,
+            reasoning_to_text = report.reasoning_to_text,
+            reasoning_dropped = report.reasoning_dropped,
+            tool_calls_to_text = report.tool_calls_to_text,
+            tool_results_to_text = report.tool_results_to_text,
+            backend_calls_to_text = report.backend_calls_to_text,
+            "model rejected this history; converted it to plain text and resubmitting"
+        );
+        self.signals_handle().record_error_typed("history_flattened");
+        self.send_xai_notification(XaiSessionUpdate::RetryState(
+            crate::extensions::notification::RetryState::Retrying {
+                attempt: 1,
+                max_retries: 1,
+                reason: format!(
+                    "This model cannot read the history's reasoning and tool calls, so they \
+                     were converted to plain text ({} items). Continuing.",
+                    report.items_after
+                ),
+            },
+        ))
+        .await;
+        self.chat_state_handle.replace_conversation(flattened);
+        true
+    }
     async fn reduce_conversation_for_overflow(self: &Arc<Self>, context_window: u64) {
         const REDUCE_BUDGET_PERCENT: u64 = 70;
         let budget = context_window.saturating_mul(REDUCE_BUDGET_PERCENT) / 100;
@@ -1356,6 +1403,9 @@ impl SessionActor {
                     }
                     SamplerFailureRecovery::RefreshAuthAndResubmit { credential, store } => {
                         Ok(SamplerTurnOutcome::RefreshAuthAndResubmit { credential, store })
+                    }
+                    SamplerFailureRecovery::FlattenAndResubmit => {
+                        Ok(SamplerTurnOutcome::FlattenAndResubmit)
                     }
                 }
             }

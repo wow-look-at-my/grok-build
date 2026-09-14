@@ -345,6 +345,7 @@ pub fn build_messages_request(req: &ConversationRequest) -> crate::messages::Mes
     };
 
     let mut dropped_foreign_thinking = 0usize;
+    let mut converted_foreign_thinking = 0usize;
     // Thinking off for this request takes its blocks with it: a block sent
     // without the top-level config is rejected in turn.
     let thinking_off = open_tool_loop_lost_its_thinking(req);
@@ -459,7 +460,18 @@ pub fn build_messages_request(req: &ConversationRequest) -> crate::messages::Mes
                 let foreign =
                     thinking_is_foreign(&req.items, idx, r, req.model.as_deref(), target_signs);
                 if foreign || thinking_off {
-                    dropped_foreign_thinking += 1;
+                    // The block cannot ride as thinking: its signature is not
+                    // this model's, or thinking is off for this request. The
+                    // words still can, as an ordinary assistant message.
+                    if thinking.is_empty() {
+                        dropped_foreign_thinking += 1;
+                        continue;
+                    }
+                    converted_foreign_thinking += 1;
+                    pending_assistant.push(ContentBlock::Text {
+                        text: format!("<thinking>\n{thinking}\n</thinking>"),
+                        cache_control: None,
+                    });
                     continue;
                 }
                 pending_assistant.push(ContentBlock::Thinking {
@@ -473,12 +485,13 @@ pub fn build_messages_request(req: &ConversationRequest) -> crate::messages::Mes
     flush_assistant(&mut pending_assistant, &mut messages);
     flush_tool_results(&mut pending_tool_results, &mut messages);
 
-    if dropped_foreign_thinking > 0 {
+    if dropped_foreign_thinking > 0 || converted_foreign_thinking > 0 {
         tracing::warn!(
             dropped = dropped_foreign_thinking,
+            converted = converted_foreign_thinking,
             model = req.model.as_deref().unwrap_or_default(),
             thinking_off,
-            "dropped thinking block(s) minted by another model; this model cannot verify their signatures"
+            "thinking block(s) this model cannot verify: the ones carrying text went as plain assistant messages, the signature-only ones went"
         );
     }
 

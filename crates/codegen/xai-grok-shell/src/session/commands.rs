@@ -289,7 +289,21 @@ pub enum SessionCommand {
     /// message has been sent yet (`turn_count == 0`).
     RebuildAgentForDefinition {
         definition: xai_grok_agent::AgentDefinition,
+        /// True only when no turn has run yet. It gates conversation surgery
+        /// that assumes `conversation[1]` is the synthetic zero-turn prefix; a
+        /// mid-session switch passes false, or the rebuild writes over the
+        /// session's first real user message.
+        zero_turn: bool,
         responds_to: oneshot::Sender<Result<(), acp::Error>>,
+    },
+    /// Rewrite the conversation to plain text so a model that cannot read the
+    /// history's reasoning and tool calls can still be handed it.
+    ///
+    /// Sent by the model-switch orchestrator when the new model runs a
+    /// different harness than the turns already in this session. Reports what
+    /// it converted; an already-flat history reports nothing converted.
+    FlattenHistory {
+        responds_to: oneshot::Sender<xai_grok_sampling_types::conversation::FlattenReport>,
     },
     /// Override the model name and optionally inject extra HTTP headers
     /// into the session's sampling config.
