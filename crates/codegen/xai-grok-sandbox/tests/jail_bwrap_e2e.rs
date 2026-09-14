@@ -48,6 +48,8 @@ fn plan(script: &str, mounts: Vec<Mount>, grok_home: &Path, cwd: &Path) -> JailP
         // These e2e scenarios are the release-default jail (ro base, tmpfs
         // /tmp, rw $GROK_HOME); they pin that the default bwrap argv confines.
         defaults: JailDefaults::default(),
+        // No host worker: these scenarios exec a shell script inside the jail.
+        ci_host_fd: None,
     }
 }
 
