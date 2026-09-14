@@ -35,6 +35,7 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - `/run` and `/var` are in the read-only base for one reason. On a systemd host `/etc/resolv.conf` is a symlink into one of them, and a jail without them resolves no name.
 - A working directory nothing binds is refused before the exec. Bubblewrap answers that case with a bare chdir error. That error reads as a broken sandbox and not as a missing `--rw .`.
 - Seatbelt confines WRITES only. The profile is `(allow default)` plus `(deny file-write*)`, so `--ro` means "not writable" there and reads stay open. Linux confines both.
+- The CI host worker's fd rides on the PLAN (`JailPlan::ci_host_fd`) so each backend builder emits it among its own options: bwrap as `--setenv GROK_CI_HOST_FD <fd>` BEFORE the `--` program separator, Seatbelt as a command env. Appending it to the finished command put it after bwrap's `--`, where it is argv for the jailed binary rather than an option — the env var never arrived (so the dot reported no CI under `--sandbox`) and the pager started with three stray arguments.
 
 ## The darwin binary is compiled on Linux and linked on macOS
 
@@ -48,7 +49,7 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 ## CI-status feature notes
 
 - The GitHub CI-status dot lives in `crates/codegen/xai-grok-pager/src/ci_status.rs` (pure `gh` invocation + tri-state mapping + HSV-value animation) and is wired into the session status bar in `src/app/agent_view/render.rs`.
-- The yellow "in progress" dot animates its HSV value in a sine wave between 25% and 80% (see `ci_status::animate_value`).
+- The yellow "in progress" dot animates its HSV value in a sine wave between 25% and 80% (see `ci_status::in_progress_dot_color`). The phase is WALL-CLOCK time (`pulse_elapsed`, one `CI_PULSE_PERIOD` per breath), never the frame tick: the loop's cadence moves with what the UI is doing (83 ms on an idle screen, ~30 fps while streaming) and a tick only advances on a frame that was drawn, so a tick-counted pulse breathes faster the busier the screen is.
 - A `--sandbox` session cannot spawn `gh` in the jail. The host worker (`xai-grok-sandbox/src/ci_host.rs`) answers fixed request shapes over the inherited fd: `gh-status` feeds the dot, `gh-pr` feeds the shell's `x.ai/pr/status` (`extensions/pr.rs`). `gh pr checks` puts its verdict in the exit code (1 failed, 8 pending) and prints the list either way, so both paths accept those codes.
 
 - The dot is only realtime because three things outside the render path keep it moving. Drop any one and it freezes at its last color, silently, on exactly the idle session that is watching CI:

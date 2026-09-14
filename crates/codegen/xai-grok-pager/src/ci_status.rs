@@ -81,18 +81,61 @@ static CI_CACHE: LazyLock<Mutex<HashMap<CiCacheKey, CiCacheEntry>>> =
 static CI_CHANGE_TX: LazyLock<Mutex<Option<tokio::sync::mpsc::UnboundedSender<()>>>> =
     LazyLock::new(|| Mutex::new(None));
 
-/// Sine-wave factor that animates the "CI running" dot's HSV value.
+/// How long one full breath of the "in progress" pulse takes, measured on the
+/// wall clock. Slow enough that the Slow tick cadence (~83 ms,
+/// `app_view::SLOW_TICK_INTERVAL`) still samples the curve smoothly, and long
+/// enough to read as breathing rather than blinking.
+pub const CI_PULSE_PERIOD: Duration = Duration::from_secs(4);
+
+/// The pulse's HSV value bounds: the dot dims to [`CI_PULSE_MIN_VALUE`] and
+/// brightens to [`CI_PULSE_MAX_VALUE`], with hue and saturation untouched.
+pub const CI_PULSE_MIN_VALUE: f32 = 0.25;
+pub const CI_PULSE_MAX_VALUE: f32 = 0.80;
+
+/// The pulse's factor in `[min, max]` (each in `0..=1`) after `elapsed` of
+/// wall-clock time, `min` + `(max-min)·(1+sin)/2`.
 ///
-/// Returns a value in `[min, max]` (each in `0..=1`) that oscillates over the
-/// render tick, `min` + `(max-min)·(1+sin)/2`. Kept dependency-free and
-/// headless so the animation math is directly unit-testable.
-pub fn sine_value_factor(tick: u64, min: f32, max: f32) -> f32 {
-    // Full sine cycle (2π) every 48 ticks. A pulsing dot demands only slow
-    // ticks (83ms, `app_view::SLOW_TICK_INTERVAL`), so that is one breath
-    // per ~4s.
-    let phase = (tick as f32) * std::f32::consts::TAU / 48.0;
+/// A pure function of ELAPSED TIME, deliberately not of a frame or tick
+/// counter: the loop's tick cadence follows what the UI is doing (Slow while
+/// idle, ~30 fps while streaming) and a tick only advances on a frame that was
+/// actually drawn, so a tick-counted pulse breathes faster the busier the
+/// screen is. Sampling elapsed time instead makes the period the same four
+/// seconds at any cadence, and makes the value a function a test can pin
+/// without a terminal.
+pub fn pulse_value(elapsed: Duration, min: f32, max: f32) -> f32 {
+    let phase = elapsed.as_secs_f32() * std::f32::consts::TAU / CI_PULSE_PERIOD.as_secs_f32();
     let unit = (phase.sin() + 1.0) / 2.0; // 0..=1
     min + unit * (max - min)
+}
+
+/// The process's pulse epoch. One shared origin means every render of the dot
+/// reads the same phase, and a poll landing between two frames cannot jump it.
+static PULSE_EPOCH: LazyLock<Instant> = LazyLock::new(Instant::now);
+
+/// Wall-clock time since the pulse epoch, which is what the render path feeds
+/// [`animate_value_at`]. An `Instant`-derived duration rather than a tick
+/// count — see [`pulse_value`].
+pub fn pulse_elapsed() -> Duration {
+    PULSE_EPOCH.elapsed()
+}
+
+/// The color the dot takes after `elapsed` of wall-clock time: `base`'s hue and
+/// saturation with its HSV value pulsed across the two bounds.
+pub fn animate_value_at(elapsed: Duration, base: (u8, u8, u8), min: f32, max: f32) -> (u8, u8, u8) {
+    let (h, s, _v) = rgb_to_hsv(base);
+    hsv_to_rgb((h, s, pulse_value(elapsed, min, max)))
+}
+
+/// The in-progress dot's color right now: [`animate_value_at`] sampled at
+/// [`pulse_elapsed`], at the shipped bounds. This is the exact call the status
+/// bar's dot makes while a run is in flight.
+pub fn in_progress_dot_color(base: (u8, u8, u8)) -> (u8, u8, u8) {
+    animate_value_at(
+        pulse_elapsed(),
+        base,
+        CI_PULSE_MIN_VALUE,
+        CI_PULSE_MAX_VALUE,
+    )
 }
 
 /// Pure RGB → HSV: returns `(hue 0..=360, saturation 0..=1, value 0..=1)`.
@@ -137,15 +180,6 @@ pub fn hsv_to_rgb((h, s, v): (f32, f32, f32)) -> (u8, u8, u8) {
         ((g + m) * 255.0).round() as u8,
         ((b + m) * 255.0).round() as u8,
     )
-}
-
-/// Animate the CI dot's color for a given `tick`: re-scale the HS**V** value of
-/// `base` in a sine wave between `min` and `max` (percent as fractions), fully
-/// preserving hue and saturation. Used to pulse the yellow "in progress" dot.
-pub fn animate_value(tick: u64, base: (u8, u8, u8), min: f32, max: f32) -> (u8, u8, u8) {
-    let (h, s, _v) = rgb_to_hsv(base);
-    let v = sine_value_factor(tick, min, max);
-    hsv_to_rgb((h, s, v))
 }
 
 /// Run the real `gh` CI-status command for `branch` in `repo_root` and return
@@ -667,6 +701,100 @@ mod tests {
         }
     }
 
+    /// Serialises the tests that publish a host-worker fd through the process
+    /// environment. That variable is process-global, so two such tests running
+    /// at once would each read the other's fd — or find it already removed.
+    static CI_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn ci_env_lock() -> std::sync::MutexGuard<'static, ()> {
+        CI_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Publish an in-process peer speaking the worker's protocol over
+    /// `CI_HOST_FD_ENV`, exactly the way the jail boundary hands the fd to the
+    /// jailed pager, and answer one `gh-status <branch>` request with `json`.
+    ///
+    /// The peer asserts the request shape, so a caller that reached `gh` some
+    /// other way, or asked for the wrong thing, fails here rather than silently
+    /// reading whatever the peer felt like sending. Callers hold
+    /// [`ci_env_lock`] for as long as the variable must stay set.
+    #[cfg(unix)]
+    fn publish_ci_host_peer(json: &'static [u8]) -> i32 {
+        use std::os::unix::net::UnixStream;
+        let (ours, theirs) = UnixStream::pair().expect("pair");
+        let raw = std::os::unix::io::AsRawFd::as_raw_fd(&ours);
+        std::thread::spawn(move || {
+            let mut peer = theirs;
+            let mut buf = [0u8; 8192];
+            let n = peer.read(&mut buf).unwrap();
+            let request = String::from_utf8_lossy(&buf[..n]).to_string();
+            assert!(
+                request.starts_with("gh-status "),
+                "the jailed side must ask in the worker's fixed shape, got: {request}"
+            );
+            peer.write_all(json).unwrap();
+            peer.write_all(b"\n").unwrap();
+            peer.flush().unwrap();
+        });
+        // SAFETY: the tests that mutate this variable serialise on
+        // `CI_ENV_LOCK`, and nothing else in the process reads it.
+        unsafe {
+            std::env::set_var(xai_grok_sandbox::ci_host::CI_HOST_FD_ENV, raw.to_string());
+        }
+        // Leak `ours` so the fd stays open and unique for this process; see the
+        // sibling helper below for why the transport's per-fd cache needs that.
+        std::mem::forget(ours);
+        raw
+    }
+
+    /// Drive the SHIPPED CI-status path exactly as a `--sandbox` session does:
+    /// `gh_ci_status` → `run_gh` → the `GROK_CI_HOST_FD` env read → the host
+    /// worker, with no fd passed by hand.
+    ///
+    /// `repo_root` does not exist, so a real in-jail `gh` spawn could only fail:
+    /// reading a color back at all proves the answer came over the inherited
+    /// worker connection.
+    #[test]
+    #[cfg(unix)]
+    fn the_shipped_ci_status_reads_the_host_worker_the_jail_hands_it() {
+        let _env = ci_env_lock();
+        let _fd = publish_ci_host_peer(
+            br#"[{"status":"completed","conclusion":"success","headBranch":"master","workflowName":"CI"}]"#,
+        );
+        let (runs, status) = gh_ci_status(Path::new("/no/such/repo"), "master");
+        assert_eq!(
+            status,
+            CiStatus::Green,
+            "a green host answer must reach the dot ({runs:?})"
+        );
+        unsafe { std::env::remove_var(xai_grok_sandbox::ci_host::CI_HOST_FD_ENV) };
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn the_shipped_ci_status_shows_an_in_progress_host_answer_as_yellow() {
+        let _env = ci_env_lock();
+        let _fd = publish_ci_host_peer(
+            br#"[{"status":"in_progress","conclusion":"","headBranch":"master","workflowName":"CI"}]"#,
+        );
+        let (_runs, status) = gh_ci_status(Path::new("/no/such/repo"), "master");
+        assert_eq!(status, CiStatus::Yellow, "a live run must pulse, not go dark");
+        unsafe { std::env::remove_var(xai_grok_sandbox::ci_host::CI_HOST_FD_ENV) };
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn the_shipped_ci_status_degrades_to_off_on_the_worker_sentinel() {
+        // The worker's nothing-usable sentinel (`gh` failed, or the branch has
+        // no runs): the dot goes dark rather than inventing a color.
+        let _env = ci_env_lock();
+        let _fd = publish_ci_host_peer(b".");
+        let (runs, status) = gh_ci_status(Path::new("/no/such/repo"), "master");
+        assert_eq!(status, CiStatus::Off);
+        assert!(runs.is_empty());
+        unsafe { std::env::remove_var(xai_grok_sandbox::ci_host::CI_HOST_FD_ENV) };
+    }
+
     /// Drive `run_gh_via_ci_host` against an in-process peer speaking the real
     /// host-worker protocol, returning the `Output` it would hand a caller.
     /// The peer consumes a request, replies with one JSON line, and verifies
@@ -718,6 +846,7 @@ mod tests {
 
     #[test]
     fn sandboxed_query_reduces_a_host_result_to_a_real_status() {
+        let _env = ci_env_lock();
         // A host worker answering exactly what `gh run list --json` emits: the
         // shipped `gh_ci_status` reduction must read it and produce Green, not
         // Off — proving the dot works through the sandbox transport.
@@ -732,6 +861,7 @@ mod tests {
 
     #[test]
     fn sandboxed_query_yellow_on_an_in_progress_host_result() {
+        let _env = ci_env_lock();
         let json = br#"[{"status":"in_progress","conclusion":"","headBranch":"master","workflowName":"CI"}]"#;
         let output = host_peer_reply(json);
         let runs = parse_gh_runs(&output.stdout).expect("parse host JSON");
@@ -740,6 +870,7 @@ mod tests {
 
     #[test]
     fn sandboxed_query_degrades_to_off_on_a_malformed_host_answer() {
+        let _env = ci_env_lock();
         // A worker replying with the "." sentinel (its `gh` failed / the
         // branch had no runs) must read back as no status at all — the
         // transport reports `None`, so the dot degrades to "off". It must
@@ -771,6 +902,7 @@ mod tests {
 
     #[test]
     fn repeated_polls_reuse_one_host_connection_and_stay_correct() {
+        let _env = ci_env_lock();
         // The session must poll more than once (continuous refresh), and each
         // poll must get a fresh, correct answer over the same connection.
         use std::os::unix::net::UnixStream;
@@ -850,20 +982,99 @@ mod tests {
         assert_eq!(ci_status_peek(Path::new(repo), "master"), None);
     }
 
-    #[test]
-    fn sine_value_factor_stays_between_min_and_max() {
-        // The yellow pulse must never leave [0.25, 0.80].
-        for tick in 0..200 {
-            let v = sine_value_factor(tick, 0.25, 0.80);
-            assert!((0.25..=0.80).contains(&v), "tick {tick} -> {v}");
+    /// Walk one render cadence over `span` of wall-clock time, sampling the
+    /// SHIPPED pulse once per frame the way the render loop does, and report
+    /// the wall-clock duration of one full breath: the elapsed time between the
+    /// first two peak samples.
+    ///
+    /// This is the measurement the tick-counted pulse failed: the same code
+    /// sampled on the Slow cadence and on the ~30 fps cadence reported two
+    /// different periods, because the period was a frame count.
+    fn measured_period(step: Duration, span: Duration) -> Duration {
+        let mut samples: Vec<(Duration, f32)> = Vec::new();
+        let mut elapsed = Duration::ZERO;
+        while elapsed <= span {
+            samples.push((
+                elapsed,
+                pulse_value(elapsed, CI_PULSE_MIN_VALUE, CI_PULSE_MAX_VALUE),
+            ));
+            elapsed += step;
         }
-        // Phase extremes hit the bounds: sin peaks at tick 12 (max) and
-        // bottoms out at tick 36 (min) for a 48-tick cycle.
-        assert!((sine_value_factor(12, 0.25, 0.80) - 0.80).abs() < 1e-2);
-        assert!((sine_value_factor(36, 0.25, 0.80) - 0.25).abs() < 1e-2);
-        // And it is periodic.
+        let peaks: Vec<Duration> = samples
+            .windows(3)
+            .filter(|w| w[1].1 >= w[0].1 && w[1].1 >= w[2].1)
+            .map(|w| w[1].0)
+            .collect();
         assert!(
-            (sine_value_factor(0, 0.25, 0.80) - sine_value_factor(48, 0.25, 0.80)).abs() < 1e-2
+            peaks.len() >= 2,
+            "a {span:?} span at {step:?} per frame must contain two peaks"
+        );
+        peaks[1] - peaks[0]
+    }
+
+    #[test]
+    fn the_pulse_period_is_wall_clock_time_not_a_frame_count() {
+        // The two cadences the event loop actually uses: Slow on an idle screen
+        // (app_view::SLOW_TICK_INTERVAL) and ~30 fps while streaming.
+        let slow_step = Duration::from_millis(83);
+        let fast_step = Duration::from_millis(33);
+        let span = CI_PULSE_PERIOD * 3;
+
+        let slow = measured_period(slow_step, span);
+        let fast = measured_period(fast_step, span);
+
+        // Each cadence measures the shipped period, within one frame of its own
+        // sampling resolution.
+        for (measured, step) in [(slow, slow_step), (fast, fast_step)] {
+            let error = measured.abs_diff(CI_PULSE_PERIOD);
+            assert!(
+                error <= step * 2,
+                "one breath must be {CI_PULSE_PERIOD:?} at a {step:?} cadence, \
+                 measured {measured:?}"
+            );
+        }
+        // And the two cadences agree with each other: a frame-counted pulse
+        // cannot do this, because its period scales with the frame rate.
+        assert!(
+            slow.abs_diff(fast) <= slow_step * 2,
+            "the breath must take the same wall-clock time at either cadence: \
+             slow {slow:?} vs fast {fast:?}"
+        );
+    }
+
+    #[test]
+    fn pulse_value_stays_between_min_and_max_and_is_periodic() {
+        // The yellow pulse must never leave [0.25, 0.80].
+        for ms in 0..(CI_PULSE_PERIOD.as_millis() as u64 * 2) {
+            let v = pulse_value(
+                Duration::from_millis(ms),
+                CI_PULSE_MIN_VALUE,
+                CI_PULSE_MAX_VALUE,
+            );
+            assert!(
+                (CI_PULSE_MIN_VALUE..=CI_PULSE_MAX_VALUE).contains(&v),
+                "{ms}ms -> {v}"
+            );
+        }
+        // Phase extremes: sin peaks a quarter period in (max) and bottoms out at
+        // three quarters (min).
+        let quarter = CI_PULSE_PERIOD / 4;
+        assert!(
+            (pulse_value(quarter, CI_PULSE_MIN_VALUE, CI_PULSE_MAX_VALUE) - CI_PULSE_MAX_VALUE).abs()
+                < 1e-2
+        );
+        assert!(
+            (pulse_value(quarter * 3, CI_PULSE_MIN_VALUE, CI_PULSE_MAX_VALUE)
+                - CI_PULSE_MIN_VALUE)
+                .abs()
+                < 1e-2
+        );
+        // And the period is the period.
+        assert!(
+            (pulse_value(Duration::ZERO, CI_PULSE_MIN_VALUE, CI_PULSE_MAX_VALUE)
+                - pulse_value(CI_PULSE_PERIOD, CI_PULSE_MIN_VALUE, CI_PULSE_MAX_VALUE))
+            .abs()
+                < 1e-2
         );
     }
 
@@ -875,10 +1086,10 @@ mod tests {
         assert!(h > 30.0 && h < 90.0, "expected a yellow hue, got {h}");
         assert!(s > 0.5);
 
-        // One full cycle apart: tick 12 is the brightest (value 0.80), tick 36
-        // the dimmest (value 0.25).
-        let dim = animate_value(36, base, 0.25, 0.80);
-        let bright = animate_value(12, base, 0.25, 0.80);
+        // A quarter period apart: the brightest sample, then the dimmest.
+        let quarter = CI_PULSE_PERIOD / 4;
+        let bright = animate_value_at(quarter, base, CI_PULSE_MIN_VALUE, CI_PULSE_MAX_VALUE);
+        let dim = animate_value_at(quarter * 3, base, CI_PULSE_MIN_VALUE, CI_PULSE_MAX_VALUE);
         // Preserves hue and saturation; only value changes.
         let (h1, s1, _) = rgb_to_hsv(dim);
         let (h2, s2, _) = rgb_to_hsv(bright);
@@ -888,6 +1099,37 @@ mod tests {
         let lum =
             |(r, g, b): (u8, u8, u8)| 0.2126 * r as f32 + 0.7152 * g as f32 + 0.0722 * b as f32;
         assert!(lum(bright) > lum(dim), "brighter frame must be lighter");
+    }
+
+    /// The shipped status-bar call site must feed the pulse ELAPSED WALL TIME.
+    /// The pulse math above is only half the fix: a render path that still
+    /// passes `scrollback.animation_tick()` would keep the old frame-counted
+    /// behavior with a `Duration`-shaped cast.
+    ///
+    /// Structural, because the call site lives inside a ratatui render pass that
+    /// no unit test can run. It reads the real file and asserts the CI dot's
+    /// in-progress arm goes through `in_progress_dot_color` (the wall-clock
+    /// entry point) and never through the tick counter.
+    #[test]
+    fn the_status_bar_dot_pulses_from_wall_clock_time() {
+        const RENDER_SRC: &str = include_str!("app/agent_view/render.rs");
+        let arm = RENDER_SRC
+            .split("CiStatus::Yellow => {")
+            .nth(1)
+            .expect("the status bar must have an in-progress arm for the dot");
+        let arm = &arm[..arm.find("CiStatus::Green").unwrap_or(arm.len())];
+        assert!(
+            arm.contains("in_progress_dot_color("),
+            "the in-progress dot must pulse through the wall-clock entry point: {arm}"
+        );
+        assert!(
+            !arm.contains("animation_tick"),
+            "the pulse phase must not come from the frame tick: {arm}"
+        );
+        assert!(
+            !arm.contains("animate_value("),
+            "the tick-counter entry point must be gone from the render path: {arm}"
+        );
     }
 
     #[test]

@@ -1451,6 +1451,10 @@ impl SessionActor {
                         | ToolKind::MemoryGet
                         | ToolKind::WebSearch
                         | ToolKind::WebFetch
+                        // The `ci` tool is a read of GitHub state: it declares
+                        // itself read-only, and a missing kind here would make
+                        // the shell prompt for approval on every CI query.
+                        | ToolKind::Ci
                         | ToolKind::EnterPlan
                         | ToolKind::ExitPlan
                         | ToolKind::AskUser
@@ -1973,6 +1977,10 @@ impl SessionActor {
                 vec![],
                 vec![],
             ),
+            // The CI tool has its own row: without this arm it fell into the
+            // generic `_` below and every CI query read as "Tool call", which
+            // says nothing about what was asked of CI.
+            ToolInput::Ci(ref ci) => (ci_tool_title(ci), acp::ToolKind::Other, vec![], vec![]),
             #[allow(unreachable_patterns)]
             _ => (
                 "Tool call".to_string(),
@@ -2862,6 +2870,26 @@ impl SessionActor {
         Ok(())
     }
 }
+/// The transcript title for a `ci` tool call: what was asked, and of which
+/// branch. Extracted so the title is driven by the shipped descriptor and
+/// testable without a live session (see `ci_tool_title_tests`).
+fn ci_tool_title(ci: &xai_grok_tools::implementations::grok_build::ci::CiInput) -> String {
+    use xai_grok_tools::implementations::grok_build::ci::CiAction;
+    let action = match ci.action {
+        CiAction::Status => "status",
+        CiAction::Runs => "runs",
+        CiAction::Wait => "wait",
+        CiAction::Logs => "logs",
+        CiAction::Checks => "checks",
+    };
+    match ci.branch.as_deref().filter(|branch| !branch.is_empty()) {
+        Some(branch) => format!("CI {action}: {branch}"),
+        // No branch named: the tool reads the checked-out one, which is what
+        // the session is already showing.
+        None => format!("CI {action} (current branch)"),
+    }
+}
+
 /// Execute tool-call display parts. The title peels a redundant leading
 /// `cd <cwd>` for chrome only; `raw_input` is serialized separately and stays full.
 fn execute_tool_call_parts(
@@ -2884,6 +2912,72 @@ fn execute_tool_call_parts(
         ))],
     )
 }
+#[cfg(test)]
+mod ci_tool_title_tests {
+    use super::ci_tool_title;
+    use xai_grok_tools::implementations::grok_build::ci::{CiAction, CiInput};
+
+    fn input(action: CiAction, branch: Option<&str>) -> CiInput {
+        CiInput {
+            action,
+            branch: branch.map(str::to_string),
+            run_id: None,
+            limit: None,
+            timeout_secs: None,
+        }
+    }
+
+    #[test]
+    fn a_ci_call_names_the_action_and_the_branch() {
+        for (action, label) in [
+            (CiAction::Status, "status"),
+            (CiAction::Runs, "runs"),
+            (CiAction::Wait, "wait"),
+            (CiAction::Logs, "logs"),
+            (CiAction::Checks, "checks"),
+        ] {
+            let title = ci_tool_title(&input(action, Some("fix/darwin-version-stamp")));
+            assert_eq!(title, format!("CI {label}: fix/darwin-version-stamp"));
+            assert_ne!(title, "Tool call", "the generic fallback is not a CI title");
+        }
+    }
+
+    #[test]
+    fn a_branch_less_ci_call_says_which_branch_it_reads() {
+        // An omitted branch (and an empty one, which some callers send) means
+        // the checked-out branch: the title says so rather than trailing a colon.
+        for branch in [None, Some("")] {
+            assert_eq!(
+                ci_tool_title(&input(CiAction::Status, branch)),
+                "CI status (current branch)"
+            );
+        }
+    }
+
+    /// The descriptor test above drives the helper; this pins that the shipped
+    /// match actually routes `ToolInput::Ci` there. Neither match in this file is
+    /// exhaustive over its enum, so a missing arm degrades silently into the
+    /// generic label instead of failing to compile.
+    #[test]
+    fn the_shipped_descriptor_routes_ci_to_its_own_title() {
+        const SRC: &str = include_str!("tool_calls.rs");
+        let arm = SRC
+            .find("ToolInput::Ci(ref ci)")
+            .expect("the ci arm must exist in the shipped descriptor");
+        let fallback = SRC
+            .find("\"Tool call\".to_string()")
+            .expect("the generic fallback must still exist for other tools");
+        assert!(
+            arm < fallback,
+            "the ci arm must be matched before the generic fallback"
+        );
+        assert!(
+            SRC[arm..fallback].contains("ci_tool_title("),
+            "the ci arm must use the shipped title helper"
+        );
+    }
+}
+
 #[cfg(test)]
 mod execute_tool_call_parts_tests {
     use super::execute_tool_call_parts;

@@ -452,6 +452,13 @@ pub struct JailPlan {
     /// `/tmp`, the system base and `$GROK_HOME`; the cwd default was already
     /// applied by [`build_plan`] when it injected the front cwd mount.
     pub defaults: JailDefaults,
+    /// The inherited fd of the unsandboxed CI host worker, when one was started
+    /// for this jail. It is an input to the backend builders, not something the
+    /// caller appends afterwards: bwrap reads its own options only up to the
+    /// `--` program separator, so a `--setenv` emitted after it becomes argv for
+    /// the jailed binary and the jail starts with no way to reach `gh` — the
+    /// dot's "no CI" state, with stray arguments on the pager's command line.
+    pub ci_host_fd: Option<i32>,
 }
 
 /// Resolve a request into a plan. Every path must exist: a missing bind is a
@@ -554,6 +561,9 @@ pub fn build_plan(
         cwd,
         args,
         defaults: *defaults,
+        // The CI host worker is spawned by the caller that is about to exec,
+        // moments before the jail is built (see `maybe_reexec_into_jail`).
+        ci_host_fd: None,
     };
     plan.check_cwd_is_bound()?;
     Ok(plan)
@@ -618,7 +628,13 @@ fn dedicated_temp_dir() -> Result<PathBuf, JailError> {
 /// release behavior (ro base, tmpfs `/tmp`, rw `$GROK_HOME`), so a plan built
 /// with [`JailDefaults::default`] produces byte-identical argv to the jail
 /// before config existed.
-#[cfg(target_os = "linux")]
+///
+/// Compiled under `cfg(test)` off Linux as well, because the emitted argv IS
+/// the contract (the option order is what makes a later bind win, and what
+/// keeps the CI host-worker fd an option rather than a program argument) and an
+/// ordering only one host can assert is one that regresses quietly everywhere
+/// else.
+#[cfg(any(target_os = "linux", test))]
 pub fn bwrap_command(plan: &JailPlan) -> std::process::Command {
     // No --die-with-parent: it kills the jail when bwrap's parent dies, and a
     // session started from a script that exits right after is a live session.
@@ -703,6 +719,17 @@ pub fn bwrap_command(plan: &JailPlan) -> std::process::Command {
     cmd.arg("--chdir").arg(&plan.cwd);
     cmd.arg("--setenv").arg(JAIL_ENV_VAR).arg("1");
     cmd.arg("--setenv").arg(BWRAP_ENV_VAR).arg("1");
+    // The host-worker fd, as a bwrap env setting and therefore BEFORE `--`.
+    // bwrap stops reading its own options at `--`, so an override emitted after
+    // it is not an override at all: it lands in the jailed binary's argv, which
+    // both loses the env var and injects stray arguments the pager must then
+    // tolerate. Emitting it here is what makes `GROK_CI_HOST_FD` visible inside
+    // the jail, which is the only way the dot reaches `gh` under `--sandbox`.
+    if let Some(fd) = plan.ci_host_fd {
+        cmd.arg("--setenv")
+            .arg(crate::ci_host::CI_HOST_FD_ENV)
+            .arg(fd.to_string());
+    }
     cmd.arg("--").arg(&plan.self_exe).args(&plan.args);
     cmd
 }
@@ -831,6 +858,11 @@ pub fn seatbelt_command(plan: &JailPlan) -> std::process::Command {
     cmd.arg(&plan.self_exe).args(&plan.args);
     cmd.env(JAIL_ENV_VAR, "1");
     cmd.env("TMPDIR", &plan.temp_dir);
+    // Seatbelt inherits the environment, so the host-worker fd is delivered as
+    // a command env setting — never as an argument of the jailed program.
+    if let Some(fd) = plan.ci_host_fd {
+        cmd.env(crate::ci_host::CI_HOST_FD_ENV, fd.to_string());
+    }
     cmd.current_dir(&plan.cwd);
     cmd
 }
@@ -895,7 +927,7 @@ pub fn maybe_reexec_into_jail() {
     // (release defaults when there is no `[jail]` section), then drive the real
     // plan/service builders so the config layer shapes the emitted jail.
     let defaults = JailDefaults::load(&crate::paths::grok_home());
-    let plan = match build_plan(&request, &defaults, argv) {
+    let mut plan = match build_plan(&request, &defaults, argv) {
         Ok(plan) => plan,
         Err(e) => fail(&e.to_string()),
     };
@@ -904,26 +936,16 @@ pub fn maybe_reexec_into_jail() {
     // from it instead of reaching the host from inside the jail. `None` when
     // the worker cannot start — the jailed dot then degrades to "off", which
     // is the same graceful state as a missing `gh`.
-    let ci_host_fd = crate::ci_host::spawn_ci_host(&plan.cwd);
+    //
+    // The fd goes on the PLAN, so the backend builder emits it among its own
+    // options. Appending it to the finished command put it after bwrap's `--`
+    // separator, which made it argv for the jailed binary instead of an env
+    // setting — see `JailPlan::ci_host_fd`.
+    plan.ci_host_fd = crate::ci_host::spawn_ci_host(&plan.cwd);
     let mut cmd = match backend_command(&plan) {
         Ok(cmd) => cmd,
         Err(e) => fail(&e.to_string()),
     };
-    // Thread the host-worker fd through the jail boundary. bwrap rebuilds the
-    // env from its own argument list; Seatbelt inherits and we set it anyway.
-    if let Some(fd) = ci_host_fd {
-        let value = fd.to_string();
-        #[cfg(target_os = "linux")]
-        {
-            cmd.arg("--setenv")
-                .arg(crate::ci_host::CI_HOST_FD_ENV)
-                .arg(&value);
-        }
-        #[cfg(target_os = "macos")]
-        {
-            cmd.env(crate::ci_host::CI_HOST_FD_ENV, &value);
-        }
-    }
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt as _;
@@ -1043,6 +1065,7 @@ mod tests {
             cwd: PathBuf::from("/work"),
             args: vec![OsString::from("--sandbox=pathbox")],
             defaults: JailDefaults::default(),
+            ci_host_fd: None,
         }
     }
 
@@ -1113,6 +1136,122 @@ mod tests {
         assert!(
             args.windows(2).any(|w| w == ["--chdir", "/work"]),
             "the jail must keep the working directory: {args:?}"
+        );
+    }
+
+    /// The host-worker fd must reach the jailed process as a bwrap `--setenv`
+    /// option, BEFORE the `--` program separator. Emitted after it, bwrap reads
+    /// it as argv for the jailed binary instead — the env var then never
+    /// arrives (so the dot reports no CI) and the pager starts with three stray
+    /// arguments.
+    #[test]
+    fn bwrap_hands_the_ci_host_fd_to_the_jail_before_the_program_separator() {
+        let mut plan = plan_fixture(vec![]);
+        plan.ci_host_fd = Some(7);
+        let args: Vec<String> = bwrap_command(&plan)
+            .get_args()
+            .map(|a| a.to_string_lossy().to_string())
+            .collect();
+        let separator = args
+            .iter()
+            .position(|a| a == "--")
+            .expect("bwrap needs its program separator");
+        let override_at = args
+            .windows(3)
+            .position(|w| w[0] == "--setenv" && w[1] == crate::ci_host::CI_HOST_FD_ENV)
+            .expect("the host worker's fd must be handed to the jail");
+        assert_eq!(
+            args[override_at + 2],
+            "7",
+            "the value must be the fd number the worker was spawned on"
+        );
+        assert!(
+            override_at < separator,
+            "bwrap stops reading its own options at `--`, so the fd override must \
+             come before it: {args:?}"
+        );
+        assert!(
+            !args[separator + 1..]
+                .iter()
+                .any(|a| a == crate::ci_host::CI_HOST_FD_ENV || a == "--setenv"),
+            "the fd is a jail setting, never an argument of the jailed program: {args:?}"
+        );
+    }
+
+    /// With no worker there is nothing to hand over, and the jail must not
+    /// invent an fd for the pager to read.
+    #[test]
+    fn bwrap_emits_no_ci_fd_override_without_a_host_worker() {
+        let plan = plan_fixture(vec![]);
+        let args: Vec<String> = bwrap_command(&plan)
+            .get_args()
+            .map(|a| a.to_string_lossy().to_string())
+            .collect();
+        assert!(
+            !args.iter().any(|a| a == crate::ci_host::CI_HOST_FD_ENV),
+            "no worker means no fd to advertise: {args:?}"
+        );
+    }
+
+    /// The defect this fixes, on the record. Prints the fixed argv, and beside
+    /// it the argv the pre-fix caller produced: the SAME builder for a plan with
+    /// no fd, with the identical override appended to the finished command.
+    /// There it sits after `--`, so bwrap hands it to the jailed binary as three
+    /// arguments and never sets the variable. Output only — the assertions live
+    /// in the tests above.
+    #[test]
+    fn capture_ci_fd_argv() {
+        let mut with_fd = plan_fixture(vec![]);
+        with_fd.ci_host_fd = Some(7);
+        let fixed: Vec<String> = bwrap_command(&with_fd)
+            .get_args()
+            .map(|a| a.to_string_lossy().to_string())
+            .collect();
+
+        let no_fd = plan_fixture(vec![]);
+        let mut pre_fix = bwrap_command(&no_fd);
+        pre_fix
+            .arg("--setenv")
+            .arg(crate::ci_host::CI_HOST_FD_ENV)
+            .arg("7");
+        let pre_fix: Vec<String> = pre_fix
+            .get_args()
+            .map(|a| a.to_string_lossy().to_string())
+            .collect();
+
+        eprintln!("fixed argv:   {fixed:?}");
+        eprintln!("pre-fix argv: {pre_fix:?}");
+    }
+
+    /// Seatbelt inherits the environment, so the same fd rides as a command env
+    /// setting — never as an argument the jailed pager would have to ignore.
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn seatbelt_hands_the_ci_host_fd_to_the_jail_as_a_command_env() {
+        let mut plan = plan_fixture(vec![]);
+        plan.ci_host_fd = Some(7);
+        let cmd = seatbelt_command(&plan);
+        let value = cmd
+            .get_envs()
+            .find(|(key, _)| key.to_string_lossy() == crate::ci_host::CI_HOST_FD_ENV)
+            .and_then(|(_, value)| value)
+            .map(|value| value.to_string_lossy().into_owned());
+        assert_eq!(
+            value.as_deref(),
+            Some("7"),
+            "the jailed pager reads the fd from this env var"
+        );
+        assert!(
+            !cmd.get_args()
+                .any(|arg| arg.to_string_lossy() == crate::ci_host::CI_HOST_FD_ENV),
+            "the fd must never be an argument of the jailed program"
+        );
+        plan.ci_host_fd = None;
+        assert!(
+            seatbelt_command(&plan)
+                .get_envs()
+                .all(|(key, _)| key.to_string_lossy() != crate::ci_host::CI_HOST_FD_ENV),
+            "no worker means no fd to advertise"
         );
     }
 
