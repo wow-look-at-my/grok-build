@@ -1387,6 +1387,7 @@ impl ModelsManager {
     }
 }
 
+
 /// Add a provider-qualified Codex catalog to the resolved xAI/custom catalog.
 ///
 /// Provider entries are kept outside `prefetched`: xAI auth refreshes may

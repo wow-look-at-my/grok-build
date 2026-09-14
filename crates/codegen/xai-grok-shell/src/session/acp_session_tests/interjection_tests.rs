@@ -275,10 +275,7 @@ async fn drain_interjection_reload_round_trip_renders_original_text() {
                 cwd: "/test/workspace".to_string(),
             };
             let adapter = JsonlStorageAdapter::with_root(temp_dir.path().to_path_buf());
-            adapter
-                .init_session(&info, default_model_id())
-                .await
-                .unwrap();
+            adapter.init_session(&info, default_model_id()).await.unwrap();
             adapter
                 .append_update(
                     &info,

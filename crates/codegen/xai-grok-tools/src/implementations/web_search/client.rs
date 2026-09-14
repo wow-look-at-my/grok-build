@@ -156,10 +156,7 @@ impl WebSearchClient {
     ) -> Result<(String, Vec<String>), xai_tool_runtime::ToolError> {
         if self.backend == SearchBackend::Kagi {
             let (content, pairs) = self.kagi_results(query, allowed_domains).await?;
-            return Ok((
-                content,
-                pairs.into_iter().map(|(_title, url)| url).collect(),
-            ));
+            return Ok((content, pairs.into_iter().map(|(_title, url)| url).collect()));
         }
         let web_search = rs::WebSearchToolArgs::default()
             .filters(rs::WebSearchToolFilters { allowed_domains })
@@ -395,7 +392,9 @@ impl WebSearchClient {
                 .text()
                 .await
                 .unwrap_or_else(|_| "Failed to read error body".to_string());
-            return Err(kagi_error(format!("Kagi search returned {status}: {body}")));
+            return Err(kagi_error(format!(
+                "Kagi search returned {status}: {body}"
+            )));
         }
         let bytes = response
             .bytes()
@@ -448,7 +447,10 @@ struct KagiItem {
 /// Each result becomes its title, URL, and snippet, so the model sees what Kagi
 /// returned without a synthesis pass. Related searches carry no URL, so they
 /// ride the text and never a citation.
-fn format_kagi_results(results: &[&KagiItem], related: &[&str]) -> (String, Vec<(String, String)>) {
+fn format_kagi_results(
+    results: &[&KagiItem],
+    related: &[&str],
+) -> (String, Vec<(String, String)>) {
     let mut blocks = Vec::with_capacity(results.len() + 1);
     let mut pairs = Vec::with_capacity(results.len());
     for item in results {
@@ -457,11 +459,7 @@ fn format_kagi_results(results: &[&KagiItem], related: &[&str]) -> (String, Vec<
         };
         let title = item.title.as_deref().unwrap_or(url);
         pairs.push((title.to_string(), url.to_string()));
-        match item
-            .snippet
-            .as_deref()
-            .filter(|snippet| !snippet.is_empty())
-        {
+        match item.snippet.as_deref().filter(|snippet| !snippet.is_empty()) {
             Some(snippet) => blocks.push(format!("{title}\n{url}\n{snippet}")),
             None => blocks.push(format!("{title}\n{url}")),
         }

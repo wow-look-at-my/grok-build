@@ -1001,7 +1001,8 @@ mod tests {
                     vec![serde_json::json!("other")],
                 ),
             ] {
-                let bad = serde_json::json!({ "_meta": { "x.ai/facetFilters": { "kind": sent } } });
+                let bad =
+                    serde_json::json!({ "_meta": { "x.ai/facetFilters": { "kind": sent } } });
                 let req = parse_list_req(&bad.to_string()).expect("parse");
                 let parsed = ParsedMeta::parse(req.meta.as_ref());
                 assert_eq!(

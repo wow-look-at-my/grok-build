@@ -2465,9 +2465,11 @@ mod tests {
     ) -> (String, tokio::task::JoinHandle<()>) {
         use axum::routing::get;
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let base = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
-        let app =
-            axum::Router::new().route("/v1/models", get(move || async move { axum::Json(body) }));
+        let base =
+            format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+        let app = axum::Router::new().route("/v1/models", get(move || async move {
+            axum::Json(body)
+        }));
         let handle = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
         (base, handle)
     }
@@ -2498,19 +2500,15 @@ mod tests {
         .unwrap();
         server.abort();
 
-        let deepseek = entries
-            .iter()
-            .find(|m| m.model == "openrouter/deepseek/deepseek-test")
-            .unwrap();
+        let deepseek =
+            entries.iter().find(|m| m.model == "openrouter/deepseek/deepseek-test").unwrap();
         assert_eq!(
-            deepseek.context_window.get(),
-            1_000_000,
+            deepseek.context_window.get(), 1_000_000,
             "per-model contextWindow must parse from the model's own provider listing"
         );
         let vendor2 = entries.iter().find(|m| m.model == "vendor-2").unwrap();
         assert_eq!(
-            vendor2.context_window.get(),
-            700_000,
+            vendor2.context_window.get(), 700_000,
             "Anthropic max_input_tokens form must parse too"
         );
     }

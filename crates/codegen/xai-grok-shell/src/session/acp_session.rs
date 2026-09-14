@@ -742,8 +742,9 @@ pub(crate) struct SessionActor {
     /// the stream — which can run for many minutes on a long
     /// reasoning/text generation — to finish. `None` while no turn is
     /// streaming (idle, or inside a tool call between requests).
-    pub(crate) in_flight_sampler_request_id:
-        parking_lot::Mutex<Option<xai_grok_sampler::RequestId>>,
+    pub(crate) in_flight_sampler_request_id: parking_lot::Mutex<
+        Option<xai_grok_sampler::RequestId>,
+    >,
     /// Set by the `SessionCommand::Interject` handler to tell
     /// `run_turn_via_sampler` that the in-flight request it is awaiting
     /// was cancelled *for an interjection* (not a user Stop). The error
@@ -1880,9 +1881,6 @@ impl Drop for TurnMetrics {
         self.span.record("turn_model_calls", self.turn_model_calls);
     }
 }
-#[cfg(test)]
-#[path = "acp_session_tests/turn/asap_injection_tests.rs"]
-mod asap_injection_tests;
 /// Token rotation on the sampler/inference path is owned by the
 /// proactive refresh loop and the per-turn pre-request refresh
 /// (`refresh_token_if_expired`). `handle_sampling_failure` surfaces
@@ -1915,6 +1913,15 @@ mod chat_history_integrity_tests;
 #[path = "acp_session_tests/turn/disk_full_tests.rs"]
 mod disk_full_tests;
 #[cfg(test)]
+#[path = "acp_session_tests/turn/length_truncation_resume_tests.rs"]
+mod length_truncation_resume_tests;
+#[cfg(test)]
+#[path = "acp_session_tests/turn/asap_injection_tests.rs"]
+mod asap_injection_tests;
+#[cfg(test)]
+#[path = "acp_session_tests/todo_capture_e2e_tests.rs"]
+mod todo_capture_e2e_tests;
+#[cfg(test)]
 #[path = "acp_session_tests/feedback_turn_lookup_tests.rs"]
 mod feedback_turn_lookup_tests;
 #[cfg(test)]
@@ -1932,9 +1939,6 @@ mod laziness_detector_tests;
 #[cfg(test)]
 #[path = "acp_session_tests/laziness/laziness_integration_tests.rs"]
 mod laziness_integration_tests;
-#[cfg(test)]
-#[path = "acp_session_tests/turn/length_truncation_resume_tests.rs"]
-mod length_truncation_resume_tests;
 #[cfg(test)]
 #[path = "acp_session_tests/load_user_prompts_tests.rs"]
 mod load_user_prompts_tests;
@@ -1956,9 +1960,6 @@ mod prompt_context_persistence_tests;
 #[cfg(test)]
 #[path = "acp_session_tests/session_thread_tests.rs"]
 mod session_thread_tests;
-#[cfg(test)]
-#[path = "acp_session_tests/todo_capture_e2e_tests.rs"]
-mod todo_capture_e2e_tests;
 #[cfg(test)]
 #[path = "acp_session_tests/tool_layer_images_bridge_tests.rs"]
 mod tool_layer_images_bridge_tests;

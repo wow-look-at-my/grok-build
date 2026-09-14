@@ -1845,6 +1845,7 @@ mod tests {
         ));
     }
 
+
     fn team_jwt(principal_id: &str) -> String {
         crate::auth::ensure_crypto_provider();
         jsonwebtoken::encode(

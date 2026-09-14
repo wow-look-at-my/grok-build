@@ -53,10 +53,7 @@ mod budget_tests {
 
     #[test]
     fn planner_wait_defaults_to_30_minutes() {
-        assert_eq!(
-            GOAL_PLANNER_AWAIT_BUDGET_DEFAULT,
-            std::time::Duration::from_secs(1800)
-        );
+        assert_eq!(GOAL_PLANNER_AWAIT_BUDGET_DEFAULT, std::time::Duration::from_secs(1800));
     }
 }
 
@@ -446,7 +443,8 @@ impl ChannelSpawner {
                 // Goal planning is allowed to use the full configurable
                 // foreground wait budget, whose default is 30 minutes.
                 foreground_wait_budget_ms: Some(
-                    crate::session::goal_planner::goal_planner_await_budget().as_millis() as u64,
+                    crate::session::goal_planner::goal_planner_await_budget()
+                        .as_millis() as u64,
                 ),
                 ..Default::default()
             },

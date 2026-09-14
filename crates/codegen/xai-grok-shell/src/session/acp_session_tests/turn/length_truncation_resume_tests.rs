@@ -154,9 +154,7 @@ async fn length_truncated_response_resumes_and_completes() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let server = MockInferenceServer::start()
-                .await
-                .expect("mock inference server");
+            let server = MockInferenceServer::start().await.expect("mock inference server");
             server.enqueue_response(
                 "/v1/chat/completions",
                 chat_completion_response("Part one of the answer, ", "length"),
@@ -238,9 +236,7 @@ async fn unbroken_length_truncation_is_bounded_by_max_turns() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let server = MockInferenceServer::start()
-                .await
-                .expect("mock inference server");
+            let server = MockInferenceServer::start().await.expect("mock inference server");
             for _ in 0..10 {
                 server.enqueue_response(
                     "/v1/chat/completions",

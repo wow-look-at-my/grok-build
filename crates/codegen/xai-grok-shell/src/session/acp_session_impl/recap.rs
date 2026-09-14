@@ -79,18 +79,19 @@ impl SessionActor {
         // its own bounded transient-failure retry (policy + predicate above).
         use backon::Retryable as _;
         let attempts = std::cell::Cell::new(1u32);
-        let result = (|| sampling_client.conversation_collect(fresh_req_id(&base_request, "btw")))
-            .retry(aux_retry_policy())
-            .when(should_retry_aux_call)
-            .notify(|e: &SamplingError, backoff: std::time::Duration| {
-                attempts.set(attempts.get() + 1);
-                tracing::warn!(
-                    backoff_ms = backoff.as_millis() as u64,
-                    error = %e,
-                    "side question transient failure; retrying"
-                );
-            })
-            .await;
+        let result =
+            (|| sampling_client.conversation_collect(fresh_req_id(&base_request, "btw")))
+                .retry(aux_retry_policy())
+                .when(should_retry_aux_call)
+                .notify(|e: &SamplingError, backoff: std::time::Duration| {
+                    attempts.set(attempts.get() + 1);
+                    tracing::warn!(
+                        backoff_ms = backoff.as_millis() as u64,
+                        error = %e,
+                        "side question transient failure; retrying"
+                    );
+                })
+                .await;
 
         match result {
             Ok(response) => {
@@ -670,3 +671,4 @@ impl SessionActor {
         suggestion
     }
 }
+

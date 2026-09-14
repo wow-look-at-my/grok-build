@@ -67,9 +67,7 @@ pub(crate) fn ci_stop_gate_blocks(
 /// Only [`CiStatus::Red`] blocks. Every other state — green, still running, or
 /// no runs at all — allows the stop, so a repository with no workflows and a
 /// session that has pushed nothing are both unaffected by this gate.
-pub(crate) fn ci_gate_decision(
-    status: Option<xai_grok_sandbox::ci_state::CiStatus>,
-) -> CiGateDecision {
+pub(crate) fn ci_gate_decision(status: Option<xai_grok_sandbox::ci_state::CiStatus>) -> CiGateDecision {
     match status {
         Some(xai_grok_sandbox::ci_state::CiStatus::Red) => CiGateDecision::Nudge,
         _ => CiGateDecision::Allow,
@@ -240,11 +238,7 @@ impl SessionActor {
             return None;
         }
         let (branch, status) = self.collect_ci_gate_state().await?;
-        if !ci_stop_gate_blocks(
-            true,
-            continuations_this_turn,
-            ci_gate_decision(Some(status)),
-        ) {
+        if !ci_stop_gate_blocks(true, continuations_this_turn, ci_gate_decision(Some(status))) {
             return None;
         }
         tracing::info!(
@@ -769,7 +763,11 @@ mod todo_stop_gate_tests {
             in_progress_backed: vec!["watched-by-bash"],
             backing_task_count: 1,
         };
-        assert!(!todo_stop_gate_blocks(true, 0, &evaluate_todo_gate(&done)));
+        assert!(!todo_stop_gate_blocks(
+            true,
+            0,
+            &evaluate_todo_gate(&done)
+        ));
         // And once the budget is exhausted, pending todos no longer block.
         assert!(!todo_stop_gate_blocks(
             true,
