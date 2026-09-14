@@ -95,6 +95,27 @@ pub(super) fn send_ack(
 
 pub(super) const GOAL_CLASSIFIER_PENDING_QUEUE_CAP: usize = 4;
 
+/// Contents of a session's live todo list, in order.
+///
+/// A missing `TodoState` resource reads as an empty list: seeding appends onto
+/// whatever is there, and "nothing tracked yet" is the state a fresh goal
+/// starts in (and the state a session with no todo tool stays in).
+async fn live_todo_contents(bridge: &xai_grok_tools::bridge::ToolBridge) -> Vec<String> {
+    use crate::tools::todo::TodoState;
+    use xai_grok_tools::types::resources::State;
+    bridge
+        .read_resource::<State<TodoState>>()
+        .await
+        .map(|state| {
+            state
+                .0
+                .todo_items_with_ids()
+                .map(|(_id, item)| item.content.clone())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 pub(super) struct InFlightGuard<'a> {
     pub(super) flag: &'a std::sync::atomic::AtomicBool,
 }
@@ -1151,7 +1172,10 @@ impl SessionActor {
                     && goal.status == crate::session::goal_tracker::GoalStatus::Active
             };
             match outcome {
-                crate::session::goal_planner::GoalPlannerOutcome::Planned { .. } => {
+                crate::session::goal_planner::GoalPlannerOutcome::Planned {
+                    todos: planner_todos,
+                    ..
+                } => {
                     let can_publish = self
                         .goal_tracker
                         .lock()
@@ -1204,6 +1228,14 @@ impl SessionActor {
                         goal.plan_file = Some(plan_file);
                         need_baseline.then_some((src, dst))
                     };
+                    // The plan is published. Populate the session's todo list
+                    // from it HERE, before the goal-start reminder is rendered,
+                    // so the implementing turn opens with the plan's steps
+                    // already on its list instead of re-reading the plan to
+                    // transcribe them (and risking losing one doing it).
+                    let published_plan = self.goal_tracker.lock().plan_path();
+                    self.seed_goal_todos_from_plan(&goal_id, &published_plan, &planner_todos)
+                        .await;
                     if let Some((src, dst)) = baseline_target {
                         let tmp = dst
                             .with_file_name(format!("plan-baseline-{}.md", uuid::Uuid::now_v7()));
@@ -1310,6 +1342,129 @@ impl SessionActor {
             );
         }
         cleared
+    }
+
+    /// Populate the session's todo list from the plan the goal planner just
+    /// published.
+    ///
+    /// The plan names its work twice over: the planner calls `todo_write` on
+    /// its OWN list while it works (read back out of the child when it finished
+    /// — `planner_todos`), and it writes the plan body. `planner_todos` wins;
+    /// when the planner named nothing the plan body is parsed
+    /// ([`plan_todo_items_from_path`]). So the list is populated on every
+    /// publish, whether or not the planner reached for the tool — the main
+    /// session never transcribes the plan itself.
+    ///
+    /// Runs once per goal. `plan_todos_seeded` is claimed under the tracker lock
+    /// before any I/O, and the append is additionally deduped by content, so a
+    /// retry, a resume, or a re-entry cannot add a second copy of a step.
+    /// Existing items are never touched: this appends, it does not replace.
+    ///
+    /// Best-effort by design. A session with no append-capable todo tool, or a
+    /// failed append, logs and returns 0 — seeding must never fail the goal.
+    ///
+    /// `pub(super)` so the goal e2e suite can drive it a second time directly
+    /// over the same plan; the publish path itself calls it exactly once.
+    pub(super) async fn seed_goal_todos_from_plan(
+        &self,
+        goal_id: &str,
+        plan_path: &Path,
+        planner_todos: &[String],
+    ) -> usize {
+        // Claim the seed before the I/O. One lock covers the check and the set,
+        // so two racing publishes cannot both append.
+        let claimed = {
+            let mut tracker = self.goal_tracker.lock();
+            tracker
+                .snapshot_mut()
+                .filter(|goal| {
+                    goal.goal_id == goal_id
+                        && goal.status == crate::session::goal_tracker::GoalStatus::Active
+                        && goal.plan_file.as_deref() == Some(plan_path)
+                        && !goal.plan_todos_seeded
+                })
+                .map(|goal| goal.plan_todos_seeded = true)
+                .is_some()
+        };
+        if !claimed {
+            return 0;
+        }
+
+        let items: Vec<String> = if planner_todos.is_empty() {
+            crate::session::goal_next_step::plan_todo_items_from_path(plan_path)
+        } else {
+            planner_todos.to_vec()
+        };
+        if items.is_empty() {
+            tracing::debug!(
+                plan = %plan_path.display(),
+                "goal planner: plan named no steps; nothing to seed"
+            );
+            return 0;
+        }
+
+        let bridge = self.tool_bridge_handle();
+        let todo_tool = match self.resolve_capture_todo_tool(&bridge).await {
+            Ok(name) => name,
+            Err(err) => {
+                tracing::warn!(
+                    error = %err,
+                    "goal planner: session has no append-capable todo tool; \
+                     the plan's steps were not seeded"
+                );
+                return 0;
+            }
+        };
+
+        // Dedupe against what is already on the list: a step the user or the
+        // main agent already wrote is the same step, and a plan that repeats
+        // one is still one piece of work.
+        let mut seen = live_todo_contents(&bridge).await;
+        let fresh: Vec<String> = items
+            .into_iter()
+            .filter(|item| {
+                if seen.iter().any(|have| have == item) {
+                    return false;
+                }
+                seen.push(item.clone());
+                true
+            })
+            .collect();
+        if fresh.is_empty() {
+            tracing::debug!("goal planner: every plan step is already on the todo list");
+            return 0;
+        }
+
+        let call_id = format!("goal-plan-seed-{}", uuid::Uuid::now_v7());
+        match self
+            .append_capture_todos(
+                &todo_tool,
+                &call_id,
+                super::todo_capture::add_only_todo_args_with_prefix(
+                    &fresh,
+                    false,
+                    super::todo_capture::PLAN_SEED_ID_PREFIX,
+                ),
+            )
+            .await
+        {
+            Ok(_) => {
+                tracing::info!(
+                    count = fresh.len(),
+                    "goal planner: seeded the session todo list from the plan"
+                );
+                fresh.len()
+            }
+            Err(err) => {
+                tracing::warn!(error = %err, "goal planner: seeding the todo list failed");
+                // Release the claim so the guard never outlives the effect.
+                let mut tracker = self.goal_tracker.lock();
+                if let Some(goal) = tracker.snapshot_mut().filter(|g| g.goal_id == goal_id) {
+                    goal.plan_todos_seeded = false;
+                }
+                0
+            }
+        }
     }
 
     /// Run one planner attempt: re-validate the goal, stage the attempt file,

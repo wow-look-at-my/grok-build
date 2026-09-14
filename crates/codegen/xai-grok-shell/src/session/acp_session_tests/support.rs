@@ -9,9 +9,14 @@ pub(crate) fn test_auth_method_id(id: &str) -> crate::agent::auth_method::Shared
 /// "tells you what's missing").
 pub(crate) const HARNESS_VERIFIES_SENTENCE: &str =
     "verifies what's complete and tells you what's missing on the next nudge";
-/// Plan-aware seed-todos instruction (`goal_plan_block.md`).
+/// The manual seed-todos instruction (`goal_plan_block.md`), now GONE: the
+/// plan-aware rally must state that the harness already seeded the list rather
+/// than telling the main session to transcribe the plan itself.
 pub(crate) const PLAN_SEED_TODOS_PHRASE: &str =
     "Seed todos from the plan's acceptance criteria via";
+/// The replacement instruction: the plan's steps are already on the list.
+pub(crate) const PLAN_TODOS_ALREADY_SEEDED_PHRASE: &str =
+    "The plan's steps are ALREADY on your todo list";
 #[cfg(test)]
 pub(crate) fn noop_observability_bridge() -> xai_computer_hub_sdk::ObservabilityBridge {
     xai_computer_hub_sdk::ObservabilityBridge::new(

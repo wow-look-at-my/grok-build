@@ -119,6 +119,24 @@ pub(crate) struct RoleRenderedPrompt {
     pub fallback: String,
 }
 
+/// What one planner spawn returned: the child's terminal text, plus the todo
+/// items the child put on ITS OWN list while it planned.
+///
+/// The planner is told to build that list with the session's todo tool as it
+/// writes the plan. A child session keeps its own `State<TodoState>`, read into
+/// [`SubagentResult::todos`] when the child finishes, so carrying the items here
+/// is what lets the parent merge the planner's own steps into the session's
+/// list instead of re-deriving them from the plan file.
+///
+/// [`SubagentResult::todos`]: xai_grok_tools::implementations::grok_build::task::types::SubagentResult::todos
+#[derive(Debug, Clone, Default)]
+pub(crate) struct PlannerSpawnOutput {
+    /// The child's terminal response text (the harness parses `Done` from it).
+    pub(crate) output: String,
+    /// Contents of the child's own todo list when it finished, in order.
+    pub(crate) todos: Vec<String>,
+}
+
 /// A spawn error the fail-open wrapper can inspect to decide whether a
 /// retry is appropriate.
 ///
@@ -167,18 +185,18 @@ impl RetryableSpawnError for SpawnError {
 /// session-harness toolset it actually runs on), so the retried prompt never
 /// names the wrong toolset's tools. Each render is moved into its attempt — no
 /// clone on any path.
-pub(crate) async fn spawn_with_fail_open_retry<E, F, Fut>(
+pub(crate) async fn spawn_with_fail_open_retry<T, E, F, Fut>(
     role: &'static str,
     skeptic_idx: Option<u32>,
     override_: &RoleSpawnOverride,
     events: Option<&EventWriter>,
     prompt: RoleRenderedPrompt,
     mut spawn: F,
-) -> Result<String, E>
+) -> Result<T, E>
 where
     E: RetryableSpawnError,
     F: FnMut(Option<String>, Option<String>, String) -> Fut,
-    Fut: std::future::Future<Output = Result<String, E>>,
+    Fut: std::future::Future<Output = Result<T, E>>,
 {
     // Inherit path: single attempt on the current model + session harness; move
     // the prompt.
@@ -236,6 +254,10 @@ const GOAL_PLANNER_PROMPT_TEMPLATE: &str = include_str!("templates/goal_planner_
 pub(crate) enum GoalPlannerOutcome {
     Planned {
         plan_file: PathBuf,
+        /// Contents of the planner child's own todo list, in order — the steps
+        /// it named with `todo_write` while planning. Empty when the child kept
+        /// no list, in which case the caller falls back to the plan body.
+        todos: Vec<String>,
         latency_ms: u64,
     },
     /// Produced only by the planner's [`ChannelSpawner`], whose `cancel_token`
@@ -263,7 +285,7 @@ pub(crate) trait GoalPlannerSpawner: Send + Sync {
         &self,
         id: &str,
         prompt: RoleRenderedPrompt,
-    ) -> Result<String, SpawnError>;
+    ) -> Result<PlannerSpawnOutput, SpawnError>;
 }
 
 /// Spawn-time error. Deliberately mirrored from the verifier rather
@@ -345,7 +367,7 @@ impl GoalPlannerSpawner for ChannelSpawner {
         &self,
         id: &str,
         prompt: RoleRenderedPrompt,
-    ) -> Result<String, SpawnError> {
+    ) -> Result<PlannerSpawnOutput, SpawnError> {
         // Publish the coordinator id BEFORE awaiting the child: a Send Now that
         // lands at any point during the run has to be able to address it.
         if let Some(slot) = &self.subagent_id_slot
@@ -369,13 +391,13 @@ impl GoalPlannerSpawner for ChannelSpawner {
         // Trace the FINAL attempt's output / runtime error (transport errors
         // carry no subagent output, matching the prior behavior).
         match &outcome {
-            Ok(text) => crate::session::goal_classifier::record_subagent_trace(
+            Ok(out) => crate::session::goal_classifier::record_subagent_trace(
                 self.trace_sink.as_ref(),
                 id,
                 GOAL_PLANNER_SUBAGENT_TYPE,
                 GOAL_PLANNER_SUBAGENT_DESCRIPTION,
                 trace_prompt.as_deref(),
-                text,
+                &out.output,
             ),
             Err(SpawnError::Runtime { message, .. }) => {
                 crate::session::goal_classifier::record_subagent_trace(
@@ -405,7 +427,7 @@ impl ChannelSpawner {
         prompt: String,
         model: Option<String>,
         harness_agent_type: Option<String>,
-    ) -> Result<String, SpawnError> {
+    ) -> Result<PlannerSpawnOutput, SpawnError> {
         let request = SubagentRequest {
             id: id.to_string(),
             prompt,
@@ -468,7 +490,12 @@ impl ChannelSpawner {
                 cancelled: result.cancelled,
             });
         }
-        Ok(result.output.to_string())
+        Ok(PlannerSpawnOutput {
+            output: result.output.to_string(),
+            // The child's own list, read out of its live `TodoState` when it
+            // finished — a `todo_write` the planner issued while planning.
+            todos: result.todos,
+        })
     }
 }
 
@@ -541,8 +568,8 @@ pub(crate) async fn run_goal_planner(
     };
 
     let spawn_id = uuid::Uuid::now_v7().to_string();
-    let response = match spawner.spawn_planner(&spawn_id, prompt).await {
-        Ok(text) => text,
+    let (response, todos) = match spawner.spawn_planner(&spawn_id, prompt).await {
+        Ok(PlannerSpawnOutput { output, todos }) => (output, todos),
         Err(SpawnError::Transport(detail)) => {
             tracing::warn!(error = %detail, "goal planner: transport error; failing closed");
             return record_fail_closed(
@@ -595,6 +622,7 @@ pub(crate) async fn run_goal_planner(
     });
     GoalPlannerOutcome::Planned {
         plan_file: inputs.plan_file.to_path_buf(),
+        todos,
         latency_ms,
     }
 }
@@ -695,6 +723,36 @@ mod tests {
         assert_no_tool_placeholders(&rendered);
     }
 
+    /// The planner is told to build its OWN todo list with the session's todo
+    /// tool, and the prompt names the tool the harness actually exposes. That
+    /// list is what the parent merges into the session's list, so a prompt that
+    /// drops the instruction silently loses every step.
+    #[test]
+    fn planner_prompt_requires_the_todo_list_and_names_the_real_tool() {
+        let template = GOAL_PLANNER_PROMPT_TEMPLATE;
+        assert!(
+            template.contains("## Todo list — REQUIRED"),
+            "the todo-list section must stay in the planner prompt",
+        );
+        assert!(
+            template.contains("one item per `## Task checklist` line"),
+            "the planner must be told to list one todo per checklist line",
+        );
+        assert!(template.contains("{TODO_TOOL}"));
+
+        let rendered = RoleToolNames::from_summary(&summary_with(&[
+            (ToolKind::Read, "read_file"),
+            (ToolKind::Plan, "cursor_todo"),
+        ]))
+        .apply(template);
+        assert!(
+            rendered.contains("`cursor_todo`"),
+            "the render must name the harness's own todo tool:\n{rendered}",
+        );
+        assert!(!rendered.contains("{TODO_TOOL}"));
+        assert_no_tool_placeholders(&rendered);
+    }
+
     /// Pin each load-bearing clause of the named-artifact research mandate so a
     /// targeted revert fails (the convergence balance: fix under-scoping, never
     /// reopen over-scoping).
@@ -782,6 +840,9 @@ mod tests {
         plan_body: Vec<u8>,
         plan_file_target: std::path::PathBuf,
         last_prompt: Mutex<Option<String>>,
+        /// The child's own todo list, standing in for what a real planner child
+        /// built with `todo_write` while planning.
+        todos: Vec<String>,
     }
 
     impl MockSpawner {
@@ -792,6 +853,7 @@ mod tests {
                 plan_body: body.to_vec(),
                 plan_file_target: plan_file.to_path_buf(),
                 last_prompt: Mutex::new(None),
+                todos: Vec::new(),
             }
         }
 
@@ -802,6 +864,7 @@ mod tests {
                 plan_body: Vec::new(),
                 plan_file_target: plan_file.to_path_buf(),
                 last_prompt: Mutex::new(None),
+                todos: Vec::new(),
             }
         }
 
@@ -812,7 +875,14 @@ mod tests {
                 plan_body: Vec::new(),
                 plan_file_target: plan_file.to_path_buf(),
                 last_prompt: Mutex::new(None),
+                todos: Vec::new(),
             }
+        }
+
+        /// Stand in for a planner child that listed its steps with `todo_write`.
+        fn with_todos(mut self, todos: &[&str]) -> Self {
+            self.todos = todos.iter().map(|t| (*t).to_string()).collect();
+            self
         }
     }
 
@@ -822,13 +892,16 @@ mod tests {
             &self,
             #[allow(unused_variables)] id: &str,
             prompt: RoleRenderedPrompt,
-        ) -> Result<String, SpawnError> {
+        ) -> Result<PlannerSpawnOutput, SpawnError> {
             *self.last_prompt.lock().unwrap() = Some(prompt.primary);
             if self.write_plan {
                 let _ = tokio::fs::write(&self.plan_file_target, &self.plan_body).await;
             }
             match &self.response {
-                Ok(text) => Ok(text.clone()),
+                Ok(text) => Ok(PlannerSpawnOutput {
+                    output: text.clone(),
+                    todos: self.todos.clone(),
+                }),
                 Err(SpawnError::Transport(s)) => Err(SpawnError::Transport(s.clone())),
                 Err(SpawnError::Runtime { message, cancelled }) => Err(SpawnError::Runtime {
                     message: message.clone(),
@@ -892,6 +965,79 @@ mod tests {
         assert_eq!(log.len(), 2, "{log:?}");
         assert_eq!(log[0], "fired");
         assert_eq!(log[1], "completed");
+        let _ = std::fs::remove_file(&plan_file);
+    }
+
+    /// A planner child that kept its own todo list hands those items to the
+    /// caller on `Planned` — that is the channel the parent merges from.
+    #[tokio::test]
+    async fn planned_carries_the_planner_childs_own_todo_list() {
+        let plan_file = tmp_plan_file("planner-todos");
+        let spawner = Arc::new(
+            MockSpawner::ok_writes(
+                &plan_file,
+                b"# Plan: foo\n\n## Task checklist\n- [ ] first step\n- [ ] second step\n",
+            )
+            .with_todos(&["first step", "second step"]),
+        );
+        let (_log, emit) = collect_events();
+
+        let outcome = run_goal_planner(
+            spawner,
+            GoalPlannerInputs {
+                objective: "do X",
+                context: "",
+                plan_file: &plan_file,
+                attempt: 1,
+                model_id: "grok-test",
+                tool_names: &RoleToolNames::inherit_defaults(),
+                inherit_tool_names: &RoleToolNames::inherit_defaults(),
+            },
+            &emit,
+        )
+        .await;
+
+        let GoalPlannerOutcome::Planned { todos, .. } = outcome else {
+            panic!("a written plan must return Planned");
+        };
+        assert_eq!(
+            todos,
+            vec!["first step".to_string(), "second step".to_string()],
+            "the child's own list must ride back on the outcome",
+        );
+        let _ = std::fs::remove_file(&plan_file);
+    }
+
+    /// A planner that kept no list reports none: the caller falls back to the
+    /// plan body rather than seeding an invented list.
+    #[tokio::test]
+    async fn planned_reports_no_todos_when_the_child_kept_none() {
+        let plan_file = tmp_plan_file("planner-no-todos");
+        let spawner = Arc::new(MockSpawner::ok_writes(
+            &plan_file,
+            b"# Plan: foo\n\n## Task checklist\n- [ ] first step\n",
+        ));
+        let (_log, emit) = collect_events();
+
+        let outcome = run_goal_planner(
+            spawner,
+            GoalPlannerInputs {
+                objective: "do X",
+                context: "",
+                plan_file: &plan_file,
+                attempt: 1,
+                model_id: "grok-test",
+                tool_names: &RoleToolNames::inherit_defaults(),
+                inherit_tool_names: &RoleToolNames::inherit_defaults(),
+            },
+            &emit,
+        )
+        .await;
+
+        let GoalPlannerOutcome::Planned { todos, .. } = outcome else {
+            panic!("a written plan must return Planned");
+        };
+        assert!(todos.is_empty());
         let _ = std::fs::remove_file(&plan_file);
     }
 
