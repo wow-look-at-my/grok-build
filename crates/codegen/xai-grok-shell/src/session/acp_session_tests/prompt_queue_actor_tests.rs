@@ -1272,9 +1272,73 @@ async fn queue_input_send_now_during_goal_turn_merges_as_interjections_fifo() {
         .await;
 }
 
+/// The goal-turn exception: a COMMAND row is promoted to run as its own turn
+/// instead of steering the live planner. `resolve` reads only a prompt's leading
+/// token, so steering `/cmd args` into the goal turn would hand the model the
+/// literal line and the command would never run.
+#[tokio::test]
+async fn goal_send_now_promotes_a_command_row_instead_of_steering_it() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (actor, _rx) = build_actor().await;
+            {
+                let mut state = actor.state.lock().await;
+                state.pending_inputs.push_back(user_item("running", "A"));
+                state.running_task = Some(running_task_stub("running"));
+            }
+            *actor
+                .current_prompt_id
+                .lock()
+                .expect("current_prompt_id mutex poisoned") = Some("running".into());
+            actor.goal_tracker.lock().create_goal(
+                "goal".into(),
+                "objective".into(),
+                None,
+                0,
+                "2026-01-01T00:00:00Z".into(),
+                None,
+            );
+
+            let (respond_to, _prx) = oneshot::channel();
+            let cancel = actor
+                .queue_input(QueueInputRequest {
+                    send_now: true,
+                    ..queue_input_request(
+                        vec![acp::ContentBlock::Text(acp::TextContent::new(
+                            "/pr-cleanup fix the branch",
+                        ))],
+                        "cmd-1",
+                        respond_to,
+                    )
+                })
+                .await;
+            assert!(!cancel, "goal turns never cancel-and-send");
+
+            let state = actor.state.lock().await;
+            assert!(
+                state
+                    .pending_inputs
+                    .iter()
+                    .any(|item| item.prompt_id == "cmd-1"),
+                "the command row keeps its own turn: {:?}",
+                state
+                    .pending_inputs
+                    .iter()
+                    .map(|i| i.prompt_id.as_str())
+                    .collect::<Vec<_>>()
+            );
+            drop(state);
+            assert!(
+                actor.pending_interjections.is_empty(),
+                "a command line is never steered into the goal turn as text"
+            );
+        })
+        .await;
+}
+
 /// DIAGNOSTIC (not a regression guard yet): the automatic ASAP path — a
-/// plain queued row with no `send_now` — reaches `queue_input` and
-/// `harvest_queued_prompts_into_interjections` exactly the same way whether
+/// plain queued row with no `send_now` — reaches `queue_input` and/// `harvest_queued_prompts_into_interjections` exactly the same way whether
 /// or not a goal is active. Confirms the harvest function itself carries no
 /// goal-awareness, so if goal mode really blocks ASAP delivery the gate must
 /// live in how often turn.rs's loop *calls* the harvest during a goal round,

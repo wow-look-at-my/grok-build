@@ -58,8 +58,7 @@ async fn queue_send_now_keeps_prompt_block_images_on_promoted_row() {
 /// replaced, and the text (with its images) still reaches the parent turn as an
 /// interjection.
 #[tokio::test]
-async fn goal_send_now_steers_the_live_planner_without_restarting_it() {
-    let local = tokio::task::LocalSet::new();
+async fn goal_send_now_steers_the_live_planner_without_restarting_it() {    let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
             let (gateway_tx, _gateway_rx) =
@@ -140,6 +139,64 @@ async fn goal_send_now_steers_the_live_planner_without_restarting_it() {
             assert_eq!(interjections.len(), 1);
             assert_eq!(interjections[0].text, "steer");
             assert_eq!(interjections[0].attachments.len(), 1);
+        })
+        .await;
+}
+
+/// The goal exception for the send-now of an ALREADY-QUEUED row: a command row
+/// is promoted to run as its own turn. Steering it would hand the model the
+/// literal `/cmd args` (only a prompt's leading token is resolved), so the
+/// planner must not see it and the row must keep its turn.
+#[tokio::test]
+async fn goal_queued_send_now_promotes_a_command_row_instead_of_steering_it() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (actor, _rx) = build_actor().await;
+            {
+                let mut state = actor.state.lock().await;
+                state.pending_inputs.push_back(user_item("running", "A"));
+                state.running_task = Some(running_task_stub("running"));
+                state.front_message_committed = true;
+                state
+                    .pending_inputs
+                    .push_back(slash_command_item("cmd1", "/pr-cleanup fix the branch"));
+            }
+            *actor
+                .current_prompt_id
+                .lock()
+                .expect("current_prompt_id mutex poisoned") = Some("running".into());
+            actor.goal_tracker.lock().create_goal(
+                "goal".into(),
+                "objective".into(),
+                None,
+                0,
+                "2026-01-01T00:00:00Z".into(),
+                None,
+            );
+
+            let cancel = actor
+                .handle_interject_queued_prompt("cmd1", 0, None, None)
+                .await;
+            assert!(!cancel, "a goal turn is never cancelled for a send-now");
+
+            assert!(
+                actor.pending_interjections.is_empty(),
+                "a command line is never steered into the goal turn as text"
+            );
+            let state = actor.state.lock().await;
+            assert!(
+                state
+                    .pending_inputs
+                    .iter()
+                    .any(|item| item.prompt_id == "cmd1"),
+                "the command row keeps its own turn: {:?}",
+                state
+                    .pending_inputs
+                    .iter()
+                    .map(|i| i.prompt_id.as_str())
+                    .collect::<Vec<_>>()
+            );
         })
         .await;
 }

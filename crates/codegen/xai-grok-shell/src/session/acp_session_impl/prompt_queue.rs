@@ -238,6 +238,12 @@ impl SessionActor {
             .map(|m| m.kind.clone())
             .unwrap_or_else(|| "synthetic".to_string());
         let log_owner = client_identifier.clone().unwrap_or_default();
+        // A command line means something only as the LEADING token of its own
+        // turn (`resolve`), so it must never be steered into another turn as
+        // text — see the goal merge below.
+        let is_slash_invocation = slash_commands::is_slash_invocation(
+            &Self::queue_text_from_blocks(&prompt_blocks),
+        );
         let mut item = InputItem {
             prompt_id,
             prompt_blocks,
@@ -277,7 +283,8 @@ impl SessionActor {
         let merge_into_goal = send_now
             && turn_running
             && goal_active
-            && Self::extract_bash_command(&item.prompt_blocks).is_none();
+            && Self::extract_bash_command(&item.prompt_blocks).is_none()
+            && !is_slash_invocation;
         if merge_into_goal {
             self.enqueue_prompt_as_planner_context(&item);
             self.enqueue_prompt_as_interjection(
@@ -727,9 +734,15 @@ impl SessionActor {
             if let Some(new_text) = new_text.filter(|t| !t.trim().is_empty()) {
                 Self::apply_queued_prompt_edit(&mut item, new_text.to_string(), owner);
             }
+            // A command row is promoted instead of steered: `resolve` reads only
+            // a prompt's leading token, so a `/cmd args` folded into the goal
+            // turn would reach the model as literal prose.
             let merge_into_goal = turn_running
                 && goal_active
-                && Self::extract_bash_command(&item.prompt_blocks).is_none();
+                && Self::extract_bash_command(&item.prompt_blocks).is_none()
+                && !slash_commands::is_slash_invocation(&Self::queue_text_from_blocks(
+                    &item.prompt_blocks,
+                ));
             if merge_into_goal {
                 self.enqueue_prompt_as_planner_context(&item);
                 self.enqueue_prompt_as_interjection(
