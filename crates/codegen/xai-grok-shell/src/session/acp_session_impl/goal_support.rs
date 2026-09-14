@@ -1365,7 +1365,11 @@ impl SessionActor {
     ///
     /// `pub(super)` so the goal e2e suite can drive it a second time directly;
     /// the publish path itself calls it exactly once.
-    pub(super) async fn apply_planner_todos(&self, goal_id: &str, planner_todos: &[String]) -> usize {
+    pub(super) async fn apply_planner_todos(
+        &self,
+        goal_id: &str,
+        planner_todos: &[String],
+    ) -> usize {
         if planner_todos.is_empty() {
             tracing::debug!("goal planner: the planner listed no todo items; nothing to seed");
             return 0;
