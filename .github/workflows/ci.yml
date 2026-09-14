@@ -45,6 +45,8 @@ jobs:
       - name: Report disk before build
         run: df -h /
 
+      # - uses: wow-look-at-my/actions@yaml-comment-block#latest  (off until slopfix runs on ubuntu-22.04: its APE trips the runner's Mono binfmt handler on the MZ magic)
+
       - uses: ./.github/actions/setup-protoc
 
       - uses: ./.github/actions/setup-cargo-timings
@@ -105,6 +107,7 @@ jobs:
       - uses: ./.github/actions/upload-cargo-timings
         with:
           name: cargo-timings-build-test
+
   # These assert on what a virtual terminal actually shows, which a unit test over the width function cannot stand in for.
   pty-e2e:
     name: Test (PTY end-to-end)
@@ -246,8 +249,7 @@ jobs:
       - uses: ./.github/actions/setup-cargo-timings
 
       - name: Add the darwin target
-        run: |
-          rustup target add aarch64-apple-darwin
+        run: rustup target add aarch64-apple-darwin
 
       # zig compiles the C in the build scripts for macOS. It never links here: xai-darwin-link records that step instead.
       - name: Install zig (pinned 0.14.1)
