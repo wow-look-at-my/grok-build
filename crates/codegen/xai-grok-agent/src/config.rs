@@ -372,13 +372,13 @@ fn codex_toolset() -> ToolServerConfig {
 /// Read-only toolset for the **explore** subagent.
 ///
 /// Genuinely read-only over the workspace: `read_file` (Read), `list_dir`
-/// (Glob), `grep` (Grep). `send_message` is here too — it writes nothing, and
-/// without it an explorer cannot answer the session that spawned it until its
-/// run ends.
+/// (Glob), `grep` (Grep).
 /// `run_terminal_command` (Bash) is intentionally omitted so exploration cannot
 /// mutate the workspace — the read-only guarantee is enforced by the toolset,
 /// not merely by the prompt. With no `BashTool`, the background-task helpers
 /// (`KillTaskTool`/`TaskOutputTool`) are unnecessary and also omitted.
+/// `send_message` mutates nothing here, and without it an explorer cannot
+/// answer the session that spawned it until its whole run ends.
 fn explore_toolset() -> ToolServerConfig {
     ToolServerConfig {
         tools: vec![
