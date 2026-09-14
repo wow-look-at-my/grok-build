@@ -739,9 +739,7 @@ impl SessionActor {
             let merge_into_goal = turn_running
                 && goal_active
                 && Self::extract_bash_command(&item.prompt_blocks).is_none()
-                && !Self::row_text_is_command(&Self::queue_text_from_blocks(
-                    &item.prompt_blocks,
-                ));
+                && !Self::row_text_is_command(&Self::queue_text_from_blocks(&item.prompt_blocks));
             if merge_into_goal {
                 self.enqueue_prompt_as_planner_context(&item);
                 self.enqueue_prompt_as_interjection(

@@ -420,6 +420,18 @@ impl AgentView {
         if !self.session.state.is_turn_running() {
             return self.save_edited_queued_row(id, server_id, true);
         }
+        // The EDITED text is what goes out, so it is what must be classified:
+        // `queue_row_prompt_like` below reads the STORED row, which can be
+        // steering text while the composer holds a command. An interjection (or
+        // a `newText` override) reaches the running turn as ordinary user text —
+        // only a prompt's LEADING token is ever resolved as a command — so the
+        // model would read the literal `/cmd args` and the command would never
+        // run. Save the edit instead: the row keeps its own turn, and the shell
+        // resolves the command when that turn starts.
+        if xai_prompt_queue::is_slash_invocation(&text) {
+            self.show_toast("Can't send this mid-turn — it runs when the current turn ends");
+            return self.save_edited_queued_row(id, server_id, true);
+        }
         // Non-prompt rows stay queued (see `queue_row_prompt_like`): save the edit.
         let row_prompt_like = self.queue_row_prompt_like(id);
         if row_prompt_like == Some(false) {
@@ -1073,6 +1085,89 @@ mod tests {
         assert!(agent.session.pending_prompts.is_empty());
         assert!(matches!(agent.prompt_mode, PromptMode::Normal));
         assert_eq!(agent.prompt.text(), "draft");
+    }
+
+    /// The edit-interject chord classifies the STORED row, but the EDITED text
+    /// is what would go out — so a row that was steering text when it was queued
+    /// can be edited into a command. Interjecting that reaches the running turn
+    /// as ordinary user text (only a prompt's LEADING token is ever resolved as
+    /// a command), so the model reads the literal `/cmd args` and the command
+    /// never runs. The edit is saved instead: the row keeps its own turn, where
+    /// the shell resolves it.
+    #[test]
+    fn edit_interject_into_a_command_saves_the_local_row_instead() {
+        let mut agent = make_running_agent();
+        let registry = non_vscode_registry();
+        agent.prompt.set_text("draft");
+
+        let ids = agent.queue.entry_ids();
+        agent.queue.list_state.select_by_id(ids[1]);
+        let _ = agent.handle_queue_key(&edit_key(), &registry);
+        assert!(matches!(
+            agent.prompt_mode,
+            PromptMode::EditingQueued { .. }
+        ));
+        agent.prompt.set_text("/pr-cleanup fix the branch");
+
+        let outcome = agent.handle_prompt_key_for_test(&force_interject_key());
+
+        match outcome {
+            InputOutcome::Action(Action::Interject { text, .. })
+            | InputOutcome::Action(Action::QueueInterjectShared {
+                new_text: Some(text),
+                ..
+            }) => panic!("the edited command was sent as text: {text}"),
+            other => assert!(
+                matches!(&other, InputOutcome::Action(Action::DrainQueue)),
+                "the edit is saved and the row left to run, got {other:?}"
+            ),
+        }
+        let row = agent
+            .session
+            .pending_prompts
+            .iter()
+            .find(|p| p.text == "/pr-cleanup fix the branch")
+            .expect("the edit is saved onto the row");
+        assert!(
+            row.is_slash_command(),
+            "the saved row owns its own turn now"
+        );
+        assert!(matches!(agent.prompt_mode, PromptMode::Normal));
+        let (toast, _) = agent.toast.as_ref().expect("the refusal explains itself");
+        assert!(toast.contains("runs when the current turn ends"), "{toast}");
+    }
+
+    /// The same classification for a SERVER row: its `newText` would be folded
+    /// into the running turn by the shell's interject handler on an active goal
+    /// turn, so the edit must be saved rather than interjected.
+    #[test]
+    fn edit_interject_into_a_command_saves_the_server_row_instead() {
+        let mut agent = make_running_agent();
+        let registry = non_vscode_registry();
+
+        let ids = agent.queue.entry_ids();
+        agent.queue.list_state.select_by_id(ids[0]);
+        let _ = agent.handle_queue_key(&edit_key(), &registry);
+        agent.prompt.set_text("/pr-cleanup fix the branch");
+
+        let outcome = agent.handle_prompt_key_for_test(&force_interject_key());
+
+        match outcome {
+            InputOutcome::Action(Action::QueueInterjectShared {
+                new_text: Some(text),
+                ..
+            })
+            | InputOutcome::Action(Action::Interject { text, .. }) => {
+                panic!("the edited command was sent as text: {text}")
+            }
+            other => assert!(
+                matches!(&other, InputOutcome::Action(Action::QueueEditShared { .. })),
+                "the edit is saved as a queue edit, got {other:?}"
+            ),
+        }
+        assert!(matches!(agent.prompt_mode, PromptMode::Normal));
+        let (toast, _) = agent.toast.as_ref().expect("the refusal explains itself");
+        assert!(toast.contains("runs when the current turn ends"), "{toast}");
     }
 
     #[test]
