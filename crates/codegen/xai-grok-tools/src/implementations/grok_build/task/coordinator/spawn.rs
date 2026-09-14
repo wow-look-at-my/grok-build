@@ -69,9 +69,10 @@ impl<R: ChildRunner> SubagentCoordinator<R> {
                         limit: self.admission.max_concurrent(),
                     },
                 );
-                let deadline = request
-                    .awaits_in_foreground()
-                    .then(|| tokio::time::Instant::now() + self.config.foreground_budget);
+                let deadline = request.awaits_in_foreground().then(|| {
+                    tokio::time::Instant::now()
+                        + request.foreground_wait_budget(self.config.foreground_budget)
+                });
                 self.queued.push_back(QueuedSpawn {
                     request,
                     queued_at: tokio::time::Instant::now(),

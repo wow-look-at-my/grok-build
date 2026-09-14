@@ -110,6 +110,16 @@ impl SubagentRequest {
     pub fn awaits_in_foreground(&self) -> bool {
         !self.run_in_background && !self.await_to_completion
     }
+
+    /// Resolve the foreground deadline for this request. Positive internal
+    /// overrides take precedence; all ordinary requests use the host default.
+    pub fn foreground_wait_budget(&self, default: std::time::Duration) -> std::time::Duration {
+        self.runtime_overrides
+            .foreground_wait_budget_ms
+            .filter(|ms| *ms > 0)
+            .map(std::time::Duration::from_millis)
+            .unwrap_or(default)
+    }
 }
 
 /// Spawn command envelope owned by the coordinator mailbox.
@@ -183,6 +193,10 @@ pub struct SubagentRuntimeOverrides {
     pub completion_output_cap: Option<usize>,
     pub spawn_depth: Option<u32>,
     pub output_token_budget: Option<u64>,
+    /// Optional per-spawn foreground await budget override in milliseconds.
+    /// Internal harnesses use this to give long-running roles a larger wait
+    /// window without changing the ordinary TaskTool budget.
+    pub foreground_wait_budget_ms: Option<u64>,
     pub output_schema: Option<serde_json::Value>,
     pub loop_task_id: Option<String>,
 }

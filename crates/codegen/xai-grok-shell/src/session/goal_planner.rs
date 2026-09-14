@@ -32,6 +32,31 @@ pub(crate) const GOAL_ROLE_SUBAGENT_TYPE: &str = "general-purpose";
 pub(crate) const GOAL_ROLE_AWAIT_BUDGET_EXCEEDED: &str =
     "goal role subagent exceeded foreground wait budget";
 
+/// Default foreground wait for the goal plan writer. This is separate from
+/// the ordinary TaskTool wait budget because planning is a user-visible
+/// phase and a slow planner must not be mistaken for a failed goal.
+pub(crate) const GOAL_PLANNER_AWAIT_BUDGET_DEFAULT: std::time::Duration =
+    std::time::Duration::from_secs(30 * 60);
+
+/// Resolve the planner wait from a positive millisecond environment override.
+/// Invalid, zero, or absent values use the 30 minute default.
+pub(crate) fn goal_planner_await_budget() -> std::time::Duration {
+    xai_grok_tools::implementations::grok_build::task::backend::env_duration_or(
+        "GROK_GOAL_PLANNER_AWAIT_BUDGET_MS",
+        GOAL_PLANNER_AWAIT_BUDGET_DEFAULT,
+    )
+}
+
+#[cfg(test)]
+mod budget_tests {
+    use super::*;
+
+    #[test]
+    fn planner_wait_defaults_to_30_minutes() {
+        assert_eq!(GOAL_PLANNER_AWAIT_BUDGET_DEFAULT, std::time::Duration::from_secs(1800));
+    }
+}
+
 /// Best-effort wait for a subagent cancel to be acknowledged before giving up.
 /// The planner is aborting regardless, so this is a bound on cleanup, not a
 /// correctness gate.
@@ -393,6 +418,12 @@ impl ChannelSpawner {
             runtime_overrides: SubagentRuntimeOverrides {
                 model,
                 harness_agent_type,
+                // Goal planning is allowed to use the full configurable
+                // foreground wait budget, whose default is 30 minutes.
+                foreground_wait_budget_ms: Some(
+                    crate::session::goal_planner::goal_planner_await_budget()
+                        .as_millis() as u64,
+                ),
                 ..Default::default()
             },
             run_in_background: false,
