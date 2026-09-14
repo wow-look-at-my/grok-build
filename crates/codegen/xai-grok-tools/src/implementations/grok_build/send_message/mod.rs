@@ -61,6 +61,34 @@ impl std::fmt::Debug for ParentMessenger {
 
 register_resource!("grok_build", "ParentMessenger", ParentMessenger);
 
+/// Wrap a subagent's message in the block the parent session reads.
+///
+/// The parent takes this as a user message. Without the attribution it reads
+/// as the user's own words, from an agent the user never addressed. Every
+/// attribute is quoted, so a task description carrying a `"` cannot end the
+/// tag early and forge the rest of the block.
+pub fn render_subagent_message(
+    subagent_id: &str,
+    subagent_type: &str,
+    task: &str,
+    text: &str,
+) -> String {
+    format!(
+        "<message from=\"subagent\" subagent_id=\"{}\" subagent_type=\"{}\" task=\"{}\">\n{text}\n</message>",
+        escape_attribute(subagent_id),
+        escape_attribute(subagent_type),
+        escape_attribute(task),
+    )
+}
+
+fn escape_attribute(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}
+
 // ---------------------------------------------------------------------------
 // Input / output
 // ---------------------------------------------------------------------------
@@ -295,6 +323,33 @@ mod tests {
             messenger.deliver("hello"),
             Err("parent session ended".to_string())
         );
+    }
+
+    #[test]
+    fn a_rendered_message_names_the_subagent_that_sent_it() {
+        let rendered = render_subagent_message("abc-123", "explore", "map the jail", "found it");
+        assert_eq!(
+            rendered,
+            "<message from=\"subagent\" subagent_id=\"abc-123\" subagent_type=\"explore\" \
+             task=\"map the jail\">\nfound it\n</message>"
+        );
+    }
+
+    #[test]
+    fn a_quote_in_a_task_cannot_close_the_tag_early() {
+        let rendered = render_subagent_message(
+            "abc-123",
+            "explore",
+            "check \"quoted\" <thing>",
+            "body stays raw",
+        );
+        assert!(
+            rendered.contains("task=\"check &quot;quoted&quot; &lt;thing&gt;\""),
+            "attribute must be escaped: {rendered}"
+        );
+        // The body is the subagent's own words. It is data, not markup, so it
+        // is delivered as written.
+        assert!(rendered.contains("\n body stays raw\n".trim_start()));
     }
 
     #[test]

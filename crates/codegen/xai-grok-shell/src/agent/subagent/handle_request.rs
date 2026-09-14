@@ -748,12 +748,13 @@ pub(crate) async fn run_shell_child(
         let subagent_type = request.subagent_type.clone();
         let description = request.description.clone();
         xai_grok_tools::implementations::grok_build::ParentMessenger::new(move |text| {
-            // The parent reads this as a user message, so the provenance has to
-            // be in the text: nothing else tells it which child spoke, and a
-            // bare line reads as the user.
-            let body = format!(
-                "<message from=\"subagent\" subagent_id=\"{subagent_id}\" \
-                 subagent_type=\"{subagent_type}\" task=\"{description}\">\n{text}\n</message>",
+            // The parent reads this as a user message. Nothing else tells it
+            // which child spoke, so the attribution rides in the text.
+            let body = xai_grok_tools::implementations::grok_build::render_subagent_message(
+                &subagent_id,
+                &subagent_type,
+                &description,
+                text,
             );
             parent_cmd_tx
                 .send(SessionCommand::InterjectWithoutCancel { text: body })

@@ -61,7 +61,9 @@ pub use scheduler::create::{
 pub use scheduler::delete::{SCHEDULER_DELETE_TOOL_NAME, SchedulerDeleteTool};
 pub use scheduler::list::SchedulerListTool;
 pub use search_replace::SearchReplaceTool;
-pub use send_message::{ParentMessenger, SEND_MESSAGE_TOOL_NAME, SendMessageTool};
+pub use send_message::{
+    ParentMessenger, SEND_MESSAGE_TOOL_NAME, SendMessageTool, render_subagent_message,
+};
 pub use task::TaskTool;
 pub use task_output::{GetTerminalCommandOutputTool, TaskOutputTool, WaitTasksTool};
 pub use todo::TodoWriteTool;
