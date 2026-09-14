@@ -750,6 +750,11 @@ pub fn bwrap_command(plan: &JailPlan) -> std::process::Command {
 ///   `system = "rw"` (the user's explicit choice to weaken the jail).
 /// - `$GROK_HOME` and the sandbox temp dir — read and write, unless
 ///   `grok_home = "ro"` leaves `$GROK_HOME` readable only.
+/// - the binary itself (`self_exe`), which sandbox-exec execs by path.
+/// - metadata-only rules for the ANCESTORS of those paths, plus a read rule
+///   for `/`: path resolution walks the chain, so without them the grants
+///   above are unreachable and the jail does not start at all (see the
+///   comments at each rule).
 ///
 /// Anything not in that set — e.g. a sibling repo under `$HOME` — is denied
 /// for both reads and writes, exactly as bwrap confines it on Linux. SBPL
@@ -768,6 +773,40 @@ pub fn seatbelt_profile(plan: &JailPlan) -> String {
     // A terminal, a PTY and /dev/null are reads and writes every tool makes.
     profile.push_str("(allow file-read* (subpath \"/dev\"))\n");
     profile.push_str("(allow file-write* (subpath \"/dev\"))\n");
+    // The root itself. A `(subpath "/usr")` grant covers that directory and
+    // everything under it but NOT `/`, and resolving any absolute path walks
+    // through the root — dyld's very first read is one. Measured on macOS
+    // 26.5: without this rule the deny above stands for `/`, sandbox-exec's
+    // own execvp fails, and the jailed process dies with SIGABRT and no
+    // output, so the jail cannot start AT ALL (not merely fail to reach `gh`).
+    // A read grant on `/` alone exposes no directory: it names one inode.
+    profile.push_str("(allow file-read* (literal \"/\"))\n");
+    // Path resolution stats each ANCESTOR of every path it is handed, so a
+    // grant whose ancestors are denied is unreachable in practice: `getcwd`
+    // fails and a tool cannot resolve a path it was given, even inside a
+    // mounted directory. Grant metadata on the ancestors — literal rules, one
+    // per directory, never a subtree — so the granted trees resolve while a
+    // path nobody granted stays as invisible as bwrap leaves it.
+    for path in std::iter::once(&plan.self_exe)
+        .chain(plan.mounts.iter().filter_map(|mount| {
+            (mount.access != Access::Deny).then_some(&mount.path)
+        }))
+        .chain([&plan.grok_home, &plan.temp_dir])
+    {
+        for ancestor in path.ancestors().skip(1).filter(|dir| *dir != Path::new("/")) {
+            profile.push_str(&format!(
+                "(allow file-read-metadata (literal \"{}\"))\n",
+                sbpl_escape(ancestor)
+            ));
+        }
+    }
+    // The binary sandbox-exec execs. bwrap binds it read-only explicitly; here
+    // it needs its own read grant, because $GROK_HOME and the system base do
+    // not cover a checkout or a `~/.local/bin` install.
+    profile.push_str(&format!(
+        "(allow file-read* (literal \"{}\"))\n",
+        sbpl_escape(&plan.self_exe)
+    ));
     // The read-only system base the process needs to run (dylibs, binaries,
     // config, and on macOS the real /private home of /etc, /var and /tmp).
     // Emitted before the user mounts, matching bwrap's bind order (base first,
@@ -1255,6 +1294,70 @@ mod tests {
         );
     }
 
+    /// Regression guards for the rules that make the jail startable at all.
+    ///
+    /// Measured on macOS 26.5: with only the grants the profile used to emit,
+    /// sandbox-exec's own execvp of the target fails and the jailed process
+    /// dies with SIGABRT and no output — the jail does not start, so nothing
+    /// inside it (the CI dot included) can work. A read grant on `/` is what
+    /// fixes it, and metadata rules on each grant's ancestors are what let the
+    /// jailed process resolve paths it was handed.
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn seatbelt_grants_the_root_and_ancestor_metadata_so_the_jail_can_start() {
+        let plan = plan_fixture(vec![Mount {
+            access: Access::Rw,
+            path: PathBuf::from("/work/deep"),
+        }]);
+        let profile = seatbelt_profile(&plan);
+
+        let deny = profile
+            .find("(deny file-read*)")
+            .expect("the blanket read deny must be emitted");
+        let root = profile
+            .find("(allow file-read* (literal \"/\"))")
+            .expect("the root must be readable, or the jail cannot start");
+        assert!(
+            deny < root,
+            "the root grant must FOLLOW the blanket deny (SBPL: last match wins): {profile}"
+        );
+
+        // Ancestors of every grant, as metadata-only literals.
+        for ancestor in ["/work", "/home/u", "/home", "/opt/grok/bin", "/opt"] {
+            assert!(
+                profile.contains(&format!(
+                    "(allow file-read-metadata (literal \"{ancestor}\"))"
+                )),
+                "missing ancestor metadata for {ancestor}: {profile}"
+            );
+        }
+        // And the program sandbox-exec execs, which the system base and
+        // $GROK_HOME need not cover.
+        assert!(
+            profile.contains("(allow file-read* (literal \"/opt/grok/bin/grok\"))"),
+            "the jailed binary must be readable by path: {profile}"
+        );
+
+        // The two halves of the confinement must survive all of that: ancestor
+        // grants are metadata-only and name one directory each (never a
+        // subtree), and the read grant on `/` names the root rather than the
+        // whole filesystem.
+        assert!(
+            !profile.contains("(allow file-read-metadata (subpath"),
+            "an ancestor must be granted as a literal, not a subtree: {profile}"
+        );
+        for ancestor in ["/home", "/work"] {
+            assert!(
+                !profile.contains(&format!("(allow file-read* (subpath \"{ancestor}\"))")),
+                "an ancestor must never be granted as a subtree: {profile}"
+            );
+        }
+        assert!(
+            !profile.contains("(allow file-read* (subpath \"/\"))"),
+            "the root grant must name the root, not the whole filesystem: {profile}"
+        );
+    }
+
     #[test]
     #[cfg(target_os = "macos")]
     fn seatbelt_confines_reads_and_writes_ending_with_grok_home() {
@@ -1305,8 +1408,7 @@ mod tests {
 
     #[test]
     #[cfg(target_os = "macos")]
-    fn seatbelt_reads_cover_the_macos_system_base() {
-        // macOS needs /System, /Library and the real /private tree readable or
+    fn seatbelt_reads_cover_the_macos_system_base() {        // macOS needs /System, /Library and the real /private tree readable or
         // the binary cannot dyld-load; without them the read-deny bricks the
         // sandboxed process outright.
         let plan = plan_fixture(Vec::new());
