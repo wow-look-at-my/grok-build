@@ -587,6 +587,42 @@ async fn the_planner_is_spawned_with_the_todo_instruction() {
         .await;
 }
 
+/// The shipped reader that carries a planner child's items back
+/// ([`crate::agent::subagent::session_todo_contents`]), driven against a real
+/// bound session whose list was written through the real tool — and against an
+/// id that was never bound, which is the proxy-mode / no-child case.
+#[tokio::test(flavor = "current_thread")]
+#[serial]
+async fn the_child_todo_reader_reads_a_bound_sessions_live_list() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (actor, _tmp) = make_planner_actor(None, false).await;
+            arm_todo_writes(&actor).await;
+            write_existing_todo(&actor, "t1", "the user's own item").await;
+            write_existing_todo(&actor, "t2", "a second item").await;
+
+            let read = crate::agent::subagent::session_todo_contents(
+                &actor.workspace_ops,
+                &actor.session_id_string(),
+            )
+            .await;
+            assert_eq!(
+                read,
+                vec!["the user's own item".to_string(), "a second item".to_string()],
+                "the reader must return the session's own live items, in order",
+            );
+            assert!(
+                crate::agent::subagent::session_todo_contents(&actor.workspace_ops, "never-bound")
+                    .await
+                    .is_empty(),
+                "an unbound session reads empty, which is what the merge treats as \
+                 `nothing to carry over`",
+            );
+        })
+        .await;
+}
+
 /// The gate for the objective's first two criteria: one `setup_goal` call —
 /// with no model turn of its own — leaves the session's LIVE todo list carrying
 /// the planner's items, each a fresh pending harness-minted item.

@@ -61,7 +61,7 @@ pub(super) fn task_model_override_error(
 /// this is how a parent reads a child's list without the child having to hand it
 /// over. Empty when the session is unknown (proxy mode, or a session that was
 /// never bound) or has no list at all, which is exactly "nothing to merge".
-async fn session_todo_contents(
+pub(crate) async fn session_todo_contents(
     workspace_ops: &xai_grok_workspace::WorkspaceOps,
     session_id: &str,
 ) -> Vec<String> {
