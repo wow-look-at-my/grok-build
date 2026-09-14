@@ -756,6 +756,25 @@ mod tests {
     /// Pin each load-bearing clause of the named-artifact research mandate so a
     /// targeted revert fails (the convergence balance: fix under-scoping, never
     /// reopen over-scoping).
+    /// The planner's harness must actually expose the todo tool: the prompt's
+    /// instruction to list the plan's work is inert, and the session's list
+    /// stays empty, if the toolset the planner runs on has no such tool.
+    #[test]
+    fn planner_harness_toolset_exposes_the_todo_tool() {
+        let definition = xai_grok_agent::config::AgentDefinition::general_purpose();
+        let ids: Vec<&str> = definition
+            .tool_config
+            .tools
+            .iter()
+            .map(|t| t.id.as_str())
+            .collect();
+        assert!(
+            ids.iter().any(|id| id.ends_with("todo_write")),
+            "the goal planner's `{GOAL_PLANNER_SUBAGENT_TYPE}` harness must expose a todo \
+             tool, or it cannot make the call the session's list is populated from: {ids:?}",
+        );
+    }
+
     #[test]
     fn planner_prompt_pins_named_artifact_research_mandate() {
         let t = GOAL_PLANNER_PROMPT_TEMPLATE;
