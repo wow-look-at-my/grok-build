@@ -75,9 +75,15 @@ pub(super) fn dispatch_enter_plan_mode(
             .prompt
             .slash_controller
             .recognized_token_ranges(&desc, &agent.session.models);
+        // Own-turn: when a turn is already running the drain below is blocked
+        // and this row waits for the NEXT turn — which is exactly what was
+        // asked for, since the plan mode this submit switched on applies to
+        // that turn. Marking it keeps every mid-turn delivery path (queue
+        // migration, interrupt-with-queue) from folding the description into
+        // the running turn as steering text.
         agent
             .session
-            .enqueue_prompt_with_skill_tokens(desc, skill_token_ranges);
+            .enqueue_own_turn_prompt(desc, skill_token_ranges);
         let drain = maybe_drain_queue(agent);
         note_peek_page_flip(app, id, drain.page_flip_entry);
         let mut effects = Vec::with_capacity(1);

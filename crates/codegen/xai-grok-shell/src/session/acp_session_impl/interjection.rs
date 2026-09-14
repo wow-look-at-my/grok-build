@@ -262,6 +262,15 @@ impl SessionActor {
         if meta.text.trim().is_empty() {
             return false;
         }
+        // A slash invocation is a command, not a note: `resolve` runs it when
+        // the prompt's OWN turn starts, while this path's drain expands skills
+        // alone — folding it in would hand the model the literal `/cmd args`
+        // (and `/plan <description>` would swallow the prompt of the turn the
+        // mode switch was requested for). It stays queued and runs as its own
+        // turn instead.
+        if slash_commands::is_slash_invocation(&meta.text) {
+            return false;
+        }
         // Text and images are all the interjection pipeline carries.
         item.prompt_blocks.iter().all(|block| {
             matches!(

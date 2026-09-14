@@ -77,6 +77,11 @@ pub struct QueuedPrompt {
     pub chip_elements: Vec<ChipElement>,
     /// Combined-turn display segments (len ≥ 2); drain paints one bubble each.
     pub combined_texts: Vec<String>,
+    /// Whether this row must be delivered as its own turn rather than folded
+    /// into another one. Set for the `/plan <description>` description: it is
+    /// the prompt of the FOLLOWING (plan-mode) turn, so the turn that is
+    /// running when it is queued must not swallow it as steering text.
+    pub own_turn: bool,
 }
 impl QueuedPrompt {
     /// Base row with every optional field at its default. Sites needing
@@ -96,6 +101,7 @@ impl QueuedPrompt {
             human_schedule: None,
             chip_elements: Vec::new(),
             combined_texts: Vec::new(),
+            own_turn: false,
         }
     }
     /// Whether the wire payload is exactly the display text.
@@ -112,6 +118,38 @@ impl QueuedPrompt {
             Some([acp::ContentBlock::Text(t)]) => t.text == self.text,
             Some(_) => false,
         }
+    }
+
+    /// Whether this row's text is a slash invocation that must be executed as a
+    /// command rather than delivered as ordinary user text.
+    ///
+    /// The submit path resolves a leading `/cmd args` through the registry, so
+    /// such a line never becomes a prompt in the first place. A row that carries
+    /// one got there without being resolved (a shell/ACP command this client
+    /// passes through, a row queued before the registry sync, one edited into a
+    /// command) — and every delivery path that would hand it to the model as
+    /// text loses the command. `wire_blocks` excluded: a client-expanded payload
+    /// has already replaced the command text with what the model must see.
+    pub fn is_slash_command(&self) -> bool {
+        self.kind == QueueEntryKind::Prompt
+            && self.wire_blocks.is_none()
+            && crate::slash::is_slash_invocation(&self.text)
+    }
+
+    /// Whether delivering this row as mid-turn steering text (or handing it to
+    /// the shell as a plain prompt row) would lose what it is. Such a row runs
+    /// as its own turn instead.
+    pub fn owns_its_turn(&self) -> bool {
+        self.own_turn || self.is_slash_command()
+    }
+
+    /// Whether the shell may fold this row into a RUNNING turn as steering text
+    /// — the rule `SessionActor::deliverable_mid_turn` enforces shell-side,
+    /// mirrored here so both ends agree on what an interrupt can deliver.
+    pub fn is_steering_text(&self) -> bool {
+        self.kind == QueueEntryKind::Prompt
+            && self.wire_matches_display()
+            && !self.owns_its_turn()
     }
 }
 /// A command that is sent to the agent and tracked in the state machine.
@@ -999,6 +1037,24 @@ impl AgentSession {
         skill_token_ranges: Vec<std::ops::Range<usize>>,
     ) -> u64 {
         self.enqueue_entry_at(text, QueueEntryKind::Prompt, false, skill_token_ranges)
+    }
+    /// Push a plain prompt that must run as its own turn — never folded into
+    /// another turn as mid-turn steering text.
+    ///
+    /// Used for the `/plan <description>` description: the mode switch the same
+    /// submit requested applies to the FOLLOWING turn, so the description must
+    /// survive the running one intact instead of being absorbed by it.
+    pub fn enqueue_own_turn_prompt(
+        &mut self,
+        text: String,
+        skill_token_ranges: Vec<std::ops::Range<usize>>,
+    ) -> u64 {
+        let id = self.enqueue_entry_at(text, QueueEntryKind::Prompt, false, skill_token_ranges);
+        if let Some(row) = self.pending_prompts.back_mut() {
+            debug_assert_eq!(row.id, id);
+            row.own_turn = true;
+        }
+        id
     }
     /// Push a prompt onto the **front** of the queue. Returns the assigned ID.
     ///

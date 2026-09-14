@@ -1312,6 +1312,18 @@ pub struct SlashInvocation<'a> {
     pub args: &'a str,
 }
 
+/// Whether `text` is a slash invocation — the same line the submit path treats
+/// as a command (`dispatch_send_prompt_inner`'s registry branch reads it the
+/// same way).
+///
+/// A bare `/` or a lone `/ ` is not: `parse_invocation` finds no token, so the
+/// line is ordinary text. Consulted by every path that delivers an
+/// ALREADY-QUEUED line, so a command queued while the agent is busy is executed
+/// as a command instead of reaching the model as the literal `/cmd args` text.
+pub fn is_slash_invocation(text: &str) -> bool {
+    parse_invocation(text.trim()).is_some()
+}
+
 /// Parse a line into a slash command invocation.
 ///
 /// Returns `None` if the line doesn't start with `/` or has no command token.

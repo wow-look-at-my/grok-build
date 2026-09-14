@@ -108,6 +108,18 @@ fn row_is_plain_text(prompt: &crate::app::agent::QueuedPrompt) -> bool {
         && prompt.chip_elements.is_empty()
 }
 
+/// Whether a local row may be handed to the shell as a plain prompt row.
+///
+/// [`row_is_plain_text`] says the row's payload survives the trip, but a slash
+/// invocation must not take it: the shell may not know the command (pager-owned
+/// `/plan`, `/model`, …) and would hand the model the literal `/cmd args`, and
+/// even a command it does know resolves only when its OWN turn starts. Such a
+/// row — and one that owns its turn outright — stays local and runs as its own
+/// turn, the same as a `/compact` or bash row does.
+fn row_may_be_migrated(prompt: &crate::app::agent::QueuedPrompt) -> bool {
+    row_is_plain_text(prompt) && !prompt.owns_its_turn()
+}
+
 /// Hand the local queue's leading plain-text rows to the shell while a turn is
 /// running, so ASAP delivery cannot latch off.
 ///
@@ -126,7 +138,9 @@ fn row_is_plain_text(prompt: &crate::app::agent::QueuedPrompt) -> bool {
 /// Only a leading run of plain rows moves, and it stops at the first row that
 /// cannot: the merged view renders server rows ahead of local ones, so
 /// migrating a prefix keeps the user's order, while migrating past a stuck row
-/// would hoist a newer prompt above an older one.
+/// would hoist a newer prompt above an older one. A slash-invocation row is one
+/// that cannot move (see [`row_may_be_migrated`]): the shell resolves a command
+/// only when its own turn starts.
 pub(crate) fn migrate_local_rows_to_server_queue(app: &mut AppView) -> Vec<Effect> {
     let mut effects = Vec::new();
     let crate::app::app_view::ActiveView::Agent(agent_id) = app.active_view else {
@@ -154,7 +168,7 @@ pub(crate) fn migrate_local_rows_to_server_queue(app: &mut AppView) -> Vec<Effec
         .agents
         .get(&agent_id)
         .and_then(|agent| agent.session.pending_prompts.front())
-        .is_some_and(row_is_plain_text)
+        .is_some_and(row_may_be_migrated)
     {
         let Some(row) = app
             .agents

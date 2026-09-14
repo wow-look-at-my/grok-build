@@ -59,7 +59,7 @@ impl AgentView {
     ///   bash/command/cron row is executed from block meta this path has no
     ///   field for, so if that is the only thing queued, send-now refuses it
     ///   with a toast rather than folding it in wrong.
-    pub(super) fn try_interrupt_with_queued_from_prompt(&mut self) -> Option<InputOutcome> {
+    pub(in crate::app) fn try_interrupt_with_queued_from_prompt(&mut self) -> Option<InputOutcome> {
         if !self.session.state.is_turn_running() {
             return None;
         }
@@ -99,21 +99,17 @@ impl AgentView {
     /// Whether any queued row can be folded into the running turn as user text
     /// — the shell's `deliverable_mid_turn` rule, evaluated on what this client
     /// can see: a plain prompt row, server-owned or local. Bash and
-    /// client-expanded slash rows own their turn and never qualify.
+    /// client-expanded slash rows own their turn and never qualify, and so does
+    /// a row whose text is a slash invocation (`wire_row_is_steering_text`):
+    /// the shell's drain resolves no builtin, so folding it in would deliver the
+    /// literal `/cmd args` to the model.
     pub(crate) fn queue_has_interjectable_row(&self) -> bool {
-        use crate::app::agent::QueueEntryKind;
-
         let running = self.session.current_prompt_id.as_deref();
         let server = self.shared_queue.iter().any(|e| {
             Some(e.id.as_str()) != running
-                && crate::views::queue_pane::kind_from_wire(&e.kind) == QueueEntryKind::Prompt
+                && crate::views::queue_pane::wire_row_is_steering_text(e)
         });
-        server
-            || self
-                .session
-                .pending_prompts
-                .iter()
-                .any(|p| p.kind == QueueEntryKind::Prompt && p.wire_matches_display())
+        server || self.session.pending_prompts.iter().any(|p| p.is_steering_text())
     }
 
     /// The turn is parked in a wait the shell aborts as soon as the user
@@ -342,13 +338,14 @@ impl AgentView {
     /// display text — the shell expands those at the interjection drain. Rows
     /// with a client-expanded payload (`/imagine`, `/loop`) and non-prompt
     /// kinds stay queued: interjecting them would send the display text, not
-    /// the payload.
+    /// the payload. So does a row that owns its own turn — a slash invocation
+    /// (`is_steering_text`), whose text the shell's drain would deliver
+    /// unresolved.
     pub(in crate::app) fn queue_row_prompt_like(&self, id: u64) -> Option<bool> {
-        use crate::app::agent::QueueEntryKind;
-        use crate::views::queue_pane::{QueueRowOrigin, kind_from_wire};
+        use crate::views::queue_pane::QueueRowOrigin;
 
         if let Some(local) = self.session.pending_prompts.iter().find(|p| p.id == id) {
-            return Some(local.kind == QueueEntryKind::Prompt && local.wire_matches_display());
+            return Some(local.is_steering_text());
         }
         let row = self.queue.row_ref(id)?;
         if row.origin != QueueRowOrigin::Server {
@@ -356,7 +353,7 @@ impl AgentView {
         }
         let server_id = row.server_id?;
         let wire = self.shared_queue.iter().find(|e| e.id == server_id)?;
-        Some(kind_from_wire(&wire.kind) == QueueEntryKind::Prompt)
+        Some(crate::views::queue_pane::wire_row_is_steering_text(wire))
     }
 
     /// Whether [`Self::force_interject_queue_row`] will actually deliver
