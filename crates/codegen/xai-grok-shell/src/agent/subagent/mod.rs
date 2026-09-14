@@ -46,6 +46,10 @@ use xai_grok_workspace::file_system::AsyncFileSystem;
 use xai_hunk_tracker::HunkTrackerHandle;
 mod handle_request;
 pub(crate) use handle_request::run_shell_child;
+/// Re-exported for the goal e2e suite, which drives it against a real bound
+/// session: it is the hop that carries a planner child's own todo items back to
+/// the session that spawned it.
+pub(crate) use handle_request::session_todo_contents;
 /// How the child session's initial context was bootstrapped.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum InitialContextSource {

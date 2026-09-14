@@ -799,6 +799,9 @@ impl SessionActor {
             bridge.tool_for_kind(ToolKind::WebSearch).await,
             bridge.tool_for_kind(ToolKind::WebFetch).await,
         )
+        // The planner builds its own todo list with the parent's `Plan` tool, so
+        // its prompt names THAT tool rather than the literal `todo_write`.
+        .with_todo(bridge.tool_for_kind(ToolKind::Plan).await)
     }
 
     pub(super) async fn setup_goal(&self, objective: &str, token_budget: Option<i64>) -> String {

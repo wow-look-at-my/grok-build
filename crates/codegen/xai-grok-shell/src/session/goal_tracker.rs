@@ -622,6 +622,16 @@ pub struct GoalOrchestration {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plan_baseline_file: Option<PathBuf>,
 
+    /// True once the harness has populated the session's todo list from the
+    /// published plan (the planner's own list, or the plan body when the
+    /// planner named nothing). Seeding happens at plan publication only, so
+    /// this is the guard that keeps a retry / resume / re-entry from adding a
+    /// second copy of every step. Persisted, so the guard survives a restart;
+    /// the append is additionally deduped by content, so a lost flag cannot
+    /// duplicate either.
+    #[serde(default)]
+    pub plan_todos_seeded: bool,
+
     /// True once the harness created and squat-verified the scratch root AND
     /// the implementer subdir, so prompts can honestly say the dir exists.
     /// `#[serde(skip)]`: recomputed by `from_snapshot` on every reload (the
@@ -1023,6 +1033,7 @@ impl GoalTracker {
             changes_baseline_commit: baseline_commit,
             plan_file: None,
             plan_baseline_file: None,
+            plan_todos_seeded: false,
             scratch_dir_ready,
             live_subagent_tokens: 0,
             live_tokens_by_model: Vec::new(),
@@ -1143,6 +1154,8 @@ impl GoalTracker {
             // Drop the plan baseline alongside skeptic 0: a later goal
             // re-snapshots its own planner's original plan.
             o.plan_baseline_file = None;
+            // Same for the seed guard: a later goal seeds its own plan.
+            o.plan_todos_seeded = false;
             // Terminal transition: reset all strategist state so a
             // recreated/reactivated goal never inherits a stale count or note.
             o.reset_strategist_fields();
@@ -1179,6 +1192,7 @@ impl GoalTracker {
             o.skeptic0_session_id = None;
             o.skeptic_model_assignment.clear();
             o.plan_baseline_file = None;
+            o.plan_todos_seeded = false;
             o.reset_strategist_fields();
             o.reset_evaluator_blocker_fields();
             // Symmetric with `complete`.
@@ -1447,6 +1461,7 @@ pub(crate) fn make_base_orchestration() -> GoalOrchestration {
         changes_baseline_commit: None,
         plan_file: None,
         plan_baseline_file: None,
+        plan_todos_seeded: false,
         scratch_dir_ready: false,
         live_subagent_tokens: 0,
         live_tokens_by_model: Vec::new(),
