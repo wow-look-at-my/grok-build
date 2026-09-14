@@ -74,6 +74,9 @@ struct PlannerSpawnCapture {
     fork_context: StdArc<std::sync::Mutex<Vec<bool>>>,
     surface_completion: StdArc<std::sync::Mutex<Vec<bool>>>,
     model: StdArc<std::sync::Mutex<Vec<Option<String>>>>,
+    /// Every prompt the coordinator was asked to spawn a planner with, so a
+    /// test can assert what the planner's run was actually told to do.
+    prompt: StdArc<std::sync::Mutex<Vec<String>>>,
 }
 
 /// Stand up a coordinator that handles exactly the spawn behaviours
@@ -104,6 +107,7 @@ fn spawn_planner_coordinator_capturing(
     let capture = PlannerSpawnCapture::default();
     let fork_log = StdArc::clone(&capture.fork_context);
     let surface_log = StdArc::clone(&capture.surface_completion);
+    let prompt_log = StdArc::clone(&capture.prompt);
     let model_log = StdArc::clone(&capture.model);
     tokio::task::spawn_local(async move {
         while let Some(ev) = rx.recv().await {
@@ -123,6 +127,7 @@ fn spawn_planner_coordinator_capturing(
                 count_task.fetch_add(1, SeqOrd::SeqCst);
                 fork_log.lock().unwrap().push(req.fork_context);
                 surface_log.lock().unwrap().push(req.surface_completion);
+                prompt_log.lock().unwrap().push(req.prompt.clone());
                 model_log
                     .lock()
                     .unwrap()
@@ -534,6 +539,49 @@ async fn the_seed_reaches_the_client_as_a_plan_update() {
                     .iter()
                     .all(|e| matches!(e.status, acp::PlanEntryStatus::Pending)),
                 "seeded items are pending: {entries:?}",
+            );
+        })
+        .await;
+}
+
+/// The gate for criterion 2's "the run's tool calls include it": the real spawn
+/// path hands the planner a prompt that tells it to list the plan's work with
+/// the session's own todo tool — the instruction the whole feature rests on,
+/// asserted on the prompt the coordinator was actually given rather than on a
+/// template rendered in isolation.
+#[tokio::test(flavor = "current_thread")]
+#[serial]
+async fn the_planner_is_spawned_with_the_todo_instruction() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (tx, _count, capture) =
+                spawn_planner_coordinator_capturing(scripted_planner_with_todos());
+            let (actor, _tmp) = make_planner_actor(Some(tx), true).await;
+            arm_todo_writes(&actor).await;
+
+            let _ = actor.setup_goal("ship the exporter", None).await;
+
+            let prompts = capture.prompt.lock().unwrap().clone();
+            assert_eq!(prompts.len(), 1, "one planner spawn for one goal");
+            let prompt = &prompts[0];
+            assert!(
+                prompt.contains("## Todo list — REQUIRED"),
+                "the planner's own prompt must carry the todo-list section",
+            );
+            assert!(
+                prompt.contains("`todo_write`"),
+                "and name the session's todo tool — the session advertises it as \
+                 `todo_write`, so `{{TODO_TOOL}}` must have resolved through the live \
+                 bridge: {prompt}",
+            );
+            assert!(
+                prompt.contains("one item per `## Task checklist` line"),
+                "one item per plan step, in order",
+            );
+            assert!(
+                !prompt.contains("{TODO_TOOL}"),
+                "an unresolved placeholder would name no tool at all",
             );
         })
         .await;
