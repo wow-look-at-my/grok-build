@@ -119,6 +119,11 @@ pub(crate) struct AgentRebuildSpec {
     pub attribution_callback: Option<xai_grok_tools::SharedAttributionCallback>,
     pub tool_params_json: ResolvedToolParamsJson,
     pub subagent_event_tx: Option<UnboundedSender<SubagentEvent>>,
+    /// Route from this session to the one that spawned it, for `send_message`.
+    /// Only a subagent session carries one; a top-level session has no parent.
+    /// It lives on the spec so a rebuild re-registers it — a mode switch must
+    /// not quietly take a child's way of answering its parent away.
+    pub parent_messenger: Option<xai_grok_tools::implementations::grok_build::ParentMessenger>,
     pub monitor_event_buffer: Option<MonitorEventBuffer>,
     pub user_question_tx: UnboundedSender<UserQuestionRequest>,
     pub subagent_depth: u32,
@@ -221,6 +226,7 @@ impl AgentRebuildSpec {
             attribution_callback,
             tool_params_json,
             subagent_event_tx,
+            parent_messenger,
             monitor_event_buffer,
             user_question_tx,
             subagent_depth,
@@ -367,6 +373,9 @@ impl AgentRebuildSpec {
                 agent.tool_bridge().update_resource(buffer).await;
             }
         }
+        if let Some(messenger) = parent_messenger.clone() {
+            agent.tool_bridge().update_resource(messenger).await;
+        }
         agent
             .tool_bridge()
             .update_resource(xai_grok_tools::types::resources::RespectGitignore(
@@ -455,6 +464,7 @@ pub(crate) fn test_rebuild_spec_default() -> Arc<AgentRebuildSpec> {
         attribution_callback: None,
         tool_params_json: ResolvedToolParamsJson::default(),
         subagent_event_tx: None,
+        parent_messenger: None,
         monitor_event_buffer: None,
         user_question_tx: uq_tx,
         subagent_depth: 0,

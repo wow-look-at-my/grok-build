@@ -29,8 +29,9 @@ use super::coordinator_state::{
 };
 use super::types::{
     SpawnedSubagentRef, SubagentCancelOutcome, SubagentCancelTarget, SubagentDescribeOutcome,
-    SubagentEvent, SubagentOutstandingReply, SubagentRegistryCounts, SubagentRequest,
-    SubagentResult, SubagentResumeLookup, SubagentResumeSource, SubagentValidateTypeOutcome,
+    SubagentEvent, SubagentMessageChildRequest, SubagentMessageOutcome, SubagentOutstandingReply,
+    SubagentRegistryCounts, SubagentRequest, SubagentResult, SubagentResumeLookup,
+    SubagentResumeSource, SubagentValidateTypeOutcome,
 };
 
 pub use super::coordinator_state::{
@@ -220,6 +221,7 @@ impl<R: ChildRunner> SubagentCoordinator<R> {
             SubagentEvent::Interject { subagent_id, text } => {
                 self.handle_interject(&subagent_id, &text);
             }
+            SubagentEvent::MessageChild(request) => self.handle_message_child(request),
             SubagentEvent::Query(query) => {
                 self.handle_query(
                     query.subagent_id,
@@ -483,7 +485,10 @@ impl<R: ChildRunner> SubagentCoordinator<R> {
             return;
         }
         let known = self.pending.contains_key(subagent_id)
-            || self.queued.iter().any(|queued| queued.request.id == subagent_id);
+            || self
+                .queued
+                .iter()
+                .any(|queued| queued.request.id == subagent_id);
         if !known {
             tracing::warn!(
                 subagent_id,
@@ -495,6 +500,58 @@ impl<R: ChildRunner> SubagentCoordinator<R> {
             .entry(subagent_id.to_owned())
             .or_default()
             .push(text.to_owned());
+    }
+
+    /// Deliver a model-sent message to one child of `parent_session_id`
+    /// (`SubagentEvent::MessageChild`) and answer with what became of it.
+    ///
+    /// Scoping is the difference from `handle_interject`: a child of another
+    /// session is refused rather than steered, and every path answers, so the
+    /// calling tool reports a real outcome instead of a silent success.
+    fn handle_message_child(&mut self, request: SubagentMessageChildRequest) {
+        let SubagentMessageChildRequest {
+            parent_session_id,
+            subagent_id,
+            text,
+            respond_to,
+        } = request;
+        let mut seen_under_other_parent = false;
+        if let Some(child) = self.active.get(&subagent_id) {
+            if child.request.parent_session_id == parent_session_id {
+                child.control.interject(&text);
+                let _ = respond_to.send(SubagentMessageOutcome::Delivered);
+                return;
+            }
+            seen_under_other_parent = true;
+        }
+        let owned_pending = self
+            .pending
+            .get(&subagent_id)
+            .is_some_and(|child| child.request.parent_session_id == parent_session_id);
+        let owned_queued = self.queued.iter().any(|queued| {
+            queued.request.id == subagent_id
+                && queued.request.parent_session_id == parent_session_id
+        });
+        if owned_pending || owned_queued {
+            self.held_interjections
+                .entry(subagent_id)
+                .or_default()
+                .push(text);
+            let _ = respond_to.send(SubagentMessageOutcome::Queued);
+            return;
+        }
+        seen_under_other_parent = seen_under_other_parent
+            || self.pending.contains_key(&subagent_id)
+            || self
+                .queued
+                .iter()
+                .any(|queued| queued.request.id == subagent_id);
+        let outcome = if seen_under_other_parent {
+            SubagentMessageOutcome::NotOwned
+        } else {
+            SubagentMessageOutcome::NotFound
+        };
+        let _ = respond_to.send(outcome);
     }
 
     fn handle_internal(&mut self, event: InternalEvent<R::Control>) {
@@ -513,7 +570,10 @@ impl<R: ChildRunner> SubagentCoordinator<R> {
                     let _ = respond_to.send(false);
                     return;
                 }
-                let held = self.held_interjections.remove(&subagent_id).unwrap_or_default();
+                let held = self
+                    .held_interjections
+                    .remove(&subagent_id)
+                    .unwrap_or_default();
                 for text in &held {
                     child.control.interject(text);
                 }

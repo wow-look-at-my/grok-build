@@ -609,6 +609,7 @@ pub fn consumed_completion_ids(output: &ToolOutput) -> Vec<&str> {
         | ToolOutput::UpdateGoal(_)
         | ToolOutput::Ci(_)
         | ToolOutput::Workflow(_)
+        | ToolOutput::SendMessage(_)
         | ToolOutput::ImageGen(_)
         | ToolOutput::ImageToVideo(_)
         | ToolOutput::ReferenceToVideo(_)
@@ -1677,8 +1678,8 @@ mod tests {
     #[tokio::test]
     async fn completed_task_reminder_surfaces_on_the_first_post_completion_tool_round() {
         use crate::computer::local::LocalTerminalBackend;
-        use crate::types::resources::OwnerSessionId;
         use crate::notification::types::ToolNotificationHandle;
+        use crate::types::resources::OwnerSessionId;
 
         let backend: Arc<dyn TerminalBackend> = Arc::new(LocalTerminalBackend::new());
         let output_file = std::env::temp_dir().join(format!(
@@ -1720,7 +1721,10 @@ mod tests {
             .wait_for_completion(&handle.task_id, Some(Duration::from_secs(30)))
             .await
             .expect("background task must complete");
-        assert!(snapshot.completed, "expected a completed task: {snapshot:?}");
+        assert!(
+            snapshot.completed,
+            "expected a completed task: {snapshot:?}"
+        );
 
         // Resources as a live goal-loop session would hold them: the loop is
         // active while the task completes, and the next tool call arrives.

@@ -743,6 +743,24 @@ pub(crate) async fn run_shell_child(
     )
     .with_hunk_tracking_enabled(ctx.hunk_tracking_enabled);
     tool_ctx.subagent_event_tx = Some(ctx.subagent_event_tx.clone());
+    tool_ctx.parent_messenger = ctx.parent_cmd_tx.clone().map(|parent_cmd_tx| {
+        let subagent_id = subagent_id.clone();
+        let subagent_type = request.subagent_type.clone();
+        let description = request.description.clone();
+        xai_grok_tools::implementations::grok_build::ParentMessenger::new(move |text| {
+            // The parent reads this as a user message. Nothing else tells it
+            // which child spoke, so the attribution rides in the text.
+            let body = xai_grok_tools::implementations::grok_build::render_subagent_message(
+                &subagent_id,
+                &subagent_type,
+                &description,
+                text,
+            );
+            parent_cmd_tx
+                .send(SessionCommand::InterjectWithoutCancel { text: body })
+                .map_err(|_| "the parent session is no longer running".to_string())
+        })
+    });
     let task_output_budget = request
         .runtime_overrides
         .output_token_budget
