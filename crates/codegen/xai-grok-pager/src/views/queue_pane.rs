@@ -111,14 +111,15 @@ pub fn kind_from_wire(kind: &str) -> QueueEntryKind {
 /// Whether a server-queue row may be folded into a RUNNING turn as steering
 /// text.
 ///
-/// Mirrors the shell's `SessionActor::deliverable_mid_turn`: a non-prompt kind
-/// owns its turn, and so does a slash invocation — the shell's drain expands
-/// skills but resolves no builtin, so folding `/cmd args` in would hand the
-/// model the literal command text. Such a row stays queued and runs as its own
-/// turn, where the shell resolves it.
+/// Mirrors the shell's `SessionActor::deliverable_mid_turn` by asking the same
+/// rule ([`xai_prompt_queue::is_slash_invocation`]): a non-prompt kind owns its
+/// turn, and so does a slash invocation — the shell's drain expands skills but
+/// resolves no builtin, so folding `/cmd args` in would hand the model the
+/// literal command text. Such a row stays queued and runs as its own turn,
+/// where the shell resolves it.
 pub fn wire_row_is_steering_text(entry: &QueueEntryWire) -> bool {
     kind_from_wire(&entry.kind) == QueueEntryKind::Prompt
-        && !crate::slash::is_slash_invocation(&entry.text)
+        && !xai_prompt_queue::is_slash_invocation(&entry.text)
 }
 
 impl QueuedPromptEntry {

@@ -1572,26 +1572,6 @@ pub(super) fn resolve(
     Ok(prompt_blocks)
 }
 
-/// Whether `text` is a slash invocation — the line shape
-/// [`parse_slash_prefix`] treats as a command (`/name` or `/name args`; a bare
-/// `/` is not one).
-///
-/// Consumed by the mid-turn delivery filter: a queued row whose text is one of
-/// these must run as its own turn, where `resolve` executes it, rather than be
-/// folded into a running turn as user text (the interjection drain expands
-/// skills but resolves no builtin, so it would hand the model the literal
-/// `/cmd args`).
-pub(crate) fn is_slash_invocation(text: &str) -> bool {
-    let trimmed = text.trim();
-    let Some(without_slash) = trimmed.strip_prefix('/') else {
-        return false;
-    };
-    let name = without_slash
-        .find(char::is_whitespace)
-        .map_or(without_slash, |idx| &without_slash[..idx]);
-    !name.is_empty()
-}
-
 /// Extract `(name, args)` if the first text block starts with `/`.
 ///
 /// - `"/compact keep auth"` → `Some(("compact", "keep auth"))`

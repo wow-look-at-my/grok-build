@@ -241,8 +241,8 @@ impl SessionActor {
         // A command line means something only as the LEADING token of its own
         // turn (`resolve`), so it must never be steered into another turn as
         // text — see the goal merge below.
-        let is_slash_invocation =
-            slash_commands::is_slash_invocation(&Self::queue_text_from_blocks(&prompt_blocks));
+        let text_is_command =
+            Self::row_text_is_command(&Self::queue_text_from_blocks(&prompt_blocks));
         let mut item = InputItem {
             prompt_id,
             prompt_blocks,
@@ -283,7 +283,7 @@ impl SessionActor {
             && turn_running
             && goal_active
             && Self::extract_bash_command(&item.prompt_blocks).is_none()
-            && !is_slash_invocation;
+            && !text_is_command;
         if merge_into_goal {
             self.enqueue_prompt_as_planner_context(&item);
             self.enqueue_prompt_as_interjection(
@@ -739,7 +739,7 @@ impl SessionActor {
             let merge_into_goal = turn_running
                 && goal_active
                 && Self::extract_bash_command(&item.prompt_blocks).is_none()
-                && !slash_commands::is_slash_invocation(&Self::queue_text_from_blocks(
+                && !Self::row_text_is_command(&Self::queue_text_from_blocks(
                     &item.prompt_blocks,
                 ));
             if merge_into_goal {
@@ -1016,12 +1016,20 @@ impl SessionActor {
             is_expanded_skill,
             is_bash,
             has_images,
-            // Only the turn's leading token is resolved as a command, so a row
-            // merged behind another one would reach the model as the literal
-            // `/cmd args`. Mirrors the pager's `is_slash_invocation` gate.
-            is_slash_invocation: slash_commands::is_slash_invocation(text),
             text,
         }
+    }
+
+    /// Whether a queued row's display text is a command line.
+    ///
+    /// Thin wrapper over [`xai_prompt_queue::is_slash_invocation`] — the one
+    /// definition the pager reads too — so every shell-side gate asks the same
+    /// question. Such a row must run as its own turn: `resolve` reads a prompt's
+    /// leading token, and the interjection drain expands skills but resolves no
+    /// builtin, so steering or merging it would hand the model the literal
+    /// `/cmd args` and the command would never run.
+    pub(super) fn row_text_is_command(text: &str) -> bool {
+        xai_prompt_queue::is_slash_invocation(text)
     }
 
     fn has_display_text(t: &acp::TextContent) -> bool {

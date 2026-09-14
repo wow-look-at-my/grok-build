@@ -91,47 +91,15 @@ fn text_block(text: &str) -> acp::ContentBlock {
 
 // ── the classification ────────────────────────────────────────────────────
 
-/// The predicate every delivery path consults reads a line the same way the
-/// submit path does: a leading `/name` is a command; a bare `/`, a lone `/ `,
-/// or a `/` mid-sentence is ordinary text.
-#[test]
-fn slash_invocation_classification_matches_the_submit_path() {
-    for text in [
-        "/plan",
-        "/plan implement the auth flow",
-        "/compact keep the auth notes",
-        "  /model grok-4  ",
-        "/TODO jump the queue",
-    ] {
-        assert!(
-            crate::slash::is_slash_invocation(text),
-            "{text:?} is a command line and the submit path treats it as one"
-        );
-    }
-    for text in [
-        "",
-        "   ",
-        "/",
-        "/ ",
-        "/\t",
-        "hello",
-        "hello /plan implement it",
-        "!ls -la",
-        "https://example.com/x",
-    ] {
-        assert!(
-            !crate::slash::is_slash_invocation(text),
-            "{text:?} is ordinary text, so the submit path would send it as a prompt"
-        );
-    }
-}
-
 /// Which rows own their turn, and which may travel as steering text.
 ///
-/// `wire_blocks` excluded because a client-expanded payload has already
-/// replaced the command text with what the model must see; images make no
-/// difference, because a `/gboom stats` row can carry a pasted image and is
-/// still a command; `own_turn` covers the `/plan <description>` description.
+/// The line shape itself (`xai_prompt_queue::is_slash_invocation`) is table-
+/// tested in the shared crate both ends read; what matters here is that these
+/// row predicates consult it. `wire_blocks` excluded because a client-expanded
+/// payload has already replaced the command text with what the model must see;
+/// images make no difference, because a `/gboom stats` row can carry a pasted
+/// image and is still a command; `own_turn` covers the `/plan <description>`
+/// description.
 #[test]
 fn only_payload_free_slash_rows_own_their_turn() {
     let slash = QueuedPrompt::plain(1, "/plan implement it", QueueEntryKind::Prompt);

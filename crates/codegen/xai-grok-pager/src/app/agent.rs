@@ -130,10 +130,13 @@ impl QueuedPrompt {
     /// command) — and every delivery path that would hand it to the model as
     /// text loses the command. `wire_blocks` excluded: a client-expanded payload
     /// has already replaced the command text with what the model must see.
+    ///
+    /// The shape itself comes from [`xai_prompt_queue::is_slash_invocation`],
+    /// the one definition the shell reads too, so the two ends cannot disagree.
     pub fn is_slash_command(&self) -> bool {
         self.kind == QueueEntryKind::Prompt
             && self.wire_blocks.is_none()
-            && crate::slash::is_slash_invocation(&self.text)
+            && xai_prompt_queue::is_slash_invocation(&self.text)
     }
 
     /// Whether delivering this row as mid-turn steering text (or handing it to
@@ -1155,12 +1158,6 @@ impl AgentSession {
                 is_expanded_skill: !p.wire_matches_display(),
                 is_bash: p.kind == QueueEntryKind::BashCommand,
                 has_images: !p.images.is_empty(),
-                // A command row must not merge into another row's turn: only
-                // the turn's LEADING token is resolved as a command, so merging
-                // it behind a plain row would deliver the literal `/cmd args`
-                // as prose. Text-only: this holds however the row is shaped
-                // (a raw skill row's payload IS its display text).
-                is_slash_invocation: crate::slash::is_slash_invocation(&p.text),
                 text: p.text.as_str(),
             })
             .collect();

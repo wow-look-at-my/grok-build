@@ -267,8 +267,9 @@ impl SessionActor {
         // alone — folding it in would hand the model the literal `/cmd args`
         // (and `/plan <description>` would swallow the prompt of the turn the
         // mode switch was requested for). It stays queued and runs as its own
-        // turn instead.
-        if slash_commands::is_slash_invocation(&meta.text) {
+        // turn instead. Same rule the pager consults:
+        // `xai_prompt_queue::is_slash_invocation`.
+        if Self::row_text_is_command(&meta.text) {
             return false;
         }
         // Text and images are all the interjection pipeline carries.
