@@ -2339,9 +2339,18 @@ fn resolve_context_window_returns_each_models_own_window_from_multi_model_listin
     // context window. Per-exact-slug lookup must yield each model's own value —
     // never a max or first-match value.
     let mut listing = IndexMap::new();
-    listing.insert("openai-foo".to_owned(), entry_with_cw("openai-foo", "foo", 128_000));
-    listing.insert("openai-bar".to_owned(), entry_with_cw("openai-bar", "bar", 200_000));
-    listing.insert("openai-baz".to_owned(), entry_with_cw("openai-baz", "baz", 1_000_000));
+    listing.insert(
+        "openai-foo".to_owned(),
+        entry_with_cw("openai-foo", "foo", 128_000),
+    );
+    listing.insert(
+        "openai-bar".to_owned(),
+        entry_with_cw("openai-bar", "bar", 200_000),
+    );
+    listing.insert(
+        "openai-baz".to_owned(),
+        entry_with_cw("openai-baz", "baz", 1_000_000),
+    );
 
     assert_eq!(
         super::resolution::resolve_context_window("openai-foo", &listing).get(),
@@ -2362,7 +2371,10 @@ fn resolve_context_window_matches_by_routing_slug_even_when_key_differs() {
     // The model is requested by its routing slug, which may differ from its
     // catalog key; the resolver must still return that model's own window.
     let mut listing = IndexMap::new();
-    listing.insert("remote-grok-4".to_owned(), entry_with_cw("remote-grok-4", "grok-4", 256_000));
+    listing.insert(
+        "remote-grok-4".to_owned(),
+        entry_with_cw("remote-grok-4", "grok-4", 256_000),
+    );
     assert_eq!(
         super::resolution::resolve_context_window("grok-4", &listing).get(),
         256_000,
@@ -2373,7 +2385,10 @@ fn resolve_context_window_matches_by_routing_slug_even_when_key_differs() {
 #[test]
 fn resolve_context_window_absent_slug_falls_back_to_documented_default() {
     let mut listing = IndexMap::new();
-    listing.insert("openai-a".to_owned(), entry_with_cw("openai-a", "a", 131_072));
+    listing.insert(
+        "openai-a".to_owned(),
+        entry_with_cw("openai-a", "a", 131_072),
+    );
     let default = crate::remote::DEFAULT_CONTEXT_WINDOW;
     assert_eq!(
         super::resolution::resolve_context_window("totally-unknown-model", &listing).get(),
@@ -2404,7 +2419,10 @@ fn listing_json_context_window_lands_in_model_info() {
     let cases = [
         (r#"{"model":"m1","context_window":131072}"#, 131_072u64),
         (r#"{"model":"m2","contextWindow":262144}"#, 262_144u64),
-        (r#"{"model":"m3","_meta":{"totalContextTokens":1000000}}"#, 1_000_000u64),
+        (
+            r#"{"model":"m3","_meta":{"totalContextTokens":1000000}}"#,
+            1_000_000u64,
+        ),
     ];
     for (json, expected) in cases {
         let value: serde_json::Value = serde_json::from_str(json).unwrap();
@@ -2531,7 +2549,11 @@ fn production_resolve_model_list_backfills_window_per_slugs_into_compaction() {
         .as_ref()
         .and_then(|m| m.get("totalContextTokens"))
         .and_then(|v| v.as_u64());
-    assert_eq!(total, Some(1_000_000), "ACP ModelInfo must expose the window");
+    assert_eq!(
+        total,
+        Some(1_000_000),
+        "ACP ModelInfo must expose the window"
+    );
 
     // And the catalog's per-slug window flows through the shell's sampling
     // producer into `SamplerConfig.context_window` and drives compaction.
@@ -2550,7 +2572,9 @@ fn production_resolve_model_list_backfills_window_per_slugs_into_compaction() {
     );
     assert_eq!(sampling.context_window, 1_000_000);
     assert_eq!(
-        CompactionAtTokens::Enabled(true).resolve(sampling.context_window, 85).unwrap(),
+        CompactionAtTokens::Enabled(true)
+            .resolve(sampling.context_window, 85)
+            .unwrap(),
         1_000_000 * 85 / 100,
         "the resolved context window must drive the auto-compaction threshold"
     );

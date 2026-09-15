@@ -375,9 +375,7 @@ pub(crate) fn project_result_usage(result: &mut serde_json::Value, usage: &Promp
                 "cacheCreationInputTokens": cache_creation_tokens,
                 "modelCalls": model_calls,
             });
-            if !hide_costs
-                && let Some(ticks) = cost_usd_ticks
-            {
+            if !hide_costs && let Some(ticks) = cost_usd_ticks {
                 entry["costUSD"] = serde_json::json!(ticks_to_usd(ticks));
             }
             model_usage.insert(name.clone(), entry);

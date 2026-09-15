@@ -228,10 +228,7 @@ impl SessionActor {
     ///
     /// Everything excluded here keeps today's behaviour (it runs as its own
     /// turn once the current one ends).
-    fn deliverable_mid_turn(
-        item: &InputItem,
-        holds: &std::collections::HashSet<String>,
-    ) -> bool {
+    fn deliverable_mid_turn(item: &InputItem, holds: &std::collections::HashSet<String>) -> bool {
         // Auto-wake, nudges and drains are the system talking to itself; each
         // is written to own a turn.
         if item.origin.is_synthetic() || item.send_now {
