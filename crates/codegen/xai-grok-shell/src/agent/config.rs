@@ -5144,39 +5144,47 @@ fn byok_from_lookup(lookup: &ModelLookup) -> ModelByok {
         ModelLookup::Loaded(_) => ModelByok::NotByok,
     }
 }
-/// Resolve the per-token pricing for `model_id` from the effective config.
-/// Returns the default (all-zero / unusable) pricing when the model is absent
-/// or config is unavailable, so the caller's `compute_cost_ticks` fallback
-/// correctly yields `None` (honest absence) rather than fabricating a cost.
-/// This is the FIRST tier of `crate::agent::model_pricing::resolve`, which
-/// owns the catalog lookup behind it.
-pub(crate) fn resolve_configured_model_pricing(
-    model_id: &str,
-) -> xai_grok_sampling_types::ModelPricing {
-    with_resolved_model(model_id, |lookup| match lookup {
-        ModelLookup::Loaded(Some(e)) => e.info.pricing.clone(),
-        _ => xai_grok_sampling_types::ModelPricing::default(),
-    })
+/// What `crate::agent::model_pricing::resolve` needs from config: the model's
+/// own configured price, and where to look when that price is absent.
+pub(crate) struct ConfiguredPricing {
+    /// `[model.<id>].pricing`. All-zero (unusable) when the model is absent or
+    /// config is unavailable, so the caller's `compute_cost_ticks` fallback
+    /// yields `None` (honest absence) rather than fabricating a cost.
+    pub(crate) model: xai_grok_sampling_types::ModelPricing,
+    /// `[pricing].lookup_enabled`.
+    pub(crate) lookup_enabled: bool,
+    /// `[pricing].catalog_url`.
+    pub(crate) catalog_url: String,
 }
 
-/// Where the pricing catalog lives, and whether it is consulted at all.
-pub(crate) struct PricingLookupSettings {
-    pub(crate) enabled: bool,
-    pub(crate) base_url: String,
-}
-
-/// Read `[pricing]` from the effective config. A config that fails to load
-/// falls back to the shipped defaults, so a transient config error costs the
-/// cost indicator nothing.
-pub(crate) fn resolve_pricing_lookup_settings() -> PricingLookupSettings {
-    let parsed = crate::config::load_effective_config()
+/// Read both halves off ONE config load. A model call resolves this per
+/// response, and `ConfigLayers::load` reads the config files each time. So a
+/// second load here doubles that cost for every message the session sends.
+pub(crate) fn resolve_configured_pricing(model_id: &str) -> ConfiguredPricing {
+    let loaded = crate::config::load_effective_config()
+        .map_err(|e| tracing::warn!(error = %e, "config load failed for pricing lookup"))
         .ok()
-        .and_then(|raw| Config::new_from_toml_cfg(&raw).ok())
-        .map(|cfg| cfg.pricing)
+        .and_then(|raw| {
+            Config::new_from_toml_cfg(&raw)
+                .map_err(|e| tracing::warn!(error = %e, "config parse failed for pricing lookup"))
+                .ok()
+        });
+    let Some(cfg) = loaded else {
+        let defaults = PricingConfig::default();
+        return ConfiguredPricing {
+            model: xai_grok_sampling_types::ModelPricing::default(),
+            lookup_enabled: defaults.lookup_enabled,
+            catalog_url: defaults.catalog_url,
+        };
+    };
+    let models = resolve_model_list(&cfg, None);
+    let model = find_model_by_id(&models, model_id)
+        .map(|e| e.info.pricing.clone())
         .unwrap_or_default();
-    PricingLookupSettings {
-        enabled: parsed.lookup_enabled,
-        base_url: parsed.catalog_url,
+    ConfiguredPricing {
+        model,
+        lookup_enabled: cfg.pricing.lookup_enabled,
+        catalog_url: cfg.pricing.catalog_url,
     }
 }
 enum ModelLookup<'a> {

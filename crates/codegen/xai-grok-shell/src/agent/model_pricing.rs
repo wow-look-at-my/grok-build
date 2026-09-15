@@ -140,21 +140,14 @@ fn persist_entry(path: &std::path::Path, model_id: &str, entry: &PricingCacheEnt
 /// with unusable pricing, which keeps the cost honestly absent for this call
 /// rather than stalling the turn on the network.
 pub(crate) fn resolve(model_id: &str) -> ModelPricing {
-    let configured = crate::agent::config::resolve_configured_model_pricing(model_id);
-    if !configured.is_unusable() {
-        return configured;
+    let configured = crate::agent::config::resolve_configured_pricing(model_id);
+    if !configured.model.is_unusable() {
+        return configured.model;
     }
-    if model_id.is_empty() {
-        return configured;
+    if model_id.is_empty() || !configured.lookup_enabled {
+        return configured.model;
     }
-    let settings = crate::agent::config::resolve_pricing_lookup_settings();
-    if !settings.enabled {
-        return configured;
-    }
-    match cached_or_schedule(model_id, &settings.base_url) {
-        Some(pricing) => pricing,
-        None => configured,
-    }
+    cached_or_schedule(model_id, &configured.catalog_url).unwrap_or(configured.model)
 }
 
 /// The cached answer for `model_id`, or `None` after arranging a fetch.
