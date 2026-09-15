@@ -181,6 +181,7 @@ fn cached_or_schedule(model_id: &str, base_url: &str) -> Option<ModelPricing> {
 /// Run one fetch on its own thread. The turn path is sync and may hold no
 /// tokio runtime, so this owns a thread rather than a spawned task.
 fn spawn_fetch(model_id: String, base_url: String) {
+    let owned = model_id.clone();
     let spawned = std::thread::Builder::new()
         .name("model-pricing-fetch".to_string())
         .spawn(move || {
@@ -204,9 +205,11 @@ fn spawn_fetch(model_id: String, base_url: String) {
                 guard.in_flight.remove(&model_id);
             }
         });
+    // A thread that never started still holds the slot. Release it, or this
+    // model never gets another attempt for the life of the process.
     if spawned.is_err() {
         if let Ok(mut guard) = store().lock() {
-            guard.in_flight.remove(&model_id);
+            guard.in_flight.remove(&owned);
         }
     }
 }
