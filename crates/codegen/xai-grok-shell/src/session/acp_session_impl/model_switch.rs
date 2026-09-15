@@ -119,6 +119,38 @@ impl SessionActor {
             });
         Ok(model_id)
     }
+    /// Handle [`SessionCommand::FlattenHistory`].
+    ///
+    /// Rewrites the conversation so nothing in it belongs to the model that
+    /// produced it. A history already free of reasoning and tool calls is
+    /// untouched, and the report says nothing was converted.
+    pub(super) async fn handle_flatten_history(
+        &self,
+    ) -> xai_grok_sampling_types::conversation::FlattenReport {
+        use xai_grok_sampling_types::conversation::{flatten_conversation, needs_flattening};
+        let conversation = self.chat_state_handle.get_conversation().await;
+        if !needs_flattening(&conversation) {
+            return xai_grok_sampling_types::conversation::FlattenReport {
+                items_before: conversation.len(),
+                items_after: conversation.len(),
+                ..Default::default()
+            };
+        }
+        let (flattened, report) = flatten_conversation(conversation);
+        tracing::info!(
+            session_id = %self.session_info.id.0,
+            items_before = report.items_before,
+            items_after = report.items_after,
+            reasoning_to_text = report.reasoning_to_text,
+            reasoning_dropped = report.reasoning_dropped,
+            tool_calls_to_text = report.tool_calls_to_text,
+            tool_results_to_text = report.tool_results_to_text,
+            backend_calls_to_text = report.backend_calls_to_text,
+            "flattened this session's history to plain text for a model switch"
+        );
+        self.chat_state_handle.replace_conversation(flattened);
+        report
+    }
     /// Handle [`SessionCommand::RebuildAgentForDefinition`].
     ///
     /// Builds a fresh [`xai_grok_agent::Agent`] from the cached

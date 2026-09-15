@@ -3,8 +3,8 @@
 use super::common::*;
 
 /// 10. **Reverse direction mismatch.**
-/// Switching between models with mismatched agent types mid-session
-/// should also show the modal (both directions).
+/// A mid-session switch between mismatched harnesses goes through in both
+/// directions, so the recovery is not one-way.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore]
 async fn reverse_agent_type_mismatch_cursor_to_default() {
@@ -47,11 +47,15 @@ async fn reverse_agent_type_mismatch_cursor_to_default() {
         .inject_keys(b"/model default-model\r")
         .expect("type model switch");
 
-    // The question modal should appear.
     harness
-        .wait_for_text("requires starting a new session", Duration::from_secs(15))
-        .expect("agent type mismatch modal should appear for reverse direction");
+        .wait_for_text("default-model", Duration::from_secs(15))
+        .expect("the target model must become the session's model");
 
+    assert!(
+        !harness.contains_text("requires starting a new session"),
+        "a cross-harness switch must not ask for a new session\nscreen:\n{}",
+        harness.screen_contents()
+    );
     assert!(
         harness.is_running().expect("poll pager liveness"),
         "pager exited\nscreen:\n{}",

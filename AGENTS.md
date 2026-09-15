@@ -226,6 +226,18 @@ Every one of those is the test doing its job. Making them pass there means weake
 - `ParentMessenger` rides `AgentRebuildSpec`. One `update_resource` after spawn is not enough. An agent rebuild builds a fresh tool bridge. A mode switch or a model switch triggers one. A resource registered one time is gone after that rebuild. The child then loses its way to answer its parent. Nothing reports the loss.
 - `ToolKind::SendMessage` is a meta kind in `kind_allowed`. Every `CapabilityMode` allows it. The tool writes nothing. And a read-only explorer still has to answer the session that spawned it.
 
+## History-flattening notes
+
+- A history carries state that belongs to the provider that made it. A reasoning item's `encrypted_content`, a thinking block's signature, and a tool call's id and vendor fields are each such state. Another model refuses a request that replays them. `flatten_conversation` (`xai-grok-sampling-types/src/conversation/flatten.rs`) rewrites the conversation so none of it is left.
+- Reasoning becomes a `<thinking>` assistant message. An assistant message's tool calls become `<tool_call>` blocks in its own text. A tool result becomes a `<tool_result>` user message, because no call is left to pair it with. A server-side call becomes assistant text. System and user messages pass through. Neither carries provider state.
+- Every assistant message the flattening touches loses its `model_id`. The thinking-signature rules read that origin. A flattened message came from no model. A stale origin there arms those rules against text they do not apply to.
+- A reasoning item with an encrypted blob and no text is dropped. Nothing in it reaches the next model. `FlattenReport.reasoning_dropped` counts it, so the one real loss is visible in the log.
+- `needs_flattening` is also the loop bound. One flattening leaves nothing for a second to find. So a model that still refuses a flat history gets a terminal error that quotes what it said, in place of another resubmit.
+- A model switch onto another harness sends `SessionCommand::FlattenHistory` and switches (`agent/handlers/model_switch.rs`). `MODEL_SWITCH_INCOMPATIBLE_AGENT` is dead on this path. A mid-turn rejection naming `encrypted_content` flattens and resubmits the turn instead of ending it (`acp_session_impl/sampler_turn.rs`, `SamplerFailureRecovery::FlattenAndResubmit`).
+- `SessionCommand::RebuildAgentForDefinition` carries `zero_turn`. That flag gates conversation surgery which assumes `conversation[1]` is the synthetic zero-turn prefix. A mid-session switch reaches this path now. A `true` there writes over the session's first real user message.
+- Thinking a model cannot verify rides as text, in both places that handle it: `build_messages_request` and the sampler's `RetryWithReasoningStrip` recovery (`ConversationRequest::reasoning_to_plain_text`). A block carrying only a signature has no words. That block is what goes.
+- The pager keeps its `MODEL_SWITCH_INCOMPATIBLE_AGENT` handling and its `model_incompatible` flag. The shell sends neither on the recoverable paths. An older shell on the other end of ACP still can.
+
 ## Workflow agent-concurrency notes
 
 - `WorkflowHostParams.agent_slots` is a semaphore owned by `WorkflowManager` and shared by every run it launches (`session/workflow/manager.rs`), not one fresh semaphore per run. Up to `WORKFLOW_MAX_ACTIVE_RUNS_PER_SESSION` runs can be active at once, so a per-run semaphore will let total live agent-spawned LLM requests scale with active run count instead of staying under the configured cap (`GROK_WORKFLOW_MAX_CONCURRENT_AGENTS` / `workflow_max_concurrent_agents`) — the knob operators lower to stay under a hard per-host concurrent-request limit.
