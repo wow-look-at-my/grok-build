@@ -1085,7 +1085,6 @@ mod tests {
 
     // -- force_login_team_uuid pin enforced on the 401-recovery path -------
 
-
     fn team_jwt(principal_id: &str) -> String {
         crate::auth::ensure_crypto_provider();
         jsonwebtoken::encode(

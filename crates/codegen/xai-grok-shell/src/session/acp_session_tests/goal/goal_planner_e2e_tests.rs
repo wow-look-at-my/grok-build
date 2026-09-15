@@ -153,7 +153,8 @@ fn spawn_planner_coordinator_capturing(
                     tokio::task::spawn_local(async move {
                         notify.notified().await;
                         if let Some(p) = plan_path.as_deref() {
-                            let _ = std::fs::create_dir_all(std::path::Path::new(p).parent().unwrap());
+                            let _ =
+                                std::fs::create_dir_all(std::path::Path::new(p).parent().unwrap());
                             let _ = std::fs::write(p, body);
                         }
                         let _ = result_tx.send(SubagentResult {
@@ -367,9 +368,7 @@ fn create_test_goal(actor: &SessionActor) {
 ///
 /// Read through the session's own tool bridge, which is where `todo_write`
 /// keeps it — the same state the model and the pager see.
-async fn live_todos(
-    actor: &SessionActor,
-) -> Vec<(String, String, crate::tools::todo::TodoStatus)> {
+async fn live_todos(actor: &SessionActor) -> Vec<(String, String, crate::tools::todo::TodoStatus)> {
     use crate::tools::todo::TodoState;
     use xai_grok_tools::types::resources::State;
     actor
@@ -609,7 +608,10 @@ async fn the_child_todo_reader_reads_a_bound_sessions_live_list() {
             .await;
             assert_eq!(
                 read,
-                vec!["the user's own item".to_string(), "a second item".to_string()],
+                vec![
+                    "the user's own item".to_string(),
+                    "a second item".to_string()
+                ],
                 "the reader must return the session's own live items, in order",
             );
             assert!(
@@ -645,7 +647,10 @@ async fn setup_goal_seeds_the_planners_own_items_without_a_model_turn() {
                 snap.plan_file.is_some(),
                 "the scripted planner wrote a plan, so the outcome must be Planned",
             );
-            assert!(snap.plan_todos_seeded, "the publish path must record the seed");
+            assert!(
+                snap.plan_todos_seeded,
+                "the publish path must record the seed"
+            );
 
             let todos = live_todos(&actor).await;
             // Printed so `--nocapture` captures the observed list: the
@@ -686,12 +691,10 @@ async fn the_planner_childs_own_items_are_the_source_not_the_plan_prose() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let (tx, _c) = spawn_planner_coordinator(
-                SpawnBehaviour::WritePlanThenDoneWithTodos {
-                    body: b"# Plan\n\n## Task checklist\n- [ ] a step the plan body names\n",
-                    todos: &["the child's first step", "the child's second step"],
-                },
-            );
+            let (tx, _c) = spawn_planner_coordinator(SpawnBehaviour::WritePlanThenDoneWithTodos {
+                body: b"# Plan\n\n## Task checklist\n- [ ] a step the plan body names\n",
+                todos: &["the child's first step", "the child's second step"],
+            });
             let (actor, _tmp) = make_planner_actor(Some(tx), true).await;
             arm_todo_writes(&actor).await;
 
@@ -724,8 +727,9 @@ async fn a_planner_that_named_no_items_leaves_the_list_untouched() {
         .run_until(async {
             // Writes a plan with a full checklist, but reports no todo list:
             // the planner never called `todo_write`.
-            let (tx, _c) =
-                spawn_planner_coordinator(SpawnBehaviour::WritePlanThenDone { body: CHECKLIST_PLAN });
+            let (tx, _c) = spawn_planner_coordinator(SpawnBehaviour::WritePlanThenDone {
+                body: CHECKLIST_PLAN,
+            });
             let (actor, _tmp) = make_planner_actor(Some(tx), true).await;
             arm_todo_writes(&actor).await;
 
@@ -814,7 +818,10 @@ async fn goal_seeding_is_append_only_and_idempotent() {
             let second = live_todos(&actor).await;
             println!("=== todo list AFTER the retry ===\n{second:?}\n");
             assert_eq!(
-                second.iter().map(|(id, _, _)| id.clone()).collect::<Vec<_>>(),
+                second
+                    .iter()
+                    .map(|(id, _, _)| id.clone())
+                    .collect::<Vec<_>>(),
                 after_publish
                     .iter()
                     .map(|(id, _, _)| id.clone())
@@ -940,10 +947,13 @@ async fn send_now_queues_planner_context_without_restart() {
                         .expect("planner coordinator stub alive"),
                 );
             }
-            assert_eq!(delivered, [
-                "Additional user context for the current plan:\n\nfirst",
-                "Additional user context for the current plan:\n\nsecond",
-            ]);
+            assert_eq!(
+                delivered,
+                [
+                    "Additional user context for the current plan:\n\nfirst",
+                    "Additional user context for the current plan:\n\nsecond",
+                ]
+            );
             notify.notify_one();
             tokio::time::timeout(std::time::Duration::from_secs(5), planner)
                 .await
@@ -1477,7 +1487,10 @@ async fn planner_reopens_spawn_admission_blocked_by_prior_cancel() {
                 snap.plan_file.is_some(),
                 "with admission reopened the planner run must succeed; got {snap:?}",
             );
-            assert_eq!(snap.status, crate::session::goal_tracker::GoalStatus::Active);
+            assert_eq!(
+                snap.status,
+                crate::session::goal_tracker::GoalStatus::Active
+            );
         })
         .await;
 }

@@ -184,9 +184,18 @@ mod tests {
 
     #[test]
     fn a_prompt_that_fills_the_window_still_asks_for_the_floor() {
-        assert_eq!(fit_output_tokens(262_144, 1_000_000, 1_000_000), MIN_OUTPUT_TOKENS);
-        assert_eq!(fit_output_tokens(262_144, 2_000_000, 1_000_000), MIN_OUTPUT_TOKENS);
-        assert_eq!(fit_output_tokens(262_144, 999_999, 1_000_000), MIN_OUTPUT_TOKENS);
+        assert_eq!(
+            fit_output_tokens(262_144, 1_000_000, 1_000_000),
+            MIN_OUTPUT_TOKENS
+        );
+        assert_eq!(
+            fit_output_tokens(262_144, 2_000_000, 1_000_000),
+            MIN_OUTPUT_TOKENS
+        );
+        assert_eq!(
+            fit_output_tokens(262_144, 999_999, 1_000_000),
+            MIN_OUTPUT_TOKENS
+        );
     }
 
     #[test]

@@ -2030,7 +2030,8 @@ impl SamplingClient {
         // this only ever cuts further.
         let usable_window =
             xai_token_estimation::window_less_estimate_slack(self.defaults.context_window);
-        if let Some(clamp) = request.fit_output_budget(request.estimate_prompt_tokens(), usable_window)
+        if let Some(clamp) =
+            request.fit_output_budget(request.estimate_prompt_tokens(), usable_window)
         {
             tracing::warn!(
                 requested = clamp.requested,
@@ -2321,9 +2322,10 @@ mod tests {
         cfg.max_completion_tokens = Some(262_144);
         let client = SamplingClient::new(cfg).expect("client should build");
 
-        let mut request = ConversationRequest::from_items(vec![
-            xai_grok_sampling_types::ConversationItem::user("hello"),
-        ]);
+        let mut request =
+            ConversationRequest::from_items(vec![xai_grok_sampling_types::ConversationItem::user(
+                "hello",
+            )]);
         client
             .apply_conversation_defaults(&mut request)
             .expect("defaults apply");

@@ -650,9 +650,12 @@ async fn harvest_leaves_rows_that_own_their_turn_queued() {
                 state.pending_inputs.push_back(send_now);
 
                 state.pending_inputs.push_back(
-                    input_with_origin_rx("wake1", crate::session::PromptOrigin::TaskCompleted {
-                        task_id: "t1".to_string(),
-                    })
+                    input_with_origin_rx(
+                        "wake1",
+                        crate::session::PromptOrigin::TaskCompleted {
+                            task_id: "t1".to_string(),
+                        },
+                    )
                     .0,
                 );
 
@@ -778,7 +781,9 @@ async fn a_row_arriving_mid_turn_reaches_the_asap_buffer_unprompted() {
             // First Enter: the prompt lands on the shell's queue mid-turn.
             {
                 let mut state = actor.state.lock().await;
-                state.pending_inputs.push_back(user_item("typed-while-streaming", "A"));
+                state
+                    .pending_inputs
+                    .push_back(user_item("typed-while-streaming", "A"));
             }
 
             assert!(

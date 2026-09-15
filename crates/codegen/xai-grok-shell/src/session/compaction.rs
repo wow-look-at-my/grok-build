@@ -1867,8 +1867,7 @@ impl SessionActor {
         // The server saying so is the other, and it settles it — its tokenizer
         // is the one that counts, and a 400 that names the context length is
         // not a turn to hand back to the user.
-        estimated_total
-            > context_window.saturating_sub(xai_token_estimation::MIN_OUTPUT_TOKENS)
+        estimated_total > context_window.saturating_sub(xai_token_estimation::MIN_OUTPUT_TOKENS)
             || xai_grok_sampling_types::is_context_length_error(&err.message)
     }
     /// Pre-sampling compaction check. Uses `get_estimated_total_tokens()`
