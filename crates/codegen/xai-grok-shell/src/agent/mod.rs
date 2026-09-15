@@ -10,6 +10,7 @@ pub mod folder_trust;
 pub(crate) mod handlers;
 pub mod init;
 pub mod model_providers;
+pub(crate) mod model_pricing;
 pub mod models;
 pub mod mvp_agent;
 pub(crate) mod otel_gate;

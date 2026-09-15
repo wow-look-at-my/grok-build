@@ -1370,6 +1370,10 @@ pub struct Config {
     pub hints: Option<toml::Value>,
     #[serde(default)]
     pub ui: UiConfig,
+    /// `[pricing]` section: the catalog consulted for a model whose endpoint
+    /// reports no cost. See [`PricingConfig`].
+    #[serde(default)]
+    pub pricing: PricingConfig,
     #[serde(default)]
     pub toolset: ShellToolsetConfig,
     /// Validation only; the value is parsed at spawn by `resolve_shell_env_policy`.
@@ -4104,6 +4108,32 @@ pub struct ModelEntryConfig {
 fn is_default_model_pricing(p: &xai_grok_sampling_types::ModelPricing) -> bool {
     p.is_unusable()
 }
+
+/// `[pricing]` in config.toml. The catalog is a fallback for a model that
+/// `[model.<id>].pricing` does not price, so a user-written price is never
+/// reached by anything here.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct PricingConfig {
+    /// Set false to keep the cost indicator off the network. A session then
+    /// prices only the models config prices.
+    pub lookup_enabled: bool,
+    /// Base URL of the catalog. The per-model document is read from
+    /// `<catalog_url>/v1/models/<model id>`.
+    pub catalog_url: String,
+}
+
+impl Default for PricingConfig {
+    fn default() -> Self {
+        Self {
+            lookup_enabled: true,
+            catalog_url: DEFAULT_PRICING_CATALOG_URL.to_string(),
+        }
+    }
+}
+
+/// The catalog the cost indicator reads when nothing else prices a model.
+pub const DEFAULT_PRICING_CATALOG_URL: &str = "https://modelinfo.pazer.ai";
 /// True when `cfg` equals the all-disabled default. Derives `PartialEq`
 /// on `f32`, which is fine for the current shape because both `f32`
 /// fields default to `None` — there's no parsed-vs-literal `0.7` float
@@ -5117,11 +5147,36 @@ fn byok_from_lookup(lookup: &ModelLookup) -> ModelByok {
 /// Returns the default (all-zero / unusable) pricing when the model is absent
 /// or config is unavailable, so the caller's `compute_cost_ticks` fallback
 /// correctly yields `None` (honest absence) rather than fabricating a cost.
-pub(crate) fn resolve_model_pricing(model_id: &str) -> xai_grok_sampling_types::ModelPricing {
+/// This is the FIRST tier of `crate::agent::model_pricing::resolve`, which
+/// owns the catalog lookup behind it.
+pub(crate) fn resolve_configured_model_pricing(
+    model_id: &str,
+) -> xai_grok_sampling_types::ModelPricing {
     with_resolved_model(model_id, |lookup| match lookup {
         ModelLookup::Loaded(Some(e)) => e.info.pricing.clone(),
         _ => xai_grok_sampling_types::ModelPricing::default(),
     })
+}
+
+/// Where the pricing catalog lives, and whether it is consulted at all.
+pub(crate) struct PricingLookupSettings {
+    pub(crate) enabled: bool,
+    pub(crate) base_url: String,
+}
+
+/// Read `[pricing]` from the effective config. A config that fails to load
+/// falls back to the shipped defaults, so a transient config error costs the
+/// cost indicator nothing.
+pub(crate) fn resolve_pricing_lookup_settings() -> PricingLookupSettings {
+    let parsed = crate::config::load_effective_config()
+        .ok()
+        .and_then(|raw| Config::new_from_toml_cfg(&raw).ok())
+        .map(|cfg| cfg.pricing)
+        .unwrap_or_default();
+    PricingLookupSettings {
+        enabled: parsed.lookup_enabled,
+        base_url: parsed.catalog_url,
+    }
 }
 enum ModelLookup<'a> {
     /// `None` if `model_id` is absent from the catalog.
