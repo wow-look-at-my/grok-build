@@ -1236,8 +1236,7 @@ impl SessionActor {
             backend_calls_to_text = report.backend_calls_to_text,
             "model rejected this history; converted it to plain text and resubmitting"
         );
-        self.signals_handle()
-            .record_error_typed("history_flattened");
+        self.signals_handle().record_error_typed("history_flattened");
         self.send_xai_notification(XaiSessionUpdate::RetryState(
             crate::extensions::notification::RetryState::Retrying {
                 attempt: 1,
@@ -1258,8 +1257,10 @@ impl SessionActor {
         let budget = context_window.saturating_mul(REDUCE_BUDGET_PERCENT) / 100;
         let conversation = self.chat_state_handle.get_conversation().await;
         let turns_before = conversation.len();
-        let reduced =
-            xai_chat_state::compaction_utils::fit_conversation_to_budget(conversation, budget);
+        let reduced = xai_chat_state::compaction_utils::fit_conversation_to_budget(
+            conversation,
+            budget,
+        );
         tracing::warn!(
             session_id = %self.session_info.id.0,
             context_window,
@@ -1675,15 +1676,13 @@ impl SessionActor {
         }
         let model_id = capture.model_id.clone();
         drop(capture);
-        Some(ConversationItem::Assistant(
-            xai_grok_sampling_types::AssistantItem {
-                content: std::sync::Arc::from(text.as_str()),
-                tool_calls: Vec::new(),
-                model_id,
-                model_fingerprint: None,
-                reasoning_effort: None,
-            },
-        ))
+        Some(ConversationItem::Assistant(xai_grok_sampling_types::AssistantItem {
+            content: std::sync::Arc::from(text.as_str()),
+            tool_calls: Vec::new(),
+            model_id,
+            model_fingerprint: None,
+            reasoning_effort: None,
+        }))
     }
 }
 /// Per-tool precedence: a non-empty `over` wins, else the non-empty `seed`.

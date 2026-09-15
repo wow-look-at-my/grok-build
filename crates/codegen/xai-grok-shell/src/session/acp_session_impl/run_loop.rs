@@ -56,13 +56,11 @@ async fn deliver_interjection(
     session.broadcast_interjection(&text, id.as_deref());
     // Telemetry at enqueue (not drain) so it is recorded even when a cancel
     // clears the buffer before the next drain point.
-    session
-        .events
-        .emit(crate::session::events::Event::Interjected {
-            source: crate::session::events::InterjectionSource::Direct,
-            image_count: images.len() as u32,
-            redirect_kind: crate::session::events::RedirectKind::Interjection,
-        });
+    session.events.emit(crate::session::events::Event::Interjected {
+        source: crate::session::events::InterjectionSource::Direct,
+        image_count: images.len() as u32,
+        redirect_kind: crate::session::events::RedirectKind::Interjection,
+    });
     // Buffer only into an actually-running turn: the buffer is drained
     // exclusively by the turn loop, so an interjection arriving while idle
     // (the pager's running-state check races turn end) would strand forever

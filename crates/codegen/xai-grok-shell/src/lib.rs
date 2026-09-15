@@ -19,8 +19,8 @@ pub mod auth;
 // monomorphization surface — part of the compile-RAM work). Re-exported here
 // so existing `crate::bundle::*` / `crate::builtin::*` call sites are
 // unchanged.
-pub use xai_grok_shell_assets::builtin;
 pub use xai_grok_shell_assets::bundle;
+pub use xai_grok_shell_assets::builtin;
 pub mod claude_import;
 pub mod claude_import_state;
 pub mod cli_models;

@@ -3935,9 +3935,11 @@ fn default_models(endpoints: &EndpointsConfig) -> IndexMap<String, ModelEntryCon
                 m.id
             );
             let key = m.id.clone().unwrap_or_else(|| m.model.clone());
-            let context_window = m.context_window.unwrap_or_else(|| {
-                NonZeroU64::new(CONFIG_DEFAULT_CONTEXT_WINDOW).expect("200000 is non-zero")
-            });
+            let context_window = m
+                .context_window
+                .unwrap_or_else(|| {
+                    NonZeroU64::new(CONFIG_DEFAULT_CONTEXT_WINDOW).expect("200000 is non-zero")
+                });
             let config = ModelEntryConfig {
                 id: m.id,
                 model: m.model,
@@ -3971,7 +3973,7 @@ fn default_models(endpoints: &EndpointsConfig) -> IndexMap<String, ModelEntryCon
                 show_model_fingerprint: m.show_model_fingerprint,
                 stream_tool_calls: None,
                 laziness_detector: LazinessDetectorPerModelConfig::default(),
-                pricing: xai_grok_sampling_types::ModelPricing::default(),
+            pricing: xai_grok_sampling_types::ModelPricing::default(),
             };
             (key, config)
         })
@@ -5285,7 +5287,7 @@ pub(crate) fn resolve_aux_model_sampling_config(
                 show_model_fingerprint: false,
                 stream_tool_calls: None,
                 laziness_detector: LazinessDetectorPerModelConfig::default(),
-                pricing: xai_grok_sampling_types::ModelPricing::default(),
+            pricing: xai_grok_sampling_types::ModelPricing::default(),
             },
             api_key: Some(bearer),
             env_key: None,
@@ -6723,7 +6725,7 @@ reasoning_effort = "low"
                 show_model_fingerprint: false,
                 stream_tool_calls: None,
                 laziness_detector: LazinessDetectorPerModelConfig::default(),
-                pricing: xai_grok_sampling_types::ModelPricing::default(),
+            pricing: xai_grok_sampling_types::ModelPricing::default(),
             },
             api_key: api_key.map(|s| s.to_string()),
             env_key: env_key.map(EnvKeys::single),
@@ -12267,7 +12269,7 @@ default = "grok-4.5"
                 show_model_fingerprint: false,
                 stream_tool_calls: None,
                 laziness_detector: LazinessDetectorPerModelConfig::default(),
-                pricing: xai_grok_sampling_types::ModelPricing::default(),
+            pricing: xai_grok_sampling_types::ModelPricing::default(),
                 auto_compact_threshold_percent: None,
                 system_prompt_label: None,
             },

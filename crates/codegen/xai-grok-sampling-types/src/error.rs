@@ -342,9 +342,7 @@ impl SamplingError {
         if *status != StatusCode::BAD_REQUEST {
             return false;
         }
-        message
-            .to_ascii_lowercase()
-            .contains("reasoning is mandatory")
+        message.to_ascii_lowercase().contains("reasoning is mandatory")
     }
 
     /// The API rejected the request because an inline image could not be

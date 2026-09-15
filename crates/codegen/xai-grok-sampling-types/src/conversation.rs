@@ -748,7 +748,8 @@ impl ConversationRequest {
 /// [`crate::ReasoningEffort::to_messages_api`] and `None` serializes as a
 /// disable on the chat-completions wire), so the lowest *enabled* tier is
 /// `Low`.
-pub const LOWEST_ENABLED_REASONING_EFFORT: crate::ReasoningEffort = crate::ReasoningEffort::Low;
+pub const LOWEST_ENABLED_REASONING_EFFORT: crate::ReasoningEffort =
+    crate::ReasoningEffort::Low;
 
 /// Resolve the reasoning effort a wire body must carry for a target.
 ///
@@ -771,9 +772,9 @@ pub fn wire_reasoning_effort(
         return requested;
     }
     match requested {
-        Some(crate::ReasoningEffort::None) | Some(crate::ReasoningEffort::Minimal) | None => {
-            Some(crate::ReasoningEffort::Low)
-        }
+        Some(crate::ReasoningEffort::None)
+            | Some(crate::ReasoningEffort::Minimal)
+            | None => Some(crate::ReasoningEffort::Low),
         Some(effort) => Some(effort),
     }
 }

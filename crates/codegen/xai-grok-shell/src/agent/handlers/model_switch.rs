@@ -72,9 +72,11 @@ pub(crate) async fn apply(
             // reasoning and tool calls are not something the new model can
             // ingest. Convert the history to plain text and switch anyway.
             let (flatten_tx, flatten_rx) = oneshot::channel();
-            let _ = handle.cmd_tx.send(SessionCommand::FlattenHistory {
-                responds_to: flatten_tx,
-            });
+            let _ = handle
+                .cmd_tx
+                .send(SessionCommand::FlattenHistory {
+                    responds_to: flatten_tx,
+                });
             let report = flatten_rx.await.map_err(|_| {
                 acp::Error::internal_error().data("flatten_history: session actor closed")
             })?;

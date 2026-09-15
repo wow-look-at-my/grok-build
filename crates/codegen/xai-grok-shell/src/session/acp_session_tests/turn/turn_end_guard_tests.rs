@@ -1,9 +1,9 @@
-use super::MAX_STOP_HOOK_CONTINUATIONS_PER_TURN;
-use super::stop_gate::todo_stop_gate_blocks;
 use super::{
     CollectedTodoGateInput, TodoGateDecision, TodoGateInput, TodoGateReason,
     build_todo_gate_reminder, evaluate_todo_gate,
 };
+use super::stop_gate::todo_stop_gate_blocks;
+use super::MAX_STOP_HOOK_CONTINUATIONS_PER_TURN;
 use crate::tools::todo::TodoStatus;
 use std::collections::HashMap;
 use xai_grok_tools::types::template_renderer::TemplateRenderer;

@@ -913,7 +913,10 @@ mod egress_disabled_pins {
         let results: Vec<(&str, anyhow::Result<()>)> = vec![
             (
                 "signals",
-                client.update_signals("session", &signals).await.map(|_| ()),
+                client
+                    .update_signals("session", &signals)
+                    .await
+                    .map(|_| ()),
             ),
             (
                 "events",
@@ -933,8 +936,8 @@ mod egress_disabled_pins {
         }
 
         // A connection would mean something dialled out before failing.
-        let accepted =
-            tokio::time::timeout(std::time::Duration::from_millis(250), listener.accept()).await;
+        let accepted = tokio::time::timeout(std::time::Duration::from_millis(250), listener.accept())
+            .await;
         assert!(
             accepted.is_err(),
             "a reporting endpoint opened a connection: nothing may leave this build"

@@ -3351,6 +3351,7 @@ async fn enrich_auth_inline_unreachable_server_leaves_auth_unchanged() {
 // token the manager hands out (startup, sync reads, `auth()`), not just fresh
 // login. Each test fails on the pre-fix tree.
 
+
 /// A signed (HS256) access token carrying a `Team` principal, matching the
 /// shape `peek_access_token_principal` extracts in production.
 fn team_jwt(principal_id: &str) -> String {

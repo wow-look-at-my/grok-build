@@ -825,9 +825,7 @@ pub enum SessionCommand {
     /// [`Self::Interject`] without cutting the running turn's in-flight model
     /// stream: the text is read at the turn's next drain point. A session with
     /// no turn running takes it as its own prompt turn, like `Interject`.
-    InterjectWithoutCancel {
-        text: String,
-    },
+    InterjectWithoutCancel { text: String },
     /// Trigger a model turn so the model can print a visible goal progress
     /// summary.  The goal orchestrator injects a system reminder into context
     /// (via `push_parent_reminder`) *before* sending this command.  The session

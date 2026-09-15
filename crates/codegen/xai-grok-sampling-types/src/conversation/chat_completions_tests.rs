@@ -463,10 +463,7 @@ fn wire_reasoning_effort_remaps_only_mandatory_disabled_tiers() {
         ReasoningEffort::Xhigh,
         ReasoningEffort::Max,
     ] {
-        assert_eq!(
-            wire_reasoning_effort(true, Some(supported)),
-            Some(supported)
-        );
+        assert_eq!(wire_reasoning_effort(true, Some(supported)), Some(supported));
     }
     // A non-mandatory target is a strict no-op, including the disabled tiers.
     assert_eq!(wire_reasoning_effort(false, None), None);
@@ -500,7 +497,8 @@ fn mandatory_target_never_disables_reasoning_on_chat_completions_wire() {
         let req = ConversationRequest {
             reasoning_effort: requested,
             reasoning_mandatory: true,
-            ..ConversationRequest::from_items(vec![ConversationItem::user("hi")]).with_model("test")
+            ..ConversationRequest::from_items(vec![ConversationItem::user("hi")])
+                .with_model("test")
         };
         let chat: ChatCompletionRequest = req.into();
         let json = serde_json::to_value(&chat).unwrap();

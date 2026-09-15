@@ -64,15 +64,14 @@ async fn an_encrypted_content_rejection_flattens_and_resubmits() {
         .run_until(async {
             let (gateway_tx, _) = mpsc::unbounded_channel::<xai_acp_lib::AcpClientMessage>();
             let (persistence_tx, _) = mpsc::unbounded_channel::<PersistenceMsg>();
-            let actor =
-                Arc::new(create_test_actor(1_000, 1_000_000, 85, gateway_tx, persistence_tx).await);
+            let actor = Arc::new(
+                create_test_actor(1_000, 1_000_000, 85, gateway_tx, persistence_tx).await,
+            );
             actor
                 .chat_state_handle
                 .replace_conversation(history_with_provider_state());
 
-            let result = actor
-                .handle_sampling_failure(encrypted_content_error())
-                .await;
+            let result = actor.handle_sampling_failure(encrypted_content_error()).await;
 
             assert!(
                 matches!(result, Ok(SamplerFailureRecovery::FlattenAndResubmit)),
@@ -113,8 +112,9 @@ async fn a_rejection_with_nothing_left_to_convert_is_terminal() {
         .run_until(async {
             let (gateway_tx, _) = mpsc::unbounded_channel::<xai_acp_lib::AcpClientMessage>();
             let (persistence_tx, _) = mpsc::unbounded_channel::<PersistenceMsg>();
-            let actor =
-                Arc::new(create_test_actor(1_000, 1_000_000, 85, gateway_tx, persistence_tx).await);
+            let actor = Arc::new(
+                create_test_actor(1_000, 1_000_000, 85, gateway_tx, persistence_tx).await,
+            );
             actor.chat_state_handle.replace_conversation(vec![
                 ConversationItem::user("hello"),
                 ConversationItem::Assistant(AssistantItem {
@@ -126,9 +126,7 @@ async fn a_rejection_with_nothing_left_to_convert_is_terminal() {
                 }),
             ]);
 
-            let result = actor
-                .handle_sampling_failure(encrypted_content_error())
-                .await;
+            let result = actor.handle_sampling_failure(encrypted_content_error()).await;
 
             assert!(
                 result.is_err(),
@@ -147,8 +145,9 @@ async fn flatten_history_converts_in_place_and_reports_it() {
         .run_until(async {
             let (gateway_tx, _) = mpsc::unbounded_channel::<xai_acp_lib::AcpClientMessage>();
             let (persistence_tx, _) = mpsc::unbounded_channel::<PersistenceMsg>();
-            let actor =
-                Arc::new(create_test_actor(1_000, 1_000_000, 85, gateway_tx, persistence_tx).await);
+            let actor = Arc::new(
+                create_test_actor(1_000, 1_000_000, 85, gateway_tx, persistence_tx).await,
+            );
             actor
                 .chat_state_handle
                 .replace_conversation(history_with_provider_state());
@@ -175,8 +174,9 @@ async fn flatten_history_leaves_a_plain_conversation_alone() {
         .run_until(async {
             let (gateway_tx, _) = mpsc::unbounded_channel::<xai_acp_lib::AcpClientMessage>();
             let (persistence_tx, _) = mpsc::unbounded_channel::<PersistenceMsg>();
-            let actor =
-                Arc::new(create_test_actor(1_000, 1_000_000, 85, gateway_tx, persistence_tx).await);
+            let actor = Arc::new(
+                create_test_actor(1_000, 1_000_000, 85, gateway_tx, persistence_tx).await,
+            );
             let plain = vec![
                 ConversationItem::user("hello"),
                 ConversationItem::Assistant(AssistantItem {

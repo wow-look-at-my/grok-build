@@ -1362,11 +1362,7 @@ mod tests {
         succeed(queued);
 
         assert!(
-            first
-                .await
-                .expect("first reply")
-                .expect("first result")
-                .success,
+            first.await.expect("first reply").expect("first result").success,
             "run-a agent completes"
         );
         assert!(
