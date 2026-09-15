@@ -1583,6 +1583,48 @@ async fn build_request_uses_sampling_config() {
     assert_eq!(request.top_p, Some(0.9));
 }
 
+/// The provider charges the requested output against the same window as the
+/// prompt, so a conversation that fits on its own can still make the REQUEST
+/// too big: 737_857 input tokens plus a 262_144 output budget is 1_000_001
+/// against a 1_000_000 window, and the server rejects it. The budget that goes
+/// out has to be the one the window has room for.
+#[tokio::test]
+async fn build_request_fits_the_output_budget_into_the_context_window() {
+    let config = SamplingConfig {
+        base_url: "https://api.example.com".to_string(),
+        model: "grok-4".to_string(),
+        max_completion_tokens: Some(262_144),
+        temperature: None,
+        top_p: None,
+        api_backend: Default::default(),
+        extra_headers: Default::default(),
+        query_params: Default::default(),
+        env_http_headers: Default::default(),
+        context_window: NonZeroU64::new(1_000_000).unwrap(),
+        reasoning_effort: None,
+        stream_tool_calls: None,
+    };
+    // Bytes/4: this is a 737_857-token prompt.
+    let items = vec![ConversationItem::user("x".repeat(737_857 * 4))];
+    let h = TestHarness::with_config(items, config);
+
+    let request = h
+        .handle
+        .build_request(vec![], None, false, None, "c".into(), "r".into())
+        .await
+        .unwrap();
+
+    let budget = u64::from(request.max_output_tokens.expect("a budget is sent"));
+    assert!(
+        budget < 262_144,
+        "the configured budget must be cut to fit: {budget}"
+    );
+    assert!(
+        737_857 + budget <= 1_000_000,
+        "prompt + output must fit the window, got {budget} on top of 737_857"
+    );
+}
+
 #[tokio::test]
 async fn build_request_does_not_mutate_actor_state() {
     let h = TestHarness::with_conversation(vec![

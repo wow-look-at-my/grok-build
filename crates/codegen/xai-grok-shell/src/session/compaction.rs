@@ -1832,9 +1832,9 @@ impl SessionActor {
         }
     }
     /// Returns true if the error response indicates tokens exceed the
-    /// model's context window. Inspects only the model-metadata
-    /// portion of the [`SamplingErrorInfo`] (the `context_window`
-    /// field) against the session's tracked token estimate.
+    /// model's context window: the session's tracked token estimate against
+    /// the `context_window` the [`SamplingErrorInfo`] metadata carries, or
+    /// the server's own message saying as much.
     ///
     /// Called from `handle_sampling_failure` with the
     /// `SamplingErrorInfo` the sampler hands back.
@@ -1860,7 +1860,16 @@ impl SessionActor {
             return false;
         }
         let estimated_total = self.chat_state_handle.get_estimated_total_tokens().await;
-        estimated_total > context_window
+        // Two ways to know the window is the problem. Our own count is one, and
+        // it does not need the prompt to exceed the window on its own: a prompt
+        // that leaves no room for an answer is over it in practice, because the
+        // provider charges the requested output against the same window.
+        // The server saying so is the other, and it settles it — its tokenizer
+        // is the one that counts, and a 400 that names the context length is
+        // not a turn to hand back to the user.
+        estimated_total
+            > context_window.saturating_sub(xai_token_estimation::MIN_OUTPUT_TOKENS)
+            || xai_grok_sampling_types::is_context_length_error(&err.message)
     }
     /// Pre-sampling compaction check. Uses `get_estimated_total_tokens()`
     /// (exact prior count + byte-estimate of items since last response) so
@@ -1926,7 +1935,8 @@ impl SessionActor {
         None
     }
     /// Returns `Some` when tool call outputs have pushed the estimated token
-    /// count past the context window, indicating pre-emptive compaction is needed.
+    /// count past what the context window holds alongside an answer,
+    /// indicating pre-emptive compaction is needed.
     pub(crate) async fn check_preflight_overflow(&self) -> Option<AutoCompactTriggerInfo> {
         if self
             .compaction
@@ -1939,10 +1949,16 @@ impl SessionActor {
         let estimated_total = self.chat_state_handle.get_estimated_total_tokens().await;
         let cfg = self.chat_state_handle.get_sampling_config().await?;
         let cw = cfg.context_window.get();
-        if estimated_total <= cw {
+        // The response shares the window with the prompt. A prompt that leaves
+        // less room than the smallest usable answer is over the window in
+        // practice, even when it is under it on its own: the request then goes
+        // out with its output budget cut to the floor, and the model answers in
+        // 1024 tokens. Compact instead.
+        let usable = cw.saturating_sub(xai_token_estimation::MIN_OUTPUT_TOKENS);
+        if estimated_total <= usable {
             return None;
         }
-        let overflow = estimated_total.saturating_sub(cw);
+        let overflow = estimated_total.saturating_sub(usable);
         let percentage = xai_token_estimation::usage_percentage_u8(estimated_total, cw);
         tracing::warn!(
             estimated_total,

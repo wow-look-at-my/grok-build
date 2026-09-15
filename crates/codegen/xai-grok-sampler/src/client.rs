@@ -516,6 +516,9 @@ struct ClientDefaults {
     max_completion_tokens: Option<u32>,
     temperature: Option<f32>,
     top_p: Option<f32>,
+    /// The window `max_completion_tokens` shares with the prompt. `0` means
+    /// unknown, which claims nothing about either.
+    context_window: u64,
     api_backend: ApiBackend,
     auth_scheme: AuthScheme,
     stream_tool_calls: bool,
@@ -823,6 +826,7 @@ impl SamplingClient {
             max_completion_tokens: config.max_completion_tokens,
             temperature: config.temperature,
             top_p: config.top_p,
+            context_window: config.context_window,
             api_backend: config.api_backend,
             auth_scheme: config.auth_scheme,
             stream_tool_calls: config.stream_tool_calls,
@@ -2016,6 +2020,28 @@ impl SamplingClient {
             request.max_output_tokens = self.defaults.max_completion_tokens;
         }
 
+        // The provider counts the requested output against the same window as
+        // the prompt, so the default applied just above is not free: on a large
+        // conversation it is what carries the request past the window. Every
+        // backend converter reads `max_output_tokens` from here, so this is the
+        // last point that can hold the sum inside the window. The estimate is
+        // the only prompt size this layer has; a caller that tracks the
+        // provider's reported usage fits the budget with that number first, and
+        // this only ever cuts further.
+        let usable_window =
+            xai_token_estimation::window_less_estimate_slack(self.defaults.context_window);
+        if let Some(clamp) = request.fit_output_budget(request.estimate_prompt_tokens(), usable_window)
+        {
+            tracing::warn!(
+                requested = clamp.requested,
+                applied = clamp.applied,
+                estimated_prompt_tokens = clamp.prompt_tokens,
+                usable_window = clamp.context_window,
+                model = %request.model.as_deref().unwrap_or_default(),
+                "output budget exceeded the context window with the prompt; cut it to fit"
+            );
+        }
+
         Ok(())
     }
 
@@ -2255,6 +2281,54 @@ mod tests {
     use super::*;
     use indexmap::IndexMap;
     use xai_grok_sampling_types::types::ChatRequestMessage;
+
+    /// The sampler's own default output budget is what a caller that sets none
+    /// sends, so the default is where an impossible request is born: the
+    /// provider adds it to the prompt and rejects the sum. Nothing downstream
+    /// can fix that, so the sum is held inside the window here.
+    #[test]
+    fn the_default_output_budget_cannot_carry_a_request_past_the_window() {
+        let mut cfg = minimal_config();
+        cfg.context_window = 1_000_000;
+        cfg.max_completion_tokens = Some(262_144);
+        let client = SamplingClient::new(cfg).expect("client should build");
+
+        // ~737_857 estimated prompt tokens, the size the server reported.
+        let mut request =
+            ConversationRequest::from_items(vec![xai_grok_sampling_types::ConversationItem::user(
+                "x".repeat(737_857 * 4),
+            )]);
+        client
+            .apply_conversation_defaults(&mut request)
+            .expect("defaults apply");
+
+        let budget = u64::from(request.max_output_tokens.expect("a budget is applied"));
+        assert!(
+            budget < 262_144,
+            "the default must be cut, not sent whole: {budget}"
+        );
+        assert!(
+            request.estimate_prompt_tokens() + budget <= 1_000_000,
+            "prompt + output must fit the window"
+        );
+    }
+
+    /// The same default on an ordinary conversation is the configured one.
+    #[test]
+    fn a_conversation_with_room_keeps_the_configured_output_budget() {
+        let mut cfg = minimal_config();
+        cfg.context_window = 1_000_000;
+        cfg.max_completion_tokens = Some(262_144);
+        let client = SamplingClient::new(cfg).expect("client should build");
+
+        let mut request = ConversationRequest::from_items(vec![
+            xai_grok_sampling_types::ConversationItem::user("hello"),
+        ]);
+        client
+            .apply_conversation_defaults(&mut request)
+            .expect("defaults apply");
+        assert_eq!(request.max_output_tokens, Some(262_144));
+    }
 
     /// The banner a user actually reads is this message, so a rejected payload
     /// has to say WHICH field it rejected. Both wire surfaces are covered: a
