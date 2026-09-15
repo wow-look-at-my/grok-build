@@ -4,8 +4,16 @@ use semver::Version;
 
 pub const TEST_VERSION_ENV: &str = "GROK_TEST_VERSION";
 
+/// An empty `GROK_VERSION` is a workflow expression that resolved to nothing, so it
+/// reads as no stamp at all rather than as a release whose version is the empty string.
 pub const VERSION: &str = match option_env!("GROK_VERSION") {
-    Some(v) => v,
+    Some(v) => {
+        if v.is_empty() {
+            env!("CARGO_PKG_VERSION")
+        } else {
+            v
+        }
+    }
     None => env!("CARGO_PKG_VERSION"),
 };
 

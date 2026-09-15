@@ -139,7 +139,8 @@ fn is_local_build() -> bool {
     if std::env::var(xai_grok_version::TEST_VERSION_ENV).is_ok() {
         return false;
     }
-    option_env!("GROK_VERSION").is_none()
+    // An empty stamp is a workflow expression that resolved to nothing, which is no release.
+    option_env!("GROK_VERSION").is_none_or(str::is_empty)
 }
 
 /// Resolve whether the folder-trust gate is enabled.
