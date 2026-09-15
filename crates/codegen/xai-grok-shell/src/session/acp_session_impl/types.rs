@@ -51,6 +51,11 @@ pub(crate) enum SamplerFailureRecovery {
         credential: xai_grok_sampling_types::SentCredential,
         store: RecoveredStore,
     },
+    /// The model refused the history as provider-bound state it cannot read
+    /// (an `encrypted_content` blob, a thinking signature it did not mint).
+    /// `flatten_conversation` rewrote the history to plain text, so the turn
+    /// loop should resubmit it.
+    FlattenAndResubmit,
 }
 
 /// Outcome of a single turn attempt via the sampler-based path.
@@ -76,6 +81,10 @@ pub(crate) enum SamplerTurnOutcome {
         credential: xai_grok_sampling_types::SentCredential,
         store: RecoveredStore,
     },
+    /// Mirrors [`SamplerFailureRecovery::FlattenAndResubmit`]: the history was
+    /// rewritten to plain text because the model refused the provider state in
+    /// it. The turn loop resubmits, the same as `CompactAndResubmit`.
+    FlattenAndResubmit,
     /// The in-flight model request was cancelled because a user interjection
     /// arrived mid-stream — the "asap injection" path. The turn loop drains
     /// the interjection and resubmits immediately rather than waiting for the

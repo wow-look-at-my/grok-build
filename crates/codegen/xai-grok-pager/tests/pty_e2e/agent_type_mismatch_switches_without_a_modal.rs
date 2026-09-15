@@ -2,12 +2,13 @@
 #[allow(unused_imports)]
 use super::common::*;
 
-/// 7. **Agent type mismatch — "No" returns to current session.**
-/// Selecting "No" dismisses the modal and keeps the current session
-/// with its original model.
+/// 5. **Agent type mismatch — the `/model` switch goes through.**
+/// After a prompt (turn_count > 0), switching to a model on another harness
+/// converts the history to plain text and switches. Nothing asks the user to
+/// start a new session.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore]
-async fn agent_type_mismatch_no_keeps_current_session() {
+async fn agent_type_mismatch_switches_without_a_modal() {
     let content = start_dual_agent_type_content().await;
     content.set_response(format!(
         "{MOCK_RESPONSE_SENTINEL} hello from the default harness."
@@ -34,32 +35,18 @@ async fn agent_type_mismatch_no_keeps_current_session() {
         .inject_keys(b"/model cursor-model\r")
         .expect("type model switch");
 
-    // Wait for the modal.
     harness
-        .wait_for_text("requires starting a new session", Duration::from_secs(15))
-        .expect("modal appeared");
+        .wait_for_text("cursor-model", Duration::from_secs(15))
+        .expect("the target model must become the session's model");
 
-    // Select "No" (second option — press j then Enter).
-    harness.inject_keys(keys::J).expect("move to No");
-    harness.inject_keys(keys::ENTER).expect("select no");
-
-    // Modal should dismiss. Wait a moment for UI to settle.
-    harness.update(Duration::from_millis(500));
-
-    // The original response should still be visible (same session).
-    assert!(
-        harness.contains_text(MOCK_RESPONSE_SENTINEL),
-        "original response should still be visible after cancelling\nscreen:\n{}",
-        harness.screen_contents()
-    );
     assert!(
         !harness.contains_text("requires starting a new session"),
-        "modal should be dismissed\nscreen:\n{}",
+        "a cross-harness switch must not ask for a new session\nscreen:\n{}",
         harness.screen_contents()
     );
     assert!(
-        harness.is_running().expect("poll pager liveness"),
-        "pager exited\nscreen:\n{}",
+        !harness.contains_text("panicked"),
+        "pager panicked\nscreen:\n{}",
         harness.screen_contents()
     );
 

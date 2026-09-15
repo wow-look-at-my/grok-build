@@ -1928,6 +1928,9 @@ mod feedback_turn_lookup_tests;
 #[path = "acp_session_tests/idle_resume_tests.rs"]
 mod idle_resume_tests;
 #[cfg(test)]
+#[path = "acp_session_tests/history_flatten_tests.rs"]
+mod history_flatten_tests;
+#[cfg(test)]
 #[path = "acp_session_tests/inline_auto_compact_flow_tests.rs"]
 mod inline_auto_compact_flow_tests;
 #[cfg(test)]

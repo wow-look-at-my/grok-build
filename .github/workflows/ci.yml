@@ -383,7 +383,8 @@ jobs:
 
   publish-upload:
     name: Upload ${{ matrix.target_os }}/${{ matrix.target_arch }} binary
-    needs: [publish-create, build-release]
+    # link-darwin writes the grok-darwin-arm64 hand-off this matrix downloads.
+    needs: [publish-create, build-release, link-darwin]
     runs-on: ubuntu-22.04
     permissions:
       contents: read
