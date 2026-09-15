@@ -130,6 +130,14 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 
 - The Messages backend takes a price off the wire when one is there: `MessagesUsage`/`MessageDeltaUsage` carry `cost_in_usd_ticks` (alias `cost_usd_ticks`) and the USD-float `cost`, read on `message_start` and every `message_delta` with the Chat Completions precedence — ticks over float, a zero is unbilled, and a later silent event never erases a reported price. Anthropic itself prices nothing. So that path stays `None` and the shell's `compute_cost_ticks` fallback derives one from the model's pricing.
 
+## Model-pricing resolution notes
+
+- `model_pricing::resolve` (`xai-grok-shell/src/agent/model_pricing.rs`) answers the `compute_cost_ticks` fallback for an endpoint that reports no price. It reads `[model.<id>].pricing` from config first. A price the user wrote is the price, and the catalog never overrides it. `config::resolve_configured_model_pricing` is that first tier.
+- The catalog is modelinfo. One model's document is at `<catalog_url>/v1/models/<model id>`. `[pricing].catalog_url` moves it and `[pricing].lookup_enabled = false` keeps the session off the network. The whole-catalogue `/v1/models` route answers with about 20 MB, so nothing fetches it.
+- `resolve` runs on the turn path and is sync. So it never waits on the network. A model with no fresh cache entry answers as unpriced for that call and starts a background fetch. The price lands for the next call. `in_flight` holds one fetch per model. A second turn therefore starts no second request.
+- The cache is `$GROK_HOME/model_pricing_cache.json`, one entry per model. An absence is cached too, with a shorter TTL, or every turn on an unpriced model re-fetches. A failed lookup is NOT an absence and is not cached. Caching one pins an outage into the catalog for the whole TTL.
+- A document that prices no tier is recorded as an absence. Recording it as an all-zero price claims a price the catalog never gave.
+
 - The per-message cache-hit-percent indicator reads the same `ResponseCompleted.usage` the cost indicator does (`AcpUpdateTracker::set_response_cache_hit`). It renders on its OWN reserved row below the content instead of widening the cost/timestamp gutter further (`EntryRenderer::cache_hit_reserved_rows`).
 
 ## Stream-timing notes
