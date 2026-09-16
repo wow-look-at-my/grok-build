@@ -3815,28 +3815,6 @@ mod tests {
         assert!(KIND_LENS_CODE_CHANGE.contains("actively HUNT for real bugs, issues, and gaps"));
     }
 
-    /// Pin both sides of the reach stance: an unauthorized live action is a
-    /// defect however good its evidence, and a handed-back one is satisfied
-    /// rather than a gap the panel serves again.
-    #[test]
-    fn verifier_prompt_pins_the_authorization_check() {
-        assert!(GOAL_VERIFIER_PROMPT_TEMPLATE.contains("Authorization check"));
-        assert!(
-            GOAL_VERIFIER_PROMPT_TEMPLATE.contains("overreach is a DEFECT, never a pass"),
-            "good evidence must not launder an action the objective never named"
-        );
-        assert!(GOAL_VERIFIER_PROMPT_TEMPLATE.contains("[artifact]"));
-        assert!(GOAL_VERIFIER_PROMPT_TEMPLATE.contains("[live-system]"));
-        assert!(
-            GOAL_VERIFIER_PROMPT_TEMPLATE.contains("HANDED BACK"),
-            "a hand-back is the sanctioned answer to an unauthorized check"
-        );
-        assert!(
-            GOAL_VERIFIER_PROMPT_TEMPLATE.contains("never a gap to re-serve"),
-            "re-serving a handed-back criterion is the ratchet this prevents"
-        );
-    }
-
     /// Pin the gating-vs-best-effort verifier stance: an absent `evidence`
     /// observation alone is not a refute once the gating criteria hold.
     #[test]

@@ -98,12 +98,10 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - `Plan: <path>` still renders on every plan-aware reminder — only the manual seed-todos directive is gone, replaced by a statement that the steps are already on the list.
 - A fail-closed planner publishes no plan, so nothing is seeded. Red/unseeded is the honest state there.
 
-## Goal verification-reach notes
+## Verification does not widen the goal
 
-- The plan is derived knowledge and grants nothing. Every `## Verification plan` step opens with a reach label: `[artifact]` reads files, logs, hashes, build output and source on this machine, `[live-system]` touches anything else. A `[live-system]` step is admissible only when the step quotes the OBJECTIVE span that names the action. Without that quote the implementer reads an invented step as a permit. It then performs it, which is how a plan step became authority to act on a machine nobody offered.
-- `goal_plan_validation.rs` is the gate and it is pure. `run_goal_planner` calls it on the written plan before publishing. A violation returns `GoalPlannerOutcome::PlanRejected`, not a fail-closed pause. The corrections ride back as the next attempt's CONTEXT, capped by `GOAL_PLANNER_MAX_ATTEMPTS`. Cap exhaustion pauses on the ordinary planner-failure path.
-- The label is the planner's own claim, so `OFF_MACHINE_TOKENS` is the backstop under it. A step that names a transport or a remote control surface while wearing `[artifact]` is rejected too. A one-word quote authorizes nothing — it matches any objective that happens to use the word.
-- A check the user never authorized is handed back, never dropped and never smuggled in. The implementer prints the exact command line. The criterion is then `awaiting-user`, which does not block completion and is not a gap the verifier re-serves. Without that arm the completeness rule ("no manual steps left for the user") converts a legitimate hand-back into an unauthorized action, every round.
+- A `## Verification plan` step reads back what the goal built. It is not a permit. The implementer read "do X to confirm Y" as an instruction to do X. A planner-invented check then became an action on a system nobody put in scope. Every place that demands verification says so now. Those are the planner prompt's `## Verification plan` contract, `goal_rules.md`'s VERIFY AS YOU GO, `goal_plan_block.md`, and the per-turn continuation directive.
+- The planner is told to prefer reading what the work already produced over operating anything. Files, logs, hashes, build output and source are what it reads. That is the whole mechanism. There is no label grammar and no validator. An earlier attempt added a reach DSL, a keyword list and a reject-and-retry loop to a planner prompt that is already long. That buys rigidity rather than scope discipline.
 
 ## `/todo` capture feature notes
 

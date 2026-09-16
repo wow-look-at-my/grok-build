@@ -44,51 +44,6 @@ score) so the verifier sees it was deferred, not forgotten. If web research
 is unavailable or fails, note the gap under `## Assumed scope` and proceed
 from best knowledge.
 
-## Authorization — the plan grants nothing
-
-The plan is DERIVED knowledge. It cannot hand the implementer a permission the
-user did not give. Every action the plan directs traces to OBJECTIVE's own
-words. The absence of a ban is NOT permission. The implementer treats an
-invented step as authorized and performs it. So a step that acts on something
-the user did not offer you is a plan defect, not initiative.
-
-## Verification reach — label every step
-
-Every `## Verification plan` step MUST open with a reach label, before its
-`gating`/`evidence` tag. There are these labels:
-
-- `[artifact]` — reads files, logs, hashes, build output, generated headers,
-  compile flags, or source ON THE MACHINE THIS GOAL RUNS ON. It also covers the
-  local processes this goal itself starts.
-- `[live-system]` — anything else. A device, vehicle, phone, console, remote
-  host, production or staging service, an already-open browser session, or a
-  database. Any shared resource another person uses is one too.
-
-Rules, in force order:
-
-1. **Prefer `[artifact]` by construction.** A claim you can establish from
-   files, logs, hashes, build output, or source gets that check. The plan MUST
-   NOT specify a live-system one in its place. A deployed binary's identity is a
-   hash comparison, not a login. A build's configuration is the generated
-   definitions header, the compile flags, and the build log. It is not a screen.
-2. **A `[live-system]` step needs the user's own words.** Quote the span of
-   OBJECTIVE that names that action, in double quotes, inside the step. Add a
-   one-line justification naming what no artifact can establish. Plan validation
-   REJECTS a step with no such quote. You are then asked to rewrite it, so do
-   not spend an attempt on one.
-3. **Nothing destructive, even when authorized.** A permitted live step must be
-   non-destructive. Otherwise it must state exactly what it closes and how to
-   restore it. Read-only verbs (`ls`, `ps`, `cat`, `sha256sum`, reading a log)
-   are fine. State-closing verbs (`end`, `clear`, `reset`, `stop`, `restart`,
-   `disable`, any bulk toggle) are not. Never direct a toggle to be re-sent "to
-   make sure". Re-sending flips it back.
-4. **What you cannot authorize, hand back.** A claim can genuinely need a live
-   action the user never named. Do not drop the claim. Do not smuggle it in.
-   Write the step as `[live-system] hand-back: <the exact command line> — the
-   user runs this to confirm <criterion>`. The implementer prints that line in
-   place of running it. The criterion is then satisfied as `awaiting-user`,
-   which does NOT block completion.
-
 ## Goal kind — pick exactly one
 
 - `code-change` — modify the workspace; the diff is the evidence.
@@ -130,7 +85,7 @@ serve it instead of failing silently.
 Unit tests of internals do NOT prove the deliverable starts: a missing import
 map, a crashing `main()`, or a bad entry script all pass unit tests and fail
 the user on first launch. Whenever the deliverable has a launchable entry
-point and THIS MACHINE can run it, the verification plan MUST include one
+point and the environment can run it, the verification plan MUST include one
 GATING launch on the real entry path with the cheapest available runtime,
 asserting NOT merely that it starts but that its PRIMARY OBSERVABLE is CORRECT
 (present and non-empty is INSUFFICIENT), and producing captured output in
@@ -138,10 +93,8 @@ asserting NOT merely that it starts but that its PRIMARY OBSERVABLE is CORRECT
 non-deterministic launch output (a pass on one run, an empty/error capture on
 the next) is an APP-side defect to FIX, not to average away or
 cherry-pick a success from (if the ENVIRONMENT is what's flaky, capture that
-and take the honest fallback below). The launch runs HERE. A deliverable whose
-entry point lives on a device or a service the user did not offer gets no
-launch step — its `[artifact]` proof is the build output and the deploy log.
-Assert the primary observable per deliverable:
+and take the honest fallback below). Assert the primary observable per
+deliverable:
 
 - CLI tool → run the real command on a representative input; assert the actual
   output CONTENT, not just that it ran; capture output.
@@ -191,7 +144,7 @@ sections, in order. `## Implementation approach` and `## Task checklist` are
 1. <gating, outcome-based criterion>
 
 ## Verification plan
-1. <[artifact]|[live-system]> <gating|evidence: action + the observations that MUST be present to pass>
+1. <gating|evidence: action + the observations that MUST be present to pass>
 
 ## Non-goals
 - <out-of-scope item>
@@ -227,8 +180,11 @@ Contradictions`.
 
 **Verification plan** — the shared procedure the implementer and the verifiers
 both follow, so all judge by the SAME observable bar; cover every criterion.
-Open each step with its `[artifact]`/`[live-system]` reach label, per
-`## Verification reach` above. Then tag it `gating` (decides pass/fail) or `evidence` (best-effort
+Verification checks the work. It never adds to it: a step that acts on
+something OBJECTIVE did not put in scope is new scope, not a check. Prefer
+reading what the work already produced — files, logs, hashes, build output,
+source — over operating anything. Tag each step `gating` (decides pass/fail)
+or `evidence` (best-effort
 corroboration whose absence alone, once the gating steps and honest unit checks
 hold, must NOT deny completion). Each step gives the **action** (run the tests,
 exercise the entry point, read the artifact) and the

@@ -205,7 +205,7 @@ pub(super) enum GoalResumeOutcome {
     Message(String),
 }
 
-/// Goal-only `<task_completion_discipline>` (Rules 1–5); `{TODO_TOOL}` from [`GoalToolNames`].
+/// Goal-only `<task_completion_discipline>` (Rules 1–4); `{TODO_TOOL}` from [`GoalToolNames`].
 /// Template must end with `\n` so `{DISCIPLINE_BLOCK}TRACKING:` glues correctly.
 pub(super) fn render_goal_task_discipline(names: &GoalToolNames) -> String {
     GOAL_TASK_DISCIPLINE_TEMPLATE.replace("{TODO_TOOL}", &names.todo)
@@ -1129,9 +1129,6 @@ impl SessionActor {
         // for every message the session has left.
         self.open_subagent_spawn_admission();
         let mut attempt = 0u32;
-        // Corrections from a rejected attempt, delivered as the next
-        // attempt's CONTEXT. Empty on the first attempt.
-        let mut plan_feedback = String::new();
         loop {
             // Exhausting the retry cap pauses the goal with the canonical
             // message (like any other planner failure), never leaving it Active
@@ -1155,12 +1152,7 @@ impl SessionActor {
             attempt += 1;
 
             let (goal_id, plan_file, attempt_file, outcome) = match self
-                .run_goal_planner_attempt(
-                    &objective,
-                    run_goal_id.as_deref(),
-                    attempt,
-                    &plan_feedback,
-                )
+                .run_goal_planner_attempt(&objective, run_goal_id.as_deref(), attempt)
                 .await
             {
                 PlannerAttemptStep::Stop => break,
@@ -1278,20 +1270,6 @@ impl SessionActor {
                             ),
                         }
                     }
-                }
-                // A plan that claims authority the objective withheld is
-                // replanned, not published: the corrections go back as the
-                // next attempt's context. The staged attempt file drops
-                // here, so nothing partial survives. Exhausting the cap
-                // pauses the goal on the ordinary planner-failure path.
-                crate::session::goal_planner::GoalPlannerOutcome::PlanRejected {
-                    violations,
-                    ..
-                } => {
-                    plan_feedback =
-                        crate::session::goal_plan_validation::rejection_feedback(&violations);
-                    drop(attempt_file);
-                    continue;
                 }
                 // A cancel is terminal. Spawning another planner does the
                 // opposite of what the Stop requested, onto a session whose
@@ -1489,7 +1467,6 @@ impl SessionActor {
         objective: &str,
         run_goal_id: Option<&str>,
         attempt: u32,
-        plan_feedback: &str,
     ) -> PlannerAttemptStep {
         if !self.goal_planner_enabled {
             return PlannerAttemptStep::Stop;
@@ -1559,10 +1536,8 @@ impl SessionActor {
             .await
             .map(|c| c.model)
             .unwrap_or_default();
-        // Fork owns history; fail-open stays OBJECTIVE-only (no last-assistant
-        // CONTEXT). A rejected attempt's corrections are the one exception:
-        // they ride here so the next attempt reads what it has to fix.
-        let context = plan_feedback.to_owned();
+        // Fork owns history; fail-open stays OBJECTIVE-only (no last-assistant CONTEXT).
+        let context = String::new();
 
         let task_tool_name = self.resolve_goal_tool_names().await.task;
         // Tag the planner with the goal-creation turn's prompt id so its
@@ -2013,7 +1988,7 @@ impl SessionActor {
 }
 
 #[cfg(test)]
-mod reach_boundary_tests {
+mod verification_scope_tests {
     use super::*;
 
     fn names() -> GoalToolNames {
@@ -2024,64 +1999,16 @@ mod reach_boundary_tests {
         }
     }
 
-    /// The completeness rule tells the implementer to leave the user no
-    /// manual steps. Without this boundary beside it, a check the user never
-    /// authorized reads as work still owed.
+    /// The plan block tells the implementer to run the verification plan. It
+    /// has to say in the same breath that running it is not a licence to do
+    /// anything the objective did not ask for.
     #[test]
-    fn the_goal_rules_carry_the_authorization_boundary() {
-        let rules = crate::session::acp_session::GOAL_RULES_TEMPLATE;
-        assert!(rules.contains("AUTHORIZATION:"), "{rules}");
-        assert!(
-            rules.contains("never from the plan"),
-            "authority traces to the user's message, not the plan"
-        );
-        assert!(
-            rules.contains("Absence of a ban is not permission"),
-            "{rules}"
-        );
-        assert!(
-            rules.contains("handing back that command line IS delivery"),
-            "a hand-back must not read as an unfinished goal"
-        );
-        assert!(
-            rules.contains("NEVER CLOSE WHAT SOMEBODY IS READING"),
-            "a state-closing verb acts on what a person may be using now"
-        );
-        assert!(
-            rules.contains("Re-sending flips it back off"),
-            "a toggle re-sent to make sure turns the thing off"
-        );
-    }
-
-    /// The rendered discipline block carries the same boundary, so the
-    /// per-turn "do not ask permission" rule cannot reach past the workspace.
-    #[test]
-    fn the_discipline_block_stops_at_the_workspace_edge() {
-        let block = render_goal_task_discipline(&names());
-        assert!(
-            block.contains("That rule stops at the workspace edge"),
-            "{block}"
-        );
-        assert!(block.contains("hand back the exact command line"), "{block}");
-        assert!(
-            block.contains("not \"easy work left undone\""),
-            "the no-stopping rule must not push the unauthorized action"
-        );
-        assert!(!block.contains("{TODO_TOOL}"), "{block}");
-    }
-
-    /// The plan block tells the implementer which steps it may run itself,
-    /// and what to do with the rest.
-    #[test]
-    fn the_plan_block_splits_the_steps_by_reach() {
+    fn the_plan_block_keeps_verification_inside_the_objective() {
         let block = render_goal_plan_block(std::path::Path::new("/tmp/plan.md"), &names());
-        assert!(block.contains("[artifact]"), "{block}");
-        assert!(block.contains("[live-system]"), "{block}");
         assert!(
-            block.contains("A step with no label is treated as `[live-system]`"),
-            "an unlabelled step must fail closed, not open"
+            block.contains("Checking is not doing"),
+            "running the verification plan must not widen the work: {block}"
         );
-        assert!(block.contains("awaiting-user"), "{block}");
         assert!(!block.contains("{PLAN_PATH}"), "{block}");
     }
 }

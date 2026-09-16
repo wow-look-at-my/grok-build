@@ -15,15 +15,10 @@ Plan: {PLAN_PATH}
   don't edit the plan's existing items. Keep it TERSE: ONE bullet per deviation
   (what changed + why); not a progress log, so don't restate the plan or dump
   test counts / "all fixed" / "verification re-run" / "superseding" notes there.
-- A plan step states what must be TRUE. It is not a permit to perform it. Each
-  `## Verification plan` step carries a reach label. Run the `[artifact]` ones,
-  which read files, logs, hashes, build output and source here. Do NOT run a
-  `[live-system]` one unless the user's own words named that action. Print its
-  exact command line in one line instead and say it is the user's call. That
-  hand-back satisfies the criterion as `awaiting-user` and does not block
-  completion. A step with no label is treated as `[live-system]`.
-- Before claiming completion, run the plan's `[artifact]` `## Verification plan`
-  steps yourself and confirm their observations hold. SAVE durable proof:
-  commit real tests that drive the shipped code in-repo, and write the captured run output to your scratch dir
+- Before claiming completion, run the plan's `## Verification plan` yourself and
+  confirm its observations hold. Checking is not doing: a step reads back what
+  you built, and never authorizes work the objective did not ask for. SAVE
+  durable proof: commit real tests that drive the shipped code in-repo, and
+  write the captured run output to your scratch dir
   (the one the goal rules name; never shared `/tmp/...`). Fix any missing
   observation before calling the goal complete.

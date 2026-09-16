@@ -21,13 +21,10 @@ references to scratch, which is deleted when the goal ends.
 The plan's `{SCRATCH}` placeholder resolves there. The verifier AUDITS your committed tests
 and saved evidence rather than rebuilding them — leave honest proof or you
 WILL be refuted.
-Run the plan's `[artifact]` `## Verification plan` steps yourself and confirm
-the observations they list hold. A `[live-system]` step needs the user's own
-words naming that action. Without them, print its exact command line and say it
-is the user's call. That hand-back satisfies the criterion as `awaiting-user`.
-It does not block completion and it is not a reason to keep working. "Continue
-working" never authorises an action on a device, a remote host, a service, or
-any shared resource the user did not name. The harness evaluates completion automatically
+Run the plan's `## Verification plan` steps yourself and confirm the
+observations it lists hold. Checking is not doing: continuing never authorises
+an action the objective did not ask for. The harness evaluates completion
+automatically
 after this round, re-checks the same steps adversarially when appropriate, and
 inlines any outstanding verifier gaps above.
 </system-reminder>
