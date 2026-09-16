@@ -3253,6 +3253,145 @@ mod tests {
             acp::TextContent::new(text.to_string()),
         )))
     }
+    // ── a tool call while the model is still writing it ──────────────
+    /// The block a streaming call is rendering into, by scrollback index.
+    fn streaming_block_at(sb: &ScrollbackState, idx: usize) -> &OtherToolCallBlock {
+        match &sb.get(idx).expect("entry at index").block {
+            RenderBlock::ToolCall(ToolCallBlock::Other(b)) => b,
+            other => panic!("expected a streaming Other block at {idx}, got {other:?}"),
+        }
+    }
+    /// Nothing reached the screen before this: the ACP `ToolCall` arrives only
+    /// once the whole call has parsed. The name shows on the opening chunk and
+    /// the arguments fill in behind it.
+    #[test]
+    fn a_tool_call_is_visible_while_its_arguments_stream() {
+        let mut sb = ScrollbackState::new();
+        let mut tracker = AcpUpdateTracker::new();
+
+        assert!(tracker.handle_tool_call_delta(
+            Some("call-1"),
+            0,
+            Some("search_replace"),
+            None,
+            &mut sb
+        ));
+        assert_eq!(sb.len(), 1, "the opening chunk is what puts it on screen");
+        assert_eq!(streaming_block_at(&sb, 0).name, "search_replace");
+
+        assert!(tracker.handle_tool_call_delta(None, 0, None, Some("{\"path\":\"src/"), &mut sb));
+        assert!(tracker.handle_tool_call_delta(None, 0, None, Some("main.rs\"}"), &mut sb));
+        assert_eq!(
+            streaming_block_at(&sb, 0).summary,
+            "{\"path\":\"src/main.rs\"}",
+            "each fragment extends the same preview"
+        );
+        assert_eq!(sb.len(), 1, "fragments never push a second entry");
+    }
+    /// The call the user watched being written is the call that runs: the real
+    /// `ToolCall` refines that entry rather than appending a second one.
+    #[test]
+    fn the_real_tool_call_adopts_the_streaming_entry() {
+        let mut sb = ScrollbackState::new();
+        let mut tracker = AcpUpdateTracker::new();
+        tracker.handle_tool_call_delta(Some("read-1"), 0, Some("read_file"), None, &mut sb);
+        tracker.handle_tool_call_delta(None, 0, None, Some("{\"path\":\"a.rs\"}"), &mut sb);
+        assert_eq!(sb.len(), 1);
+
+        assert!(tracker.handle_update(
+            tool_call("read-1", acp::ToolKind::Read, "read_file"),
+            &meta(),
+            &mut sb
+        ));
+        assert_eq!(sb.len(), 1, "adoption must not leave a duplicate entry");
+        assert!(
+            matches!(
+                &sb.get(0).expect("entry").block,
+                RenderBlock::ToolCall(ToolCallBlock::Read(_))
+            ),
+            "the adopted entry refines into the real kind"
+        );
+        assert!(
+            tracker.streaming_tools.is_empty(),
+            "the streaming slot is released on adoption"
+        );
+    }
+    /// A suppressed tool never belongs in scrollback. Its preview is already
+    /// there when the suppression is decided, so it has to come back off.
+    #[test]
+    fn a_suppressed_tool_takes_its_preview_back_off_the_screen() {
+        let mut sb = ScrollbackState::new();
+        let mut tracker = AcpUpdateTracker::new();
+        tracker.handle_tool_call_delta(Some("todo-1"), 0, Some("todo_write"), None, &mut sb);
+        assert_eq!(sb.len(), 1);
+
+        assert!(!tracker.handle_update(
+            tool_call("todo-1", acp::ToolKind::Other, "TodoWrite"),
+            &meta(),
+            &mut sb
+        ));
+        assert_eq!(sb.len(), 0, "a suppressed tool leaves no ghost behind");
+    }
+    /// A cancel lands mid-argument and no `ToolCall` ever follows. What the
+    /// model had written stays, and it stops spinning.
+    #[test]
+    fn a_turn_that_ends_mid_argument_stops_the_preview_spinning() {
+        let mut sb = ScrollbackState::new();
+        let mut tracker = AcpUpdateTracker::new();
+        tracker.handle_tool_call_delta(Some("w-1"), 0, Some("write_file"), None, &mut sb);
+        tracker.handle_tool_call_delta(None, 0, None, Some("{\"path\":\"x"), &mut sb);
+
+        tracker.finish_turn(&mut sb, None);
+        assert_eq!(sb.len(), 1, "the partial call stays visible");
+        assert!(
+            !sb.get(0).expect("entry").is_running,
+            "nothing is still arriving for it"
+        );
+        assert!(tracker.streaming_tools.is_empty());
+    }
+    /// A file write streams the whole file. The preview keeps a bounded head,
+    /// so the size is what carries the progress once the head is full.
+    #[test]
+    fn the_preview_head_is_capped_and_the_size_keeps_moving() {
+        let mut sb = ScrollbackState::new();
+        let mut tracker = AcpUpdateTracker::new();
+        tracker.handle_tool_call_delta(Some("w-1"), 0, Some("write_file"), None, &mut sb);
+        for _ in 0..600 {
+            tracker.handle_tool_call_delta(None, 0, None, Some(&"x".repeat(1024)), &mut sb);
+        }
+
+        let streaming = tracker.streaming_tools.get(&0).expect("still streaming");
+        assert!(
+            streaming.args.len() <= ARG_PREVIEW_CAP,
+            "the head is bounded, not the whole body: {}",
+            streaming.args.len()
+        );
+        assert_eq!(streaming.args_bytes, 600 * 1024);
+        let summary = &streaming_block_at(&sb, 0).summary;
+        assert!(
+            summary.ends_with("600.0 KB"),
+            "the size is what still moves: {summary}"
+        );
+    }
+    /// A fragment can split a multi-byte character at the cap boundary.
+    #[test]
+    fn the_cap_never_splits_a_character() {
+        let mut sb = ScrollbackState::new();
+        let mut tracker = AcpUpdateTracker::new();
+        tracker.handle_tool_call_delta(Some("w-1"), 0, Some("write_file"), None, &mut sb);
+        // Fill the head to one byte short, then offer a 3-byte character.
+        let fill = "a".repeat(ARG_PREVIEW_CAP - 1);
+        tracker.handle_tool_call_delta(None, 0, None, Some(&fill), &mut sb);
+        tracker.handle_tool_call_delta(None, 0, None, Some("한글"), &mut sb);
+
+        let streaming = tracker.streaming_tools.get(&0).expect("still streaming");
+        assert_eq!(
+            streaming.args.len(),
+            ARG_PREVIEW_CAP - 1,
+            "a character that does not fit is left out whole"
+        );
+        assert_eq!(streaming.args_bytes, ARG_PREVIEW_CAP - 1 + "한글".len());
+    }
     #[test]
     fn streaming_agent_message() {
         let mut sb = ScrollbackState::new();
