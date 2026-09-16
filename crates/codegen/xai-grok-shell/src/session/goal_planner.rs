@@ -1363,6 +1363,16 @@ mod tests {
         assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("exact signatures"));
     }
 
+    /// A verification step checks what the objective asked for. It never
+    /// widens the work, which is how a check became an unrequested action.
+    #[test]
+    fn planner_prompt_keeps_verification_inside_the_objective() {
+        assert!(
+            GOAL_PLANNER_PROMPT_TEMPLATE.contains("Verification checks the work. It never adds to it"),
+            "a check that acts beyond the objective is new scope, not verification"
+        );
+    }
+
     /// Pin the gating-vs-best-effort split: a small gating set decides pass/fail
     /// and best-effort `evidence` steps must not deny completion on their own.
     #[test]

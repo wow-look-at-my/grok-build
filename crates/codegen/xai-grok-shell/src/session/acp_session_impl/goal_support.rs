@@ -1271,10 +1271,9 @@ impl SessionActor {
                         }
                     }
                 }
-                // A cancel is terminal: the user asked for the planner to
-                // stop, so spawning another one is doing the opposite of what
-                // was asked, onto a session whose spawns the same Stop just
-                // latched shut.
+                // A cancel is terminal. Spawning another planner does the
+                // opposite of what the Stop requested, onto a session whose
+                // spawns that same Stop just latched shut.
                 crate::session::goal_planner::GoalPlannerOutcome::Interrupted => {
                     let _ = self
                         .auto_pause_goal_if_matches_with_message(
@@ -1985,5 +1984,31 @@ impl SessionActor {
                 xai_grok_tools::implementations::grok_build::task::types::GoalLoopActive(active),
             )
             .await;
+    }
+}
+
+#[cfg(test)]
+mod verification_scope_tests {
+    use super::*;
+
+    fn names() -> GoalToolNames {
+        GoalToolNames {
+            goal: "x.ai/goal".to_string(),
+            task: "task".to_string(),
+            todo: "todo_write".to_string(),
+        }
+    }
+
+    /// The plan block tells the implementer to run the verification plan. It
+    /// has to say in the same breath that running it is not a licence to do
+    /// anything the objective did not ask for.
+    #[test]
+    fn the_plan_block_keeps_verification_inside_the_objective() {
+        let block = render_goal_plan_block(std::path::Path::new("/tmp/plan.md"), &names());
+        assert!(
+            block.contains("Checking is not doing"),
+            "running the verification plan must not widen the work: {block}"
+        );
+        assert!(!block.contains("{PLAN_PATH}"), "{block}");
     }
 }

@@ -180,7 +180,11 @@ Contradictions`.
 
 **Verification plan** — the shared procedure the implementer and the verifiers
 both follow, so all judge by the SAME observable bar; cover every criterion.
-Tag each step `gating` (decides pass/fail) or `evidence` (best-effort
+Verification checks the work. It never adds to it: a step that acts on
+something OBJECTIVE did not put in scope is new scope, not a check. Prefer
+reading what the work already produced — files, logs, hashes, build output,
+source — over operating anything. Tag each step `gating` (decides pass/fail)
+or `evidence` (best-effort
 corroboration whose absence alone, once the gating steps and honest unit checks
 hold, must NOT deny completion). Each step gives the **action** (run the tests,
 exercise the entry point, read the artifact) and the
