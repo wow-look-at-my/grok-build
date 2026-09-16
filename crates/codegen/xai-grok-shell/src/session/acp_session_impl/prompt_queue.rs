@@ -238,6 +238,11 @@ impl SessionActor {
             .map(|m| m.kind.clone())
             .unwrap_or_else(|| "synthetic".to_string());
         let log_owner = client_identifier.clone().unwrap_or_default();
+        // A command line means something only as the LEADING token of its own
+        // turn (`resolve`), so it must never be steered into another turn as
+        // text — see the goal merge below.
+        let text_is_command =
+            Self::row_text_is_command(&Self::queue_text_from_blocks(&prompt_blocks));
         let mut item = InputItem {
             prompt_id,
             prompt_blocks,
@@ -277,7 +282,8 @@ impl SessionActor {
         let merge_into_goal = send_now
             && turn_running
             && goal_active
-            && Self::extract_bash_command(&item.prompt_blocks).is_none();
+            && Self::extract_bash_command(&item.prompt_blocks).is_none()
+            && !text_is_command;
         if merge_into_goal {
             self.enqueue_prompt_as_planner_context(&item);
             self.enqueue_prompt_as_interjection(
@@ -727,9 +733,13 @@ impl SessionActor {
             if let Some(new_text) = new_text.filter(|t| !t.trim().is_empty()) {
                 Self::apply_queued_prompt_edit(&mut item, new_text.to_string(), owner);
             }
+            // A command row is promoted instead of steered: `resolve` reads only
+            // a prompt's leading token, so a `/cmd args` folded into the goal
+            // turn would reach the model as literal prose.
             let merge_into_goal = turn_running
                 && goal_active
-                && Self::extract_bash_command(&item.prompt_blocks).is_none();
+                && Self::extract_bash_command(&item.prompt_blocks).is_none()
+                && !Self::row_text_is_command(&Self::queue_text_from_blocks(&item.prompt_blocks));
             if merge_into_goal {
                 self.enqueue_prompt_as_planner_context(&item);
                 self.enqueue_prompt_as_interjection(
@@ -981,6 +991,18 @@ impl SessionActor {
             .as_ref()
             .map(|m| m.text.as_str())
             .unwrap_or("");
+        let text = if text.is_empty() {
+            // Fall back so empty meta still participates when blocks have text.
+            item.prompt_blocks
+                .iter()
+                .find_map(|b| match b {
+                    acp::ContentBlock::Text(t) if !t.text.is_empty() => Some(t.text.as_str()),
+                    _ => None,
+                })
+                .unwrap_or("")
+        } else {
+            text
+        };
         xai_prompt_queue::CombineGate {
             id: item.prompt_id.as_str(),
             // A row with its own override can't merge into another turn (that would drop its bound).
@@ -992,19 +1014,20 @@ impl SessionActor {
             is_expanded_skill,
             is_bash,
             has_images,
-            text: if text.is_empty() {
-                // Fall back so empty meta still participates when blocks have text.
-                item.prompt_blocks
-                    .iter()
-                    .find_map(|b| match b {
-                        acp::ContentBlock::Text(t) if !t.text.is_empty() => Some(t.text.as_str()),
-                        _ => None,
-                    })
-                    .unwrap_or("")
-            } else {
-                text
-            },
+            text,
         }
+    }
+
+    /// Whether a queued row's display text is a command line.
+    ///
+    /// Thin wrapper over [`xai_prompt_queue::is_slash_invocation`] — the one
+    /// definition the pager reads too — so every shell-side gate asks the same
+    /// question. Such a row must run as its own turn: `resolve` reads a prompt's
+    /// leading token, and the interjection drain expands skills but resolves no
+    /// builtin, so steering or merging it would hand the model the literal
+    /// `/cmd args` and the command would never run.
+    pub(super) fn row_text_is_command(text: &str) -> bool {
+        xai_prompt_queue::is_slash_invocation(text)
     }
 
     fn has_display_text(t: &acp::TextContent) -> bool {

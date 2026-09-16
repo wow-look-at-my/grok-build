@@ -144,6 +144,64 @@ async fn goal_send_now_steers_the_live_planner_without_restarting_it() {
         .await;
 }
 
+/// The goal exception for the send-now of an ALREADY-QUEUED row: a command row
+/// is promoted to run as its own turn. Steering it would hand the model the
+/// literal `/cmd args` (only a prompt's leading token is resolved), so the
+/// planner must not see it and the row must keep its turn.
+#[tokio::test]
+async fn goal_queued_send_now_promotes_a_command_row_instead_of_steering_it() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (actor, _rx) = build_actor().await;
+            {
+                let mut state = actor.state.lock().await;
+                state.pending_inputs.push_back(user_item("running", "A"));
+                state.running_task = Some(running_task_stub("running"));
+                state.front_message_committed = true;
+                state
+                    .pending_inputs
+                    .push_back(slash_command_item("cmd1", "/pr-cleanup fix the branch"));
+            }
+            *actor
+                .current_prompt_id
+                .lock()
+                .expect("current_prompt_id mutex poisoned") = Some("running".into());
+            actor.goal_tracker.lock().create_goal(
+                "goal".into(),
+                "objective".into(),
+                None,
+                0,
+                "2026-01-01T00:00:00Z".into(),
+                None,
+            );
+
+            let cancel = actor
+                .handle_interject_queued_prompt("cmd1", 0, None, None)
+                .await;
+            assert!(!cancel, "a goal turn is never cancelled for a send-now");
+
+            assert!(
+                actor.pending_interjections.is_empty(),
+                "a command line is never steered into the goal turn as text"
+            );
+            let state = actor.state.lock().await;
+            assert!(
+                state
+                    .pending_inputs
+                    .iter()
+                    .any(|item| item.prompt_id == "cmd1"),
+                "the command row keeps its own turn: {:?}",
+                state
+                    .pending_inputs
+                    .iter()
+                    .map(|i| i.prompt_id.as_str())
+                    .collect::<Vec<_>>()
+            );
+        })
+        .await;
+}
+
 /// Draining an image-bearing interjection injects structured
 /// `ContentPart::Image` parts (base64 data URL) on the synthetic user
 /// message, preserving `SyntheticReason::Interjection`.
@@ -812,6 +870,97 @@ async fn a_row_arriving_mid_turn_reaches_the_asap_buffer_unprompted() {
                 vec!["running"],
                 "and it no longer waits to run as its own turn afterwards"
             );
+        })
+        .await;
+}
+
+/// A queued slash command is NOT folded into the running turn: the drain
+/// expands skills but resolves no builtin, so `/cmd args` would reach the model
+/// as literal user text (and `/plan <description>` would swallow the prompt of
+/// the turn its mode switch was requested for). It stays queued and runs as its
+/// own turn, where `resolve` executes it. Rows behind it are unaffected.
+#[tokio::test]
+async fn harvest_leaves_a_queued_slash_command_to_its_own_turn() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (actor, _rx) = build_actor().await;
+            {
+                let mut state = actor.state.lock().await;
+                state.pending_inputs.push_back(user_item("running", "A"));
+                state.running_task = Some(running_task_stub("running"));
+                state
+                    .pending_inputs
+                    .push_back(slash_command_item("cmd1", "/compact keep the auth notes"));
+                state.pending_inputs.push_back(user_item("plain1", "A"));
+            }
+            *actor.queued_at_turn_start.borrow_mut() = ["running".to_string()].into();
+
+            assert!(actor.harvest_queued_prompts_into_interjections(false).await);
+
+            {
+                let state = actor.state.lock().await;
+                assert_eq!(
+                    state
+                        .pending_inputs
+                        .iter()
+                        .map(|i| i.prompt_id.as_str())
+                        .collect::<Vec<_>>(),
+                    vec!["running", "cmd1"],
+                    "the command keeps its own turn; the plain row is delivered"
+                );
+            }
+            let buffered: Vec<String> = actor
+                .pending_interjections
+                .drain_all()
+                .into_iter()
+                .map(|entry| entry.text)
+                .collect();
+            assert_eq!(
+                buffered,
+                vec!["text for plain1"],
+                "the command text never enters the ASAP buffer"
+            );
+        })
+        .await;
+}
+
+/// The same rule under the forced ("deliver everything now") harvest: with only
+/// a command queued there is nothing to deliver, so the caller must not cancel
+/// the in-flight stream for it.
+#[tokio::test]
+async fn forced_harvest_delivers_nothing_for_a_queued_slash_command() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (actor, _rx) = build_actor().await;
+            {
+                let mut state = actor.state.lock().await;
+                state.pending_inputs.push_back(user_item("running", "A"));
+                state.running_task = Some(running_task_stub("running"));
+                state
+                    .pending_inputs
+                    .push_back(slash_command_item("cmd1", "/pr-cleanup fix the branch"));
+            }
+            *actor.queued_at_turn_start.borrow_mut() =
+                ["running".to_string(), "cmd1".to_string()].into();
+
+            assert!(
+                !actor.harvest_queued_prompts_into_interjections(true).await,
+                "a command row is not deliverable, so nothing is harvested"
+            );
+
+            let state = actor.state.lock().await;
+            assert_eq!(
+                state
+                    .pending_inputs
+                    .iter()
+                    .map(|i| i.prompt_id.as_str())
+                    .collect::<Vec<_>>(),
+                vec!["running", "cmd1"],
+                "the command is still queued to run as its own turn"
+            );
+            assert!(actor.pending_interjections.is_empty());
         })
         .await;
 }
