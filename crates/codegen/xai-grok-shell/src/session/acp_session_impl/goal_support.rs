@@ -2011,3 +2011,77 @@ impl SessionActor {
             .await;
     }
 }
+
+#[cfg(test)]
+mod reach_boundary_tests {
+    use super::*;
+
+    fn names() -> GoalToolNames {
+        GoalToolNames {
+            goal: "x.ai/goal".to_string(),
+            task: "task".to_string(),
+            todo: "todo_write".to_string(),
+        }
+    }
+
+    /// The completeness rule tells the implementer to leave the user no
+    /// manual steps. Without this boundary beside it, a check the user never
+    /// authorized reads as work still owed.
+    #[test]
+    fn the_goal_rules_carry_the_authorization_boundary() {
+        let rules = crate::session::acp_session::GOAL_RULES_TEMPLATE;
+        assert!(rules.contains("AUTHORIZATION:"), "{rules}");
+        assert!(
+            rules.contains("never from the plan"),
+            "authority traces to the user's message, not the plan"
+        );
+        assert!(
+            rules.contains("Absence of a ban is not permission"),
+            "{rules}"
+        );
+        assert!(
+            rules.contains("handing back that command line IS delivery"),
+            "a hand-back must not read as an unfinished goal"
+        );
+        assert!(
+            rules.contains("NEVER CLOSE WHAT SOMEBODY IS READING"),
+            "a state-closing verb acts on what a person may be using now"
+        );
+        assert!(
+            rules.contains("Re-sending flips it back off"),
+            "a toggle re-sent to make sure turns the thing off"
+        );
+    }
+
+    /// The rendered discipline block carries the same boundary, so the
+    /// per-turn "do not ask permission" rule cannot reach past the workspace.
+    #[test]
+    fn the_discipline_block_stops_at_the_workspace_edge() {
+        let block = render_goal_task_discipline(&names());
+        assert!(
+            block.contains("That rule stops at the workspace edge"),
+            "{block}"
+        );
+        assert!(block.contains("hand back the exact command line"), "{block}");
+        assert!(
+            block.contains("not \"easy work left undone\""),
+            "the no-stopping rule must not push the unauthorized action"
+        );
+        assert!(!block.contains("{TODO_TOOL}"), "{block}");
+    }
+
+    /// The plan block tells the implementer which steps it may run itself,
+    /// and what to do with the rest.
+    #[test]
+    fn the_plan_block_splits_the_steps_by_reach() {
+        let block = render_goal_plan_block(std::path::Path::new("/tmp/plan.md"), &names());
+        assert!(block.contains("[artifact]"), "{block}");
+        assert!(block.contains("[live-system]"), "{block}");
+        assert!(
+            block.contains("A step with no label is treated as `[live-system]`"),
+            "an unlabelled step must fail closed, not open"
+        );
+        assert!(block.contains("awaiting-user"), "{block}");
+        assert!(!block.contains("{PLAN_PATH}"), "{block}");
+    }
+}
