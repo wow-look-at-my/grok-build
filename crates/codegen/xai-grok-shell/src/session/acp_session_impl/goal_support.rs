@@ -205,7 +205,7 @@ pub(super) enum GoalResumeOutcome {
     Message(String),
 }
 
-/// Goal-only `<task_completion_discipline>` (Rules 1–4); `{TODO_TOOL}` from [`GoalToolNames`].
+/// Goal-only `<task_completion_discipline>` (Rules 1–5); `{TODO_TOOL}` from [`GoalToolNames`].
 /// Template must end with `\n` so `{DISCIPLINE_BLOCK}TRACKING:` glues correctly.
 pub(super) fn render_goal_task_discipline(names: &GoalToolNames) -> String {
     GOAL_TASK_DISCIPLINE_TEMPLATE.replace("{TODO_TOOL}", &names.todo)
@@ -1129,6 +1129,9 @@ impl SessionActor {
         // for every message the session has left.
         self.open_subagent_spawn_admission();
         let mut attempt = 0u32;
+        // Corrections from a rejected attempt, delivered as the next
+        // attempt's CONTEXT. Empty on the first attempt.
+        let mut plan_feedback = String::new();
         loop {
             // Exhausting the retry cap pauses the goal with the canonical
             // message (like any other planner failure), never leaving it Active
@@ -1152,7 +1155,12 @@ impl SessionActor {
             attempt += 1;
 
             let (goal_id, plan_file, attempt_file, outcome) = match self
-                .run_goal_planner_attempt(&objective, run_goal_id.as_deref(), attempt)
+                .run_goal_planner_attempt(
+                    &objective,
+                    run_goal_id.as_deref(),
+                    attempt,
+                    &plan_feedback,
+                )
                 .await
             {
                 PlannerAttemptStep::Stop => break,
@@ -1271,10 +1279,23 @@ impl SessionActor {
                         }
                     }
                 }
-                // A cancel is terminal: the user asked for the planner to
-                // stop, so spawning another one is doing the opposite of what
-                // was asked, onto a session whose spawns the same Stop just
-                // latched shut.
+                // A plan that claims authority the objective withheld is
+                // replanned, not published: the corrections go back as the
+                // next attempt's context. The staged attempt file drops
+                // here, so nothing partial survives. Exhausting the cap
+                // pauses the goal on the ordinary planner-failure path.
+                crate::session::goal_planner::GoalPlannerOutcome::PlanRejected {
+                    violations,
+                    ..
+                } => {
+                    plan_feedback =
+                        crate::session::goal_plan_validation::rejection_feedback(&violations);
+                    drop(attempt_file);
+                    continue;
+                }
+                // A cancel is terminal. Spawning another planner does the
+                // opposite of what the Stop requested, onto a session whose
+                // spawns that same Stop just latched shut.
                 crate::session::goal_planner::GoalPlannerOutcome::Interrupted => {
                     let _ = self
                         .auto_pause_goal_if_matches_with_message(
@@ -1468,6 +1489,7 @@ impl SessionActor {
         objective: &str,
         run_goal_id: Option<&str>,
         attempt: u32,
+        plan_feedback: &str,
     ) -> PlannerAttemptStep {
         if !self.goal_planner_enabled {
             return PlannerAttemptStep::Stop;
@@ -1537,8 +1559,10 @@ impl SessionActor {
             .await
             .map(|c| c.model)
             .unwrap_or_default();
-        // Fork owns history; fail-open stays OBJECTIVE-only (no last-assistant CONTEXT).
-        let context = String::new();
+        // Fork owns history; fail-open stays OBJECTIVE-only (no last-assistant
+        // CONTEXT). A rejected attempt's corrections are the one exception:
+        // they ride here so the next attempt reads what it has to fix.
+        let context = plan_feedback.to_owned();
 
         let task_tool_name = self.resolve_goal_tool_names().await.task;
         // Tag the planner with the goal-creation turn's prompt id so its

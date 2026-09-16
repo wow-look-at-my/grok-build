@@ -271,6 +271,13 @@ pub(crate) enum GoalPlannerOutcome {
     /// summarizer spawners pass a fresh, never-cancelled token, so their
     /// equivalent cancel arms are unreachable in practice.
     Interrupted,
+    /// The plan was written but claims authority the OBJECTIVE withheld,
+    /// or leaves a verification step's reach undeclared. The caller feeds
+    /// `violations` back as the next attempt's CONTEXT.
+    PlanRejected {
+        violations: Vec<crate::session::goal_plan_validation::PlanViolation>,
+        latency_ms: u64,
+    },
     FailClosed {
         reason: GoalPlannerFailClosedReason,
         latency_ms: u64,
@@ -617,6 +624,34 @@ pub(crate) async fn run_goal_planner(
         );
     }
 
+    // A plan cannot grant a permission the user never gave. A verification
+    // step that reaches off this machine without the user's own words is
+    // rejected here, before it reaches the implementer as an instruction.
+    let violations = match tokio::fs::read_to_string(inputs.plan_file).await {
+        Ok(body) => {
+            crate::session::goal_plan_validation::validate_plan(&body, inputs.objective)
+        }
+        Err(err) => {
+            tracing::warn!(
+                plan_file = %plan_file_str,
+                error = %err,
+                "goal planner: plan unreadable after write; skipping reach validation",
+            );
+            Vec::new()
+        }
+    };
+    if !violations.is_empty() {
+        tracing::info!(
+            plan_file = %plan_file_str,
+            violations = violations.len(),
+            "goal planner: plan claims unauthorized reach; rejecting",
+        );
+        return GoalPlannerOutcome::PlanRejected {
+            violations,
+            latency_ms: started.elapsed().as_millis() as u64,
+        };
+    }
+
     let latency_ms = started.elapsed().as_millis() as u64;
     emit_event(Event::GoalPlannerCompleted {
         attempt: inputs.attempt,
@@ -955,6 +990,81 @@ mod tests {
         ));
         std::fs::create_dir_all(&tmp).unwrap();
         tmp.join("plan.md")
+    }
+
+    /// A verification step that reaches a device the objective never named is
+    /// rejected before the plan is published, and the corrections name it.
+    #[tokio::test]
+    async fn a_plan_reaching_an_unauthorized_device_is_rejected() {
+        let plan_file = tmp_plan_file("unauthorized-reach");
+        let spawner = Arc::new(MockSpawner::ok_writes(
+            &plan_file,
+            b"# Plan: deploy\n\n## Goal kind\n\ncode-change\n\n\
+              ## Verification plan\n\
+              1. [artifact] gating: hash the staged and deployed binary\n\
+              2. [live-system] gating: enable the overlay on the device\n",
+        ));
+        let (log, emit) = collect_events();
+
+        let outcome = run_goal_planner(
+            spawner,
+            GoalPlannerInputs {
+                objective: "build a test package and deploy it",
+                context: "",
+                plan_file: &plan_file,
+                attempt: 1,
+                model_id: "grok-test",
+                tool_names: &RoleToolNames::inherit_defaults(),
+                inherit_tool_names: &RoleToolNames::inherit_defaults(),
+            },
+            &emit,
+        )
+        .await;
+
+        let GoalPlannerOutcome::PlanRejected { violations, .. } = outcome else {
+            panic!("an unauthorized live-system step must be rejected: {outcome:?}");
+        };
+        assert_eq!(violations.len(), 1, "{violations:?}");
+        assert_eq!(violations[0].step_index, 2);
+        assert!(
+            log.lock().unwrap().iter().all(|e| e != "completed"),
+            "a rejected plan must not report completion",
+        );
+        let _ = std::fs::remove_file(&plan_file);
+    }
+
+    /// The same plan passes once the objective's own words authorize the step.
+    #[tokio::test]
+    async fn a_plan_quoting_the_objective_is_published() {
+        let plan_file = tmp_plan_file("authorized-reach");
+        let spawner = Arc::new(MockSpawner::ok_writes(
+            &plan_file,
+            b"# Plan: deploy\n\n## Goal kind\n\ncode-change\n\n\
+              ## Verification plan\n\
+              1. [live-system] gating: \"restart the daemon\" and read the new pid\n",
+        ));
+        let (_log, emit) = collect_events();
+
+        let outcome = run_goal_planner(
+            spawner,
+            GoalPlannerInputs {
+                objective: "deploy the build, then restart the daemon",
+                context: "",
+                plan_file: &plan_file,
+                attempt: 1,
+                model_id: "grok-test",
+                tool_names: &RoleToolNames::inherit_defaults(),
+                inherit_tool_names: &RoleToolNames::inherit_defaults(),
+            },
+            &emit,
+        )
+        .await;
+
+        assert!(
+            matches!(outcome, GoalPlannerOutcome::Planned { .. }),
+            "{outcome:?}",
+        );
+        let _ = std::fs::remove_file(&plan_file);
     }
 
     #[tokio::test]
@@ -1361,6 +1471,50 @@ mod tests {
         assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("OUTCOMES, not architecture"));
         assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("MUST NOT prescribe the module/file layout"));
         assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("exact signatures"));
+    }
+
+    /// Pin the reach contract: every verification step declares whether it
+    /// stays on this machine, and a step that leaves it needs the user's own
+    /// words. The plan itself grants nothing.
+    #[test]
+    fn planner_prompt_pins_verification_reach_labels() {
+        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("## Verification reach"));
+        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("[artifact]"));
+        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("[live-system]"));
+        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("MUST open with a reach label"));
+        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("The plan is DERIVED knowledge"));
+        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("absence of a ban is NOT permission"));
+        assert!(
+            GOAL_PLANNER_PROMPT_TEMPLATE.contains("Quote the span of\n   OBJECTIVE"),
+            "a live-system step must carry the user's own authorizing words"
+        );
+        assert!(
+            GOAL_PLANNER_PROMPT_TEMPLATE.contains("hand-back:"),
+            "an unauthorized check is handed back, never dropped and never smuggled in"
+        );
+        assert!(
+            GOAL_PLANNER_PROMPT_TEMPLATE.contains("awaiting-user"),
+            "a handed-back criterion must not block completion"
+        );
+        assert!(
+            GOAL_PLANNER_PROMPT_TEMPLATE.contains("Prefer `[artifact]` by construction"),
+            "a claim provable from files, logs or hashes must not become a device touch"
+        );
+        assert!(
+            GOAL_PLANNER_PROMPT_TEMPLATE.contains("Re-sending flips it back"),
+            "a toggle re-sent to make sure turns the thing off"
+        );
+    }
+
+    /// The prompt's output contract must SHOW the label, not only describe it:
+    /// the sample step is what a small model copies.
+    #[test]
+    fn planner_prompt_sample_step_carries_a_reach_label() {
+        assert!(
+            GOAL_PLANNER_PROMPT_TEMPLATE
+                .contains("1. <[artifact]|[live-system]> <gating|evidence:"),
+            "the `## Verification plan` sample must model the reach label"
+        );
     }
 
     /// Pin the gating-vs-best-effort split: a small gating set decides pass/fail

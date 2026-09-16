@@ -370,7 +370,7 @@ fn build_laziness_nudge_quotes_rule_by_name_per_category() {
     );
     assert!(
         n.contains("A plan/todo list of the remaining phases"),
-        "Rule 3 must fall back to plan/todo when todo_tool is None: {n}"
+        "Rule 4 must fall back to plan/todo when todo_tool is None: {n}"
     );
     assert!(n.contains("ev3b"));
 

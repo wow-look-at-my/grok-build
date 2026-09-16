@@ -836,13 +836,13 @@ pub(crate) fn build_laziness_nudge(
         L::StalledPermissionAsking => {
             "Per <task_completion_discipline> Rule 2, don't ask permission to continue a task \
              that is in flight. Resume work in your next turn — only pause for genuine \
-             ambiguity that changes the approach."
+             ambiguity that changes the approach, or where Rule 3 withholds the authority."
         }
         L::StalledNoTodosButTaskInFlight => {
             let tool = todo_tool.unwrap_or("plan/todo");
             return format!(
                 "Idle-stall detector flagged this session: {evidence}\n\n\
-                 Per <task_completion_discipline> Rule 3, a multi-step task is clearly in flight \
+                 Per <task_completion_discipline> Rule 4, a multi-step task is clearly in flight \
                  — make the next concrete tool call now. A {tool} list of the remaining phases \
                  can help you keep track, but the priority is to resume the work this turn."
             );

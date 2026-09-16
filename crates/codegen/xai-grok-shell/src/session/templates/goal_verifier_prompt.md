@@ -117,11 +117,25 @@ your only writes are `{DETAILS_FILE}` and `{VERDICT_FILE}`.{TOOLSET_TOOLS}
    written prose, so an empty diff is fine — judge content against the artifact on
    disk or FINAL_RESPONSE, not a diff hunk. Apply the same leniency when PLAN_FILE
    is `(unavailable)` and OBJECTIVE plainly asks for understanding / external info.
-2. Honesty check: a FINAL_RESPONSE claim of work on a file absent from
+2. Authorization check — overreach is a DEFECT, never a pass. The plan is
+   derived knowledge and grants no permission OBJECTIVE withheld. Each
+   `## Verification plan` step carries a reach label. `[artifact]` reads files,
+   logs, hashes, build output and source on this machine. `[live-system]`
+   touches a device, vehicle, phone, console, remote host, production or staging
+   service, an open browser session, or a shared resource. The implementer may
+   have satisfied a criterion by taking a `[live-system]` action OBJECTIVE never
+   named. Refute that with a `bug` finding. Good evidence does not excuse it. An
+   action that closed or reset state somebody was using is the worst case of it.
+   Conversely, a `[live-system]` step the implementer HANDED BACK is
+   `awaiting-user`. It handed back by printing the exact command line and saying
+   the action is the user's call. That criterion is SATISFIED for your purposes.
+   It is never grounds to refute, and never a gap to re-serve. Do not ask for
+   the action to be performed. Do not raise it again on a later round.
+3. Honesty check: a FINAL_RESPONSE claim of work on a file absent from
    CHANGED_FILES is fabricated — refute.
-3. TODO/FIXME/`unimplemented!()`/`todo!()`, skipped tests, or
+4. TODO/FIXME/`unimplemented!()`/`todo!()`, skipped tests, or
    `#[ignore]`/`@pytest.mark.skip` on tests this goal added — refute.
-4. Missing tests alone are NOT grounds to refute once you have confirmed the
+5. Missing tests alone are NOT grounds to refute once you have confirmed the
    criteria hold by auditing the implementer's tests / captured evidence (running
    the code only as a cheap spot-check) and found no defect. Likewise, when the
    suite does drive the real shipped functions and the plan's observations hold,
@@ -139,15 +153,15 @@ your only writes are `{DETAILS_FILE}` and `{VERDICT_FILE}`.{TOOLSET_TOOLS}
    `blocking: "unverifiable"` for when there is no honest evidence path at all.
    Caveat: when the objective IS "add tests" /
    "increase coverage", their absence is an unmet criterion — a normal refute.
-5. If CHANGES_FILE is `(unavailable)`, investigate yourself (`git log/status/
-   diff`, read files) and apply rules 1-4. No evidence at all ⇒ refute (rule 6).
-6. Genuinely ambiguous evidence (with CHANGES_FILE available) ⇒ refute.
-7. Where the `## Verification plan` requires captured evidence, the IMPLEMENTER
+6. If CHANGES_FILE is `(unavailable)`, investigate yourself (`git log/status/
+   diff`, read files) and apply rules 1-5. No evidence at all ⇒ refute (rule 7).
+7. Genuinely ambiguous evidence (with CHANGES_FILE available) ⇒ refute.
+8. Where the `## Verification plan` requires captured evidence, the IMPLEMENTER
    must have produced it: confirm it exists in `{IMPLEMENTER_SCRATCH}` / the repo
    and shows the listed observations (read it; you can view images). If absent or
    insufficient, refute and request it — do NOT generate it yourself.
    Generated/mocked artifacts are NOT evidence.
-8. Classify each refute via `blocking`: `"none"` (ordinary model-fixable),
+9. Classify each refute via `blocking`: `"none"` (ordinary model-fixable),
    `"contradiction"` (objective/plan internally precludes itself), or
    `"unverifiable"` (evidence infeasible in THIS environment). The latter two
    signal the goal needs a user decision, not a retry.
@@ -175,7 +189,7 @@ Write this object (fixed schema) with your file-write tool:
 - `refuted` (bool): `true` if you found grounds; `false` only after thorough investigation.
 - `evidence` (string): a one-line summary citation; for `code-change`, FINAL_RESPONSE prose is NOT evidence.
 - `confidence` (string): `"high"` | `"medium"` | `"low"`.
-- `blocking` (string, default `"none"`): `"none"` | `"contradiction"` | `"unverifiable"` (rule 8).
+- `blocking` (string, default `"none"`): `"none"` | `"contradiction"` | `"unverifiable"` (rule 9).
 - `details_md` (string, optional): Markdown writeup; if omitted, the aggregator
   falls back to the details file below.
 

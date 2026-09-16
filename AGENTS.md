@@ -98,6 +98,13 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - `Plan: <path>` still renders on every plan-aware reminder — only the manual seed-todos directive is gone, replaced by a statement that the steps are already on the list.
 - A fail-closed planner publishes no plan, so nothing is seeded. Red/unseeded is the honest state there.
 
+## Goal verification-reach notes
+
+- The plan is derived knowledge and grants nothing. Every `## Verification plan` step opens with a reach label: `[artifact]` reads files, logs, hashes, build output and source on this machine, `[live-system]` touches anything else. A `[live-system]` step is admissible only when the step quotes the OBJECTIVE span that names the action. Without that quote the implementer reads an invented step as a permit. It then performs it, which is how a plan step became authority to act on a machine nobody offered.
+- `goal_plan_validation.rs` is the gate and it is pure. `run_goal_planner` calls it on the written plan before publishing. A violation returns `GoalPlannerOutcome::PlanRejected`, not a fail-closed pause. The corrections ride back as the next attempt's CONTEXT, capped by `GOAL_PLANNER_MAX_ATTEMPTS`. Cap exhaustion pauses on the ordinary planner-failure path.
+- The label is the planner's own claim, so `OFF_MACHINE_TOKENS` is the backstop under it. A step that names a transport or a remote control surface while wearing `[artifact]` is rejected too. A one-word quote authorizes nothing — it matches any objective that happens to use the word.
+- A check the user never authorized is handed back, never dropped and never smuggled in. The implementer prints the exact command line. The criterion is then `awaiting-user`, which does not block completion and is not a gap the verifier re-serves. Without that arm the completeness rule ("no manual steps left for the user") converts a legitimate hand-back into an unauthorized action, every round.
+
 ## `/todo` capture feature notes
 
 - `/todo <request>` rides the `/btw` path, not the prompt queue: `Action::SendTodo` → `x.ai/todo` → `SessionCommand::TodoCapture`, spawned on the session's LocalSet (`session/acp_session_impl/todo_capture.rs`). The running turn is never interrupted. And the parent conversation is never mutated — the capture agent works from a snapshot of it.
