@@ -32,6 +32,15 @@ fail-fast = false
 # mutex, which works under `cargo test` (one process, many threads) and NOT
 # under nextest, which gives every test its own process. This group restores
 # that guarantee — without it the mutex is a no-op and the cells go flaky.
+# A 25 Mpx compress in a debug build is slow by itself. It takes 33s on a
+# 4-core box with nothing else running. The CI runner has 2 physical cores
+# and runs the whole workspace at once, so the 60s cap above has no margin
+# and kills the test mid-compress. The test is not hung. It gets its own
+# deadline instead of a cap that measures the runner's load.
+[[profile.ci.overrides]]
+filter = 'test(compress_camera_sized_photo_succeeds)'
+slow-timeout = { period = "300s", terminate-after = 1 }
+
 [test-groups]
 scroll-matrix = { max-threads = 1 }
 

@@ -125,7 +125,7 @@ impl ChatStateActor {
         }
 
         // Step 4: Assemble request
-        ConversationRequest {
+        let mut request = ConversationRequest {
             items,
             tools: tool_definitions,
             hosted_tools: vec![],
@@ -146,7 +146,29 @@ impl ChatStateActor {
             reasoning_effort: self.state.sampling_config.reasoning_effort,
             reasoning_mandatory: false,
             json_schema: None,
+        };
+
+        // The output budget shares the context window with the prompt, so a
+        // conversation that is under the window on its own can still put the
+        // REQUEST over it: the provider adds `max_output_tokens` to the input
+        // and rejects the sum. The prompt size here is the tracked total — the
+        // provider's own reported usage for the last response plus the
+        // estimated delta since — which is the closest number this process
+        // has to what the server will count.
+        let prompt_tokens = self.state.total_tokens + self.state.estimated_tokens_since_model;
+        let usable_window = xai_token_estimation::window_less_estimate_slack(
+            self.state.sampling_config.context_window.get(),
+        );
+        if let Some(clamp) = request.fit_output_budget(prompt_tokens, usable_window) {
+            tracing::warn!(
+                requested = clamp.requested,
+                applied = clamp.applied,
+                prompt_tokens = clamp.prompt_tokens,
+                usable_window = clamp.context_window,
+                "ChatState: output budget did not fit the context window; cut it to fit"
+            );
         }
+        request
     }
 }
 

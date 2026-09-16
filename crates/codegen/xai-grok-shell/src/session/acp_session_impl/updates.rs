@@ -221,9 +221,12 @@ impl SessionActor {
             SessionNotification::Xai(n) => {
                 self.log_outbound_xai_buffered(&n);
                 if matches!(n.update, XaiSessionUpdate::ResponseCompleted { .. }) {
-                    let _ = self.notifications.persistence_tx.send(PersistenceMsg::Update(
-                        crate::session::storage::SessionUpdate::Xai(Box::new((*n).clone())),
-                    ));
+                    let _ = self
+                        .notifications
+                        .persistence_tx
+                        .send(PersistenceMsg::Update(
+                            crate::session::storage::SessionUpdate::Xai(Box::new((*n).clone())),
+                        ));
                 }
                 if self
                     .notifications

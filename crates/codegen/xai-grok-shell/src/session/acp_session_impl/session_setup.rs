@@ -444,7 +444,8 @@ impl SessionActor {
                     );
                     let mut updated_config = current_config.clone();
                     updated_config.context_window = cw;
-                    self.chat_state_handle.update_sampling_config(updated_config);
+                    self.chat_state_handle
+                        .update_sampling_config(updated_config);
                 }
             } else {
                 tracing::debug!(

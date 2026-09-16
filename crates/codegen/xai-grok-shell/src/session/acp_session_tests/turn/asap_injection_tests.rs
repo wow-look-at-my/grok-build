@@ -70,10 +70,10 @@ async fn actor_with_mock_sampler(
     let bash_cfg = ToolConfig::from(&BashTool)
         .with_name("run_terminal_command")
         .with_param_rename("is_background", "background");
-    let task_output_cfg = ToolConfig::for_tool::<TaskOutputTool>()
-        .with_name("get_command_or_subagent_output");
-    let kill_task_cfg = ToolConfig::for_tool::<KillTaskTool>()
-        .with_name("kill_command_or_subagent");
+    let task_output_cfg =
+        ToolConfig::for_tool::<TaskOutputTool>().with_name("get_command_or_subagent_output");
+    let kill_task_cfg =
+        ToolConfig::for_tool::<KillTaskTool>().with_name("kill_command_or_subagent");
     let tools = vec![bash_cfg, task_output_cfg, kill_task_cfg];
 
     let sampling_cfg = xai_grok_sampler::SamplerConfig {
