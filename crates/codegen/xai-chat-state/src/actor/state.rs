@@ -40,42 +40,10 @@ pub fn estimate_tool_definitions_tokens(tds: &[xai_grok_sampling_types::ToolDefi
 /// Shared by [`estimate_conversation_tokens`] and [`estimate_messages_tokens`]
 /// so the per-variant arithmetic stays in one place.
 pub fn estimate_item_tokens(item: &ConversationItem) -> u64 {
-    use xai_grok_sampling_types::ContentPart;
-    match item {
-        ConversationItem::System(s) => xai_token_estimation::estimate_tokens(&s.content),
-        ConversationItem::User(u) => {
-            let mut bytes: usize = 0;
-            let mut images: u64 = 0;
-            for p in &u.content {
-                match p {
-                    ContentPart::Text { text } => bytes += text.len(),
-                    ContentPart::Image { .. } => images += 1,
-                }
-            }
-            (bytes as u64) / xai_token_estimation::BYTES_PER_TOKEN
-                + xai_token_estimation::estimate_image_tokens(images)
-        }
-        ConversationItem::Assistant(a) => {
-            let bytes = a.content.len()
-                + a.tool_calls
-                    .iter()
-                    .map(|tc| tc.arguments.len())
-                    .sum::<usize>();
-            (bytes as u64) / xai_token_estimation::BYTES_PER_TOKEN
-        }
-        ConversationItem::ToolResult(tr) => xai_token_estimation::estimate_tokens(&tr.content),
-        ConversationItem::BackendToolCall(b) => {
-            xai_token_estimation::estimate_tokens(&b.text_summary())
-        }
-        ConversationItem::Reasoning(r) => {
-            // Summary + content text follow the standard bytes-per-token
-            // estimate; encrypted blobs are base64 and don't survive
-            // tokenization 1:1, so estimate at len/4 as well.
-            let text_bytes = xai_grok_sampling_types::reasoning_item_text(r).len();
-            let enc_bytes = r.encrypted_content.as_deref().map(str::len).unwrap_or(0);
-            ((text_bytes + enc_bytes) as u64) / xai_token_estimation::BYTES_PER_TOKEN
-        }
-    }
+    // The arithmetic lives next to the item type, so the request builder that
+    // fits the output budget into the window counts the prompt the same way
+    // this actor's running total does.
+    xai_grok_sampling_types::estimate_item_tokens(item)
 }
 
 /// Estimate token footprint: text bytes / 4, images at the per-image

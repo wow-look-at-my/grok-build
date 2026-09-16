@@ -100,10 +100,9 @@ fn messages_mandatory_target_always_carries_a_non_disabled_effort() {
         let msgs = build_messages_request(&req);
         // Inspect the wire and top-level fields before consuming anything.
         let json = serde_json::to_value(&msgs).unwrap();
-        let oc = msgs
-            .output_config
-            .clone()
-            .unwrap_or_else(|| panic!("mandatory target with {requested:?} must carry output_config"));
+        let oc = msgs.output_config.clone().unwrap_or_else(|| {
+            panic!("mandatory target with {requested:?} must carry output_config")
+        });
         assert_eq!(
             oc.effort.as_deref(),
             Some("low"),

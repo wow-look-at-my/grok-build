@@ -66,10 +66,7 @@ pub enum TodoCaptureError {
     #[error(
         "the capture agent finished without adding a todo ({reason}). Transcript: {transcript}"
     )]
-    NothingAdded {
-        reason: String,
-        transcript: String,
-    },
+    NothingAdded { reason: String, transcript: String },
     #[error("adding the todo failed: {0}")]
     TodoWriteFailed(String),
 }
@@ -523,9 +520,8 @@ impl SessionActor {
                     // one last turn that can only call the todo tool.
                     items.push(write_only_retry_nudge(tag, &todo_tool, request));
                     refuse_reads = true;
-                    no_write_reason = format!(
-                        "ended after {MAX_MODEL_CALLS} turns without a `{todo_tool}` call"
-                    );
+                    no_write_reason =
+                        format!("ended after {MAX_MODEL_CALLS} turns without a `{todo_tool}` call");
                 } else {
                     break;
                 }
@@ -614,9 +610,8 @@ impl SessionActor {
             self.stream_capture_transcript(capture_id, &items, &mut streamed)
                 .await;
             if added.is_empty() && refused_only {
-                no_write_reason = format!(
-                    "tool calls were refused and `{todo_tool}` was never invoked"
-                );
+                no_write_reason =
+                    format!("tool calls were refused and `{todo_tool}` was never invoked");
             }
             // The append is the end of the job. Finish the batch that produced
             // it (a split across two calls in one batch is still one write),
@@ -658,9 +653,7 @@ impl SessionActor {
         // The list alone does not say who wrote an item, and the main agent
         // reads one it did not write as somebody else's suggestion. This is
         // the message that says the user assigned it.
-        self.deliver_reminder_to_main_agent(captured_todos_reminder(
-            urgent, &todo_tool, &added,
-        ));
+        self.deliver_reminder_to_main_agent(captured_todos_reminder(urgent, &todo_tool, &added));
         Ok(TodoCaptureOutcome { added, tools_used })
     }
 
@@ -791,7 +784,11 @@ impl SessionActor {
     /// itself would see. Falls back to reading the JSON directly, so a call
     /// the strict parser rejects (an extra field, a status the schema does not
     /// know) still contributes its content instead of being dropped.
-    async fn capture_todo_contents(&self, todo_tool: &str, args: &serde_json::Value) -> Vec<String> {
+    async fn capture_todo_contents(
+        &self,
+        todo_tool: &str,
+        args: &serde_json::Value,
+    ) -> Vec<String> {
         use xai_grok_tools::types::tool_io::ToolInput;
         let bridge = self.agent.borrow().tool_bridge().clone();
         if let Ok(ToolInput::TodoWrite(input)) = bridge.try_parse(todo_tool, args.clone()).await {
@@ -1046,7 +1043,12 @@ mod tests {
             CaptureAction::Read
         );
         assert!(matches!(
-            capture_action("read_file", Some(ToolKind::Read), TODO_WRITE, MAX_TOOL_CALLS),
+            capture_action(
+                "read_file",
+                Some(ToolKind::Read),
+                TODO_WRITE,
+                MAX_TOOL_CALLS
+            ),
             CaptureAction::Refuse(_)
         ));
     }
@@ -1242,6 +1244,9 @@ mod tests {
             "{msg}"
         );
         assert!(msg.contains("answered in prose"), "{msg}");
-        assert!(msg.contains("/tmp/sess/todo-captures/todo-x.jsonl"), "{msg}");
+        assert!(
+            msg.contains("/tmp/sess/todo-captures/todo-x.jsonl"),
+            "{msg}"
+        );
     }
 }

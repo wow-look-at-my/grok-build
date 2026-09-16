@@ -7,11 +7,13 @@
 mod chat_completions;
 mod flatten;
 mod messages;
+mod output_budget;
 mod responses;
 
 pub use chat_completions::{conversation_item_to_chat_message, conversation_to_chat_messages};
 pub use flatten::{FlattenReport, flatten_conversation, needs_flattening};
 pub use messages::build_messages_request;
+pub use output_budget::{OutputBudgetClamp, estimate_item_tokens, estimate_tool_spec_tokens};
 pub use responses::{
     extra_tool_entries, patch_reasoning_text_types, response_to_conversation_items,
 };
@@ -746,8 +748,7 @@ impl ConversationRequest {
 /// [`crate::ReasoningEffort::to_messages_api`] and `None` serializes as a
 /// disable on the chat-completions wire), so the lowest *enabled* tier is
 /// `Low`.
-pub const LOWEST_ENABLED_REASONING_EFFORT: crate::ReasoningEffort =
-    crate::ReasoningEffort::Low;
+pub const LOWEST_ENABLED_REASONING_EFFORT: crate::ReasoningEffort = crate::ReasoningEffort::Low;
 
 /// Resolve the reasoning effort a wire body must carry for a target.
 ///
@@ -770,9 +771,9 @@ pub fn wire_reasoning_effort(
         return requested;
     }
     match requested {
-        Some(crate::ReasoningEffort::None)
-            | Some(crate::ReasoningEffort::Minimal)
-            | None => Some(crate::ReasoningEffort::Low),
+        Some(crate::ReasoningEffort::None) | Some(crate::ReasoningEffort::Minimal) | None => {
+            Some(crate::ReasoningEffort::Low)
+        }
         Some(effort) => Some(effort),
     }
 }
