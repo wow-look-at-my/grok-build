@@ -98,6 +98,11 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - `Plan: <path>` still renders on every plan-aware reminder — only the manual seed-todos directive is gone, replaced by a statement that the steps are already on the list.
 - A fail-closed planner publishes no plan, so nothing is seeded. Red/unseeded is the honest state there.
 
+## Verification does not widen the goal
+
+- A `## Verification plan` step reads back what the goal built. It is not a permit. The implementer read "do X to confirm Y" as an instruction to do X. A planner-invented check then became an action on a system nobody put in scope. Every place that demands verification says so now. Those are the planner prompt's `## Verification plan` contract, `goal_rules.md`'s VERIFY AS YOU GO, `goal_plan_block.md`, and the per-turn continuation directive.
+- The planner is told to prefer reading what the work already produced over operating anything. Files, logs, hashes, build output and source are what it reads. That is the whole mechanism. There is no label grammar and no validator. An earlier attempt added a reach DSL, a keyword list and a reject-and-retry loop to a planner prompt that is already long. That buys rigidity rather than scope discipline.
+
 ## `/todo` capture feature notes
 
 - `/todo <request>` rides the `/btw` path, not the prompt queue: `Action::SendTodo` → `x.ai/todo` → `SessionCommand::TodoCapture`, spawned on the session's LocalSet (`session/acp_session_impl/todo_capture.rs`). The running turn is never interrupted. And the parent conversation is never mutated — the capture agent works from a snapshot of it.
