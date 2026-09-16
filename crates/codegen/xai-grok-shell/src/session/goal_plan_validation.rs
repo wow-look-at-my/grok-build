@@ -290,7 +290,7 @@ mod tests {
     #[test]
     fn a_live_system_step_without_a_quote_is_rejected() {
         let body = "## Verification plan\n\
-                    1. [live-system] gating: open the console and enable the stat overlay\n";
+                    1. [live-system] gating: open the console and turn the readout on\n";
         assert_eq!(kinds(body, OBJECTIVE), vec![
             PlanViolationKind::LiveSystemWithoutQuote
         ]);
@@ -308,7 +308,7 @@ mod tests {
     #[test]
     fn a_quote_the_objective_never_contained_is_not_authorization() {
         let body = "## Verification plan\n\
-                    1. [live-system] gating: \"enable the stat overlay\" on the running app\n";
+                    1. [live-system] gating: \"turn the readout on\" on the running app\n";
         assert_eq!(kinds(body, OBJECTIVE), vec![
             PlanViolationKind::LiveSystemWithoutQuote
         ]);
@@ -317,7 +317,7 @@ mod tests {
     #[test]
     fn a_single_word_quote_is_not_authorization() {
         let objective = "deploy the build to my device";
-        let body = "## Verification plan\n1. [live-system] gating: \"deploy\" a stat dump\n";
+        let body = "## Verification plan\n1. [live-system] gating: \"deploy\" a log bundle\n";
         assert_eq!(kinds(body, objective), vec![
             PlanViolationKind::LiveSystemWithoutQuote
         ]);
@@ -343,9 +343,9 @@ mod tests {
     fn an_off_machine_step_labelled_artifact_is_rejected() {
         for step in [
             "[artifact] gating: ssh into the box and read the log",
-            "[artifact] gating: adb shell the stat dump off the phone",
+            "[artifact] gating: adb shell the log file off the phone",
             "[artifact] gating: send an rcon command and read the reply",
-            "[artifact] gating: capture a screenshot of the overlay",
+            "[artifact] gating: capture a screenshot of the screen",
             "[artifact] gating: curl the production endpoint",
             "[artifact] gating: read the staging service's health output",
         ] {
@@ -391,19 +391,19 @@ mod tests {
     #[test]
     fn the_section_ends_at_the_next_same_level_header() {
         let body = "## Verification plan\n1. [artifact] gating: read the log\n\
-                    \n## Non-goals\n- flip the overlay on the device\n";
+                    \n## Non-goals\n- toggle the readout on the device\n";
         assert_eq!(verification_steps(body).len(), 1);
     }
 
     #[test]
     fn feedback_names_every_violation_and_its_step() {
         let body = "## Verification plan\n1. gating: read the log\n\
-                    2. [live-system] gating: enable the overlay\n";
+                    2. [live-system] gating: turn the readout on\n";
         let violations = validate_plan(body, OBJECTIVE);
         let feedback = rejection_feedback(&violations);
         assert!(feedback.contains("REJECTED"), "{feedback}");
         assert!(feedback.contains("Step 1"), "{feedback}");
         assert!(feedback.contains("Step 2"), "{feedback}");
-        assert!(feedback.contains("enable the overlay"), "{feedback}");
+        assert!(feedback.contains("turn the readout on"), "{feedback}");
     }
 }

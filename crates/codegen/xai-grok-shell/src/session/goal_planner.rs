@@ -1002,7 +1002,7 @@ mod tests {
             b"# Plan: deploy\n\n## Goal kind\n\ncode-change\n\n\
               ## Verification plan\n\
               1. [artifact] gating: hash the staged and deployed binary\n\
-              2. [live-system] gating: enable the overlay on the device\n",
+              2. [live-system] gating: turn the readout on, on the device\n",
         ));
         let (log, emit) = collect_events();
 
