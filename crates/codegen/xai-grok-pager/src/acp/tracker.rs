@@ -338,6 +338,92 @@ pub struct AcpUpdateTracker {
     pending_acp_tools: Option<Vec<String>>,
     /// Live Edit completions awaiting full-file HL (drained via [`Self::take_pending_edit_hl`]).
     pending_edit_hl: Vec<EntryId>,
+    /// Tool calls whose arguments are still arriving from the model, keyed by
+    /// the wire's `tool_index`. See [`StreamingTool`].
+    streaming_tools: HashMap<u32, StreamingTool>,
+}
+/// A tool call the model is still writing.
+///
+/// The ACP `ToolCall` only exists once the whole call has parsed, so without
+/// this the block appears at the end with nothing before it. The entry is
+/// pushed on the first chunk and the real `ToolCall` adopts it, so a write
+/// shows its path while the model is still typing the body.
+///
+/// Keyed by `tool_index`, not by id: only the FIRST chunk of a call carries
+/// its id and name, and the index is the one identifier every chunk has.
+#[derive(Debug)]
+struct StreamingTool {
+    /// The scrollback entry showing this call, adopted by the real `ToolCall`.
+    entry_id: EntryId,
+    /// Known once the naming chunk arrives; what the adoption matches on.
+    tool_call_id: Option<String>,
+    /// The HEAD of the arguments, capped at [`ARG_PREVIEW_CAP`]. A file write
+    /// streams the whole file, so keeping all of it here would hold a second
+    /// copy of the content for a preview one line long.
+    args: String,
+    /// Every argument byte seen, including what the cap dropped. This is what
+    /// makes a long write show progress once the head stops growing.
+    args_bytes: usize,
+    /// When the first chunk landed. The adopted block keeps it, so the timing
+    /// counts from when the model began the call.
+    started_at: std::time::Instant,
+}
+/// How much of a call's arguments the preview keeps. Enough to carry the
+/// leading fields a write names first (the path), and bounded so a large
+/// body costs nothing.
+const ARG_PREVIEW_CAP: usize = 512;
+impl StreamingTool {
+    /// Take one argument fragment. Bytes past the cap are counted, not kept.
+    fn push_args(&mut self, delta: &str) {
+        self.args_bytes += delta.len();
+        let room = ARG_PREVIEW_CAP.saturating_sub(self.args.len());
+        if room == 0 {
+            return;
+        }
+        // A fragment can split a multi-byte character, so cut on a boundary.
+        let mut end = delta.len().min(room);
+        while end > 0 && !delta.is_char_boundary(end) {
+            end -= 1;
+        }
+        self.args.push_str(&delta[..end]);
+    }
+    /// One line of what the model has written so far.
+    ///
+    /// The arguments are raw JSON and a fragment of them parses as nothing, so
+    /// this shows the text itself rather than pretending to read fields out of
+    /// it. Newlines and runs of spaces collapse, because the summary is one
+    /// line and a file body is full of both.
+    fn preview(&self) -> String {
+        let mut out = String::with_capacity(self.args.len());
+        let mut in_space = false;
+        for ch in self.args.chars() {
+            if ch.is_whitespace() {
+                in_space = true;
+                continue;
+            }
+            if in_space && !out.is_empty() {
+                out.push(' ');
+            }
+            in_space = false;
+            out.push(ch);
+        }
+        // Past the cap the head stops moving, so the byte count is the only
+        // thing left that shows the call is still being written.
+        if self.args_bytes > self.args.len() {
+            out.push_str(&format!(" … {}", format_arg_bytes(self.args_bytes)));
+        }
+        out
+    }
+}
+/// Human-readable size of a call's arguments so far.
+fn format_arg_bytes(bytes: usize) -> String {
+    if bytes < 1024 {
+        format!("{bytes} B")
+    } else if bytes < 1024 * 1024 {
+        format!("{:.1} KB", bytes as f64 / 1024.0)
+    } else {
+        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
+    }
 }
 /// A tool call that's been started but not yet completed.
 #[derive(Debug)]
@@ -893,6 +979,12 @@ impl AcpUpdateTracker {
                 scrollback.finish_running(entry_id);
             }
         }
+        // A call the turn ended mid-argument (a cancel, an error) never gets
+        // its `ToolCall`. Its entry stays, showing what the model had written,
+        // and stops spinning.
+        for (_, streaming) in self.streaming_tools.drain() {
+            scrollback.finish_running(streaming.entry_id);
+        }
         if let Some(pending) = self.pending_compaction.take() {
             scrollback.push_block(RenderBlock::session_event(
                 SessionEvent::CompactionCompleted {
@@ -1255,6 +1347,83 @@ impl AcpUpdateTracker {
             scrollback.push_chunk_to_thinking(id, text)
         }
     }
+    /// Show a tool call while the model is still writing its arguments.
+    ///
+    /// Returns whether the screen changed. The first chunk for an index pushes
+    /// the entry; later chunks extend the preview in place.
+    pub fn handle_tool_call_delta(
+        &mut self,
+        tool_call_id: Option<&str>,
+        tool_index: u32,
+        name: Option<&str>,
+        arguments_delta: Option<&str>,
+        scrollback: &mut ScrollbackState,
+    ) -> bool {
+        // A call is the model's next act, so the message and the thinking that
+        // preceded it are finished — the same thing the real `ToolCall` does.
+        self.finish_thinking(scrollback);
+        self.current_agent_msg = None;
+        if let Some(streaming) = self.streaming_tools.get_mut(&tool_index) {
+            if let Some(id) = tool_call_id {
+                streaming.tool_call_id = Some(id.to_string());
+            }
+            let Some(delta) = arguments_delta else {
+                return false;
+            };
+            streaming.push_args(delta);
+            let preview = streaming.preview();
+            let entry_id = streaming.entry_id;
+            let Some(entry) = scrollback.get_by_id_mut(entry_id) else {
+                return false;
+            };
+            let RenderBlock::ToolCall(ToolCallBlock::Other(block)) = &mut entry.block else {
+                // The real `ToolCall` already refined this entry. It owns the
+                // block now, and overwriting it would undo that refinement.
+                return false;
+            };
+            block.summary = preview;
+            entry.invalidate_cache();
+            return true;
+        }
+        // A name is what makes the first chunk worth showing: a bare argument
+        // fragment with no tool attached reads as noise. A call always opens
+        // with its name, so this only drops a fragment whose opening chunk
+        // never arrived.
+        let Some(name) = name else {
+            return false;
+        };
+        let started_at = std::time::Instant::now();
+        let mut block = OtherToolCallBlock::new(name, String::new());
+        block.started_at = Some(started_at);
+        let entry_id = scrollback.push_block(RenderBlock::ToolCall(ToolCallBlock::Other(block)));
+        scrollback.set_last_running(true);
+        let mut streaming = StreamingTool {
+            entry_id,
+            tool_call_id: tool_call_id.map(str::to_string),
+            args: String::new(),
+            args_bytes: 0,
+            started_at,
+        };
+        if let Some(delta) = arguments_delta {
+            streaming.push_args(delta);
+            if let Some(entry) = scrollback.get_by_id_mut(entry_id)
+                && let RenderBlock::ToolCall(ToolCallBlock::Other(block)) = &mut entry.block
+            {
+                block.summary = streaming.preview();
+            }
+        }
+        self.streaming_tools.insert(tool_index, streaming);
+        true
+    }
+    /// The streaming entry for `tool_call_id`, removed from the live set.
+    fn take_streaming_tool(&mut self, tool_call_id: &str) -> Option<StreamingTool> {
+        let index = self
+            .streaming_tools
+            .iter()
+            .find(|(_, s)| s.tool_call_id.as_deref() == Some(tool_call_id))
+            .map(|(index, _)| *index)?;
+        self.streaming_tools.remove(&index)
+    }
     /// Handle a tool call start.
     fn handle_tool_call(
         &mut self,
@@ -1295,28 +1464,54 @@ impl AcpUpdateTracker {
                     },
                 );
             }
+            // A suppressed tool never belongs in scrollback, and the streaming
+            // entry is in it already. Take the preview back off the screen.
+            if let Some(streaming) = self.take_streaming_tool(&tc.tool_call_id.0.to_string()) {
+                scrollback.remove_entry(streaming.entry_id);
+            }
             self.suppressed_tools.insert(tc.tool_call_id.0.to_string());
             return false;
         }
         let tc_id = tc.tool_call_id.0.to_string();
+        // The arguments were streamed into an entry already. Refine THAT entry
+        // rather than pushing a second one: the call the user watched being
+        // written is the call that now runs.
+        let streaming = self.take_streaming_tool(&tc_id);
         if let Some(orphan) = self.orphan_updates.remove(&tc_id) {
             let merged = merge_tool_call_update(tc, orphan);
             let block = tool_call_to_block(&merged, self.session_cwd.as_deref());
-            self.finish_completed_tool(block, scrollback, is_replay);
+            match streaming {
+                Some(s) => self.finish_adopted_tool(s, block, scrollback, is_replay),
+                None => {
+                    self.finish_completed_tool(block, scrollback, is_replay);
+                }
+            }
             return true;
         }
         let is_completed = matches!(
             tc.status,
             acp::ToolCallStatus::Completed | acp::ToolCallStatus::Failed
         );
+        let block = tool_call_to_block(&tc, self.session_cwd.as_deref());
         if is_completed {
-            let block = tool_call_to_block(&tc, self.session_cwd.as_deref());
-            self.finish_completed_tool(block, scrollback, is_replay);
+            match streaming {
+                Some(s) => self.finish_adopted_tool(s, block, scrollback, is_replay),
+                None => {
+                    self.finish_completed_tool(block, scrollback, is_replay);
+                }
+            }
         } else {
-            let block = tool_call_to_block(&tc, self.session_cwd.as_deref());
-            let id = scrollback.push_block(block);
-            scrollback.set_last_running(true);
-            let started_at = Some(std::time::Instant::now());
+            let (id, started_at) = match streaming {
+                Some(s) => {
+                    scrollback.replace_tool_block(s.entry_id, block, Some(s.started_at));
+                    (s.entry_id, Some(s.started_at))
+                }
+                None => {
+                    let id = scrollback.push_block(block);
+                    scrollback.set_last_running(true);
+                    (id, Some(std::time::Instant::now()))
+                }
+            };
             self.pending_tools.insert(
                 tc_id,
                 PendingTool {
@@ -1328,6 +1523,26 @@ impl AcpUpdateTracker {
             );
         }
         true
+    }
+    /// Complete a tool call into the entry its arguments streamed into.
+    ///
+    /// The completed block replaces the preview in place, so a finished call
+    /// keeps the position it occupied while it was being written. Parallel
+    /// calls therefore stay in the order the model opened them.
+    fn finish_adopted_tool(
+        &mut self,
+        streaming: StreamingTool,
+        block: RenderBlock,
+        scrollback: &mut ScrollbackState,
+        is_replay: bool,
+    ) {
+        let wants_hl = Self::edit_wants_file_hl(&block);
+        scrollback.replace_tool_block(streaming.entry_id, block, Some(streaming.started_at));
+        if !is_replay && wants_hl {
+            self.pending_edit_hl.push(streaming.entry_id);
+        }
+        scrollback.finish_running(streaming.entry_id);
+        self.try_coalesce_edit(streaming.entry_id, scrollback, is_replay);
     }
     /// Handle a tool call update (streaming output or completion).
     fn handle_tool_call_update(

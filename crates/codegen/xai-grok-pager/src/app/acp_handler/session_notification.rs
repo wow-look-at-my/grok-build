@@ -1150,6 +1150,26 @@ pub(super) fn handle_session_notification(notif: &acp::ExtNotification, app: &mu
         XaiSessionUpdate::InteractionResolved { tool_call_id } => {
             agent.dismiss_resolved_interaction(&tool_call_id)
         }
+        XaiSessionUpdate::ToolCallDeltaChunk {
+            tool_call_id,
+            tool_index,
+            name,
+            arguments_delta,
+        } => {
+            // A replayed transcript already carries the finished `ToolCall`
+            // for every one of these, so replaying the chunks would build a
+            // preview of a call that is already on screen.
+            if meta.is_replay {
+                return false;
+            }
+            agent.session.tracker.handle_tool_call_delta(
+                tool_call_id.as_deref(),
+                tool_index,
+                name.as_deref(),
+                arguments_delta.as_deref(),
+                &mut agent.scrollback,
+            )
+        }
         XaiSessionUpdate::ResponseCompleted {
             usage,
             cost_usd_ticks,
