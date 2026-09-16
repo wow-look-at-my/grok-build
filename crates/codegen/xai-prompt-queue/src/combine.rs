@@ -27,8 +27,19 @@ pub struct CombineGate<'a> {
 }
 
 /// Front of a combine run: plain user prompt; may carry images.
+///
+/// A row whose text is a slash invocation is never a front either: only a
+/// prompt's LEADING token is resolved as a command, so merging one into a
+/// neighbour's turn (or letting it absorb followers) delivers the literal
+/// `/cmd args` as prose. The shape comes from [`crate::is_slash_invocation`],
+/// the single definition both ends read, so no call site can forget to set it.
 pub fn can_merge_front(g: &CombineGate<'_>) -> bool {
-    g.is_plain_prompt && !g.is_synthetic && !g.is_expanded_skill && !g.is_bash && !g.text.is_empty()
+    g.is_plain_prompt
+        && !g.is_synthetic
+        && !g.is_expanded_skill
+        && !g.is_bash
+        && !crate::is_slash_invocation(g.text)
+        && !g.text.is_empty()
 }
 
 /// Follower: same as front, no images, and not under edit hold.
@@ -228,6 +239,30 @@ mod tests {
         assert_eq!(
             meta.get(COMBINED_DISPLAY_TEXTS_META),
             Some(&serde_json::json!(["a", "b"]))
+        );
+    }
+
+    #[test]
+    fn stops_at_slash_invocation() {
+        // A command behind a plain row would be delivered as prose: the merged
+        // body's leading token is the plain row's, so `resolve` never sees it.
+        assert_eq!(
+            combine_prefix_len(
+                [
+                    plain("a", "look at this"),
+                    plain("cmd", "/pr-cleanup fix")
+                ],
+                &[]
+            ),
+            1
+        );
+        // A command as the front is taken alone, and the row behind it stays.
+        assert_eq!(
+            combine_prefix_len(
+                [plain("cmd", "/pr-cleanup fix"), plain("b", "then this")],
+                &[]
+            ),
+            1
         );
     }
 
