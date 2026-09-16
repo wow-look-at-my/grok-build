@@ -650,6 +650,7 @@ pub(crate) fn assert_goal_discipline_in_reminder(reminder: &str, site: &str) {
     for phrase in [
         "Tool-call first",
         "Don't ask permission to continue a task in flight",
+        "That rule stops at the workspace edge",
         "Track multi-step work with a",
         "Don't stop with easy work left undone",
     ] {

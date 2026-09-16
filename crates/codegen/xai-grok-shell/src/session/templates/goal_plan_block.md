@@ -22,8 +22,8 @@ Plan: {PLAN_PATH}
   exact command line in one line instead and say it is the user's call. That
   hand-back satisfies the criterion as `awaiting-user` and does not block
   completion. A step with no label is treated as `[live-system]`.
-- Before claiming completion, run the plan's `## Verification plan` yourself and
-  confirm its observations hold. SAVE durable proof: commit real tests that drive
-  the shipped code in-repo, and write the captured run output to your scratch dir
+- Before claiming completion, run the plan's `[artifact]` `## Verification plan`
+  steps yourself and confirm their observations hold. SAVE durable proof:
+  commit real tests that drive the shipped code in-repo, and write the captured run output to your scratch dir
   (the one the goal rules name; never shared `/tmp/...`). Fix any missing
   observation before calling the goal complete.

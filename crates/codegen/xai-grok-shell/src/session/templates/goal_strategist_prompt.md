@@ -45,6 +45,12 @@ Change the HOW, never the WHAT: do NOT touch the objective or the acceptance
 criteria / verification plan. Do NOT edit `{PLAN_FILE}` or any workspace file
 (edits to plan.md are reverted). Your only write is the note below.
 
+Your recommendation stays on this machine. Some things sit outside it: a
+device, a remote host, a production or staging service, a shared resource.
+Never recommend a step that acts on one the OBJECTIVE did not name. The
+implementer's authority comes from the user's own words, and your note grants
+nothing.
+
 ## Output contract — STRICT
 
 Write a short Markdown note to `{STRATEGY_FILE}`:

@@ -1237,6 +1237,10 @@ mod tests {
         assert!(GOAL_STRATEGIST_PROMPT_TEMPLATE.contains("{STRATEGY_FILE}"));
         assert!(GOAL_STRATEGIST_PROMPT_TEMPLATE.contains("{SESSION_TRACES_DIR}"));
         assert!(GOAL_STRATEGIST_PROMPT_TEMPLATE.contains("{SCRATCH_ROOT}"));
+        assert!(
+            GOAL_STRATEGIST_PROMPT_TEMPLATE.contains("Your recommendation stays on this machine"),
+            "an unsticking step must not reach a system the objective never named"
+        );
         assert!(lower.contains("structural"));
         assert!(
             lower.contains("do not") && GOAL_STRATEGIST_PROMPT_TEMPLATE.contains("plan.md"),

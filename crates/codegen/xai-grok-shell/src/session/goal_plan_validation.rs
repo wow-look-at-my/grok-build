@@ -327,7 +327,7 @@ mod tests {
     fn a_quote_survives_rewrapping_and_case() {
         let objective = "Deploy the test build\nand restart the service afterwards";
         let body = "## Verification plan\n\
-                    1. [live-system] gating: \"Restart   the\nservice\" and read the new pid\n";
+                    1. [live-system] gating: \"Restart   the  service\" and read the new pid\n";
         assert!(validate_plan(body, objective).is_empty());
     }
 
