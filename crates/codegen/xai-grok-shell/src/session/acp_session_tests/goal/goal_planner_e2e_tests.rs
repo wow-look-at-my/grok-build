@@ -53,6 +53,13 @@ enum SpawnBehaviour {
         notify: StdArc<tokio::sync::Notify>,
         body: &'static [u8],
     },
+    /// Write a plan whose verification step reaches off this machine on the
+    /// first spawn, then a clean one. Records every prompt so the test can
+    /// read what the second attempt was told to fix.
+    RejectedPlanThenClean {
+        rejected: &'static [u8],
+        clean: &'static [u8],
+    },
     /// Reply success but never write the file.
     NoWriteThenDone,
     /// Reply with subagent runtime failure.
@@ -225,6 +232,25 @@ fn spawn_planner_coordinator_capturing(
                                 child_session_id: req.id.clone(),
                                 ..Default::default()
                             }
+                        }
+                    }
+                    SpawnBehaviour::RejectedPlanThenClean { rejected, clean } => {
+                        let body = if count_task.load(SeqOrd::SeqCst) <= 1 {
+                            *rejected
+                        } else {
+                            *clean
+                        };
+                        if let Some(p) = plan_path.as_deref() {
+                            let _ =
+                                std::fs::create_dir_all(std::path::Path::new(p).parent().unwrap());
+                            let _ = std::fs::write(p, body);
+                        }
+                        SubagentResult {
+                            success: true,
+                            output: StdArc::from("Done"),
+                            subagent_id: req.id.clone(),
+                            child_session_id: req.id.clone(),
+                            ..Default::default()
                         }
                     }
                     SpawnBehaviour::NoWriteThenDone => SubagentResult {
@@ -1019,6 +1045,66 @@ async fn planner_early_exit_clears_planning_latch() {
                     .snapshot()
                     .unwrap()
                     .planning_in_flight
+            );
+        })
+        .await;
+}
+
+/// A plan whose verification step reaches off this machine without the
+/// objective's own words is replanned, not published and not paused. The
+/// second attempt reads the corrections and its clean plan publishes.
+#[tokio::test(flavor = "current_thread")]
+#[serial]
+async fn a_plan_claiming_unauthorized_reach_is_replanned_then_published() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (tx, spawn_count, capture) = spawn_planner_coordinator_capturing(
+                SpawnBehaviour::RejectedPlanThenClean {
+                    rejected: b"# Plan\n\n## Verification plan\n\
+                                1. [live-system] gating: turn the readout on, on the device\n",
+                    clean: b"# Plan\n\n## Verification plan\n\
+                             1. [artifact] gating: hash the staged and deployed binary\n",
+                },
+            );
+            let (actor, _tmp) = make_planner_actor(Some(tx), true).await;
+            create_test_goal(&actor);
+            let plan_path = actor.goal_tracker.lock().plan_path();
+
+            actor.maybe_run_goal_planner("ship the build").await;
+
+            assert_eq!(
+                spawn_count.load(SeqOrd::SeqCst),
+                2,
+                "a rejected plan must cost one more attempt, not pause the goal",
+            );
+            let snap = actor.goal_tracker.lock().snapshot().cloned().unwrap();
+            assert_eq!(
+                snap.status,
+                crate::session::goal_tracker::GoalStatus::Active,
+                "a rejection is a replan, never a pause",
+            );
+            assert_eq!(
+                snap.plan_file.as_deref(),
+                Some(plan_path.as_path()),
+                "the clean plan must publish",
+            );
+            let published = std::fs::read_to_string(&plan_path).unwrap();
+            assert!(
+                published.contains("[artifact]") && !published.contains("[live-system]"),
+                "the rejected plan must not survive: {published}",
+            );
+
+            let prompts = capture.prompt.lock().unwrap().clone();
+            assert_eq!(prompts.len(), 2, "{prompts:?}");
+            assert!(
+                !prompts[0].contains("REJECTED"),
+                "the first attempt has nothing to fix yet",
+            );
+            assert!(
+                prompts[1].contains("REJECTED") && prompts[1].contains("Step 1"),
+                "the second attempt must read what to fix: {}",
+                prompts[1],
             );
         })
         .await;
