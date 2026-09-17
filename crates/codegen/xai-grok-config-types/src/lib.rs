@@ -52,6 +52,27 @@ pub struct DoomLoopRecoverySettings {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_retries: Option<u32>,
 }
+/// Advanced knobs for the output-rate floor: the `[output_rate_floor]` TOML
+/// table. Every field is `Option` so a partial table never fails the parse and
+/// each key falls through to the client default on its own.
+///
+/// The floor itself and how long a breach must last are NOT here. Those live
+/// in the `[ui]` table, where the settings modal writes them, and one model
+/// overrides the floor with `[model.<id>].min_output_tokens_per_sec`. One key,
+/// one home.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct OutputRateFloorSettings {
+    /// Trailing window the rate is measured over (clamped to 2..=120).
+    /// Absent ⇒ client default (10).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub window_secs: Option<u64>,
+    /// Reissue budget per model call (clamped to 0..=5). Absent ⇒ client
+    /// default (2).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_retries: Option<u32>,
+}
+
 /// Per-kind age policy for auto-GC: seconds or never.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WorktreeKindMaxAge {

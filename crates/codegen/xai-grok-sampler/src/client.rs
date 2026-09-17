@@ -2427,6 +2427,7 @@ mod tests {
             empty_response_context: None,
             doom_loop_triggers: None,
             doom_loop_aborted_at_chunk: None,
+            output_rate: None,
             credential: xai_grok_sampling_types::SentCredential::Unknown,
         };
         // SamplingError is not PartialEq (it carries reqwest/serde errors),
@@ -2484,6 +2485,7 @@ mod tests {
             compactions_remaining: None,
             compaction_at_tokens: None,
             doom_loop_recovery: None,
+            output_rate_floor: None,
             header_injector: None,
         }
     }

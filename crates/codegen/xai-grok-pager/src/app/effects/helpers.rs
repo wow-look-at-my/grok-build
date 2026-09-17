@@ -1418,6 +1418,22 @@ pub(crate) async fn persist_setting(
                 .await
                 .map_err(|e| e.to_string())
         }
+        "min_output_tokens_per_sec" => {
+            let SettingValue::Int(i) = value else {
+                return Err(kind_mismatch("min_output_tokens_per_sec", "Int", &value));
+            };
+            xai_grok_shell::util::config::set_min_output_tokens_per_sec(i)
+                .await
+                .map_err(|e| e.to_string())
+        }
+        "output_rate_sustained_secs" => {
+            let SettingValue::Int(i) = value else {
+                return Err(kind_mismatch("output_rate_sustained_secs", "Int", &value));
+            };
+            xai_grok_shell::util::config::set_output_rate_sustained_secs(i)
+                .await
+                .map_err(|e| e.to_string())
+        }
         "show_tips" => {
             let SettingValue::Bool(b) = value else {
                 return Err(kind_mismatch("show_tips", "Bool", &value));

@@ -146,6 +146,12 @@ pub struct SamplerConfig {
     #[serde(default)]
     pub doom_loop_recovery: Option<DoomLoopRecoveryPolicy>,
 
+    /// Floor on the model's output tokens/sec; `None` (or an unarmed policy)
+    /// leaves the stream ungated. A response that stays under the floor for a
+    /// whole window is abandoned and resampled on this policy's own budget.
+    #[serde(default)]
+    pub output_rate_floor: Option<xai_grok_sampling_types::OutputRateFloorPolicy>,
+
     /// Per-request header injector (e.g. OTel traceparent). Called in `post()`.
     #[serde(skip)]
     pub header_injector: Option<SharedHeaderInjector>,
@@ -185,6 +191,7 @@ impl Default for SamplerConfig {
             compactions_remaining: None,
             compaction_at_tokens: None,
             doom_loop_recovery: None,
+            output_rate_floor: None,
             header_injector: None,
         }
     }

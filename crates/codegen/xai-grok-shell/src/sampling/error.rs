@@ -184,6 +184,11 @@ pub(crate) fn map_sampling_err_to_acp(err: SamplingError) -> acp::Error {
         SamplingError::DoomLoopDetected { .. } => {
             acp::Error::internal_error().data(err.to_string())
         }
+        // Same shape: the rate gate consumes these in the sampler's own loop,
+        // and one that reaches here still reports what it measured.
+        SamplingError::OutputRateCollapsed { .. } => {
+            acp::Error::internal_error().data(err.to_string())
+        }
     }
 }
 

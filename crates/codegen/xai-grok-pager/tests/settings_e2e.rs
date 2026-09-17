@@ -50,6 +50,8 @@ const ALL_SETTINGS_EXERCISED: &[&str] = &[
     "permission_mode",
     "default_model",
     "max_thoughts_width",
+    "min_output_tokens_per_sec",
+    "output_rate_sustained_secs",
     "scroll_speed",
     "scroll_mode",
     "scroll_lines",
@@ -1912,7 +1914,13 @@ fn registry_kind_membership_through_pr_14() {
     sorted_int.sort();
     assert_eq!(
         sorted_int,
-        vec!["max_thoughts_width", "scroll_lines", "scroll_speed"],
+        vec![
+            "max_thoughts_width",
+            "min_output_tokens_per_sec",
+            "output_rate_sustained_secs",
+            "scroll_lines",
+            "scroll_speed"
+        ],
         "Int kind membership drift (PR 8)",
     );
 
@@ -2013,6 +2021,9 @@ fn defaults_round_trip_through_registry() {
             "permission_mode" => SettingValue::Enum("ask"),
             "default_model" => SettingValue::String(String::new()),
             "max_thoughts_width" => SettingValue::Int(120),
+            // The rate gate ships off; its grace period still has a value.
+            "min_output_tokens_per_sec" => SettingValue::Int(0),
+            "output_rate_sustained_secs" => SettingValue::Int(10),
             "scroll_speed" => SettingValue::Int(50),
             "scroll_mode" => SettingValue::Enum("auto"),
             "scroll_lines" => SettingValue::Int(3),

@@ -686,6 +686,11 @@ pub(crate) struct SessionActor {
     /// `reconstruct_full_config` threads it into the sampler config, and the
     /// sampler itself sends the matching `x-grok-doom-loop-check` header.
     pub(crate) doom_loop_recovery: Option<xai_grok_sampling_types::DoomLoopRecoveryPolicy>,
+    /// Output-rate floor for the CURRENT model; `None` = ungated. A Cell
+    /// rather than a plain field because the floor is per-model: a switch
+    /// re-resolves it, and every turn after reads the new one.
+    pub(crate) output_rate_floor:
+        std::cell::Cell<Option<xai_grok_sampling_types::OutputRateFloorPolicy>>,
     /// Telemetry-only per-turn doom-loop recovery tally (attempts, whether a
     /// budget-spent accept happened, tightest trigger label). Accumulated by
     /// the event drainer, taken at turn end for the per-turn analytics event.

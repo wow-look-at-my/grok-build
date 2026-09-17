@@ -86,6 +86,23 @@ pub enum SamplingEvent {
         signature: String,
     },
 
+    /// The model's current output rate, measured over the trailing window of
+    /// the same meter the rate floor judges. Emitted while a response streams,
+    /// throttled to a few per second, so a client can render it live without
+    /// running a second meter that disagrees with the gate.
+    ///
+    /// `floor_tokens_per_sec` is the configured floor, absent when the session
+    /// set none; a client colors the rate against it. `slow_for_ms` is how
+    /// long the rate has been under that floor, so the indicator can say how
+    /// long the slowdown has run rather than only that one is happening.
+    OutputRate {
+        request_id: RequestId,
+        tokens_per_sec: f64,
+        window_secs: u64,
+        floor_tokens_per_sec: Option<f64>,
+        slow_for_ms: Option<u64>,
+    },
+
     /// Streaming completed successfully.
     Completed {
         request_id: RequestId,
@@ -174,11 +191,25 @@ pub struct SamplingErrorInfo {
     /// Telemetry only; `None` for terminal-response detections.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub doom_loop_aborted_at_chunk: Option<u64>,
+    /// Present only when `kind == OutputRateCollapsed`: what the meter
+    /// measured against what it was told to require. Carried rather than
+    /// re-parsed out of `message` so a round trip through this struct keeps
+    /// real numbers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_rate: Option<OutputRateCollapse>,
     /// Meaningful only when `kind == Auth`: whether the rejected request
     /// actually carried a credential on the wire. Defaults to `Unknown`
     /// (charge-the-budget behavior) for payloads from older peers.
     #[serde(default, skip_serializing_if = "SentCredential::is_unknown")]
     pub credential: SentCredential,
+}
+
+/// The measurement behind a [`SamplingErrorKind::OutputRateCollapsed`].
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+pub struct OutputRateCollapse {
+    pub observed_tokens_per_sec: f64,
+    pub floor_tokens_per_sec: f64,
+    pub window_secs: u64,
 }
 
 /// Coarse-grained classification of a sampling failure.
@@ -199,6 +230,7 @@ pub enum SamplingErrorKind {
     EmptyResponse,
     MaxTokensTruncation,
     DoomLoopDetected,
+    OutputRateCollapsed,
 }
 
 impl SamplingErrorKind {
@@ -218,6 +250,7 @@ impl SamplingErrorKind {
             SamplingErrorKind::EmptyResponse => "empty_response",
             SamplingErrorKind::MaxTokensTruncation => "max_tokens_truncation",
             SamplingErrorKind::DoomLoopDetected => "doom_loop_detected",
+            SamplingErrorKind::OutputRateCollapsed => "output_rate_collapsed",
         }
     }
 }
@@ -262,6 +295,9 @@ impl From<&SamplingError> for SamplingErrorInfo {
             SamplingError::DoomLoopDetected { .. } => {
                 (SamplingErrorKind::DoomLoopDetected, None, None, None)
             }
+            SamplingError::OutputRateCollapsed { .. } => {
+                (SamplingErrorKind::OutputRateCollapsed, None, None, None)
+            }
         };
 
         let empty_response_context = match err {
@@ -274,6 +310,18 @@ impl From<&SamplingError> for SamplingErrorInfo {
                 aborted_at_chunk,
             } => (Some(triggers.clone()), *aborted_at_chunk),
             _ => (None, None),
+        };
+        let output_rate = match err {
+            SamplingError::OutputRateCollapsed {
+                observed_tokens_per_sec,
+                floor_tokens_per_sec,
+                window_secs,
+            } => Some(OutputRateCollapse {
+                observed_tokens_per_sec: *observed_tokens_per_sec,
+                floor_tokens_per_sec: *floor_tokens_per_sec,
+                window_secs: *window_secs,
+            }),
+            _ => None,
         };
         let credential = match err {
             SamplingError::Auth { credential, .. } => *credential,
@@ -291,6 +339,7 @@ impl From<&SamplingError> for SamplingErrorInfo {
             empty_response_context,
             doom_loop_triggers,
             doom_loop_aborted_at_chunk,
+            output_rate,
             credential,
         }
     }

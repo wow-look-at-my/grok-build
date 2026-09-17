@@ -599,6 +599,12 @@ pub enum Action {
     /// Commit the max-thoughts-width (column budget for the thoughts panel).
     /// Payload is `i64`; clamped to `u16` at the shell helper boundary.
     SetMaxThoughtsWidth(i64),
+    /// Set `[ui].min_output_tokens_per_sec`: the floor under which a model
+    /// call is reissued. `0` turns the gate off.
+    SetMinOutputTokensPerSec(i64),
+    /// Set `[ui].output_rate_sustained_secs`: how long the rate must stay
+    /// under that floor before the request is reissued.
+    SetOutputRateSustainedSecs(i64),
     /// Commit the fork-secondary model. Typed `ModelId` payload,
     /// persisted to `[ui].fork_secondary_model`. Rebroadcast via
     /// `ConfigUpdate::Ui` so running agents pick up the change.

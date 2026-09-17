@@ -24,6 +24,7 @@ use chrono::{DateTime, Local, TimeZone};
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 use tracing::debug;
 use xai_grok_tools::types::output::{BashOutput, ToolOutput};
 use xai_grok_tools::types::output::{ReadFileOutput, SearchToolOutput, WebFetchOutput};
@@ -212,6 +213,26 @@ pub struct PendingCompaction {
 const PROMPT_COST_HISTORY: usize = 8;
 /// Tracks in-flight streaming state for one agent's turn.
 ///
+/// The model's live output rate, measured by the agent's own meter — the one
+/// its rate floor judges — so the indicator and the gate cannot disagree.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct OutputRate {
+    pub tokens_per_sec: f64,
+    /// The trailing window the rate covers.
+    pub window_secs: u64,
+    /// The configured floor, absent when the session gates nothing.
+    pub floor_tokens_per_sec: Option<f64>,
+    /// How long the rate has been under the floor, when it is.
+    pub slow_for: Option<Duration>,
+}
+
+impl OutputRate {
+    /// How this rate stands against its floor. Drives the indicator's color.
+    pub fn health(&self) -> xai_grok_sampling_types::OutputRateHealth {
+        xai_grok_sampling_types::classify_rate(self.tokens_per_sec, self.floor_tokens_per_sec)
+    }
+}
+
 /// Converts ACP `SessionUpdate` variants into scrollback entry mutations.
 /// Does nothing else — no UI, no networking, just data transformation.
 #[derive(Debug, Default)]
@@ -322,6 +343,11 @@ pub struct AcpUpdateTracker {
     /// run's spend, so summing the scrollback would report the wrong quantity —
     /// see [`Self::scrollback_sum_is_this_run`].
     replayed_cost_seen: bool,
+    /// The model's live output rate, as last reported by the agent's own
+    /// meter. `None` between responses: a rate is a statement about a stream
+    /// in flight, and holding the last one under an idle session would show a
+    /// number nothing is producing.
+    output_rate: Option<OutputRate>,
 
     /// Pending agent toolset from the most recent `AvailableCommandsUpdate.meta`.
     /// Format on the wire: `{"tools": ["read_file", ...]}`.
@@ -957,6 +983,8 @@ impl AcpUpdateTracker {
     /// Called when PromptResponse is received (turn complete).
     pub fn finish_turn(&mut self, scrollback: &mut ScrollbackState, prompt_id: Option<&str>) {
         self.epoch_at_last_finish = self.agent_output_epoch;
+        // Nothing is streaming any more, so there is no rate to show.
+        self.output_rate = None;
         self.finish_thinking(scrollback);
         if let Some(agent_id) = self.current_agent_msg.take() {
             scrollback.finish_running(agent_id);
@@ -1208,6 +1236,26 @@ impl AcpUpdateTracker {
         self.reported_session_cost_usd_ticks = Some(cost);
         changed
     }
+    /// Record the model's live output rate. Returns whether the rendered
+    /// number changed, so the caller repaints only when it did.
+    pub fn set_output_rate(&mut self, rate: OutputRate) -> bool {
+        let changed = self.output_rate != Some(rate);
+        self.output_rate = Some(rate);
+        changed
+    }
+
+    /// Forget the current rate. The turn ended, so there is no stream to
+    /// describe; the indicator goes away rather than freezing at its last
+    /// reading.
+    pub fn clear_output_rate(&mut self) -> bool {
+        self.output_rate.take().is_some()
+    }
+
+    /// The model's live output rate, or `None` between responses.
+    pub fn output_rate(&self) -> Option<OutputRate> {
+        self.output_rate
+    }
+
     /// The agent-reported session total (USD ticks), or `None` if the agent has
     /// never reported one — an agent too old to send it, or a session where no
     /// call was priced.
