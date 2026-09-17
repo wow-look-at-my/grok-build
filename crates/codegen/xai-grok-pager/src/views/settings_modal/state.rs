@@ -1102,6 +1102,8 @@ pub(super) fn action_for_int(key: SettingKey, value: i64) -> Option<Action> {
         "max_thoughts_width" => Some(Action::SetMaxThoughtsWidth(value)),
         "scroll_speed" => Some(Action::SetScrollSpeed(value)),
         "scroll_lines" => Some(Action::SetScrollLines(value)),
+        "min_output_tokens_per_sec" => Some(Action::SetMinOutputTokensPerSec(value)),
+        "output_rate_sustained_secs" => Some(Action::SetOutputRateSustainedSecs(value)),
         _ => None,
     }
 }

@@ -207,6 +207,9 @@ pub struct TurnStatusArgs<'a> {
     pub has_running_execute: bool,
     /// Context-window tokens used, shown as `⇣Nk`.
     pub total_tokens: Option<u64>,
+    /// The model's live output rate, shown as `N tok/s` beside the timers.
+    /// `None` between responses, which is when there is no rate to show.
+    pub output_rate: Option<crate::acp::tracker::OutputRate>,
     pub mcp_init_progress: Option<&'a McpInitProgress>,
     pub is_bash_turn: bool,
     pub is_pending_user_input: bool,
@@ -240,6 +243,7 @@ pub fn render_turn_status(
         buttons,
         has_running_execute,
         total_tokens,
+        output_rate,
         mcp_init_progress,
         is_bash_turn,
         is_pending_user_input,
@@ -382,6 +386,14 @@ pub fn render_turn_status(
     };
     let turn_timer_width = turn_timer_str.width();
 
+    // Output rate, rendered in its own color: gray while healthy, amber once
+    // it is near the configured floor, red once it is under it. Under the
+    // floor it also carries how long it has been there, because "slow right
+    // now" and "slow for the last 40 seconds" are different situations and
+    // only the second one is about to reissue the request.
+    let rate_str = output_rate.map(format_output_rate).unwrap_or_default();
+    let rate_width = rate_str.width();
+
     // Bg button: [↓] normally, [send to bg] when hovered. Running execute
     // tools only, and never while cancelling (demote no-ops there).
     let show_bg = show_cancel
@@ -412,7 +424,7 @@ pub fn render_turn_status(
     };
     let cancel_width = cancel_str.width();
 
-    let right_width = turn_timer_width + bg_width + cancel_width;
+    let right_width = turn_timer_width + rate_width + bg_width + cancel_width;
 
     // ── Build components ──
     // While a tool is blocked on a permission prompt or `ask_user_question`,
@@ -612,6 +624,18 @@ pub fn render_turn_status(
         let span = Span::styled(turn_timer_str.clone(), timer_style);
         buf.set_span(x, area.y, &span, turn_timer_width as u16);
         x += turn_timer_width as u16;
+    }
+
+    // Output rate — its own color, so the rest of the right side stays gray.
+    if let Some(rate) = output_rate.filter(|_| !rate_str.is_empty()) {
+        let fg = match rate.health() {
+            xai_grok_sampling_types::OutputRateHealth::Healthy => theme.gray,
+            xai_grok_sampling_types::OutputRateHealth::Near => theme.warning,
+            xai_grok_sampling_types::OutputRateHealth::Slow => theme.accent_error,
+        };
+        let span = Span::styled(rate_str.clone(), right_style(fg));
+        buf.set_span(x, area.y, &span, rate_width as u16);
+        x += rate_width as u16;
     }
 
     // Bg button — accent_running on hover
@@ -833,6 +857,28 @@ pub fn should_show(
 /// Re-exports [`crate::util::format_duration`] under the old name for
 /// backwards compatibility within this module.
 pub use crate::util::format_duration as format_turn_timer;
+
+/// The output-rate segment of the status row: ` 42 tok/s`, or
+/// ` 3.4 tok/s (slow 41s)` once the rate is under the floor.
+///
+/// A rate under 10 keeps one decimal. The whole point of the indicator is a
+/// collapse from three digits to one, and `4 tok/s` for anything from 3.5 to
+/// 4.4 hides how far it fell.
+fn format_output_rate(rate: crate::acp::tracker::OutputRate) -> String {
+    let tps = rate.tokens_per_sec;
+    let value = if tps < 10.0 {
+        format!("{tps:.1}")
+    } else {
+        format!("{:.0}", tps.round())
+    };
+    match rate.slow_for {
+        Some(slow_for) => format!(
+            " {value} tok/s (slow {})",
+            crate::util::format_duration(slow_for)
+        ),
+        None => format!(" {value} tok/s"),
+    }
+}
 
 /// Format a token count for compact display.
 ///
@@ -1058,6 +1104,7 @@ mod tests {
                 buttons: Some(MouseButtons::default()),
                 has_running_execute: false,
                 total_tokens: None,
+                output_rate: None,
                 mcp_init_progress: None,
                 is_bash_turn: false,
                 is_pending_user_input: false,
@@ -1217,6 +1264,7 @@ mod tests {
             buttons: Some(MouseButtons::default()),
             has_running_execute: false,
             total_tokens: None,
+            output_rate: None,
             mcp_init_progress: None,
             is_bash_turn: false,
             is_pending_user_input: false,
@@ -1241,6 +1289,74 @@ mod tests {
     fn render_row_text(args: TurnStatusArgs<'_>, width: u16) -> String {
         let (_, buf) = render_row(args, width);
         buffer_text(&buf, buf.area)
+    }
+
+    /// Render a running turn carrying `rate`, returning the row's text and
+    /// the foreground color the rate segment was painted in.
+    fn render_rate(rate: crate::acp::tracker::OutputRate) -> (String, Option<Color>) {
+        let mut args = idle_args(Watchers::default());
+        args.state = &AgentState::TurnRunning;
+        args.turn_elapsed = Some(Duration::from_secs(30));
+        args.output_rate = Some(rate);
+        let (_, buf) = render_row(args, 80);
+        let text = buffer_text(&buf, buf.area);
+        // The rate's own cells: find the `k` of `tok/s` and read its color.
+        let row: Vec<char> = text.chars().collect();
+        let fg = row
+            .iter()
+            .position(|c| *c == 'k')
+            .and_then(|x| buf.cell((x as u16, 0)).map(|c| c.fg));
+        (text, fg)
+    }
+
+    /// A healthy rate renders gray; near the floor amber; under it red, with
+    /// how long it has been under it.
+    #[test]
+    fn the_rate_is_colored_by_its_distance_from_the_floor() {
+        let theme = Theme::current();
+        let base = crate::acp::tracker::OutputRate {
+            tokens_per_sec: 120.0,
+            window_secs: 10,
+            floor_tokens_per_sec: Some(10.0),
+            slow_for: None,
+        };
+
+        let (text, fg) = render_rate(base);
+        assert!(text.contains("120 tok/s"), "got: {text:?}");
+        assert_eq!(fg, Some(theme.gray), "a healthy rate is not colored");
+
+        let (text, fg) = render_rate(crate::acp::tracker::OutputRate {
+            tokens_per_sec: 12.0,
+            ..base
+        });
+        assert!(text.contains("12 tok/s"), "got: {text:?}");
+        assert_eq!(fg, Some(theme.warning), "near the floor warns");
+
+        let (text, fg) = render_rate(crate::acp::tracker::OutputRate {
+            tokens_per_sec: 3.4,
+            slow_for: Some(Duration::from_secs(41)),
+            ..base
+        });
+        assert!(
+            text.contains("3.4 tok/s (slow 41s)"),
+            "a slowdown reports how long it has run: {text:?}"
+        );
+        assert_eq!(fg, Some(theme.accent_error), "under the floor is red");
+    }
+
+    /// With no floor configured there is nothing to be near or under, so the
+    /// rate renders plainly however low it goes.
+    #[test]
+    fn an_ungated_rate_is_never_colored() {
+        let theme = Theme::current();
+        let (text, fg) = render_rate(crate::acp::tracker::OutputRate {
+            tokens_per_sec: 0.4,
+            window_secs: 10,
+            floor_tokens_per_sec: None,
+            slow_for: None,
+        });
+        assert!(text.contains("0.4 tok/s"), "got: {text:?}");
+        assert_eq!(fg, Some(theme.gray));
     }
 
     /// Invoke `render_turn_status` for an idle agent with the given MCP seed.

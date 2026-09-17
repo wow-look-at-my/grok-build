@@ -1204,6 +1204,27 @@ pub(super) fn handle_session_notification(notif: &acp::ExtNotification, app: &mu
                     .set_reported_session_cost(session_cost_usd_ticks);
             priced || cache_hit_set || total_changed
         }
+        XaiSessionUpdate::OutputRate {
+            tokens_per_sec,
+            window_secs,
+            floor_tokens_per_sec,
+            slow_for_ms,
+        } => {
+            // A rate describes a stream in flight. A replayed one describes a
+            // stream that ended, so it is dropped rather than rendered.
+            if meta.is_replay {
+                return false;
+            }
+            agent
+                .session
+                .tracker
+                .set_output_rate(crate::acp::tracker::OutputRate {
+                    tokens_per_sec,
+                    window_secs,
+                    floor_tokens_per_sec,
+                    slow_for: slow_for_ms.map(std::time::Duration::from_millis),
+                })
+        }
         _ => {
             tracing::trace!(
                 "Ignoring {}: {:?}",

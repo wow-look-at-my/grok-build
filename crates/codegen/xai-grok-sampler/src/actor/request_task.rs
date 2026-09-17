@@ -19,7 +19,8 @@ use tracing::Instrument;
 
 use xai_grok_sampling_types::{
     ConversationRequest, ConversationResponse, EmptyResponseContext, ImageStripReason,
-    SamplingError, SentCredential, error::Result as SamplingResult,
+    OutputRateFloorPolicy, OutputRateGate, RateTick, SamplingError, SentCredential,
+    error::Result as SamplingResult,
 };
 
 use crate::actor::state::ImageInputRejections;
@@ -40,6 +41,17 @@ use crate::types::RequestId;
 /// (5 minutes -- long enough for cold-start reasoning, short enough
 /// to detect dead streams before the user gives up).
 const DEFAULT_IDLE_TIMEOUT_SECS: u64 = 300;
+
+/// How often the output-rate meter is read: it judges the floor and publishes
+/// the rate a client renders. Silence between chunks only lowers the rate when
+/// something reads the meter, so this is also what makes a stream that stops
+/// dead reachable by the gate.
+const RATE_TICK: Duration = Duration::from_millis(250);
+
+/// Smallest change in tokens/sec worth a [`SamplingEvent::OutputRate`]. The
+/// event exists to move a number on screen; a client cannot see less than this
+/// and every event costs a repaint.
+const RATE_EVENT_EPSILON: f64 = 0.5;
 
 /// Result type for the `submit_and_collect` oneshot. Carries the rich
 /// `SamplingError` so callers can inspect retryability, status code,
@@ -134,6 +146,16 @@ pub(crate) async fn run_request_task(
         .flatten();
     let doom_max_retries = doom_policy.map_or(0, |p| p.max_retries);
     let mut doom_retry_count: u32 = 0;
+    // The output-rate floor keeps a third budget, for the same reason the
+    // doom-loop one is separate: a collapsed engine is not a transport
+    // failure, and spending the transport budget on it leaves nothing for the
+    // 5xx that follows.
+    let rate_policy = (max_retries > 0)
+        .then(|| config.output_rate_floor.map(OutputRateFloorPolicy::clamped))
+        .flatten()
+        .filter(OutputRateFloorPolicy::is_armed);
+    let rate_max_retries = rate_policy.map_or(0, |p| p.max_retries);
+    let mut rate_retry_count: u32 = 0;
     let output_observed = Arc::new(AtomicBool::new(false));
 
     loop {
@@ -145,6 +167,10 @@ pub(crate) async fn run_request_task(
         // Once the resample budget is spent, the attempt runs with the abort
         // disarmed so it can complete and be accepted as-is.
         let doom_check = doom_policy.filter(|_| doom_retry_count < doom_max_retries);
+        // Same disarm as the doom check: once the resample budget is spent the
+        // attempt runs ungated, so a persistently slow engine still answers
+        // instead of the turn dying.
+        let rate_check = rate_policy.filter(|_| rate_retry_count < rate_max_retries);
         let outcome = run_one_attempt(
             &client,
             request.clone(),
@@ -153,6 +179,7 @@ pub(crate) async fn run_request_task(
             &event_tx,
             &cancel_token,
             doom_check,
+            rate_check,
             Arc::clone(&output_observed),
         )
         .instrument(sampling_span.clone())
@@ -170,7 +197,7 @@ pub(crate) async fn run_request_task(
                 response,
                 mut metrics,
             } => {
-                metrics.attempts = retry_count + doom_retry_count + 1;
+                metrics.attempts = retry_count + doom_retry_count + rate_retry_count + 1;
                 if let Some(policy) = doom_policy {
                     let confident = policy.confident_triggers(&response.doom_loop_signals);
                     if !confident.is_empty() {
@@ -262,6 +289,47 @@ pub(crate) async fn run_request_task(
                         &request_id,
                         doom_retry_count,
                         doom_max_retries,
+                        &error,
+                    );
+                    if sleep_or_cancel(backoff, &cancel_token).await {
+                        continue;
+                    }
+                    handle_cancellation(&event_tx, &request_id, &mut completion_tx);
+                    return request_id;
+                }
+                if let SamplingError::OutputRateCollapsed {
+                    observed_tokens_per_sec,
+                    floor_tokens_per_sec,
+                    window_secs,
+                } = &error
+                {
+                    // Duplicate output is exactly what this caller cannot
+                    // take, so a collapsed rate is reported rather than
+                    // resampled there.
+                    if retry_policy.retry_only_before_output
+                        && output_observed.load(Ordering::Relaxed)
+                    {
+                        emit_failed(&event_tx, &request_id, &error);
+                        send_completion(&mut completion_tx, Err(clone_error(&error)));
+                        return request_id;
+                    }
+                    let backoff = retry_mod::output_rate_backoff(rate_retry_count + 1);
+                    rate_retry_count += 1;
+                    tracing::warn!(
+                        target: crate::sampling_log::TARGET,
+                        observed_tokens_per_sec = observed_tokens_per_sec,
+                        floor_tokens_per_sec = floor_tokens_per_sec,
+                        window_secs = window_secs,
+                        attempt = rate_retry_count,
+                        max_retries = rate_max_retries,
+                        outcome = "reissued",
+                        "output-rate floor: abandoning the collapsed response and reissuing"
+                    );
+                    emit_retrying(
+                        &event_tx,
+                        &request_id,
+                        rate_retry_count,
+                        rate_max_retries,
                         &error,
                     );
                     if sleep_or_cancel(backoff, &cancel_token).await {
@@ -532,6 +600,7 @@ async fn run_one_attempt(
     event_tx: &mpsc::UnboundedSender<SamplingEvent>,
     cancel_token: &CancellationToken,
     doom_check: Option<xai_grok_sampling_types::DoomLoopRecoveryPolicy>,
+    rate_check: Option<OutputRateFloorPolicy>,
     output_observed: Arc<AtomicBool>,
 ) -> AttemptOutcome {
     match client.api_backend() {
@@ -549,6 +618,7 @@ async fn run_one_attempt(
                 cancel_token,
                 captured,
                 None,
+                rate_check,
                 output_observed,
             )
             .await
@@ -580,6 +650,7 @@ async fn run_one_attempt(
                 cancel_token,
                 captured,
                 doom_check,
+                rate_check,
                 output_observed,
             )
             .await
@@ -598,6 +669,7 @@ async fn run_one_attempt(
                 cancel_token,
                 captured,
                 None,
+                rate_check,
                 output_observed,
             )
             .await
@@ -640,6 +712,13 @@ fn tee_errors<'a, T: Send + 'a>(
 /// the terminal event (or cancellation). `doom_check`, when set, turns a
 /// completed response carrying confident doom-loop signals into a
 /// retryable failure (belt-and-braces behind the mid-stream abort).
+///
+/// The output-rate meter runs here rather than inside a backend transform:
+/// every backend's tokens and tool-call arguments pass through this loop, so
+/// one meter covers all three and the gate and the published rate are the same
+/// measurement. `rate_check`, when set, turns a full window under its floor
+/// into a retryable failure; dropping this future drops the L2 stream, which
+/// is what cancels the HTTP request.
 #[allow(clippy::too_many_arguments)]
 async fn drive_l2(
     l2: impl futures_util::Stream<Item = SamplingEvent>,
@@ -648,14 +727,73 @@ async fn drive_l2(
     cancel_token: &CancellationToken,
     captured: ErrorCell,
     doom_check: Option<xai_grok_sampling_types::DoomLoopRecoveryPolicy>,
+    rate_check: Option<OutputRateFloorPolicy>,
     output_observed: Arc<AtomicBool>,
 ) -> AttemptOutcome {
     let mut l2 = pin!(l2);
+    // The gate measures whether or not a floor is armed: the rate it
+    // publishes is what the client renders, and a session with no floor still
+    // wants the number.
+    let mut gate = OutputRateGate::new(rate_check);
+    let mut rate_ticker = tokio::time::interval(RATE_TICK);
+    rate_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut last_published: Option<PublishedRate> = None;
     loop {
         tokio::select! {
             biased;
             _ = cancel_token.cancelled() => {
                 return AttemptOutcome::Cancelled;
+            }
+            _ = rate_ticker.tick() => {
+                let now = std::time::Instant::now();
+                // Both slowdown edges are logged, not just the breach: a dip
+                // that recovers on its own is never reissued over and would
+                // otherwise leave no trace of the seconds it cost.
+                match gate.tick(now) {
+                    RateTick::Quiet => {}
+                    RateTick::SlowdownStarted { tokens_per_sec } => {
+                        tracing::warn!(
+                            target: crate::sampling_log::TARGET,
+                            request_id = %request_id.as_str(),
+                            observed_tokens_per_sec = tokens_per_sec,
+                            floor_tokens_per_sec = gate.floor(),
+                            event = "output_rate_slowdown_start",
+                            "output rate fell under the floor"
+                        );
+                    }
+                    RateTick::SlowdownEnded { tokens_per_sec, slow_for } => {
+                        tracing::info!(
+                            target: crate::sampling_log::TARGET,
+                            request_id = %request_id.as_str(),
+                            observed_tokens_per_sec = tokens_per_sec,
+                            floor_tokens_per_sec = gate.floor(),
+                            slow_duration_ms = slow_for.as_millis() as u64,
+                            event = "output_rate_slowdown_end",
+                            "output rate recovered above the floor"
+                        );
+                    }
+                    RateTick::Breached { tokens_per_sec, slow_for } => {
+                        let policy = rate_check.unwrap_or_default();
+                        tracing::warn!(
+                            target: crate::sampling_log::TARGET,
+                            request_id = %request_id.as_str(),
+                            observed_tokens_per_sec = tokens_per_sec,
+                            floor_tokens_per_sec = policy.min_tokens_per_sec,
+                            slow_duration_ms = slow_for.as_millis() as u64,
+                            sustained_secs = policy.sustained_secs,
+                            event = "output_rate_breached",
+                            "output rate stayed under the floor for the sustained duration"
+                        );
+                        return AttemptOutcome::Failed {
+                            error: SamplingError::OutputRateCollapsed {
+                                observed_tokens_per_sec: tokens_per_sec,
+                                floor_tokens_per_sec: policy.min_tokens_per_sec,
+                                window_secs: policy.window_secs,
+                            },
+                        };
+                    }
+                }
+                publish_rate(&gate, now, &request_id, event_tx, &mut last_published);
             }
             next = l2.next() => match next {
                 Some(SamplingEvent::Completed { response, metrics, .. }) => {
@@ -708,6 +846,20 @@ async fn drive_l2(
                     ) {
                         output_observed.store(true, Ordering::Relaxed);
                     }
+                    // Tool-call arguments are generation like any other: a
+                    // response that collapses while writing a large edit is
+                    // the case the floor exists for, and counting only text
+                    // would read it as total silence.
+                    let generated = match &other {
+                        SamplingEvent::ChannelToken { text, .. } => text.len() as u64,
+                        SamplingEvent::ToolCallDelta { arguments_delta, .. } => {
+                            arguments_delta.as_ref().map_or(0, |d| d.len() as u64)
+                        }
+                        _ => 0,
+                    };
+                    if generated > 0 {
+                        gate.record(std::time::Instant::now(), generated);
+                    }
                     let _ = event_tx.send(retag(other, &request_id));
                 }
                 None => {
@@ -724,6 +876,50 @@ async fn drive_l2(
             }
         }
     }
+}
+
+/// Publish the gate's current rate. The event's whole job is to change what a
+/// client renders, so an unchanged reading is not sent — with one exception:
+/// while the rate is under the floor the event also carries how long that has
+/// lasted, and that number moves even when the rate does not.
+fn publish_rate(
+    gate: &OutputRateGate,
+    now: std::time::Instant,
+    request_id: &RequestId,
+    event_tx: &mpsc::UnboundedSender<SamplingEvent>,
+    last_published: &mut Option<PublishedRate>,
+) {
+    let Some(rate) = gate.rate(now) else {
+        return;
+    };
+    let slow_for = gate.slow_for(now);
+    let health = xai_grok_sampling_types::classify_rate(rate, gate.floor());
+    let unchanged = last_published.is_some_and(|last| {
+        (last.tokens_per_sec - rate).abs() < RATE_EVENT_EPSILON
+            && last.health == health
+            && slow_for.is_none()
+    });
+    if unchanged {
+        return;
+    }
+    *last_published = Some(PublishedRate {
+        tokens_per_sec: rate,
+        health,
+    });
+    let _ = event_tx.send(SamplingEvent::OutputRate {
+        request_id: request_id.clone(),
+        tokens_per_sec: rate,
+        window_secs: gate.window().as_secs(),
+        floor_tokens_per_sec: gate.floor(),
+        slow_for_ms: slow_for.map(|d| d.as_millis() as u64),
+    });
+}
+
+/// The last reading a client was told about, for the change test above.
+#[derive(Clone, Copy)]
+struct PublishedRate {
+    tokens_per_sec: f64,
+    health: xai_grok_sampling_types::OutputRateHealth,
 }
 
 /// Re-tag a forwarded event with the canonical request_id. The L2
@@ -784,6 +980,18 @@ fn synthesize_from_info(info: &SamplingErrorInfo) -> SamplingError {
         SamplingErrorKind::DoomLoopDetected => SamplingError::DoomLoopDetected {
             triggers: info.doom_loop_triggers.clone().unwrap_or_default(),
             aborted_at_chunk: info.doom_loop_aborted_at_chunk,
+        },
+        // The rate gate lives in this loop, not in an L2 transform, so a
+        // synthesized failure of this kind means a peer sent one. Rebuild it
+        // from the numbers it carried; a payload without them is a transport
+        // failure rather than an invented measurement.
+        SamplingErrorKind::OutputRateCollapsed => match info.output_rate {
+            Some(rate) => SamplingError::OutputRateCollapsed {
+                observed_tokens_per_sec: rate.observed_tokens_per_sec,
+                floor_tokens_per_sec: rate.floor_tokens_per_sec,
+                window_secs: rate.window_secs,
+            },
+            None => SamplingError::EventStreamError(info.message.clone()),
         },
     }
 }
@@ -884,6 +1092,7 @@ fn handle_cancellation(
         empty_response_context: None,
         doom_loop_triggers: None,
         doom_loop_aborted_at_chunk: None,
+        output_rate: None,
         credential: SentCredential::Unknown,
     };
     let _ = event_tx.send(SamplingEvent::Failed {
@@ -923,6 +1132,7 @@ mod tests {
             empty_response_context: None,
             doom_loop_triggers: None,
             doom_loop_aborted_at_chunk: None,
+            output_rate: None,
             credential: SentCredential::Unknown,
         };
         let err = synthesize_from_info(&info);
@@ -945,6 +1155,7 @@ mod tests {
             empty_response_context: None,
             doom_loop_triggers: None,
             doom_loop_aborted_at_chunk: None,
+            output_rate: None,
             credential: SentCredential::Unknown,
         };
         let err = synthesize_from_info(&info);
@@ -976,6 +1187,7 @@ mod tests {
             empty_response_context: None,
             doom_loop_triggers: None,
             doom_loop_aborted_at_chunk: None,
+            output_rate: None,
             credential: SentCredential::Unknown,
         };
         let err = synthesize_from_info(&info);

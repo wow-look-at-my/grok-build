@@ -2707,6 +2707,22 @@ impl SessionActor {
                 self.record_api_request_time();
                 self.signals_handle().record_inference_metrics(metrics);
             }
+            SamplingEvent::OutputRate {
+                tokens_per_sec,
+                window_secs,
+                floor_tokens_per_sec,
+                slow_for_ms,
+                ..
+            } => {
+                // Transient by design: it describes a stream in flight, and a
+                // replayed copy would put a stale rate under an idle session.
+                self.send_xai_notification_transient(XaiSessionUpdate::OutputRate {
+                    tokens_per_sec,
+                    window_secs,
+                    floor_tokens_per_sec,
+                    slow_for_ms,
+                });
+            }
             SamplingEvent::ModelMetadata { metadata, .. } => {
                 self.handle_model_metadata_update(metadata).await;
             }

@@ -1346,6 +1346,12 @@ pub struct Config {
     /// object. See [`crate::util::config::DoomLoopRecoverySettings`].
     #[serde(default)]
     pub doom_loop_recovery: crate::util::config::DoomLoopRecoverySettings,
+    /// `[output_rate_floor]` section: the session-wide output tokens/sec
+    /// floor and its timing. See
+    /// [`crate::util::config::OutputRateFloorSettings`]; one model overrides
+    /// the floor with `[model.<id>].min_output_tokens_per_sec`.
+    #[serde(default)]
+    pub output_rate_floor: crate::util::config::OutputRateFloorSettings,
     /// `[worktree]` section (currently `[worktree.auto_gc]` only).
     #[serde(default)]
     pub worktree: WorktreeConfigSection,
@@ -1810,6 +1816,7 @@ impl Default for Config {
             goal: GoalConfig::default(),
             workflows: WorkflowsConfig::default(),
             doom_loop_recovery: crate::util::config::DoomLoopRecoverySettings::default(),
+            output_rate_floor: crate::util::config::OutputRateFloorSettings::default(),
             worktree: WorktreeConfigSection::default(),
             auto_mode: AutoModeConfig::default(),
             pricing: PricingConfig::default(),
@@ -2570,6 +2577,43 @@ impl Config {
                 .or(remote.and_then(|s| s.max_retries))
                 .map_or(Policy::DEFAULT_MAX_RETRIES, Policy::clamp_max_retries),
         })
+    }
+    /// The output-rate floor for `model_id`, or `None` when nothing gates it.
+    ///
+    /// The floor resolves per-model first: `[model.<id>].min_output_tokens_per
+    /// _sec` is the endpoint's own number, and it is the only one that can
+    /// differ between two models in one session. `[ui].min_output_tokens_per_sec`
+    /// is the session-wide fallback the settings modal writes. Zero at either
+    /// layer is off, so a per-model `0` turns the gate off for that model
+    /// without touching the session value.
+    ///
+    /// The timing is shared: `[ui].output_rate_sustained_secs` plus the
+    /// `[output_rate_floor]` window and budget, each clamped to its range.
+    pub(crate) fn resolve_output_rate_floor(
+        &self,
+        model_id: &str,
+    ) -> Option<xai_grok_sampling_types::OutputRateFloorPolicy> {
+        use xai_grok_sampling_types::OutputRateFloorPolicy as Policy;
+        let models = resolve_model_list(self, None);
+        let per_model = find_model_by_id(&models, model_id)
+            .and_then(|e| e.info.min_output_tokens_per_sec)
+            .filter(|f| f.is_finite());
+        let min_tokens_per_sec =
+            per_model.unwrap_or_else(|| f64::from(self.ui.min_output_tokens_per_sec_value()));
+        let policy = Policy {
+            min_tokens_per_sec,
+            window_secs: self
+                .output_rate_floor
+                .window_secs
+                .unwrap_or(xai_grok_sampling_types::output_rate::DEFAULT_WINDOW_SECS),
+            sustained_secs: u64::from(self.ui.output_rate_sustained_secs_value()),
+            max_retries: self
+                .output_rate_floor
+                .max_retries
+                .unwrap_or(Policy::DEFAULT_MAX_RETRIES),
+        }
+        .clamped();
+        policy.is_armed().then_some(policy)
     }
     /// Automatic worktree GC policy. Precedence: env kill/dry-run >
     /// `[worktree.auto_gc]` TOML > remote `worktree_auto_gc` > defaults.
@@ -3987,6 +4031,7 @@ fn default_models(endpoints: &EndpointsConfig) -> IndexMap<String, ModelEntryCon
                 stream_tool_calls: None,
                 laziness_detector: LazinessDetectorPerModelConfig::default(),
                 pricing: xai_grok_sampling_types::ModelPricing::default(),
+                min_output_tokens_per_sec: None,
             };
             (key, config)
         })
@@ -4116,6 +4161,12 @@ pub struct ModelEntryConfig {
     /// cost stays honestly absent).
     #[serde(default, skip_serializing_if = "is_default_model_pricing")]
     pub pricing: xai_grok_sampling_types::ModelPricing,
+    /// Floor on this model's output tokens/sec. A response that stays under
+    /// it for the configured sustained duration is abandoned and the request
+    /// is reissued. Absent or zero leaves the model ungated; the global
+    /// `[output_rate_floor]` value applies when this is absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_output_tokens_per_sec: Option<f64>,
 }
 
 /// True when `pricing` equals the all-zero default.
@@ -4215,6 +4266,7 @@ pub struct ConfigModelOverride {
     pub show_model_fingerprint: Option<bool>,
     pub stream_tool_calls: Option<bool>,
     pub pricing: Option<xai_grok_sampling_types::ModelPricing>,
+    pub min_output_tokens_per_sec: Option<f64>,
 }
 impl ConfigModelOverride {
     pub(crate) fn apply(
@@ -4312,6 +4364,9 @@ impl ConfigModelOverride {
         if let Some(ref p) = self.pricing {
             entry.info.pricing = p.clone();
         }
+        if self.min_output_tokens_per_sec.is_some() {
+            entry.info.min_output_tokens_per_sec = self.min_output_tokens_per_sec;
+        }
         if self.api_key.is_some() {
             entry.api_key.clone_from(&self.api_key);
         }
@@ -4405,10 +4460,15 @@ pub struct ModelInfo {
     /// injecting nudges. See [`LazinessDetectorPerModelConfig`].
     #[serde(default)]
     pub laziness_detector: LazinessDetectorPerModelConfig,
-    /// Per-token USD pricing used to derive cost when the backend reports
-    /// token usage but no wire cost.
+    /// Per-token USD pricing, which derives a cost for a backend that reports
+    /// token usage and no wire cost.
     #[serde(default)]
     pub pricing: xai_grok_sampling_types::ModelPricing,
+    /// Floor on this model's output tokens/sec; see
+    /// [`Config::resolve_output_rate_floor`]. `None` falls through to the
+    /// session-wide `[ui].min_output_tokens_per_sec`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_output_tokens_per_sec: Option<f64>,
 }
 impl ModelInfo {
     /// Minimal fallback descriptor for an unknown model slug.
@@ -4448,6 +4508,7 @@ impl ModelInfo {
             stream_tool_calls: None,
             laziness_detector: LazinessDetectorPerModelConfig::default(),
             pricing: xai_grok_sampling_types::ModelPricing::default(),
+            min_output_tokens_per_sec: None,
         }
     }
     /// Extract shared model metadata from a flat config entry.
@@ -4486,6 +4547,7 @@ impl ModelInfo {
             stream_tool_calls: entry.stream_tool_calls,
             laziness_detector: entry.laziness_detector.clone(),
             pricing: entry.pricing.clone(),
+            min_output_tokens_per_sec: entry.min_output_tokens_per_sec,
         }
     }
     /// Derive the legacy effort gate/default from `reasoning_efforts` so the
@@ -5204,6 +5266,21 @@ pub(crate) fn resolve_configured_pricing(model_id: &str) -> ConfiguredPricing {
         catalog_url: cfg.pricing.catalog_url,
     }
 }
+/// [`Config::resolve_output_rate_floor`] off a fresh config load, for the
+/// model-switch path, which holds no parsed config of its own. One load per
+/// switch, never per turn: the session caches the answer until the model
+/// changes again.
+pub(crate) fn resolve_output_rate_floor_from_disk(
+    model_id: &str,
+) -> Option<xai_grok_sampling_types::OutputRateFloorPolicy> {
+    let raw = crate::config::load_effective_config()
+        .map_err(|e| tracing::warn!(error = %e, "config load failed for output-rate floor lookup"))
+        .ok()?;
+    let cfg = Config::new_from_toml_cfg(&raw)
+        .map_err(|e| tracing::warn!(error = %e, "config parse failed for output-rate floor lookup"))
+        .ok()?;
+    cfg.resolve_output_rate_floor(model_id)
+}
 enum ModelLookup<'a> {
     /// `None` if `model_id` is absent from the catalog.
     Loaded(Option<&'a ModelEntry>),
@@ -5305,6 +5382,7 @@ pub(crate) fn resolve_aux_model_sampling_config(
                 stream_tool_calls: None,
                 laziness_detector: LazinessDetectorPerModelConfig::default(),
                 pricing: xai_grok_sampling_types::ModelPricing::default(),
+                min_output_tokens_per_sec: None,
             },
             api_key: Some(bearer),
             env_key: None,
@@ -5441,6 +5519,9 @@ pub(crate) fn sampling_config_for_model(
         compactions_remaining: info.compactions_remaining,
         compaction_at_tokens: info.compaction_at_tokens,
         doom_loop_recovery: None,
+        // Resolved per session (and re-resolved on a model switch), not here:
+        // the floor reads config layers this builder does not have.
+        output_rate_floor: None,
         header_injector: None,
     }
 }
@@ -5519,6 +5600,7 @@ fn resolve_hidden_default_web_search_sampling_config(
             stream_tool_calls: None,
             laziness_detector: LazinessDetectorPerModelConfig::default(),
             pricing: xai_grok_sampling_types::ModelPricing::default(),
+            min_output_tokens_per_sec: None,
         },
         api_key: None,
         env_key: None,
@@ -9320,6 +9402,64 @@ reasoning_effort = "low"
         assert!(!r.value, "env wins over config + remote");
         assert_eq!(r.source, ConfigSource::Env);
         unsafe { std::env::remove_var("GROK_TWO_PASS_COMPACTION") };
+    }
+    /// The output-rate floor is off by default, takes the session-wide
+    /// `[ui]` value when one is set, and lets a model override it — including
+    /// with a zero, which turns the gate off for that model alone.
+    #[test]
+    fn resolve_output_rate_floor_prefers_the_model_over_the_session() {
+        assert!(
+            Config::default().resolve_output_rate_floor("any-model").is_none(),
+            "a floor belongs to an endpoint that collapses, so nothing is assumed"
+        );
+
+        let mut session_wide = Config::default();
+        session_wide.ui.min_output_tokens_per_sec = Some(20);
+        session_wide.ui.output_rate_sustained_secs = Some(15);
+        let p = session_wide
+            .resolve_output_rate_floor("any-model")
+            .expect("the session floor arms the gate");
+        assert_eq!(p.min_tokens_per_sec, 20.0);
+        assert_eq!(p.sustained_secs, 15);
+        assert_eq!(
+            p.window_secs,
+            xai_grok_sampling_types::output_rate::DEFAULT_WINDOW_SECS
+        );
+
+        let mut per_model = session_wide.clone();
+        per_model.config_models.insert(
+            "slow-model".to_string(),
+            ConfigModelOverride {
+                model: Some("slow-model".to_string()),
+                min_output_tokens_per_sec: Some(5.0),
+                ..Default::default()
+            },
+        );
+        let p = per_model
+            .resolve_output_rate_floor("slow-model")
+            .expect("the model's own floor arms the gate");
+        assert_eq!(p.min_tokens_per_sec, 5.0, "the model's floor wins");
+        assert_eq!(
+            per_model
+                .resolve_output_rate_floor("any-model")
+                .map(|p| p.min_tokens_per_sec),
+            Some(20.0),
+            "one model's floor does not move any other model's",
+        );
+
+        let mut model_off = per_model.clone();
+        model_off.config_models.insert(
+            "ungated-model".to_string(),
+            ConfigModelOverride {
+                model: Some("ungated-model".to_string()),
+                min_output_tokens_per_sec: Some(0.0),
+                ..Default::default()
+            },
+        );
+        assert!(
+            model_off.resolve_output_rate_floor("ungated-model").is_none(),
+            "a zero on the model turns the gate off for that model alone"
+        );
     }
     /// Gate precedence: env > `[doom_loop_recovery]` > remote settings >
     /// default(ON), with the remote layer merged PER-FIELD from the nested

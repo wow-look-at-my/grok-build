@@ -36,6 +36,11 @@ impl SessionActor {
             .set(sampling_config.compactions_remaining);
         self.compaction_at_tokens
             .set(sampling_config.compaction_at_tokens);
+        // The floor is per-model, so it is re-resolved here rather than read
+        // per turn: one config load per switch instead of one per message.
+        self.output_rate_floor.set(
+            crate::agent::config::resolve_output_rate_floor_from_disk(&sampling_config.model),
+        );
         xai_grok_telemetry::unified_log::info(
             "backend_search: model switch",
             Some(self.session_info.id.0.as_ref()),

@@ -98,6 +98,7 @@ xai-grok-config = { workspace = true }
 xai-grok-voice = { path = "../xai-grok-voice", default-features = false, features = ["audio"] }
 xai-grok-shell = { workspace = true }
 xai-grok-workspace = { workspace = true }
+xai-grok-sampling-types = { path = "../xai-grok-sampling-types" }
 xai-token-estimation = { workspace = true }
 xai-grok-telemetry = { workspace = true }
 xai-fast-worktree = { path = "../xai-fast-worktree", features = ["metadata"] }
