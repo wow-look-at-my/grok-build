@@ -67,6 +67,7 @@ async fn persist_ack_waits_for_disk_flush_before_success() {
                 compactions_remaining: None,
                 compaction_at_tokens: None,
                 doom_loop_recovery: None,
+                output_rate_floor: None,
                 header_injector: None,
             })
             .expect("sampling client should build for persistence actor");
@@ -156,6 +157,7 @@ async fn persist_ack_waits_for_disk_flush_before_success() {
                 compactions_remaining: std::cell::Cell::new(None),
                 compaction_at_tokens: std::cell::Cell::new(None),
                 doom_loop_recovery: None,
+                output_rate_floor: std::cell::Cell::new(None),
                 doom_loop_turn_tally: Default::default(),
                 file_state_tracker: Arc::new(FileStateTracker::new()),
                 rewind_pending_prompt: std::sync::Mutex::new(None),
@@ -389,6 +391,7 @@ async fn first_turn_memory_injection_persists_to_chat_history() {
                     compactions_remaining: None,
                     compaction_at_tokens: None,
                     doom_loop_recovery: None,
+                    output_rate_floor: None,
                     header_injector: None,
                 })
                 .expect("sampling client should build for persistence actor");
@@ -523,6 +526,7 @@ async fn first_turn_memory_injection_disabled_does_not_persist_to_chat_history()
                 compactions_remaining: None,
                 compaction_at_tokens: None,
                 doom_loop_recovery: None,
+                output_rate_floor: None,
                 header_injector: None,
             })
             .expect("sampling client should build for persistence actor");
@@ -633,6 +637,7 @@ async fn first_turn_memory_injection_disabled_does_not_persist_to_chat_history()
                 compactions_remaining: std::cell::Cell::new(None),
                 compaction_at_tokens: std::cell::Cell::new(None),
                 doom_loop_recovery: None,
+                output_rate_floor: std::cell::Cell::new(None),
                 doom_loop_turn_tally: Default::default(),
                 file_state_tracker: Arc::new(FileStateTracker::new()),
                 rewind_pending_prompt: std::sync::Mutex::new(None),
@@ -927,6 +932,7 @@ async fn cancel_running_task_teardown_clears_running_and_pending_work() {
                 compactions_remaining: std::cell::Cell::new(None),
                 compaction_at_tokens: std::cell::Cell::new(None),
                 doom_loop_recovery: None,
+                output_rate_floor: std::cell::Cell::new(None),
                 doom_loop_turn_tally: Default::default(),
                 file_state_tracker: Arc::new(FileStateTracker::new()),
                 rewind_pending_prompt: std::sync::Mutex::new(None),
@@ -2259,6 +2265,7 @@ async fn cancel_propagates_to_sampler_handle_so_no_further_emission() {
                 compactions_remaining: None,
                 compaction_at_tokens: None,
                 doom_loop_recovery: None,
+                output_rate_floor: None,
                 header_injector: None,
             };
             let (sampler_event_tx, _sampler_event_rx) = tokio::sync::mpsc::unbounded_channel::<
@@ -2366,6 +2373,7 @@ async fn cancel_propagates_to_sampler_handle_so_no_further_emission() {
                 compactions_remaining: std::cell::Cell::new(None),
                 compaction_at_tokens: std::cell::Cell::new(None),
                 doom_loop_recovery: None,
+                output_rate_floor: std::cell::Cell::new(None),
                 doom_loop_turn_tally: Default::default(),
                 file_state_tracker: Arc::new(FileStateTracker::new()),
                 rewind_pending_prompt: std::sync::Mutex::new(None),
