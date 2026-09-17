@@ -25,7 +25,7 @@ use xai_grok_sampler::{
     SamplingErrorKind, SamplingEvent,
 };
 use xai_grok_sampling_types::{
-    ConversationItem, ConversationRequest, DoomLoopRecoveryPolicy, UserItem,
+    ConversationItem, ConversationRequest, DoomLoopRecoveryPolicy, OutputRateFloorPolicy, UserItem,
 };
 use xai_grok_test_support::{SseEvent, sse};
 
@@ -973,6 +973,140 @@ async fn responses_confident_doom_loop_signal_resamples_once() {
         response.doom_loop_signals.is_empty(),
         "the accepted response is the clean resample"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Output-rate floor
+// ---------------------------------------------------------------------------
+
+/// A collapsed stream is abandoned mid-response and the request is reissued;
+/// the clean answer is what the caller gets.
+///
+/// The first attempt dribbles one character every 200 ms — about 1 tok/s
+/// against a 100 tok/s floor — and never finishes. The second answers
+/// normally. The timings are the policy's minimum so the test costs seconds
+/// rather than a window plus a sustained duration at their defaults.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_collapsed_stream_is_reissued_and_the_clean_answer_wins() {
+    let counter = Arc::new(AtomicU32::new(0));
+    let counter_handler = Arc::clone(&counter);
+    let app = Router::new().route(
+        "/v1/chat/completions",
+        post(move || {
+            let counter = Arc::clone(&counter_handler);
+            async move {
+                let attempt = counter.fetch_add(1, Ordering::SeqCst);
+                if attempt == 0 {
+                    // 60 chunks at 200 ms outlasts the breach by far; the
+                    // client drops the stream partway through.
+                    let events: Vec<Event> =
+                        (0..60).map(|_| text_chunk_event("x", false)).collect();
+                    let slow = stream::iter(events).then(|event| async move {
+                        tokio::time::sleep(Duration::from_millis(200)).await;
+                        Ok::<_, std::convert::Infallible>(event)
+                    });
+                    return Sse::new(slow.boxed());
+                }
+                let events = vec![text_chunk_event("clean answer", true)];
+                Sse::new(
+                    stream::iter(events.into_iter().map(Ok::<_, std::convert::Infallible>)).boxed(),
+                )
+            }
+        }),
+    );
+    let server = MockServer::spawn(app).await;
+    let (event_tx, mut event_rx) = mpsc::unbounded_channel();
+    let mut cfg = test_config(server.base_url(), "test-model");
+    cfg.output_rate_floor = Some(OutputRateFloorPolicy {
+        min_tokens_per_sec: 100.0,
+        window_secs: 2,
+        sustained_secs: 1,
+        max_retries: 2,
+    });
+    let handle = SamplerActor::spawn(cfg, RetryPolicy::default(), event_tx);
+
+    let result = handle
+        .submit_and_collect(RequestId::from("req-rate-floor"), user_request("hi"))
+        .await;
+    server.shutdown();
+
+    let (response, _metrics) = result.expect("the reissued request answers");
+    assert_eq!(counter.load(Ordering::SeqCst), 2, "exactly one reissue");
+    assert_eq!(response.assistant_text(), "clean answer");
+
+    let mut saw_rate_retry = false;
+    let mut saw_rate_event = false;
+    while let Ok(event) = event_rx.try_recv() {
+        match event {
+            SamplingEvent::Retrying { kind, .. } => {
+                if kind == SamplingErrorKind::OutputRateCollapsed {
+                    saw_rate_retry = true;
+                }
+            }
+            SamplingEvent::OutputRate {
+                tokens_per_sec,
+                floor_tokens_per_sec,
+                ..
+            } => {
+                saw_rate_event = true;
+                assert!(
+                    tokens_per_sec < 100.0,
+                    "the collapsed stream's rate was {tokens_per_sec}"
+                );
+                assert_eq!(floor_tokens_per_sec, Some(100.0));
+            }
+            _ => {}
+        }
+    }
+    assert!(
+        saw_rate_retry,
+        "the reissue must be attributed to the rate floor, not to a transport retry"
+    );
+    assert!(
+        saw_rate_event,
+        "the rate the gate measured must also reach the client"
+    );
+}
+
+/// The same collapsed stream with no floor configured runs to completion:
+/// nothing was asked for, so nothing is reissued.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_ungated_session_never_reissues_a_slow_stream() {
+    let counter = Arc::new(AtomicU32::new(0));
+    let counter_handler = Arc::clone(&counter);
+    let app = Router::new().route(
+        "/v1/chat/completions",
+        post(move || {
+            let counter = Arc::clone(&counter_handler);
+            async move {
+                counter.fetch_add(1, Ordering::SeqCst);
+                let mut events: Vec<Event> =
+                    (0..12).map(|_| text_chunk_event("x", false)).collect();
+                events.push(text_chunk_event("", true));
+                let slow = stream::iter(events).then(|event| async move {
+                    tokio::time::sleep(Duration::from_millis(200)).await;
+                    Ok::<_, std::convert::Infallible>(event)
+                });
+                Sse::new(slow.boxed())
+            }
+        }),
+    );
+    let server = MockServer::spawn(app).await;
+    let (event_tx, _event_rx) = mpsc::unbounded_channel();
+    let handle = SamplerActor::spawn(
+        test_config(server.base_url(), "test-model"),
+        RetryPolicy::default(),
+        event_tx,
+    );
+
+    let result = handle
+        .submit_and_collect(RequestId::from("req-no-floor"), user_request("hi"))
+        .await;
+    server.shutdown();
+
+    let (response, _metrics) = result.expect("a slow stream still answers");
+    assert_eq!(counter.load(Ordering::SeqCst), 1, "no reissue");
+    assert_eq!(response.assistant_text(), "xxxxxxxxxxxx");
 }
 
 // ---------------------------------------------------------------------------

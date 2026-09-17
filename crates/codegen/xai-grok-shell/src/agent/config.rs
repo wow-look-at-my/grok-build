@@ -9403,6 +9403,64 @@ reasoning_effort = "low"
         assert_eq!(r.source, ConfigSource::Env);
         unsafe { std::env::remove_var("GROK_TWO_PASS_COMPACTION") };
     }
+    /// The output-rate floor is off by default, takes the session-wide
+    /// `[ui]` value when one is set, and lets a model override it — including
+    /// with a zero, which turns the gate off for that model alone.
+    #[test]
+    fn resolve_output_rate_floor_prefers_the_model_over_the_session() {
+        assert!(
+            Config::default().resolve_output_rate_floor("any-model").is_none(),
+            "a floor belongs to an endpoint that collapses, so nothing is assumed"
+        );
+
+        let mut session_wide = Config::default();
+        session_wide.ui.min_output_tokens_per_sec = Some(20);
+        session_wide.ui.output_rate_sustained_secs = Some(15);
+        let p = session_wide
+            .resolve_output_rate_floor("any-model")
+            .expect("the session floor arms the gate");
+        assert_eq!(p.min_tokens_per_sec, 20.0);
+        assert_eq!(p.sustained_secs, 15);
+        assert_eq!(
+            p.window_secs,
+            xai_grok_sampling_types::output_rate::DEFAULT_WINDOW_SECS
+        );
+
+        let mut per_model = session_wide.clone();
+        per_model.config_models.insert(
+            "slow-model".to_string(),
+            ConfigModelOverride {
+                model: Some("slow-model".to_string()),
+                min_output_tokens_per_sec: Some(5.0),
+                ..Default::default()
+            },
+        );
+        let p = per_model
+            .resolve_output_rate_floor("slow-model")
+            .expect("the model's own floor arms the gate");
+        assert_eq!(p.min_tokens_per_sec, 5.0, "the model's floor wins");
+        assert_eq!(
+            per_model
+                .resolve_output_rate_floor("any-model")
+                .map(|p| p.min_tokens_per_sec),
+            Some(20.0),
+            "one model's floor does not move any other model's",
+        );
+
+        let mut model_off = per_model.clone();
+        model_off.config_models.insert(
+            "ungated-model".to_string(),
+            ConfigModelOverride {
+                model: Some("ungated-model".to_string()),
+                min_output_tokens_per_sec: Some(0.0),
+                ..Default::default()
+            },
+        );
+        assert!(
+            model_off.resolve_output_rate_floor("ungated-model").is_none(),
+            "a zero on the model turns the gate off for that model alone"
+        );
+    }
     /// Gate precedence: env > `[doom_loop_recovery]` > remote settings >
     /// default(ON), with the remote layer merged PER-FIELD from the nested
     /// `doom_loop_recovery` object and each layer's `false` an independent
