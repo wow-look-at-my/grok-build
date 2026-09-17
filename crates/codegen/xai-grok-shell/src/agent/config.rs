@@ -2929,12 +2929,24 @@ impl Config {
             .default(false)
             .resolve()
     }
+    /// When `true`, a remote-pushed role pair may pin a `/goal` role to a model
+    /// the user did not select. Default `false`: the session's own model is what
+    /// the user picked, and a server-side pin that silently replaces it reads as
+    /// the harness ignoring that choice. A pair written in local `[goal]` config
+    /// is the user's own instruction and is honored either way.
+    pub(crate) fn resolve_goal_follow_remote_role_models(&self) -> Resolved<bool> {
+        BoolFlag::env("GROK_GOAL_FOLLOW_REMOTE_ROLE_MODELS")
+            .config(self.goal.follow_remote_role_models)
+            .default(false)
+            .resolve()
+    }
     /// Shared single-pair resolution. Precedence: kill-switch ⇒
     /// `InheritCurrent`/`Config` > `config_pair` ⇒ `Explicit`/`Config` >
-    /// `remote_pair` ⇒ `Explicit`/`Remote` > `InheritCurrent`/`Default`. The
-    /// chosen pair is cloned only on its branch.
+    /// `remote_pair` (only with `follow_remote`) ⇒ `Explicit`/`Remote` >
+    /// `InheritCurrent`/`Default`. The chosen pair is cloned only on its branch.
     fn resolve_single_role_model(
         use_current_only: bool,
+        follow_remote: bool,
         config_pair: Option<&crate::util::config::GoalRoleModel>,
         remote_pair: Option<&crate::util::config::GoalRoleModel>,
     ) -> Resolved<GoalRoleModelChoice> {
@@ -2947,7 +2959,7 @@ impl Config {
                 ConfigSource::Config,
             );
         }
-        match remote_pair {
+        match remote_pair.filter(|_| follow_remote) {
             Some(pair) => Resolved::new(
                 GoalRoleModelChoice::Explicit(pair.clone()),
                 ConfigSource::Remote,
@@ -2955,8 +2967,8 @@ impl Config {
             None => Resolved::new(GoalRoleModelChoice::InheritCurrent, ConfigSource::Default),
         }
     }
-    /// Planner role model: `[goal]` config then remote. No env layer (only the
-    /// kill-switch reads env).
+    /// Planner role model: `[goal]` config, then remote when the user opted in.
+    /// The pair itself has no env layer. The two switches around it do.
     ///
     /// An `Explicit` pair is applied as `runtime_overrides.model`, resolved before
     /// `resolve_subagent_sampling_config`, so it wins over a user
@@ -2967,6 +2979,7 @@ impl Config {
     ) -> Resolved<GoalRoleModelChoice> {
         Self::resolve_single_role_model(
             use_current_only,
+            self.resolve_goal_follow_remote_role_models().value,
             self.goal.planner_model.as_ref(),
             self.remote_settings
                 .as_ref()
@@ -2980,6 +2993,7 @@ impl Config {
     ) -> Resolved<GoalRoleModelChoice> {
         Self::resolve_single_role_model(
             use_current_only,
+            self.resolve_goal_follow_remote_role_models().value,
             self.goal.strategist_model.as_ref(),
             self.remote_settings
                 .as_ref()
@@ -3008,6 +3022,7 @@ impl Config {
         match self
             .remote_settings
             .as_ref()
+            .filter(|_| self.resolve_goal_follow_remote_role_models().value)
             .map(|s| s.goal_skeptic_models.as_slice())
         {
             Some(pool) if !pool.is_empty() => Resolved::new(to_choices(pool), ConfigSource::Remote),
@@ -4689,6 +4704,10 @@ pub struct GoalConfig {
     pub summary_enabled: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub use_current_model_only: Option<bool>,
+    /// Opt in to remote-pushed role model pins. Unset means the session's own
+    /// model runs every role that local config does not pin.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub follow_remote_role_models: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub verifier_count: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -10399,8 +10418,10 @@ reverify_after = 6
         assert_eq!(empty.goal.verifier_count, None);
     }
     const GOAL_USE_CURRENT_ENV: &str = "GROK_GOAL_USE_CURRENT_MODEL_ONLY";
+    const GOAL_FOLLOW_REMOTE_ENV: &str = "GROK_GOAL_FOLLOW_REMOTE_ROLE_MODELS";
     fn clear_goal_model_env() {
         unsafe { std::env::remove_var(GOAL_USE_CURRENT_ENV) };
+        unsafe { std::env::remove_var(GOAL_FOLLOW_REMOTE_ENV) };
     }
     fn planner_pair() -> crate::util::config::GoalRoleModel {
         crate::util::config::GoalRoleModel {
@@ -10487,7 +10508,38 @@ reverify_after = 6
         assert_eq!(r.source, ConfigSource::Config);
     }
     #[test]
-    fn resolve_goal_planner_model_remote_pair_explicit() {
+    #[serial]
+    fn resolve_goal_planner_model_remote_pair_explicit_when_followed() {
+        clear_goal_model_env();
+        let cfg = cfg_with_goal_config_and_remote(
+            GoalConfig {
+                follow_remote_role_models: Some(true),
+                ..Default::default()
+            },
+            remote_planner_model(planner_pair()),
+        );
+        let r = cfg.resolve_goal_planner_model(false);
+        assert_eq!(r.value, GoalRoleModelChoice::Explicit(planner_pair()));
+        assert_eq!(r.source, ConfigSource::Remote);
+    }
+    /// A server-pushed pin must not replace the model the user selected.
+    #[test]
+    #[serial]
+    fn resolve_goal_planner_model_remote_pair_ignored_by_default() {
+        clear_goal_model_env();
+        let cfg = cfg_with_goal_config_and_remote(
+            GoalConfig::default(),
+            remote_planner_model(planner_pair()),
+        );
+        let r = cfg.resolve_goal_planner_model(false);
+        assert_eq!(r.value, GoalRoleModelChoice::InheritCurrent);
+        assert_eq!(r.source, ConfigSource::Default);
+    }
+    #[test]
+    #[serial]
+    fn resolve_goal_planner_model_remote_pair_followed_via_env() {
+        clear_goal_model_env();
+        unsafe { std::env::set_var(GOAL_FOLLOW_REMOTE_ENV, "1") };
         let cfg = cfg_with_goal_config_and_remote(
             GoalConfig::default(),
             remote_planner_model(planner_pair()),
@@ -10495,6 +10547,7 @@ reverify_after = 6
         let r = cfg.resolve_goal_planner_model(false);
         assert_eq!(r.value, GoalRoleModelChoice::Explicit(planner_pair()));
         assert_eq!(r.source, ConfigSource::Remote);
+        clear_goal_model_env();
     }
     #[test]
     fn resolve_goal_planner_model_config_overrides_remote() {
@@ -10526,14 +10579,31 @@ reverify_after = 6
         assert_eq!(r.source, ConfigSource::Default);
     }
     #[test]
-    fn resolve_goal_strategist_model_remote_pair_explicit() {
+    #[serial]
+    fn resolve_goal_strategist_model_remote_pair_explicit_when_followed() {
+        clear_goal_model_env();
         let cfg = cfg_with_goal_config_and_remote(
-            GoalConfig::default(),
+            GoalConfig {
+                follow_remote_role_models: Some(true),
+                ..Default::default()
+            },
             remote_strategist_model(strategist_pair()),
         );
         let r = cfg.resolve_goal_strategist_model(false);
         assert_eq!(r.value, GoalRoleModelChoice::Explicit(strategist_pair()));
         assert_eq!(r.source, ConfigSource::Remote);
+    }
+    #[test]
+    #[serial]
+    fn resolve_goal_strategist_model_remote_pair_ignored_by_default() {
+        clear_goal_model_env();
+        let cfg = cfg_with_goal_config_and_remote(
+            GoalConfig::default(),
+            remote_strategist_model(strategist_pair()),
+        );
+        let r = cfg.resolve_goal_strategist_model(false);
+        assert_eq!(r.value, GoalRoleModelChoice::InheritCurrent);
+        assert_eq!(r.source, ConfigSource::Default);
     }
     #[test]
     fn resolve_goal_strategist_model_config_overrides_remote() {
@@ -10559,13 +10629,21 @@ reverify_after = 6
         assert_eq!(r.source, ConfigSource::Config);
     }
     #[test]
-    fn resolve_goal_skeptic_models_remote_pool_explicit() {
+    #[serial]
+    fn resolve_goal_skeptic_models_remote_pool_explicit_when_followed() {
+        clear_goal_model_env();
         let remote = crate::util::config::RemoteSettings {
             goal_skeptic_models: vec![planner_pair(), strategist_pair()],
             ..Default::default()
         };
-        let r = cfg_with_goal_config_and_remote(GoalConfig::default(), remote)
-            .resolve_goal_skeptic_models(false);
+        let cfg = cfg_with_goal_config_and_remote(
+            GoalConfig {
+                follow_remote_role_models: Some(true),
+                ..Default::default()
+            },
+            remote,
+        );
+        let r = cfg.resolve_goal_skeptic_models(false);
         assert_eq!(
             r.value,
             vec![
@@ -10574,6 +10652,20 @@ reverify_after = 6
             ]
         );
         assert_eq!(r.source, ConfigSource::Remote);
+    }
+    /// The panel inherits the current model until the user asks for the pool.
+    #[test]
+    #[serial]
+    fn resolve_goal_skeptic_models_remote_pool_ignored_by_default() {
+        clear_goal_model_env();
+        let remote = crate::util::config::RemoteSettings {
+            goal_skeptic_models: vec![planner_pair(), strategist_pair()],
+            ..Default::default()
+        };
+        let r = cfg_with_goal_config_and_remote(GoalConfig::default(), remote)
+            .resolve_goal_skeptic_models(false);
+        assert!(r.value.is_empty(), "remote pool must not pin the panel");
+        assert_eq!(r.source, ConfigSource::Default);
     }
     #[test]
     fn resolve_goal_skeptic_models_config_pool_overrides_remote_pool() {
