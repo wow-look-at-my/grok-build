@@ -191,6 +191,7 @@ async fn read_agents_config_with_roots(
 
     let mut home_roots = Vec::new();
     add_discovery_root(&mut home_roots, grok_home, true, HOME_RULES_DIRS);
+    let import_home = home_dir.clone();
     if let Some(home) = home_dir {
         if compat.claude.agents || compat.claude.rules {
             add_discovery_root(
@@ -283,28 +284,49 @@ async fn read_agents_config_with_roots(
         }
     }
 
-    candidates
-        .into_iter()
-        .filter_map(|candidate| {
-            let content = std::fs::read_to_string(&candidate.path).ok()?;
-            let content = if candidate.is_rule {
-                xai_grok_tools::implementations::skills::skill::extract_skill_body(&content)
-            } else {
-                content
-            };
-            let file_name = candidate
-                .path
-                .file_name()
-                .and_then(|file_name| file_name.to_str())
-                .unwrap_or("AGENTS.md")
-                .to_string();
-            Some(AgentConfigFile {
-                file_name,
-                file_path: candidate.path.display().to_string(),
-                content,
-            })
-        })
-        .collect()
+    // Every discovered path is already spoken for, so an `@ref` to one of them
+    // imports nothing and the file keeps the position discovery gave it.
+    let mut imported_seen: std::collections::HashSet<PathBuf> =
+        seen_candidates.into_keys().collect();
+
+    let mut files = Vec::new();
+    for candidate in candidates {
+        let Ok(raw) = std::fs::read_to_string(&candidate.path) else {
+            continue;
+        };
+        let content = if candidate.is_rule {
+            xai_grok_tools::implementations::skills::skill::extract_skill_body(&raw)
+        } else {
+            raw
+        };
+        let imported = crate::prompt::agents_md_imports::collect_imports(
+            &candidate.path,
+            &content,
+            import_home.as_deref(),
+            &mut imported_seen,
+            1,
+        );
+        files.push(config_file(candidate.path, content));
+        files.extend(
+            imported
+                .into_iter()
+                .map(|file| config_file(file.path, file.content)),
+        );
+    }
+    files
+}
+
+fn config_file(path: PathBuf, content: String) -> AgentConfigFile {
+    let file_name = path
+        .file_name()
+        .and_then(|file_name| file_name.to_str())
+        .unwrap_or("AGENTS.md")
+        .to_string();
+    AgentConfigFile {
+        file_name,
+        file_path: path.display().to_string(),
+        content,
+    }
 }
 
 /// Format AGENTS.md configs into a `<system-reminder>` block for user message injection.
@@ -975,6 +997,121 @@ mod tests {
                 .map(|c| (&c.file_path, &c.content))
                 .collect::<Vec<_>>()
         );
+    }
+
+    // ── @import tests ───────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn an_at_reference_delivers_the_file_it_names() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = tmp.path().join("repo");
+        fs::create_dir_all(repo.join("docs")).unwrap();
+        init_git_repo(&repo);
+        fs::write(repo.join("CLAUDE.md"), "# Entry\n\n@docs/house-style.md").unwrap();
+        fs::write(repo.join("docs/house-style.md"), "XYZZY_IMPORTED_RULES").unwrap();
+
+        let configs = read_agents_config_with_roots(
+            repo.to_str().unwrap(),
+            None,
+            CompatConfig::default(),
+            repo.clone(),
+            None,
+        )
+        .await;
+        let imported = configs
+            .iter()
+            .find(|config| config.content.contains("XYZZY_IMPORTED_RULES"))
+            .expect("the imported file should be delivered");
+        assert!(imported.file_path.ends_with("house-style.md"));
+        assert!(
+            format_agents_md_section(&configs)
+                .unwrap()
+                .contains("XYZZY_IMPORTED_RULES")
+        );
+    }
+
+    /// This repo's own shape: CLAUDE.md is a one-line pointer at AGENTS.md,
+    /// which discovery finds by itself. The pointer must not duplicate it.
+    #[tokio::test]
+    async fn an_at_reference_to_an_already_discovered_file_adds_nothing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = tmp.path().join("repo");
+        fs::create_dir_all(&repo).unwrap();
+        init_git_repo(&repo);
+        fs::write(repo.join("CLAUDE.md"), "# CLAUDE.md\n\n@AGENTS.md").unwrap();
+        fs::write(repo.join("AGENTS.md"), "XYZZY_SHARED_RULES").unwrap();
+
+        let configs = read_agents_config_with_roots(
+            repo.to_str().unwrap(),
+            None,
+            CompatConfig::default(),
+            repo.clone(),
+            None,
+        )
+        .await;
+        assert_eq!(
+            configs
+                .iter()
+                .filter(|config| config.content.contains("XYZZY_SHARED_RULES"))
+                .count(),
+            1
+        );
+    }
+
+    /// An import is a deliberate instruction to read that file, which is the
+    /// whole point of a gitignored local override.
+    #[tokio::test]
+    async fn a_gitignored_file_is_imported_when_a_reference_names_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = tmp.path().join("repo");
+        fs::create_dir_all(&repo).unwrap();
+        init_git_repo(&repo);
+        fs::write(repo.join(".gitignore"), "CLAUDE.local.md\n").unwrap();
+        fs::write(repo.join("CLAUDE.md"), "@CLAUDE.local.md").unwrap();
+        fs::write(repo.join("CLAUDE.local.md"), "XYZZY_LOCAL_OVERRIDE").unwrap();
+
+        let configs = read_agents_config_with_roots(
+            repo.to_str().unwrap(),
+            None,
+            CompatConfig::default(),
+            repo.clone(),
+            None,
+        )
+        .await;
+        assert!(
+            configs
+                .iter()
+                .any(|config| config.content.contains("XYZZY_LOCAL_OVERRIDE"))
+        );
+    }
+
+    #[tokio::test]
+    async fn an_imported_file_keeps_its_own_frontmatter_and_provenance() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = tmp.path().join("repo");
+        fs::create_dir_all(repo.join(".grok/rules")).unwrap();
+        init_git_repo(&repo);
+        fs::write(
+            repo.join(".grok/rules/style.md"),
+            "---\nglobs: ['*.rs']\n---\n@../../shared.md",
+        )
+        .unwrap();
+        fs::write(repo.join("shared.md"), "---\nkeep: me\n---\nXYZZY_SHARED").unwrap();
+
+        let configs = read_agents_config_with_roots(
+            repo.to_str().unwrap(),
+            None,
+            CompatConfig::default(),
+            repo.clone(),
+            None,
+        )
+        .await;
+        let imported = configs
+            .iter()
+            .find(|config| config.content.contains("XYZZY_SHARED"))
+            .expect("a rule file's import should be delivered too");
+        assert!(imported.content.starts_with("---\n"));
+        assert!(imported.file_path.ends_with("shared.md"));
     }
 
     /// CI pin: pattern must compile, and must hit the tag shapes we neutralize (not bare words).

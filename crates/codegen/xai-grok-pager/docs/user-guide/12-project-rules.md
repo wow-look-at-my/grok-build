@@ -47,6 +47,29 @@ Home rules load first, in the table order, followed by project files from repo r
 
 ---
 
+## Importing Another File with `@`
+
+A project instruction file can pull in another file by naming it with an `@` reference. Grok reads the referenced file and adds it to the context, right after the file that named it:
+
+```markdown
+# CLAUDE.md
+
+@AGENTS.md
+@docs/house-style.md
+@~/.grok/personal-rules.md
+```
+
+- A relative path resolves against the directory of the file that wrote the reference. A `~/` path resolves against your home directory.
+- An imported file can import further files. Grok follows a bounded number of hops and imports each file once. So a cycle terminates.
+- A reference inside a code fence or inline backticks is text, not an import. So is an email address, because an `@` must start a line or follow a space.
+- A reference that names no existing file is skipped.
+- A gitignored file IS imported when a reference names it. The reference is a deliberate instruction to read that file, which is what makes a personal `CLAUDE.local.md` importable.
+- A file Grok already discovered on its own is not delivered twice. A `CLAUDE.md` whose whole content is `@AGENTS.md` therefore adds the pointer and nothing else.
+
+Each imported file keeps its own `## From:` path in the context. You can see where every instruction came from.
+
+---
+
 ## How Discovery Works
 
 Grok scans for project rules in this order:
