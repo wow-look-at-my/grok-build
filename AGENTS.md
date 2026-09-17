@@ -267,6 +267,14 @@ Every one of those is the test doing its job. Making them pass there means weake
 - Thinking a model cannot verify rides as text, in both places that handle it: `build_messages_request` and the sampler's `RetryWithReasoningStrip` recovery (`ConversationRequest::reasoning_to_plain_text`). A block carrying only a signature has no words. That block is what goes.
 - The pager keeps its `MODEL_SWITCH_INCOMPATIBLE_AGENT` handling and its `model_incompatible` flag. The shell sends neither on the recoverable paths. An older shell on the other end of ACP still can.
 
+## Project-instruction `@import` notes
+
+- An `@ref` in a discovered instruction file names a file to deliver (`prompt/agents_md_imports.rs`). Before it existed, this repo's `CLAUDE.md` shipped the literal line `@AGENTS.md` and none of the rules under it.
+- An imported file is its OWN `AgentConfigFile`, placed right after the file that named it, rather than text spliced into the importer. That keeps the `## From:` path on every instruction. It also lets discovery's canonical-path dedup cover imports. A ref to a file discovery already found therefore adds nothing.
+- The gitignore filter is discovery's, not the import path's. A ref is a deliberate instruction to read that file. Applying the filter to it makes a personal `CLAUDE.local.md` unimportable, which is the one thing people gitignore it for.
+- A rule file's frontmatter is stripped from the RULE, never from what the rule imports. The import is read as written.
+- `MAX_IMPORT_DEPTH` plus the seen-set bound the walk. The seen-set is what terminates a cycle. The depth cap only bounds a chain.
+
 ## Workflow agent-concurrency notes
 
 - `WorkflowHostParams.agent_slots` is a semaphore owned by `WorkflowManager` and shared by every run it launches (`session/workflow/manager.rs`), not one fresh semaphore per run. Up to `WORKFLOW_MAX_ACTIVE_RUNS_PER_SESSION` runs can be active at once, so a per-run semaphore will let total live agent-spawned LLM requests scale with active run count instead of staying under the configured cap (`GROK_WORKFLOW_MAX_CONCURRENT_AGENTS` / `workflow_max_concurrent_agents`) — the knob operators lower to stay under a hard per-host concurrent-request limit.
