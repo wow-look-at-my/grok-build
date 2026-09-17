@@ -1571,6 +1571,7 @@ pub(super) fn resolve(
     }
     Ok(prompt_blocks)
 }
+
 /// Extract `(name, args)` if the first text block starts with `/`.
 ///
 /// - `"/compact keep auth"` → `Some(("compact", "keep auth"))`

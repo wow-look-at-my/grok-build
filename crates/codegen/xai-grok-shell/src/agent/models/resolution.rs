@@ -60,10 +60,17 @@ pub(crate) fn resolve_context_window_from_provider(
     // tokio runtime that panics if it is created inside an async context), and
     // we wait for the result with a deadline.
     const FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
-    let (model, base, key) = (model.to_owned(), api_base_url.to_owned(), api_key.map(str::to_owned));
+    let (model, base, key) = (
+        model.to_owned(),
+        api_base_url.to_owned(),
+        api_key.map(str::to_owned),
+    );
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
-        let _ = tx.send(crate::remote::fetch_models_for_api_base_blocking(&base, key.as_deref()));
+        let _ = tx.send(crate::remote::fetch_models_for_api_base_blocking(
+            &base,
+            key.as_deref(),
+        ));
     });
     let listing = rx
         .recv_timeout(FETCH_TIMEOUT)
@@ -76,7 +83,6 @@ pub(crate) fn resolve_context_window_from_provider(
     let cw = listed.context_window;
     (cw != default).then_some(cw)
 }
-
 
 /// Map a model id (catalog key or routing slug) to its catalog key.
 pub(crate) fn resolve_catalog_key(
@@ -398,7 +404,10 @@ pub(crate) fn merge_codex_catalog(
 }
 
 /// Whether `effort` is a value this model will accept on the wire.
-pub(crate) fn model_offers_reasoning_effort(info: &config::ModelInfo, effort: ReasoningEffort) -> bool {
+pub(crate) fn model_offers_reasoning_effort(
+    info: &config::ModelInfo,
+    effort: ReasoningEffort,
+) -> bool {
     if !info.supports_reasoning_effort {
         return false;
     }

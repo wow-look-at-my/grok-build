@@ -228,10 +228,7 @@ impl SessionActor {
     ///
     /// Everything excluded here keeps today's behaviour (it runs as its own
     /// turn once the current one ends).
-    fn deliverable_mid_turn(
-        item: &InputItem,
-        holds: &std::collections::HashSet<String>,
-    ) -> bool {
+    fn deliverable_mid_turn(item: &InputItem, holds: &std::collections::HashSet<String>) -> bool {
         // Auto-wake, nudges and drains are the system talking to itself; each
         // is written to own a turn.
         if item.origin.is_synthetic() || item.send_now {
@@ -260,6 +257,16 @@ impl SessionActor {
             return false;
         }
         if meta.text.trim().is_empty() {
+            return false;
+        }
+        // A slash invocation is a command, not a note: `resolve` runs it when
+        // the prompt's OWN turn starts, while this path's drain expands skills
+        // alone — folding it in would hand the model the literal `/cmd args`
+        // (and `/plan <description>` would swallow the prompt of the turn the
+        // mode switch was requested for). It stays queued and runs as its own
+        // turn instead. Same rule the pager consults:
+        // `xai_prompt_queue::is_slash_invocation`.
+        if Self::row_text_is_command(&meta.text) {
             return false;
         }
         // Text and images are all the interjection pipeline carries.

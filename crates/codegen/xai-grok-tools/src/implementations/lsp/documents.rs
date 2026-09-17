@@ -68,11 +68,12 @@ impl Documents {
 
     /// What to send for `uri`, without recording it as sent.
     ///
-    /// Deliberately separate from [`Self::commit`]: what is recorded here
+    /// Deliberately separate from [`Self::commit`]: what is recorded there
     /// describes the text the *server* has, so a notification that failed to go
-    /// out must not advance it. Advancing it anyway would aim every later
-    /// incremental range at a revision the server never received — the same
-    /// protocol violation the range exists to avoid.
+    /// out must not be left advanced — [`Self::restore`] takes it back.
+    /// Leaving it advanced would aim every later incremental range at a
+    /// revision the server never received — the same protocol violation the
+    /// range exists to avoid.
     pub fn plan(&self, uri: &str) -> Update {
         match self.read().get(uri) {
             Some(tracked) => Update::Change {
@@ -85,19 +86,45 @@ impl Documents {
         }
     }
 
-    /// Record a notification that is on the wire.
-    pub fn commit(&self, uri: &str, version: i32, language_id: &str, end: Position) {
-        self.write()
-            .entry(uri.to_string())
-            .and_modify(|tracked| {
-                tracked.version = version;
-                tracked.end = end;
-            })
-            .or_insert_with(|| Tracked {
+    /// A notification's revision is written down here, before the notification
+    /// reaches the wire. The replaced value comes back, so [`Self::restore`]
+    /// can undo a send that failed.
+    ///
+    /// A push that names no version is credited with the newest version we
+    /// have sent, and the server can answer on another thread before the
+    /// sending thread gets this far. A report read against the older record
+    /// settles nothing, so the reader never sees it.
+    pub fn commit(
+        &self,
+        uri: &str,
+        version: i32,
+        language_id: &str,
+        end: Position,
+    ) -> Option<Tracked> {
+        let mut documents = self.write();
+        // A document keeps the language it was opened with: renaming one the
+        // server already has open is not what a later change means to say.
+        let language_id = documents
+            .get(uri)
+            .map(|tracked| tracked.language_id.clone())
+            .unwrap_or_else(|| language_id.to_string());
+        documents.insert(
+            uri.to_string(),
+            Tracked {
                 version,
-                language_id: language_id.to_string(),
+                language_id,
                 end,
-            });
+            },
+        )
+    }
+
+    /// Undo a [`Self::commit`] whose notification never went out.
+    pub fn restore(&self, uri: &str, previous: Option<Tracked>) {
+        let mut documents = self.write();
+        match previous {
+            Some(tracked) => documents.insert(uri.to_string(), tracked),
+            None => documents.remove(uri),
+        };
     }
 
     /// The version the server has, or `None` if it has never been told about
@@ -184,7 +211,8 @@ mod tests {
     #[test]
     fn a_committed_document_is_changed_from_where_it_ended() {
         let documents = Documents::new();
-        documents.commit(A, 1, "csharp", end_position("one\ntwo"));
+        let previous = documents.commit(A, 1, "csharp", end_position("one\ntwo"));
+        assert!(previous.is_none(), "nothing was open to replace");
 
         assert_eq!(
             documents.plan(A),
@@ -214,6 +242,64 @@ mod tests {
             "planning twice is the same plan"
         );
         assert_eq!(documents.version(A), Some(0));
+    }
+
+    /// The revision is written down before the notification goes out, so a
+    /// versionless push that arrives while the send is still running is
+    /// credited with the text the server was just given. A send that fails
+    /// takes it back: what is recorded describes the text the server has.
+    #[test]
+    fn a_failed_send_leaves_the_document_where_it_was() {
+        let documents = Documents::new();
+        documents.commit(A, 1, "csharp", end_position("one"));
+
+        let previous = documents.commit(A, 2, "csharp", end_position("one\ntwo"));
+        assert_eq!(documents.version(A), Some(2), "recorded before the send");
+
+        documents.restore(A, previous);
+        assert_eq!(documents.version(A), Some(1));
+        assert_eq!(
+            documents.plan(A),
+            Update::Change {
+                version: 2,
+                previous_end: position(0, 3),
+            },
+            "the next change describes the text the server really has"
+        );
+    }
+
+    /// The same, for a document the server has never been told about: there is
+    /// nothing to put back, so the failed open leaves it unopened.
+    #[test]
+    fn a_failed_open_leaves_the_document_unopened() {
+        let documents = Documents::new();
+        let previous = documents.commit(A, FIRST_VERSION, "csharp", end_position("one"));
+
+        documents.restore(A, previous);
+        assert_eq!(documents.version(A), None);
+        assert!(!documents.contains(A));
+        assert_eq!(
+            documents.plan(A),
+            Update::Open {
+                version: FIRST_VERSION
+            },
+            "the next attempt is an open, not a change"
+        );
+    }
+
+    /// A document keeps the language it was opened with. A later change names
+    /// whatever the caller resolved this time, and overwriting the recorded one
+    /// would rename a document the server already has open.
+    #[test]
+    fn a_change_does_not_rename_the_document_language() {
+        let documents = Documents::new();
+        documents.commit(A, 1, "csharp", end_position("one"));
+        documents.commit(A, 2, "typescript", end_position("one\ntwo"));
+
+        assert_eq!(
+            documents.tracked(),
+            vec![(A.to_string(), "csharp".to_string())]
+        );
     }
 
     fn position(line: u32, character: u32) -> Position {

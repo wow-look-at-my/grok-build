@@ -4,8 +4,9 @@ use crate::implementations::grok_build::task::backend::{ChannelBackend, Subagent
 use crate::implementations::grok_build::task::types::{
     SubagentCancelRequest, SubagentClearUsageNotAppliedRequest, SubagentCompletionsRequest,
     SubagentListActiveRequest, SubagentLoopUnitActiveRequest, SubagentMarkUsageNotAppliedRequest,
-    SubagentOutstandingReply, SubagentOutstandingRequest, SubagentOwner, SubagentRegistryCounts,
-    SubagentRequest, SubagentSnapshotStatus,
+    SubagentMessageChildRequest, SubagentMessageOutcome, SubagentOutstandingReply,
+    SubagentOutstandingRequest, SubagentOwner, SubagentRegistryCounts, SubagentRequest,
+    SubagentSnapshotStatus,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -329,7 +330,10 @@ async fn interject_reaches_the_active_child_named_by_id() {
     // channel is the barrier that proves the interjection was handled.
     let _ = loop_unit_active(&harness.backend, "unrelated").await;
     assert_eq!(
-        harness.interjections.try_recv().expect("delivered to planner"),
+        harness
+            .interjections
+            .try_recv()
+            .expect("delivered to planner"),
         CONTEXT
     );
 
@@ -389,6 +393,135 @@ async fn interject_before_start_is_delivered_on_start() {
     let _ = loop_unit_active(&harness.backend, "unrelated").await;
     assert_eq!(harness.interjections.try_recv().expect("first"), "first");
     assert_eq!(harness.interjections.try_recv().expect("second"), "second");
+
+    let _ = harness.finish.send(());
+    assert!(spawn.await.unwrap().unwrap().success);
+    harness.actor.abort();
+}
+
+/// Ask the coordinator to deliver one `send_message` to a child and report
+/// what became of it.
+async fn message_child(
+    backend: &ChannelBackend,
+    parent_session_id: &str,
+    subagent_id: &str,
+    text: &str,
+) -> SubagentMessageOutcome {
+    let (respond_to, response_rx) = tokio::sync::oneshot::channel();
+    backend
+        .sender()
+        .send(SubagentEvent::MessageChild(SubagentMessageChildRequest {
+            parent_session_id: parent_session_id.to_owned(),
+            subagent_id: subagent_id.to_owned(),
+            text: text.to_owned(),
+            respond_to,
+        }))
+        .expect("actor command channel open");
+    response_rx.await.expect("message outcome")
+}
+
+/// A `send_message` to a running child of this session is delivered and
+/// reported as delivered.
+#[tokio::test]
+async fn send_message_reaches_the_caller_s_own_running_child() {
+    let mut harness = harness(false, std::time::Duration::from_secs(60));
+    let spawn = tokio::spawn({
+        let backend = harness.backend.clone();
+        async move { backend.spawn(request("planner", false)).await }
+    });
+    let started = harness.started.recv().await.expect("child started");
+    assert_eq!(started, "planner");
+
+    const TEXT: &str = "drop the rewrite, the base branch already has it";
+    assert_eq!(
+        message_child(&harness.backend, "parent", "planner", TEXT).await,
+        SubagentMessageOutcome::Delivered
+    );
+    assert_eq!(
+        harness
+            .interjections
+            .try_recv()
+            .expect("delivered to planner"),
+        TEXT
+    );
+
+    let _ = harness.finish.send(());
+    assert!(spawn.await.unwrap().unwrap().success);
+    harness.actor.abort();
+}
+
+/// A child of a DIFFERENT session is refused, and nothing is delivered. This
+/// is what separates the model-facing tool from the host's own `Interject`,
+/// which is unscoped.
+#[tokio::test]
+async fn send_message_refuses_a_child_of_another_session() {
+    let mut harness = harness(false, std::time::Duration::from_secs(60));
+    let spawn = tokio::spawn({
+        let backend = harness.backend.clone();
+        async move { backend.spawn(request("planner", false)).await }
+    });
+    assert_eq!(
+        harness.started.recv().await.expect("child started"),
+        "planner"
+    );
+
+    assert_eq!(
+        message_child(&harness.backend, "someone-else", "planner", "steer").await,
+        SubagentMessageOutcome::NotOwned
+    );
+    assert!(
+        harness.interjections.try_recv().is_err(),
+        "a stranger's message must never reach the child"
+    );
+
+    let _ = harness.finish.send(());
+    assert!(spawn.await.unwrap().unwrap().success);
+    harness.actor.abort();
+}
+
+/// An id that names no child at all reports `NotFound`, so the model is told
+/// its message went nowhere instead of reading a silent success.
+#[tokio::test]
+async fn send_message_to_an_unknown_id_reports_not_found() {
+    let harness = harness(false, std::time::Duration::from_secs(60));
+    assert_eq!(
+        message_child(&harness.backend, "parent", "ghost", "hello").await,
+        SubagentMessageOutcome::NotFound
+    );
+    harness.actor.abort();
+}
+
+/// A child that has not started yet holds the message and reports `Queued`;
+/// the text arrives the moment it starts.
+#[tokio::test]
+async fn send_message_before_start_is_queued_then_delivered() {
+    let mut harness = harness(true, std::time::Duration::from_secs(60));
+    let spawn = tokio::spawn({
+        let backend = harness.backend.clone();
+        async move { backend.spawn(request("planner", false)).await }
+    });
+    let pending = harness.requests.recv().await.expect("child pending");
+    assert_eq!(pending.id, "planner");
+
+    assert_eq!(
+        message_child(&harness.backend, "parent", "planner", "read the spec first").await,
+        SubagentMessageOutcome::Queued
+    );
+    assert!(
+        harness.interjections.try_recv().is_err(),
+        "nothing is delivered before the child starts"
+    );
+
+    let _ = harness.start.send(());
+    assert_eq!(
+        harness.started.recv().await.expect("child started"),
+        "planner"
+    );
+    let _ = loop_unit_active(&harness.backend, "unrelated").await;
+    assert_eq!(
+        harness.interjections.try_recv().expect("held message"),
+        "read the spec first"
+    );
 
     let _ = harness.finish.send(());
     assert!(spawn.await.unwrap().unwrap().success);

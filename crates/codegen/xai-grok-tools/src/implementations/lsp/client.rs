@@ -626,6 +626,15 @@ impl LspClient {
         let update = self.documents.plan(&uri_str);
         let version = update.version();
 
+        // Recorded before the send, not after. A server can publish about this
+        // revision on another thread while this one is still inside the send,
+        // and a versionless publish is credited with the newest version we have
+        // sent. Read a moment too early it is credited with no version at all,
+        // settles nothing, and the report is never shown.
+        let previous = self
+            .documents
+            .commit(&uri_str, version, language_id, new_end);
+
         let sent = match update {
             Update::Open { version } => {
                 tracing::debug!(server = %self.server_name, uri = %uri, language_id, "didOpen");
@@ -667,19 +676,14 @@ impl LspClient {
         };
 
         if let Err(e) = sent {
+            // The record describes the text the *server* has. Left advanced
+            // over a send that never went out, it would aim every later
+            // incremental range at a revision the server never received — the
+            // same protocol violation the range exists to avoid.
+            self.documents.restore(&uri_str, previous);
             tracing::debug!(server = %self.server_name, error = %e, "failed to send document update");
             return None;
         }
-
-        // Only now, with the notification actually on the wire, does our record
-        // of the server's copy advance. It describes the text the *server* has;
-        // advancing it after a send that failed would compute every later
-        // incremental range against a revision the server never received — the
-        // same protocol violation the range exists to avoid. It is also what
-        // the pull about to be spawned reads to know which revision it is
-        // asking about, so it has to be committed first.
-        self.documents
-            .commit(&uri_str, version, language_id, new_end);
 
         // Some servers only emit diagnostics on save, not change — but only
         // notify the ones that asked, and only include the text when they said

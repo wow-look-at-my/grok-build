@@ -74,9 +74,11 @@ pub struct SamplerConfig {
     /// client build and never persisted.
     #[serde(default)]
     pub env_http_headers: IndexMap<String, String>,
-    /// Total context window size in tokens. The sampler does not enforce
-    /// it; it is informational metadata used by the session for compaction
-    /// decisions.
+    /// Total context window size in tokens. The session reads it for its
+    /// compaction decisions. The sampler holds one thing to it: the requested
+    /// output shares this window with the prompt, so `apply_conversation_defaults`
+    /// cuts `max_output_tokens` to what is left rather than send a body the
+    /// provider rejects on its arithmetic. `0` means unknown, and nothing is cut.
     pub context_window: u64,
     pub force_http1: bool,
     pub max_retries: Option<u32>,

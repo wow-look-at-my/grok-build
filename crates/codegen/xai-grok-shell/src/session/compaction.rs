@@ -1832,9 +1832,9 @@ impl SessionActor {
         }
     }
     /// Returns true if the error response indicates tokens exceed the
-    /// model's context window. Inspects only the model-metadata
-    /// portion of the [`SamplingErrorInfo`] (the `context_window`
-    /// field) against the session's tracked token estimate.
+    /// model's context window: the session's tracked token estimate against
+    /// the `context_window` the [`SamplingErrorInfo`] metadata carries, or
+    /// the server's own message saying as much.
     ///
     /// Called from `handle_sampling_failure` with the
     /// `SamplingErrorInfo` the sampler hands back.
@@ -1860,7 +1860,15 @@ impl SessionActor {
             return false;
         }
         let estimated_total = self.chat_state_handle.get_estimated_total_tokens().await;
-        estimated_total > context_window
+        // Two ways to know the window is the problem. Our own count is one, and
+        // it does not need the prompt to exceed the window on its own: a prompt
+        // that leaves no room for an answer is over it in practice, because the
+        // provider charges the requested output against the same window.
+        // The server saying so is the other, and it settles it — its tokenizer
+        // is the one that counts, and a 400 that names the context length is
+        // not a turn to hand back to the user.
+        estimated_total > context_window.saturating_sub(xai_token_estimation::MIN_OUTPUT_TOKENS)
+            || xai_grok_sampling_types::is_context_length_error(&err.message)
     }
     /// Pre-sampling compaction check. Uses `get_estimated_total_tokens()`
     /// (exact prior count + byte-estimate of items since last response) so
@@ -1926,7 +1934,8 @@ impl SessionActor {
         None
     }
     /// Returns `Some` when tool call outputs have pushed the estimated token
-    /// count past the context window, indicating pre-emptive compaction is needed.
+    /// count past what the context window holds alongside an answer,
+    /// indicating pre-emptive compaction is needed.
     pub(crate) async fn check_preflight_overflow(&self) -> Option<AutoCompactTriggerInfo> {
         if self
             .compaction
@@ -1939,10 +1948,16 @@ impl SessionActor {
         let estimated_total = self.chat_state_handle.get_estimated_total_tokens().await;
         let cfg = self.chat_state_handle.get_sampling_config().await?;
         let cw = cfg.context_window.get();
-        if estimated_total <= cw {
+        // The response shares the window with the prompt. A prompt that leaves
+        // less room than the smallest usable answer is over the window in
+        // practice, even when it is under it on its own: the request then goes
+        // out with its output budget cut to the floor, and the model answers in
+        // 1024 tokens. Compact instead.
+        let usable = cw.saturating_sub(xai_token_estimation::MIN_OUTPUT_TOKENS);
+        if estimated_total <= usable {
             return None;
         }
-        let overflow = estimated_total.saturating_sub(cw);
+        let overflow = estimated_total.saturating_sub(usable);
         let percentage = xai_token_estimation::usage_percentage_u8(estimated_total, cw);
         tracing::warn!(
             estimated_total,
@@ -3712,10 +3727,16 @@ mod inline_auto_compact_flow_tests {
             .await;
     }
     fn api_error_with_context_window(context_window: u64) -> xai_grok_sampler::SamplingErrorInfo {
+        api_error_with_message(context_window, "prompt is too long")
+    }
+    fn api_error_with_message(
+        context_window: u64,
+        message: &str,
+    ) -> xai_grok_sampler::SamplingErrorInfo {
         xai_grok_sampler::SamplingErrorInfo {
             kind: xai_grok_sampler::SamplingErrorKind::Api,
             status_code: Some(400),
-            message: "prompt is too long".to_string(),
+            message: message.to_string(),
             is_retryable: false,
             retry_after_secs: None,
             should_retry: None,
@@ -3747,8 +3768,8 @@ mod inline_auto_compact_flow_tests {
             })
             .await;
     }
-    /// When tracked tokens are within the new limit, the error was not a context
-    /// overflow — do not compact.
+    /// An error that is not about the window, with tracked tokens inside it:
+    /// there is nothing for a compaction to fix, so do not compact.
     #[tokio::test(flavor = "current_thread")]
     async fn test_compact_on_error_no_trigger_when_tokens_within_new_window() {
         let local = tokio::task::LocalSet::new();
@@ -3758,8 +3779,46 @@ mod inline_auto_compact_flow_tests {
                 let (persistence_tx, _) = mpsc::unbounded_channel::<PersistenceMsg>();
                 let actor =
                     create_test_actor(150_000, 1_000_000, 85, gateway_tx, persistence_tx).await;
-                let err = api_error_with_context_window(200_000);
+                let err = api_error_with_message(200_000, "invalid_request_error: bad tool schema");
                 assert!(!actor.should_compact_on_error(&err).await);
+            })
+            .await;
+    }
+    /// The server's tokenizer is the one that counts. When it says the context
+    /// length is the problem, our own estimate saying the prompt fits is not a
+    /// reason to hand the turn back to the user.
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_context_length_rejection_compacts_even_when_our_own_count_fits() {
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let (gateway_tx, _) = mpsc::unbounded_channel::<xai_acp_lib::AcpClientMessage>();
+                let (persistence_tx, _) = mpsc::unbounded_channel::<PersistenceMsg>();
+                let actor =
+                    create_test_actor(150_000, 1_000_000, 85, gateway_tx, persistence_tx).await;
+                let err = api_error_with_message(
+                    200_000,
+                    "This model's maximum context length is 200000 tokens. However, you \
+                     requested 60000 output tokens and your prompt contains at least 150000 \
+                     input tokens",
+                );
+                assert!(actor.should_compact_on_error(&err).await);
+            })
+            .await;
+    }
+    /// A prompt that fits only with no room left for an answer is over the
+    /// window in practice, because the requested output shares it.
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_prompt_that_leaves_no_room_for_an_answer_compacts() {
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let (gateway_tx, _) = mpsc::unbounded_channel::<xai_acp_lib::AcpClientMessage>();
+                let (persistence_tx, _) = mpsc::unbounded_channel::<PersistenceMsg>();
+                let actor =
+                    create_test_actor(199_900, 1_000_000, 85, gateway_tx, persistence_tx).await;
+                let err = api_error_with_message(200_000, "invalid_request_error: bad tool schema");
+                assert!(actor.should_compact_on_error(&err).await);
             })
             .await;
     }

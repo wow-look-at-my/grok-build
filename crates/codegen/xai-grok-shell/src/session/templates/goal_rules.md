@@ -20,7 +20,9 @@ driving the real entry point. A test that passes while the program is broken is
 worse than none.
 
 VERIFY AS YOU GO: run each change. If output is visual, capture and inspect it;
-for data/config, validate programmatically.
+for data/config, validate programmatically. Verifying is reading back what you
+built — checking is not doing. It never authorizes an action the objective did
+not ask for, on a device, a service, or anything else outside this workspace.
 
 SCRATCH: use your private scratch dir {SCRATCH_DIR} only for captured test
 output, temp scripts, and throwaway artifacts — never shared `/tmp/...` paths

@@ -588,7 +588,6 @@ pub(crate) mod tests {
         assert!(auth_manager.current().is_some());
     }
 
-
     #[test]
     fn build_auth_seeds_team_metadata_from_access_token() {
         crate::auth::ensure_crypto_provider();

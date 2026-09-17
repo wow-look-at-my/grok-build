@@ -53,7 +53,10 @@ mod budget_tests {
 
     #[test]
     fn planner_wait_defaults_to_30_minutes() {
-        assert_eq!(GOAL_PLANNER_AWAIT_BUDGET_DEFAULT, std::time::Duration::from_secs(1800));
+        assert_eq!(
+            GOAL_PLANNER_AWAIT_BUDGET_DEFAULT,
+            std::time::Duration::from_secs(1800)
+        );
     }
 }
 
@@ -443,8 +446,7 @@ impl ChannelSpawner {
                 // Goal planning is allowed to use the full configurable
                 // foreground wait budget, whose default is 30 minutes.
                 foreground_wait_budget_ms: Some(
-                    crate::session::goal_planner::goal_planner_await_budget()
-                        .as_millis() as u64,
+                    crate::session::goal_planner::goal_planner_await_budget().as_millis() as u64,
                 ),
                 ..Default::default()
             },
@@ -1359,6 +1361,16 @@ mod tests {
         assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("OUTCOMES, not architecture"));
         assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("MUST NOT prescribe the module/file layout"));
         assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("exact signatures"));
+    }
+
+    /// A verification step checks what the objective asked for. It never
+    /// widens the work, which is how a check became an unrequested action.
+    #[test]
+    fn planner_prompt_keeps_verification_inside_the_objective() {
+        assert!(
+            GOAL_PLANNER_PROMPT_TEMPLATE.contains("Verification checks the work. It never adds to it"),
+            "a check that acts beyond the objective is new scope, not verification"
+        );
     }
 
     /// Pin the gating-vs-best-effort split: a small gating set decides pass/fail

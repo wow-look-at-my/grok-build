@@ -532,6 +532,17 @@ pub(crate) fn user_item_with_rx(
 pub(crate) fn user_item(id: &str, owner: &str) -> InputItem {
     user_item_with_rx(id, owner).0
 }
+
+/// A user-originated row whose text is a slash command, carried in both its
+/// wire blocks and its queue metadata — the shape a pager row that was never
+/// resolved client-side sends (an ACP/shell command passed through).
+#[cfg(test)]
+pub(crate) fn slash_command_item(id: &str, command: &str) -> InputItem {
+    let mut item = user_item(id, "A");
+    item.prompt_blocks = vec![acp::ContentBlock::Text(acp::TextContent::new(command))];
+    item.queue_meta.as_mut().expect("user rows carry meta").text = command.to_string();
+    item
+}
 #[cfg(test)]
 pub(crate) fn input_with_origin_rx(
     prompt_id: &str,

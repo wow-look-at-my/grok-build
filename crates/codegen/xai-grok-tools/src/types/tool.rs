@@ -102,6 +102,7 @@ pub enum ToolKind {
     GoalUpdate,
     Workflow,
     Ci,
+    SendMessage,
     #[serde(other)]
     Other,
 }

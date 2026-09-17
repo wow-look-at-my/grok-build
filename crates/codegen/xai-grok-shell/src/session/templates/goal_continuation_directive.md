@@ -22,7 +22,9 @@ The plan's `{SCRATCH}` placeholder resolves there. The verifier AUDITS your comm
 and saved evidence rather than rebuilding them — leave honest proof or you
 WILL be refuted.
 Run the plan's `## Verification plan` steps yourself and confirm the
-observations it lists hold. The harness evaluates completion automatically
+observations it lists hold. Checking is not doing: continuing never authorises
+an action the objective did not ask for. The harness evaluates completion
+automatically
 after this round, re-checks the same steps adversarially when appropriate, and
 inlines any outstanding verifier gaps above.
 </system-reminder>

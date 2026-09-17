@@ -41,14 +41,15 @@ pub(crate) async fn apply(
         resolve_required_agent_type(Some(model.info().agent_type.as_str()), session_default);
     let previous_model_id = handle.model_id.0.clone();
     let mut pending_rebuild_definition: Option<xai_grok_agent::AgentDefinition> = None;
+    let turn_count_at_switch = handle
+        .signals_handle
+        .snapshot()
+        .await
+        .map(|s| s.turn_count)
+        .unwrap_or(0);
     {
         let required = &required_agent_type;
-        let turn_count = handle
-            .signals_handle
-            .snapshot()
-            .await
-            .map(|s| s.turn_count)
-            .unwrap_or(0);
+        let turn_count = turn_count_at_switch;
         let (agent_tx, agent_rx) = oneshot::channel();
         let _ = handle.cmd_tx.send(SessionCommand::GetActiveAgent {
             responds_to: agent_tx,
@@ -67,33 +68,29 @@ pub(crate) async fn apply(
             "set_session_model: agent type compatibility check"
         );
         if is_mismatch && turn_count > 0 {
+            // The turns already here were produced by another harness, so their
+            // reasoning and tool calls are not something the new model can
+            // ingest. Convert the history to plain text and switch anyway.
+            let (flatten_tx, flatten_rx) = oneshot::channel();
+            let _ = handle.cmd_tx.send(SessionCommand::FlattenHistory {
+                responds_to: flatten_tx,
+            });
+            let report = flatten_rx.await.map_err(|_| {
+                acp::Error::internal_error().data("flatten_history: session actor closed")
+            })?;
             tracing::warn!(
                 session_id = %session_id.0,
                 model_id = %model_id.0,
                 active_agent = ?active_agent_type,
                 required_agent = %required,
                 turn_count,
-                "set_session_model: agent type mismatch rejected"
+                items_after = report.items_after,
+                reasoning_to_text = report.reasoning_to_text,
+                tool_calls_to_text = report.tool_calls_to_text,
+                "set_session_model: harness mismatch — history converted to plain text"
             );
-            xai_grok_telemetry::session_ctx::log_event(xai_grok_telemetry::events::ModelSwitched {
-                session_id: session_id.0.to_string(),
-                previous_model_id: previous_model_id.to_string(),
-                new_model_id: model_id.0.to_string(),
-                success: false,
-                error_code: Some(config::MODEL_SWITCH_INCOMPATIBLE_AGENT.to_string()),
-                required_agent_type: Some(required.clone()),
-                current_agent_type: active_agent_type.clone(),
-            });
-            let err_payload = config::ModelSwitchIncompatibleAgentError {
-                code: config::MODEL_SWITCH_INCOMPATIBLE_AGENT.to_string(),
-                active_agent_type: active_agent_type.unwrap_or_else(|| "unknown".to_owned()),
-                required_agent_type: required.clone(),
-                model_id: model_id.0.to_string(),
-                suggestion: "start_new_session".to_string(),
-            };
-            return Err(err_payload.into_acp_error());
         }
-        if is_mismatch && turn_count == 0 {
+        if is_mismatch {
             let cwd = handle.tool_context.cwd.as_path();
             let resolved = xai_grok_agent::discovery::by_name_in_cwd_with_plugins(
                 required,
@@ -107,7 +104,8 @@ pub(crate) async fn apply(
                         model_id = %model_id.0,
                         required_agent_type = %required,
                         agent_def_name = %def.name,
-                        "set_session_model: zero-turn harness switch — queued agent rebuild"
+                        turn_count,
+                        "set_session_model: harness switch — queued agent rebuild"
                     );
                     pending_rebuild_definition = Some(def);
                 }
@@ -116,7 +114,7 @@ pub(crate) async fn apply(
                         session_id = %session_id.0,
                         model_id = %model_id.0,
                         required_agent_type = %required,
-                        "set_session_model: zero-turn harness switch — could not resolve agent definition; proceeding with stale harness"
+                        "set_session_model: harness switch — could not resolve agent definition; proceeding with stale harness"
                     );
                 }
             }
@@ -163,6 +161,7 @@ pub(crate) async fn apply(
             .cmd_tx
             .send(SessionCommand::RebuildAgentForDefinition {
                 definition: def,
+                zero_turn: turn_count_at_switch == 0,
                 responds_to: rebuild_tx,
             });
         let rebuild_result = rebuild_rx

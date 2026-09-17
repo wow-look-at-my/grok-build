@@ -99,6 +99,7 @@ pub enum ToolInput {
     UpdateGoal(UpdateGoalInput),
     Ci(crate::implementations::grok_build::ci::CiInput),
     Workflow(crate::implementations::grok_build::workflow::WorkflowToolInput),
+    SendMessage(crate::implementations::grok_build::send_message::SendMessageInput),
     /// Dynamic input for runtime-registered tools (MCP, etc.)
     Dynamic(serde_json::Value),
 }

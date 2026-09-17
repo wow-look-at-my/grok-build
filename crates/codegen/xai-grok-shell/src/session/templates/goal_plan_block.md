@@ -16,7 +16,9 @@ Plan: {PLAN_PATH}
   (what changed + why); not a progress log, so don't restate the plan or dump
   test counts / "all fixed" / "verification re-run" / "superseding" notes there.
 - Before claiming completion, run the plan's `## Verification plan` yourself and
-  confirm its observations hold. SAVE durable proof: commit real tests that drive
-  the shipped code in-repo, and write the captured run output to your scratch dir
+  confirm its observations hold. Checking is not doing: a step reads back what
+  you built, and never authorizes work the objective did not ask for. SAVE
+  durable proof: commit real tests that drive the shipped code in-repo, and
+  write the captured run output to your scratch dir
   (the one the goal rules name; never shared `/tmp/...`). Fix any missing
   observation before calling the goal complete.

@@ -13888,6 +13888,7 @@ dependencies = [
  "xai-grok-sampling-types",
  "xai-grok-test-support",
  "xai-grok-version",
+ "xai-token-estimation",
 ]
 
 [[package]]
@@ -13907,6 +13908,7 @@ dependencies = [
  "xai-circuit-breaker",
  "xai-grok-compaction",
  "xai-grok-tools",
+ "xai-token-estimation",
 ]
 
 [[package]]

@@ -87,6 +87,12 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - Closing the ring (past the last identity stop) DOES drop yolo before entering Plan. Plan+yolo matches no arm of the `(in_plan, in_auto, in_yolo)` match, so leaving it set sends the next press into the catch-all and lands on Normal instead of Auto.
 - The composer flag row is additive, so an orchestrating yolo session correctly reads `always-approve · orchestrator` (`agent_view/render.rs`).
 
+## `/goal` role-model notes
+
+- Every `/goal` role (planner, strategist, skeptic panel) inherits the session's current model unless something pins it. Precedence is `[goal].use_current_model_only` (kill switch, wins over everything) > a local `[goal]` pin > a remote-pushed pin > inherit.
+- A remote pin applies only with `[goal].follow_remote_role_models` (env `GROK_GOAL_FOLLOW_REMOTE_ROLE_MODELS`), default off. A server-side pin silently replaces the model the user picked. Nothing local reports which model a role ran on.
+- The opt-in itself is local only. A remote-controlled switch for whether to obey remote pins grants back what the default withholds.
+
 ## Goal-plan-to-todos notes
 
 - The implementing session no longer transcribes the plan into its todo list. The planner lists the plan's work on its OWN todo list, and the harness puts those items on the session's list as the plan is published (`apply_planner_todos` in `acp_session_impl/goal_support.rs`, called from the `Planned` publish branch of `maybe_run_goal_planner`, before the goal-start reminder is rendered).
@@ -97,6 +103,11 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - The child's list is read through the shared workspace handle (`WorkspaceOps::workspace_handle` → the session's `toolset().resources`), so it needs LOCAL mode. A proxied session (the workspace server owns sessions) has no handle here, the read returns empty, and the feature degrades to the main agent keeping its own list. Nothing breaks; nothing is populated either.
 - `Plan: <path>` still renders on every plan-aware reminder — only the manual seed-todos directive is gone, replaced by a statement that the steps are already on the list.
 - A fail-closed planner publishes no plan, so nothing is seeded. Red/unseeded is the honest state there.
+
+## Verification does not widen the goal
+
+- A `## Verification plan` step reads back what the goal built. It is not a permit. The implementer read "do X to confirm Y" as an instruction to do X. A planner-invented check then became an action on a system nobody put in scope. Every place that demands verification says so now. Those are the planner prompt's `## Verification plan` contract, `goal_rules.md`'s VERIFY AS YOU GO, `goal_plan_block.md`, and the per-turn continuation directive.
+- The planner is told to prefer reading what the work already produced over operating anything. Files, logs, hashes, build output and source are what it reads. That is the whole mechanism. There is no label grammar and no validator. An earlier attempt added a reach DSL, a keyword list and a reject-and-retry loop to a planner prompt that is already long. That buys rigidity rather than scope discipline.
 
 ## `/todo` capture feature notes
 
@@ -129,6 +140,24 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - `ResponseCompleted` is the one buffered xAI update that is persisted — it is the only carrier of a message's cost, so a reload replays it and each message keeps its price. The indicator counts THIS run's spend: the agent's ledger is in-memory and restarts at reload. So a replayed total is not adopted and the scrollback sum stops being a valid fallback once anything priced is replayed (`AcpUpdateTracker::scrollback_sum_is_this_run`).
 
 - The Messages backend takes a price off the wire when one is there: `MessagesUsage`/`MessageDeltaUsage` carry `cost_in_usd_ticks` (alias `cost_usd_ticks`) and the USD-float `cost`, read on `message_start` and every `message_delta` with the Chat Completions precedence — ticks over float, a zero is unbilled, and a later silent event never erases a reported price. Anthropic itself prices nothing. So that path stays `None` and the shell's `compute_cost_ticks` fallback derives one from the model's pricing.
+
+## Output-budget notes
+
+- A provider charges the requested output against the same window as the prompt. A conversation that is under the window on its own can still put the REQUEST over it. 737_857 input tokens plus a 262_144 output budget is 1_000_001 against a 1M window. The server answers 400. `max_output_tokens` is not a free parameter of the request. It is whatever the window has left.
+- `xai_token_estimation::fit_output_tokens` is that arithmetic. `ConversationRequest::fit_output_budget` applies it. `build_conversation_request` (chat-state) fits against the tracked total. That total is the provider's own usage for the last response plus the estimated delta, which is the best number this process has.
+- `apply_conversation_defaults` (sampler) fits again, against its own bytes/4 estimate. The sampler's DEFAULT budget is what a caller that sets none sends. Every backend converter reads the field from there. This pass only cuts further.
+- Both fit against `window_less_estimate_slack`, which holds back 1% of the window. Every prompt count here is an estimate somewhere. One token low is a rejected request.
+- The budget never goes below `MIN_OUTPUT_TOKENS`. A prompt that leaves less room than that is over the window. The provider's own overflow error is the honest report of it. The compaction ladder answers that error.
+- `check_preflight_overflow` and `should_compact_on_error` measure against the window less that same floor. A prompt with no room for an answer needs compaction, not a 1024-token reply.
+- `should_compact_on_error` also takes the server's own context-length message as decisive. Its tokenizer is the one that counts. A rejection that names the context length is never a turn to hand back to the user.
+
+## Model-pricing resolution notes
+
+- `model_pricing::resolve` (`xai-grok-shell/src/agent/model_pricing.rs`) answers the `compute_cost_ticks` fallback for an endpoint that reports no price. It reads `[model.<id>].pricing` from config first. A price the user wrote is the price, and the catalog never overrides it. `config::resolve_configured_model_pricing` is that first tier.
+- The catalog is modelinfo. One model's document is at `<catalog_url>/v1/models/<model id>`. `[pricing].catalog_url` moves it and `[pricing].lookup_enabled = false` keeps the session off the network. The whole-catalogue `/v1/models` route answers with about 20 MB, so nothing fetches it.
+- `resolve` runs on the turn path and is sync. So it never waits on the network. A model with no fresh cache entry answers as unpriced for that call and starts a background fetch. The price lands for the next call. `in_flight` holds one fetch per model. A second turn therefore starts no second request.
+- The cache is `$GROK_HOME/model_pricing_cache.json`, one entry per model. An absence is cached too, with a shorter TTL, or every turn on an unpriced model re-fetches. A failed lookup is NOT an absence and is not cached. Caching one pins an outage into the catalog for the whole TTL.
+- A document that prices no tier is recorded as an absence. Recording it as an all-zero price claims a price the catalog never gave.
 
 - The per-message cache-hit-percent indicator reads the same `ResponseCompleted.usage` the cost indicator does (`AcpUpdateTracker::set_response_cache_hit`). It renders on its OWN reserved row below the content instead of widening the cost/timestamp gutter further (`EntryRenderer::cache_hit_reserved_rows`).
 
@@ -216,6 +245,35 @@ Every one of those is the test doing its job. Making them pass there means weake
 - Two switches, and they are ORed, not ANDed (`todo_stop_gate_enabled`). The persisted `[ui].stop_gate_unfinished_todos` toggle ships ON and is the switch. `todo_gate.enabled` (remote `todo_gate_enabled`, or the `--todo-gate` CLI force-enable) is an opt-in on top, for a session whose toggle the user turned off. ANDing them is what shipped the feature dead: `TodoGateConfig::default().enabled` is false, so every default session took the `None` arm and the gate never ran.
 - `todo_gate_applicable` is the other half and still binds. It allows no gate while the goal loop is active, because the continuation directive drives the loop there. It allows no gate for a prompt that carries no `<task_completion_discipline>` block.
 - `todo_stop_gate_blocks` is pure and table-tested. The actor supplies the toggle, the shared continuation counter, and `evaluate_todo_gate` over the live todo state.
+
+## `send_message` notes
+
+- One tool carries both directions (`grok_build/send_message/`). `to` is a subagent id from `task` to reach a child. `to` is `parent` to reach the session that spawned this one. The recipient reads the text as a mid-turn user message. It keeps the work it is streaming and reads at its next drain point.
+- The parent-to-child leg is `SubagentEvent::MessageChild`, NOT the host's `SubagentEvent::Interject`. `MessageChild` is scoped by `parent_session_id`. A child of another session answers `NotOwned` instead of taking a stranger's instruction. Every path also answers on a oneshot. The model reads `Delivered`, `Queued`, `NotOwned` or `NotFound` in place of a silent success over a dropped message. `Interject` stays unscoped and silent because the user owns it.
+- A child that has not started holds the message in `held_interjections` and answers `Queued`. The held text goes out on `Started`, in order, through the path the user's interjections use.
+- The child-to-parent leg is a host-supplied closure, `ParentMessenger`. It is not a channel the tool can address. The host owns the provenance line. A child session does not know which subagent it is. Without that line the parent reads an unattributed message as the user's own. The closure wraps `ctx.parent_cmd_tx` and sends `SessionCommand::InterjectWithoutCancel`.
+- `ParentMessenger` rides `AgentRebuildSpec`. One `update_resource` after spawn is not enough. An agent rebuild builds a fresh tool bridge. A mode switch or a model switch triggers one. A resource registered one time is gone after that rebuild. The child then loses its way to answer its parent. Nothing reports the loss.
+- `ToolKind::SendMessage` is a meta kind in `kind_allowed`. Every `CapabilityMode` allows it. The tool writes nothing. And a read-only explorer still has to answer the session that spawned it.
+
+## History-flattening notes
+
+- A history carries state that belongs to the provider that made it. A reasoning item's `encrypted_content`, a thinking block's signature, and a tool call's id and vendor fields are each such state. Another model refuses a request that replays them. `flatten_conversation` (`xai-grok-sampling-types/src/conversation/flatten.rs`) rewrites the conversation so none of it is left.
+- Reasoning becomes a `<thinking>` assistant message. An assistant message's tool calls become `<tool_call>` blocks in its own text. A tool result becomes a `<tool_result>` user message, because no call is left to pair it with. A server-side call becomes assistant text. System and user messages pass through. Neither carries provider state.
+- Every assistant message the flattening touches loses its `model_id`. The thinking-signature rules read that origin. A flattened message came from no model. A stale origin there arms those rules against text they do not apply to.
+- A reasoning item with an encrypted blob and no text is dropped. Nothing in it reaches the next model. `FlattenReport.reasoning_dropped` counts it, so the one real loss is visible in the log.
+- `needs_flattening` is also the loop bound. One flattening leaves nothing for a second to find. So a model that still refuses a flat history gets a terminal error that quotes what it said, in place of another resubmit.
+- A model switch onto another harness sends `SessionCommand::FlattenHistory` and switches (`agent/handlers/model_switch.rs`). `MODEL_SWITCH_INCOMPATIBLE_AGENT` is dead on this path. A mid-turn rejection naming `encrypted_content` flattens and resubmits the turn instead of ending it (`acp_session_impl/sampler_turn.rs`, `SamplerFailureRecovery::FlattenAndResubmit`).
+- `SessionCommand::RebuildAgentForDefinition` carries `zero_turn`. That flag gates conversation surgery which assumes `conversation[1]` is the synthetic zero-turn prefix. A mid-session switch reaches this path now. A `true` there writes over the session's first real user message.
+- Thinking a model cannot verify rides as text, in both places that handle it: `build_messages_request` and the sampler's `RetryWithReasoningStrip` recovery (`ConversationRequest::reasoning_to_plain_text`). A block carrying only a signature has no words. That block is what goes.
+- The pager keeps its `MODEL_SWITCH_INCOMPATIBLE_AGENT` handling and its `model_incompatible` flag. The shell sends neither on the recoverable paths. An older shell on the other end of ACP still can.
+
+## Project-instruction `@import` notes
+
+- An `@ref` in a discovered instruction file names a file to deliver (`prompt/agents_md_imports.rs`). Before it existed, this repo's `CLAUDE.md` shipped the literal line `@AGENTS.md` and none of the rules under it.
+- An imported file is its OWN `AgentConfigFile`, placed right after the file that named it, rather than text spliced into the importer. That keeps the `## From:` path on every instruction. It also lets discovery's canonical-path dedup cover imports. A ref to a file discovery already found therefore adds nothing.
+- The gitignore filter is discovery's, not the import path's. A ref is a deliberate instruction to read that file. Applying the filter to it makes a personal `CLAUDE.local.md` unimportable, which is the one thing people gitignore it for.
+- A rule file's frontmatter is stripped from the RULE, never from what the rule imports. The import is read as written.
+- `MAX_IMPORT_DEPTH` plus the seen-set bound the walk. The seen-set is what terminates a cycle. The depth cap only bounds a chain.
 
 ## Workflow agent-concurrency notes
 

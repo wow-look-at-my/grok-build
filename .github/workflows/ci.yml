@@ -235,6 +235,8 @@ jobs:
   # Every crate of the darwin binary compiles here. Only the link needs a Mac, and it is its own job below.
   build-darwin-objects:
     name: Compile darwin/arm64 (Linux)
+    # publish-create assigns the release number this job stamps in as GROK_VERSION below. Without the edge, `needs.publish-create` resolves to an empty string and the darwin binary reports an empty version.
+    needs: publish-create
     runs-on: ubuntu-22.04
     timeout-minutes: 45
     env:
@@ -381,7 +383,8 @@ jobs:
 
   publish-upload:
     name: Upload ${{ matrix.target_os }}/${{ matrix.target_arch }} binary
-    needs: [publish-create, build-release]
+    # link-darwin writes the grok-darwin-arm64 hand-off this matrix downloads.
+    needs: [publish-create, build-release, link-darwin]
     runs-on: ubuntu-22.04
     permissions:
       contents: read

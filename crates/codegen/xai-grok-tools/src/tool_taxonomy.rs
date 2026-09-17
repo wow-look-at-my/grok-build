@@ -70,6 +70,7 @@ impl ToolKind {
             ToolKind::GoalUpdate => "Update Goal",
             ToolKind::Workflow => "Workflow",
             ToolKind::Ci => "CI Status",
+            ToolKind::SendMessage => "Send Message",
             ToolKind::Other => "Tool",
         }
     }
@@ -113,6 +114,9 @@ impl ToolKind {
             | ToolKind::Monitor
             | ToolKind::GoalUpdate
             | ToolKind::Workflow
+            // Reads nothing and writes nothing here. It hands text to another
+            // session, which is a mutation of that session's conversation.
+            | ToolKind::SendMessage
             | ToolKind::Other => false,
         }
     }

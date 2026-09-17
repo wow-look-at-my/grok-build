@@ -5,14 +5,18 @@
 //! conversion in a sibling module.
 
 mod chat_completions;
+mod flatten;
 mod messages;
+mod output_budget;
 mod responses;
 
 pub use chat_completions::{
     conversation_item_to_chat_message, conversation_item_to_chat_message_with_profile,
     conversation_to_chat_messages, conversation_to_chat_messages_with_profile,
 };
+pub use flatten::{FlattenReport, flatten_conversation, needs_flattening};
 pub use messages::build_messages_request;
+pub use output_budget::{OutputBudgetClamp, estimate_item_tokens, estimate_tool_spec_tokens};
 pub use responses::{
     extra_tool_entries, patch_reasoning_text_types, response_to_conversation_items,
 };
@@ -166,6 +170,9 @@ pub enum SyntheticReason {
     /// Working-directory switch context appended after a session relocation.
     /// Carries a generation marker so recovery can detect an existing append.
     WorkingDirectorySwitch,
+    /// A tool result rewritten as user text by
+    /// [`flatten_conversation`](crate::conversation::flatten_conversation).
+    HistoryFlattened,
     /// Catch-all for unknown/future variants.  Preserves forward compatibility
     /// so older clients can deserialize sessions written by newer versions.
     #[serde(other)]
@@ -202,6 +209,7 @@ impl SyntheticReason {
             | Self::GoalSummary
             | Self::StopHookFeedback
             | Self::WorkingDirectorySwitch
+            | Self::HistoryFlattened
             | Self::Unknown => false,
         }
     }
@@ -711,16 +719,36 @@ impl ConversationRequest {
         stripped
     }
 
-    /// Drop every replayed `Reasoning` sibling, returning how many went.
+    /// Turn every replayed `Reasoning` sibling into ordinary assistant text,
+    /// returning how many items it touched.
     ///
-    /// Recovery path for a server that rejects a thinking block's signature.
-    /// A signature cannot be re-minted for another model, so the block is the
-    /// only thing that can give.
-    pub fn strip_reasoning(&mut self) -> usize {
-        let before = self.items.len();
-        self.items
-            .retain(|item| !matches!(item, ConversationItem::Reasoning(_)));
-        before - self.items.len()
+    /// Recovery path for a server that rejects a thinking block's signature. A
+    /// signature cannot be re-minted for another model, so the block has to
+    /// give. Its text does not: the target reads it as a plain message. A
+    /// sibling carrying only a signature has no text and is dropped.
+    pub fn reasoning_to_plain_text(&mut self) -> usize {
+        let mut touched = 0;
+        let items = std::mem::take(&mut self.items);
+        for item in items {
+            match item {
+                ConversationItem::Reasoning(r) => {
+                    touched += 1;
+                    let text = reasoning_item_text(&r);
+                    if text.trim().is_empty() {
+                        continue;
+                    }
+                    self.items.push(ConversationItem::Assistant(AssistantItem {
+                        content: Arc::<str>::from(format!("<thinking>\n{text}\n</thinking>")),
+                        tool_calls: Vec::new(),
+                        model_id: None,
+                        model_fingerprint: None,
+                        reasoning_effort: None,
+                    }));
+                }
+                other => self.items.push(other),
+            }
+        }
+        touched
     }
 
     /// Drop the message properties a strict-schema provider rejected from the

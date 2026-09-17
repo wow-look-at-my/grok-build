@@ -56,11 +56,13 @@ async fn deliver_interjection(
     session.broadcast_interjection(&text, id.as_deref());
     // Telemetry at enqueue (not drain) so it is recorded even when a cancel
     // clears the buffer before the next drain point.
-    session.events.emit(crate::session::events::Event::Interjected {
-        source: crate::session::events::InterjectionSource::Direct,
-        image_count: images.len() as u32,
-        redirect_kind: crate::session::events::RedirectKind::Interjection,
-    });
+    session
+        .events
+        .emit(crate::session::events::Event::Interjected {
+            source: crate::session::events::InterjectionSource::Direct,
+            image_count: images.len() as u32,
+            redirect_kind: crate::session::events::RedirectKind::Interjection,
+        });
     // Buffer only into an actually-running turn: the buffer is drained
     // exclusively by the turn loop, so an interjection arriving while idle
     // (the pager's running-state check races turn end) would strand forever
@@ -764,9 +766,13 @@ pub(super) async fn run_session(
                             let updated_model_id = session.handle_set_session_model(sampling_config, use_concise, apply_prompt_override, skip_prompt_rewrite, auto_compact_threshold_percent).await;
                             let _ = responds_to.send(updated_model_id);
                         }
-                        SessionCommand::RebuildAgentForDefinition { definition, responds_to } => {
-                            let outcome = session.handle_rebuild_agent_for_definition(definition, true).await;
+                        SessionCommand::RebuildAgentForDefinition { definition, zero_turn, responds_to } => {
+                            let outcome = session.handle_rebuild_agent_for_definition(definition, zero_turn).await;
                             let _ = responds_to.send(outcome);
+                        }
+                        SessionCommand::FlattenHistory { responds_to } => {
+                            let report = session.handle_flatten_history().await;
+                            let _ = responds_to.send(report);
                         }
                         SessionCommand::OverrideModelName { model_name, extra_headers, context_window } => {
                             // Update the actor's SamplingConfig model + headers + context window.

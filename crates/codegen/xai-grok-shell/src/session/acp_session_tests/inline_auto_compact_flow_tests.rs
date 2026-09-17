@@ -1168,10 +1168,17 @@ async fn test_idle_flush_conversation_len_reset_after_compaction() {
         .await;
 }
 fn api_error_with_context_window(context_window: u64) -> xai_grok_sampler::SamplingErrorInfo {
+    api_error_with_message(context_window, "prompt is too long")
+}
+
+fn api_error_with_message(
+    context_window: u64,
+    message: &str,
+) -> xai_grok_sampler::SamplingErrorInfo {
     xai_grok_sampler::SamplingErrorInfo {
         kind: xai_grok_sampler::SamplingErrorKind::Api,
         status_code: Some(400),
-        message: "prompt is too long".into(),
+        message: message.into(),
         is_retryable: false,
         retry_after_secs: None,
         should_retry: None,
@@ -1202,8 +1209,8 @@ async fn test_compact_on_error_triggers_when_tokens_exceed_new_window() {
         })
         .await;
 }
-/// When tracked tokens are within the new limit, the error was not a context
-/// overflow — do not compact.
+/// An error that is not about the window, with tracked tokens inside it: there
+/// is nothing for a compaction to fix, so do not compact.
 #[tokio::test(flavor = "current_thread")]
 async fn test_compact_on_error_no_trigger_when_tokens_within_new_window() {
     let local = tokio::task::LocalSet::new();
@@ -1212,8 +1219,44 @@ async fn test_compact_on_error_no_trigger_when_tokens_within_new_window() {
             let (gateway_tx, _) = mpsc::unbounded_channel::<xai_acp_lib::AcpClientMessage>();
             let (persistence_tx, _) = mpsc::unbounded_channel::<PersistenceMsg>();
             let actor = create_test_actor(150_000, 1_000_000, 85, gateway_tx, persistence_tx).await;
-            let err = api_error_with_context_window(200_000);
+            let err = api_error_with_message(200_000, "invalid_request_error: bad tool schema");
             assert!(!actor.should_compact_on_error(&err).await);
+        })
+        .await;
+}
+/// The server's tokenizer is the one that counts. When it says the context
+/// length is the problem, our own estimate saying the prompt fits is not a
+/// reason to hand the turn back to the user: the overflow ladder takes it,
+/// and that ladder is what bounds the retries.
+#[tokio::test(flavor = "current_thread")]
+async fn a_context_length_rejection_compacts_even_when_our_own_count_fits() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (gateway_tx, _) = mpsc::unbounded_channel::<xai_acp_lib::AcpClientMessage>();
+            let (persistence_tx, _) = mpsc::unbounded_channel::<PersistenceMsg>();
+            let actor = create_test_actor(150_000, 1_000_000, 85, gateway_tx, persistence_tx).await;
+            let err = api_error_with_message(
+                200_000,
+                "This model's maximum context length is 200000 tokens. However, you requested \
+                 60000 output tokens and your prompt contains at least 150000 input tokens",
+            );
+            assert!(actor.should_compact_on_error(&err).await);
+        })
+        .await;
+}
+/// A prompt that fits only with no room left for an answer is over the window
+/// in practice, because the requested output shares it.
+#[tokio::test(flavor = "current_thread")]
+async fn a_prompt_that_leaves_no_room_for_an_answer_compacts() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (gateway_tx, _) = mpsc::unbounded_channel::<xai_acp_lib::AcpClientMessage>();
+            let (persistence_tx, _) = mpsc::unbounded_channel::<PersistenceMsg>();
+            let actor = create_test_actor(199_900, 1_000_000, 85, gateway_tx, persistence_tx).await;
+            let err = api_error_with_message(200_000, "invalid_request_error: bad tool schema");
+            assert!(actor.should_compact_on_error(&err).await);
         })
         .await;
 }
