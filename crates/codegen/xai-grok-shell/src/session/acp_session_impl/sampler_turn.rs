@@ -424,6 +424,7 @@ impl SessionActor {
                 env_http_headers: Default::default(),
                 context_window: std::num::NonZeroU64::new(256_000).unwrap(),
                 reasoning_effort: None,
+                chat_message_profile: Default::default(),
                 stream_tool_calls: None,
             });
         let creds = self.chat_state_handle.get_credentials().await;
@@ -494,6 +495,7 @@ impl SessionActor {
             context_window: cfg.context_window.get(),
             client_version: creds.client_version,
             reasoning_effort: cfg.reasoning_effort,
+            chat_message_profile: cfg.chat_message_profile,
             force_http1: false,
             max_retries: Some(self.max_retries),
             stream_tool_calls: cfg.stream_tool_calls.unwrap_or(false),
@@ -1210,10 +1212,8 @@ impl SessionActor {
         let budget = context_window.saturating_mul(REDUCE_BUDGET_PERCENT) / 100;
         let conversation = self.chat_state_handle.get_conversation().await;
         let turns_before = conversation.len();
-        let reduced = xai_chat_state::compaction_utils::fit_conversation_to_budget(
-            conversation,
-            budget,
-        );
+        let reduced =
+            xai_chat_state::compaction_utils::fit_conversation_to_budget(conversation, budget);
         tracing::warn!(
             session_id = %self.session_info.id.0,
             context_window,
@@ -1625,13 +1625,15 @@ impl SessionActor {
         }
         let model_id = capture.model_id.clone();
         drop(capture);
-        Some(ConversationItem::Assistant(xai_grok_sampling_types::AssistantItem {
-            content: std::sync::Arc::from(text.as_str()),
-            tool_calls: Vec::new(),
-            model_id,
-            model_fingerprint: None,
-            reasoning_effort: None,
-        }))
+        Some(ConversationItem::Assistant(
+            xai_grok_sampling_types::AssistantItem {
+                content: std::sync::Arc::from(text.as_str()),
+                tool_calls: Vec::new(),
+                model_id,
+                model_fingerprint: None,
+                reasoning_effort: None,
+            },
+        ))
     }
 }
 /// Per-tool precedence: a non-empty `over` wins, else the non-empty `seed`.

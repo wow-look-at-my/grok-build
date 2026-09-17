@@ -1200,6 +1200,82 @@ impl ApiBackend {
     }
 }
 
+/// Which optional message-level properties a Chat Completions target's schema
+/// accepts on replayed messages.
+///
+/// Most OpenAI-compatible providers ignore unknown message properties, so the
+/// defaults here are permissive — [`Self::PERMISSIVE`], exactly the body this
+/// crate sent before this type existed. A provider that validates its message
+/// schema strictly (Cerebras answers an unrecognized property with
+/// `wrong_api_format ... is unsupported`) needs [`Self::STRICT`], which omits
+/// the properties entirely rather than sending them as null/empty.
+///
+/// Pure data: no I/O, no provider knowledge. The per-model config surface
+/// selects it; the wire conversion consults it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ChatMessageProfile {
+    /// Whether the target accepts `model_id` on replayed messages.
+    pub accepts_model_id: bool,
+    /// Whether the target accepts `reasoning_content` on replayed messages.
+    pub accepts_reasoning_content: bool,
+}
+
+impl ChatMessageProfile {
+    /// Today's behavior: emit both properties. This is what every provider
+    /// except a strict-schema one expects.
+    pub const PERMISSIVE: Self = Self {
+        accepts_model_id: true,
+        accepts_reasoning_content: true,
+    };
+
+    /// A target whose schema defines neither property: omit both.
+    pub const STRICT: Self = Self {
+        accepts_model_id: false,
+        accepts_reasoning_content: false,
+    };
+
+    /// Whether this profile emits both properties (i.e. nothing is suppressed).
+    pub fn is_permissive(&self) -> bool {
+        self.accepts_model_id && self.accepts_reasoning_content
+    }
+
+    /// Narrow `self` by `other`: a property rejected by either side is dropped.
+    ///
+    /// Used to combine a request's profile with the per-model config's, so a
+    /// model configured as strict cannot be re-widened by a caller that left
+    /// the request at the permissive default.
+    pub fn narrowed_by(self, other: Self) -> Self {
+        Self {
+            accepts_model_id: self.accepts_model_id && other.accepts_model_id,
+            accepts_reasoning_content: self.accepts_reasoning_content
+                && other.accepts_reasoning_content,
+        }
+    }
+
+    /// Drop the properties named as unsupported by a provider error, if any.
+    /// Returns `None` when nothing changed, so a retry loop can tell a
+    /// productive strip from a no-op.
+    pub fn strip_named(&mut self, names_model_id: bool, names_reasoning_content: bool) -> bool {
+        let before = *self;
+        if names_model_id {
+            self.accepts_model_id = false;
+        }
+        if names_reasoning_content {
+            self.accepts_reasoning_content = false;
+        }
+        *self != before
+    }
+}
+
+impl Default for ChatMessageProfile {
+    /// Permissive, deliberately: `ConversationRequest` and `SamplingConfig`
+    /// both derive/lean on `Default`, so a strict default would silently
+    /// reshape every existing provider's request body.
+    fn default() -> Self {
+        Self::PERMISSIVE
+    }
+}
+
 /// Sampling client configuration (API key excluded — that stays in the client).
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct SamplingConfig {
@@ -1226,6 +1302,10 @@ pub struct SamplingConfig {
     /// Reasoning effort level for reasoning models.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<ReasoningEffort>,
+    /// Which optional message properties this target's schema accepts.
+    /// Defaults to [`ChatMessageProfile::PERMISSIVE`] (today's behavior).
+    #[serde(default)]
+    pub chat_message_profile: ChatMessageProfile,
     /// When true, inject `stream_tool_calls: true` into the Responses
     /// API request body so the upstream emits per-chunk argument deltas.
     #[serde(default, skip_serializing_if = "Option::is_none")]

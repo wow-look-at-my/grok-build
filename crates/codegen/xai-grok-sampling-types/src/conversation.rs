@@ -8,7 +8,10 @@ mod chat_completions;
 mod messages;
 mod responses;
 
-pub use chat_completions::{conversation_item_to_chat_message, conversation_to_chat_messages};
+pub use chat_completions::{
+    conversation_item_to_chat_message, conversation_item_to_chat_message_with_profile,
+    conversation_to_chat_messages, conversation_to_chat_messages_with_profile,
+};
 pub use messages::build_messages_request;
 pub use responses::{
     extra_tool_entries, patch_reasoning_text_types, response_to_conversation_items,
@@ -56,9 +59,9 @@ use serde::{Deserialize, Serialize};
 use crate::rs;
 use crate::tool_overrides::{ToolOverrides, WebSearchOptions, XSearchOptions, drop_empty};
 use crate::types::{
-    ChatCompletionRequest, ChatContentBlock, ChatRequestMessage, ChatResponseMessage, FinishReason,
-    ImageUrl, MessageContent, Role, ToolCallRequest, ToolChoice, ToolDefinition, TraceContext,
-    Usage,
+    ChatCompletionRequest, ChatContentBlock, ChatMessageProfile, ChatRequestMessage,
+    ChatResponseMessage, FinishReason, ImageUrl, MessageContent, Role, ToolCallRequest, ToolChoice,
+    ToolDefinition, TraceContext, Usage,
 };
 
 // ============================================================================
@@ -641,6 +644,12 @@ pub struct ConversationRequest {
     pub json_schema: Option<serde_json::Value>,
     /// Sticky routing key for prompt-cache reuse; overrides `x_grok_conv_id` for routing.
     pub prompt_cache_key: Option<String>,
+    /// Which optional message properties the target's Chat Completions schema
+    /// accepts. Defaults to [`ChatMessageProfile::PERMISSIVE`], so every
+    /// existing provider keeps the body it had. Set to
+    /// [`ChatMessageProfile::STRICT`] for a target that rejects unknown
+    /// message properties (the recovery path sets this after such a 400).
+    pub chat_message_profile: ChatMessageProfile,
 }
 
 /// Why [`ConversationRequest::strip_images`] ran, which decides the
@@ -713,6 +722,37 @@ impl ConversationRequest {
             .retain(|item| !matches!(item, ConversationItem::Reasoning(_)));
         before - self.items.len()
     }
+
+    /// Drop the message properties a strict-schema provider rejected from the
+    /// **serialized** Chat Completions body, then report whether anything
+    /// changed.
+    ///
+    /// The stored conversation is untouched: `items` still carries each
+    /// assistant's `model_id` and the `Reasoning` siblings, so the Messages
+    /// backend keeps resolving thinking signatures and a later turn on a
+    /// tolerant provider still sends reasoning. Only
+    /// [`Self::chat_message_profile`] is narrowed, and the wire conversion
+    /// consults it — so this is reversible by starting a new session, and it
+    /// cannot corrupt history.
+    ///
+    /// `names_model_id` / `names_reasoning_content` come from the provider's
+    /// error; when neither is named but the error is still an
+    /// unsupported-property error, both are dropped, since that error class
+    /// exists only for targets whose schema takes neither.
+    ///
+    /// Returns whether the profile changed — `false` means the strip would be
+    /// a no-op and the caller should stop retrying.
+    pub fn strip_unsupported_message_properties(
+        &mut self,
+        names_model_id: bool,
+        names_reasoning_content: bool,
+    ) -> bool {
+        let narrow_to_known = !names_model_id && !names_reasoning_content;
+        self.chat_message_profile.strip_named(
+            names_model_id || narrow_to_known,
+            names_reasoning_content || narrow_to_known,
+        )
+    }
 }
 
 /// The lowest effort a wire body can carry for a reasoning-mandatory target.
@@ -720,8 +760,7 @@ impl ConversationRequest {
 /// [`crate::ReasoningEffort::to_messages_api`] and `None` serializes as a
 /// disable on the chat-completions wire), so the lowest *enabled* tier is
 /// `Low`.
-pub const LOWEST_ENABLED_REASONING_EFFORT: crate::ReasoningEffort =
-    crate::ReasoningEffort::Low;
+pub const LOWEST_ENABLED_REASONING_EFFORT: crate::ReasoningEffort = crate::ReasoningEffort::Low;
 
 /// Resolve the reasoning effort a wire body must carry for a target.
 ///
@@ -744,9 +783,9 @@ pub fn wire_reasoning_effort(
         return requested;
     }
     match requested {
-        Some(crate::ReasoningEffort::None)
-            | Some(crate::ReasoningEffort::Minimal)
-            | None => Some(crate::ReasoningEffort::Low),
+        Some(crate::ReasoningEffort::None) | Some(crate::ReasoningEffort::Minimal) | None => {
+            Some(crate::ReasoningEffort::Low)
+        }
         Some(effort) => Some(effort),
     }
 }

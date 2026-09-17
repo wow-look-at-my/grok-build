@@ -3,7 +3,7 @@
 use crate::sampling::{
     ApiBackend, ChatCompletionRequest, ChatRequestMessage, Client as OaiCompatClient,
     ConversationItem, ConversationRequest, ConversationToolChoice, HostedTool, SamplingError,
-    ToolChoice, ToolDefinition, ToolSpec, conversation_to_chat_messages,
+    ToolChoice, ToolDefinition, ToolSpec, conversation_to_chat_messages_with_profile,
 };
 use agent_client_protocol as acp;
 use async_openai::types::responses::ResponseStreamEvent;
@@ -441,8 +441,13 @@ pub(crate) async fn generate_session_compact(
     };
     let output = match sampling_config.api_backend {
         ApiBackend::ChatCompletions => {
-            let chat_messages: Vec<ChatRequestMessage> =
-                conversation_to_chat_messages(chat_history);
+            // Honor the model's message-schema profile: compaction replays the
+            // same assistant items, so a strict-schema target would reject
+            // `model_id`/`reasoning_content` here exactly as on a normal turn.
+            let chat_messages: Vec<ChatRequestMessage> = conversation_to_chat_messages_with_profile(
+                chat_history,
+                sampling_config.chat_message_profile,
+            );
             let mut message =
                 ChatCompletionRequest::new(sampling_config.model.to_owned(), chat_messages)
                     .with_temperature(1.0);
@@ -1736,6 +1741,7 @@ mod reasoning_compaction_regression_tests {
             idle_timeout_secs: None,
             client_identifier: None,
             reasoning_effort: None,
+            chat_message_profile: Default::default(),
             deployment_id: None,
             user_id: None,
             origin_client: None,

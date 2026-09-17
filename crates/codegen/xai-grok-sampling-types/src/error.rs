@@ -342,7 +342,9 @@ impl SamplingError {
         if *status != StatusCode::BAD_REQUEST {
             return false;
         }
-        message.to_ascii_lowercase().contains("reasoning is mandatory")
+        message
+            .to_ascii_lowercase()
+            .contains("reasoning is mandatory")
     }
 
     /// The API rejected the request because an inline image could not be
@@ -400,6 +402,96 @@ impl SamplingError {
         ]
         .iter()
         .any(|needle| message.contains(needle))
+    }
+
+    /// The provider's schema rejected a message-level property it does not
+    /// define, e.g. Cerebras's
+    /// `wrong_api_format: messages.6.assistant.model_id: property
+    ///  'messages.6.assistant.model_id' is unsupported`.
+    ///
+    /// This is a request-content error, not a transient one: the property
+    /// lives in conversation *history*, so re-sending the same body fails
+    /// identically on every turn and every retry. The recovery is to drop the
+    /// named properties from the serialized body and retry, which this
+    /// classifier enables by identifying the error.
+    ///
+    /// Narrow on purpose: the provider's own `wrong_api_format` code AND an
+    /// "is unsupported" phrase must both appear, so an unrelated 400 that
+    /// merely mentions a property name is not mistaken for this.
+    pub fn is_unsupported_message_property_error(&self) -> bool {
+        let SamplingError::Api {
+            status, message, ..
+        } = self
+        else {
+            return false;
+        };
+        if *status != StatusCode::BAD_REQUEST {
+            return false;
+        }
+        let message = message.to_ascii_lowercase();
+        message.contains("wrong_api_format") && message.contains("is unsupported")
+    }
+
+    /// Whether this error names `model_id` as an unsupported property, so the
+    /// recovery can strip exactly what the provider objected to.
+    /// Case-insensitive; the property name is matched as a whole token so
+    /// `messages.6.assistant.model_id` hits and `model_identifier` does not.
+    pub fn names_unsupported_model_id(&self) -> bool {
+        self.unsupported_property_names()
+            .is_some_and(|names| names.iter().any(|n| n == "model_id"))
+    }
+
+    /// Whether this error names `reasoning_content` as an unsupported property.
+    pub fn names_unsupported_reasoning_content(&self) -> bool {
+        self.unsupported_property_names()
+            .is_some_and(|names| names.iter().any(|n| n == "reasoning_content"))
+    }
+
+    /// The distinct property names an unsupported-property error names.
+    /// `None` when this is not such an error.
+    ///
+    /// The provider packs several failures into one newline-separated string,
+    /// e.g.
+    /// `messages.6.assistant.model_id: property '...' is unsupported\n
+    ///  messages.6.assistant.reasoning_content: property '...' is unsupported`,
+    /// so this reads every line, not just the first.
+    fn unsupported_property_names(&self) -> Option<Vec<String>> {
+        if !self.is_unsupported_message_property_error() {
+            return None;
+        }
+        let SamplingError::Api { message, .. } = self else {
+            return None;
+        };
+        let mut names = Vec::new();
+        for line in message.split('\n') {
+            // Each line is `<path>: property '<path>' is unsupported`, and may
+            // carry a client-side prefix before the path (`API error (status
+            // 400 Bad Request): wrong_api_format: <path>: property ...`).
+            // Anchoring on the `: property '` separator — rather than the
+            // first `:` — keeps the prefix from being read as the path.
+            let line = line.to_ascii_lowercase();
+            if !line.contains("is unsupported") {
+                continue;
+            }
+            let Some((path, _)) = line.split_once(": property '") else {
+                continue;
+            };
+            // `<path>` may itself carry a `<prefix>: wrong_api_format: ` head;
+            // the property path is the final colon-separated segment.
+            let path = path.rsplit(':').next().unwrap_or(path);
+            // `messages.6.assistant.model_id` -> the final dot-segment.
+            let Some(name) = path.trim().rsplit('.').next() else {
+                continue;
+            };
+            let name = name.trim();
+            if !name.is_empty() && !names.iter().any(|n: &String| n == name) {
+                names.push(name.to_owned());
+            }
+        }
+        // An unsupported-property error that names nothing is still this error
+        // class (caller strips what it knows how to strip); return an empty
+        // list rather than `None` so the class is not lost.
+        Some(names)
     }
 
     pub fn is_retryable(&self) -> bool {
@@ -1620,5 +1712,128 @@ mod tests {
                 "origin-TLS {code} must not be retried"
             );
         }
+    }
+
+    // ========================================================================
+    // Strict-schema unsupported-message-property errors (Cerebras)
+    // ========================================================================
+
+    /// The exact error Cerebras returned for a replayed assistant message in
+    /// this repo's own session log. It must classify as an
+    /// unsupported-message-property error, name both offending properties, and
+    /// produce a property-strip retry — otherwise it is Fatal and the session
+    /// is bricked, since the properties live in stored history.
+    #[test]
+    fn cerebras_unsupported_message_property_400_is_detected() {
+        let err = SamplingError::Api {
+            status: StatusCode::BAD_REQUEST,
+            message: "API error (status 400 Bad Request): wrong_api_format: \
+                 messages.6.assistant.model_id: property 'messages.6.assistant.model_id' \
+                 is unsupported\nmessages.6.assistant.reasoning_content: property \
+                 'messages.6.assistant.reasoning_content' is unsupported"
+                .into(),
+            model_metadata: None,
+            retry_after_secs: None,
+            should_retry: None,
+        };
+        assert!(
+            err.is_unsupported_message_property_error(),
+            "the documented Cerebras 400 must classify"
+        );
+        assert!(
+            err.names_unsupported_model_id(),
+            "must name model_id specifically"
+        );
+        assert!(
+            err.names_unsupported_reasoning_content(),
+            "must name reasoning_content from the second line"
+        );
+    }
+
+    /// Both properties named on separate lines must both be read: the
+    /// provider packs multiple failures into one newline-separated string, so
+    /// a first-line-only parse would miss `reasoning_content` and leave the
+    /// retry failing on the property it did not strip.
+    #[test]
+    fn unsupported_property_names_reads_every_line() {
+        let err = SamplingError::Api {
+            status: StatusCode::BAD_REQUEST,
+            message: "wrong_api_format: messages.1.assistant.reasoning_content: property \
+                 'messages.1.assistant.reasoning_content' is unsupported"
+                .into(),
+            model_metadata: None,
+            retry_after_secs: None,
+            should_retry: None,
+        };
+        assert!(err.names_unsupported_reasoning_content());
+        assert!(
+            !err.names_unsupported_model_id(),
+            "model_id was not named and must not be claimed"
+        );
+    }
+
+    /// Narrowness: the classifier requires the provider's own code AND the
+    /// "is unsupported" phrase. An unrelated 400 that merely mentions a
+    /// property must not be caught — otherwise a genuine request bug would be
+    /// silently retried with fields stripped.
+    #[test]
+    fn unrelated_400_mentioning_a_property_is_not_matched() {
+        for message in [
+            // Right phrase, wrong error class.
+            "messages.0.content: property is unsupported",
+            // Right class, no unsupported-property phrase.
+            "wrong_api_format: messages.0.content: missing required field",
+            // Neither.
+            "context_length_exceeded: Current length is 200052 while limit is 131072",
+        ] {
+            let err = SamplingError::Api {
+                status: StatusCode::BAD_REQUEST,
+                message: message.into(),
+                model_metadata: None,
+                retry_after_secs: None,
+                should_retry: None,
+            };
+            assert!(
+                !err.is_unsupported_message_property_error(),
+                "must not classify: {message}"
+            );
+            assert!(err.unsupported_property_names().is_none());
+        }
+    }
+
+    /// A non-400 must never classify, whatever it says: this recovery is for a
+    /// schema-validation rejection specifically.
+    #[test]
+    fn unsupported_property_requires_a_400() {
+        let err = SamplingError::Api {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            message: "wrong_api_format: messages.0.assistant.model_id: property \
+                 'messages.0.assistant.model_id' is unsupported"
+                .into(),
+            model_metadata: None,
+            retry_after_secs: None,
+            should_retry: None,
+        };
+        assert!(!err.is_unsupported_message_property_error());
+    }
+
+    /// The property name is matched as a whole dot-segment: a similarly
+    /// prefixed name must not be mistaken for `model_id`.
+    #[test]
+    fn property_name_match_is_segment_exact() {
+        let err = SamplingError::Api {
+            status: StatusCode::BAD_REQUEST,
+            message: "wrong_api_format: messages.0.assistant.model_identifier: property \
+                 'messages.0.assistant.model_identifier' is unsupported"
+                .into(),
+            model_metadata: None,
+            retry_after_secs: None,
+            should_retry: None,
+        };
+        assert!(err.is_unsupported_message_property_error());
+        assert!(
+            !err.names_unsupported_model_id(),
+            "model_identifier is a different property from model_id"
+        );
     }
 }

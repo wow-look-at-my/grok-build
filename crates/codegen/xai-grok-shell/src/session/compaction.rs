@@ -2303,6 +2303,7 @@ mod inline_auto_compact_flow_tests {
                     .expect("test context_window must be non-zero"),
                 reasoning_effort: None,
                 stream_tool_calls: None,
+                chat_message_profile: Default::default(),
             },
             Box::new(xai_chat_state::NullChatPersistence),
             chat_event_tx,

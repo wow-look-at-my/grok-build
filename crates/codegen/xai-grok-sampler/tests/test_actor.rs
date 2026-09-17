@@ -88,6 +88,7 @@ fn test_config(base_url: String, model: &str) -> SamplerConfig {
         stream_tool_calls: false,
         idle_timeout_secs: Some(30),
         reasoning_effort: None,
+        chat_message_profile: Default::default(),
         origin_client: None,
         client_identifier: None,
         deployment_id: None,
@@ -979,6 +980,284 @@ async fn responses_confident_doom_loop_signal_resamples_once() {
 // ---------------------------------------------------------------------------
 
 /// Drain the event channel until a terminal event (`Completed` or
+// ---------------------------------------------------------------------------
+// Strict-schema message-property recovery (Cerebras `wrong_api_format`)
+// ---------------------------------------------------------------------------
+//
+// The provider's schema rejects any message property it does not define, and
+// the offending properties (`model_id`, `reasoning_content`) live in stored
+// conversation history. Without the strip-and-retry arm this 400 is Fatal and
+// the conversation is bricked from turn 2 onward. These tests drive the real
+// `SamplerActor` retry loop and assert on the bodies the server actually
+// received.
+
+/// History whose assistant item carries a recorded `model_id` plus a replayed
+/// reasoning sibling — the shape that produced the live Cerebras 400.
+fn poisoned_request(text: &str) -> ConversationRequest {
+    ConversationRequest {
+        items: vec![
+            ConversationItem::User(UserItem {
+                content: vec![xai_grok_sampling_types::ContentPart::Text {
+                    text: std::sync::Arc::<str>::from(text),
+                }],
+                synthetic_reason: None,
+                ..Default::default()
+            }),
+            ConversationItem::Reasoning(xai_grok_sampling_types::synthesized_reasoning_item(
+                "thinking about q1",
+            )),
+            ConversationItem::Assistant(xai_grok_sampling_types::conversation::AssistantItem {
+                content: "a1".into(),
+                tool_calls: vec![],
+                model_id: Some("qwen-3.8-27b".into()),
+                model_fingerprint: None,
+                reasoning_effort: None,
+            }),
+            ConversationItem::User(UserItem {
+                content: vec![xai_grok_sampling_types::ContentPart::Text {
+                    text: std::sync::Arc::<str>::from("q2"),
+                }],
+                synthetic_reason: None,
+                ..Default::default()
+            }),
+        ],
+        ..Default::default()
+    }
+}
+
+/// The documented Cerebras rejection of replayed history.
+fn cerebras_400_body() -> serde_json::Value {
+    json!({
+        "message": "wrong_api_format: messages.2.assistant.model_id: property \
+            'messages.2.assistant.model_id' is unsupported\n\
+            messages.2.assistant.reasoning_content: property \
+            'messages.2.assistant.reasoning_content' is unsupported",
+        "type": "invalid_request_error",
+        "param": "validation_error",
+        "code": "wrong_api_format",
+    })
+}
+
+/// History predating the fix must recover, not dead-end: the first attempt is
+/// answered with the Cerebras 400, and the retried body must omit exactly the
+/// properties the provider named.
+///
+/// Asserts on the recorded request bodies — what the provider actually
+/// received — using the shared mock server's `request_bodies()`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn unsupported_message_property_400_strips_and_recovers() {
+    let server = xai_grok_test_support::MockInferenceServer::start()
+        .await
+        .unwrap();
+    server.enqueue_response(
+        "/v1/chat/completions",
+        xai_grok_test_support::ScriptedResponse::json(400, cerebras_400_body()),
+    );
+    server.set_keep_requests(true);
+    server.set_response("recovered");
+
+    let (event_tx, mut event_rx) = mpsc::unbounded_channel();
+    let cfg = test_config(server.url(), "qwen-3.8-27b");
+    let handle = SamplerActor::spawn(cfg, RetryPolicy::default(), event_tx);
+
+    let rid = RequestId::from("req-strict-schema");
+    handle.submit(rid.clone(), poisoned_request("q1"));
+
+    let events = drain_until_terminal(&mut event_rx, Duration::from_secs(30)).await;
+
+    // The turn completed rather than dead-ending.
+    let response = match events.last().unwrap() {
+        SamplingEvent::Completed { response, .. } => response.clone(),
+        other => panic!("expected Completed after recovery, got {other:?}"),
+    };
+    assert!(
+        response
+            .assistant()
+            .is_some_and(|a| a.content.contains("recovered")),
+        "the recovered turn must carry the provider's reply: {response:?}"
+    );
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, SamplingEvent::Retrying { .. })),
+        "the recovery is a retry and must be observable as one"
+    );
+
+    // Exactly two requests: the rejected attempt, then the recovered retry.
+    let bodies = server.request_bodies();
+    assert_eq!(
+        bodies.len(),
+        2,
+        "expected the rejected attempt plus one recovered retry, got {bodies:#?}"
+    );
+
+    // The rejected attempt carried the properties (that is what caused the 400).
+    let first = bodies[0]["messages"].as_array().expect("messages array");
+    let first_assistant = first
+        .iter()
+        .find(|m| m["role"] == "assistant")
+        .expect("assistant in the first attempt");
+    assert!(
+        first_assistant.get("model_id").is_some(),
+        "the first attempt should carry model_id — the rejected shape: {first:#?}"
+    );
+
+    // The recovered retry carries neither property on any message.
+    let retried = bodies[1]["messages"].as_array().expect("messages array");
+    for m in retried {
+        assert!(
+            m.get("model_id").is_none(),
+            "recovered body must omit model_id: {m:#}"
+        );
+        assert!(
+            m.get("reasoning_content").is_none(),
+            "recovered body must omit reasoning_content: {m:#}"
+        );
+    }
+
+    // Recovery must not cost content: the assistant reply and the follow-up
+    // user turn survive.
+    let retried_assistant = retried
+        .iter()
+        .find(|m| m["role"] == "assistant")
+        .expect("assistant in the recovered attempt");
+    assert_eq!(retried_assistant["content"], json!("a1"));
+    assert!(
+        retried.iter().any(|m| m["content"] == json!("q2")),
+        "the conversation past the poisoned turn must survive: {retried:#?}"
+    );
+}
+
+/// A model configured `strict_message_schema` sends a body the provider
+/// accepts on the first attempt — no 400 and no retry. This is the primary
+/// fix for new sessions; the recovery above covers pre-existing history.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn strict_model_config_sends_no_unsupported_property_at_all() {
+    let server = xai_grok_test_support::MockInferenceServer::start()
+        .await
+        .unwrap();
+    server.set_keep_requests(true);
+    server.set_response("ok");
+
+    let (event_tx, mut event_rx) = mpsc::unbounded_channel();
+    let mut cfg = test_config(server.url(), "qwen-3.8-27b");
+    // Exactly what `sampling_config_for_model` produces for a model entry with
+    // `strict_message_schema = true`.
+    cfg.chat_message_profile = xai_grok_sampling_types::ChatMessageProfile::STRICT;
+    let handle = SamplerActor::spawn(cfg, RetryPolicy::default(), event_tx);
+
+    handle.submit(RequestId::from("req-strict-config"), poisoned_request("q1"));
+    let events = drain_until_terminal(&mut event_rx, Duration::from_secs(30)).await;
+
+    assert!(
+        matches!(events.last().unwrap(), SamplingEvent::Completed { .. }),
+        "a strict-configured model must complete: {events:?}"
+    );
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, SamplingEvent::Retrying { .. })),
+        "no retry should be needed: {events:?}"
+    );
+
+    let bodies = server.request_bodies();
+    assert_eq!(bodies.len(), 1, "exactly one request: {bodies:#?}");
+    for m in bodies[0]["messages"].as_array().unwrap() {
+        assert!(
+            m.get("model_id").is_none() && m.get("reasoning_content").is_none(),
+            "a strict model must never send these properties: {m:#}"
+        );
+    }
+}
+
+/// The regression guard at the wire level: a permissive model (the default)
+/// still sends both properties and needs no retry.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn permissive_model_still_sends_replayed_properties() {
+    let server = xai_grok_test_support::MockInferenceServer::start()
+        .await
+        .unwrap();
+    server.set_keep_requests(true);
+    server.set_response("ok");
+
+    let (event_tx, mut event_rx) = mpsc::unbounded_channel();
+    let cfg = test_config(server.url(), "qwen-3.8-27b");
+    assert_eq!(
+        cfg.chat_message_profile,
+        xai_grok_sampling_types::ChatMessageProfile::PERMISSIVE,
+        "the default config must stay permissive"
+    );
+    let handle = SamplerActor::spawn(cfg, RetryPolicy::default(), event_tx);
+
+    handle.submit(RequestId::from("req-permissive"), poisoned_request("q1"));
+    let events = drain_until_terminal(&mut event_rx, Duration::from_secs(30)).await;
+    assert!(matches!(
+        events.last().unwrap(),
+        SamplingEvent::Completed { .. }
+    ));
+
+    let bodies = server.request_bodies();
+    assert_eq!(
+        bodies.len(),
+        1,
+        "no retry for a tolerant target: {bodies:#?}"
+    );
+    let messages = bodies[0]["messages"].as_array().unwrap();
+    let assistant = messages
+        .iter()
+        .find(|m| m["role"] == "assistant")
+        .expect("assistant present");
+    assert_eq!(
+        assistant["model_id"],
+        json!("qwen-3.8-27b"),
+        "tolerant target keeps model_id: {assistant:#}"
+    );
+    assert_eq!(
+        assistant["reasoning_content"],
+        json!("thinking about q1"),
+        "tolerant target keeps replayed reasoning: {assistant:#}"
+    );
+}
+
+/// A 400 that is not the strict-schema class must stay fatal — the recovery
+/// must not silently rewrite bodies for unrelated request bugs.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn unrelated_400_stays_fatal_without_a_strip_retry() {
+    let server = xai_grok_test_support::MockInferenceServer::start()
+        .await
+        .unwrap();
+    server.set_keep_requests(true);
+    server.enqueue_response(
+        "/v1/chat/completions",
+        xai_grok_test_support::ScriptedResponse::json(
+            400,
+            json!({
+                "message": "malformed tool call in history",
+                "type": "invalid_request_error",
+                "code": "invalid_request",
+            }),
+        ),
+    );
+
+    let (event_tx, mut event_rx) = mpsc::unbounded_channel();
+    let cfg = test_config(server.url(), "qwen-3.8-27b");
+    let handle = SamplerActor::spawn(cfg, RetryPolicy::default(), event_tx);
+
+    handle.submit(RequestId::from("req-unrelated-400"), poisoned_request("q1"));
+    let events = drain_until_terminal(&mut event_rx, Duration::from_secs(30)).await;
+
+    assert!(
+        matches!(events.last().unwrap(), SamplingEvent::Failed { .. }),
+        "an unrelated 400 must end the turn as failed: {events:?}"
+    );
+    assert_eq!(
+        server.request_bodies().len(),
+        1,
+        "no strip-retry for an unrelated 400: {:#?}",
+        server.request_bodies()
+    );
+}
+
 /// `Failed`) is received, or until `deadline` elapses.
 async fn drain_until_terminal(
     rx: &mut mpsc::UnboundedReceiver<SamplingEvent>,

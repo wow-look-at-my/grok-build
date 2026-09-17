@@ -3930,11 +3930,9 @@ fn default_models(endpoints: &EndpointsConfig) -> IndexMap<String, ModelEntryCon
                 m.id
             );
             let key = m.id.clone().unwrap_or_else(|| m.model.clone());
-            let context_window = m
-                .context_window
-                .unwrap_or_else(|| {
-                    NonZeroU64::new(CONFIG_DEFAULT_CONTEXT_WINDOW).expect("200000 is non-zero")
-                });
+            let context_window = m.context_window.unwrap_or_else(|| {
+                NonZeroU64::new(CONFIG_DEFAULT_CONTEXT_WINDOW).expect("200000 is non-zero")
+            });
             let config = ModelEntryConfig {
                 id: m.id,
                 model: m.model,
@@ -3967,8 +3965,9 @@ fn default_models(endpoints: &EndpointsConfig) -> IndexMap<String, ModelEntryCon
                 compaction_at_tokens: m.compaction_at_tokens,
                 show_model_fingerprint: m.show_model_fingerprint,
                 stream_tool_calls: None,
+                strict_message_schema: false,
                 laziness_detector: LazinessDetectorPerModelConfig::default(),
-            pricing: xai_grok_sampling_types::ModelPricing::default(),
+                pricing: xai_grok_sampling_types::ModelPricing::default(),
             };
             (key, config)
         })
@@ -4088,6 +4087,19 @@ pub struct ModelEntryConfig {
     /// flag should leave this unset to avoid request errors.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stream_tool_calls: Option<bool>,
+    /// When true, this model's Chat Completions schema is strict: the request
+    /// body must carry no message-level property the provider does not define,
+    /// or it answers 400 (`wrong_api_format ... is unsupported`).
+    ///
+    /// Set it for providers such as Cerebras that validate message schemas
+    /// strictly. The wire conversion then omits `model_id` and
+    /// `reasoning_content` from replayed assistant messages. Defaults to
+    /// false — the body every tolerant OpenAI-compatible provider receives
+    /// (they ignore unknown message properties).
+    ///
+    /// Stored conversation history is never altered, only the serialized body.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub strict_message_schema: bool,
     /// Per-model Layer-3 LazinessDetector configuration. Defaults to
     /// the all-disabled state via `#[serde(default)]`.
     #[serde(default, skip_serializing_if = "is_default_laziness_detector")]
@@ -4355,6 +4367,12 @@ pub struct ModelInfo {
     pub show_model_fingerprint: bool,
     /// When `Some(true)`, the sampler injects `stream_tool_calls: true`
     pub stream_tool_calls: Option<bool>,
+    /// When true, this model's Chat Completions schema is strict: the wire body
+    /// must omit message-level properties the provider does not define (see
+    /// [`ModelEntryConfig::strict_message_schema`]). Resolved into a
+    /// [`xai_grok_sampling_types::ChatMessageProfile::STRICT`] profile.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub strict_message_schema: bool,
     /// Per-model Layer-3 LazinessDetector configuration. Defaults to
     /// the all-disabled state — the feature is per-model opt-in with a
     /// second-step `max_nudges_per_session > 0` opt-in for actually
@@ -4402,6 +4420,7 @@ impl ModelInfo {
             compaction_at_tokens: None,
             show_model_fingerprint: false,
             stream_tool_calls: None,
+            strict_message_schema: false,
             laziness_detector: LazinessDetectorPerModelConfig::default(),
             pricing: xai_grok_sampling_types::ModelPricing::default(),
         }
@@ -4440,6 +4459,7 @@ impl ModelInfo {
             compaction_at_tokens: entry.compaction_at_tokens,
             show_model_fingerprint: entry.show_model_fingerprint,
             stream_tool_calls: entry.stream_tool_calls,
+            strict_message_schema: entry.strict_message_schema,
             laziness_detector: entry.laziness_detector.clone(),
             pricing: entry.pricing.clone(),
         }
@@ -5222,8 +5242,9 @@ pub(crate) fn resolve_aux_model_sampling_config(
                 compaction_at_tokens: None,
                 show_model_fingerprint: false,
                 stream_tool_calls: None,
+                strict_message_schema: false,
                 laziness_detector: LazinessDetectorPerModelConfig::default(),
-            pricing: xai_grok_sampling_types::ModelPricing::default(),
+                pricing: xai_grok_sampling_types::ModelPricing::default(),
             },
             api_key: Some(bearer),
             env_key: None,
@@ -5346,6 +5367,11 @@ pub(crate) fn sampling_config_for_model(
         context_window: info.context_window.get(),
         client_version,
         reasoning_effort: info.reasoning_effort,
+        chat_message_profile: if info.strict_message_schema {
+            xai_grok_sampling_types::ChatMessageProfile::STRICT
+        } else {
+            xai_grok_sampling_types::ChatMessageProfile::PERMISSIVE
+        },
         force_http1: false,
         max_retries: info.max_retries,
         stream_tool_calls: info.stream_tool_calls.unwrap_or(false),
@@ -5436,6 +5462,7 @@ fn resolve_hidden_default_web_search_sampling_config(
             compaction_at_tokens: None,
             show_model_fingerprint: false,
             stream_tool_calls: None,
+            strict_message_schema: false,
             laziness_detector: LazinessDetectorPerModelConfig::default(),
             pricing: xai_grok_sampling_types::ModelPricing::default(),
         },
@@ -6660,8 +6687,9 @@ reasoning_effort = "low"
                 compaction_at_tokens: None,
                 show_model_fingerprint: false,
                 stream_tool_calls: None,
+                strict_message_schema: false,
                 laziness_detector: LazinessDetectorPerModelConfig::default(),
-            pricing: xai_grok_sampling_types::ModelPricing::default(),
+                pricing: xai_grok_sampling_types::ModelPricing::default(),
             },
             api_key: api_key.map(|s| s.to_string()),
             env_key: env_key.map(EnvKeys::single),
@@ -7701,6 +7729,7 @@ reasoning_effort = "low"
             compaction_at_tokens: None,
             show_model_fingerprint: false,
             stream_tool_calls: None,
+            strict_message_schema: false,
             laziness_detector: LazinessDetectorPerModelConfig::default(),
             pricing: xai_grok_sampling_types::ModelPricing::default(),
         };
@@ -7861,6 +7890,7 @@ reasoning_effort = "low"
             compaction_at_tokens: None,
             show_model_fingerprint: false,
             stream_tool_calls: None,
+            strict_message_schema: false,
             laziness_detector: LazinessDetectorPerModelConfig::default(),
             pricing: xai_grok_sampling_types::ModelPricing::default(),
         };
@@ -8313,6 +8343,7 @@ reasoning_effort = "low"
             compaction_at_tokens: None,
             show_model_fingerprint: false,
             stream_tool_calls: None,
+            strict_message_schema: false,
             laziness_detector: LazinessDetectorPerModelConfig::default(),
             pricing: xai_grok_sampling_types::ModelPricing::default(),
         };
@@ -12204,8 +12235,9 @@ default = "grok-4.5"
                 compaction_at_tokens: None,
                 show_model_fingerprint: false,
                 stream_tool_calls: None,
+                strict_message_schema: false,
                 laziness_detector: LazinessDetectorPerModelConfig::default(),
-            pricing: xai_grok_sampling_types::ModelPricing::default(),
+                pricing: xai_grok_sampling_types::ModelPricing::default(),
                 auto_compact_threshold_percent: None,
                 system_prompt_label: None,
             },
