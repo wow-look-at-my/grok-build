@@ -22,6 +22,7 @@ fn encrypted_content_error() -> xai_grok_sampler::SamplingErrorInfo {
         empty_response_context: None,
         doom_loop_triggers: None,
         doom_loop_aborted_at_chunk: None,
+        output_rate: None,
         credential: xai_grok_sampling_types::SentCredential::Unknown,
     }
 }

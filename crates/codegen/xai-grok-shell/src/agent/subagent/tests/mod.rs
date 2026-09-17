@@ -1853,6 +1853,7 @@ fn test_model_entry(model_id: &str) -> crate::agent::config::ModelEntry {
             stream_tool_calls: None,
             laziness_detector: crate::agent::config::LazinessDetectorPerModelConfig::default(),
             pricing: xai_grok_sampling_types::ModelPricing::default(),
+            min_output_tokens_per_sec: None,
         },
         api_key: None,
         env_key: None,

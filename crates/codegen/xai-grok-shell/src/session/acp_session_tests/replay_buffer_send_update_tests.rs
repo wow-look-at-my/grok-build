@@ -821,6 +821,7 @@ async fn failed_event_preserves_streaming_capture_for_takeout() {
                         empty_response_context: None,
                         doom_loop_triggers: None,
                         doom_loop_aborted_at_chunk: None,
+                        output_rate: None,
                         credential: xai_grok_sampling_types::SentCredential::Unknown,
                     },
                 })
@@ -1244,6 +1245,7 @@ async fn reasoning_only_doomloop_turn_captures_every_generation_as_segments() {
                 }),
                 doom_loop_triggers: None,
                 doom_loop_aborted_at_chunk: None,
+                output_rate: None,
                 credential: xai_grok_sampling_types::SentCredential::Unknown,
             };
             actor
