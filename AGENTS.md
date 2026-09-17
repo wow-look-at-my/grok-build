@@ -87,6 +87,12 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - Closing the ring (past the last identity stop) DOES drop yolo before entering Plan. Plan+yolo matches no arm of the `(in_plan, in_auto, in_yolo)` match, so leaving it set sends the next press into the catch-all and lands on Normal instead of Auto.
 - The composer flag row is additive, so an orchestrating yolo session correctly reads `always-approve · orchestrator` (`agent_view/render.rs`).
 
+## `/goal` role-model notes
+
+- Every `/goal` role (planner, strategist, skeptic panel) inherits the session's current model unless something pins it. Precedence is `[goal].use_current_model_only` (kill switch, wins over everything) > a local `[goal]` pin > a remote-pushed pin > inherit.
+- A remote pin applies only with `[goal].follow_remote_role_models` (env `GROK_GOAL_FOLLOW_REMOTE_ROLE_MODELS`), default off. A server-side pin silently replaces the model the user picked. Nothing local reports which model a role ran on.
+- The opt-in itself is local only. A remote-controlled switch for whether to obey remote pins grants back what the default withholds.
+
 ## Goal-plan-to-todos notes
 
 - The implementing session no longer transcribes the plan into its todo list. The planner lists the plan's work on its OWN todo list, and the harness puts those items on the session's list as the plan is published (`apply_planner_todos` in `acp_session_impl/goal_support.rs`, called from the `Planned` publish branch of `maybe_run_goal_planner`, before the goal-start reminder is rendered).

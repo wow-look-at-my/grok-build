@@ -321,6 +321,19 @@ enabled = false                       # disable background workflows (or GROK_WO
 
 Project workflows are discovered from `<repo-root>/.grok/workflows/`; user workflows from `~/.grok/workflows/`. Discovery and invocation key off the script's `meta.name`, so keep each filename aligned with its `meta.name`. Built-ins win over project names, and project names win over user names, so keep names unique across scopes.
 
+#### Which model runs the `/goal` roles
+
+The planner, strategist and verification panel run on the session's current model. Pin a role to another model in `[goal]`:
+
+```toml
+[goal]
+planner_model = { model = "grok-build", agent_type = "grok-build-plan" }
+use_current_model_only = true          # ignore every pin, including the ones above
+follow_remote_role_models = true       # opt in to server-pushed role pins
+```
+
+`follow_remote_role_models` is off by default, so a server-side pin never replaces the model you selected. `use_current_model_only` is the kill switch: it overrides local pins too, even for a goal already in flight. Both read an env var as well (`GROK_GOAL_FOLLOW_REMOTE_ROLE_MODELS`, `GROK_GOAL_USE_CURRENT_MODEL_ONLY`).
+
 Each launch gets a session-unique display handle such as `deep-research-2`. That handle is what you see in the `/workflows` run dashboard and pass to `/workflow pause`, `resume`, or `stop` — the internal run IDs never surface in commands. A numbered handle isn't a reusable definition name, so the dashboard disables **save** until you pick a new unique `meta.name` and save the edited script yourself. See [Slash Commands](04-slash-commands.md) for examples.
 
 ### Skills
