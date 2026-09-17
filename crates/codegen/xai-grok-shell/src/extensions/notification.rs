@@ -1136,6 +1136,23 @@ pub enum SessionUpdate {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         session_cost_usd_ticks: Option<i64>,
     },
+    /// The model's live output rate while a response streams. Fire-and-forget,
+    /// **never persisted**: it describes a stream that is happening now, and a
+    /// replayed one would put a stale number under an idle session.
+    ///
+    /// It is measured by the sampler's own meter — the one the rate floor
+    /// judges — so the indicator a client renders and the gate that reissues a
+    /// request can never disagree about the rate. `floor_tokens_per_sec` is
+    /// the configured floor, absent when the session gates nothing, and
+    /// `slow_for_ms` is how long the rate has been under it.
+    OutputRate {
+        tokens_per_sec: f64,
+        window_secs: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        floor_tokens_per_sec: Option<f64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        slow_for_ms: Option<u64>,
+    },
     /// Catch-all for unrecognized session update types.
     /// Allows forward/backward compatibility when variants are added or removed.
     /// All fields from the unrecognized variant are discarded during deserialization.

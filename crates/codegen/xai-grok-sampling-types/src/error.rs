@@ -195,6 +195,18 @@ pub enum SamplingError {
         triggers: Vec<String>,
         aborted_at_chunk: Option<u64>,
     },
+    /// The model's output rate stayed under the configured floor for a whole
+    /// measurement window. Retryable on the rate gate's own budget, separate
+    /// from the transport budget: the request is fine, the engine serving it
+    /// is not, and a fresh request usually lands on a healthy one.
+    #[error(
+        "output rate collapsed to {observed_tokens_per_sec:.1} tok/s over {window_secs}s (floor {floor_tokens_per_sec:.1})"
+    )]
+    OutputRateCollapsed {
+        observed_tokens_per_sec: f64,
+        floor_tokens_per_sec: f64,
+        window_secs: u64,
+    },
 }
 
 impl SamplingError {
@@ -417,6 +429,7 @@ impl SamplingError {
             SamplingError::EmptyResponse { .. } => true,
             SamplingError::MaxTokensTruncation => false,
             SamplingError::DoomLoopDetected { .. } => true,
+            SamplingError::OutputRateCollapsed { .. } => true,
         }
     }
 

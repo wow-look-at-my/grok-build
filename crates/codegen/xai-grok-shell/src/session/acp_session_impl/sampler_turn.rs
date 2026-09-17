@@ -532,6 +532,7 @@ impl SessionActor {
             compactions_remaining: self.compactions_remaining.get(),
             compaction_at_tokens: self.compaction_at_tokens.get(),
             doom_loop_recovery: self.doom_loop_recovery,
+            output_rate_floor: self.output_rate_floor.get(),
             header_injector: if codex_backend {
                 Some(std::sync::Arc::new(
                     crate::codex_provider::CodexHeaderInjector::new(

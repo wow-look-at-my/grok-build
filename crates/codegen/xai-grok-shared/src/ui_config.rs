@@ -65,6 +65,19 @@ pub struct UiConfig {
     /// `None` = on (default). (`[ui].stop_gate_ci_failing`.)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stop_gate_ci_failing: Option<bool>,
+    /// Reissue a model call whose output rate stays under this many tokens per
+    /// second for [`Self::output_rate_sustained_secs`]. `None` or `0` = off,
+    /// which is the default: a floor belongs to an endpoint that collapses,
+    /// and a session-wide guess would reissue against a model that is merely
+    /// slow. `[model.<id>].min_output_tokens_per_sec` overrides it for one
+    /// model. (`[ui].min_output_tokens_per_sec`.)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_output_tokens_per_sec: Option<u32>,
+    /// How long the rate must stay under the floor before the request is
+    /// reissued. `None` = 10 seconds. A dip shorter than this is a pause, not
+    /// a collapsed engine. (`[ui].output_rate_sustained_secs`.)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_rate_sustained_secs: Option<u32>,
     /// Theme to use when the OS is in dark mode. Written by the pager's theme persist module.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auto_dark_theme: Option<String>,
@@ -278,6 +291,8 @@ impl Default for UiConfig {
             confirm_before_rewind: None,
             stop_gate_unfinished_todos: None,
             stop_gate_ci_failing: None,
+            min_output_tokens_per_sec: None,
+            output_rate_sustained_secs: None,
             auto_dark_theme: None,
             auto_light_theme: None,
             scroll_speed: None,
@@ -358,6 +373,22 @@ impl UiConfig {
     pub fn stop_gate_ci_failing_enabled(&self) -> bool {
         self.stop_gate_ci_failing
             .unwrap_or(Self::STOP_GATE_CI_FAILING_DEFAULT)
+    }
+
+    /// Default for [`Self::min_output_tokens_per_sec`] when unset: off.
+    pub const MIN_OUTPUT_TOKENS_PER_SEC_DEFAULT: u32 = 0;
+
+    /// Default for [`Self::output_rate_sustained_secs`] when unset.
+    pub const OUTPUT_RATE_SUSTAINED_SECS_DEFAULT: u32 = 10;
+
+    pub fn min_output_tokens_per_sec_value(&self) -> u32 {
+        self.min_output_tokens_per_sec
+            .unwrap_or(Self::MIN_OUTPUT_TOKENS_PER_SEC_DEFAULT)
+    }
+
+    pub fn output_rate_sustained_secs_value(&self) -> u32 {
+        self.output_rate_sustained_secs
+            .unwrap_or(Self::OUTPUT_RATE_SUSTAINED_SECS_DEFAULT)
     }
 
     /// True when the highlight should not timer-dismiss (`hold` / `word_select`,

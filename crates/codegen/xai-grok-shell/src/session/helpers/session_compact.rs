@@ -84,7 +84,10 @@ fn classify_sampling_error(err: SamplingError) -> CompactFailure {
         | SamplingError::EventStreamError(_)
         | SamplingError::StreamError { .. }
         | SamplingError::EmptyResponse { .. }
-        | SamplingError::DoomLoopDetected { .. } => false,
+        | SamplingError::DoomLoopDetected { .. }
+        // An engine that collapsed is transient by definition: the next
+        // request is the whole remedy.
+        | SamplingError::OutputRateCollapsed { .. } => false,
     };
     if deterministic {
         CompactFailure::Deterministic(acp_err)

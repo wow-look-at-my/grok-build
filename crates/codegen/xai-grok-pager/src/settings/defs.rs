@@ -29,6 +29,16 @@ pub(crate) const MAX_THOUGHTS_WIDTH_MAX: i64 = 500;
 pub(crate) const MAX_THOUGHTS_WIDTH_KEY: &str = "max_thoughts_width";
 
 // ---------------------------------------------------------------------------
+// Int bounds for the output-rate floor. `pub(crate)` so the dispatcher's
+// clamp and the shell helper's defensive clamp share them, and mirrored from
+// `OutputRateFloorPolicy`'s own ranges so the settings modal cannot offer a
+// value the policy would clamp away underneath it.
+pub(crate) const MIN_OUTPUT_TOKENS_PER_SEC_MIN: i64 = 0;
+pub(crate) const MIN_OUTPUT_TOKENS_PER_SEC_MAX: i64 = 500;
+pub(crate) const OUTPUT_RATE_SUSTAINED_SECS_MIN: i64 = 1;
+pub(crate) const OUTPUT_RATE_SUSTAINED_SECS_MAX: i64 = 600;
+
+// ---------------------------------------------------------------------------
 // Theme choice catalogs.
 //
 // Canonical names MUST match `ThemeKind::display_name()`.
@@ -696,6 +706,66 @@ pub fn default_settings() -> Vec<SettingMeta> {
             ],
             kind: SettingKind::Bool {
                 default: ui_default.stop_gate_ci_failing_enabled(),
+            },
+            restart_required: false,
+            hidden_in_minimal: false,
+        },
+        // SHARED. `[ui].min_output_tokens_per_sec`, `Option<u32>` widened to
+        // `i64`. 0 is the off state, which is the default.
+        SettingMeta {
+            key: "min_output_tokens_per_sec",
+            category: SettingCategory::Agent,
+            owner: SettingOwner::Shared,
+            label: "Minimum output tokens/sec",
+            description: "Reissue a model call whose output rate stays under this many tokens \
+                          per second for the grace period below. Some inference engines drop \
+                          from 100+ tok/s to a crawl mid-response and never recover; a fresh \
+                          request usually lands on a healthy one. The tokens/sec indicator \
+                          turns amber near this floor and red under it. 0 turns the gate off. \
+                          A model overrides it with `[model.<id>].min_output_tokens_per_sec`.",
+            keywords: &[
+                "tokens",
+                "rate",
+                "speed",
+                "slow",
+                "stall",
+                "vllm",
+                "retry",
+                "reissue",
+                "throughput",
+                "tok/s",
+            ],
+            kind: SettingKind::Int {
+                default: i64::from(ui_default.min_output_tokens_per_sec_value()),
+                min: MIN_OUTPUT_TOKENS_PER_SEC_MIN,
+                max: MIN_OUTPUT_TOKENS_PER_SEC_MAX,
+            },
+            restart_required: false,
+            hidden_in_minimal: false,
+        },
+        // SHARED. `[ui].output_rate_sustained_secs`, `Option<u32>` widened to `i64`.
+        SettingMeta {
+            key: "output_rate_sustained_secs",
+            category: SettingCategory::Agent,
+            owner: SettingOwner::Shared,
+            label: "Slow-output grace period",
+            description: "How long the output rate must stay under the floor above before the \
+                          request is reissued. A shorter dip is a pause, not a collapsed \
+                          engine, and reissuing over one throws away good generation.",
+            keywords: &[
+                "tokens",
+                "rate",
+                "slow",
+                "grace",
+                "sustained",
+                "duration",
+                "stall",
+                "retry",
+            ],
+            kind: SettingKind::Int {
+                default: i64::from(ui_default.output_rate_sustained_secs_value()),
+                min: OUTPUT_RATE_SUSTAINED_SECS_MIN,
+                max: OUTPUT_RATE_SUSTAINED_SECS_MAX,
             },
             restart_required: false,
             hidden_in_minimal: false,

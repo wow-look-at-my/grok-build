@@ -690,6 +690,14 @@ pub fn current_value_for(
         )),
         // max_thoughts_width: `u16` widened to `i64`.
         "max_thoughts_width" => Some(SettingValue::Int(ui.max_thoughts_width as i64)),
+        // The output-rate floor and its grace period: `Option<u32>` resolved
+        // through their defaults, then widened to `i64`.
+        "min_output_tokens_per_sec" => Some(SettingValue::Int(i64::from(
+            ui.min_output_tokens_per_sec_value(),
+        ))),
+        "output_rate_sustained_secs" => Some(SettingValue::Int(i64::from(
+            ui.output_rate_sustained_secs_value(),
+        ))),
         // coding_data_sharing: inverts the `_opt_out` bool.
         "coding_data_sharing" => Some(SettingValue::Enum(if pager.coding_data_sharing_opt_out {
             "opt-out"
@@ -957,6 +965,20 @@ mod tests {
                     assert_eq!(
                         *default, ui.max_thoughts_width as i64,
                         "max_thoughts_width default drifts from UiConfig::default()",
+                    );
+                }
+                ("min_output_tokens_per_sec", SettingKind::Int { default, .. }) => {
+                    assert_eq!(
+                        *default,
+                        i64::from(ui.min_output_tokens_per_sec_value()),
+                        "min_output_tokens_per_sec default drifts from UiConfig::default()",
+                    );
+                }
+                ("output_rate_sustained_secs", SettingKind::Int { default, .. }) => {
+                    assert_eq!(
+                        *default,
+                        i64::from(ui.output_rate_sustained_secs_value()),
+                        "output_rate_sustained_secs default drifts from UiConfig::default()",
                     );
                 }
                 // coding_data_sharing: no UiConfig field; default pinned

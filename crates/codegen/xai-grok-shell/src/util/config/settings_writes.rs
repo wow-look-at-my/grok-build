@@ -173,6 +173,29 @@ pub async fn set_max_thoughts_width(value: i64) -> Result<()> {
     update_config(|cfg| cfg.ui.max_thoughts_width = clamped).await
 }
 
+/// Bounds for the output-rate floor settings. Mirrored from the pager's
+/// registry consts, which mirror `OutputRateFloorPolicy`'s own ranges.
+const MIN_OUTPUT_TOKENS_PER_SEC_SHELL_MAX: i64 = 500;
+const OUTPUT_RATE_SUSTAINED_SECS_SHELL_MIN: i64 = 1;
+const OUTPUT_RATE_SUSTAINED_SECS_SHELL_MAX: i64 = 600;
+
+/// Persist `[ui].min_output_tokens_per_sec` via `update_config`.
+/// Defensively clamps to `[0, 500]` at the shell boundary; `0` is off.
+pub async fn set_min_output_tokens_per_sec(value: i64) -> Result<()> {
+    let clamped = value.clamp(0, MIN_OUTPUT_TOKENS_PER_SEC_SHELL_MAX) as u32;
+    update_config(|cfg| cfg.ui.min_output_tokens_per_sec = Some(clamped)).await
+}
+
+/// Persist `[ui].output_rate_sustained_secs` via `update_config`.
+/// Defensively clamps to `[1, 600]` at the shell boundary.
+pub async fn set_output_rate_sustained_secs(value: i64) -> Result<()> {
+    let clamped = value.clamp(
+        OUTPUT_RATE_SUSTAINED_SECS_SHELL_MIN,
+        OUTPUT_RATE_SUSTAINED_SECS_SHELL_MAX,
+    ) as u32;
+    update_config(|cfg| cfg.ui.output_rate_sustained_secs = Some(clamped)).await
+}
+
 /// Persist `[ui].scroll_speed` via `update_config`.
 /// Defensively clamps to `[1, 100]` at the shell boundary.
 pub async fn set_scroll_speed(value: i64) -> Result<()> {

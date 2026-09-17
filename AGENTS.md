@@ -275,6 +275,24 @@ Every one of those is the test doing its job. Making them pass there means weake
 - A rule file's frontmatter is stripped from the RULE, never from what the rule imports. The import is read as written.
 - `MAX_IMPORT_DEPTH` plus the seen-set bound the walk. The seen-set is what terminates a cycle. The depth cap only bounds a chain.
 
+## Output-rate floor notes
+
+- One meter serves both halves (`xai-grok-sampling-types/src/output_rate.rs`). `OutputRateGate` owns an `OutputRateMeter` and the sustained-breach state machine. `OutputRateHealth`/`classify_rate` is the reduction the indicator color, the slowdown log and the reissue all read. A second meter for the display lets the number on screen disagree with the number the gate acted on.
+- The meter records BYTES. It divides one time, over the window's whole byte count. `estimate_tokens` truncates. So a stream of short chunks, estimated one at a time, reads as a total stall at any real rate. `short_chunks_are_not_rounded_away` is the guard.
+- TTFT is outside all of it. The meter starts at the FIRST CONTENT CHUNK. A long prefill therefore neither depresses the rate nor counts toward a breach. A queued request is the idle timeout's business. `a_long_prefill_is_not_a_slowdown` covers it.
+- `rate()` answers `None` until `MIN_DISPLAY_SPAN` of stream. Below that span one chunk's arrival jitter dominates. The quotient is then noise.
+- The durations are separate knobs. `window_secs` (default 10) is what the rate is AVERAGED over. `sustained_secs` (default 10) is how long that average must stay under the floor before the request is reissued. A dip shorter than the sustained duration is a pause, not a collapsed engine.
+- A short stall after a fast burst does not move the average below the floor. That smoothing is what the window is for. So a test that drives a recovering dip must outlast the window.
+- The gate is ticked on a timer (`RATE_TICK`). A tick on an arriving chunk is not enough. A stream that stops dead delivers nothing to record. The tick is what turns that silence into a falling rate.
+- It runs in `drive_l2` (`xai-grok-sampler/src/actor/request_task.rs`), not in a backend transform. Every backend's tokens and tool-call arguments pass through that loop, so one meter covers Chat Completions, Responses and Messages.
+- Tool-call arguments count as generation. A response that collapses while it writes a large edit is the case the floor exists for. A meter that counts only text reads that case as silence.
+- A breach answers `SamplingError::OutputRateCollapsed`. The request is reissued on the rate gate's OWN budget (`rate_retry_count`), the way the doom-loop recovery does. A collapsed engine therefore spends none of the transport budget. A spent rate budget disarms the gate, so the attempt completes instead of the turn dying. `retry_only_before_output` still wins: a caller that cannot take duplicate output gets the failure reported instead.
+- The finest granularity available is ONE MODEL CALL. Dropping the L2 stream cancels that HTTP request. Every earlier response and tool call in the turn is already in the conversation, and stays untouched. Nothing resumes a half-written response, because no provider here accepts one back.
+- Both slowdown EDGES are logged, not the breach alone (`output_rate_slowdown_start`, `output_rate_slowdown_end`, `output_rate_breached`). A dip that recovers by itself is never reissued over. Nothing else records the seconds it cost.
+- `SamplingEvent::OutputRate` → `XaiSessionUpdate::OutputRate` → `AcpUpdateTracker::set_output_rate` feeds the indicator. It is transient and never persisted. A rate describes a stream in flight. A replayed one puts a stale number under an idle session. `finish_turn` clears it.
+- Config: `[ui].min_output_tokens_per_sec` is the settings-modal floor, where a zero turns the gate off. `[ui].output_rate_sustained_secs` is the grace period. `[model.<id>].min_output_tokens_per_sec` overrides the floor for one model. `[output_rate_floor]` holds the window and the reissue budget. One key, one home.
+- `Config::resolve_output_rate_floor` is the whole precedence. The session caches the answer in a `Cell`. It re-resolves on a model switch rather than on each turn, because the floor reads the config off disk.
+
 ## Workflow agent-concurrency notes
 
 - `WorkflowHostParams.agent_slots` is a semaphore owned by `WorkflowManager` and shared by every run it launches (`session/workflow/manager.rs`), not one fresh semaphore per run. Up to `WORKFLOW_MAX_ACTIVE_RUNS_PER_SESSION` runs can be active at once, so a per-run semaphore will let total live agent-spawned LLM requests scale with active run count instead of staying under the configured cap (`GROK_WORKFLOW_MAX_CONCURRENT_AGENTS` / `workflow_max_concurrent_agents`) — the knob operators lower to stay under a hard per-host concurrent-request limit.

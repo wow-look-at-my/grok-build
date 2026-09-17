@@ -103,6 +103,13 @@ pub fn doom_loop_backoff(retry_count: u32) -> Duration {
     Duration::from_millis(hasher.finish() % 251)
 }
 
+/// Backoff for an output-rate resample. Waiting is the thing the gate exists
+/// to stop doing, so it is the same near-immediate jitter a doom-loop resample
+/// takes.
+pub fn output_rate_backoff(retry_count: u32) -> Duration {
+    doom_loop_backoff(retry_count)
+}
+
 /// Exponential backoff (2s, 4s, 8s, ..., capped at [`MAX_RETRY_BACKOFF`])
 /// with +/-20% jitter to prevent thundering-herd retry storms.
 pub fn retry_backoff_with_jitter(retry_count: u32) -> Duration {
@@ -267,6 +274,16 @@ pub fn classify_error(
     if matches!(err, SamplingError::DoomLoopDetected { .. }) {
         return RetryDecision::Retry {
             backoff: doom_loop_backoff(retry_count + 1),
+        };
+    }
+
+    // Output-rate collapses: same shape as the doom-loop arm above. The rate
+    // gate intercepts these before classification and runs its own budget;
+    // this arm keeps classification total so one arriving by any other path
+    // can never be Fatal.
+    if matches!(err, SamplingError::OutputRateCollapsed { .. }) {
+        return RetryDecision::Retry {
+            backoff: output_rate_backoff(retry_count + 1),
         };
     }
 
@@ -436,6 +453,16 @@ pub fn format_sampling_error(err: &SamplingError, retry_count: Option<u32>) -> S
                 triggers.join(", ")
             )
         }
+        SamplingError::OutputRateCollapsed {
+            observed_tokens_per_sec,
+            floor_tokens_per_sec,
+            window_secs,
+        } => {
+            format!(
+                "{}Output rate collapsed to {:.1} tok/s over {}s (floor {:.1}); reissuing the request.",
+                retry_prefix, observed_tokens_per_sec, window_secs, floor_tokens_per_sec,
+            )
+        }
     }
 }
 
@@ -505,6 +532,15 @@ pub(crate) fn clone_error(err: &SamplingError) -> SamplingError {
         } => SamplingError::DoomLoopDetected {
             triggers: triggers.clone(),
             aborted_at_chunk: *aborted_at_chunk,
+        },
+        SamplingError::OutputRateCollapsed {
+            observed_tokens_per_sec,
+            floor_tokens_per_sec,
+            window_secs,
+        } => SamplingError::OutputRateCollapsed {
+            observed_tokens_per_sec: *observed_tokens_per_sec,
+            floor_tokens_per_sec: *floor_tokens_per_sec,
+            window_secs: *window_secs,
         },
     }
 }

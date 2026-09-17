@@ -883,6 +883,12 @@ pub(in crate::app::dispatch) fn action_for_reset(
         }
         // max_thoughts_width: direct round-trip.
         ("max_thoughts_width", SettingValue::Int(i)) => Some(Action::SetMaxThoughtsWidth(*i)),
+        ("min_output_tokens_per_sec", SettingValue::Int(i)) => {
+            Some(Action::SetMinOutputTokensPerSec(*i))
+        }
+        ("output_rate_sustained_secs", SettingValue::Int(i)) => {
+            Some(Action::SetOutputRateSustainedSecs(*i))
+        }
         // coding_data_sharing: "opt-in" / "opt-out" → bool.
         // Both arms needed (registry default is "opt-out").
         ("coding_data_sharing", SettingValue::Enum("opt-in")) => {
@@ -1122,6 +1128,12 @@ pub(in crate::app::dispatch) fn apply_setting_rollback(
         }
         // max_thoughts_width: direct inner call.
         ("max_thoughts_width", SettingValue::Int(i)) => set_max_thoughts_width_inner(app, *i),
+        ("min_output_tokens_per_sec", SettingValue::Int(i)) => {
+            set_min_output_tokens_per_sec_inner(app, *i)
+        }
+        ("output_rate_sustained_secs", SettingValue::Int(i)) => {
+            set_output_rate_sustained_secs_inner(app, *i)
+        }
         // scroll_speed: direct inner call (clamp handled by inner).
         ("scroll_speed", SettingValue::Int(i)) => set_scroll_speed_inner(app, *i as u8),
         // scroll_mode: restore the cache mirror to the canonical value.

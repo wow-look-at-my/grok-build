@@ -2315,6 +2315,7 @@ impl AgentView {
                         }),
                         has_running_execute,
                         total_tokens: self.context_state.as_ref().map(|c| c.used),
+                        output_rate: self.session.tracker.output_rate(),
                         mcp_init_progress: self.mcp_init_progress.as_ref(),
                         is_bash_turn: self.bash_turn,
                         is_pending_user_input,
