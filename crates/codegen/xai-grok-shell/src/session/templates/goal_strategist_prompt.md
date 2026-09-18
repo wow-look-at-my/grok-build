@@ -18,9 +18,12 @@ pre-digested summary. Session traces are at
   gap feedback; richest signal for the whack-a-mole pattern.
 - `events.jsonl` — the verdict history.
 - `goal/plan.md` (also `{PLAN_FILE}`) — the acceptance criteria / verification plan.
-- `{SCRATCH_ROOT}` — per-goal scratch root with the implementer's and each
-  skeptic's captured test output / artifacts (`implementer/`, `skeptic-*/`); read
-  it to see what evidence the run actually produced.
+- `{SCRATCH_ROOT}` — per-goal scratch root. It holds the harness-written run
+  logs (`goal-classifier-*.runlog.md`, one per verification attempt: every
+  tool call the implementer made, and what it returned). It also holds the
+  per-attempt patch and verdict files, and the implementer's and each
+  skeptic's temp files (`implementer/`, `skeptic-*/`). The run logs show what
+  the run actually did.
 
 Also read the deliverable (`git diff` / `git status`). These files are large —
 grep for the signal, don't dump them whole.

@@ -604,6 +604,14 @@ pub struct GoalOrchestration {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub changes_baseline_commit: Option<String>,
 
+    /// Session prompt index at goal creation. The run log
+    /// (`goal_classifier::run_log`) keeps only tool calls on a turn at or
+    /// after it, so a run from before the goal is not read as the goal's
+    /// evidence. `None` on snapshots that predate the field: the whole
+    /// conversation is logged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_prompt_index: Option<usize>,
+
     /// Path to the goal's plan markdown (`<session_dir>/goal/plan.md`,
     /// via [`GoalTracker::plan_path`]). `None` until a planner writes
     /// one. `is_some()` is the single source of truth for "this goal
@@ -1031,6 +1039,7 @@ impl GoalTracker {
             last_strategy_path: None,
             last_strategy_recommendation: None,
             changes_baseline_commit: baseline_commit,
+            start_prompt_index: None,
             plan_file: None,
             plan_baseline_file: None,
             plan_todos_seeded: false,
@@ -1459,6 +1468,7 @@ pub(crate) fn make_base_orchestration() -> GoalOrchestration {
         last_strategy_path: None,
         last_strategy_recommendation: None,
         changes_baseline_commit: None,
+        start_prompt_index: None,
         plan_file: None,
         plan_baseline_file: None,
         plan_todos_seeded: false,
