@@ -1155,6 +1155,7 @@ pub(super) fn handle_session_notification(notif: &acp::ExtNotification, app: &mu
             tool_index,
             name,
             arguments_delta,
+            title,
         } => {
             // A replayed transcript already carries the finished `ToolCall`
             // for every one of these, so replaying the chunks would build a
@@ -1167,6 +1168,7 @@ pub(super) fn handle_session_notification(notif: &acp::ExtNotification, app: &mu
                 tool_index,
                 name.as_deref(),
                 arguments_delta.as_deref(),
+                title.as_deref(),
                 &mut agent.scrollback,
             )
         }

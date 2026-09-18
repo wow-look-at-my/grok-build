@@ -1660,9 +1660,11 @@ impl SessionActor {
         #[allow(unused_mut)]
         let mut raw_input = serde_json::to_value(&tool_call_input)?;
         let canonical_meta = self.stamp_tool_meta(None, wire_name, Some(&tool_call_input));
-        let (title, kind, locations, content) = match tool_call_input {
+        // One function names every tool call, finished or still streaming, so a
+        // row cannot rename itself when the last argument byte lands.
+        let title = tool_title::tool_input_title(&tool_call_input, self.tool_context.cwd.as_path());
+        let (kind, locations, content) = match tool_call_input {
             ToolInput::ListDir(list_dir) => (
-                format!("List `{}`", list_dir.target_directory),
                 acp::ToolKind::Other,
                 vec![acp::ToolCallLocation::new(
                     list_dir.target_directory.clone(),
@@ -1689,7 +1691,6 @@ impl SessionActor {
                     None
                 };
                 (
-                    format!("Edit `{}`", sr.file_path.as_str()),
                     acp::ToolKind::Edit,
                     vec![acp::ToolCallLocation::new(sr.file_path.clone())],
                     vec![acp::ToolCallContent::from(
@@ -1699,17 +1700,19 @@ impl SessionActor {
                     )],
                 )
             }
-            ToolInput::Bash(bash_tool) => execute_tool_call_parts(
-                &bash_tool.command,
-                Some(bash_tool.description.as_str()),
-                self.tool_context.cwd.as_path(),
-            ),
+            ToolInput::Bash(bash_tool) => {
+                let (_, kind, locations, content) = execute_tool_call_parts(
+                    &bash_tool.command,
+                    Some(bash_tool.description.as_str()),
+                    self.tool_context.cwd.as_path(),
+                );
+                (kind, locations, content)
+            }
             ToolInput::ReadFile(read_file) => {
                 if let Some(skill) = self.skill_for_read_path(&read_file.path).await {
                     self.emit_skill_md_read(skill);
                 }
                 (
-                    format!("Read `{}`", read_file.path),
                     acp::ToolKind::Read,
                     vec![
                         acp::ToolCallLocation::new(read_file.path)
@@ -1723,80 +1726,17 @@ impl SessionActor {
                     Vec::new(),
                 )
             }
-            ToolInput::TodoWrite(_) => (
-                "Updating plan".to_string(),
-                acp::ToolKind::Think,
-                Vec::new(),
-                Vec::new(),
-            ),
-            ToolInput::Grep(gs) => (gs.pattern.clone(), acp::ToolKind::Search, vec![], vec![]),
-            ToolInput::WebSearch(ws) => (
-                format!("Web search: \"{}\"", ws.query),
-                acp::ToolKind::Search,
-                vec![],
-                vec![],
-            ),
-            ToolInput::ImageGen(ig) => (
-                format!("imagine: {}", ig.prompt),
-                acp::ToolKind::Other,
-                vec![],
-                vec![],
-            ),
-            ToolInput::ImageEdit(ie) => (
-                format!("imagine-edit: {}", ie.prompt),
-                acp::ToolKind::Other,
-                vec![],
-                vec![],
-            ),
-            ToolInput::ImageToVideo(i2v) => (
-                format!(
-                    "image-to-video: {}",
-                    i2v.prompt.as_deref().unwrap_or(&i2v.image)
-                ),
-                acp::ToolKind::Other,
-                vec![],
-                vec![],
-            ),
-            ToolInput::ReferenceToVideo(r2v) => (
-                format!("reference-to-video: {}", r2v.prompt),
-                acp::ToolKind::Other,
-                vec![],
-                vec![],
-            ),
-            ToolInput::MCPTool(mcp_tool) => (
-                mcp_tool.tool_name.to_owned(),
-                acp::ToolKind::Other,
-                vec![],
-                vec![],
-            ),
-            ToolInput::TaskOutput(task_output) => {
-                let ids = task_output.resolved_task_ids();
-                let label = match ids.as_slice() {
-                    [] => "Get task output".to_string(),
-                    [one] => format!("Get task output: {one}"),
-                    many => format!("Get task output: {} tasks", many.len()),
-                };
-                (label, acp::ToolKind::Other, vec![], vec![])
-            }
-            ToolInput::WaitTasks(wait) => (
-                format!(
-                    "Wait tasks: {} ids, mode={}",
-                    wait.task_ids.len(),
-                    match wait.mode {
-                        xai_tool_types::WaitMode::WaitAny => "wait_any",
-                        xai_tool_types::WaitMode::WaitAll => "wait_all",
-                    }
-                ),
-                acp::ToolKind::Other,
-                vec![],
-                vec![],
-            ),
-            ToolInput::KillTask(kill_task) => (
-                format!("Kill task: {}", kill_task.task_id),
-                acp::ToolKind::Other,
-                vec![],
-                vec![],
-            ),
+            ToolInput::TodoWrite(_) => (acp::ToolKind::Think, Vec::new(), Vec::new()),
+            ToolInput::Grep(_) => (acp::ToolKind::Search, vec![], vec![]),
+            ToolInput::WebSearch(_) => (acp::ToolKind::Search, vec![], vec![]),
+            ToolInput::ImageGen(_) => (acp::ToolKind::Other, vec![], vec![]),
+            ToolInput::ImageEdit(_) => (acp::ToolKind::Other, vec![], vec![]),
+            ToolInput::ImageToVideo(_) => (acp::ToolKind::Other, vec![], vec![]),
+            ToolInput::ReferenceToVideo(_) => (acp::ToolKind::Other, vec![], vec![]),
+            ToolInput::MCPTool(_) => (acp::ToolKind::Other, vec![], vec![]),
+            ToolInput::TaskOutput(_) => (acp::ToolKind::Other, vec![], vec![]),
+            ToolInput::WaitTasks(_) => (acp::ToolKind::Other, vec![], vec![]),
+            ToolInput::KillTask(_) => (acp::ToolKind::Other, vec![], vec![]),
             ToolInput::Skill(skill) => {
                 xai_grok_telemetry::session_ctx::log_event(
                     xai_grok_telemetry::events::SkillDispatched {
@@ -1811,92 +1751,25 @@ impl SessionActor {
                     invocation_trigger = "skill_tool",
                 )
                 .in_scope(|| {});
-                (
-                    format!("Skill: {}", skill.skill),
-                    acp::ToolKind::Other,
-                    vec![],
-                    vec![],
-                )
+                (acp::ToolKind::Other, vec![], vec![])
             }
-            ToolInput::ApplyPatch(_) => (
-                "Apply patch".to_string(),
-                acp::ToolKind::Edit,
-                vec![],
-                vec![],
-            ),
-            ToolInput::Dynamic(_) => (
-                "Dynamic tool call".to_string(),
-                acp::ToolKind::Other,
-                vec![],
-                vec![],
-            ),
-            ToolInput::MemorySearch(ms) => {
-                let end = ms
-                    .query
-                    .char_indices()
-                    .nth(60)
-                    .map_or(ms.query.len(), |(i, _)| i);
-                let display = &ms.query[..end];
-                (
-                    format!("Memory search: \"{display}\""),
-                    acp::ToolKind::Other,
-                    vec![],
-                    vec![],
-                )
-            }
-            ToolInput::MemoryGet(mg) => (
-                format!("Memory read: {}", mg.path),
-                acp::ToolKind::Read,
-                vec![],
-                vec![],
-            ),
+            ToolInput::ApplyPatch(_) => (acp::ToolKind::Edit, vec![], vec![]),
+            ToolInput::Dynamic(_) => (acp::ToolKind::Other, vec![], vec![]),
+            ToolInput::MemorySearch(_) => (acp::ToolKind::Other, vec![], vec![]),
+            ToolInput::MemoryGet(_) => (acp::ToolKind::Read, vec![], vec![]),
             ToolInput::HashlineEdit(he) => (
-                format!("Edit `{}`", he.file_path),
                 acp::ToolKind::Edit,
                 vec![acp::ToolCallLocation::new(he.file_path.clone())],
                 vec![],
             ),
-            ToolInput::Task(task) => (
-                task.description.clone(),
-                acp::ToolKind::Other,
-                vec![],
-                vec![],
-            ),
-            ToolInput::EnterPlanMode(_) => (
-                "Plan: Enter".to_string(),
-                acp::ToolKind::Other,
-                vec![],
-                vec![],
-            ),
-            ToolInput::ExitPlanMode(_) => (
-                "Plan: Exit".to_string(),
-                acp::ToolKind::Other,
-                vec![],
-                vec![],
-            ),
-            ToolInput::AskUserQuestion(ref ask) => {
-                let title = if ask.questions.len() == 1 {
-                    format!("Ask: {}", ask.questions[0].question)
-                } else {
-                    format!("Ask {} questions", ask.questions.len())
-                };
-                (title, acp::ToolKind::Other, vec![], vec![])
-            }
-            ToolInput::WebFetch(wf) => (
-                format!("Fetch: {}", wf.url),
-                acp::ToolKind::Fetch,
-                vec![],
-                vec![],
-            ),
-            ToolInput::SearchTool(st) => (
-                format!("Search tools: \"{}\"", st.query),
-                acp::ToolKind::Other,
-                vec![],
-                vec![],
-            ),
-            ToolInput::UseTool(ut) => (ut.tool_name.clone(), acp::ToolKind::Other, vec![], vec![]),
+            ToolInput::Task(_) => (acp::ToolKind::Other, vec![], vec![]),
+            ToolInput::EnterPlanMode(_) => (acp::ToolKind::Other, vec![], vec![]),
+            ToolInput::ExitPlanMode(_) => (acp::ToolKind::Other, vec![], vec![]),
+            ToolInput::AskUserQuestion(_) => (acp::ToolKind::Other, vec![], vec![]),
+            ToolInput::WebFetch(_) => (acp::ToolKind::Fetch, vec![], vec![]),
+            ToolInput::SearchTool(_) => (acp::ToolKind::Other, vec![], vec![]),
+            ToolInput::UseTool(_) => (acp::ToolKind::Other, vec![], vec![]),
             ToolInput::Write(ref w) => (
-                format!("Write `{}`", w.file_path),
                 acp::ToolKind::Edit,
                 vec![acp::ToolCallLocation::new(w.file_path.clone())],
                 vec![acp::ToolCallContent::from(
@@ -1907,87 +1780,15 @@ impl SessionActor {
                     .old_text(Some(String::new())),
                 )],
             ),
-            ToolInput::Workflow(ref w) => {
-                let script_name = |script: &str| -> Option<String> {
-                    let head = script.get(..600).unwrap_or(script);
-                    let rest = &head[head.find("name:")? + 5..];
-                    let rest = &rest[rest.find('"')? + 1..];
-                    Some(rest[..rest.find('"')?].to_string())
-                };
-                let inline_name = w.script.as_deref().and_then(script_name);
-                let title = if w.validate_only {
-                    match inline_name.or_else(|| w.name.clone()) {
-                        Some(n) => format!("Validating workflow '{n}'"),
-                        None => "Validating workflow script".to_string(),
-                    }
-                } else if w.script.is_some() {
-                    match inline_name {
-                        Some(n) => format!("Creating workflow '{n}'"),
-                        None => "Creating workflow".to_string(),
-                    }
-                } else if let Some(ref name) = w.name {
-                    format!("Workflow: {name}")
-                } else if w.resume_from_run_id.is_some() {
-                    "Workflow: resume run".to_string()
-                } else {
-                    "Workflow: launch script".to_string()
-                };
-                (title, acp::ToolKind::Other, vec![], vec![])
-            }
-            ToolInput::UpdateGoal(ref ug) => {
-                let title = if ug.completed == Some(true) {
-                    "Goal: marking complete".to_string()
-                } else if let Some(ref reason) = ug.blocked_reason {
-                    format!("Goal: blocked — {reason}")
-                } else if let Some(ref msg) = ug.message {
-                    format!("Goal: {msg}")
-                } else {
-                    "Goal: update".to_string()
-                };
-                (title, acp::ToolKind::Other, vec![], vec![])
-            }
-            ToolInput::Monitor(ref m) => (
-                format!("Start monitor: {}", m.description),
-                acp::ToolKind::Other,
-                vec![],
-                vec![],
-            ),
-            ToolInput::SchedulerCreate(ref sc) => {
-                let title = match (&sc.task_id, &sc.interval) {
-                    (Some(id), Some(interval)) => {
-                        format!("Update scheduled task {id} (every {interval})")
-                    }
-                    (Some(id), None) => format!("Update scheduled task {id}"),
-                    (None, Some(interval)) => {
-                        format!("Create scheduled task (every {interval})")
-                    }
-                    (None, None) => "Create scheduled task".to_string(),
-                };
-                (title, acp::ToolKind::Other, vec![], vec![])
-            }
-            ToolInput::SchedulerDelete(ref sd) => (
-                format!("Delete scheduled task: {}", sd.id),
-                acp::ToolKind::Other,
-                vec![],
-                vec![],
-            ),
-            ToolInput::SchedulerList(_) => (
-                "List scheduled tasks".to_string(),
-                acp::ToolKind::Other,
-                vec![],
-                vec![],
-            ),
-            // The CI tool has its own row: without this arm it fell into the
-            // generic `_` below and every CI query read as "Tool call", which
-            // says nothing about what was asked of CI.
-            ToolInput::Ci(ref ci) => (ci_tool_title(ci), acp::ToolKind::Other, vec![], vec![]),
+            ToolInput::Workflow(_) => (acp::ToolKind::Other, vec![], vec![]),
+            ToolInput::UpdateGoal(_) => (acp::ToolKind::Other, vec![], vec![]),
+            ToolInput::Monitor(_) => (acp::ToolKind::Other, vec![], vec![]),
+            ToolInput::SchedulerCreate(_) => (acp::ToolKind::Other, vec![], vec![]),
+            ToolInput::SchedulerDelete(_) => (acp::ToolKind::Other, vec![], vec![]),
+            ToolInput::SchedulerList(_) => (acp::ToolKind::Other, vec![], vec![]),
+            ToolInput::Ci(_) => (acp::ToolKind::Other, vec![], vec![]),
             #[allow(unreachable_patterns)]
-            _ => (
-                "Tool call".to_string(),
-                acp::ToolKind::Other,
-                vec![],
-                vec![],
-            ),
+            _ => (acp::ToolKind::Other, vec![], vec![]),
         };
         let tool_call_update = acp::ToolCallUpdate::new(
             tool_call_id.clone(),
@@ -2539,6 +2340,65 @@ impl SessionActor {
         )
         .await;
     }
+    /// Name a tool call the model is still writing, from the arguments so far.
+    ///
+    /// Returns a title only when this fragment CHANGED it. The chunk carries
+    /// the answer to the client, which has neither the tool registry nor the
+    /// typed inputs a title is read from, and a repeat of the current title is
+    /// bytes on the wire that redraw the same row.
+    ///
+    /// Every step is allowed to fail and say nothing. A half-written argument
+    /// that names no tool yet, a name the registry does not know, and a body
+    /// past the size cap all leave the row showing the wire name, which is what
+    /// it showed before any of this existed.
+    async fn streaming_tool_title(
+        self: &Arc<Self>,
+        tool_index: u32,
+        name: Option<&str>,
+        arguments_delta: Option<&str>,
+    ) -> Option<String> {
+        let (wire_name, args) = {
+            let mut live = self.streaming_tool_titles.lock();
+            if let Some(name) = name {
+                live.entry(tool_index)
+                    .or_insert_with(|| tool_title::StreamingToolArgs::new(name.to_string()));
+            }
+            // Only the opening fragment carries the name. One that arrives for
+            // an index that never opened belongs to a call this session cannot
+            // name.
+            let entry = live.get_mut(&tool_index)?;
+            if let Some(delta) = arguments_delta {
+                entry.args.push_str(delta);
+            }
+            if !entry.wants_parse() {
+                return None;
+            }
+            (entry.name.clone(), entry.args.clone())
+        };
+        let completed = crate::session::helpers::partial_json::complete_partial_json(&args)?;
+        let value = serde_json::from_str::<serde_json::Value>(&completed).ok()?;
+        // An empty object names nothing worth showing. A tool that takes no
+        // arguments does parse from one and would be named correctly, but so
+        // would a half-written `{"path":`, and that one reads as "Read" with an
+        // empty path. Waiting for the first whole field costs the argument-less
+        // tools a few milliseconds and keeps the blank titles out.
+        if !value.as_object().is_some_and(|obj| !obj.is_empty()) {
+            return None;
+        }
+        let bridge = self.agent.borrow().tool_bridge().clone();
+        let input = bridge.try_parse(&wire_name, value).await.ok()?;
+        let title = tool_title::tool_input_title(&input, self.tool_context.cwd.as_path());
+        if title.is_empty() {
+            return None;
+        }
+        let mut live = self.streaming_tool_titles.lock();
+        let entry = live.get_mut(&tool_index)?;
+        if entry.title.as_deref() == Some(title.as_str()) {
+            return None;
+        }
+        entry.title = Some(title.clone());
+        Some(title)
+    }
     /// Translate one [`xai_grok_sampler::SamplingEvent`] from the
     /// per-session sampler actor into the corresponding ACP / shell
     /// side-effects (notifications, signal recording, model-metadata
@@ -2558,6 +2418,9 @@ impl SessionActor {
         use xai_grok_sampler::{SamplingChannel, SamplingEvent};
         match event {
             SamplingEvent::StreamStarted { timestamp_ms, .. } => {
+                // A retry reuses the tool indexes of the attempt it replaces,
+                // so the abandoned attempt's bytes would name this one's calls.
+                self.streaming_tool_titles.lock().clear();
                 {
                     let prompt_id = self
                         .current_prompt_id
@@ -2639,11 +2502,15 @@ impl SessionActor {
                         cap.phase = CapturePhase::ToolCall;
                     }
                 }
+                let title = self
+                    .streaming_tool_title(tool_index, name.as_deref(), arguments_delta.as_deref())
+                    .await;
                 self.send_buffered_xai_update(XaiSessionUpdate::ToolCallDeltaChunk {
                     tool_call_id: id,
                     tool_index,
                     name,
                     arguments_delta,
+                    title,
                 })
                 .await;
             }
@@ -2673,6 +2540,10 @@ impl SessionActor {
             SamplingEvent::Completed {
                 response, metrics, ..
             } => {
+                // The calls are whole now and the real `ToolCall` names each
+                // one. Holding their arguments past here only feeds the next
+                // stream a stale head.
+                self.streaming_tool_titles.lock().clear();
                 if let Some(tx) = self.turn_stream_drained.lock().take() {
                     let _ = tx.send(());
                 }
@@ -2889,7 +2760,9 @@ impl SessionActor {
 /// The transcript title for a `ci` tool call: what was asked, and of which
 /// branch. Extracted so the title is driven by the shipped descriptor and
 /// testable without a live session (see `ci_tool_title_tests`).
-fn ci_tool_title(ci: &xai_grok_tools::implementations::grok_build::ci::CiInput) -> String {
+pub(crate) fn ci_tool_title(
+    ci: &xai_grok_tools::implementations::grok_build::ci::CiInput,
+) -> String {
     use xai_grok_tools::implementations::grok_build::ci::CiAction;
     let action = match ci.action {
         CiAction::Status => "status",
@@ -2908,7 +2781,7 @@ fn ci_tool_title(ci: &xai_grok_tools::implementations::grok_build::ci::CiInput) 
 
 /// Execute tool-call display parts. The title peels a redundant leading
 /// `cd <cwd>` for chrome only; `raw_input` is serialized separately and stays full.
-fn execute_tool_call_parts(
+pub(crate) fn execute_tool_call_parts(
     command: &str,
     description: Option<&str>,
     cwd: &std::path::Path,
