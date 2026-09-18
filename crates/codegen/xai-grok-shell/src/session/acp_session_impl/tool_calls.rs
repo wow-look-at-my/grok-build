@@ -2844,14 +2844,15 @@ mod ci_tool_title_tests {
     }
 
     /// The descriptor test above drives the helper; this pins that the shipped
-    /// match actually routes `ToolInput::Ci` there. Neither match in this file is
-    /// exhaustive over its enum, so a missing arm degrades silently into the
-    /// generic label instead of failing to compile.
+    /// match actually routes `ToolInput::Ci` there. That match is
+    /// `tool_title::tool_input_title`, and it is not exhaustive over its enum,
+    /// so a missing arm degrades silently into the generic label instead of
+    /// failing to compile.
     #[test]
     fn the_shipped_descriptor_routes_ci_to_its_own_title() {
-        const SRC: &str = include_str!("tool_calls.rs");
+        const SRC: &str = include_str!("tool_title.rs");
         let arm = SRC
-            .find("ToolInput::Ci(ref ci)")
+            .find("ToolInput::Ci(ci)")
             .expect("the ci arm must exist in the shipped descriptor");
         let fallback = SRC
             .find("\"Tool call\".to_string()")
