@@ -4279,6 +4279,11 @@ pub struct ConfigModelOverride {
     pub compaction_at_tokens: Option<CompactionAtTokens>,
     pub show_model_fingerprint: Option<bool>,
     pub stream_tool_calls: Option<bool>,
+    /// Opt this model into strict message-schema handling: omit
+    /// `model_id`/`reasoning_content` from replayed Chat Completions messages
+    /// for providers that reject unknown message properties (e.g. Cerebras).
+    /// Absent/false keeps today's permissive body.
+    pub strict_message_schema: Option<bool>,
     pub pricing: Option<xai_grok_sampling_types::ModelPricing>,
     pub min_output_tokens_per_sec: Option<f64>,
 }
@@ -4374,6 +4379,9 @@ impl ConfigModelOverride {
         }
         if self.stream_tool_calls.is_some() {
             entry.info.stream_tool_calls = self.stream_tool_calls;
+        }
+        if let Some(v) = self.strict_message_schema {
+            entry.info.strict_message_schema = v;
         }
         if let Some(ref p) = self.pricing {
             entry.info.pricing = p.clone();
@@ -8710,6 +8718,82 @@ reasoning_effort = "low"
     fn resolve_sampling(model: &ModelEntry, session_key: Option<&str>) -> SamplerConfig {
         let credentials = resolve_credentials(model, session_key);
         sampling_config_for_model(model, credentials, None, None, None, None)
+    }
+
+    /// A Cerebras-slugged entry must resolve — through the real `config.toml`
+    /// parse, model resolution, and `sampling_config_for_model` — to a client
+    /// config whose message profile is STRICT and whose endpoint/backend are
+    /// what the entry specifies.
+    ///
+    /// This is the config half of the fix: the wire suppression only takes
+    /// effect if a `strict_message_schema = true` entry actually reaches
+    /// `SamplerConfig::chat_message_profile`. A tolerant entry must stay
+    /// permissive with the same shape.
+    #[test]
+    #[serial]
+    fn strict_message_schema_entry_resolves_to_strict_profile() {
+        let (_, models) = resolve_models_from_toml(
+            r#"
+            [model.qwen38-27b-cerebras]
+            model = "qwen-3.8-27b"
+            base_url = "https://api.cerebras.ai/v1"
+            name = "Qwen 3.8 27B (Cerebras)"
+            api_backend = "chat_completions"
+            api_key = "csk-test-key"
+            context_window = 131072
+            max_completion_tokens = 40960
+            strict_message_schema = true
+
+            [model.tolerant-example]
+            model = "some-other-model"
+            base_url = "https://openrouter.ai/api/v1"
+            api_backend = "chat_completions"
+            api_key = "sk-test-key"
+            context_window = 200000
+            "#,
+            None,
+        );
+
+        let cerebras = models
+            .get("qwen38-27b-cerebras")
+            .expect("the Cerebras entry must resolve");
+        assert!(
+            cerebras.info.strict_message_schema,
+            "the config flag must survive parsing and model resolution"
+        );
+        let sampling = resolve_sampling(cerebras, None);
+        assert_eq!(
+            sampling.chat_message_profile,
+            xai_grok_sampling_types::ChatMessageProfile::STRICT,
+            "a strict_message_schema entry must resolve to a STRICT profile"
+        );
+        assert_eq!(
+            sampling.base_url, "https://api.cerebras.ai/v1",
+            "the entry's endpoint must reach the sampler"
+        );
+        assert_eq!(
+            sampling.api_backend,
+            crate::sampling::ApiBackend::ChatCompletions,
+            "Cerebras is only offered over Chat Completions"
+        );
+        assert_eq!(sampling.model, "qwen-3.8-27b");
+        assert_eq!(sampling.context_window, 131_072);
+        assert_eq!(sampling.max_completion_tokens, Some(40_960));
+
+        // An entry without the flag keeps today's permissive body.
+        let tolerant = models
+            .get("tolerant-example")
+            .expect("the tolerant entry must resolve");
+        assert!(!tolerant.info.strict_message_schema);
+        let tolerant_sampling = resolve_sampling(tolerant, None);
+        assert_eq!(
+            tolerant_sampling.chat_message_profile,
+            xai_grok_sampling_types::ChatMessageProfile::PERMISSIVE,
+            "an entry without the flag must stay permissive"
+        );
+        assert_eq!(
+            tolerant_sampling.base_url, "https://openrouter.ai/api/v1"
+        );
     }
     #[test]
     #[serial]

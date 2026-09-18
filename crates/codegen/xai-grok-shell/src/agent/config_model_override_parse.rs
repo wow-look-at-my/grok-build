@@ -726,6 +726,7 @@ mod tests {
             compaction_at_tokens: Some(CompactionAtTokens::Fixed(100_000)),
             show_model_fingerprint: Some(true),
             stream_tool_calls: Some(false),
+            strict_message_schema: Some(false),
             pricing: Some(xai_grok_sampling_types::ModelPricing::default()),
             min_output_tokens_per_sec: None,
         }
