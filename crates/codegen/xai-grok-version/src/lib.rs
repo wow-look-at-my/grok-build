@@ -21,11 +21,10 @@ pub const STAMP_SLOT_LEN: usize = STAMP_MAGIC.len() + 1 + STAMP_PAYLOAD_LEN;
 /// The slot itself. A zero length byte is the unstamped state, which is what a
 /// local build and every CI test build carry.
 ///
-/// `#[used]` and `#[no_mangle]` keep it in the binary: nothing reads it through
-/// this symbol, and a plain `static` the optimizer sees no load of is free to
-/// disappear.
+/// `#[used]` keeps it in the binary: a plain `static` the optimizer sees no
+/// load of is free to disappear. The stamper searches for the magic bytes, so
+/// the symbol needs no stable name.
 #[used]
-#[no_mangle]
 pub static STAMP_SLOT: [u8; STAMP_SLOT_LEN] = build_stamp_slot();
 
 /// The magic followed by a zero length and zero payload.
