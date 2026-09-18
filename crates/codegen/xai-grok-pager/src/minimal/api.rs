@@ -574,6 +574,12 @@ pub fn watchers(v: &AgentView) -> crate::views::turn_status::Watchers {
     v.watchers()
 }
 
+/// The model's live output rate, for the shared turn-status widget. The
+/// tracker itself is private to this crate.
+pub fn output_rate(v: &AgentView) -> Option<crate::acp::tracker::OutputRate> {
+    v.session.tracker.output_rate()
+}
+
 /// [`AgentView::held_queue_count`].
 pub fn held_queue_count(v: &AgentView) -> usize {
     v.held_queue_count()
