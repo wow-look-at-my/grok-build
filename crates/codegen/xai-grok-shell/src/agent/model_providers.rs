@@ -1,9 +1,21 @@
 use indexmap::IndexMap;
 
+use xai_grok_sampling_types::{
+    CompactionAtTokens, CompactionsRemaining, ReasoningEffort, ReasoningEffortOption,
+};
+
 use super::config::{ConfigModelOverride, EnvKeys};
 use super::config_model_override_parse::{ConfigWarning, ConfigWarningKind};
 use crate::sampling::ApiBackend;
 
+/// A `[model_providers.<id>]` block: the settings every model behind one
+/// endpoint shares. A `[model.<id>]` that names the provider with
+/// `model_provider = "<id>"` inherits each field it leaves unset, so an
+/// endpoint, a credential, a wire format or a header set is written once.
+///
+/// Every field here is also a `[model.<id>]` field, and the model's own value
+/// always wins. What is NOT here is what identifies one model: `model`,
+/// `name`, `description`.
 #[derive(Clone, Debug, Default, serde::Deserialize)]
 #[serde(default)]
 pub struct ModelProviderConfig {
@@ -12,15 +24,48 @@ pub struct ModelProviderConfig {
     pub env_key: Option<EnvKeys>,
     pub api_key: Option<String>,
     pub api_backend: Option<ApiBackend>,
+    /// Static request headers; inherited per key, so a model that sets one
+    /// header of its own still gets the rest of the provider's.
     pub extra_headers: IndexMap<String, String>,
-    /// Query parameters folded into every request URL; inherited by models.
+    /// Query parameters folded into every request URL; inherited per key.
     pub query_params: IndexMap<String, String>,
-    /// Header name to environment variable; inherited by models, resolved at
+    /// Header name to environment variable; inherited per key, resolved at
     /// client build.
     pub env_http_headers: IndexMap<String, String>,
     pub auth_provider: Option<String>,
     pub auth: Option<crate::auth::AuthProviderConfig>,
     pub context_window: Option<u64>,
+    pub temperature: Option<f32>,
+    pub top_p: Option<f32>,
+    pub max_completion_tokens: Option<u32>,
+    pub max_retries: Option<u32>,
+    pub inference_idle_timeout_secs: Option<u64>,
+    pub stream_tool_calls: Option<bool>,
+    pub strict_message_schema: Option<bool>,
+    pub reasoning_effort: Option<ReasoningEffort>,
+    pub supports_reasoning_effort: Option<bool>,
+    pub reasoning_efforts: Vec<ReasoningEffortOption>,
+    pub supports_backend_search: Option<bool>,
+    pub show_model_fingerprint: Option<bool>,
+    pub use_concise: Option<bool>,
+    pub agent_type: Option<String>,
+    pub hidden: Option<bool>,
+    pub supported_in_api: Option<bool>,
+    pub compactions_remaining: Option<CompactionsRemaining>,
+    pub compaction_at_tokens: Option<CompactionAtTokens>,
+    pub pricing: Option<xai_grok_sampling_types::ModelPricing>,
+    pub min_output_tokens_per_sec: Option<f64>,
+}
+
+/// Fill the provider's header defaults into a model's own set. The presence
+/// check is case-insensitive because these lower into an `http::HeaderMap`, so
+/// a provider `X-Foo` must not shadow a model's `x-foo`.
+fn inherit_headers(model: &mut IndexMap<String, String>, provider: &IndexMap<String, String>) {
+    for (name, value) in provider {
+        if !model.keys().any(|own| own.eq_ignore_ascii_case(name)) {
+            model.insert(name.clone(), value.clone());
+        }
+    }
 }
 
 pub(crate) fn model_provider_auth_name(provider_id: &str) -> String {
@@ -185,6 +230,26 @@ impl ConfigModelOverride {
             auth_provider,
             auth,
             context_window,
+            temperature,
+            top_p,
+            max_completion_tokens,
+            max_retries,
+            inference_idle_timeout_secs,
+            stream_tool_calls,
+            strict_message_schema,
+            reasoning_effort,
+            supports_reasoning_effort,
+            reasoning_efforts,
+            supports_backend_search,
+            show_model_fingerprint,
+            use_concise,
+            agent_type,
+            hidden,
+            supported_in_api,
+            compactions_remaining,
+            compaction_at_tokens,
+            pricing,
+            min_output_tokens_per_sec,
         } = provider;
 
         let mut merged = self.clone();
@@ -193,15 +258,41 @@ impl ConfigModelOverride {
         merged.api_base_url = merged.api_base_url.or_else(|| api_base_url.clone());
         merged.api_backend = merged.api_backend.or_else(|| api_backend.clone());
         merged.context_window = merged.context_window.or(*context_window);
-        // Inherited wholesale only when the model sets none of its own.
-        if merged.extra_headers.is_empty() {
-            merged.extra_headers = extra_headers.clone();
+        merged.temperature = merged.temperature.or(*temperature);
+        merged.top_p = merged.top_p.or(*top_p);
+        merged.max_completion_tokens = merged.max_completion_tokens.or(*max_completion_tokens);
+        merged.max_retries = merged.max_retries.or(*max_retries);
+        merged.inference_idle_timeout_secs = merged
+            .inference_idle_timeout_secs
+            .or(*inference_idle_timeout_secs);
+        merged.stream_tool_calls = merged.stream_tool_calls.or(*stream_tool_calls);
+        merged.strict_message_schema = merged.strict_message_schema.or(*strict_message_schema);
+        merged.reasoning_effort = merged.reasoning_effort.or(*reasoning_effort);
+        merged.supports_reasoning_effort =
+            merged.supports_reasoning_effort.or(*supports_reasoning_effort);
+        merged.supports_backend_search =
+            merged.supports_backend_search.or(*supports_backend_search);
+        merged.show_model_fingerprint = merged.show_model_fingerprint.or(*show_model_fingerprint);
+        merged.use_concise = merged.use_concise.or(*use_concise);
+        merged.agent_type = merged.agent_type.or_else(|| agent_type.clone());
+        merged.hidden = merged.hidden.or(*hidden);
+        merged.supported_in_api = merged.supported_in_api.or(*supported_in_api);
+        merged.compactions_remaining = merged.compactions_remaining.or(*compactions_remaining);
+        merged.compaction_at_tokens = merged.compaction_at_tokens.or(*compaction_at_tokens);
+        merged.pricing = merged.pricing.or_else(|| pricing.clone());
+        merged.min_output_tokens_per_sec =
+            merged.min_output_tokens_per_sec.or(*min_output_tokens_per_sec);
+        if merged.reasoning_efforts.is_empty() {
+            merged.reasoning_efforts = reasoning_efforts.clone();
         }
-        if merged.query_params.is_empty() {
-            merged.query_params = query_params.clone();
-        }
-        if merged.env_http_headers.is_empty() {
-            merged.env_http_headers = env_http_headers.clone();
+        // Per KEY, not wholesale: a model that sets one header of its own must
+        // not have to restate the provider's others to keep them.
+        inherit_headers(&mut merged.extra_headers, extra_headers);
+        inherit_headers(&mut merged.env_http_headers, env_http_headers);
+        for (k, v) in query_params {
+            if !merged.query_params.contains_key(k) {
+                merged.query_params.insert(k.clone(), v.clone());
+            }
         }
         let model_sets_own_api_key = self
             .api_key
@@ -828,7 +919,7 @@ mod tests {
     }
 
     #[test]
-    fn model_headers_shadow_provider_headers() {
+    fn model_headers_shadow_provider_headers_per_key() {
         let raw_config: toml::Value = toml::from_str(
             r#"
             [model_providers.gateway]
@@ -837,6 +928,7 @@ mod tests {
 
             [model_providers.gateway.extra_headers]
             X-Corp = "yes"
+            X-Shared = "provider"
 
             [model.via-gateway]
             model = "m"
@@ -845,6 +937,7 @@ mod tests {
 
             [model.via-gateway.extra_headers]
             X-Model = "own"
+            x-shared = "model"
             "#,
         )
         .unwrap();
@@ -856,9 +949,19 @@ mod tests {
             model.info.extra_headers.get("X-Model").map(String::as_str),
             Some("own")
         );
+        assert_eq!(
+            model.info.extra_headers.get("X-Corp").map(String::as_str),
+            Some("yes"),
+            "a header the model does not set is still inherited"
+        );
+        assert_eq!(
+            model.info.extra_headers.get("x-shared").map(String::as_str),
+            Some("model"),
+            "the model's own value wins for the key it sets"
+        );
         assert!(
-            model.info.extra_headers.get("X-Corp").is_none(),
-            "a model that sets any header inherits none of the provider's"
+            !model.info.extra_headers.contains_key("X-Shared"),
+            "the provider's differently-cased key must not ride alongside the model's"
         );
     }
 
@@ -983,6 +1086,7 @@ mod tests {
 
             [model_providers.gateway.query_params]
             api-version = "provider"
+            region = "us-east"
 
             [model.via-gateway]
             model = "m"
@@ -1004,7 +1108,78 @@ mod tests {
                 .get("api-version")
                 .map(String::as_str),
             Some("model"),
-            "a model that sets its own query params inherits none of the provider's"
+            "the model's own value wins for the key it sets"
+        );
+        assert_eq!(
+            model.info.query_params.get("region").map(String::as_str),
+            Some("us-east"),
+            "a query param the model does not set is still inherited"
+        );
+    }
+
+    #[test]
+    fn model_inherits_provider_sampling_and_quirk_defaults() {
+        let toml_cfg: toml::Value = toml::from_str(
+            r#"
+            [model_providers.gateway]
+            base_url = "https://gateway.example/v1"
+            api_key = "sk-provider"
+            api_backend = "messages"
+            context_window = 128000
+            temperature = 0.7
+            top_p = 0.95
+            max_completion_tokens = 8192
+            max_retries = 8
+            inference_idle_timeout_secs = 600
+            stream_tool_calls = true
+            strict_message_schema = true
+            supports_backend_search = true
+            min_output_tokens_per_sec = 5.0
+
+            [model.inherits]
+            model = "m"
+            model_provider = "gateway"
+
+            [model.overrides]
+            model = "m2"
+            model_provider = "gateway"
+            temperature = 0.1
+            max_retries = 2
+            strict_message_schema = false
+            "#,
+        )
+        .unwrap();
+
+        let cfg = Config::new_from_toml_cfg(&toml_cfg).expect("config should parse");
+        let resolved = resolve_model_list(&cfg, None);
+
+        let inherits = resolved.get("inherits").expect("model should exist");
+        assert_eq!(inherits.info.temperature, Some(0.7));
+        assert_eq!(inherits.info.top_p, Some(0.95));
+        assert_eq!(inherits.info.max_completion_tokens, Some(8192));
+        assert_eq!(inherits.info.max_retries, Some(8));
+        assert_eq!(inherits.info.inference_idle_timeout_secs, Some(600));
+        assert_eq!(inherits.info.stream_tool_calls, Some(true));
+        assert!(inherits.info.strict_message_schema);
+        assert!(inherits.info.supports_backend_search);
+        assert_eq!(inherits.info.min_output_tokens_per_sec, Some(5.0));
+        assert_eq!(inherits.info.context_window.get(), 128000);
+
+        let overrides = resolved.get("overrides").expect("model should exist");
+        assert_eq!(
+            overrides.info.temperature,
+            Some(0.1),
+            "the model's own value wins"
+        );
+        assert_eq!(overrides.info.max_retries, Some(2));
+        assert!(
+            !overrides.info.strict_message_schema,
+            "an explicit false on the model must not read as unset"
+        );
+        assert_eq!(
+            overrides.info.top_p,
+            Some(0.95),
+            "fields the model leaves unset still come from the provider"
         );
     }
 }

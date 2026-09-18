@@ -230,6 +230,21 @@ env_http_headers = { "X-Tenant" = "TENANT_TOKEN" }    # request headers from env
 
 Credential resolution: `api_key` > `env_key` > signed-in session token > `XAI_API_KEY`. See [Custom Models](11-custom-models.md#request-query-parameters) for `query_params` and `env_http_headers`, and [Sandbox Mode](18-sandbox.md#shell-environment-policy) for `[shell_environment_policy]`, which restricts the environment variables tool subprocesses inherit.
 
+Several models behind one endpoint share a `[model_providers.<id>]` block instead of repeating the URL, the key, the backend and the headers on each one:
+
+```toml
+[model_providers.acme]
+base_url    = "https://gateway.acme.com/v1"
+api_backend = "responses"
+env_key     = "ACME_API_KEY"
+
+[model.acme-fast]
+model = "acme-fast-1"
+model_provider = "acme"
+```
+
+A model's own field always wins; the provider fills in the rest. See [Provider Defaults](11-custom-models.md#provider-defaults).
+
 To override a built-in model, use its name as the section key and set only the fields you need:
 
 ```toml
