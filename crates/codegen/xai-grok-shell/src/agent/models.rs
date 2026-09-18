@@ -1429,6 +1429,8 @@ fn merge_codex_catalog(
         }
     }
 
+    force_reasoning_effort_support(cfg, &mut additive);
+
     if let Some(effort) = cfg.models.default_reasoning_effort
         && let Some(default_id) = cfg.models.default.as_deref()
         && let Some(entry) = additive.get_mut(default_id)
