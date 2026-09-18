@@ -498,6 +498,49 @@ mod tests {
         assert!(resolved.contains_key("grok-4.5"));
     }
 
+    /// The output-rate floor is settable per model from config.toml, and it
+    /// beats the session-wide `[ui]` floor for that model alone. A zero there
+    /// turns the gate off for it while every other model keeps the floor.
+    #[test]
+    fn a_per_model_output_rate_floor_parses_and_wins() {
+        let cfg = parse_cfg(
+            r#"
+            [ui]
+            min_output_tokens_per_sec = 30
+
+            [model."slow-endpoint"]
+            model = "slow-endpoint"
+            min_output_tokens_per_sec = 5.0
+
+            [model."ungated"]
+            model = "ungated"
+            min_output_tokens_per_sec = 0.0
+            "#,
+        );
+        assert_eq!(
+            cfg.config_models
+                .get("slow-endpoint")
+                .and_then(|m| m.min_output_tokens_per_sec),
+            Some(5.0),
+            "the key must survive the TOML parse"
+        );
+        assert_eq!(
+            cfg.resolve_output_rate_floor("slow-endpoint")
+                .map(|p| p.min_tokens_per_sec),
+            Some(5.0),
+        );
+        assert_eq!(
+            cfg.resolve_output_rate_floor("anything-else")
+                .map(|p| p.min_tokens_per_sec),
+            Some(30.0),
+            "one model's floor does not move another's",
+        );
+        assert!(
+            cfg.resolve_output_rate_floor("ungated").is_none(),
+            "a zero turns the gate off for that model alone"
+        );
+    }
+
     #[test]
     fn legacy_alias_alone_parses_without_warning() {
         let cfg = parse_cfg(
