@@ -1190,6 +1190,7 @@ fn api_error_with_message(
         empty_response_context: None,
         doom_loop_triggers: None,
         doom_loop_aborted_at_chunk: None,
+        output_rate: None,
         credential: xai_grok_sampling_types::SentCredential::Unknown,
     }
 }
@@ -1719,6 +1720,7 @@ async fn test_compact_on_error_noop_without_model_metadata() {
                 empty_response_context: None,
                 doom_loop_triggers: None,
                 doom_loop_aborted_at_chunk: None,
+                output_rate: None,
                 credential: xai_grok_sampling_types::SentCredential::Unknown,
             };
             assert!(!actor.should_compact_on_error(&err).await);

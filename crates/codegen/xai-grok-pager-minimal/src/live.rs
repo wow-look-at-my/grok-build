@@ -566,7 +566,6 @@ fn render_minimal_status(
             buttons: None,
             has_running_execute: false,
             total_tokens: agent.context_state.as_ref().map(|c| c.used),
-            output_rate: minimal_api::output_rate(agent),
             mcp_init_progress: minimal_api::mcp_init_progress(agent),
             is_bash_turn: agent.bash_turn,
             is_pending_user_input,
@@ -576,6 +575,7 @@ fn render_minimal_status(
             flat_background: true,
             held_queue: minimal_api::held_queue_count(agent),
             held_queue_top_sendable: minimal_api::held_queue_top_sendable(agent),
+            output_rate: minimal_api::output_rate(agent),
         },
     );
 }

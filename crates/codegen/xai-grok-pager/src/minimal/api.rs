@@ -574,12 +574,6 @@ pub fn watchers(v: &AgentView) -> crate::views::turn_status::Watchers {
     v.watchers()
 }
 
-/// The model's live output rate, for the shared turn-status widget. The
-/// tracker itself is private to this crate.
-pub fn output_rate(v: &AgentView) -> Option<crate::acp::tracker::OutputRate> {
-    v.session.tracker.output_rate()
-}
-
 /// [`AgentView::held_queue_count`].
 pub fn held_queue_count(v: &AgentView) -> usize {
     v.held_queue_count()
@@ -600,6 +594,12 @@ pub fn sync_pending_user_input_marks(v: &mut AgentView) {
 /// reached scrollback.
 pub fn pending_tool_entry_id(v: &AgentView, tool_call_id: &str) -> Option<EntryId> {
     v.session.tracker.pending_tool_entry_id(tool_call_id)
+}
+
+/// The live output rate for the turn-status indicator, or `None` when no
+/// stream is in flight.
+pub fn output_rate(v: &AgentView) -> Option<crate::acp::tracker::OutputRate> {
+    v.session.tracker.output_rate()
 }
 
 /// [`AgentView::draw_active_modal`] — minimal reuses the full-TUI modal renderer.

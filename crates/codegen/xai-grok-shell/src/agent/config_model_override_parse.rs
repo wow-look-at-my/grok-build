@@ -727,6 +727,7 @@ mod tests {
             show_model_fingerprint: Some(true),
             stream_tool_calls: Some(false),
             pricing: Some(xai_grok_sampling_types::ModelPricing::default()),
+            min_output_tokens_per_sec: None,
         }
     }
 
