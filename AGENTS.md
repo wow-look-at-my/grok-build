@@ -50,7 +50,10 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 
 ## Release-number stamping and the shape of ci.yml
 
-- The release number is written into the binary AFTER it links, by `xai-grok-stamp`. Nothing in a build needs a number, so `build-test`, `pty-e2e`, `test-darwin-sandbox`, `build-release` and `build-darwin-objects` all start at t=0. `publish-create` waits on every one of them. Then `publish-upload` stamps, verifies and uploads. Reading the number with `option_env!` is what once forced the release to be created before anything was built.
+- The release number is written into the binary AFTER it links, by `xai-grok-stamp`. Nothing in a build needs a number, so `build-test`, `pty-e2e`, `test-darwin-sandbox`, `build-release` and `build-darwin-objects` all start at t=0. One `publish` job waits on every one of them, then creates the release, stamps, verifies, uploads and publishes. Reading the number with `option_env!` is what once forced the release to be created before anything was built.
+- `publish` runs on `macos-14` and handles both platforms. The darwin binary must be re-signed where it is patched. Patching the ELF needs no Linux. The linux binary's own `--version` runs in `build-release` instead, on a stamped copy.
+- Its uploads run at once, backgrounded in one step, through the buildhost CLI. Composite action steps cannot overlap, and `buildhost-upload-artifact` is one. The CLI chunks a body past the edge's size cap by itself.
+- Each upload passes `--version` for the release the job already created. The CLI's own create call answers 409 on a version that exists, and carries on. `--draft` keeps each call from publishing the release under the other. The `buildhost-publish-release` step publishes one time at the end.
 - The slot is a `#[used] static` in `xai-grok-version`: a 16-byte magic, a length byte, then 64 payload bytes. A zero length reads as unstamped. That is every local build, and every binary CI tests.
 - The read is `read_volatile`. The slot is an immutable static, and the compiler knows its contents. So a plain read folds the zero length in at compile time. It never looks at what the stamper wrote.
 - `version()` and `version_with_commit()` are functions for that reason. Neither can be a `const`. A `const` initialised from one fails to compile, rather than giving a wrong answer.
