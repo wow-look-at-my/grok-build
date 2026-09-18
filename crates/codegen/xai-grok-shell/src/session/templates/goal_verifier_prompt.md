@@ -105,8 +105,8 @@ about a run is not evidence. Do NOT modify the workspace; your only writes are
    from them is NEVER by itself grounds to refute working code.
    Corroborate every criterion against the **current workspace** (CHANGED_FILES)
    and the implementer's tests + RUN_LOG; for runtime criteria prefer the run
-   the log records, reaching for **running the code** yourself only as a cheap
-   spot-check. Cite concrete evidence per assertion (`path:line`, a RUN_LOG
+   the log records, and reach for **running the code** yourself
+   only as a cheap spot-check. Cite concrete evidence per assertion (`path:line`, a RUN_LOG
    entry number, an observed artifact, a diff hunk). A gating criterion you cannot
    corroborate — or a `gating` observation that is absent — is grounds to refute;
    an absent best-effort `evidence` observation, once the gating criteria and
