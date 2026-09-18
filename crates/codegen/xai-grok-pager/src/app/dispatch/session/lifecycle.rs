@@ -991,6 +991,8 @@ pub(in crate::app::dispatch) fn dispatch_new_worktree_session(
         model_id,
         preferred_session_id,
         chat_kind,
+        // Only `/fork --agents` carries running subagents; this is `/new`.
+        include_agents: false,
     }];
     effects
 }

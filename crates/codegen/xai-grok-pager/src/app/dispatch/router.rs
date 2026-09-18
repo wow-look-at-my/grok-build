@@ -1230,8 +1230,9 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
             worktree,
             directive,
             persist_mode,
+            include_agents,
         } => {
-            let mut effects = dispatch_fork_resolved(app, worktree, directive);
+            let mut effects = dispatch_fork_resolved(app, worktree, directive, include_agents);
             apply_persist_worktree_mode(
                 &mut app.fork_worktree_mode,
                 &mut effects,

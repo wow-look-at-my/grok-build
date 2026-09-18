@@ -41,6 +41,68 @@ fn is_orchestration_projection_update(update: &SessionUpdate) -> bool {
     )
 }
 
+/// The `subagent_id` a persisted update belongs to. Only the three subagent
+/// records carry one; every other update answers `None`.
+fn subagent_id_of(update: &SessionUpdate) -> Option<&str> {
+    let SessionUpdate::Xai(notification) = update else {
+        return None;
+    };
+    use crate::extensions::notification::SessionUpdate as Xai;
+    match &notification.update {
+        Xai::SubagentSpawned { subagent_id, .. }
+        | Xai::SubagentProgress { subagent_id, .. }
+        | Xai::SubagentFinished { subagent_id, .. } => Some(subagent_id.as_str()),
+        _ => None,
+    }
+}
+
+/// Subagents that are spawned and never finished across `reader`. A `spawn`
+/// with no `finish` is an agent the source session is still running: the copy
+/// drops its records unless the caller asked to carry them, so the child does
+/// not open with a row for work that reports to its parent.
+///
+/// `survivors` restricts the walk to the lines the write pass keeps, in the
+/// same non-empty-line index space, so a prompt cut cannot leave a spawn
+/// whose finish was cut away. The substring pre-filter keeps every other line
+/// off the JSON path.
+fn running_subagent_ids<R: BufRead>(
+    reader: R,
+    survivors: Option<&[usize]>,
+) -> io::Result<BTreeSet<String>> {
+    let mut running = BTreeSet::new();
+    let mut survivors = survivors.map(|indexes| indexes.iter().copied().peekable());
+    for_each_jsonl_line(reader, |index, line| {
+        if let Some(survivors) = survivors.as_mut()
+            && survivors.next_if_eq(&index).is_none()
+        {
+            return Ok(ControlFlow::Continue(()));
+        }
+        let Ok(text) = std::str::from_utf8(line) else {
+            return Ok(ControlFlow::Continue(()));
+        };
+        if !text.contains("subagent_") {
+            return Ok(ControlFlow::Continue(()));
+        }
+        let Ok(update) = SessionUpdateEnvelope::from_str(text) else {
+            return Ok(ControlFlow::Continue(()));
+        };
+        if let SessionUpdate::Xai(notification) = &update {
+            use crate::extensions::notification::SessionUpdate as Xai;
+            match &notification.update {
+                Xai::SubagentSpawned { subagent_id, .. } => {
+                    running.insert(subagent_id.clone());
+                }
+                Xai::SubagentFinished { subagent_id, .. } => {
+                    running.remove(subagent_id);
+                }
+                _ => {}
+            }
+        }
+        Ok(ControlFlow::Continue(()))
+    })?;
+    Ok(running)
+}
+
 /// Updates written plus the `compaction_checkpoints/{uuid}.json` files the
 /// surviving records reference, collected in the same pass.
 #[derive(Default)]
@@ -159,6 +221,8 @@ struct UpdateLineWriter<'a> {
     target_session_id: &'a acp::SessionId,
     copied: CopiedUpdates,
     skipped_lines: usize,
+    /// Subagents whose records this copy leaves behind.
+    dropped_subagents: BTreeSet<String>,
 }
 
 impl<'a> UpdateLineWriter<'a> {
@@ -173,6 +237,7 @@ impl<'a> UpdateLineWriter<'a> {
             target_session_id,
             copied: CopiedUpdates::default(),
             skipped_lines: 0,
+            dropped_subagents: BTreeSet::new(),
         })
     }
 
@@ -189,6 +254,9 @@ impl<'a> UpdateLineWriter<'a> {
             }
         };
         if is_orchestration_projection_update(&update) {
+            return Ok(());
+        }
+        if subagent_id_of(&update).is_some_and(|id| self.dropped_subagents.contains(id)) {
             return Ok(());
         }
         if let SessionUpdate::Xai(notification) = &update
@@ -245,6 +313,7 @@ fn copy_updates_streaming(
     target: &Path,
     target_session_id: &acp::SessionId,
     target_prompt_index: Option<usize>,
+    carry_running_subagents: bool,
 ) -> io::Result<CopiedUpdates> {
     let mut writer = UpdateLineWriter::try_new(target, source, target_session_id)?;
     let mut file = match std::fs::File::open(source) {
@@ -253,16 +322,27 @@ fn copy_updates_streaming(
         Err(error) if error.kind() == io::ErrorKind::NotFound => return writer.finish(),
         Err(error) => return Err(error),
     };
-    match target_prompt_index {
+    let survivors = match target_prompt_index {
+        Some(target_idx) => {
+            let survivors = surviving_line_indexes(BufReader::new(&mut file), target_idx)?;
+            file.seek(io::SeekFrom::Start(0))?;
+            Some(survivors)
+        }
+        None => None,
+    };
+    if !carry_running_subagents {
+        writer.dropped_subagents =
+            running_subagent_ids(BufReader::new(&mut file), survivors.as_deref())?;
+        file.seek(io::SeekFrom::Start(0))?;
+    }
+    match survivors {
         None => {
             for_each_jsonl_line(BufReader::new(file), |_, line| {
                 writer.copy_line(line)?;
                 Ok(ControlFlow::Continue(()))
             })?;
         }
-        Some(target_idx) => {
-            let survivors = surviving_line_indexes(BufReader::new(&mut file), target_idx)?;
-            file.seek(io::SeekFrom::Start(0))?;
+        Some(survivors) => {
             let mut survivors = survivors.into_iter().peekable();
             for_each_jsonl_line(BufReader::new(file), |index, line| {
                 if survivors.next_if_eq(&index).is_some() {
@@ -369,6 +449,7 @@ impl JsonlStorageAdapter {
                 &self.updates_file(target_info),
                 &target_info.id,
                 options.target_prompt_index,
+                options.carry_running_subagents,
             )?
         };
         let checkpoint_files = copied_updates.checkpoint_files;

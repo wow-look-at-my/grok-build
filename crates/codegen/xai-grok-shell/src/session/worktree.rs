@@ -405,6 +405,7 @@ async fn resume_local_session_in_worktree(
         new_cwd: effective_cwd.clone(),
         session_kind: Some("worktree".to_string()),
         source_workspace_dir: Some(resolved_source_cwd.to_owned()),
+        include_agents: req.include_agents,
         ..Default::default()
     };
     let fork_resp = match fork_session(fork_req, agent_id, auth_manager).await {
@@ -923,6 +924,7 @@ mod tests {
             worktree_type: None,
             restore_code: Some(true),
             git_ref: None,
+            include_agents: false,
         };
         let ops = xai_grok_workspace::WorkspaceOps::for_test();
         let result = resume_session_in_worktree(
