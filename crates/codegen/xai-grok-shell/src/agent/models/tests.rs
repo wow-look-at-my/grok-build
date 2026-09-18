@@ -2321,7 +2321,7 @@ fn model_filters_apply_to_every_provider_in_combined_catalog() {
     let mut codex = IndexMap::new();
     codex.insert("codex/gpt-test".to_string(), make_model_entry("gpt-test"));
 
-    let combined = merge_codex_catalog(&cfg, base, &codex);
+    let combined = merge_additive_catalog(&cfg, base, &codex);
     assert!(!combined["grok-build"].info.user_selectable);
     assert!(combined["codex/gpt-test"].info.user_selectable);
 }

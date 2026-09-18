@@ -278,6 +278,54 @@ impl ModelGlobSet {
     }
 }
 
+/// Mark every entry that matches a favorites glob, and clear the mark on every
+/// entry that does not.
+///
+/// Two lists feed this: `[models].favorite_models` covers the whole catalog, and
+/// `[model_providers.<id>].favorite_models` covers the models of that provider.
+/// A model is a favorite when either list matches it.
+///
+/// An invalid pattern fails OPEN — the mark is cosmetic, and dropping every
+/// favorite would empty the picker's opening list. `allowed_models` fails closed
+/// because it decides what may be used at all.
+pub(crate) fn apply_favorites(cfg: &config::Config, catalog: &mut IndexMap<String, ModelEntry>) {
+    let global = match ModelGlobSet::compile(cfg.models.favorite_models.as_ref()) {
+        Ok(set) => set,
+        Err(bad) => {
+            tracing::error!(patterns = ?bad, "favorite_models: invalid glob(s); ignoring the list");
+            None
+        }
+    };
+    let per_provider: std::collections::HashMap<&str, ModelGlobSet> = cfg
+        .model_providers
+        .iter()
+        .filter_map(|(id, provider)| {
+            match ModelGlobSet::compile(Some(&provider.favorite_models)) {
+                Ok(set) => set.map(|set| (id.as_str(), set)),
+                Err(bad) => {
+                    tracing::error!(
+                        provider = %id, patterns = ?bad,
+                        "favorite_models: invalid glob(s); ignoring this provider's list"
+                    );
+                    None
+                }
+            }
+        })
+        .collect();
+
+    for (key, entry) in catalog.iter_mut() {
+        let model = entry.info.model.clone();
+        let by_global = global.as_ref().is_some_and(|set| set.matches(key, &model));
+        let by_provider = entry
+            .info
+            .model_provider
+            .as_deref()
+            .and_then(|id| per_provider.get(id))
+            .is_some_and(|set| set.matches(key, &model));
+        entry.info.favorite = by_global || by_provider;
+    }
+}
+
 /// Single source of truth for the catalog. Applies, in order: `disabled_models`
 pub(crate) fn resolve_model_catalog(
     cfg: &config::Config,
@@ -337,21 +385,23 @@ pub(crate) fn resolve_model_catalog(
         }
     }
 
+    apply_favorites(cfg, &mut catalog);
     catalog
 }
 
-/// Add a provider-qualified Codex catalog to the resolved xAI/custom catalog.
+/// Add a provider-qualified catalog (Codex, or an autodetected
+/// `[model_providers.<id>]`) to the resolved xAI/custom catalog.
 ///
 /// Provider entries are deliberately kept outside `prefetched`: xAI auth
 /// refreshes and cache reloads may replace that catalog wholesale, while an
-/// independent Codex sign-in must remain available. User model filters still
-/// apply uniformly to both providers.
-pub(crate) fn merge_codex_catalog(
+/// independent Codex sign-in or a provider's own listing must remain available.
+/// User model filters still apply uniformly to every provider.
+pub(crate) fn merge_additive_catalog(
     cfg: &config::Config,
     mut catalog: IndexMap<String, ModelEntry>,
-    codex_models: &IndexMap<String, ModelEntry>,
+    provider_models: &IndexMap<String, ModelEntry>,
 ) -> IndexMap<String, ModelEntry> {
-    let mut additive = codex_models.clone();
+    let mut additive = provider_models.clone();
 
     if let Ok(Some(disabled)) = ModelGlobSet::compile(cfg.models.disabled_models.as_ref()) {
         additive.retain(|key, entry| !disabled.matches(key, &entry.model));
@@ -400,6 +450,7 @@ pub(crate) fn merge_codex_catalog(
     }
 
     catalog.extend(additive);
+    apply_favorites(cfg, &mut catalog);
     catalog
 }
 

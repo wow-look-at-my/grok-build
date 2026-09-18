@@ -30,7 +30,7 @@ pub use client::{
 };
 pub(crate) use client::{
     DEFAULT_CONTEXT_WINDOW, fetch_models_blocking, fetch_models_for_api_base_blocking,
-    models_list_url, models_list_url_for_base,
+    fetch_models_for_list_url_blocking, models_list_url, models_list_url_for_base,
 };
 pub use conversations_client::{
     ConvError, ConvQuery, Conversation, ConversationsClient, ListConversationsPage,

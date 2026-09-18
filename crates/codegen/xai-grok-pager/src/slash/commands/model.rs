@@ -3,7 +3,7 @@
 //! re-opens the dropdown into a `low|medium|high|xhigh` sub-menu.
 
 use agent_client_protocol as acp;
-use xai_grok_shell::sampling::types::supports_reasoning_effort_meta;
+use xai_grok_shell::sampling::types::{favorite_meta, supports_reasoning_effort_meta};
 
 use crate::acp::model_state::ModelState;
 use crate::app::actions::Action;
@@ -61,7 +61,11 @@ impl SlashCommand for ModelCommand {
         if let Some(model_id) = detect_effort_phase(ctx.models, args_query) {
             return Some(build_effort_items(ctx.models, &model_id));
         }
-        Some(build_model_items(ctx.models))
+        // The opening list is the favorites. A typed query lists every model,
+        // so a provider with hundreds of them still answers a search for one
+        // nobody marked. The caller ranks what it gets back.
+        let favorites_only = args_query.trim().is_empty();
+        Some(build_model_items(ctx.models, favorites_only))
     }
 
     fn run(&self, ctx: &mut CommandExecCtx, args: &str) -> CommandResult {
@@ -148,13 +152,26 @@ fn detect_effort_phase(models: &ModelState, args_query: &str) -> Option<acp::Mod
     None
 }
 
+fn is_favorite(info: &acp::ModelInfo) -> bool {
+    favorite_meta(info.meta.as_ref())
+}
+
 /// One row per logical model. Reasoning models get a trailing space in
 /// `insert_text` so the prompt widget chains into the effort sub-menu.
-fn build_model_items(models: &ModelState) -> Vec<ArgItem> {
+///
+/// `favorites_only` narrows the list to the models the config marked, plus the
+/// current one — a picker that hides what the session is running reads as a
+/// model that went missing. A catalog with no favorite in it lists everything,
+/// so an unconfigured session sees the whole catalog as before.
+fn build_model_items(models: &ModelState, favorites_only: bool) -> Vec<ArgItem> {
     let current_id = models.current.as_ref();
+    let narrow = favorites_only && models.available.values().any(is_favorite);
     let mut items: Vec<ArgItem> = Vec::with_capacity(models.available.len());
     for (id, info) in &models.available {
         let is_current = current_id == Some(id);
+        if narrow && !is_current && !is_favorite(info) {
+            continue;
+        }
         let supports = supports_reasoning_effort(info);
 
         let display = if is_current {

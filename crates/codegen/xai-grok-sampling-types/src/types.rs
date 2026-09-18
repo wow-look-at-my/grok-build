@@ -1010,6 +1010,16 @@ pub fn parse_canonical_effort_token(token: &str) -> Option<ReasoningEffort> {
 
 pub const REASONING_EFFORT_META_KEY: &str = "reasoningEffort";
 pub const SUPPORTS_REASONING_EFFORT_META_KEY: &str = "supportsReasoningEffort";
+/// Set from the `favorite_models` globs. The picker reads it to decide what its
+/// opening list holds.
+pub const FAVORITE_META_KEY: &str = "favorite";
+
+/// Whether this model's ACP meta marks it a favorite.
+pub fn favorite_meta(meta: Option<&serde_json::Map<String, serde_json::Value>>) -> bool {
+    meta.and_then(|m| m.get(FAVORITE_META_KEY))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+}
 
 pub fn supports_reasoning_effort_meta(
     meta: Option<&serde_json::Map<String, serde_json::Value>>,
