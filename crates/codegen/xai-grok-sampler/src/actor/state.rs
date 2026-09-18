@@ -149,6 +149,7 @@ mod tests {
             stream_tool_calls: false,
             idle_timeout_secs: None,
             reasoning_effort: None,
+            chat_message_profile: xai_grok_sampling_types::ChatMessageProfile::PERMISSIVE,
             origin_client: None,
             client_identifier: None,
             deployment_id: None,

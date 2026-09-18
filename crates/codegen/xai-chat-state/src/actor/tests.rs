@@ -31,6 +31,7 @@ fn test_config_with_window(context_window: u64) -> SamplingConfig {
             .expect("test context_window must be non-zero"),
         reasoning_effort: None,
         stream_tool_calls: None,
+        chat_message_profile: Default::default(),
     }
 }
 
@@ -1180,6 +1181,7 @@ async fn update_sampling_config_is_queryable() {
         context_window: NonZeroU64::new(200_000).unwrap(),
         reasoning_effort: None,
         stream_tool_calls: None,
+        chat_message_profile: Default::default(),
     };
     h.handle.update_sampling_config(new_config.clone());
 
@@ -1568,6 +1570,7 @@ async fn build_request_uses_sampling_config() {
         context_window: NonZeroU64::new(128_000).unwrap(),
         reasoning_effort: None,
         stream_tool_calls: None,
+        chat_message_profile: Default::default(),
     };
     let h = TestHarness::with_config(vec![ConversationItem::user("hi")], config);
 
@@ -1603,6 +1606,7 @@ async fn build_request_fits_the_output_budget_into_the_context_window() {
         context_window: NonZeroU64::new(1_000_000).unwrap(),
         reasoning_effort: None,
         stream_tool_calls: None,
+        chat_message_profile: Default::default(),
     };
     // Bytes/4: this is a 737_857-token prompt.
     let items = vec![ConversationItem::user("x".repeat(737_857 * 4))];
@@ -3783,6 +3787,7 @@ async fn sampling_config_survives_compaction_replacement() {
         context_window: NonZeroU64::new(500_000).unwrap(),
         reasoning_effort: None,
         stream_tool_calls: None,
+        chat_message_profile: Default::default(),
     };
 
     let h = TestHarness::with_config(
@@ -3868,6 +3873,7 @@ async fn model_metadata_lost_after_compaction_then_recovered_on_next_turn() {
         context_window: NonZeroU64::new(500_000).unwrap(),
         reasoning_effort: None,
         stream_tool_calls: None,
+        chat_message_profile: Default::default(),
     };
 
     let h = TestHarness::with_config(
@@ -3958,6 +3964,7 @@ async fn context_window_downgrade_triggers_auto_compact() {
         context_window: NonZeroU64::new(500_000).unwrap(),
         reasoning_effort: None,
         stream_tool_calls: None,
+        chat_message_profile: Default::default(),
     };
 
     let h = TestHarness::with_config(vec![], config);

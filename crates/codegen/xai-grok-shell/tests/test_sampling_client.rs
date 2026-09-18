@@ -1546,3 +1546,135 @@ async fn test_chat_completions_backend_hits_chat_endpoint_not_responses() {
         "Should NOT have called /v1/responses"
     );
 }
+
+// ============================================================================
+// Cerebras strict-schema recovery (model_id / reasoning_content unsupported)
+// ============================================================================
+//
+// The provider rejects any message property its schema does not define. The
+// offending properties live in stored conversation history, so without a
+// recovery the conversation is permanently bricked from turn 2 onward. These
+// tests drive the real `SamplingClient` against the mock server: the first
+// request is answered with the documented Cerebras 400, and the recovered
+// retry is asserted on the *recorded wire body*.
+
+/// History whose assistant item carries a recorded `model_id` plus a replayed
+/// reasoning sibling — the poisoned-history shape.
+fn poisoned_history() -> Vec<ConversationItem> {
+    vec![
+        ConversationItem::system("You are helpful."),
+        ConversationItem::user("q1"),
+        ConversationItem::Reasoning(xai_grok_sampling_types::synthesized_reasoning_item(
+            "thinking about q1",
+        )),
+        ConversationItem::Assistant(xai_grok_sampling_types::conversation::AssistantItem {
+            content: "a1".into(),
+            tool_calls: vec![],
+            model_id: Some("qwen-3.8-27b".into()),
+            model_fingerprint: None,
+            reasoning_effort: None,
+        }),
+        ConversationItem::user("q2"),
+    ]
+}
+
+/// A model configured `strict_message_schema` never sends the properties in
+/// the first place — no 400 and no retry needed. This is the primary fix for
+/// new sessions; the actor-level tests in `xai-grok-sampler` cover the
+/// strip-and-retry recovery for history written before it.
+#[tokio::test]
+async fn strict_model_profile_omits_properties_on_the_first_request() {
+    let server = MockInferenceServer::start().await.unwrap();
+    server.set_response("ok");
+
+    // Configure the client the way `sampling_config_for_model` does for a
+    // model with `strict_message_schema = true`.
+    let mut config = test_sampler_config(&server.url(), ApiBackend::ChatCompletions, &[]);
+    config.chat_message_profile = xai_grok_sampling_types::ChatMessageProfile::STRICT;
+    let client = Client::new(config).unwrap();
+
+    let response = client
+        .conversation_collect(ConversationRequest::from_items(poisoned_history()))
+        .await;
+    assert!(
+        response.is_ok(),
+        "strict profile must not fail: {response:?}"
+    );
+
+    let bodies = server.request_bodies();
+    assert_eq!(bodies.len(), 1, "no retry should be needed: {bodies:#?}");
+    for m in bodies[0]["messages"].as_array().unwrap() {
+        assert!(
+            m.get("model_id").is_none() && m.get("reasoning_content").is_none(),
+            "a strict model must never send these properties: {m:#}"
+        );
+    }
+}
+
+/// The regression guard at the wire level: a tolerant provider still receives
+/// both properties on the first request, unchanged from before this feature.
+#[tokio::test]
+async fn permissive_model_still_sends_replayed_properties() {
+    let server = MockInferenceServer::start().await.unwrap();
+    server.set_response("ok");
+
+    let client = create_test_client(&server.url(), ApiBackend::ChatCompletions);
+    let response = client
+        .conversation_collect(ConversationRequest::from_items(poisoned_history()))
+        .await;
+    assert!(response.is_ok(), "{response:?}");
+
+    let bodies = server.request_bodies();
+    assert_eq!(
+        bodies.len(),
+        1,
+        "no retry for a tolerant target: {bodies:#?}"
+    );
+    let messages = bodies[0]["messages"].as_array().unwrap();
+    let assistant = messages
+        .iter()
+        .find(|m| m["role"] == "assistant")
+        .expect("assistant present");
+    assert_eq!(
+        assistant["model_id"],
+        json!("qwen-3.8-27b"),
+        "tolerant target keeps model_id: {assistant:#}"
+    );
+    assert_eq!(
+        assistant["reasoning_content"],
+        json!("thinking about q1"),
+        "tolerant target keeps replayed reasoning: {assistant:#}"
+    );
+}
+
+/// A 400 that is *not* the strict-schema class must stay fatal — the recovery
+/// must not silently rewrite bodies for unrelated request bugs.
+#[tokio::test]
+async fn unrelated_400_does_not_trigger_the_property_strip() {
+    let server = MockInferenceServer::start().await.unwrap();
+    server.enqueue_response(
+        "/v1/chat/completions",
+        ScriptedResponse::json(
+            400,
+            json!({
+                "message": "malformed tool call in history",
+                "type": "invalid_request_error",
+                "code": "invalid_request",
+            }),
+        ),
+    );
+    server.set_response("should not be reached");
+
+    let client = create_test_client(&server.url(), ApiBackend::ChatCompletions);
+    let response = client
+        .conversation_collect(ConversationRequest::from_items(poisoned_history()))
+        .await;
+
+    assert!(response.is_err(), "an unrelated 400 must stay fatal");
+    assert_eq!(
+        server.request_bodies().len(),
+        1,
+        "no strip-retry for an unrelated 400: {:#?}",
+        server.request_bodies()
+    );
+}

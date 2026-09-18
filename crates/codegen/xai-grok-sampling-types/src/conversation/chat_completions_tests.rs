@@ -820,3 +820,357 @@ fn a_tool_call_without_provider_fields_replays_unchanged() {
         "an untouched call must go out untouched: {replayed:#}",
     );
 }
+
+// ============================================================================
+// Strict-schema message profiles (Cerebras `wrong_api_format`)
+// ============================================================================
+//
+// Cerebras validates its Chat Completions message schema strictly: an
+// unrecognized property on any message is a hard 400, so a replayed
+// assistant message carrying `model_id` (which this crate writes into stored
+// history) bricks the conversation from turn 2 onward. These tests drive the
+// real serialized body — the observable the provider actually sees — and
+// assert that a strict target receives no unsupported property while a
+// tolerant target's body is byte-for-byte unchanged.
+
+/// A two-turn conversation whose assistant items carry both a recorded
+/// `model_id` and a replayed reasoning sibling — exactly the history shape
+/// that produced the Cerebras 400 on `messages.6.assistant`.
+fn history_with_model_id_and_reasoning() -> Vec<ConversationItem> {
+    vec![
+        ConversationItem::system("You are helpful."),
+        ConversationItem::user("q1"),
+        reasoning_sibling("rs_1", "thinking about q1", None),
+        ConversationItem::Assistant(AssistantItem {
+            content: "a1".into(),
+            tool_calls: vec![],
+            model_id: Some("qwen-3.8-27b".into()),
+            model_fingerprint: None,
+            reasoning_effort: None,
+        }),
+        ConversationItem::user("q2"),
+    ]
+}
+
+/// Serialize the request exactly as the sampler sends it, so the assertions
+/// read the wire body rather than an intermediate struct.
+fn wire_body(items: Vec<ConversationItem>, profile: ChatMessageProfile) -> serde_json::Value {
+    let mut req = ConversationRequest::from_items(items);
+    req.chat_message_profile = profile;
+    let wire: crate::types::ChatCompletionRequest = req.into();
+    serde_json::to_value(&wire).unwrap()
+}
+
+/// The decisive check: for a strict-schema target, the serialized assistant
+/// messages carry neither `model_id` nor `reasoning_content`.
+///
+/// This drives the real `From<ConversationRequest> for ChatCompletionRequest`
+/// conversion (the same one `SamplingClient::conversation_stream` uses), then
+/// inspects the JSON the provider would receive. Both properties are absent,
+/// not null or empty — a strict schema rejects on presence.
+#[test]
+fn strict_profile_omits_model_id_and_reasoning_content_from_wire_body() {
+    let body = wire_body(
+        history_with_model_id_and_reasoning(),
+        ChatMessageProfile::STRICT,
+    );
+    let messages = body["messages"].as_array().expect("messages array");
+
+    let assistant = messages
+        .iter()
+        .find(|m| m["role"] == "assistant")
+        .expect("assistant message present");
+    assert!(
+        assistant.get("model_id").is_none(),
+        "strict target must not receive model_id: {assistant:#}"
+    );
+    assert!(
+        assistant.get("reasoning_content").is_none(),
+        "strict target must not receive reasoning_content: {assistant:#}"
+    );
+
+    // No message of any role may carry an unsupported property.
+    for m in messages {
+        assert!(
+            m.get("model_id").is_none(),
+            "no message may carry model_id for a strict target: {m:#}"
+        );
+        assert!(
+            m.get("reasoning_content").is_none(),
+            "no message may carry reasoning_content for a strict target: {m:#}"
+        );
+    }
+
+    // The conversation itself must survive: dropping the two properties must
+    // not drop content or structure. The `Reasoning` sibling folds into the
+    // assistant, so it contributes no message of its own: system, user,
+    // assistant, user.
+    assert_eq!(assistant["content"], serde_json::json!("a1"));
+    assert_eq!(messages.len(), 4, "structure preserved: {messages:#?}");
+    assert_eq!(messages[0]["role"], "system");
+    assert_eq!(messages[1]["role"], "user");
+    assert_eq!(messages[1]["content"], serde_json::json!("q1"));
+    assert_eq!(messages[2]["role"], "assistant");
+    assert_eq!(messages[3]["content"], serde_json::json!("q2"));
+}
+
+/// The regression guard: a tolerant provider's body is unchanged. Same
+/// conversation, permissive profile — both properties are still present.
+#[test]
+fn permissive_profile_still_sends_model_id_and_reasoning_content() {
+    let body = wire_body(
+        history_with_model_id_and_reasoning(),
+        ChatMessageProfile::PERMISSIVE,
+    );
+    let messages = body["messages"].as_array().expect("messages array");
+
+    let assistant = messages
+        .iter()
+        .find(|m| m["role"] == "assistant")
+        .expect("assistant message present");
+    assert_eq!(
+        assistant["model_id"],
+        serde_json::json!("qwen-3.8-27b"),
+        "tolerant target keeps model_id: {assistant:#}"
+    );
+    assert_eq!(
+        assistant["reasoning_content"],
+        serde_json::json!("thinking about q1"),
+        "tolerant target keeps replayed reasoning: {assistant:#}"
+    );
+}
+
+/// The default profile must be today's behavior, or every existing provider
+/// would silently change shape.
+#[test]
+fn default_profile_is_permissive() {
+    assert_eq!(
+        ChatMessageProfile::default(),
+        ChatMessageProfile::PERMISSIVE
+    );
+    assert!(ChatMessageProfile::default().is_permissive());
+    assert!(!ChatMessageProfile::STRICT.is_permissive());
+
+    // A request built the ordinary way (no profile set) sends both fields.
+    let mut req = ConversationRequest::from_items(history_with_model_id_and_reasoning());
+    assert_eq!(
+        req.chat_message_profile,
+        ChatMessageProfile::PERMISSIVE,
+        "ConversationRequest::from_items must default to permissive"
+    );
+    req.model = Some("m".into());
+    let wire: crate::types::ChatCompletionRequest = req.into();
+    let body = serde_json::to_value(&wire).unwrap();
+    let assistant = body["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["role"] == "assistant")
+        .unwrap();
+    assert_eq!(assistant["model_id"], serde_json::json!("qwen-3.8-27b"));
+    assert_eq!(
+        assistant["reasoning_content"],
+        serde_json::json!("thinking about q1")
+    );
+}
+
+/// Suppressing a property must not disturb fields the provider *does* accept:
+/// tool calls, their vendor passthrough, and tool results all ride unchanged.
+#[test]
+fn strict_profile_preserves_tool_calls_and_results() {
+    let items = vec![
+        ConversationItem::user("run it"),
+        ConversationItem::Assistant(AssistantItem {
+            content: String::new().into(),
+            tool_calls: vec![ToolCall {
+                id: "call_1".into(),
+                name: "get_weather".to_string(),
+                arguments: r#"{"city":"SF"}"#.into(),
+                vendor: Default::default(),
+            }],
+            model_id: Some("qwen-3.8-27b".into()),
+            model_fingerprint: None,
+            reasoning_effort: None,
+        }),
+        ConversationItem::tool_result("call_1", "sunny"),
+    ];
+
+    let body = wire_body(items.clone(), ChatMessageProfile::STRICT);
+    let messages = body["messages"].as_array().unwrap();
+    let assistant = messages
+        .iter()
+        .find(|m| m["role"] == "assistant")
+        .expect("assistant present");
+    assert!(assistant.get("model_id").is_none());
+    assert_eq!(
+        assistant["tool_calls"][0]["function"]["name"],
+        serde_json::json!("get_weather"),
+        "tool calls survive the strip: {assistant:#}"
+    );
+    assert_eq!(
+        assistant["tool_calls"][0]["function"]["arguments"],
+        serde_json::json!(r#"{"city":"SF"}"#)
+    );
+    let tool_msg = messages
+        .iter()
+        .find(|m| m["role"] == "tool")
+        .expect("tool result present");
+    assert_eq!(tool_msg["tool_call_id"], serde_json::json!("call_1"));
+    assert_eq!(tool_msg["content"], serde_json::json!("sunny"));
+}
+
+/// Only the *serialized body* is narrowed. The stored conversation keeps both
+/// values, which is what lets the Messages backend resolve thinking
+/// signatures and lets a later turn on a tolerant provider still send
+/// reasoning.
+#[test]
+fn strict_profile_leaves_stored_history_untouched() {
+    let items = history_with_model_id_and_reasoning();
+    let before = items.clone();
+
+    let mut req = ConversationRequest::from_items(items);
+    req.chat_message_profile = ChatMessageProfile::STRICT;
+    let _wire: crate::types::ChatCompletionRequest = req.into();
+
+    // `req.items` is moved by the conversion; assert on a freshly built
+    // request instead, so the check is on stored state, not the wire.
+    let mut stored = ConversationRequest::from_items(before);
+    stored.chat_message_profile = ChatMessageProfile::STRICT;
+
+    let assistant = stored
+        .items
+        .iter()
+        .find_map(|i| match i {
+            ConversationItem::Assistant(a) => Some(a),
+            _ => None,
+        })
+        .expect("assistant item");
+    assert_eq!(
+        assistant.model_id.as_deref(),
+        Some("qwen-3.8-27b"),
+        "stored model_id must survive a strict-profile conversion"
+    );
+    assert!(
+        stored
+            .items
+            .iter()
+            .any(|i| matches!(i, ConversationItem::Reasoning(_))),
+        "reasoning siblings must survive in stored history"
+    );
+}
+
+/// `narrowed_by` can only narrow: a caller cannot re-widen a strict model,
+/// and two permissive sides stay permissive.
+#[test]
+fn profile_narrowing_is_monotonic() {
+    let p = ChatMessageProfile::PERMISSIVE;
+    let s = ChatMessageProfile::STRICT;
+
+    assert_eq!(p.narrowed_by(p), p);
+    assert_eq!(
+        p.narrowed_by(s),
+        s,
+        "permissive narrowed by strict is strict"
+    );
+    assert_eq!(s.narrowed_by(p), s, "strict cannot be widened");
+    assert_eq!(s.narrowed_by(s), s);
+}
+
+/// Partial profiles: a provider may accept one property and reject the other.
+#[test]
+fn partial_profiles_suppress_independently() {
+    let only_model_id = ChatMessageProfile {
+        accepts_model_id: true,
+        accepts_reasoning_content: false,
+    };
+    let body = wire_body(history_with_model_id_and_reasoning(), only_model_id);
+    let messages = body["messages"].as_array().unwrap();
+    let assistant = messages.iter().find(|m| m["role"] == "assistant").unwrap();
+    assert_eq!(
+        assistant["model_id"],
+        serde_json::json!("qwen-3.8-27b"),
+        "model_id accepted by this profile must be sent"
+    );
+    assert!(
+        assistant.get("reasoning_content").is_none(),
+        "reasoning_content rejected by this profile must be omitted"
+    );
+
+    let only_reasoning = ChatMessageProfile {
+        accepts_model_id: false,
+        accepts_reasoning_content: true,
+    };
+    let body = wire_body(history_with_model_id_and_reasoning(), only_reasoning);
+    let messages = body["messages"].as_array().unwrap();
+    let assistant = messages.iter().find(|m| m["role"] == "assistant").unwrap();
+    assert!(
+        assistant.get("model_id").is_none(),
+        "model_id rejected by this profile must be omitted"
+    );
+    assert_eq!(
+        assistant["reasoning_content"],
+        serde_json::json!("thinking about q1"),
+        "reasoning_content accepted by this profile must be sent"
+    );
+}
+
+/// `strip_unsupported_message_properties` drops exactly what the provider
+/// named, and reports whether it changed anything so the retry loop can tell a
+/// productive strip from a no-op.
+#[test]
+fn strip_unsupported_message_properties_narrows_named_fields_only() {
+    let mut req = ConversationRequest::from_items(history_with_model_id_and_reasoning());
+    assert!(req.chat_message_profile.is_permissive());
+
+    // Provider named only `model_id`.
+    assert!(req.strip_unsupported_message_properties(true, false));
+    assert!(!req.chat_message_profile.accepts_model_id);
+    assert!(
+        req.chat_message_profile.accepts_reasoning_content,
+        "reasoning_content was not named, so it stays"
+    );
+
+    // A second strip for the other named property still makes progress.
+    assert!(req.strip_unsupported_message_properties(false, true));
+    assert!(!req.chat_message_profile.accepts_reasoning_content);
+
+    // Now fully narrowed: further strips are no-ops, so the caller can stop.
+    assert!(
+        !req.strip_unsupported_message_properties(true, true),
+        "an already-narrow profile must report no change"
+    );
+}
+
+/// An unsupported-property error that names nothing still narrows both — that
+/// error class exists only for targets whose schema takes neither.
+#[test]
+fn strip_with_no_named_property_narrows_both() {
+    let mut req = ConversationRequest::from_items(history_with_model_id_and_reasoning());
+    assert!(req.strip_unsupported_message_properties(false, false));
+    assert_eq!(req.chat_message_profile, ChatMessageProfile::STRICT);
+}
+
+/// The recovery must reach the wire: after a strip, the serialized body for
+/// the same stored history carries no unsupported property — which is what
+/// un-bricks a session whose history predates the fix.
+#[test]
+fn strip_then_serialize_omits_unsupported_properties() {
+    let mut req = ConversationRequest::from_items(history_with_model_id_and_reasoning());
+    req.model = Some("qwen-3.8-27b".into());
+
+    // Before recovery, the body carries the properties the provider rejects.
+    let before: crate::types::ChatCompletionRequest = req.clone().into();
+    let before = serde_json::to_value(&before).unwrap();
+    assert!(before["messages"][2].get("model_id").is_some());
+
+    // The provider's 400 names both; strip, then serialize again.
+    assert!(req.strip_unsupported_message_properties(true, true));
+    let after: crate::types::ChatCompletionRequest = req.into();
+    let after = serde_json::to_value(&after).unwrap();
+    for m in after["messages"].as_array().unwrap() {
+        assert!(
+            m.get("model_id").is_none() && m.get("reasoning_content").is_none(),
+            "recovered body must carry no unsupported property: {m:#}"
+        );
+    }
+}

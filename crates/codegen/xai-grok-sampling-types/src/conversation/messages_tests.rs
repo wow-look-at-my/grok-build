@@ -1152,3 +1152,96 @@ fn the_thinking_dialect_is_read_off_every_spelling_of_a_model_id() {
         assert!(!speaks_adaptive(legacy), "{legacy}");
     }
 }
+
+/// Regression guard for the strict-schema work: the Messages backend reads an
+/// assistant item's `model_id` to decide whether a replayed thinking signature
+/// belongs to the target model, so `model_id` must stay load-bearing on that
+/// path. The Chat Completions suppression is scoped to the serialized body and
+/// must not have removed the stored value.
+///
+/// Two conversations differ only in the assistant's recorded `model_id`; the
+/// signed-thinking decision must differ accordingly. If the suppression had
+/// been applied globally (or the field dropped from history), both would take
+/// the same branch and this test would fail.
+#[test]
+fn messages_backend_still_reads_assistant_model_id_for_signature_handling() {
+    fn conversation_with_origin(origin: &str) -> Vec<ConversationItem> {
+        vec![
+            ConversationItem::system("You are helpful."),
+            ConversationItem::user("q1"),
+            ConversationItem::Reasoning(crate::rs::ReasoningItem {
+                id: "rs_signed".to_string(),
+                summary: vec![crate::rs::SummaryPart::SummaryText(
+                    crate::rs::SummaryTextContent {
+                        text: "signed thinking".to_string(),
+                    },
+                )],
+                content: None,
+                // A non-empty signature is what makes this block model-bound.
+                encrypted_content: Some("ENC_SIGNATURE_BLOB".to_string()),
+                status: None,
+            }),
+            ConversationItem::Assistant(AssistantItem {
+                content: "a1".into(),
+                tool_calls: vec![],
+                model_id: Some(origin.into()),
+                model_fingerprint: None,
+                reasoning_effort: None,
+            }),
+            ConversationItem::user("q2"),
+        ]
+    }
+
+    // The value the Messages path reads must still be present in history.
+    let same = conversation_with_origin("claude-opus-4-6");
+    let origin = same
+        .iter()
+        .find_map(|i| match i {
+            ConversationItem::Assistant(a) => a.model_id.as_deref(),
+            _ => None,
+        })
+        .expect("assistant carries its originating model_id");
+    assert_eq!(
+        origin, "claude-opus-4-6",
+        "the assistant's model_id must survive in stored history"
+    );
+
+    // Same model: the signed block belongs here and is replayed.
+    let req_same = ConversationRequest {
+        items: same.clone(),
+        model: Some("claude-opus-4-6".to_string()),
+        ..Default::default()
+    };
+    let body_same = serde_json::to_value(build_messages_request(&req_same)).unwrap();
+
+    // Different model: the signature cannot be verified, so it is dropped.
+    let req_other = ConversationRequest {
+        items: conversation_with_origin("claude-opus-4-6"),
+        model: Some("grok-4-fast".to_string()),
+        ..Default::default()
+    };
+    let body_other = serde_json::to_value(build_messages_request(&req_other)).unwrap();
+
+    let thinking_blocks = |body: &serde_json::Value| -> usize {
+        body["messages"]
+            .as_array()
+            .map(|msgs| {
+                msgs.iter()
+                    .filter_map(|m| m["content"].as_array())
+                    .flatten()
+                    .filter(|b| b["type"] == "thinking")
+                    .count()
+            })
+            .unwrap_or(0)
+    };
+
+    assert!(
+        thinking_blocks(&body_same) > thinking_blocks(&body_other),
+        "the originating model must be able to replay its signed thinking while a \
+         different model cannot — this is what reading model_id decides.\n\
+         same-model thinking blocks: {}\nother-model thinking blocks: {}\n\
+         same: {body_same:#}\nother: {body_other:#}",
+        thinking_blocks(&body_same),
+        thinking_blocks(&body_other),
+    );
+}

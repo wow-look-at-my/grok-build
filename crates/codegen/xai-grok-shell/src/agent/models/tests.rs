@@ -2013,6 +2013,7 @@ fn make_entry_config_with_id(
         compaction_at_tokens: None,
         show_model_fingerprint: false,
         stream_tool_calls: None,
+        strict_message_schema: false,
         laziness_detector: config::LazinessDetectorPerModelConfig::default(),
         pricing: xai_grok_sampling_types::ModelPricing::default(),
         min_output_tokens_per_sec: None,

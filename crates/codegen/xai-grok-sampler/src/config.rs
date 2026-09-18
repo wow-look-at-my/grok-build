@@ -9,7 +9,8 @@
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use xai_grok_sampling_types::{
-    ApiBackend, CompactionAtTokens, CompactionsRemaining, DoomLoopRecoveryPolicy, ReasoningEffort,
+    ApiBackend, ChatMessageProfile, CompactionAtTokens, CompactionsRemaining,
+    DoomLoopRecoveryPolicy, ReasoningEffort,
 };
 
 use crate::attribution::SharedAttributionCallback;
@@ -86,6 +87,15 @@ pub struct SamplerConfig {
 
     // Reasoning effort
     pub reasoning_effort: Option<ReasoningEffort>,
+
+    /// Which optional message properties this target's Chat Completions schema
+    /// accepts. [`ChatMessageProfile::PERMISSIVE`] (the default) sends
+    /// `model_id`/`reasoning_content` on replayed assistant messages;
+    /// [`ChatMessageProfile::STRICT`] omits them for providers that validate
+    /// message schemas strictly. Set from the per-model
+    /// `strict_message_schema` config flag.
+    #[serde(default)]
+    pub chat_message_profile: ChatMessageProfile,
 
     // Client identity
     pub origin_client: Option<OriginClientInfo>,
@@ -169,6 +179,7 @@ impl Default for SamplerConfig {
             stream_tool_calls: false,
             idle_timeout_secs: None,
             reasoning_effort: None,
+            chat_message_profile: ChatMessageProfile::PERMISSIVE,
             origin_client: None,
             client_identifier: None,
             deployment_id: None,

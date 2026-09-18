@@ -170,6 +170,12 @@ pub enum RetryDecision {
     /// 400). The wire builders then emit a supported non-disabled effort.
     RetryWithReasoningEffortRemap,
 
+    /// Retry after dropping the message-level properties a strict-schema
+    /// provider rejected (`wrong_api_format ... is unsupported`). Narrowing
+    /// the request's [`ChatMessageProfile`] makes the wire conversion omit
+    /// them, so the retry body carries only properties the target defines.
+    RetryWithMessagePropertyStrip,
+
     /// Retry after rebuilding the HTTP client with HTTP/1.1 (transport
     /// error, first retry only).
     RetryWithClientRebuild { backoff: Duration },
@@ -247,6 +253,18 @@ pub fn classify_error(
     // status-code arms below, which would otherwise call this 400 fatal.
     if err.is_reasoning_mandatory_error() {
         return RetryDecision::RetryWithReasoningEffortRemap;
+    }
+
+    // The provider's schema rejected a message-level property it does not
+    // define (`wrong_api_format ... is unsupported`, e.g. Cerebras rejecting
+    // `model_id`/`reasoning_content` on replayed assistant messages). The
+    // offending property lives in conversation *history*, so re-sending the
+    // same body fails identically on every turn and every retry — without
+    // this arm, a 400 here would be Fatal and permanently brick the session.
+    // Recovery is to omit the named properties from the serialized body and
+    // retry once.
+    if err.is_unsupported_message_property_error() {
+        return RetryDecision::RetryWithMessagePropertyStrip;
     }
 
     // Shared retry vetoes (`SamplingError::is_retry_vetoed`, also used by
@@ -716,6 +734,75 @@ mod tests {
                 RetryDecision::RetryWithReasoningEffortRemap
             ),
             "a 5xx with the same text must not take the reasoning-mandatory remap arm"
+        );
+    }
+
+    /// The server's "don't retry" hint is about the request it saw; dropping
+    /// the offending properties makes a different request, so the strip must
+    /// outrank the veto — otherwise a strict-schema provider's 400 with
+    /// `x-should-retry: false` would dead-end a recoverable session.
+    #[test]
+    fn classify_unsupported_message_property_outranks_should_retry_veto() {
+        let err = SamplingError::Api {
+            status: StatusCode::BAD_REQUEST,
+            message: "wrong_api_format: messages.6.assistant.model_id: property \
+                 'messages.6.assistant.model_id' is unsupported"
+                .to_string(),
+            model_metadata: None,
+            retry_after_secs: None,
+            should_retry: Some(false),
+        };
+        assert!(matches!(
+            classify_error(&err, 0, 5, RATE_LIMIT_RETRY_THRESHOLD),
+            RetryDecision::RetryWithMessagePropertyStrip
+        ));
+    }
+
+    /// The Cerebras shape must take the strip arm rather than the generic
+    /// fatal path — this is the arm that un-bricks a session whose stored
+    /// history predates the fix.
+    #[test]
+    fn classify_unsupported_message_property_400_strips() {
+        let err = api_err(
+            StatusCode::BAD_REQUEST,
+            "wrong_api_format: messages.6.assistant.model_id: property \
+             'messages.6.assistant.model_id' is unsupported\n\
+             messages.6.assistant.reasoning_content: property \
+             'messages.6.assistant.reasoning_content' is unsupported",
+        );
+        assert!(matches!(
+            classify_error(&err, 0, 5, RATE_LIMIT_RETRY_THRESHOLD),
+            RetryDecision::RetryWithMessagePropertyStrip
+        ));
+    }
+
+    /// A bare 400 that names nothing unsupported must stay fatal: stripping
+    /// fields cannot fix an unrelated malformed request, and silently
+    /// rewriting the body would hide the real bug.
+    #[test]
+    fn classify_plain_400_stays_fatal() {
+        let err = api_err(StatusCode::BAD_REQUEST, "malformed tool call in history");
+        assert!(matches!(
+            classify_error(&err, 0, 5, RATE_LIMIT_RETRY_THRESHOLD),
+            RetryDecision::Fatal(_)
+        ));
+    }
+
+    /// Like the other content-recovery arms, this one must not fire on a 5xx
+    /// whose text happens to match.
+    #[test]
+    fn classify_unsupported_message_property_requires_a_400() {
+        let err = api_err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "wrong_api_format: messages.0.assistant.model_id: property \
+             'messages.0.assistant.model_id' is unsupported",
+        );
+        assert!(
+            !matches!(
+                classify_error(&err, 0, 5, RATE_LIMIT_RETRY_THRESHOLD),
+                RetryDecision::RetryWithMessagePropertyStrip
+            ),
+            "a 5xx with the same text must not take the strip arm"
         );
     }
 

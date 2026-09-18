@@ -69,7 +69,30 @@ impl From<ChatRequestMessage> for ConversationItem {
 /// carries `reasoning_content` on the *following* assistant message, which a
 /// single item cannot see, so use [`conversation_to_chat_messages`] instead
 /// when reasoning must survive.
+///
+/// Permissive profile: both `model_id` and `reasoning_content` are emitted,
+/// which is what this crate sent before profiles existed. Use
+/// [`conversation_item_to_chat_message_with_profile`] to target a
+/// strict-schema provider.
 pub fn conversation_item_to_chat_message(item: ConversationItem) -> ChatRequestMessage {
+    conversation_item_to_chat_message_with_profile(item, ChatMessageProfile::PERMISSIVE)
+}
+
+/// [`conversation_item_to_chat_message`], but consulting `profile` for the
+/// optional message properties the target's schema accepts.
+///
+/// A suppressed property is set to `None`, which its `skip_serializing_if`
+/// omits from the JSON entirely — the property must be *absent*, not null or
+/// empty, because a strict-schema provider rejects on presence.
+///
+/// Only the serialized wire body is affected. The caller's stored
+/// conversation is untouched: `AssistantItem::model_id` still round-trips to
+/// disk and the Messages backend still reads it for thinking-signature
+/// handling.
+pub fn conversation_item_to_chat_message_with_profile(
+    item: ConversationItem,
+    profile: ChatMessageProfile,
+) -> ChatRequestMessage {
     match item {
         ConversationItem::System(s) => ChatRequestMessage::system(s.content.as_ref()),
         ConversationItem::User(u) => {
@@ -135,7 +158,11 @@ pub fn conversation_item_to_chat_message(item: ConversationItem) -> ChatRequestM
                 name: None,
                 tool_calls,
                 tool_call_id: None,
-                model_id: a.model_id,
+                model_id: if profile.accepts_model_id {
+                    a.model_id
+                } else {
+                    None
+                },
                 reasoning_content: None,
             }
         }
@@ -190,7 +217,24 @@ pub fn conversation_item_to_chat_message(item: ConversationItem) -> ChatRequestM
 /// `reasoning_content` of the following `Assistant`; a `BackendToolCall` in
 /// between does not break the fold, any other item clears it, and reasoning
 /// with no following assistant is dropped.
+///
+/// Permissive profile — see [`conversation_to_chat_messages_with_profile`].
 pub fn conversation_to_chat_messages(items: Vec<ConversationItem>) -> Vec<ChatRequestMessage> {
+    conversation_to_chat_messages_with_profile(items, ChatMessageProfile::PERMISSIVE)
+}
+
+/// [`conversation_to_chat_messages`], consulting `profile` for which optional
+/// message properties the target's Chat Completions schema accepts.
+///
+/// The reasoning fold runs identically for every profile: suppression happens
+/// *after* the fold, on the serialized message only. So a strict target
+/// receives the same conversation structure with `model_id` and/or
+/// `reasoning_content` absent, while a tolerant target and the Messages
+/// backend keep both values.
+pub fn conversation_to_chat_messages_with_profile(
+    items: Vec<ConversationItem>,
+    profile: ChatMessageProfile,
+) -> Vec<ChatRequestMessage> {
     let mut out: Vec<ChatRequestMessage> = Vec::with_capacity(items.len());
     let mut pending_reasoning: Vec<String> = Vec::new();
 
@@ -203,9 +247,15 @@ pub fn conversation_to_chat_messages(items: Vec<ConversationItem>) -> Vec<ChatRe
                 }
             }
             ConversationItem::Assistant(_) => {
-                let mut msg = conversation_item_to_chat_message(item);
+                let mut msg = conversation_item_to_chat_message_with_profile(item, profile);
                 if !pending_reasoning.is_empty() {
-                    msg.reasoning_content = Some(pending_reasoning.join("\n"));
+                    // Fold first, then let the profile decide whether the
+                    // target sees it: the fold itself is provider-agnostic.
+                    msg.reasoning_content = if profile.accepts_reasoning_content {
+                        Some(pending_reasoning.join("\n"))
+                    } else {
+                        None
+                    };
                     pending_reasoning.clear();
                 }
                 out.push(msg);
@@ -213,11 +263,15 @@ pub fn conversation_to_chat_messages(items: Vec<ConversationItem>) -> Vec<ChatRe
             ConversationItem::BackendToolCall(_) => {
                 // Keep `pending_reasoning` so it still folds onto the
                 // following assistant, as the Responses path does.
-                out.push(conversation_item_to_chat_message(item));
+                out.push(conversation_item_to_chat_message_with_profile(
+                    item, profile,
+                ));
             }
             other => {
                 pending_reasoning.clear();
-                out.push(conversation_item_to_chat_message(other));
+                out.push(conversation_item_to_chat_message_with_profile(
+                    other, profile,
+                ));
             }
         }
     }
@@ -254,7 +308,8 @@ impl From<ChatResponseMessage> for ConversationItem {
 
 impl From<ConversationRequest> for ChatCompletionRequest {
     fn from(req: ConversationRequest) -> Self {
-        let messages: Vec<ChatRequestMessage> = conversation_to_chat_messages(req.items);
+        let messages: Vec<ChatRequestMessage> =
+            conversation_to_chat_messages_with_profile(req.items, req.chat_message_profile);
 
         let tools_is_empty = req.tools.is_empty();
         let tools: Option<Vec<ToolDefinition>> = if tools_is_empty {

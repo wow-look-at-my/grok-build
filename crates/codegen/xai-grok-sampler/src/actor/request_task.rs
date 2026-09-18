@@ -491,6 +491,33 @@ async fn apply_retry_decision(
             emit_retrying(event_tx, request_id, *retry_count, max_retries, err);
             true
         }
+        RetryDecision::RetryWithMessagePropertyStrip => {
+            // The provider's message schema rejected a property it does not
+            // define. Narrow the request's profile so the wire conversion
+            // omits exactly what the provider named; that value lives in
+            // conversation history, so this is the only way past it short of
+            // a new session.
+            let stripped = request.strip_unsupported_message_properties(
+                err.names_unsupported_model_id(),
+                err.names_unsupported_reasoning_content(),
+            );
+            if !stripped {
+                // Already as narrow as this recovery can make it; the property
+                // must be something else, so re-sending would fail identically.
+                emit_failed(event_tx, request_id, err);
+                send_completion(completion_tx, Err(clone_error(err)));
+                return false;
+            }
+            tracing::warn!(
+                model = %config.model,
+                reason = %err,
+                profile = ?request.chat_message_profile,
+                "provider rejected unsupported message properties; omitting them for retry"
+            );
+            *retry_count += 1;
+            emit_retrying(event_tx, request_id, *retry_count, max_retries, err);
+            true
+        }
         RetryDecision::RetryWithReasoningEffortRemap => {
             // The provider mandates reasoning for this target. Mark it on the
             // request so the wire builders remap a disabled/omitted requested
@@ -1247,6 +1274,7 @@ mod tests {
         let config = SamplerConfig {
             base_url: "http://localhost".into(),
             model: "test-model".into(),
+            chat_message_profile: xai_grok_sampling_types::ChatMessageProfile::PERMISSIVE,
             ..Default::default()
         };
         let mut client = SamplingClient::new(config.clone()).expect("test client");

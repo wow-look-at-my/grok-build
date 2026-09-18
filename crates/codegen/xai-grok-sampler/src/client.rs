@@ -523,6 +523,9 @@ struct ClientDefaults {
     auth_scheme: AuthScheme,
     stream_tool_calls: bool,
     doom_loop_recovery: Option<xai_grok_sampling_types::DoomLoopRecoveryPolicy>,
+    /// Per-model message-schema profile, applied to every conversation request
+    /// this client sends (see [`Self::apply_conversation_defaults`]).
+    chat_message_profile: xai_grok_sampling_types::ChatMessageProfile,
 }
 
 /// Endpoint URL builder, resolved once at client construction so each request
@@ -831,6 +834,7 @@ impl SamplingClient {
             auth_scheme: config.auth_scheme,
             stream_tool_calls: config.stream_tool_calls,
             doom_loop_recovery: config.doom_loop_recovery,
+            chat_message_profile: config.chat_message_profile,
         };
 
         let endpoint = EndpointTemplate::new(&config.base_url, &config.query_params);
@@ -2020,6 +2024,16 @@ impl SamplingClient {
             request.max_output_tokens = self.defaults.max_completion_tokens;
         }
 
+        // The per-model config is authoritative for the message schema, and
+        // narrows (never widens) whatever the caller asked for. A request
+        // carrying an already-narrowed profile — e.g. set by the strict-schema
+        // recovery after a 400 — therefore keeps it, while a model configured
+        // strict strips the properties even when the caller left the
+        // permissive default in place.
+        request.chat_message_profile = request
+            .chat_message_profile
+            .narrowed_by(self.defaults.chat_message_profile);
+
         // The provider counts the requested output against the same window as
         // the prompt, so the default applied just above is not free: on a large
         // conversation it is what carries the request past the window. Every
@@ -2456,6 +2470,7 @@ mod tests {
             context_window: 8192,
             force_http1: false,
             max_retries: None,
+            chat_message_profile: xai_grok_sampling_types::ChatMessageProfile::PERMISSIVE,
             stream_tool_calls: false,
             idle_timeout_secs: None,
             reasoning_effort: None,
