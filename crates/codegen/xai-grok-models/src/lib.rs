@@ -4,6 +4,10 @@
 //! At runtime each model is resolved via:
 //!   CLI flag > ENV var > config.toml > remote settings > these defaults
 
+pub mod slots;
+
+pub use slots::{HARNESS_MODEL_SLOTS, ModelSlot, SlotFallback, slot_by_id, slot_for_setting_key};
+
 use std::sync::LazyLock;
 
 /// The raw JSON, embedded at compile time. Re-exported through the

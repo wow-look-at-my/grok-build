@@ -1022,8 +1022,17 @@ impl SessionActor {
             return Err(acp::Error::internal_error()
                 .data("Compaction failed: no system message in simplified conversation"));
         }
-        let sampling_config = self.reconstruct_full_config().await;
-        let sampling_client = self.prepare_chat_completion(false).await?;
+        // A pinned `[models] compaction` brings its own client AND config:
+        // the backend and the window belong to the model, not to the
+        // session. An unpinned slot keeps both as they were.
+        let (sampling_client, sampling_config) = match self.resolve_slot_sampler("compaction").await
+        {
+            Some((client, cfg)) => (client, cfg),
+            None => (
+                self.prepare_chat_completion(false).await?,
+                self.reconstruct_full_config().await,
+            ),
+        };
         let backend_search_active = self.backend_search_active();
         let effective_tool_defs: Vec<xai_grok_sampling_types::ToolDefinition> = self
             .prepare_tool_definitions()
@@ -1042,9 +1051,9 @@ impl SessionActor {
         tracing::info!(
             num_tools = compaction_tools.len(),
             tool_tokens = compaction_tool_tokens,
-            "Running compact with model '{}' (user model: '{}')",
+            "Running compact with model '{}' (slot pinned: {})",
             &sampling_config.model,
-            &sampling_config.model
+            self.harness_models.get("compaction").is_some()
         );
         let mut last_error: Option<acp::Error> = None;
         let mut last_failure_outcome = CompactionOutcome::Failed;

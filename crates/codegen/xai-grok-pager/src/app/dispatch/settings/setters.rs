@@ -1999,9 +1999,98 @@ pub(in crate::app::dispatch) fn clear_fork_secondary_model(app: &mut AppView) ->
     }]
 }
 
-// `web_search_model`, `session_summary_model`, and
-// `default_reasoning_effort` setters were removed alongside their
-// registry entries. Mirror fields and TOML schema stay for compat.
+// `web_search_model`, `session_summary_model` and
+// `default_reasoning_effort` lost their own setters when their registry
+// entries went. Their mirror fields and TOML schema stay for compat.
+
+/// State-only mutation for one harness model slot. An empty `model_id`
+/// removes the entry, which is what the modal reads as "(no override)".
+pub(super) fn set_harness_model_inner(app: &mut AppView, slot_id: &str, model_id: String) {
+    if model_id.is_empty() {
+        app.current_ui.harness_models.remove(slot_id);
+    } else {
+        app.current_ui
+            .harness_models
+            .insert(slot_id.to_string(), model_id);
+    }
+}
+
+/// Outer dispatcher for `Action::SetHarnessModel`. Mirror, persist,
+/// toast. An empty `model_id` clears the slot. Idempotent.
+///
+/// A non-empty id must be in the active agent's catalog; the modal's
+/// picker only offers catalog entries, so anything else is validator
+/// skew and is refused rather than written.
+pub(in crate::app::dispatch) fn set_harness_model(
+    app: &mut AppView,
+    slot_id: &'static str,
+    model_id: String,
+) -> Vec<Effect> {
+    let Some(slot) = xai_grok_models::slot_by_id(slot_id) else {
+        tracing::error!(
+            target: "settings",
+            slot = slot_id,
+            "Action::SetHarnessModel dispatched with an unknown slot — no-op",
+        );
+        return vec![];
+    };
+    let prev = app
+        .current_ui
+        .harness_models
+        .get(slot_id)
+        .cloned()
+        .unwrap_or_default();
+    if prev == model_id {
+        return vec![];
+    }
+    let display = if model_id.is_empty() {
+        "cleared".to_string()
+    } else {
+        let ActiveView::Agent(aid) = app.active_view else {
+            tracing::error!(
+                target: "settings",
+                slot = slot_id,
+                "Action::SetHarnessModel dispatched with no active agent — no-op",
+            );
+            return vec![];
+        };
+        let id = acp::ModelId(model_id.clone().into());
+        let Some(agent) = app.agents.get(&aid) else {
+            tracing::error!(
+                target: "settings",
+                slot = slot_id,
+                "Action::SetHarnessModel: active_view::Agent points to missing agent",
+            );
+            return vec![];
+        };
+        if !agent.session.models.available.contains_key(&id) {
+            tracing::error!(
+                target: "settings",
+                slot = slot_id,
+                id = ?id,
+                "Action::SetHarnessModel dispatched with id not in catalog — \
+                 validator skew; no-op",
+            );
+            return vec![];
+        }
+        agent.session.models.display_name_for(&id)
+    };
+    set_harness_model_inner(app, slot_id, model_id.clone());
+    refresh_open_settings_modals(app);
+    tracing::info!(
+        target: "settings",
+        key = slot.setting_key(),
+        new_id = %model_id,
+        prev_id = %prev,
+        "setting changed",
+    );
+    app.show_toast(&format!("\u{2713} {}: {display}", slot.label));
+    vec![Effect::PersistSetting {
+        key: slot.setting_key(),
+        value: crate::settings::SettingValue::String(model_id),
+        rollback_value: crate::settings::SettingValue::String(prev),
+    }]
+}
 
 // ---------------------------------------------------------------------------
 // max_thoughts_width — Int-valued setting. Registry surface is `i64`;

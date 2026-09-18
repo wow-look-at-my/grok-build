@@ -729,6 +729,22 @@ pub fn current_value_for(
             }
         })),
 
+        // Harness model slots. An absent slot is "(no override)", the empty
+        // canonical. A set one persists a model id, and the DynamicEnum
+        // canonicals are catalog display names, so the snapshot resolves it.
+        key if xai_grok_models::slot_for_setting_key(key).is_some() => {
+            let slot = xai_grok_models::slot_for_setting_key(key)?;
+            Some(SettingValue::String(match ui.harness_models.get(slot.id) {
+                None => String::new(),
+                Some(id) => pager
+                    .available_models
+                    .iter()
+                    .find(|(_, mid)| mid.0.as_ref() == id.as_str())
+                    .map(|(name, _)| name.clone())
+                    .unwrap_or_else(|| id.clone()),
+            }))
+        }
+
         _ => None,
     }
 }

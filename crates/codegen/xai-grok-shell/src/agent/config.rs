@@ -585,6 +585,10 @@ pub(crate) enum GoalRoleModelChoice {
     InheritCurrent,
     /// Use this explicit pair (subject to auth/fail-open at spawn time).
     Explicit(crate::util::config::GoalRoleModel),
+    /// Use this model and keep the parent's agent type. This is what a
+    /// `[models] goal_*` slot resolves to: the slot names a model and says
+    /// nothing about the harness flavor.
+    ModelOnly(String),
 }
 /// A requirement pin from `requirements.toml`. Wins over all other sources.
 #[derive(Debug, Clone, Default)]
@@ -1057,6 +1061,50 @@ pub struct ModelsConfig {
     /// default with the catalog guard; see `ModelOverrideConfig::resolve`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prompt_suggestion: Option<String>,
+    /// Auto permission mode's tool-call classifier. `[auto_mode]
+    /// classifier_model` is the older, narrower spelling and still wins
+    /// where it is set.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub permission_classifier: Option<String>,
+    /// Idle-turn laziness classifier.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub laziness_classifier: Option<String>,
+    /// Context-window compaction summarizer.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub compaction: Option<String>,
+    /// `/resume`-style "where was I" recap.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recap: Option<String>,
+    /// Per-turn one-line summary.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub turn_summary: Option<String>,
+    /// `/btw` side note.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub side_note: Option<String>,
+    /// `/todo` capture agent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub todo_capture: Option<String>,
+    /// Long-term memory flush turn.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub memory_flush: Option<String>,
+    /// `/goal` planner role. `[goal] planner_model` carries a model plus an
+    /// agent type and wins where it is set.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub goal_planner: Option<String>,
+    /// `/goal` strategist role; `[goal] strategist_model` wins where set.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub goal_strategist: Option<String>,
+    /// Every adversarial skeptic in the goal-verification panel;
+    /// `[goal] skeptic_models` wins where set.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub goal_skeptic: Option<String>,
+    /// `/goal` closing summary role.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub goal_summarizer: Option<String>,
+    /// Model every subagent runs on unless `[subagents.models].<name>` or
+    /// the agent definition pins one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subagent_default: Option<String>,
     /// Restricts which models are user-selectable for normal chat (picker,
     /// `/model`, `-m`). Non-matching models stay in the catalog but are never
     /// shown, defaulted to, or selectable. Special/internal models (web_search,
@@ -2988,7 +3036,11 @@ impl Config {
     /// `InheritCurrent`/`Config` > `config_pair` ⇒ `Explicit`/`Config` >
     /// `remote_pair` (only with `follow_remote`) ⇒ `Explicit`/`Remote` >
     /// `InheritCurrent`/`Default`. The chosen pair is cloned only on its branch.
+    /// `slot` is the `[models]` slot that answers when no pair is set; it
+    /// names a model only, so the role keeps the parent's agent type.
     fn resolve_single_role_model(
+        &self,
+        slot: &str,
         use_current_only: bool,
         follow_remote: bool,
         config_pair: Option<&crate::util::config::GoalRoleModel>,
@@ -3008,7 +3060,10 @@ impl Config {
                 GoalRoleModelChoice::Explicit(pair.clone()),
                 ConfigSource::Remote,
             ),
-            None => Resolved::new(GoalRoleModelChoice::InheritCurrent, ConfigSource::Default),
+            None => match self.resolve_harness_model(slot) {
+                Some(m) => Resolved::new(GoalRoleModelChoice::ModelOnly(m.value), m.source),
+                None => Resolved::new(GoalRoleModelChoice::InheritCurrent, ConfigSource::Default),
+            },
         }
     }
     /// Planner role model: `[goal]` config, then remote when the user opted in.
@@ -3021,7 +3076,8 @@ impl Config {
         &self,
         use_current_only: bool,
     ) -> Resolved<GoalRoleModelChoice> {
-        Self::resolve_single_role_model(
+        self.resolve_single_role_model(
+            "goal_planner",
             use_current_only,
             self.resolve_goal_follow_remote_role_models().value,
             self.goal.planner_model.as_ref(),
@@ -3035,7 +3091,8 @@ impl Config {
         &self,
         use_current_only: bool,
     ) -> Resolved<GoalRoleModelChoice> {
-        Self::resolve_single_role_model(
+        self.resolve_single_role_model(
+            "goal_strategist",
             use_current_only,
             self.resolve_goal_follow_remote_role_models().value,
             self.goal.strategist_model.as_ref(),
@@ -3070,7 +3127,64 @@ impl Config {
             .map(|s| s.goal_skeptic_models.as_slice())
         {
             Some(pool) if !pool.is_empty() => Resolved::new(to_choices(pool), ConfigSource::Remote),
-            _ => Resolved::new(Vec::new(), ConfigSource::Default),
+            _ => match self.resolve_harness_model("goal_skeptic") {
+                Some(m) => Resolved::new(
+                    vec![GoalRoleModelChoice::ModelOnly(m.value)],
+                    ConfigSource::Config,
+                ),
+                None => Resolved::new(Vec::new(), ConfigSource::Default),
+            },
+        }
+    }
+    /// The model for one harness model slot, or `None` when the slot
+    /// inherits the session model.
+    ///
+    /// Precedence is the slot's environment variable, then `[models]
+    /// <slot>` in `config.toml`, then the slot's compiled default. A slot
+    /// whose `fallback` is `SessionModel` and which nothing sets answers
+    /// `None`, and the caller keeps the session model.
+    ///
+    /// The slot id must be one [`xai_grok_models::HARNESS_MODEL_SLOTS`]
+    /// lists. An unknown id is a programming error and answers `None`.
+    pub(crate) fn resolve_harness_model(&self, slot_id: &str) -> Option<Resolved<String>> {
+        let slot = xai_grok_models::slot_by_id(slot_id)?;
+        if let Ok(v) = std::env::var(slot.env)
+            && !v.trim().is_empty()
+        {
+            return Some(Resolved::new(v.trim().to_owned(), ConfigSource::Env));
+        }
+        if let Some(v) = self.harness_model_from_config(slot_id)
+            && !v.trim().is_empty()
+        {
+            return Some(Resolved::new(v.trim().to_owned(), ConfigSource::Config));
+        }
+        slot.compiled_default()
+            .map(|m| Resolved::new(m.to_owned(), ConfigSource::Default))
+    }
+    /// The `[models]` entry for one slot id. Kept beside
+    /// [`Self::resolve_harness_model`] so a new slot fails to compile here
+    /// until its config field exists.
+    fn harness_model_from_config(&self, slot_id: &str) -> Option<String> {
+        let m = &self.models;
+        match slot_id {
+            "web_search" => Some(m.web_search.clone()?),
+            "image_description" => m.image_description.clone(),
+            "session_summary" => m.session_summary.clone(),
+            "prompt_suggestion" => m.prompt_suggestion.clone(),
+            "permission_classifier" => m.permission_classifier.clone(),
+            "laziness_classifier" => m.laziness_classifier.clone(),
+            "compaction" => m.compaction.clone(),
+            "recap" => m.recap.clone(),
+            "turn_summary" => m.turn_summary.clone(),
+            "side_note" => m.side_note.clone(),
+            "todo_capture" => m.todo_capture.clone(),
+            "memory_flush" => m.memory_flush.clone(),
+            "goal_planner" => m.goal_planner.clone(),
+            "goal_strategist" => m.goal_strategist.clone(),
+            "goal_skeptic" => m.goal_skeptic.clone(),
+            "goal_summarizer" => m.goal_summarizer.clone(),
+            "subagent_default" => m.subagent_default.clone(),
+            _ => None,
         }
     }
     pub(crate) fn resolve_write_file(&self) -> Resolved<bool> {

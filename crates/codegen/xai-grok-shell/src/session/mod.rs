@@ -324,6 +324,7 @@ pub(crate) mod goal_stop_detector;
 pub(crate) mod goal_strategist;
 pub(crate) mod goal_summarizer;
 pub mod goal_tracker;
+pub mod harness_models;
 pub mod helpers;
 pub(crate) mod image_describe;
 pub(crate) mod image_normalize;

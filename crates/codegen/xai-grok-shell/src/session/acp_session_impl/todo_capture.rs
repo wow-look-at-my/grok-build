@@ -461,7 +461,11 @@ impl SessionActor {
             .as_ref()
             .map(|c| c.context_window.get())
             .unwrap_or(crate::remote::DEFAULT_CONTEXT_WINDOW);
-        let model = sampling_config.map(|c| c.model).unwrap_or_default();
+        let model = self
+            .harness_models
+            .get("todo_capture")
+            .map(str::to_owned)
+            .unwrap_or_else(|| sampling_config.map(|c| c.model).unwrap_or_default());
 
         let tag = self.reminder_wrapper_tag();
         let conversation = self.chat_state_handle.get_conversation().await;

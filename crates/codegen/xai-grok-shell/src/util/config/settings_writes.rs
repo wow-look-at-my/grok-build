@@ -161,6 +161,55 @@ pub async fn set_fork_secondary_model(value: String) -> Result<()> {
     .await
 }
 
+/// Persist one harness model slot into `[models]` via `update_config`.
+///
+/// An empty `value` clears the slot, and the slot goes back to what it
+/// falls back to. `slot_id` must be one
+/// [`xai_grok_models::HARNESS_MODEL_SLOTS`] lists; any other id is an
+/// error rather than a silently ignored write.
+///
+/// The caller validates the model against the catalog, the same as
+/// [`set_fork_secondary_model`].
+pub async fn set_harness_model(slot_id: &str, value: String) -> Result<()> {
+    if value.len() > MAX_DEFAULT_MODEL_LEN {
+        anyhow::bail!(
+            "model name too long ({} > {} bytes)",
+            value.len(),
+            MAX_DEFAULT_MODEL_LEN
+        );
+    }
+    if xai_grok_models::slot_by_id(slot_id).is_none() {
+        anyhow::bail!("unknown harness model slot '{slot_id}'");
+    }
+    let slot_id = slot_id.to_owned();
+    update_config(move |cfg| {
+        let value = (!value.is_empty()).then_some(value);
+        let m = &mut cfg.models;
+        match slot_id.as_str() {
+            "web_search" => m.web_search = value,
+            "image_description" => m.image_description = value,
+            "session_summary" => m.session_summary = value,
+            "prompt_suggestion" => m.prompt_suggestion = value,
+            "permission_classifier" => m.permission_classifier = value,
+            "laziness_classifier" => m.laziness_classifier = value,
+            "compaction" => m.compaction = value,
+            "recap" => m.recap = value,
+            "turn_summary" => m.turn_summary = value,
+            "side_note" => m.side_note = value,
+            "todo_capture" => m.todo_capture = value,
+            "memory_flush" => m.memory_flush = value,
+            "goal_planner" => m.goal_planner = value,
+            "goal_strategist" => m.goal_strategist = value,
+            "goal_skeptic" => m.goal_skeptic = value,
+            "goal_summarizer" => m.goal_summarizer = value,
+            "subagent_default" => m.subagent_default = value,
+            // Unreachable: the id was checked against the slot table above.
+            other => tracing::error!(slot = other, "harness model slot has no config field"),
+        }
+    })
+    .await
+}
+
 /// Bounds for [`set_max_thoughts_width`]. Mirrored from the pager's
 /// registry consts; a CI test pins the agreement.
 const MAX_THOUGHTS_WIDTH_SHELL_MIN: i64 = 40;

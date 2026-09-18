@@ -229,6 +229,10 @@ pub(crate) struct SubagentSpawnContext {
     pub available_models: indexmap::IndexMap<String, crate::agent::config::ModelEntry>,
     /// Per-subagent model ID overrides from config.toml `[subagents.models]`.
     pub subagent_model_overrides: std::collections::HashMap<String, String>,
+    /// `[models] subagent_default`: the model a subagent runs on when
+    /// neither `[subagents.models]` nor its definition pins one. `None`
+    /// inherits the parent session's model.
+    pub subagent_default_model: Option<String>,
     /// Per-subagent enable/disable toggles from config.toml `[subagents.toggle]`.
     /// Omitted agents default to enabled (`true`).
     pub subagent_toggle: std::collections::HashMap<String, bool>,
@@ -613,7 +617,9 @@ pub(crate) fn present_child_completion(
 ///   2. `AgentDefinition.model = Override(id)`, if it resolves to a known
 ///      model. Applies unconditionally.
 ///
-///   3. Inherit the parent session's actual live sampling config (from
+///   3. The `[models] subagent_default` slot, when the user set one.
+///
+///   4. Inherit the parent session's actual live sampling config (from
 ///      `ChatStateHandle`).
 ///
 /// Both explicit pins apply regardless of which model the parent is on. If a
@@ -666,6 +672,15 @@ async fn resolve_subagent_sampling_config(
             model_id,
             "agent_definition",
             "Agent definition model references unknown model, falling through to inherit",
+        )
+    {
+        return resolved;
+    }
+    if let Some(model_id) = ctx.subagent_default_model.as_deref()
+        && let Some(resolved) = try_pin(
+            model_id,
+            "subagent_default_slot",
+            "[models] subagent_default references unknown model, falling through to inherit",
         )
     {
         return resolved;

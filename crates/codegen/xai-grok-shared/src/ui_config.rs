@@ -10,6 +10,16 @@ pub struct UiConfig {
     /// Model ID to use for the secondary agent when forking.
     /// Defaults to the main default model (from default_models.json).
     pub fork_secondary_model: String,
+    /// The `[models]` harness model slots the user set, keyed by slot id
+    /// (`xai_grok_models::HARNESS_MODEL_SLOTS`). A slot the user left alone
+    /// is absent, and the settings modal shows it as "(no override)".
+    ///
+    /// This is a READ-ONLY projection of the `[models]` table for the
+    /// settings modal, not a `[ui]` key: `[models]` stays the one place a
+    /// slot is written. Hence `serde(skip)` — serializing it would put a
+    /// second copy under `[ui]` for the next reader to disagree with.
+    #[serde(skip)]
+    pub harness_models: std::collections::BTreeMap<String, String>,
     /// YOLO mode. Read by `util::config`, declared here for `serde_ignored`.
     #[serde(default)]
     pub yolo: bool,
@@ -278,6 +288,7 @@ impl Default for UiConfig {
             max_thoughts_width: DEFAULT_MAX_THOUGHTS_WIDTH,
             theme: None,
             fork_secondary_model: xai_grok_models::default_model().to_string(),
+            harness_models: std::collections::BTreeMap::new(),
             yolo: false,
             ui_theme: None,
             compact_mode: false,

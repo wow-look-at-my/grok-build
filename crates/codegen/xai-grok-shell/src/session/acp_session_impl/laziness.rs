@@ -348,6 +348,13 @@ impl SessionActor {
         let model_id_acp = self.models_manager.current_model_id();
         let model_id = model_id_acp.0.to_string();
         let cfg = self.models_manager.laziness_detector_for(&model_id);
+        // The model that answers the classifier question. The rest of this
+        // function keeps using `model_id`, the model being judged.
+        let classifier_model = self
+            .harness_models
+            .get("laziness_classifier")
+            .map(str::to_owned)
+            .unwrap_or_else(|| model_id.clone());
         let debug_mode = self.laziness_debug_log.is_some();
 
         // Classifier-fire predicate (NOT the nudge-fire predicate —
@@ -546,7 +553,12 @@ impl SessionActor {
             tools: vec![],
             hosted_tools: vec![],
             tool_choice: None,
-            model: Some(model_id.clone()),
+            // The `[models] laziness_classifier` slot, else the session
+            // model. `model_id` stays the SESSION model everywhere else in
+            // this function: the per-model enable, the nudge budget and the
+            // telemetry all describe the model being judged, not the one
+            // doing the judging.
+            model: Some(classifier_model.clone()),
             temperature: Some(0.0),
             max_output_tokens: Some(LAZINESS_MAX_OUTPUT_TOKENS),
             // Don't pass `reasoning_effort` — `grok-4.5` (and
@@ -574,7 +586,12 @@ impl SessionActor {
         // `AgentMessageChunk` → the pager UI renders mid-classifier
         // reasoning + text deltas. `conversation_collect` does NOT
         // publish on that channel, so the client sees nothing.
-        let sampling_client = match self.prepare_chat_completion(false).await {
+        let slot_sampler = self.resolve_slot_sampler("laziness_classifier").await;
+        let sampling_client = match slot_sampler.map(|(client, _)| client) {
+            Some(c) => Ok(c),
+            None => self.prepare_chat_completion(false).await,
+        };
+        let sampling_client = match sampling_client {
             Ok(c) => c,
             Err(err) => {
                 let detail = err.to_string();

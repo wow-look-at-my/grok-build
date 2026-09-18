@@ -655,6 +655,13 @@ impl SessionActor {
         crate::session::goal_role_tools::RoleToolNames,
     ) {
         let inherit = self.resolve_inherit_role_tool_names().await;
+        // A `[models]` slot names a model and no agent type, so the role
+        // keeps the parent's harness and its tool names. Only the pair
+        // form can change the toolset, so only it needs the describe probe.
+        if let crate::agent::config::GoalRoleModelChoice::ModelOnly(model) = choice {
+            let override_ = self.resolve_goal_role_model_only(role, None, model).await;
+            return (override_, inherit.clone(), inherit);
+        }
         let crate::agent::config::GoalRoleModelChoice::Explicit(pair) = choice else {
             return (
                 crate::session::goal_planner::RoleSpawnOverride::default(),
@@ -679,6 +686,46 @@ impl SessionActor {
         (override_, tool_names, inherit)
     }
 
+    /// Apply a `[models]` slot to one role: the model is checked against the
+    /// catalog and the agent type is left alone. An unknown or unauthorized
+    /// model fails open onto the session model, the same as a bad pair.
+    pub(crate) async fn resolve_goal_role_model_only(
+        &self,
+        role: &'static str,
+        skeptic_idx: Option<u32>,
+        model: &str,
+    ) -> crate::session::goal_planner::RoleSpawnOverride {
+        use crate::session::events::{Event, GoalRoleModelFailOpenReason as Reason};
+        use crate::session::goal_planner::RoleSpawnOverride;
+
+        let available_models = self.models_manager.models();
+        let fail_open = |reason: Reason| {
+            self.emit_event(Event::GoalRoleModelFailOpen {
+                role,
+                skeptic_idx,
+                reason: reason.as_const_str(),
+            });
+            RoleSpawnOverride::default()
+        };
+        let Some(entry) = crate::agent::config::find_model_by_id(&available_models, model) else {
+            return fail_open(Reason::ModelUnknown);
+        };
+        if !entry.info.user_selectable {
+            return fail_open(Reason::ModelUnauthorized);
+        }
+        self.emit_event(Event::GoalRoleModelResolved {
+            role,
+            skeptic_idx,
+            model_id: model.to_string(),
+            agent_type: String::new(),
+            source: "config",
+        });
+        RoleSpawnOverride {
+            model: Some(model.to_string()),
+            agent_type: None,
+        }
+    }
+
     pub(crate) async fn resolve_goal_role_override(
         &self,
         role: &'static str,
@@ -698,6 +745,14 @@ impl SessionActor {
         };
         use xai_grok_tools::implementations::grok_build::task::types::SubagentDescribeOutcome;
 
+        // An empty agent type is the pool's spelling of "keep the parent's
+        // harness" — what a `[models] goal_skeptic` slot resolves to. There
+        // is no toolset to probe, so it takes the model-only path.
+        if pair.agent_type.is_empty() {
+            return self
+                .resolve_goal_role_model_only(role, skeptic_idx, &pair.model)
+                .await;
+        }
         let fail_open = |reason: Reason| {
             self.emit_event(Event::GoalRoleModelFailOpen {
                 role,
