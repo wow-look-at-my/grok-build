@@ -83,7 +83,7 @@ pub(crate) fn tool_input_title(input: &ToolInput, cwd: &std::path::Path) -> Stri
         ToolInput::WaitTasks(wait) => format!(
             "Wait tasks: {} ids, mode={}",
             wait.task_ids.len(),
-            match wait.mode {
+            match &wait.mode {
                 xai_tool_types::WaitMode::WaitAny => "wait_any",
                 xai_tool_types::WaitMode::WaitAll => "wait_all",
             }

@@ -1116,7 +1116,8 @@ async fn a_streaming_tool_call_is_named_from_the_arguments_so_far() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let actor = Arc::new(read_file_streaming_actor().await);
+            let fixture = read_file_streaming_fixture().await;
+            let actor = Arc::new(fixture.actor);
             let req = RequestId::random();
             actor
                 .handle_sampling_event(SamplingEvent::StreamStarted {
@@ -1180,7 +1181,8 @@ async fn an_unreadable_streaming_call_is_left_unnamed() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let actor = Arc::new(read_file_streaming_actor().await);
+            let fixture = read_file_streaming_fixture().await;
+            let actor = Arc::new(fixture.actor);
             let req = RequestId::random();
             actor
                 .handle_sampling_event(SamplingEvent::StreamStarted {
@@ -1204,15 +1206,16 @@ async fn an_unreadable_streaming_call_is_left_unnamed() {
         })
         .await;
 }
-/// A session actor whose registry knows `read_file`, so a streaming call can
-/// actually be parsed into a typed input and named.
-async fn read_file_streaming_actor() -> SessionActor {
+/// A fixture whose registry knows `read_file`, so a streaming call can actually
+/// be parsed into a typed input and named. The whole fixture comes back: its
+/// gateway and persistence ends have to outlive the actor that sends to them.
+async fn read_file_streaming_fixture() -> ReplaySendUpdateFixture {
     use xai_grok_tools::implementations::grok_build::read_file::ReadFileTool;
     use xai_grok_tools::registry::types::ToolConfig;
     let fixture = make_replay_send_update_fixture().await;
     *fixture.actor.agent.borrow_mut() =
         test_agent_with_tools(vec![ToolConfig::for_tool::<ReadFileTool>()]).await;
-    fixture.actor
+    fixture
 }
 /// The title the actor has resolved for the call at `tool_index`, if any.
 fn streaming_title(actor: &SessionActor, tool_index: u32) -> Option<String> {

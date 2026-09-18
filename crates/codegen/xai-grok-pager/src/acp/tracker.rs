@@ -1449,7 +1449,8 @@ impl AcpUpdateTracker {
             // differently than they did before, so an absent one means keep
             // what the row already shows.
             streaming.titled |= title.is_some();
-            let summary = streaming.summary_line(streaming.titled);
+            let titled = streaming.titled;
+            let summary = streaming.summary_line(titled);
             let entry_id = streaming.entry_id;
             let Some(entry) = scrollback.get_by_id_mut(entry_id) else {
                 return false;
@@ -1490,10 +1491,11 @@ impl AcpUpdateTracker {
         };
         if let Some(delta) = arguments_delta {
             streaming.push_args(delta);
+            let summary = streaming.summary_line(streaming.titled);
             if let Some(entry) = scrollback.get_by_id_mut(entry_id)
                 && let RenderBlock::ToolCall(ToolCallBlock::Other(block)) = &mut entry.block
             {
-                block.summary = streaming.summary_line(streaming.titled);
+                block.summary = summary;
             }
         }
         self.streaming_tools.insert(tool_index, streaming);
