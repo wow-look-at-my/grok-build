@@ -61,17 +61,25 @@ pub(in crate::app::dispatch) fn dispatch_fork(
             app.show_toast("Cannot create worktree: not in a git repository");
             vec![]
         }
-        Some(worktree) => dispatch_fork_resolved(app, worktree, args.directive),
+        Some(worktree) => {
+            dispatch_fork_resolved(app, worktree, args.directive, args.include_agents)
+        }
         None => {
             if in_git_repo {
                 use crate::app::app_view::WorktreeMode;
                 match app.fork_worktree_mode {
-                    WorktreeMode::Always => dispatch_fork_resolved(app, true, args.directive),
-                    WorktreeMode::Never => dispatch_fork_resolved(app, false, args.directive),
-                    WorktreeMode::Ask => open_fork_question(app, args.directive),
+                    WorktreeMode::Always => {
+                        dispatch_fork_resolved(app, true, args.directive, args.include_agents)
+                    }
+                    WorktreeMode::Never => {
+                        dispatch_fork_resolved(app, false, args.directive, args.include_agents)
+                    }
+                    WorktreeMode::Ask => {
+                        open_fork_question(app, args.directive, args.include_agents)
+                    }
                 }
             } else {
-                dispatch_fork_resolved(app, false, args.directive)
+                dispatch_fork_resolved(app, false, args.directive, args.include_agents)
             }
         }
     }
@@ -113,7 +121,11 @@ pub(super) fn worktree_persist_options()
 /// Open the local worktree question modal on the active agent. Refuses
 /// if a question (ACP or local) is already on screen, surfacing a toast
 /// instead -- the modal-collision protocol.
-fn open_fork_question(app: &mut AppView, directive: Option<String>) -> Vec<Effect> {
+fn open_fork_question(
+    app: &mut AppView,
+    directive: Option<String>,
+    include_agents: bool,
+) -> Vec<Effect> {
     use crate::views::question_view::{LocalQuestionKind, QuestionViewState};
     use xai_grok_tools::implementations::grok_build::ask_user_question::{
         Question, QuestionOption,
@@ -156,7 +168,10 @@ fn open_fork_question(app: &mut AppView, directive: Option<String>) -> Vec<Effec
         vec![question],
         stashed,
     )
-    .with_local_kind(LocalQuestionKind::Fork { directive });
+    .with_local_kind(LocalQuestionKind::Fork {
+        directive,
+        include_agents,
+    });
     agent.question_view = Some(state);
     agent.prompt.set_text("");
     vec![]
@@ -173,6 +188,7 @@ pub(in crate::app::dispatch) fn dispatch_fork_resolved(
     app: &mut AppView,
     worktree: bool,
     directive: Option<String>,
+    include_agents: bool,
 ) -> Vec<Effect> {
     let ActiveView::Agent(parent_id) = app.active_view else {
         return vec![];
@@ -251,6 +267,7 @@ pub(in crate::app::dispatch) fn dispatch_fork_resolved(
             model_id: None,
             preferred_session_id: None,
             chat_kind: parent_chat_kind,
+            include_agents,
         }]
     } else {
         vec![Effect::ForkSession {
@@ -259,6 +276,7 @@ pub(in crate::app::dispatch) fn dispatch_fork_resolved(
             parent_cwd,
             parent_is_worktree,
             new_session_id: None,
+            include_agents,
         }]
     }
 }
@@ -383,6 +401,7 @@ pub(in crate::app::dispatch) fn dispatch_startup_fork_session(
         parent_cwd: cwd,
         parent_is_worktree,
         new_session_id,
+        include_agents: false,
     });
     effects
 }

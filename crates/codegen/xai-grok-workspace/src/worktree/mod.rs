@@ -2290,6 +2290,10 @@ pub struct ResumeSessionInWorktreeRequest {
     /// When set, the worktree is a clean checkout of this ref (dirty overlay is ignored).
     #[serde(default)]
     pub git_ref: Option<String>,
+    /// Carry the source session's still-running subagents into the forked
+    /// session (`/fork --worktree --agents`). Default `false`.
+    #[serde(default)]
+    pub include_agents: bool,
 }
 
 /// Response from `x.ai/git/worktree/resume_session`.

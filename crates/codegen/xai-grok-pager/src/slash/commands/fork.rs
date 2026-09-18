@@ -29,6 +29,10 @@ pub struct ForkArgs {
     /// `None` when the user invoked `/fork` (with or without flags) but
     /// no directive text. The new agent simply opens with no first prompt.
     pub directive: Option<String>,
+    /// `--agents`: carry the parent's still-running subagents into the fork.
+    /// Off by default -- a fork takes the main thread's conversation, and an
+    /// agent the parent is still running stays the parent's.
+    pub include_agents: bool,
 }
 
 /// Parse the raw argument string after `/fork`.
@@ -42,6 +46,7 @@ pub struct ForkArgs {
 ///
 /// Errors:
 /// - `--worktree` and `--no-worktree` cannot both appear.
+/// - a flag cannot be repeated.
 /// - `--at <turn>` returns a friendly "not supported in this version"
 ///   message: the shell already supports the underlying parameter (see
 ///   `xai_grok_shell::session::fork::ForkSessionRequest::target_prompt_index`)
@@ -49,6 +54,7 @@ pub struct ForkArgs {
 ///   the flag so users discover the deferral cleanly.
 pub fn parse_fork_args(args: &str) -> Result<ForkArgs, String> {
     let mut worktree_override: Option<bool> = None;
+    let mut include_agents = false;
     let mut rest = args.trim_start();
 
     while !rest.is_empty() {
@@ -77,6 +83,13 @@ pub fn parse_fork_args(args: &str) -> Result<ForkArgs, String> {
                 worktree_override = Some(false);
                 rest = after.trim_start();
             }
+            "--agents" => {
+                if include_agents {
+                    return Err("--agents specified twice".into());
+                }
+                include_agents = true;
+                rest = after.trim_start();
+            }
             "--at" => {
                 return Err("--at is not supported in this version".into());
             }
@@ -92,6 +105,7 @@ pub fn parse_fork_args(args: &str) -> Result<ForkArgs, String> {
     Ok(ForkArgs {
         worktree_override,
         directive,
+        include_agents,
     })
 }
 
@@ -112,7 +126,7 @@ impl SlashCommand for ForkCommand {
     }
 
     fn usage(&self) -> &str {
-        "/fork [--worktree|--no-worktree] [directive]"
+        "/fork [--worktree|--no-worktree] [--agents] [directive]"
     }
 
     fn takes_args(&self) -> bool {
@@ -218,6 +232,38 @@ mod tests {
             err.contains("twice"),
             "error should mention duplicate: {err}"
         );
+    }
+
+    #[test]
+    fn parse_without_agents_flag_leaves_agents_behind() {
+        let parsed = parse_fork_args("keep digging").expect("directive-only parse");
+        assert!(
+            !parsed.include_agents,
+            "a plain /fork must not carry running agents"
+        );
+    }
+
+    #[test]
+    fn parse_agents_flag_sets_include_agents() {
+        let parsed = parse_fork_args("--agents").expect("--agents alone parse");
+        assert!(parsed.include_agents);
+        assert_eq!(parsed.directive, None);
+        assert_eq!(parsed.worktree_override, None);
+    }
+
+    #[test]
+    fn parse_agents_flag_combines_with_worktree_and_directive() {
+        let parsed =
+            parse_fork_args("--worktree --agents keep digging").expect("combined flags parse");
+        assert_eq!(parsed.worktree_override, Some(true));
+        assert!(parsed.include_agents);
+        assert_eq!(parsed.directive.as_deref(), Some("keep digging"));
+    }
+
+    #[test]
+    fn parse_agents_repeated_returns_error() {
+        let err = parse_fork_args("--agents --agents x").expect_err("duplicate --agents must error");
+        assert!(err.contains("twice"), "error should mention duplicate: {err}");
     }
 
     #[test]

@@ -798,6 +798,8 @@ pub enum Action {
         /// When `Some`, also persist this worktree mode preference so
         /// future `/fork` invocations skip the popup.
         persist_mode: Option<crate::app::app_view::WorktreeMode>,
+        /// Whether `/fork --agents` asked for the parent's running subagents.
+        include_agents: bool,
     },
     /// Submit-path action emitted by the local `/new` worktree question
     /// modal. `worktree: true` creates the new session in a worktree;
@@ -1460,6 +1462,10 @@ pub enum Effect {
         /// One-shot `/chat` or sticky `--chat` — stamp `_meta` kind=chat on
         /// fresh create (resume uses `LoadSession.chat_kind` instead).
         chat_kind: bool,
+        /// `/fork --worktree --agents`: carry `load_session_id`'s
+        /// still-running subagents into the forked session. Off for every
+        /// path that is not a fork.
+        include_agents: bool,
     },
     /// Load (resume) an existing ACP session by ID.
     ///
@@ -2119,6 +2125,10 @@ pub enum Effect {
         /// Optional client-chosen ID for the forked session (`--session-id`
         /// with `--fork-session`).
         new_session_id: Option<String>,
+        /// `/fork --agents`: carry the parent's still-running subagents into
+        /// the fork. Off by default, so the fork opens with the main thread's
+        /// conversation and none of the parent's live agents.
+        include_agents: bool,
     },
     /// Read session display fields from local `summary.json` after load/resume:
     /// title (and `/rename` manual-ness) plus last-turn summary for the

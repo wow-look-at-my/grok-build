@@ -794,9 +794,18 @@ pub struct CopySessionOptions {
     /// model's chain-of-thought -- each fork starts with a clean slate
     /// for reasoning on the new prompt.
     pub strip_reasoning: bool,
-    /// The original workspace directory this worktree session was spawned from.
+    /// The workspace directory a worktree session was spawned from.
     /// Propagated to the forked session's `Summary::source_workspace_dir`.
     pub source_workspace_dir: Option<String>,
+    /// Whether to carry the records of subagents that were still RUNNING at
+    /// the copy point. Defaults to `false`: a fork takes the main thread's
+    /// conversation, and an agent the parent is still running keeps
+    /// reporting to the parent, so its spawn record in the child is a row
+    /// that can never resolve. `/fork --agents` sets it.
+    ///
+    /// A subagent that already finished is history the conversation refers
+    /// to; its records are copied either way.
+    pub carry_running_subagents: bool,
 }
 
 impl Default for CopySessionOptions {
@@ -820,6 +829,7 @@ impl Default for CopySessionOptions {
             inherited_prefix_len: None,
             strip_reasoning: false,
             source_workspace_dir: None,
+            carry_running_subagents: false,
         }
     }
 }
