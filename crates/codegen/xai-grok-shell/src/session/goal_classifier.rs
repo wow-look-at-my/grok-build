@@ -13,6 +13,7 @@
 #![allow(dead_code)]
 
 pub(crate) mod evidence;
+pub(crate) mod run_log;
 
 use crate::session::events::{Event, GoalClassifierFailOpenReason};
 use crate::session::goal_planner::{
@@ -76,6 +77,13 @@ pub(crate) const GOAL_CLASSIFIER_DETAILS_PATH_TEMPLATE: &str =
 /// instead of receiving the body inline in its prompt.
 pub(crate) const GOAL_CLASSIFIER_CHANGES_PATH_TEMPLATE: &str =
     "goal-classifier-{verifier_id}-{attempt}.patch";
+
+/// Template for the per-attempt run-log FILE NAME (rooted like
+/// [`GOAL_CLASSIFIER_DETAILS_PATH_TEMPLATE`]). The harness writes the
+/// implementer's tool-call ledger here and each skeptic reads it as
+/// `RUN_LOG`.
+pub(crate) const GOAL_CLASSIFIER_RUN_LOG_PATH_TEMPLATE: &str =
+    "goal-classifier-{verifier_id}-{attempt}.runlog.md";
 
 /// Wall-clock budget for the best-effort `git rev-parse HEAD` capture
 /// during goal creation. The call must NEVER block goal creation; if
@@ -296,6 +304,17 @@ pub(crate) fn format_changes_path(verifier_id: &str, attempt: u32) -> String {
     scratch_rooted(
         verifier_id,
         GOAL_CLASSIFIER_CHANGES_PATH_TEMPLATE
+            .replace("{verifier_id}", verifier_id)
+            .replace("{attempt}", &attempt.to_string()),
+    )
+}
+
+/// Substitute placeholders in `GOAL_CLASSIFIER_RUN_LOG_PATH_TEMPLATE`
+/// and root the result under the goal's scratch root.
+pub(crate) fn format_run_log_path(verifier_id: &str, attempt: u32) -> String {
+    scratch_rooted(
+        verifier_id,
+        GOAL_CLASSIFIER_RUN_LOG_PATH_TEMPLATE
             .replace("{verifier_id}", verifier_id)
             .replace("{attempt}", &attempt.to_string()),
     )
@@ -1332,7 +1351,7 @@ Your PRIMARY mandate is to actively HUNT for real bugs, issues, and gaps in the 
 - Correctness — reason over the whole input space (valid, invalid, empty, boundary, large, concurrent, adversarial) for any input that makes the code produce a wrong result; one such input is a decisive refute — state the input and expected-vs-actual. Illustrative, not exhaustive: off-by-one, wrong operator, inverted condition, wrong variable/index, null/empty dereference, unhandled error path, overflow/precision/sign, bad early-return, race.\n\
 - Completeness — fully implement the requirement, not just the happy path. Refute when edge/error cases are silently dropped, a value is hardcoded that must be dynamic, a branch returns a placeholder, or only the demo case works.\n\
 - Real tests, not theater — judge each test by whether it would catch a deliberately-broken implementation; one that still passes against a wrong implementation (asserts only on mocks/constants, sets internal state instead of using the real entry point, or has no meaningful assertion) is theater — discount it (refute if it is the only evidence for a required behavior). Injecting a fake at an environment boundary (clock, RNG, network/file/output sink) so the unit's REAL logic runs deterministically is honest dependency injection, NOT theater. A green project suite is WEAK evidence, never proof. Refute hard on tests weakened, `#[ignore]`/skipped, commented out, or whose expected values were edited to match buggy output.\n\
-- End-to-end reality — build it and exercise each behavioral criterion through the REAL entry point and observed output, judging as the USER would; driving an internal flag or helper proves the mechanism exists, NOT that the wired-up feature works. A criterion whose code is present but whose integrated behavior is wrong, unreachable, or unusable is `refuted: true`, as is anything that fails to compile, fails its tests, or errors at runtime. EXCEPTION — behavior the harness cannot drive headlessly (a UI, a browser, a game loop, a long-running interactive session): the static/structural fallback is the accepted bar (the artifact is present AND the shipped unit-level functions — e.g. physics, collision, input mapping, state transitions — are exercised against the real path); this applies EVEN IF the plan did not spell the fallback out. The fallback still includes the cheap load check: a browser-loaded script must evaluate without error in a browser-like environment (`window` defined, NO Node globals) — an unguarded `module.exports`/`require` in a `<script src>` file crashes at load (blank page) and is a decisive, headlessly-provable defect. Likewise an ES-module/import-map page with no `file:` fallback message: double-clicked from disk it is a silent black screen (CORS blocks module imports), so it must either use plain scripts or visibly tell the user to serve it. Entry-point launch: whatever the deliverable (CLI, server, library, page), it must have been LAUNCHED once on its real entry path with the cheapest runtime the environment offers — run the command, boot the server and hit an endpoint, import the library fresh, or headless-load the page (zero page errors, plus the strong primary-observable bar below; module-resolution failures only surface on a real load). Audit the implementer's captured launch evidence (transcript/screenshot) and refute when it is absent even though the environment could launch it. Present is not correct: the launch gate must assert the deliverable's PRIMARY OBSERVABLE is CORRECT, not merely present or non-empty — a CLI's actual output content (not just that it ran), a server's response body (not just HTTP 200), a library call's real return value, or for a rendered page that the render surface's drawing dimensions equal the intended/target size (a renderer that cached a stale/default size paints a near-blank surface), that the surface is SUBSTANTIALLY filled (a high painted fraction or a painted bbox ≈ the whole surface, NOT a `> 0 pixels` check), and that a driven input produces the expected visible/state change. Launch evidence proving only \"exists / non-empty / exited 0\" is INSUFFICIENT — refute and request the stronger gate (the next-round gap). If the captured evidence instead shows the LAUNCHER failing for environmental reasons (browser cannot start in the sandbox, missing system dep), or the environment can launch but cannot reliably read back the primary observable (headless pixel/WebGL readback or input injection unavailable), that honest failure capture plus the static fallback IS the accepted bar — do not keep demanding a launch or readback the environment cannot perform; refute fabricated/synthetic launch evidence, not the honest fallback. \"Cannot read back\" means the readback mechanism is unavailable or errors, NOT a readback that succeeded and returned a blank or partial buffer — that buffer IS the deliverable's output and a defect to refute. A captured launch/run FAILURE (a page error, an empty or too-short render buffer, a \"canvas buffer empty\", a wrong/empty CLI output, an error response body, a nonzero exit) is a defect, NOT flakiness — do not wave it off or let one cherry-picked success supersede it. Re-run captures that DISAGREE across attempts to consensus on the CAUSE (not a pass/fail vote), and attribute EVERY failure by the cause test below. Route by CAUSE, not frequency: an ENVIRONMENT/launcher failure (the sandbox cannot run or observe it, whether every time or only intermittently) never forces a refute — take a good capture if one run produced it, else the honest fallback above; an APP failure (the launcher ran but the deliverable was wrong, blank, or errored) refutes even when only some runs show it — the non-determinism is itself the defect, never an unverifiable environment. Do NOT refute merely because an end-to-end outcome lacks test-only scaffolding, only when a gating criterion is missed or a real defect is present.\n\
+- End-to-end reality — build it and exercise each behavioral criterion through the REAL entry point and observed output, judging as the USER would; driving an internal flag or helper proves the mechanism exists, NOT that the wired-up feature works. A criterion whose code is present but whose integrated behavior is wrong, unreachable, or unusable is `refuted: true`, as is anything that fails to compile, fails its tests, or errors at runtime. EXCEPTION — behavior the harness cannot drive headlessly (a UI, a browser, a game loop, a long-running interactive session): the static/structural fallback is the accepted bar (the artifact is present AND the shipped unit-level functions — e.g. physics, collision, input mapping, state transitions — are exercised against the real path); this applies EVEN IF the plan did not spell the fallback out. The fallback still includes the cheap load check: a browser-loaded script must evaluate without error in a browser-like environment (`window` defined, NO Node globals) — an unguarded `module.exports`/`require` in a `<script src>` file crashes at load (blank page) and is a decisive, headlessly-provable defect. Likewise an ES-module/import-map page with no `file:` fallback message: double-clicked from disk it is a silent black screen (CORS blocks module imports), so it must either use plain scripts or visibly tell the user to serve it. Entry-point launch: whatever the deliverable (CLI, server, library, page), it must have been LAUNCHED once on its real entry path with the cheapest runtime the environment offers — run the command, boot the server and hit an endpoint, import the library fresh, or headless-load the page (zero page errors, plus the strong primary-observable bar below; module-resolution failures only surface on a real load). Find that launch in RUN_LOG (the harness's record of the implementer's calls and their output; a screenshot the step named is read from where the log wrote it) and refute when no launch was made even though the environment could launch it. Present is not correct: the launch gate must assert the deliverable's PRIMARY OBSERVABLE is CORRECT, not merely present or non-empty — a CLI's actual output content (not just that it ran), a server's response body (not just HTTP 200), a library call's real return value, or for a rendered page that the render surface's drawing dimensions equal the intended/target size (a renderer that cached a stale/default size paints a near-blank surface), that the surface is SUBSTANTIALLY filled (a high painted fraction or a painted bbox ≈ the whole surface, NOT a `> 0 pixels` check), and that a driven input produces the expected visible/state change. Launch evidence proving only \"exists / non-empty / exited 0\" is INSUFFICIENT — refute and request the stronger gate (the next-round gap). If the logged run instead shows the LAUNCHER failing for environmental reasons (browser cannot start in the sandbox, missing system dep), or the environment can launch but cannot reliably read back the primary observable (headless pixel/WebGL readback or input injection unavailable), that honest failure capture plus the static fallback IS the accepted bar — do not keep demanding a launch or readback the environment cannot perform; refute fabricated/synthetic launch evidence, not the honest fallback. (A failure the implementer RAN and the log recorded is the capture; it never has to save one.) \"Cannot read back\" means the readback mechanism is unavailable or errors, NOT a readback that succeeded and returned a blank or partial buffer — that buffer IS the deliverable's output and a defect to refute. A logged launch/run FAILURE (a page error, an empty or too-short render buffer, a \"canvas buffer empty\", a wrong/empty CLI output, an error response body, a nonzero exit) is a defect, NOT flakiness — do not wave it off or let one cherry-picked success supersede it. Re-run logged runs that DISAGREE across attempts to consensus on the CAUSE (not a pass/fail vote), and attribute EVERY failure by the cause test below. Route by CAUSE, not frequency: an ENVIRONMENT/launcher failure (the sandbox cannot run or observe it, whether every time or only intermittently) never forces a refute — take a good run if the log has one, else the honest fallback above; an APP failure (the launcher ran but the deliverable was wrong, blank, or errored) refutes even when only some runs show it — the non-determinism is itself the defect, never an unverifiable environment. Do NOT refute merely because an end-to-end outcome lacks test-only scaffolding, only when a gating criterion is missed or a real defect is present.\n\
 - Code-correctness floor (applies EVEN under the End-to-end EXCEPTION above) — the static/structural fallback excuses the *runtime* proof, never a defect you can read in the source. Before accepting the fallback for ANY deliverable (domain-agnostic: CLI, service, library, data job, UI, game), READ the shipped code for the core behaviors the OBJECTIVE names or plainly implies — not only the ones the plan enumerated — and refute (cite `path:line`) when such a behavior is, in the code, absent, a no-op, dead, or wired to nothing: e.g. a handler/branch that never changes the state it exists to change, an input/event/endpoint/flag bound to no effect, a feature present only as a placeholder/stub return, or a primary flow with no reachable completion/terminal state the objective implies. This is a FLOOR for the objective's CORE purpose ONLY — do NOT extend it to polish, fidelity, extra scope, edge/error handling, or robustness the plan did not require (those remain false-refutes — never invent scope beyond the contract); the anti-ratchet rule still binds: the floor is fixed by the objective and does not rise between rounds.\n\
 - No regressions — run the pre-existing suite and inspect adjacent call sites and any changed signature / public API.\n\
 - No cheating — refute if the agent hardcoded the expected output, special-cased the test input, swallowed errors to suppress failures, deleted/disabled failing assertions, stubbed the hard part behind a TODO, or narrowed scope to dodge the requirement.\n\
@@ -1382,12 +1401,14 @@ run a command).{TOOLSET_TOOLS}\n\n\
 - Your cached reads are STALE — RE-READ the CURRENT contents of every file in \
 CHANGED_FILES (and CHANGES_FILE) before judging.\n\
 - For EACH prior gap, confirm it is GENUINELY fixed — not merely claimed, \
-papered over, hardcoded, or stubbed. AUDIT the implementer's updated tests + \
-captured evidence (CHANGED_FILES and `{IMPLEMENTER_SCRATCH}`) first; reach for \
-RUNNING the code yourself only as a cheap spot-check, and reuse the \
-implementer's captured run instead of expensive re-runs. A gap you cannot \
-confirm is fixed remains `refuted: true`. If the fix's evidence is missing, \
-refute and ask the implementer to produce it — do not build it yourself.\n\
+papered over, hardcoded, or stubbed. AUDIT the implementer's updated tests \
+(CHANGED_FILES) and RUN_LOG first. RUN_LOG is the harness's own record of every \
+tool call the implementer made this goal and what it returned; find the run \
+that covers each gap and read its output. Reach for RUNNING the code yourself \
+only as a cheap spot-check, or where the log has no run of a plan step. A gap \
+you cannot confirm is fixed remains `refuted: true`. If the fix was never RUN, \
+refute and ask the implementer to fix and run it — never to save an evidence \
+file; a file it writes about a run is not evidence.\n\
 - Check for REGRESSIONS: the changes must not break a criterion that previously \
 held, an adjacent call site, or a passing test.\n\
 - PRIOR_GAPS — the gaps the previous round told the implementer to fix:\n\n\
@@ -1401,15 +1422,16 @@ an earlier round implicitly accepted; when every prior gap is fixed and every \
 gating criterion holds, return `Not Refuted`.\n\
 - PLAN_CHANGES shows how the agent edited PLAN_FILE this run — a weakened, \
 deleted, or self-serving criterion is itself grounds for `refuted: true`.\n\
-- Cite concrete evidence per assertion (`path:line`, a captured transcript, or \
+- Cite concrete evidence per assertion (`path:line`, a RUN_LOG entry, or \
 a diff hunk). Classify any refute via `blocking` as before (`\"none\"`, \
 `\"contradiction\"`, or `\"unverifiable\"`).\n\
 {KIND_LENS}\n\
 ## Scratch dirs\n\n\
-- `{IMPLEMENTER_SCRATCH}` — the implementer's outputs / captured evidence, your \
-PRIMARY source: READ it instead of re-running; do NOT write into it.\n\
 - `{SKEPTIC_SCRATCH}` — yours, for cheap spot-checks only; when one re-runs the \
-`## Verification plan`, the literal `{SCRATCH}` placeholder resolves here.\n\n\
+`## Verification plan`, the literal `{SCRATCH}` placeholder resolves here.\n\
+- `{IMPLEMENTER_SCRATCH}` — the implementer's temp files. Read a file there \
+only when RUN_LOG points at it; a file is not proof of a run. Do NOT write \
+into it.\n\n\
 {SCRATCH_STATUS}\n\n\
 ## Output contract — STRICT\n\n\
 Do BOTH, then emit the terminal token.\n\n\
@@ -1427,7 +1449,7 @@ Write this object (fixed schema) with your file-write tool:\n\n\
 ```\n\n\
 - `findings` (array — the PRIMARY output the implementer acts on): one terse item \
 per gap. `kind` = `bug` (defect in shipped behavior) | `gap` (unmet criterion / \
-missing test or evidence) | `todo` (TODO/`#[ignore]`/stub left in). `location` = \
+missing test / a plan step never run) | `todo` (TODO/`#[ignore]`/stub left in). `location` = \
 `path:line` when code-related, else where. `detail` = one concrete line, no prose.\n\
 - `refuted` (bool): `false` only if every prior gap is confirmed fixed and no \
 regression or other criterion fails.\n\
@@ -1460,6 +1482,7 @@ fn render_verifier_prompt(
     objective: &str,
     changes_ref: evidence::ChangesRef<'_>,
     changed_files: &[String],
+    run_log: Option<&str>,
     plan_file: Option<&Path>,
     plan_changes: Option<&str>,
     final_response: &str,
@@ -1476,6 +1499,7 @@ fn render_verifier_prompt(
         objective,
         changes_ref,
         changed_files,
+        run_log,
         plan_file,
         plan_changes,
         final_response,
@@ -1515,6 +1539,7 @@ fn render_skeptic_prompt(
     objective: &str,
     changes_ref: evidence::ChangesRef<'_>,
     changed_files: &[String],
+    run_log: Option<&str>,
     plan_file: Option<&Path>,
     plan_changes: Option<&str>,
     final_response: &str,
@@ -1532,6 +1557,7 @@ fn render_skeptic_prompt(
         objective,
         changes_ref,
         changed_files,
+        run_log,
         plan_file,
         plan_changes,
         final_response,
@@ -1553,6 +1579,7 @@ fn render_skeptic_resume_prompt(
     objective: &str,
     changes_ref: evidence::ChangesRef<'_>,
     changed_files: &[String],
+    run_log: Option<&str>,
     plan_file: Option<&Path>,
     plan_changes: Option<&str>,
     final_response: &str,
@@ -1570,6 +1597,7 @@ fn render_skeptic_resume_prompt(
         objective,
         changes_ref,
         changed_files,
+        run_log,
         plan_file,
         plan_changes,
         final_response,
@@ -1728,6 +1756,7 @@ async fn run_one_skeptic(
                 inputs.objective,
                 inputs.changes_ref,
                 inputs.changed_files,
+                inputs.run_log,
                 inputs.plan_file,
                 inputs.plan_changes,
                 inputs.final_response,
@@ -1781,6 +1810,7 @@ async fn run_one_skeptic(
             inputs.objective,
             inputs.changes_ref,
             inputs.changed_files,
+            inputs.run_log,
             inputs.plan_file,
             inputs.plan_changes,
             inputs.final_response,
@@ -1830,6 +1860,8 @@ struct SkepticInputs<'a> {
     plan_changes: Option<&'a str>,
     changes_ref: evidence::ChangesRef<'a>,
     changed_files: &'a [String],
+    /// Path of the written run log, or `None` when none was written.
+    run_log: Option<&'a str>,
     verifier_id: &'a str,
     attempt: u32,
     /// Kind-specific review lens (`kind_lens`), shared by every skeptic so the
@@ -1866,10 +1898,15 @@ pub(crate) struct VerificationStageInputs<'a> {
     /// skeptics; `None` when no baseline was captured (planner-off goals or a
     /// snapshot failure).
     pub plan_baseline_file: Option<&'a Path>,
+    /// Rendered run log ([`run_log::build_run_log`]) — the harness's own
+    /// record of the implementer's tool calls and their results. The stage
+    /// writes it beside the patch and names the path as `RUN_LOG`. `None`
+    /// when the caller has no conversation to build it from.
+    pub run_log: Option<&'a str>,
     /// The goal-wide implementer scratch dir
     /// ([`super::goal_tracker::implementer_scratch_dir`]). Threaded into
-    /// every skeptic prompt so the panel knows where the implementer wrote
-    /// its build outputs / screenshots and can READ them to verify.
+    /// every skeptic prompt so the panel knows where the implementer's
+    /// temp files are; it is not evidence by itself.
     pub implementer_scratch_dir: &'a Path,
     /// Whether that implementer dir was actually created (from the goal
     /// orchestration), so the verifier prompt only claims it exists when true.
@@ -2073,6 +2110,35 @@ pub(crate) async fn run_verification_stage(
         evidence::ChangesRef::Unavailable
     };
 
+    // The run log is written once and every skeptic reads the same file.
+    // A write failure renders `RUN_LOG: (unavailable)`; the skeptic then
+    // runs the plan's steps itself (verifier prompt rule 7).
+    let run_log_raw = format_run_log_path(inputs.verifier_id, inputs.attempt);
+    let run_log_path = PathBuf::from(&run_log_raw);
+    let run_log_ref: Option<&str> = match inputs.run_log {
+        Some(body) if validate_details_path(&run_log_path).is_ok() => {
+            match write_patch_file_atomic(&run_log_path, body).await {
+                Ok(()) => Some(run_log_raw.as_str()),
+                Err(err) => {
+                    tracing::warn!(
+                        run_log_path = %run_log_raw,
+                        error = %err,
+                        "verification stage: failed to write the run log; rendering RUN_LOG as (unavailable)",
+                    );
+                    None
+                }
+            }
+        }
+        Some(_) => {
+            tracing::warn!(
+                run_log_path = %run_log_raw,
+                "verification stage: unsafe run-log path; rendering RUN_LOG as (unavailable)",
+            );
+            None
+        }
+        None => None,
+    };
+
     // Compute the plan baseline→current diff ONCE; every skeptic shares the
     // same borrowed `&str` (no per-skeptic clone). The plan is agent-authored
     // text, so sanitize it for control tokens exactly like FINAL_RESPONSE.
@@ -2117,6 +2183,7 @@ pub(crate) async fn run_verification_stage(
         plan_changes: plan_changes_sanitized.as_deref(),
         changes_ref,
         changed_files: &changed_files,
+        run_log: run_log_ref,
         verifier_id: inputs.verifier_id,
         attempt: inputs.attempt,
         kind_lens,
@@ -3762,7 +3829,7 @@ mod tests {
 
     #[test]
     fn verifier_prompt_pins_live_workspace_reframing() {
-        // Workspace + captured evidence are primary; running the code is only a
+        // Workspace + the run log are primary; running the code is only a
         // spot-check. Pin all three against a diff-only or run-code-primary revert.
         assert!(GOAL_VERIFIER_PROMPT_TEMPLATE.contains("CHANGED_FILES"));
         assert!(GOAL_VERIFIER_PROMPT_TEMPLATE.contains("current workspace"));
@@ -3774,18 +3841,75 @@ mod tests {
     fn verifier_prompt_pins_audit_not_author_reframing() {
         // Pin the audit-not-author phrases against a revert to the expensive
         // author-your-own-evidence stance.
-        assert!(
-            GOAL_VERIFIER_PROMPT_TEMPLATE.contains("AUDIT the evidence the implementer already")
-        );
+        assert!(GOAL_VERIFIER_PROMPT_TEMPLATE.contains("AUDIT what the implementer actually ran"));
         assert!(GOAL_VERIFIER_PROMPT_TEMPLATE.contains("Minimize tool"));
         assert!(GOAL_VERIFIER_PROMPT_TEMPLATE.contains("do NOT build a parallel"));
-        assert!(GOAL_VERIFIER_PROMPT_TEMPLATE.contains("do NOT fill the gap yourself"));
-        // The RESUME template must carry the same audit-not-author stance.
-        assert!(GOAL_VERIFIER_RESUME_PROMPT_TEMPLATE.contains("reuse the implementer's"));
+        assert!(GOAL_VERIFIER_PROMPT_TEMPLATE.contains("Do NOT fill the gap yourself"));
+        // The RESUME template must carry the same stance.
+        assert!(
+            GOAL_VERIFIER_RESUME_PROMPT_TEMPLATE.contains("AUDIT the implementer's updated tests")
+        );
         assert!(
             GOAL_VERIFIER_RESUME_PROMPT_TEMPLATE
-                .contains("refute and ask the implementer to produce it")
+                .contains("refute and ask the implementer to fix and run it")
         );
+    }
+
+    /// The run log is the runtime evidence in BOTH templates, and neither
+    /// template may send the verifier back to asking for saved proof files.
+    #[test]
+    fn verifier_templates_read_the_run_log_and_never_demand_evidence_files() {
+        for tmpl in [
+            GOAL_VERIFIER_PROMPT_TEMPLATE,
+            GOAL_VERIFIER_RESUME_PROMPT_TEMPLATE,
+        ] {
+            assert!(tmpl.contains("RUN_LOG"), "template must name RUN_LOG");
+            assert!(
+                tmpl.contains("a file is not proof of a run")
+                    || tmpl.contains("A file is not proof of a run"),
+                "template must say a file is not proof of a run",
+            );
+            assert!(
+                !tmpl.contains("captured evidence"),
+                "template must not send the verifier to implementer-captured evidence",
+            );
+        }
+        assert!(GOAL_VERIFIER_PROMPT_TEMPLATE.contains("PRIMARY runtime evidence"));
+        assert!(GOAL_VERIFIER_PROMPT_TEMPLATE.contains("Never ask it to save output"));
+        assert!(GOAL_VERIFIER_PROMPT_TEMPLATE.contains("do NOT ask for a saved artifact"));
+        assert!(GOAL_VERIFIER_RESUME_PROMPT_TEMPLATE.contains("never to save an evidence file"));
+        assert!(KIND_LENS_CODE_CHANGE.contains("Find that launch in RUN_LOG"));
+        assert!(!KIND_LENS_CODE_CHANGE.contains("captured launch evidence"));
+    }
+
+    /// Both implementer-facing templates tell the model the run is the
+    /// evidence, and none of them ask it to save proof files.
+    #[test]
+    fn implementer_templates_never_ask_for_proof_files() {
+        for tmpl in [
+            include_str!("templates/goal_rules.md"),
+            include_str!("templates/goal_rules_legacy.md"),
+            include_str!("templates/goal_continuation_directive.md"),
+            include_str!("templates/goal_continuation_directive_legacy.md"),
+            include_str!("templates/goal_plan_block.md"),
+        ] {
+            for banned in [
+                "captured test output",
+                "captured run output",
+                "saved evidence",
+                "durable proof",
+                "AUDITS your committed tests",
+            ] {
+                assert!(
+                    !tmpl.contains(banned),
+                    "implementer template still says {banned:?}"
+                );
+            }
+            assert!(
+                tmpl.contains("proof files"),
+                "implementer template must tell the model not to write proof files",
+            );
+        }
     }
 
     #[test]
@@ -3978,8 +4102,8 @@ mod tests {
     }
 
     /// Both verifier templates carry the two scratch slots — the skeptic's
-    /// own dir AND the implementer-scratch awareness seam — so a future edit
-    /// can't silently drop the read-implementer-outputs instruction.
+    /// own dir AND the implementer-scratch pointer (for an image a plan step
+    /// named) — so a future edit can't silently drop either.
     #[test]
     fn verifier_templates_carry_scratch_slots() {
         for tmpl in [
@@ -4265,6 +4389,7 @@ mod tests {
             &[],
             None,
             None,
+            None,
             "final",
             "/tmp/goal-verifier-details-x-1-0.md",
             "/tmp/goal-verdict-x-1-0.json",
@@ -4296,6 +4421,7 @@ mod tests {
             &[],
             None,
             None,
+            None,
             "final",
             "/tmp/goal-verifier-details-x-1-0.md",
             "/tmp/goal-verdict-x-1-0.json",
@@ -4321,6 +4447,7 @@ mod tests {
                 "obj",
                 evidence::ChangesRef::Unavailable,
                 &[],
+                None,
                 None,
                 None,
                 "final",
@@ -4374,6 +4501,7 @@ mod tests {
                 &[],
                 None,
                 None,
+                None,
                 "final",
                 "/tmp/goal-verifier-details-x-2-1.md",
                 "/tmp/goal-verdict-x-2-1.json",
@@ -4406,6 +4534,7 @@ mod tests {
             "obj",
             evidence::ChangesRef::Unavailable,
             &[],
+            None,
             None,
             None,
             "final",
@@ -4799,6 +4928,7 @@ mod tests {
             goal_created_at: 0,
             plan_file: None,
             plan_baseline_file: None,
+            run_log: None,
             implementer_scratch_dir: Path::new("/tmp/grok-goal-test/implementer"),
             scratch_dir_ready: true,
             skeptic_count,
