@@ -1,4 +1,4 @@
-use crate::acp::model_state::{EffortTokenError, ModelState};
+use crate::acp::model_state::{EffortTokenError, ModelState, UnsupportedEffortDiagnosis};
 use crate::app::agent::DeferredModelSwitch;
 use crate::app::dispatch::session::lifecycle::{DeferredSwitchOutcome, take_deferred_model_switch};
 use agent_client_protocol as acp;
@@ -22,6 +22,17 @@ fn model_with_support(id: &str, supports: bool) -> (acp::ModelId, acp::ModelInfo
     let info = acp::ModelInfo::new(id.clone(), id.0.to_string())
         .meta(meta.and_then(|v| v.as_object().cloned()));
     (id, info)
+}
+
+/// The refusal a catalogued model with no `supportsReasoningEffort` key earns.
+fn unsupported(model_id: &str, catalog_len: usize) -> EffortTokenError {
+    EffortTokenError::Unsupported(Box::new(UnsupportedEffortDiagnosis {
+        model_id: model_id.to_string(),
+        in_catalog: true,
+        catalog_len,
+        meta_state: xai_grok_shell::sampling::types::ReasoningEffortMetaState::KeyAbsent,
+        efforts_menu_len: None,
+    }))
 }
 
 fn models_with_current(supports: bool) -> ModelState {
@@ -75,7 +86,7 @@ fn effort_only_unsupported_canonical_token_is_unsupported() {
         take_deferred_model_switch(None, &models, Some("high")),
         DeferredSwitchOutcome {
             switch: None,
-            effort_error: Some(EffortTokenError::Unsupported),
+            effort_error: Some(unsupported("grok-build", 1)),
         }
     );
 }
@@ -87,7 +98,7 @@ fn effort_only_unsupported_unknown_token_is_unsupported() {
         take_deferred_model_switch(None, &models, Some("bogus")),
         DeferredSwitchOutcome {
             switch: None,
-            effort_error: Some(EffortTokenError::Unsupported),
+            effort_error: Some(unsupported("grok-build", 1)),
         }
     );
 }
@@ -183,7 +194,7 @@ fn stashed_model_keeps_model_when_unsupported() {
         out,
         DeferredSwitchOutcome {
             switch: Some(switch(plain, None)),
-            effort_error: Some(EffortTokenError::Unsupported),
+            effort_error: Some(unsupported("plain-model", 2)),
         }
     );
 }
