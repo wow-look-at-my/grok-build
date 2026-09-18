@@ -334,17 +334,38 @@ jobs:
       - name: Test xai-grok-sandbox on macOS
         run: cargo test --locked -p xai-grok-sandbox
 
-  publish-create:
+  publish:
     # Every test AND every build first: a number is only assigned to a tree that already built and passed.
     needs: [build-test, pty-e2e, test-darwin-sandbox, build-release, link-darwin]
-    name: Create buildhost release
-    runs-on: ubuntu-22.04
+    name: Publish buildhost release
+    # macOS because patching an arm64 Mach-O invalidates the ad-hoc signature `ld` left, and `codesign` is the only thing that puts one back. The linux binary is stamped here too: patching an ELF needs no Linux.
+    runs-on: macos-14
+    timeout-minutes: 30
     permissions:
       contents: read
-      id-token: write # GitHub OIDC -> buildhost; only these jobs talk to buildhost
-    outputs:
-      version: ${{ steps.rel.outputs.version }}
+      id-token: write # GitHub OIDC -> buildhost
+      artifact-metadata: write # buildhost-publish-release records what it stored on the org's linked artifacts page
+      actions: write # cache-cleanup deletes this run's binary hand-offs
     steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: wow-look-at-my/actions@cache-download#latest
+        with:
+          name: grok-linux-amd64
+          path: dist
+
+      - uses: wow-look-at-my/actions@cache-download#latest
+        with:
+          name: grok-darwin-arm64
+          path: dist
+
+      - name: Install Rust toolchain (pinned by rust-toolchain.toml)
+        run: rustup show
+
+      - name: Build the stamper
+        run: cargo build --locked --release -p xai-grok-stamp
+
+      # buildhost assigns the number here. Nothing before this point needed it, which is why every build and test already ran.
       - name: Create release
         id: rel
         uses: wow-look-at-my/buildhost/.github/actions/buildhost-create-release@master
@@ -352,55 +373,24 @@ jobs:
           server: ${{ env.BUILDHOST_SERVER }}
           project: ${{ env.BUILDHOST_PROJECT }}
 
-  publish-upload:
-    name: Stamp and upload ${{ matrix.target_os }}/${{ matrix.target_arch }} binary
-    needs: [publish-create]
-    # The darwin leg runs on a Mac because patching an arm64 Mach-O breaks the linker's ad-hoc signature, and only `codesign` puts one back.
-    runs-on: ${{ matrix.runner }}
-    permissions:
-      contents: read
-      id-token: write
-    strategy:
-      matrix:
-        include:
-          - target_os: linux
-            target_arch: amd64
-            runner: ubuntu-22.04
-          - target_os: darwin
-            target_arch: arm64
-            runner: macos-14
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-
-      - uses: wow-look-at-my/actions@cache-download#latest
-        with:
-          name: grok-${{ matrix.target_os }}-${{ matrix.target_arch }}
-          path: dist
-
-      - name: Install Rust toolchain (pinned by rust-toolchain.toml)
-        run: rustup show
-
-      # The stamper is small and has no build script, so building it here costs less than shipping it between jobs.
-      - name: Write the release number into the binary
+      # The stamper reads each slot back off disk after writing it, so a binary that did not take the number fails here.
+      - name: Write the release number into both binaries
         run: |
           set -euo pipefail
-          binary="dist/grok-${{ matrix.target_os }}-${{ matrix.target_arch }}"
-          chmod +x "$binary"
-          cargo run --locked --release -p xai-grok-stamp -- \
-            "$binary" '${{ needs.publish-create.outputs.version }}'
+          for binary in dist/grok-linux-amd64 dist/grok-darwin-arm64; do
+            chmod +x "$binary"
+            target/release/xai-grok-stamp "$binary" '${{ steps.rel.outputs.version }}'
+          done
 
-      # Patching bytes invalidates the ad-hoc signature `ld` left, and the arm64 kernel kills an unsigned-but-modified binary on exec.
       - name: Re-sign the darwin binary
-        if: matrix.target_os == 'darwin'
-        run: codesign --force --sign - "dist/grok-darwin-arm64"
+        run: codesign --force --sign - dist/grok-darwin-arm64
 
-      # The number the site lists must equal what the binary reports. Each leg runs its own architecture, so this is the real binary answering.
-      - name: Verify the binary reports the release number
+      # This runner is the arm64 Mac, so this is the darwin binary itself answering. The linux binary's own `--version` runs in build-release.
+      - name: Verify the darwin binary reports the release number
         run: |
           set -euo pipefail
-          binary="dist/grok-${{ matrix.target_os }}-${{ matrix.target_arch }}"
-          got="$("$binary" --version)"
-          want="grok ${{ needs.publish-create.outputs.version }}"
+          got="$(dist/grok-darwin-arm64 --version)"
+          want="grok ${{ steps.rel.outputs.version }}"
           echo "buildhost release: $want"
           echo "binary reports:    $got"
           case "$got" in
@@ -408,33 +398,59 @@ jobs:
             *) echo "FAIL: the binary does not report the buildhost release" ; exit 1 ;;
           esac
 
-      - name: Upload binary
-        uses: wow-look-at-my/buildhost/.github/actions/buildhost-upload-artifact@master
+      # The CLI takes a plain bearer, and buildhost accepts a GitHub OIDC token as one. Its audience is the server URL.
+      - name: Mint a buildhost bearer from GitHub OIDC
+        uses: wow-look-at-my/actions@typescript#latest
         with:
-          server: ${{ env.BUILDHOST_SERVER }}
-          project: ${{ env.BUILDHOST_PROJECT }}
-          version: ${{ needs.publish-create.outputs.version }}
-          os: ${{ matrix.target_os }}
-          arch: ${{ matrix.target_arch }}
-          path: dist/grok-${{ matrix.target_os }}-${{ matrix.target_arch }}
-          kind: binary
+          script: |
+            const server = "${{ env.BUILDHOST_SERVER }}";
+            const token = await core.getIDToken(server);
+            core.setSecret(token);
+            core.exportVariable("BUILDHOST_TOKEN", token);
 
-  publish-finalize:
-    name: Publish buildhost release
-    needs: [publish-create, publish-upload]
-    runs-on: ubuntu-22.04
-    permissions:
-      contents: read
-      id-token: write
-      artifact-metadata: write # buildhost-publish-release records what it stored on the org's linked artifacts page
-      actions: write # cache-cleanup deletes this run's binary hand-offs
-    steps:
+      - name: Install the buildhost CLI
+        run: |
+          set -euo pipefail
+          curl -fLo "$RUNNER_TEMP/buildhost" \
+            "https://dl.pazer.build/buildhost?os=darwin&arch=arm64"
+          chmod +x "$RUNNER_TEMP/buildhost"
+          "$RUNNER_TEMP/buildhost" version
+
+      # Both uploads at once. The CLI chunks a body past the edge's cap by itself, and `--draft` keeps each call from publishing the release out from under the other.
+      - name: Upload both binaries in parallel
+        run: |
+          set -euo pipefail
+          upload() {
+            "$RUNNER_TEMP/buildhost" publish \
+              --server '${{ env.BUILDHOST_SERVER }}' \
+              --token "$BUILDHOST_TOKEN" \
+              --project '${{ env.BUILDHOST_PROJECT }}' \
+              --version '${{ steps.rel.outputs.version }}' \
+              --os "$1" --arch "$2" --kind binary \
+              --artifact "dist/grok-$1-$2" \
+              --draft
+          }
+          upload linux amd64 &
+          linux=$!
+          upload darwin arm64 &
+          darwin=$!
+          # Both are waited on before either exit code is read, so one failure never leaves the other upload orphaned.
+          linux_status=0
+          darwin_status=0
+          wait "$linux" || linux_status=$?
+          wait "$darwin" || darwin_status=$?
+          echo "linux/amd64 exit $linux_status, darwin/arm64 exit $darwin_status"
+          if [ "$linux_status" -ne 0 ] || [ "$darwin_status" -ne 0 ]; then
+            echo "FAIL: an upload did not complete"
+            exit 1
+          fi
+
       - name: Publish release
         uses: wow-look-at-my/buildhost/.github/actions/buildhost-publish-release@master
         with:
           server: ${{ env.BUILDHOST_SERVER }}
           project: ${{ env.BUILDHOST_PROJECT }}
-          version: ${{ needs.publish-create.outputs.version }}
+          version: ${{ steps.rel.outputs.version }}
 
       # always(), so a failed publish still clears the run-scoped copies buildhost has now superseded.
       - name: Clean up binary hand-offs
