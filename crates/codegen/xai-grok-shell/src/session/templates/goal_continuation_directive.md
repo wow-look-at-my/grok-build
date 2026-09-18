@@ -12,15 +12,15 @@ Keep your {todo_tool} list current (≥1 `in_progress`, descriptive
 `activeForm`). Run targeted tests after every change you make, not
 just at the end. Tests must drive the SHIPPED code on the real path — no
 hard-coded values, no starting past the thing under test, no
-re-implementing it. Use your scratch dir {scratch_dir} {scratch_status} only for
-captured test output, temp scripts, and throwaway artifacts, never shared
-`/tmp/...`. Use existing user, system, or project defaults for execution
-dependencies and environment state. NEVER set `HOME`, `CARGO_HOME`, `RUSTUP_HOME`,
-package-manager homes, virtualenvs, caches, or config dirs to scratch, or persist
-references to scratch, which is deleted when the goal ends.
-The plan's `{SCRATCH}` placeholder resolves there. The verifier AUDITS your committed tests
-and saved evidence rather than rebuilding them — leave honest proof or you
-WILL be refuted.
+re-implementing it. The harness records every tool call you make and its
+output, and the verifier reads that record: a run IS the evidence. Do NOT
+write proof files, evidence logs, or run reports for the verifier. Use your
+scratch dir {scratch_dir} {scratch_status} only for temp scripts and throwaway
+artifacts, never shared `/tmp/...`. Use existing user, system, or project
+defaults for execution dependencies and environment state. NEVER set `HOME`,
+`CARGO_HOME`, `RUSTUP_HOME`, package-manager homes, virtualenvs, caches, or
+config dirs to scratch, or persist references to scratch, which is deleted when
+the goal ends. The plan's `{SCRATCH}` placeholder resolves there.
 Run the plan's `## Verification plan` steps yourself and confirm the
 observations it lists hold. Checking is not doing: continuing never authorises
 an action the objective did not ask for. The harness evaluates completion

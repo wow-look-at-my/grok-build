@@ -1347,11 +1347,18 @@ mod tests {
         assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("it is requested, so it stays here"));
     }
 
-    /// Pin the static-check fallback and the durable-evidence-to-audit contract.
+    /// Pin the static-check fallback and the run-is-the-evidence contract: a
+    /// plan step names a command and what its output shows, never a file to
+    /// save output to.
     #[test]
-    fn planner_prompt_pins_static_fallback_and_audit_evidence() {
+    fn planner_prompt_pins_static_fallback_and_recorded_runs() {
         assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("Static / structural fallback"));
-        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("the verifiers AUDIT that evidence"));
+        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("the verifiers audit"));
+        assert!(
+            GOAL_PLANNER_PROMPT_TEMPLATE.contains("the recorded runs rather than build their own")
+        );
+        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("never require saving output"));
+        assert!(!GOAL_PLANNER_PROMPT_TEMPLATE.contains("captured run output"));
     }
 
     /// Pin the outcomes-not-architecture contract: the frozen plan must not
@@ -1368,7 +1375,8 @@ mod tests {
     #[test]
     fn planner_prompt_keeps_verification_inside_the_objective() {
         assert!(
-            GOAL_PLANNER_PROMPT_TEMPLATE.contains("Verification checks the work. It never adds to it"),
+            GOAL_PLANNER_PROMPT_TEMPLATE
+                .contains("Verification checks the work. It never adds to it"),
             "a check that acts beyond the objective is new scope, not verification"
         );
     }
