@@ -658,6 +658,7 @@ fn dispatch_fork_resolved_no_worktree_emits_fork_effect() {
                 parent_cwd,
                 parent_is_worktree,
                 new_session_id: None,
+                ..
             },
         ] => {
             assert_eq!(*agent_id, AgentId(1));
