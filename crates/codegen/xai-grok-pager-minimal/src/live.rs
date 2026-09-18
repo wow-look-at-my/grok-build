@@ -566,6 +566,7 @@ fn render_minimal_status(
             buttons: None,
             has_running_execute: false,
             total_tokens: agent.context_state.as_ref().map(|c| c.used),
+            output_rate: agent.session.tracker.output_rate(),
             mcp_init_progress: minimal_api::mcp_init_progress(agent),
             is_bash_turn: agent.bash_turn,
             is_pending_user_input,
