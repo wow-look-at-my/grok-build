@@ -1024,9 +1024,67 @@ pub fn favorite_meta(meta: Option<&serde_json::Map<String, serde_json::Value>>) 
 pub fn supports_reasoning_effort_meta(
     meta: Option<&serde_json::Map<String, serde_json::Value>>,
 ) -> bool {
-    meta.and_then(|m| m.get(SUPPORTS_REASONING_EFFORT_META_KEY))
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false)
+    reasoning_effort_meta_state(meta) == ReasoningEffortMetaState::Supported
+}
+
+/// What the effort gate actually found when it read a model's ACP `meta`.
+///
+/// The gate is one key read, so every refusal below reaches the user as the same
+/// "not supported". They have different causes and different fixes, and only
+/// this distinction tells the two apart.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReasoningEffortMetaState {
+    /// `supportsReasoningEffort: true`.
+    Supported,
+    /// The model carries no `meta` object at all.
+    NoMeta,
+    /// `meta` is present and carries no `supportsReasoningEffort` key. This is
+    /// what a model the shell never flagged looks like: the writer omits the key
+    /// rather than writing `false`.
+    KeyAbsent,
+    /// `supportsReasoningEffort: false` — written by something that decided
+    /// against support, not by an omission.
+    ExplicitlyFalse,
+    /// The key holds something that is not a bool, so the gate reads it as no.
+    NotABool { found: String },
+}
+
+impl ReasoningEffortMetaState {
+    /// One clause naming what the gate read, for an error the user must debug.
+    pub fn describe(&self) -> String {
+        match self {
+            Self::Supported => format!("`{SUPPORTS_REASONING_EFFORT_META_KEY}` is true"),
+            Self::NoMeta => "the catalog entry carries no `meta` object at all".to_string(),
+            Self::KeyAbsent => format!(
+                "`meta` is present and has no `{SUPPORTS_REASONING_EFFORT_META_KEY}` key \
+                 (the shell omits the key rather than writing false)"
+            ),
+            Self::ExplicitlyFalse => {
+                format!("`meta.{SUPPORTS_REASONING_EFFORT_META_KEY}` is explicitly false")
+            }
+            Self::NotABool { found } => format!(
+                "`meta.{SUPPORTS_REASONING_EFFORT_META_KEY}` is {found}, not a bool, \
+                 so the gate reads it as false"
+            ),
+        }
+    }
+}
+
+/// Read the effort gate's input and report exactly what was there.
+pub fn reasoning_effort_meta_state(
+    meta: Option<&serde_json::Map<String, serde_json::Value>>,
+) -> ReasoningEffortMetaState {
+    let Some(meta) = meta else {
+        return ReasoningEffortMetaState::NoMeta;
+    };
+    match meta.get(SUPPORTS_REASONING_EFFORT_META_KEY) {
+        None => ReasoningEffortMetaState::KeyAbsent,
+        Some(serde_json::Value::Bool(true)) => ReasoningEffortMetaState::Supported,
+        Some(serde_json::Value::Bool(false)) => ReasoningEffortMetaState::ExplicitlyFalse,
+        Some(other) => ReasoningEffortMetaState::NotABool {
+            found: other.to_string(),
+        },
+    }
 }
 
 /// Returns `None` on type-mismatch or unknown variant (logs a warn so we don't

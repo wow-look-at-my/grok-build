@@ -673,10 +673,11 @@ async fn apply_headless_model_and_effort(
         }
         Some(token) => match models.resolve_effort_for_model(&model_id, token) {
             Ok(effort) => Some(effort),
-            Err(EffortTokenError::Unsupported) => {
+            Err(err @ EffortTokenError::Unsupported(_)) => {
                 tracing::warn!(
                     model = %model_id.0,
                     token,
+                    basis = %err.message(),
                     "--effort/--reasoning-effort: model does not support reasoning effort; ignoring"
                 );
                 None

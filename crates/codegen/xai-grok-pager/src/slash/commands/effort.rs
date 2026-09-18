@@ -3,6 +3,7 @@
 //! Thin wrapper over `Action::SwitchModel` with the session's current model
 //! id and the chosen effort (same wire path as `/model <name> <effort>`).
 
+use crate::acp::model_state::EffortTokenError;
 use crate::app::actions::Action;
 use crate::slash::command::{AppCtx, ArgItem, CommandExecCtx, CommandResult, SlashCommand};
 use crate::slash::commands::effort_levels::build_effort_arg_items;
@@ -61,6 +62,13 @@ impl SlashCommand for EffortCommand {
         };
 
         if trimmed.is_empty() {
+            // A usage line on an unflagged model hides the real answer behind a
+            // second command. Report the gate's verdict and its basis now.
+            if let Err(err @ EffortTokenError::Unsupported(_)) =
+                ctx.models.resolve_effort_for_model(&model_id, "")
+            {
+                return CommandResult::Error(err.message());
+            }
             let offered: Vec<String> = ctx
                 .models
                 .reasoning_effort_options_for(&model_id)
@@ -299,10 +307,29 @@ mod tests {
         state.current = Some(id);
         let mut ctx = dummy_exec_ctx(&state);
         let result = EffortCommand.run(&mut ctx, "high");
-        assert!(matches!(
-            result,
-            CommandResult::Error(msg) if msg.contains("does not support reasoning effort")
-        ));
+        let CommandResult::Error(msg) = result else {
+            panic!("expected Error, got {result:?}");
+        };
+        assert!(msg.contains("not flagged as supporting reasoning effort"));
+        // The refusal must name the key it read and the knob that overrides it.
+        assert!(msg.contains("supportsReasoningEffort"), "msg={msg}");
+        assert!(msg.contains("force_reasoning_effort_models"), "msg={msg}");
+    }
+
+    /// `/effort` with no argument on an unflagged model must report the gate,
+    /// not a usage line that sends the user round again to learn the same thing.
+    #[test]
+    fn non_reasoning_model_empty_args_reports_the_gate_not_usage() {
+        let mut state = ModelState::default();
+        let (id, info) = plain_model("grok-4.5", "Grok 4.5");
+        state.available.insert(id.clone(), info);
+        state.current = Some(id);
+        let mut ctx = dummy_exec_ctx(&state);
+        let CommandResult::Error(msg) = EffortCommand.run(&mut ctx, "") else {
+            panic!("expected Error");
+        };
+        assert!(msg.contains("not flagged as supporting reasoning effort"));
+        assert!(!msg.contains("Usage: /effort"), "msg={msg}");
     }
 
     #[test]

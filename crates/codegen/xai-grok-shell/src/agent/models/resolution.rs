@@ -369,6 +369,8 @@ pub(crate) fn resolve_model_catalog(
         }
     }
 
+    force_reasoning_effort_support(cfg, &mut catalog);
+
     if let Some(effort) = cfg.models.default_reasoning_effort
         && let Some(default_id) = cfg.models.default.as_deref()
         && let Some(entry) = catalog.get_mut(default_id)
@@ -387,6 +389,34 @@ pub(crate) fn resolve_model_catalog(
 
     apply_favorites(cfg, &mut catalog);
     catalog
+}
+
+/// Force the effort gate on for every model `[models].force_reasoning_effort_models`
+/// matches. This runs on the FINISHED catalog, so it is the one knob that does not
+/// need a `[model.<key>]` table name to equal the catalog key — which is what makes
+/// it usable against a server catalog that omits `supports_reasoning_effort`.
+///
+/// A forced model with no menu of its own falls back to the built-in low..xhigh
+/// menu, the same one any flagged model with no server list gets.
+pub(crate) fn force_reasoning_effort_support(
+    cfg: &config::Config,
+    catalog: &mut IndexMap<String, ModelEntry>,
+) {
+    let Ok(Some(forced)) = ModelGlobSet::compile(cfg.models.force_reasoning_effort_models.as_ref())
+    else {
+        return;
+    };
+    for (key, entry) in catalog.iter_mut() {
+        if !forced.matches(key, &entry.model) || entry.info.supports_reasoning_effort {
+            continue;
+        }
+        tracing::info!(
+            model_key = %key,
+            model = %entry.info.model,
+            "force_reasoning_effort_models: forcing supports_reasoning_effort on",
+        );
+        entry.info.supports_reasoning_effort = true;
+    }
 }
 
 /// Add a provider-qualified catalog (Codex, or an autodetected
@@ -432,6 +462,8 @@ pub(crate) fn merge_additive_catalog(
             }
         }
     }
+
+    force_reasoning_effort_support(cfg, &mut additive);
 
     if let Some(effort) = cfg.models.default_reasoning_effort
         && let Some(default_id) = cfg.models.default.as_deref()
