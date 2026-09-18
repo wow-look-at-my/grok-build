@@ -101,6 +101,10 @@ pub enum LocalQuestionKind {
         /// here so the modal can carry it across the synchronous return
         /// path back to `dispatch_fork_resolved` without a global mailbox.
         directive: Option<String>,
+        /// Whether `/fork --agents` asked for the parent's running
+        /// subagents. Carried across the modal for the same reason the
+        /// directive is.
+        include_agents: bool,
     },
     /// Modal opened by `/new` to resolve the worktree question.
     /// On submit, the selected option index is translated into an

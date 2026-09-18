@@ -46,6 +46,75 @@ fn fork_rewind_marker(session_id: &str, target_prompt_index: usize) -> SessionUp
     }))
 }
 
+fn fork_subagent_spawned(session_id: &str, subagent_id: &str) -> SessionUpdate {
+    use crate::extensions::notification::{
+        SessionNotification as XaiSessionNotification, SessionUpdate as XaiSessionUpdateType,
+    };
+    SessionUpdate::Xai(Box::new(XaiSessionNotification {
+        session_id: acp::SessionId::new(session_id),
+        update: XaiSessionUpdateType::SubagentSpawned {
+            subagent_id: subagent_id.to_string(),
+            parent_session_id: session_id.to_string(),
+            parent_prompt_id: None,
+            child_session_id: format!("child-{subagent_id}"),
+            subagent_type: "general-purpose".to_string(),
+            description: "dig".to_string(),
+            effective_context_source: None,
+            context_normalized: false,
+            capability_mode: None,
+            persona: None,
+            role: None,
+            model: None,
+            resumed_from: None,
+            workflow_run_id: None,
+        },
+        meta: None,
+    }))
+}
+
+fn fork_subagent_finished(session_id: &str, subagent_id: &str) -> SessionUpdate {
+    use crate::extensions::notification::{
+        SessionNotification as XaiSessionNotification, SessionUpdate as XaiSessionUpdateType,
+    };
+    SessionUpdate::Xai(Box::new(XaiSessionNotification {
+        session_id: acp::SessionId::new(session_id),
+        update: XaiSessionUpdateType::SubagentFinished {
+            subagent_id: subagent_id.to_string(),
+            child_session_id: format!("child-{subagent_id}"),
+            status: "completed".to_string(),
+            error: None,
+            tool_calls: 1,
+            turns: 1,
+            duration_ms: 5,
+            tokens_used: 0,
+            output: None,
+            will_wake: false,
+        },
+        meta: None,
+    }))
+}
+
+/// Every `subagent_id` in a copied `updates.jsonl`, in file order.
+fn copied_subagent_ids(adapter: &JsonlStorageAdapter, info: &Info) -> Vec<String> {
+    use crate::extensions::notification::SessionUpdate as XaiSessionUpdateType;
+    let raw = std::fs::read_to_string(adapter.updates_file(info)).unwrap();
+    raw.lines()
+        .filter(|line| !line.trim().is_empty())
+        .filter_map(|line| {
+            let update = crate::session::storage::SessionUpdateEnvelope::from_str(line).ok()?;
+            let SessionUpdate::Xai(notification) = update else {
+                return None;
+            };
+            match notification.update {
+                XaiSessionUpdateType::SubagentSpawned { subagent_id, .. }
+                | XaiSessionUpdateType::SubagentProgress { subagent_id, .. }
+                | XaiSessionUpdateType::SubagentFinished { subagent_id, .. } => Some(subagent_id),
+                _ => None,
+            }
+        })
+        .collect()
+}
+
 fn chat_user(text: &str, prompt_index: usize) -> ConversationItem {
     let mut item = ConversationItem::user(text);
     item.set_prompt_index(prompt_index);
@@ -139,6 +208,146 @@ async fn copy_session_data_fork_truncates_live_branch_inclusive() {
         .unwrap();
     assert_eq!(result.updates_copied, 2, "P0 + A0");
     assert_eq!(result.chat_messages_copied, 2, "P0 + A0 in model context");
+}
+
+/// Seed a source session whose subagent `done` finished and whose subagent
+/// `live` is still running, with one ordinary turn around them.
+async fn seed_session_with_one_live_subagent(
+    adapter: &JsonlStorageAdapter,
+    sid: &str,
+) -> Info {
+    let source_info = Info {
+        id: acp::SessionId::new(sid),
+        cwd: "/src".to_string(),
+    };
+    adapter
+        .init_session(&source_info, default_model_id())
+        .await
+        .unwrap();
+    for update in [
+        fork_user_chunk(sid, "P0", 0),
+        fork_subagent_spawned(sid, "done"),
+        fork_subagent_finished(sid, "done"),
+        fork_subagent_spawned(sid, "live"),
+        fork_agent_chunk(sid, "A0"),
+    ] {
+        adapter.append_update(&source_info, &update).await.unwrap();
+    }
+    source_info
+}
+
+/// A fork takes the main thread's conversation. An agent the parent is still
+/// running keeps reporting to the parent, so its spawn record must not reach
+/// the child: replay would open the child with a row that can never resolve.
+/// A subagent that already finished is history, and rides along.
+#[tokio::test]
+async fn copy_session_data_leaves_a_running_subagent_behind() {
+    let temp_dir = TempDir::new().unwrap();
+    let adapter = JsonlStorageAdapter::with_root(temp_dir.path().to_path_buf());
+    let source_info = seed_session_with_one_live_subagent(&adapter, "src-live-agent").await;
+
+    let target_info = Info {
+        id: acp::SessionId::new("fork-no-agents"),
+        cwd: "/src".to_string(),
+    };
+    adapter
+        .copy_session_data(&source_info, &target_info, CopySessionOptions::default())
+        .await
+        .unwrap();
+
+    assert_eq!(
+        copied_subagent_ids(&adapter, &target_info),
+        vec!["done".to_string(), "done".to_string()],
+        "only the finished subagent's spawn+finish may survive the fork"
+    );
+    let copied = std::fs::read_to_string(adapter.updates_file(&target_info)).unwrap();
+    assert!(
+        copied.contains("P0") && copied.contains("A0"),
+        "the main thread's conversation must survive intact"
+    );
+}
+
+/// `/fork --agents` is the opt-in: the running agent's records are carried
+/// over, so the child opens with the row the default leaves behind.
+#[tokio::test]
+async fn copy_session_data_carries_a_running_subagent_when_asked() {
+    let temp_dir = TempDir::new().unwrap();
+    let adapter = JsonlStorageAdapter::with_root(temp_dir.path().to_path_buf());
+    let source_info = seed_session_with_one_live_subagent(&adapter, "src-live-agent-optin").await;
+
+    let target_info = Info {
+        id: acp::SessionId::new("fork-with-agents"),
+        cwd: "/src".to_string(),
+    };
+    adapter
+        .copy_session_data(
+            &source_info,
+            &target_info,
+            CopySessionOptions {
+                carry_running_subagents: true,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        copied_subagent_ids(&adapter, &target_info),
+        vec![
+            "done".to_string(),
+            "done".to_string(),
+            "live".to_string()
+        ],
+        "--agents must carry the running subagent's spawn record"
+    );
+}
+
+/// The cut decides what counts as running: a subagent whose finish is cut
+/// away is a spawn with no finish in the child, which is exactly the row the
+/// default drops. Keying the drop on the whole source file instead would
+/// leave it.
+#[tokio::test]
+async fn copy_session_data_drops_a_subagent_whose_finish_the_cut_removes() {
+    let temp_dir = TempDir::new().unwrap();
+    let adapter = JsonlStorageAdapter::with_root(temp_dir.path().to_path_buf());
+    let sid = "src-cut-agent";
+    let source_info = Info {
+        id: acp::SessionId::new(sid),
+        cwd: "/src".to_string(),
+    };
+    adapter
+        .init_session(&source_info, default_model_id())
+        .await
+        .unwrap();
+    for update in [
+        fork_user_chunk(sid, "P0", 0),
+        fork_subagent_spawned(sid, "spans-the-cut"),
+        fork_user_chunk(sid, "P1", 1),
+        fork_subagent_finished(sid, "spans-the-cut"),
+    ] {
+        adapter.append_update(&source_info, &update).await.unwrap();
+    }
+
+    let target_info = Info {
+        id: acp::SessionId::new("fork-at-prompt-0"),
+        cwd: "/src".to_string(),
+    };
+    adapter
+        .copy_session_data(
+            &source_info,
+            &target_info,
+            CopySessionOptions {
+                target_prompt_index: Some(0),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+    assert!(
+        copied_subagent_ids(&adapter, &target_info).is_empty(),
+        "a spawn whose finish the cut removed is a running agent to the child"
+    );
 }
 
 /// Without a `target_prompt_index`, every line streams through: rewind

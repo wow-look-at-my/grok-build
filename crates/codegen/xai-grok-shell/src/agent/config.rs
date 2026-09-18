@@ -6855,6 +6855,7 @@ reasoning_effort = "low"
                 strict_message_schema: false,
                 laziness_detector: LazinessDetectorPerModelConfig::default(),
                 pricing: xai_grok_sampling_types::ModelPricing::default(),
+                min_output_tokens_per_sec: None,
             },
             api_key: api_key.map(|s| s.to_string()),
             env_key: env_key.map(EnvKeys::single),
@@ -7897,6 +7898,7 @@ reasoning_effort = "low"
             strict_message_schema: false,
             laziness_detector: LazinessDetectorPerModelConfig::default(),
             pricing: xai_grok_sampling_types::ModelPricing::default(),
+            min_output_tokens_per_sec: None,
         };
         let info = ModelInfo::from_config(&entry);
         assert!(info.use_concise);
@@ -8058,6 +8060,7 @@ reasoning_effort = "low"
             strict_message_schema: false,
             laziness_detector: LazinessDetectorPerModelConfig::default(),
             pricing: xai_grok_sampling_types::ModelPricing::default(),
+            min_output_tokens_per_sec: None,
         };
         let info = ModelInfo::from_config(&entry);
         assert_eq!(info.agent_type, "codex");
@@ -8511,6 +8514,7 @@ reasoning_effort = "low"
             strict_message_schema: false,
             laziness_detector: LazinessDetectorPerModelConfig::default(),
             pricing: xai_grok_sampling_types::ModelPricing::default(),
+            min_output_tokens_per_sec: None,
         };
         let info = ModelInfo::from_config(&entry);
         assert_eq!(info.inference_idle_timeout_secs, Some(120));
@@ -12534,6 +12538,7 @@ default = "grok-4.5"
                 strict_message_schema: false,
                 laziness_detector: LazinessDetectorPerModelConfig::default(),
                 pricing: xai_grok_sampling_types::ModelPricing::default(),
+                min_output_tokens_per_sec: None,
                 auto_compact_threshold_percent: None,
                 system_prompt_label: None,
             },

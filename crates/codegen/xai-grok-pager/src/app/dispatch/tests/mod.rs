@@ -603,6 +603,7 @@ fn fork_args(worktree_override: Option<bool>, directive: Option<&str>) -> ForkAr
     ForkArgs {
         worktree_override,
         directive: directive.map(String::from),
+        include_agents: false,
     }
 }
 /// Build a single-agent app for the `/fork` dispatcher tests.

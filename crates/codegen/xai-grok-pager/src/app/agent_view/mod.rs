@@ -1764,7 +1764,10 @@ fn translate_local_submit(
         return InputOutcome::Changed;
     };
     match kind {
-        LocalQuestionKind::Fork { directive } => {
+        LocalQuestionKind::Fork {
+            directive,
+            include_agents,
+        } => {
             let Some((worktree, persist_mode)) = worktree_choice_from_index(*idx) else {
                 return InputOutcome::Changed;
             };
@@ -1772,6 +1775,7 @@ fn translate_local_submit(
                 worktree,
                 directive,
                 persist_mode,
+                include_agents,
             })
         }
         LocalQuestionKind::NewSession => {

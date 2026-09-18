@@ -237,6 +237,7 @@ pub(crate) fn execute(
             model_id,
             preferred_session_id,
             chat_kind,
+            include_agents,
         } => {
             let tx = acp_tx.clone();
             let cwd = cwd.to_path_buf();
@@ -286,6 +287,9 @@ pub(crate) fn execute(
                         }
                         if let Some(ref r) = git_ref {
                             payload["gitRef"] = serde_json::Value::String(r.clone());
+                        }
+                        if include_agents {
+                            payload["includeAgents"] = serde_json::Value::Bool(true);
                         }
                         let ext_req = acp::ExtRequest::new(
                             "x.ai/git/worktree/resume_session",
@@ -4123,6 +4127,7 @@ pub(crate) fn execute(
             parent_cwd,
             parent_is_worktree,
             new_session_id,
+            include_agents,
         } => {
             let tx = acp_tx.clone();
             tasks
@@ -4145,6 +4150,7 @@ pub(crate) fn execute(
                         &parent_cwd,
                         new_session_id.as_deref(),
                         parent_is_worktree,
+                        include_agents,
                     );
                     let req = acp::ExtRequest::new(
                         "x.ai/session/fork",

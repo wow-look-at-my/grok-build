@@ -109,6 +109,7 @@ async fn create_test_actor(
         compactions_remaining: std::cell::Cell::new(None),
         compaction_at_tokens: std::cell::Cell::new(None),
         doom_loop_recovery: None,
+        output_rate_floor: std::cell::Cell::new(None),
         doom_loop_turn_tally: Default::default(),
         file_state_tracker: Arc::new(FileStateTracker::new()),
         rewind_pending_prompt: std::sync::Mutex::new(None),
@@ -562,6 +563,7 @@ async fn create_test_actor_with_memory(
         compactions_remaining: std::cell::Cell::new(None),
         compaction_at_tokens: std::cell::Cell::new(None),
         doom_loop_recovery: None,
+        output_rate_floor: std::cell::Cell::new(None),
         doom_loop_turn_tally: Default::default(),
         file_state_tracker: Arc::new(FileStateTracker::new()),
         rewind_pending_prompt: std::sync::Mutex::new(None),
@@ -1190,6 +1192,7 @@ fn api_error_with_message(
         empty_response_context: None,
         doom_loop_triggers: None,
         doom_loop_aborted_at_chunk: None,
+        output_rate: None,
         credential: xai_grok_sampling_types::SentCredential::Unknown,
     }
 }
@@ -1493,6 +1496,7 @@ async fn test_e2e_idle_resume_refreshes_model_metadata() {
                 compactions_remaining: std::cell::Cell::new(None),
                 compaction_at_tokens: std::cell::Cell::new(None),
                 doom_loop_recovery: None,
+                output_rate_floor: std::cell::Cell::new(None),
                 doom_loop_turn_tally: Default::default(),
                 file_state_tracker: Arc::new(FileStateTracker::new()),
                 rewind_pending_prompt: std::sync::Mutex::new(None),
@@ -1719,6 +1723,7 @@ async fn test_compact_on_error_noop_without_model_metadata() {
                 empty_response_context: None,
                 doom_loop_triggers: None,
                 doom_loop_aborted_at_chunk: None,
+                output_rate: None,
                 credential: xai_grok_sampling_types::SentCredential::Unknown,
             };
             assert!(!actor.should_compact_on_error(&err).await);

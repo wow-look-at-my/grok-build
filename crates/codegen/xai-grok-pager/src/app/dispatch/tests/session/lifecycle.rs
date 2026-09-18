@@ -3541,6 +3541,7 @@ mod welcome_workspace_mode {
                 model_id: None,
                 preferred_session_id: None,
                 chat_kind: false,
+                include_agents: false,
             }],
             true
         ));
@@ -3554,6 +3555,7 @@ mod welcome_workspace_mode {
                     model_id: None,
                     preferred_session_id: None,
                     chat_kind: false,
+                    include_agents: false,
                 }],
                 true
             ),

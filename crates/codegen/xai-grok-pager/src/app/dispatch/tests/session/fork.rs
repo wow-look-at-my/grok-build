@@ -457,6 +457,52 @@ fn dispatch_fork_no_worktree_flag_skips_modal() {
     );
 }
 
+/// The default leaves the parent's running agents behind, so the effect
+/// carries `include_agents: false` and the shell copies none of them.
+#[test]
+fn dispatch_fork_without_agents_flag_asks_the_shell_to_drop_them() {
+    let mut app = fork_test_app();
+    let effects = dispatch(Action::Fork(fork_args(Some(false), None)), &mut app);
+    match effects.as_slice() {
+        [Effect::ForkSession { include_agents, .. }] => {
+            assert!(!include_agents, "a plain /fork must not carry running agents");
+        }
+        other => panic!("expected ForkSession, got {other:?}"),
+    }
+}
+
+/// `/fork --agents` is the opt-in, and it has to survive the whole dispatch
+/// path to reach `x.ai/session/fork`.
+#[test]
+fn dispatch_fork_agents_flag_reaches_the_fork_effect() {
+    let mut app = fork_test_app();
+    let mut args = fork_args(Some(false), None);
+    args.include_agents = true;
+    let effects = dispatch(Action::Fork(args), &mut app);
+    match effects.as_slice() {
+        [Effect::ForkSession { include_agents, .. }] => {
+            assert!(include_agents, "--agents must reach the fork effect");
+        }
+        other => panic!("expected ForkSession, got {other:?}"),
+    }
+}
+
+/// The worktree fork runs through `CreateWorktreeSession`, which carries the
+/// flag on to `x.ai/git/worktree/resume_session`.
+#[test]
+fn dispatch_fork_agents_flag_reaches_the_worktree_effect() {
+    let mut app = fork_test_app();
+    let mut args = fork_args(Some(true), None);
+    args.include_agents = true;
+    let effects = dispatch(Action::Fork(args), &mut app);
+    match effects.as_slice() {
+        [Effect::CreateWorktreeSession { include_agents, .. }] => {
+            assert!(include_agents, "--agents must reach the worktree fork");
+        }
+        other => panic!("expected CreateWorktreeSession, got {other:?}"),
+    }
+}
+
 #[test]
 fn dispatch_fork_worktree_flag_non_git_toasts_and_returns_no_effect() {
     // --worktree in a non-git directory must be rejected synchronously
@@ -505,6 +551,29 @@ fn dispatch_fork_no_flag_non_git_skips_modal_and_forks_without_worktree() {
     );
 }
 
+/// The worktree modal answers on a later event loop turn, so the flag has to
+/// ride the question across it. A fork that loses it there still runs, with
+/// none of the agents.
+#[test]
+fn fork_question_modal_carries_the_agents_flag() {
+    let mut app = fork_test_app();
+    app.fork_worktree_mode = crate::app::app_view::WorktreeMode::Ask;
+    let mut args = fork_args(None, None);
+    args.include_agents = true;
+    let effects = dispatch(Action::Fork(args), &mut app);
+    assert!(effects.is_empty(), "no effects until the modal is answered");
+    let qv = app.agents[&AgentId(0)]
+        .question_view
+        .as_ref()
+        .expect("modal must be open");
+    match qv.local_kind.as_ref().expect("local_kind must be set") {
+        crate::views::question_view::LocalQuestionKind::Fork { include_agents, .. } => {
+            assert!(include_agents, "--agents must survive the modal");
+        }
+        other => panic!("expected Fork, got {other:?}"),
+    }
+}
+
 #[test]
 fn dispatch_fork_no_flag_always_opens_question_modal() {
     let mut app = fork_test_app();
@@ -521,7 +590,7 @@ fn dispatch_fork_no_flag_always_opens_question_modal() {
         .as_ref()
         .expect("modal must be open");
     match qv.local_kind.as_ref().expect("local_kind must be set") {
-        crate::views::question_view::LocalQuestionKind::Fork { directive } => {
+        crate::views::question_view::LocalQuestionKind::Fork { directive, .. } => {
             assert_eq!(directive.as_deref(), Some("debug timeout"));
         }
         other => panic!("expected Fork, got {other:?}"),
@@ -589,6 +658,7 @@ fn dispatch_fork_resolved_no_worktree_emits_fork_effect() {
                 parent_cwd,
                 parent_is_worktree,
                 new_session_id: None,
+                ..
             },
         ] => {
             assert_eq!(*agent_id, AgentId(1));
@@ -907,6 +977,7 @@ fn dispatch_fork_answered_re_dispatches_to_dispatch_fork_resolved() {
             worktree: false,
             directive: Some("answered directive".into()),
             persist_mode: None,
+            include_agents: false,
         },
         &mut app,
     );
@@ -928,6 +999,7 @@ fn dispatch_fork_answered_worktree_true_emits_create_worktree_session() {
             worktree: true,
             directive: None,
             persist_mode: None,
+            include_agents: false,
         },
         &mut app,
     );
@@ -947,6 +1019,7 @@ fn dispatch_fork_answered_worktree_false_emits_fork_session() {
             worktree: false,
             directive: None,
             persist_mode: None,
+            include_agents: false,
         },
         &mut app,
     );
@@ -996,6 +1069,7 @@ fn dispatch_fork_answered_with_persist_always_updates_mode_and_emits_effect() {
             worktree: true,
             directive: None,
             persist_mode: Some(crate::app::app_view::WorktreeMode::Always),
+            include_agents: false,
         },
         &mut app,
     );
@@ -1335,6 +1409,7 @@ fn translate_local_submit_yes_returns_worktree_true_action() {
     )
     .with_local_kind(LocalQuestionKind::Fork {
         directive: Some("d".into()),
+        include_agents: false,
     });
     // Set selection to option 0 ("Yes" in production).
     state.selections[0] = crate::views::question_view::QuestionSelection::Single(Some(0));
@@ -1345,6 +1420,7 @@ fn translate_local_submit_yes_returns_worktree_true_action() {
             worktree,
             directive,
             persist_mode,
+            ..
         }) => {
             assert!(worktree);
             assert_eq!(directive.as_deref(), Some("d"));
@@ -1378,7 +1454,10 @@ fn translate_local_submit_no_returns_worktree_false_action() {
         vec![q],
         crate::views::prompt_widget::StashedPrompt::default(),
     )
-    .with_local_kind(LocalQuestionKind::Fork { directive: None });
+    .with_local_kind(LocalQuestionKind::Fork {
+        directive: None,
+        include_agents: false,
+    });
     // Option 1 = "No" -> worktree=false.
     state.selections[0] = crate::views::question_view::QuestionSelection::Single(Some(1));
     let kind = state.local_kind.take().unwrap();
@@ -1388,6 +1467,7 @@ fn translate_local_submit_no_returns_worktree_false_action() {
             worktree,
             directive,
             persist_mode,
+            ..
         }) => {
             assert!(!worktree);
             assert!(directive.is_none());
@@ -1421,7 +1501,10 @@ fn translate_local_submit_always_returns_persist_always_for_fork() {
         vec![q],
         crate::views::prompt_widget::StashedPrompt::default(),
     )
-    .with_local_kind(LocalQuestionKind::Fork { directive: None });
+    .with_local_kind(LocalQuestionKind::Fork {
+        directive: None,
+        include_agents: false,
+    });
     state.selections[0] = crate::views::question_view::QuestionSelection::Single(Some(2));
     let kind = state.local_kind.take().unwrap();
     let outcome = crate::app::agent_view::translate_local_submit_for_test(&state, kind, false);
@@ -1465,7 +1548,10 @@ fn translate_local_submit_never_returns_persist_never_for_fork() {
         vec![q],
         crate::views::prompt_widget::StashedPrompt::default(),
     )
-    .with_local_kind(LocalQuestionKind::Fork { directive: None });
+    .with_local_kind(LocalQuestionKind::Fork {
+        directive: None,
+        include_agents: false,
+    });
     state.selections[0] = crate::views::question_view::QuestionSelection::Single(Some(3));
     let kind = state.local_kind.take().unwrap();
     let outcome = crate::app::agent_view::translate_local_submit_for_test(&state, kind, false);
@@ -1512,6 +1598,7 @@ fn handle_ask_user_question_pushes_system_block_when_displaced_local_fork_modal(
         QuestionViewState::new("local-fork".into(), vec![q], stashed).with_local_kind(
             LocalQuestionKind::Fork {
                 directive: Some("dropped".into()),
+                include_agents: false,
             },
         ),
     );

@@ -65,6 +65,7 @@ pub fn fork_session_params(
     parent_cwd: &Path,
     new_session_id: Option<&str>,
     parent_is_worktree: bool,
+    include_agents: bool,
 ) -> serde_json::Value {
     let parent_cwd_str = parent_cwd.to_string_lossy().into_owned();
     let source_cwd = xai_grok_shell::session::resolve_local_session_any_cwd(parent_session_id)
@@ -80,6 +81,9 @@ pub fn fork_session_params(
     }
     if parent_is_worktree {
         payload["sourceWorkspaceDir"] = serde_json::Value::String(parent_cwd_str);
+    }
+    if include_agents {
+        payload["includeAgents"] = serde_json::Value::Bool(true);
     }
     payload
 }
@@ -1584,7 +1588,7 @@ mod tests {
     #[test]
     fn fork_session_params_sets_new_session_id_and_workspace_dir() {
         let cwd = PathBuf::from("/wt");
-        let p = fork_session_params("parent-1", &cwd, Some("child-uuid"), true);
+        let p = fork_session_params("parent-1", &cwd, Some("child-uuid"), true, false);
         assert_eq!(p["sourceSessionId"], "parent-1");
         assert_eq!(p["newCwd"], "/wt");
         assert_eq!(p["newSessionId"], "child-uuid");
@@ -1594,9 +1598,22 @@ mod tests {
     #[test]
     fn fork_session_params_omits_workspace_dir_when_not_worktree() {
         let cwd = PathBuf::from("/proj");
-        let p = fork_session_params("parent-1", &cwd, None, false);
+        let p = fork_session_params("parent-1", &cwd, None, false, false);
         assert!(p.get("sourceWorkspaceDir").is_none());
         assert!(p.get("newSessionId").is_none());
+        assert!(
+            p.get("includeAgents").is_none(),
+            "a plain fork must not ask the shell for the parent's running agents"
+        );
+    }
+
+    /// `/fork --agents` is the only thing that puts `includeAgents` on the
+    /// wire; the shell defaults the field to false when it is absent.
+    #[test]
+    fn fork_session_params_sets_include_agents_when_asked() {
+        let cwd = PathBuf::from("/proj");
+        let p = fork_session_params("parent-1", &cwd, None, false, true);
+        assert_eq!(p["includeAgents"], true);
     }
     #[test]
     fn fork_response_parses_nested_and_top_level_id() {

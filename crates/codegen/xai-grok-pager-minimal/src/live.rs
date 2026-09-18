@@ -575,6 +575,7 @@ fn render_minimal_status(
             flat_background: true,
             held_queue: minimal_api::held_queue_count(agent),
             held_queue_top_sendable: minimal_api::held_queue_top_sendable(agent),
+            output_rate: minimal_api::output_rate(agent),
         },
     );
 }
