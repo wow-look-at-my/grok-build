@@ -6,21 +6,27 @@
 //! rename itself the moment the call completed.
 use super::tool_calls::{ci_tool_title, execute_tool_call_parts};
 use super::*;
-/// Past this many bytes of arguments a call stops being re-read for a title.
+/// How much of a call's arguments is kept to read a title out of.
 ///
 /// What names a call sits at the head of its arguments: a path, a command, a
-/// query. The rest is the body being written — a file's contents, a patch — and
-/// re-parsing megabytes of it on every fragment buys the same title back.
+/// query. The rest is the body being written — a file's contents, a patch. Once
+/// the head is full the tail is DROPPED, not just left unparsed: a session that
+/// kept it would hold a second copy of every file the model writes, for as long
+/// as the write takes.
 pub(crate) const STREAMING_TITLE_ARG_CAP: usize = 4096;
-/// What the model has written of one tool call so far.
+/// The head of what the model has written of one tool call.
 ///
 /// Held per `tool_index` for the life of a stream. The name arrives once, on
-/// the opening fragment, and the arguments accumulate under it.
+/// the opening fragment, and the arguments accumulate under it up to the cap.
 pub(crate) struct StreamingToolArgs {
     /// The wire name the opening fragment carried.
     pub(crate) name: String,
-    /// Every argument byte seen for this call.
+    /// The head of the arguments, bounded by [`STREAMING_TITLE_ARG_CAP`].
     pub(crate) args: String,
+    /// Set once a fragment has been cut. What is held is then a prefix of a
+    /// longer document, and completing a prefix that stops mid-body can name
+    /// the call something the whole document would not.
+    pub(crate) capped: bool,
     /// The last title this call resolved to. Only a change is worth sending.
     pub(crate) title: Option<String>,
 }
@@ -29,17 +35,35 @@ impl StreamingToolArgs {
         Self {
             name,
             args: String::new(),
+            capped: false,
             title: None,
         }
     }
-    /// Whether the bytes received are still worth re-reading for a title.
+    /// Take one argument fragment, keeping only what fits under the cap.
+    pub(crate) fn push(&mut self, delta: &str) {
+        let room = STREAMING_TITLE_ARG_CAP.saturating_sub(self.args.len());
+        if room == 0 {
+            // Sticky: a call that has lost bytes never becomes whole again, so
+            // a later empty fragment must not read as "nothing was cut".
+            self.capped |= !delta.is_empty();
+            return;
+        }
+        // A fragment can split a multi-byte character, so cut on a boundary.
+        let mut end = delta.len().min(room);
+        while end > 0 && !delta.is_char_boundary(end) {
+            end -= 1;
+        }
+        self.args.push_str(&delta[..end]);
+        self.capped |= end < delta.len();
+    }
+    /// Whether the bytes held are still worth re-reading for a title.
     ///
-    /// Every fragment is re-read while under the cap, including a one-character
-    /// one. A cheaper rule that waited for a few bytes would skip the LAST
-    /// fragment of a call, which is usually two characters and is exactly the
-    /// one that completes the argument the title is read from.
+    /// Every fragment is re-read until the head fills, including a
+    /// one-character one. A cheaper rule that waited for a few bytes would skip
+    /// the LAST fragment of a call, which is usually two characters and is
+    /// exactly the one that completes the argument the title is read from.
     pub(crate) fn wants_parse(&self) -> bool {
-        self.args.len() <= STREAMING_TITLE_ARG_CAP
+        !self.capped
     }
 }
 /// What the UI calls this tool call.
@@ -168,5 +192,68 @@ pub(crate) fn tool_input_title(input: &ToolInput, cwd: &std::path::Path) -> Stri
         ToolInput::Ci(ci) => ci_tool_title(ci),
         #[allow(unreachable_patterns)]
         _ => "Tool call".to_string(),
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::{STREAMING_TITLE_ARG_CAP, StreamingToolArgs};
+    /// A write streams the whole file. Holding all of it to name the call would
+    /// put a second copy of every file the model writes in this session's
+    /// memory, for as long as the write takes.
+    #[test]
+    fn a_large_body_is_dropped_rather_than_held() {
+        let mut call = StreamingToolArgs::new("write_file".to_string());
+        call.push("{\"file_path\":\"big.txt\",\"content\":\"");
+        for _ in 0..1024 {
+            call.push(&"x".repeat(1024));
+        }
+        assert!(
+            call.args.len() <= STREAMING_TITLE_ARG_CAP,
+            "the head is bounded, not the whole body: {} bytes held",
+            call.args.len()
+        );
+        assert!(call.capped);
+        assert!(
+            !call.wants_parse(),
+            "a cut prefix must not be re-read: it can name the call something \
+             the whole document would not"
+        );
+    }
+    /// The head is what the title comes from, so it has to survive intact.
+    #[test]
+    fn the_head_is_kept_whole() {
+        let mut call = StreamingToolArgs::new("read_file".to_string());
+        call.push("{\"target_file\":\"");
+        call.push("src/main.rs\"}");
+        assert_eq!(call.args, "{\"target_file\":\"src/main.rs\"}");
+        assert!(!call.capped);
+        assert!(call.wants_parse());
+    }
+    /// Once a call has lost bytes it never becomes whole again — including
+    /// across a later fragment that would have fit, or an empty one.
+    #[test]
+    fn the_cut_flag_is_sticky() {
+        let mut call = StreamingToolArgs::new("write_file".to_string());
+        call.push(&"x".repeat(STREAMING_TITLE_ARG_CAP + 1));
+        assert!(call.capped);
+        call.push("");
+        assert!(call.capped, "an empty fragment cuts nothing and heals nothing");
+        call.push("y");
+        assert!(call.capped);
+    }
+    /// A fragment can split a multi-byte character exactly at the cap.
+    #[test]
+    fn the_cap_never_splits_a_character() {
+        let mut call = StreamingToolArgs::new("write_file".to_string());
+        call.push(&"a".repeat(STREAMING_TITLE_ARG_CAP - 1));
+        call.push("é");
+        assert_eq!(
+            call.args.len(),
+            STREAMING_TITLE_ARG_CAP - 1,
+            "a character that does not fit is left out whole"
+        );
+        assert!(call.capped);
+        // The real proof: the held bytes are still a string, not a broken one.
+        assert!(call.args.is_char_boundary(call.args.len()));
     }
 }

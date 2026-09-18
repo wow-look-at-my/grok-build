@@ -2368,7 +2368,7 @@ impl SessionActor {
             // name.
             let entry = live.get_mut(&tool_index)?;
             if let Some(delta) = arguments_delta {
-                entry.args.push_str(delta);
+                entry.push(delta);
             }
             if !entry.wants_parse() {
                 return None;
