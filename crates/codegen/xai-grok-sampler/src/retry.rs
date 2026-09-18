@@ -12,8 +12,13 @@
 //!   (520–524 origin unreachable/timed out, 530 edge 1xxx) and upstream
 //!   overload (529). The rule is `RetryPolicy::edge_client`.
 //! - Connection errors (timeout, refused, reset)
-//! - `EventStreamError` / `StreamError` (mid-stream failures)
+//! - `StreamError` (a server-sent mid-stream error)
 //! - `EmptyResponse` (model returned no content/tool calls)
+//!
+//! **Retried on their own budget** (the transport budget above is untouched):
+//! - A stream that died mid-body — `EventStreamError`, or a reqwest decode
+//!   failure ("error decoding response body"):
+//!   [`STREAM_INTERRUPT_MAX_RETRIES`] = 10, same exponential backoff.
 //!
 //! **Retried with lower cap** ([`RATE_LIMIT_RETRY_THRESHOLD`] = 2):
 //! - 429 (rate limited) — waits the full `Retry-After`, so the attempt
@@ -60,6 +65,30 @@ pub const RATE_LIMIT_RETRY_THRESHOLD: u32 = 2;
 /// retries 1-4 exponential (2+4+8+16s ≈ 30s), 5-14 flat ~30s (≈ 5 min) —
 /// ≈ 5.5 min total.
 pub const DEFAULT_MAX_RETRIES: u32 = 15;
+
+/// Retries granted to a stream that died mid-body
+/// ([`SamplingError::is_stream_interrupted`]): 10, each after the same
+/// exponential backoff the transport path uses. It is a budget of its own,
+/// like the doom-loop and output-rate ones: a dropped connection is not a
+/// server fault, and spending the transport budget on it leaves nothing for
+/// the 5xx that follows. It is also a guarantee — a model configured with a
+/// smaller `max_retries` still gets these 10, so one network blip can no
+/// longer end a turn with "error decoding response body".
+pub const STREAM_INTERRUPT_MAX_RETRIES: u32 = 10;
+
+/// The budget [`classify_error`] must be given for a stream interruption, so
+/// that exactly [`STREAM_INTERRUPT_MAX_RETRIES`] retries happen (the attempt
+/// reaching the budget is fatal, hence the `+ 1`).
+///
+/// `transport_budget` of 0 is observe-only, or a caller that cannot take
+/// duplicate output; both keep their zero.
+pub fn stream_interrupt_budget(transport_budget: u32) -> u32 {
+    if transport_budget == 0 {
+        0
+    } else {
+        STREAM_INTERRUPT_MAX_RETRIES + 1
+    }
+}
 
 /// Longest single wait on the generic retry path — the exponential-backoff
 /// ceiling, and the clamp for a server `Retry-After`. Cloudflare answers 52x
@@ -1067,6 +1096,60 @@ mod tests {
         match classify_error(&err, 0, 5, RATE_LIMIT_RETRY_THRESHOLD) {
             RetryDecision::RetryWithClientRebuild { .. } => {}
             other => panic!("expected RetryWithClientRebuild, got {other:?}"),
+        }
+    }
+
+    /// The guarantee the budget exists for: a stream that dies mid-body is
+    /// retried exactly 10 times, on backoff that grows, whatever the model's
+    /// own `max_retries` says.
+    #[test]
+    fn a_stream_interruption_is_retried_ten_times_with_growing_backoff() {
+        let err = SamplingError::EventStreamError("error decoding response body".into());
+        let budget = stream_interrupt_budget(3);
+        let mut previous = Duration::ZERO;
+        for retries_done in 0..STREAM_INTERRUPT_MAX_RETRIES {
+            let backoff = match classify_error(&err, retries_done, budget, RATE_LIMIT_RETRY_THRESHOLD)
+            {
+                // The first retry also escapes a poisoned HTTP/2 pool.
+                RetryDecision::RetryWithClientRebuild { backoff } => {
+                    assert_eq!(retries_done, 0);
+                    backoff
+                }
+                RetryDecision::Retry { backoff } => backoff,
+                other => panic!("retry {retries_done} must happen, got {other:?}"),
+            };
+            // Only while the base is still under the ceiling: once every wait
+            // is a jittered 30s, one can land below the last.
+            if retries_done < 4 {
+                assert!(
+                    backoff > previous,
+                    "backoff must grow: {backoff:?} after {previous:?}"
+                );
+            }
+            previous = backoff;
+        }
+        assert!(
+            previous >= Duration::from_secs(24),
+            "the tail must reach the {MAX_RETRY_BACKOFF:?} ceiling, got {previous:?}"
+        );
+        match classify_error(
+            &err,
+            STREAM_INTERRUPT_MAX_RETRIES,
+            budget,
+            RATE_LIMIT_RETRY_THRESHOLD,
+        ) {
+            RetryDecision::Fatal(_) => {}
+            other => panic!("the 11th attempt must be fatal, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn observe_only_grants_a_stream_interruption_nothing() {
+        assert_eq!(stream_interrupt_budget(0), 0);
+        let err = SamplingError::EventStreamError("conn reset".into());
+        match classify_error(&err, 0, stream_interrupt_budget(0), RATE_LIMIT_RETRY_THRESHOLD) {
+            RetryDecision::Fatal(_) => {}
+            other => panic!("expected Fatal, got {other:?}"),
         }
     }
 

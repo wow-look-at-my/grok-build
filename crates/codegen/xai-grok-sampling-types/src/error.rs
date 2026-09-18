@@ -170,7 +170,7 @@ pub enum SamplingError {
         /// `None` = header absent (old server or non-proxy origin).
         should_retry: Option<bool>,
     },
-    #[error("reqwest error stream: {0}")]
+    #[error("request stream error: {0}")]
     EventStreamError(String),
     /// Server-side stream error (sent as JSON within the SSE stream)
     #[error("stream error ({error_type}): {message}")]
@@ -506,6 +506,20 @@ impl SamplingError {
         Some(names)
     }
 
+    /// The response stream died part-way through: the SSE connection dropped,
+    /// or reqwest could not decode the body it was reading ("error decoding
+    /// response body"). The request itself is sound, so a fresh one usually
+    /// lands. The sampler gives this class its own retry budget — see
+    /// `xai_grok_sampler::STREAM_INTERRUPT_MAX_RETRIES` — so a network blip
+    /// never spends the transport budget the next 5xx needs.
+    pub fn is_stream_interrupted(&self) -> bool {
+        match self {
+            SamplingError::EventStreamError(_) => true,
+            SamplingError::Http(err) => err.is_decode(),
+            _ => false,
+        }
+    }
+
     pub fn is_retryable(&self) -> bool {
         match self {
             SamplingError::Auth { .. } => false,
@@ -799,6 +813,13 @@ pub fn is_retryable_reqwest(err: &reqwest::Error) -> bool {
         return true;
     }
 
+    // A decode failure is a body that stopped arriving mid-read, not a
+    // deterministic fault: reqwest renders it "error decoding response body".
+    // Calling it fatal ends a turn on one network blip.
+    if err.is_decode() {
+        return true;
+    }
+
     false
 }
 
@@ -1048,6 +1069,49 @@ mod tests {
         // Verify the existing contract hasn't changed — EventStreamError is retryable.
         let err = SamplingError::EventStreamError("connection reset".into());
         assert!(err.is_retryable());
+        assert!(err.is_stream_interrupted());
+    }
+
+    /// The real thing reqwest produces when a body it is reading does not
+    /// decode. Its Display is "error decoding response body".
+    async fn decode_error() -> reqwest::Error {
+        let response = reqwest::Response::from(http::Response::new("this is not json"));
+        response
+            .json::<serde_json::Value>()
+            .await
+            .expect_err("invalid JSON must fail to decode")
+    }
+
+    #[tokio::test]
+    async fn a_body_decode_failure_is_a_retryable_stream_interruption() {
+        let err = decode_error().await;
+        assert!(err.is_decode(), "reqwest classified this as {err:?}");
+        assert!(
+            is_retryable_reqwest(&err),
+            "a body that stopped arriving is transient, not fatal"
+        );
+        let err = SamplingError::Http(err);
+        assert!(err.is_retryable());
+        assert!(err.is_stream_interrupted());
+    }
+
+    #[test]
+    fn a_request_stream_error_names_the_request_not_the_http_crate() {
+        let msg = SamplingError::EventStreamError("error decoding response body".into()).to_string();
+        assert_eq!(msg, "request stream error: error decoding response body");
+    }
+
+    #[test]
+    fn errors_that_are_not_stream_interruptions() {
+        assert!(!SamplingError::IdleTimeout { elapsed_secs: 5 }.is_stream_interrupted());
+        assert!(
+            !SamplingError::StreamError {
+                error_type: "overloaded_error".into(),
+                message: "busy".into(),
+            }
+            .is_stream_interrupted(),
+            "a server-sent stream error is the server's verdict, not a dropped connection"
+        );
     }
 
     #[test]
