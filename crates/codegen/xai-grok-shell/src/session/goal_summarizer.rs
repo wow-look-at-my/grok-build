@@ -665,6 +665,7 @@ mod tests {
             cwd: None,
             trace_sink: None,
             events: None,
+            model_override: None,
         };
         let handle = tokio::spawn(async move {
             let _ = spawner

@@ -2472,6 +2472,7 @@ mod inline_auto_compact_flow_tests {
             goal_summary_enabled: false,
             goal_verifier_skeptic_count: 1,
             goal_role_models: Default::default(),
+            harness_models: Default::default(),
             goal_use_current_model_only: false,
             goal_classifier_max_runs:
                 crate::session::goal_classifier::GOAL_CLASSIFIER_MAX_RUNS_DEFAULT,

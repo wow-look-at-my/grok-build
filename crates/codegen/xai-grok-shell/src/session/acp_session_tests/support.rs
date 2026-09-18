@@ -402,6 +402,7 @@ pub(crate) async fn create_test_actor_with_terminal(
         goal_summary_enabled: false,
         goal_verifier_skeptic_count: 1,
         goal_role_models: Default::default(),
+        harness_models: Default::default(),
         goal_use_current_model_only: false,
         goal_classifier_max_runs: crate::session::goal_classifier::GOAL_CLASSIFIER_MAX_RUNS_DEFAULT,
         goal_strategist_every: 5,

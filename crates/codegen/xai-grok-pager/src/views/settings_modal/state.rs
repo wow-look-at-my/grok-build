@@ -1088,6 +1088,19 @@ pub(super) fn action_for_string(
                     .map(Action::SetForkSecondaryModel)
             }
         }
+        // Harness model slots. One action carries the slot id, so a new
+        // slot needs no arm here. An empty buffer clears the slot rather
+        // than taking a separate Clear action.
+        key if xai_grok_models::slot_for_setting_key(key).is_some() => {
+            let slot = xai_grok_models::slot_for_setting_key(key)?;
+            if value.is_empty() {
+                Some(Action::SetHarnessModel(slot.id, String::new()))
+            } else {
+                snapshot
+                    .resolve_model_name(&value)
+                    .map(|id| Action::SetHarnessModel(slot.id, id.0.to_string()))
+            }
+        }
         _ => {
             let _ = value;
             let _ = snapshot;

@@ -1563,6 +1563,66 @@ mod tests {
         );
     }
 
+    /// Every harness model slot has a row, under Models, that reads and
+    /// writes as a model picker. A slot with no row is a model the user
+    /// cannot change from the settings modal.
+    #[test]
+    fn every_harness_model_slot_has_a_settings_row() {
+        let reg = SettingsRegistry::defaults();
+        for slot in xai_grok_models::HARNESS_MODEL_SLOTS {
+            let key = slot.setting_key();
+            let meta = reg
+                .find(key)
+                .unwrap_or_else(|| panic!("slot `{}` has no settings row at `{key}`", slot.id));
+            assert_eq!(
+                meta.category,
+                SettingCategory::Models,
+                "`{key}` must live under Models"
+            );
+            assert_eq!(
+                meta.owner,
+                SettingOwner::Shell,
+                "`{key}` is SHELL-owned (persisted into [models])"
+            );
+            assert!(
+                matches!(
+                    meta.kind,
+                    SettingKind::DynamicEnum {
+                        default: "",
+                        source: DynamicEnumSource::ActiveModelCatalog,
+                        ..
+                    }
+                ),
+                "`{key}` must be a model picker whose empty default means inherit"
+            );
+            assert!(
+                meta.restart_required,
+                "`{key}` must be restart_required — a slot is resolved when a \
+                 session actor is built"
+            );
+        }
+    }
+
+    /// A slot's row reads back the model the user set, and reads back the
+    /// empty "(no override)" sentinel when the user set nothing.
+    #[test]
+    fn harness_model_slot_row_reads_the_configured_value() {
+        let pager = PagerLocalSnapshot::default();
+        let mut ui = UiConfig::default();
+        assert_eq!(
+            current_value_for("models.goal_skeptic", &ui, &pager),
+            Some(SettingValue::String(String::new())),
+            "an unset slot reads as the empty no-override sentinel"
+        );
+        ui.harness_models
+            .insert("goal_skeptic".to_string(), "some-model".to_string());
+        assert_eq!(
+            current_value_for("models.goal_skeptic", &ui, &pager),
+            Some(SettingValue::String("some-model".to_string())),
+            "a model the catalog does not list passes through as its id"
+        );
+    }
+
     /// Keywords must be lowercase and non-empty.
     #[test]
     fn keywords_lowercase_and_non_empty() {

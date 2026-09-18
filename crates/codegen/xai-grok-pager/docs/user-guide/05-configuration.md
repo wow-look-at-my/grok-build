@@ -205,6 +205,45 @@ client_id = "0oa1b2c3d4e5f6g7h8i9"
 # audience = "https://api.acme.com"
 ```
 
+### Harness model slots
+
+The harness sends requests to a model for many jobs beside your own turns. Each job is a slot in `[models]`. Set a slot and that job runs on the model you name. Leave it alone and the job inherits your session model, so it follows `/model`.
+
+Every slot also has a picker in the settings modal, under **Models**. A slot is read when a session starts. So a change applies to the next session.
+
+```toml
+[models]
+goal_skeptic = "grok-4.5-fast"         # every skeptic in the /goal panel
+compaction = "grok-4.5-fast"           # the context-window summarizer
+permission_classifier = "grok-4.5-fast"
+```
+
+| Slot | What it runs | Unset |
+| --- | --- | --- |
+| `web_search` | Web-search synthesis | Compiled default |
+| `image_description` | Transcribing images you attach | Compiled default |
+| `session_summary` | The session's title | Compiled default |
+| `prompt_suggestion` | Tab-autocomplete ghost text | Built-in small model |
+| `permission_classifier` | Approving tool calls in Auto mode | Session model |
+| `laziness_classifier` | Judging an idle turn | Session model |
+| `compaction` | Summarizing when the window fills | Session model |
+| `recap` | The "where was I" recap | Session model |
+| `turn_summary` | The one-line summary per turn | Session model |
+| `side_note` | `/btw` | Session model |
+| `todo_capture` | `/todo` | Session model |
+| `memory_flush` | Writing long-term memory | Session model |
+| `goal_planner` | The `/goal` plan | Session model |
+| `goal_strategist` | A new angle on a stalled goal | Session model |
+| `goal_skeptic` | Every skeptic in the verification panel | Session model |
+| `goal_summarizer` | The closing summary of a goal | Session model |
+| `subagent_default` | Any subagent with no pin of its own | Session model |
+
+Each slot takes an environment variable too, which wins over the config file. The name is the slot in upper case under `GROK_MODEL_`, so `goal_skeptic` reads `GROK_MODEL_GOAL_SKEPTIC`. The one exception is `prompt_suggestion`, whose variable keeps its older name `GROK_PROMPT_SUGGESTIONS_MODEL`.
+
+Two older, narrower keys still win over their slot where you set them: `[auto_mode] classifier_model` over `permission_classifier`, and `[memory] flush_model` over `memory_flush`. A `[subagents.models]` entry and an agent definition's own `model` both win over `subagent_default`.
+
+A slot naming a model your account cannot reach logs a warning and falls back to the session model, rather than failing the call.
+
 ### Custom models
 
 Add custom model endpoints to use alternative providers or self-hosted models.
@@ -323,7 +362,9 @@ Project workflows are discovered from `<repo-root>/.grok/workflows/`; user workf
 
 #### Which model runs the `/goal` roles
 
-The planner, strategist and verification panel run on the session's current model. Pin a role to another model in `[goal]`:
+Every `/goal` role has a slot in `[models]`. See [Harness model slots](#harness-model-slots). Reach for `goal_skeptic` when verification feels slow. It sets the model for every skeptic in the panel.
+
+`[goal]` takes a second form of pin. That form carries an agent type beside the model. Use it when a role needs a different harness flavor:
 
 ```toml
 [goal]
@@ -332,7 +373,7 @@ use_current_model_only = true          # ignore every pin, including the ones ab
 follow_remote_role_models = true       # opt in to server-pushed role pins
 ```
 
-`follow_remote_role_models` is off by default, so a server-side pin never replaces the model you selected. `use_current_model_only` is the kill switch: it overrides local pins too, even for a goal already in flight. Both read an env var as well (`GROK_GOAL_FOLLOW_REMOTE_ROLE_MODELS`, `GROK_GOAL_USE_CURRENT_MODEL_ONLY`).
+A `[goal]` pin wins over the matching `[models]` slot. `follow_remote_role_models` is off by default, so a server-side pin never replaces the model you selected. `use_current_model_only` is the kill switch: it overrides local pins too, even for a goal already in flight. Both read an env var as well (`GROK_GOAL_FOLLOW_REMOTE_ROLE_MODELS`, `GROK_GOAL_USE_CURRENT_MODEL_ONLY`).
 
 Each launch gets a session-unique display handle such as `deep-research-2`. That handle is what you see in the `/workflows` run dashboard and pass to `/workflow pause`, `resume`, or `stop` — the internal run IDs never surface in commands. A numbered handle isn't a reusable definition name, so the dashboard disables **save** until you pick a new unique `meta.name` and save the edited script yourself. See [Slash Commands](04-slash-commands.md) for examples.
 
@@ -724,6 +765,13 @@ The key ones. See the README for the complete list.
 | `GROK_AUTH_EARLY_INVALIDATION_SECS` | Seconds before expiry to refresh (default: 300) |
 | `GROK_OIDC_ISSUER` | OIDC issuer URL |
 | `GROK_OIDC_CLIENT_ID` | OIDC client ID |
+
+### Models
+
+| Variable | Description |
+|----------|-------------|
+| `GROK_MODEL_<SLOT>` | Pin one harness model slot. See [Harness model slots](#harness-model-slots) |
+| `GROK_PROMPT_SUGGESTIONS_MODEL` | The `prompt_suggestion` slot, under its older name |
 
 ### Endpoints
 

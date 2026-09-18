@@ -208,6 +208,7 @@ async fn create_test_actor(
         goal_summary_enabled: false,
         goal_verifier_skeptic_count: 1,
         goal_role_models: Default::default(),
+        harness_models: Default::default(),
         goal_use_current_model_only: false,
         goal_classifier_max_runs: crate::session::goal_classifier::GOAL_CLASSIFIER_MAX_RUNS_DEFAULT,
         goal_strategist_every: 5,
@@ -675,6 +676,7 @@ async fn create_test_actor_with_memory(
         goal_summary_enabled: false,
         goal_verifier_skeptic_count: 1,
         goal_role_models: Default::default(),
+        harness_models: Default::default(),
         goal_use_current_model_only: false,
         goal_classifier_max_runs: crate::session::goal_classifier::GOAL_CLASSIFIER_MAX_RUNS_DEFAULT,
         goal_strategist_every: 5,
@@ -1598,6 +1600,7 @@ async fn test_e2e_idle_resume_refreshes_model_metadata() {
                 goal_summary_enabled: false,
                 goal_verifier_skeptic_count: 1,
                 goal_role_models: Default::default(),
+                harness_models: Default::default(),
                 goal_use_current_model_only: false,
                 goal_classifier_max_runs:
                     crate::session::goal_classifier::GOAL_CLASSIFIER_MAX_RUNS_DEFAULT,

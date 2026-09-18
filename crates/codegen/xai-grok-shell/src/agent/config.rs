@@ -11071,6 +11071,109 @@ reverify_after = 6
         assert!(r.value.is_empty());
         assert_eq!(r.source, ConfigSource::Default);
     }
+    /// Every harness model slot parses from `[models]` and answers through
+    /// [`Config::resolve_harness_model`]. This is what makes the slot table
+    /// and the config schema one thing rather than two that drift.
+    #[test]
+    fn every_harness_model_slot_parses_from_the_models_table() {
+        let body: String = xai_grok_models::HARNESS_MODEL_SLOTS
+            .iter()
+            .map(|s| format!("{} = \"pinned-{}\"\n", s.id, s.id))
+            .collect();
+        let raw: toml::Value = toml::from_str(&format!("[models]\n{body}")).unwrap();
+        let cfg = Config::new_from_toml_cfg(&raw).unwrap();
+        for slot in xai_grok_models::HARNESS_MODEL_SLOTS {
+            let resolved = cfg
+                .resolve_harness_model(slot.id)
+                .unwrap_or_else(|| panic!("slot {} resolved to nothing", slot.id));
+            assert_eq!(
+                resolved.value,
+                format!("pinned-{}", slot.id),
+                "slot {} did not read its [models] key",
+                slot.id
+            );
+            assert_eq!(resolved.source, ConfigSource::Config, "for {}", slot.id);
+        }
+    }
+
+    /// An unset slot answers with its compiled default, or with nothing when
+    /// it inherits the session model. Nothing in between.
+    #[test]
+    fn an_unset_harness_model_slot_falls_back_as_its_table_says() {
+        let cfg = Config::default();
+        for slot in xai_grok_models::HARNESS_MODEL_SLOTS {
+            match slot.compiled_default() {
+                Some(expected) => {
+                    let r = cfg
+                        .resolve_harness_model(slot.id)
+                        .unwrap_or_else(|| panic!("{} has a compiled default", slot.id));
+                    assert_eq!(r.value, expected, "for {}", slot.id);
+                    assert_eq!(r.source, ConfigSource::Default, "for {}", slot.id);
+                }
+                None => assert!(
+                    cfg.resolve_harness_model(slot.id).is_none(),
+                    "{} must inherit the session model",
+                    slot.id
+                ),
+            }
+        }
+    }
+
+    /// A whitespace-only slot value reads as unset, the way every other
+    /// model override in this file does.
+    #[test]
+    fn a_blank_harness_model_slot_reads_as_unset() {
+        let raw: toml::Value = toml::from_str("[models]\ncompaction = \"   \"\n").unwrap();
+        let cfg = Config::new_from_toml_cfg(&raw).unwrap();
+        assert!(cfg.resolve_harness_model("compaction").is_none());
+    }
+
+    /// An id no slot uses answers nothing rather than panicking.
+    #[test]
+    fn an_unknown_harness_model_slot_id_resolves_to_nothing() {
+        assert!(
+            Config::default()
+                .resolve_harness_model("not-a-slot")
+                .is_none()
+        );
+    }
+
+    /// A `[models] goal_skeptic` slot reaches the panel as a model-only
+    /// choice, so the skeptics move off the session model without the pool
+    /// form and its agent type.
+    #[test]
+    fn goal_skeptic_slot_fills_the_pool_when_no_pair_is_set() {
+        let raw: toml::Value =
+            toml::from_str("[models]\ngoal_skeptic = \"fast-skeptic\"\n").unwrap();
+        let cfg = Config::new_from_toml_cfg(&raw).unwrap();
+        assert_eq!(
+            cfg.resolve_goal_skeptic_models(false).value,
+            vec![GoalRoleModelChoice::ModelOnly("fast-skeptic".to_string())]
+        );
+        // The kill switch still wins over the slot.
+        assert!(cfg.resolve_goal_skeptic_models(true).value.is_empty());
+    }
+
+    /// A `[goal]` pair is the more specific spelling and wins over the slot.
+    #[test]
+    fn a_goal_pair_wins_over_the_matching_models_slot() {
+        let raw: toml::Value = toml::from_str(
+            r#"
+[models]
+goal_planner = "slot-model"
+
+[goal]
+planner_model = { model = "pair-model", agent_type = "cursor" }
+"#,
+        )
+        .unwrap();
+        let cfg = Config::new_from_toml_cfg(&raw).unwrap();
+        let GoalRoleModelChoice::Explicit(pair) = cfg.resolve_goal_planner_model(false).value else {
+            panic!("the [goal] pair must win");
+        };
+        assert_eq!(pair.model, "pair-model");
+    }
+
     /// `[goal]` model pins parse from both the inline-table and `[[...]]` array forms.
     #[test]
     fn goal_model_pins_parse_from_toml() {
