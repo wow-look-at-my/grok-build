@@ -474,12 +474,14 @@ fn merge_xai_chunks(
                 tool_index: prev_idx,
                 name: prev_name,
                 arguments_delta: prev_args,
+                title: prev_title,
             },
             XUpdate::ToolCallDeltaChunk {
                 tool_call_id: new_id,
                 tool_index: new_idx,
                 name: new_name,
                 arguments_delta: new_args,
+                title: new_title,
             },
         ) if same_tool_call(&prev_id, &new_id, prev_idx, new_idx) => {
             // Merge: concat arguments_delta, prefer earlier id+name.
@@ -498,6 +500,10 @@ fn merge_xai_chunks(
                     tool_index: prev_idx,
                     name: prev_name.or(new_name),
                     arguments_delta: merged_args,
+                    // The LATEST title wins, the opposite of the name. A name
+                    // is stated once and never changes; a title is restated
+                    // every time the arguments name the call more exactly.
+                    title: new_title.or(prev_title),
                 },
                 meta: None,
             };
@@ -991,8 +997,61 @@ mod tests {
                 tool_index,
                 name: name.map(Into::into),
                 arguments_delta: arguments_delta.map(Into::into),
+                title: None,
             },
             meta: None,
+        }
+    }
+    /// The same chunk, carrying a streaming title.
+    fn delta_chunk_titled(
+        session: &str,
+        tool_index: u32,
+        title: Option<&str>,
+    ) -> crate::extensions::notification::SessionNotification {
+        crate::extensions::notification::SessionNotification {
+            session_id: acp::SessionId::new(session),
+            update: crate::extensions::notification::SessionUpdate::ToolCallDeltaChunk {
+                tool_call_id: None,
+                tool_index,
+                name: None,
+                arguments_delta: Some("x".into()),
+                title: title.map(Into::into),
+            },
+            meta: None,
+        }
+    }
+    /// A title is restated as the arguments name the call more exactly, so the
+    /// merged chunk must carry the last one. Keeping the first, the way the
+    /// name is kept, freezes the row on whatever the opening bytes said.
+    #[test]
+    fn xai_merged_deltas_keep_the_newest_title() {
+        let mut buf = ReplayBuffer::new(Some(settings(100, 1_000_000)));
+        assert!(
+            buf.consume_chunk(delta_chunk("s", Some("c"), 0, Some("bash"), None))
+                .is_none()
+        );
+        assert!(
+            buf.consume_chunk(delta_chunk_titled("s", 0, Some("Execute `ls`")))
+                .is_none()
+        );
+        assert!(
+            buf.consume_chunk(delta_chunk_titled("s", 0, None))
+                .is_none()
+        );
+        assert!(
+            buf.consume_chunk(delta_chunk_titled("s", 0, Some("Execute `ls -la`")))
+                .is_none()
+        );
+        let flushed = buf.flush().expect("should have pending");
+        let n = match flushed {
+            SessionNotification::Xai(n) => *n,
+            _ => panic!("expected Xai"),
+        };
+        match n.update {
+            crate::extensions::notification::SessionUpdate::ToolCallDeltaChunk {
+                title, ..
+            } => assert_eq!(title.as_deref(), Some("Execute `ls -la`")),
+            other => panic!("expected ToolCallDeltaChunk, got {other:?}"),
         }
     }
 
