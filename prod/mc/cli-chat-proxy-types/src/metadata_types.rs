@@ -115,7 +115,7 @@ pub struct PromptMetadata {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_type: Option<String>,
     /// Version of the grok-shell agent binary that handled this turn
-    /// (`xai_grok_version::VERSION`). Self-reported by the agent, so it reflects
+    /// (`xai_grok_version::version()`). Self-reported by the agent, so it reflects
     /// the binary actually running. Distinct from `client_version`, which is the
     /// UI client's version — for the TUI these coincide, but for embedding clients
     /// like grok-desktop the bundled shell differs from the app version.

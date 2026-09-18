@@ -894,8 +894,8 @@ pub async fn run(
     xai_grok_telemetry::external::init(
         xai_grok_shell::agent::config::resolve_external_otel_config(
             xai_grok_telemetry::external::config::ExternalClientInfo {
-                service_version: env!("VERSION_WITH_COMMIT").to_owned(),
-                client_version: xai_grok_version::VERSION.to_owned(),
+                service_version: xai_grok_version::version_with_commit().to_owned(),
+                client_version: xai_grok_version::version().to_owned(),
                 app_entrypoint: "tui".to_owned(),
             },
         ),
