@@ -57,7 +57,9 @@ jobs:
 
       # bubblewrap: jail_bwrap_e2e drives the `--sandbox` command builder against real bwrap, and reports a skip without it. mold: .cargo/config.toml links x86_64-unknown-linux-gnu with it.
       - name: Install bubblewrap and mold
-        run: sudo apt-get install -y bubblewrap mold
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap mold
 
       # Each test runs in its own process under a per-test timeout (.config/nextest.toml), which cargo test has none of.
       - name: Install cargo-nextest
