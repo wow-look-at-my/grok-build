@@ -262,6 +262,24 @@ impl OutputRateMeter {
             .sum()
     }
 
+    /// Move the whole recorded timeline `gap` later, so a span the model spent
+    /// not generating leaves no hole in the average. Everything the response
+    /// produced is kept, at the age it had when the gap opened.
+    pub fn skip(&mut self, gap: Duration) {
+        if gap.is_zero() {
+            return;
+        }
+        if let Some(first) = self.first_chunk_at
+            && let Some(shifted) = first.checked_add(gap)
+        {
+            self.first_chunk_at = Some(shifted);
+        }
+        for (at, _) in &mut self.samples {
+            if let Some(shifted) = at.checked_add(gap) {
+                *at = shifted;
+            }
+        }
+    }
 }
 
 impl Default for OutputRateMeter {
@@ -306,6 +324,13 @@ pub struct OutputRateGate {
     /// Set once a breach is reported so one collapse cannot be reported twice
     /// while the caller unwinds the stream.
     breached: bool,
+    /// Backend-hosted tool calls in flight. A parallel search opens several,
+    /// and the stream is generating again only when the last one closes.
+    paused_depth: u32,
+    /// When the current pause opened. The meter is read as of this instant
+    /// while it is set, so the pause neither decays the rate nor advances a
+    /// breach.
+    paused_since: Option<Instant>,
 }
 
 impl OutputRateGate {
@@ -320,18 +345,73 @@ impl OutputRateGate {
             policy: armed,
             slow_since: None,
             breached: false,
+            paused_depth: 0,
+            paused_since: None,
         }
     }
 
     /// Record `bytes` of model output that arrived at `at`.
+    ///
+    /// Output arriving is the end of any pause, whatever the backend has yet
+    /// to say about its hosted call: the model is generating, so this is a
+    /// stream the floor judges.
     pub fn record(&mut self, at: Instant, bytes: u64) {
+        self.end_pause(at);
         self.meter.record(at, bytes);
+    }
+
+    /// A backend-hosted tool call started at `at`. The server runs it and the
+    /// model generates nothing until it returns, so the span it takes is
+    /// removed from the measurement rather than averaged in as silence.
+    pub fn pause(&mut self, at: Instant) {
+        self.paused_depth = self.paused_depth.saturating_add(1);
+        self.paused_since.get_or_insert(at);
+    }
+
+    /// A backend-hosted tool call finished at `at`. The last one to finish
+    /// closes the pause.
+    pub fn resume(&mut self, at: Instant) {
+        self.paused_depth = self.paused_depth.saturating_sub(1);
+        if self.paused_depth == 0 {
+            self.end_pause(at);
+        }
+    }
+
+    /// Whether a hosted tool call is holding the measurement.
+    pub fn is_paused(&self) -> bool {
+        self.paused_since.is_some()
+    }
+
+    /// Close an open pause at `at`, moving the recorded timeline and the
+    /// sustained-breach clock past the gap so neither counts it.
+    fn end_pause(&mut self, at: Instant) {
+        self.paused_depth = 0;
+        let Some(since) = self.paused_since.take() else {
+            return;
+        };
+        let gap = at.saturating_duration_since(since);
+        self.meter.skip(gap);
+        if let Some(slow_since) = self.slow_since
+            && let Some(shifted) = slow_since.checked_add(gap)
+        {
+            self.slow_since = Some(shifted);
+        }
+    }
+
+    /// The instant the meter is read at: frozen at the start of an open pause,
+    /// so a hosted tool call neither decays the rendered rate nor advances a
+    /// breach toward its sustained duration.
+    fn measured_at(&self, now: Instant) -> Instant {
+        match self.paused_since {
+            Some(since) if since < now => since,
+            _ => now,
+        }
     }
 
     /// The current trailing-window rate, or `None` before there is enough
     /// stream to divide by.
     pub fn rate(&self, now: Instant) -> Option<f64> {
-        self.meter.rate(now)
+        self.meter.rate(self.measured_at(now))
     }
 
     /// The configured floor, when one is armed.
@@ -346,6 +426,7 @@ impl OutputRateGate {
 
     /// How long the rate has been under the floor, when it is.
     pub fn slow_for(&self, now: Instant) -> Option<Duration> {
+        let now = self.measured_at(now);
         self.slow_since
             .map(|since| now.saturating_duration_since(since))
     }
@@ -357,6 +438,7 @@ impl OutputRateGate {
         let Some(policy) = self.policy else {
             return RateTick::Quiet;
         };
+        let now = self.measured_at(now);
         let Some(rate) = self.meter.rate(now) else {
             return RateTick::Quiet;
         };
@@ -606,9 +688,110 @@ mod tests {
         );
     }
 
+    /// A server-side tool call is the server's time, not the stream's. A
+    /// minute of web search between two healthy bursts is neither a slowdown
+    /// nor a breach.
+    #[test]
+    fn a_hosted_tool_call_is_not_a_slowdown() {
+        let policy = collapsed_policy();
+        let start = Instant::now();
+        let mut gate = OutputRateGate::new(Some(policy));
+
+        let before = drive(&mut gate, start, 8 * 4, |_| 400);
+        assert!(before.is_empty(), "the opening burst is healthy: {before:?}");
+        let healthy = gate
+            .rate(start + Duration::from_secs(8))
+            .expect("eight seconds of stream");
+
+        // The search runs for a minute and delivers nothing.
+        let search_start = start + Duration::from_secs(8);
+        gate.pause(search_start);
+        for i in 0..240 {
+            let now = search_start + Duration::from_millis(i * 250);
+            assert_eq!(
+                gate.tick(now),
+                RateTick::Quiet,
+                "a hosted call must not move the gate"
+            );
+        }
+        let search_end = search_start + Duration::from_secs(60);
+        assert_eq!(
+            gate.rate(search_end),
+            Some(healthy),
+            "the rendered rate holds at what the stream was doing"
+        );
+        gate.resume(search_end);
+        assert!(!gate.is_paused());
+
+        // The burst before the search is still inside the window. The gap left
+        // the timeline instead of being averaged in as silence.
+        let after = drive(&mut gate, search_end, 8 * 4, |_| 400);
+        assert!(
+            after.is_empty(),
+            "a healthy stream either side of a search is quiet: {after:?}"
+        );
+    }
+
+    /// A parallel search opens several hosted calls. The stream is generating
+    /// again only when the last one closes.
+    #[test]
+    fn parallel_hosted_calls_hold_the_pause_until_the_last_one_ends() {
+        let start = Instant::now();
+        let mut gate = OutputRateGate::new(Some(collapsed_policy()));
+        drive(&mut gate, start, 8 * 4, |_| 400);
+        let at = start + Duration::from_secs(8);
+        gate.pause(at);
+        gate.pause(at);
+        gate.resume(at + Duration::from_secs(5));
+        assert!(gate.is_paused(), "one call is still running");
+        gate.resume(at + Duration::from_secs(9));
+        assert!(!gate.is_paused());
+        let after = drive(&mut gate, at + Duration::from_secs(9), 8 * 4, |_| 400);
+        assert!(after.is_empty(), "the whole search span is gone: {after:?}");
+    }
+
+    /// The pause is not a way for a collapsed stream to hide. Output arriving
+    /// ends it, whatever the backend has yet to say about its hosted call, and
+    /// the collapse after it breaches on schedule.
+    #[test]
+    fn output_during_a_hosted_call_ends_the_pause() {
+        let start = Instant::now();
+        let mut gate = OutputRateGate::new(Some(collapsed_policy()));
+        drive(&mut gate, start, 8 * 4, |_| 400);
+        let at = start + Duration::from_secs(8);
+        gate.pause(at);
+        gate.record(at + Duration::from_secs(30), 400);
+        assert!(!gate.is_paused(), "tokens mean the model is generating");
+
+        let seen = drive(&mut gate, at + Duration::from_secs(30), 40 * 4, |i| {
+            if i == 0 { 400 } else { 1 }
+        });
+        assert!(
+            seen.iter().any(|t| matches!(t, RateTick::Breached { .. })),
+            "a collapse after the search still breaches: {seen:?}"
+        );
+    }
+
+    /// An unbalanced resume — one the gate never saw a matching start for —
+    /// leaves the measurement alone rather than jumping the timeline.
+    #[test]
+    fn a_resume_without_a_pause_changes_nothing() {
+        let start = Instant::now();
+        let mut gate = OutputRateGate::new(Some(collapsed_policy()));
+        drive(&mut gate, start, 8 * 4, |_| 400);
+        let at = start + Duration::from_secs(8);
+        let before = gate.rate(at);
+        gate.resume(at + Duration::from_secs(30));
+        assert!(!gate.is_paused());
+        assert_eq!(gate.rate(at), before);
+    }
+
     #[test]
     fn an_unarmed_policy_never_trips() {
-        let policy = OutputRateFloorPolicy::default();
+        let policy = OutputRateFloorPolicy {
+            min_tokens_per_sec: 0.0,
+            ..OutputRateFloorPolicy::default()
+        };
         assert!(!policy.is_armed());
         let start = Instant::now();
         let mut gate = OutputRateGate::new(Some(policy));
