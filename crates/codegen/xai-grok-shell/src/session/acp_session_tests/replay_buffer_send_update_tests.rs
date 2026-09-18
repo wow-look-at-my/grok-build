@@ -110,6 +110,7 @@ pub(super) async fn make_replay_send_update_fixture() -> ReplaySendUpdateFixture
         compactions_remaining: std::cell::Cell::new(None),
         compaction_at_tokens: std::cell::Cell::new(None),
         doom_loop_recovery: None,
+        output_rate_floor: std::cell::Cell::new(None),
         doom_loop_turn_tally: Default::default(),
         file_state_tracker: Arc::new(FileStateTracker::new()),
         rewind_pending_prompt: std::sync::Mutex::new(None),
@@ -820,6 +821,7 @@ async fn failed_event_preserves_streaming_capture_for_takeout() {
                         empty_response_context: None,
                         doom_loop_triggers: None,
                         doom_loop_aborted_at_chunk: None,
+                        output_rate: None,
                         credential: xai_grok_sampling_types::SentCredential::Unknown,
                     },
                 })
@@ -1243,6 +1245,7 @@ async fn reasoning_only_doomloop_turn_captures_every_generation_as_segments() {
                 }),
                 doom_loop_triggers: None,
                 doom_loop_aborted_at_chunk: None,
+                output_rate: None,
                 credential: xai_grok_sampling_types::SentCredential::Unknown,
             };
             actor

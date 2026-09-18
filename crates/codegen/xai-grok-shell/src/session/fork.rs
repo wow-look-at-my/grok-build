@@ -32,9 +32,15 @@ pub struct ForkSessionRequest {
     /// Worktree forks set this to `"worktree"`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_kind: Option<String>,
-    /// The original workspace directory this worktree session was spawned from.
+    /// The workspace directory a worktree session was spawned from.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_workspace_dir: Option<String>,
+    /// Carry the parent's still-running subagents into the fork (`/fork
+    /// --agents`). Default `false`: the fork takes the main thread's
+    /// conversation, and an agent the parent is still running stays the
+    /// parent's.
+    #[serde(default)]
+    pub include_agents: bool,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -103,6 +109,7 @@ pub async fn fork_session(
         // child retains pre-compaction history (the live summary is already
         // copied via chat_history.jsonl).
         copy_compaction_segments: true,
+        carry_running_subagents: request.include_agents,
         ..Default::default()
     };
 

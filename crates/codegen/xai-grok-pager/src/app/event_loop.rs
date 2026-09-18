@@ -4085,6 +4085,7 @@ mod tests {
             model_id: None,
             preferred_session_id: None,
             chat_kind: false,
+            include_agents: false,
         };
         assert!(welcome_oneshot_applies_to_effects(std::slice::from_ref(
             &worktree
@@ -4171,6 +4172,7 @@ mod tests {
             model_id: None,
             preferred_session_id: None,
             chat_kind: false,
+            include_agents: false,
         };
         assert_eq!(
             take_load_restore_code(&mut app, std::slice::from_ref(&wt)),

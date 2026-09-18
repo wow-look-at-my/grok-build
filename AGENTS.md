@@ -293,6 +293,14 @@ Every one of those is the test doing its job. Making them pass there means weake
 - Config: `[ui].min_output_tokens_per_sec` is the settings-modal floor, where a zero turns the gate off. `[ui].output_rate_sustained_secs` is the grace period. `[model.<id>].min_output_tokens_per_sec` overrides the floor for one model. `[output_rate_floor]` holds the window and the reissue budget. One key, one home.
 - `Config::resolve_output_rate_floor` is the whole precedence. The session caches the answer in a `Cell`. It re-resolves on a model switch rather than on each turn, because the floor reads the config off disk.
 
+## `/fork` and running subagents
+
+- A fork copies `updates.jsonl`, and the child's load replays it. A `subagent_spawned` with no matching `subagent_finished` is therefore inherited. `prepare_replay_lines` reports it as unfinished and the child opens with that agent's row. The run itself stays the parent's, because `emit_subagent_notification` addresses the `parent_session_id` recorded at spawn. So the finish never reaches the child.
+- The copy drops the records of every subagent that is still RUNNING at the fork point (`CopySessionOptions::carry_running_subagents`, default off). A subagent that already finished is history the conversation refers to. Its spawn and finish pair is copied either way. This is the same boundary the copy draws for workflow and goal projections.
+- Running is decided over the lines the copy KEEPS. It is not decided over the whole source file. A `target_prompt_index` that cuts a finish away leaves a spawn the child reads as live. That spawn is dropped too.
+- `/fork --agents` opts back in. The records are copied. The child's load then reconciles them the way a resumed session's are (`reconcile_orphaned_subagents_with_backend`). An agent this process still has running keeps its row. One that is gone is finished as cancelled. The child still cannot receive that run's output, because the run answers to the parent.
+- The flag rides `ForkSessionRequest::include_agents` on `x.ai/session/fork` and `ResumeSessionInWorktreeRequest::include_agents` on the worktree fork. So `/fork --worktree --agents` behaves the same.
+
 ## Workflow agent-concurrency notes
 
 - `WorkflowHostParams.agent_slots` is a semaphore owned by `WorkflowManager` and shared by every run it launches (`session/workflow/manager.rs`), not one fresh semaphore per run. Up to `WORKFLOW_MAX_ACTIVE_RUNS_PER_SESSION` runs can be active at once, so a per-run semaphore will let total live agent-spawned LLM requests scale with active run count instead of staying under the configured cap (`GROK_WORKFLOW_MAX_CONCURRENT_AGENTS` / `workflow_max_concurrent_agents`) — the knob operators lower to stay under a hard per-host concurrent-request limit.

@@ -596,6 +596,12 @@ pub fn pending_tool_entry_id(v: &AgentView, tool_call_id: &str) -> Option<EntryI
     v.session.tracker.pending_tool_entry_id(tool_call_id)
 }
 
+/// The live output rate for the turn-status indicator, or `None` when no
+/// stream is in flight.
+pub fn output_rate(v: &AgentView) -> Option<crate::acp::tracker::OutputRate> {
+    v.session.tracker.output_rate()
+}
+
 /// [`AgentView::draw_active_modal`] — minimal reuses the full-TUI modal renderer.
 pub fn draw_active_modal(
     v: &mut AgentView,

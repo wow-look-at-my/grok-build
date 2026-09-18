@@ -618,7 +618,7 @@ async fn fork_then_open(
         ensure_session_id_available(nid, &new_cwd_str)?;
     }
     let parent_is_worktree = parent_session_is_worktree(parent_id, &write_cwd);
-    let payload = fork_session_params(parent_id, &write_cwd, new_id, parent_is_worktree);
+    let payload = fork_session_params(parent_id, &write_cwd, new_id, parent_is_worktree, false);
     let fork_params = serde_json::value::to_raw_value(&payload)
         .map_err(|e| anyhow::anyhow!("serialize fork params: {e}"))?;
     let req = acp::ExtRequest::new("x.ai/session/fork", fork_params.into());
