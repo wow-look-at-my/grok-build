@@ -91,6 +91,17 @@ async fn discover_one_provider(
 
     let mut entries = IndexMap::with_capacity(listing.len());
     for listed in listing {
+        if config_model_claims(cfg, provider_id, &listed.model) {
+            // The user wrote their own block for this one. Adding the listing's
+            // copy beside it puts the same model in the picker twice, under two
+            // names, with whatever the block changed on only one of them.
+            tracing::debug!(
+                provider = %provider_id,
+                model = %listed.model,
+                "a [model.*] block already covers this model; keeping that one"
+            );
+            continue;
+        }
         let key = discovered_model_key(provider_id, &listed.model);
         let override_for_listed = ConfigModelOverride {
             model: Some(listed.model.clone()),
@@ -117,6 +128,17 @@ async fn discover_one_provider(
         "autodetected models from the provider's listing"
     );
     entries
+}
+
+/// Whether a `[model.<id>]` block of this provider already routes to `slug`.
+///
+/// The block's own key counts too: `[model.claude-sonnet] model_provider =
+/// "gateway"` with no `model` field routes to the key.
+fn config_model_claims(cfg: &config::Config, provider_id: &str, slug: &str) -> bool {
+    cfg.config_models.iter().any(|(key, model_override)| {
+        model_override.model_provider.as_deref() == Some(provider_id)
+            && model_override.model.as_deref().unwrap_or(key.as_str()) == slug
+    })
 }
 
 /// A credential-only stand-in for the provider: every connection and auth field
@@ -299,6 +321,34 @@ mod tests {
         assert!(
             discovered.contains_key("gateway/big-one"),
             "and it does not take the reachable provider down with it"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_model_the_user_wrote_a_block_for_is_not_listed_twice() {
+        let (base, server) = start_listing_server(two_model_listing()).await;
+        let cfg = config_from(&format!(
+            r#"
+            [model_providers.gateway]
+            base_url = "{base}/v1"
+
+            [model.my-big-one]
+            model = "big-one"
+            model_provider = "gateway"
+            context_window = 999
+            "#
+        ));
+
+        let discovered = discover_provider_models(&cfg).await;
+        server.abort();
+
+        assert!(
+            !discovered.contains_key("gateway/big-one"),
+            "the user's own block owns that model"
+        );
+        assert!(
+            discovered.contains_key("gateway/small-one"),
+            "the rest of the listing still arrives"
         );
     }
 
