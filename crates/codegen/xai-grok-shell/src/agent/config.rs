@@ -3167,7 +3167,7 @@ impl Config {
     fn harness_model_from_config(&self, slot_id: &str) -> Option<String> {
         let m = &self.models;
         match slot_id {
-            "web_search" => Some(m.web_search.clone()?),
+            "web_search" => m.web_search.clone(),
             "image_description" => m.image_description.clone(),
             "session_summary" => m.session_summary.clone(),
             "prompt_suggestion" => m.prompt_suggestion.clone(),

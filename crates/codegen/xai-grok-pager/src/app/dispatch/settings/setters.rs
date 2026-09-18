@@ -2054,7 +2054,7 @@ pub(in crate::app::dispatch) fn set_harness_model(
             );
             return vec![];
         };
-        let id = acp::ModelId(model_id.clone().into());
+        let id = acp::ModelId::new(model_id.clone().into());
         let Some(agent) = app.agents.get(&aid) else {
             tracing::error!(
                 target: "settings",
