@@ -1747,6 +1747,14 @@ fn move_setting_away_from_default(app: &mut AppView, key: crate::settings::Setti
                 app,
             );
         }
+        // Both setters clamp, so the value has to be in range to move at all.
+        // 25 against a default of 0, and 30 against a default of 10.
+        "min_output_tokens_per_sec" => {
+            let _ = dispatch(Action::SetMinOutputTokensPerSec(25), app);
+        }
+        "output_rate_sustained_secs" => {
+            let _ = dispatch(Action::SetOutputRateSustainedSecs(30), app);
+        }
         other => {
             panic!(
                 "move_setting_away_from_default: no arm for `{other}`. \
