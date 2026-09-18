@@ -45,7 +45,11 @@ impl SessionActor {
 
         let sampling_config = self.chat_state_handle.get_sampling_config().await;
         let reasoning_effort = sampling_config.as_ref().and_then(|c| c.reasoning_effort);
-        let model = sampling_config.map(|c| c.model).unwrap_or_default();
+        let model = self
+            .harness_models
+            .get("side_note")
+            .map(str::to_owned)
+            .unwrap_or_else(|| sampling_config.map(|c| c.model).unwrap_or_default());
 
         let persist = |answer: String, success: bool, error: Option<String>, attempts: u32| {
             let _ = self.notifications.persistence_tx.send(PersistenceMsg::Btw(
@@ -213,7 +217,7 @@ impl SessionActor {
         // (not on failure/empty/cancel) so auto can retry later for this turn if needed.
         let clear_in_flight = || self.recap_in_flight.set(false);
 
-        let setup = match self.prepare_side_call().await {
+        let setup = match self.prepare_side_call("recap").await {
             Ok(s) => s,
             Err(e) => {
                 tracing::warn!(error = %e, "recap: failed to prepare sampling client");

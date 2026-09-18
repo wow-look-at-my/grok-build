@@ -565,7 +565,14 @@ impl SessionActor {
             .await
             .map(|c| c.model)
             .unwrap_or_default();
-        let aux_classifier_sampler = match auto_cfg.classifier_model.as_deref() {
+        // `[auto_mode] classifier_model` is the older, narrower spelling and
+        // stays ahead of the `[models] permission_classifier` slot, so a
+        // config that already sets it keeps the model it named.
+        let classifier_slug = auto_cfg
+            .classifier_model
+            .clone()
+            .or_else(|| self.harness_models.get("permission_classifier").map(str::to_owned));
+        let aux_classifier_sampler = match classifier_slug.as_deref() {
             Some(slug) => self.resolve_auto_classifier_sampler(slug).await,
             None => None,
         };
@@ -702,6 +709,53 @@ impl SessionActor {
             creds.alpha_test_key.clone(),
             creds.client_version.clone(),
         )
+    }
+    /// Resolve a dedicated sampler for a harness model slot.
+    ///
+    /// `None` means the slot inherits the session model, and the caller
+    /// keeps the client and config it already has. The config comes from the
+    /// catalog rather than from the session's own, so the backend, the
+    /// context window and the credentials all match the model the slot
+    /// names. Overriding only the model id on the session's config would
+    /// send one model's id to another model's endpoint.
+    pub(crate) async fn resolve_slot_sampler(
+        &self,
+        slot: &str,
+    ) -> Option<(xai_grok_sampler::SamplingClient, xai_grok_sampler::SamplerConfig)> {
+        let slug = self.harness_models.get(slot)?.to_string();
+        let active_session_config = self.reconstruct_full_config().await;
+        if slug == active_session_config.model {
+            return None;
+        }
+        let mut cfg = match self.resolve_aux_sampler_config(&slug).await {
+            Some(cfg) => cfg,
+            None => {
+                tracing::warn!(
+                    slot,
+                    model = %slug,
+                    "harness model slot names a model this session cannot reach; using the session model"
+                );
+                return None;
+            }
+        };
+        crate::agent::config::stamp_session_local_sampler_fields(
+            &mut cfg,
+            &active_session_config,
+            self.client_identifier.clone(),
+            Some(self.max_retries),
+        );
+        match xai_grok_sampler::SamplingClient::new(cfg.clone()) {
+            Ok(client) => Some((client, cfg)),
+            Err(e) => {
+                tracing::warn!(
+                    slot,
+                    model = %slug,
+                    error = %e,
+                    "harness model slot sampler build failed; using the session model"
+                );
+                None
+            }
+        }
     }
     /// Resolve a dedicated sampler for the Auto-mode classifier model `slug`,
     /// stamping session-local auth/attribution like image-describe (which relies

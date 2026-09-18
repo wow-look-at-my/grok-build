@@ -116,7 +116,15 @@ impl SessionActor {
     /// keeps reasoning verbatim so the prefix matches the last turn and the
     /// provider's prefix KV cache stays warm. Mirrors compaction's
     /// `summary_strips_reasoning`.
-    pub(crate) async fn prepare_side_call(&self) -> Result<SideCallSetup, acp::Error> {
+    /// `slot` is the harness model slot this call belongs to. The slot's
+    /// model replaces the session model when the user set one. That costs
+    /// the shared prompt-cache prefix, which is the point of the alignment
+    /// here — a user who pins the slot has asked for the other model and
+    /// pays for the cache miss.
+    pub(crate) async fn prepare_side_call(
+        &self,
+        slot: &str,
+    ) -> Result<SideCallSetup, acp::Error> {
         let client = self.prepare_chat_completion(false).await?;
         let strip_reasoning = client.api_backend().requires_reasoning_strip();
         // One config read serves the window, model, and reasoning effort.
@@ -126,7 +134,11 @@ impl SessionActor {
             .map(|c| c.context_window.get())
             .unwrap_or(DEFAULT_CONTEXT_WINDOW);
         let reasoning_effort = sampling_config.as_ref().and_then(|c| c.reasoning_effort);
-        let model = sampling_config.map(|c| c.model).unwrap_or_default();
+        let model = self
+            .harness_models
+            .get(slot)
+            .map(str::to_owned)
+            .unwrap_or_else(|| sampling_config.map(|c| c.model).unwrap_or_default());
         Ok(SideCallSetup {
             client,
             strip_reasoning,

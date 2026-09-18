@@ -258,6 +258,7 @@ async fn persist_ack_waits_for_disk_flush_before_success() {
                 goal_summary_enabled: false,
                 goal_verifier_skeptic_count: 1,
                 goal_role_models: Default::default(),
+                harness_models: Default::default(),
                 goal_use_current_model_only: false,
                 goal_classifier_max_runs:
                     crate::session::goal_classifier::GOAL_CLASSIFIER_MAX_RUNS_DEFAULT,
@@ -746,6 +747,7 @@ async fn first_turn_memory_injection_disabled_does_not_persist_to_chat_history()
                 goal_summary_enabled: false,
                 goal_verifier_skeptic_count: 1,
                 goal_role_models: Default::default(),
+                harness_models: Default::default(),
                 goal_use_current_model_only: false,
                 goal_classifier_max_runs:
                     crate::session::goal_classifier::GOAL_CLASSIFIER_MAX_RUNS_DEFAULT,
@@ -1051,6 +1053,7 @@ async fn cancel_running_task_teardown_clears_running_and_pending_work() {
                 goal_summary_enabled: false,
                 goal_verifier_skeptic_count: 1,
                 goal_role_models: Default::default(),
+                harness_models: Default::default(),
                 goal_use_current_model_only: false,
                 goal_classifier_max_runs: crate::session::goal_classifier::GOAL_CLASSIFIER_MAX_RUNS_DEFAULT,
                 goal_strategist_every: 5,
@@ -2494,6 +2497,7 @@ async fn cancel_propagates_to_sampler_handle_so_no_further_emission() {
                 goal_summary_enabled: false,
                 goal_verifier_skeptic_count: 1,
                 goal_role_models: Default::default(),
+                harness_models: Default::default(),
                 goal_use_current_model_only: false,
                 goal_classifier_max_runs: crate::session::goal_classifier::GOAL_CLASSIFIER_MAX_RUNS_DEFAULT,
                 goal_strategist_every: 5,

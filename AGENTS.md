@@ -87,6 +87,16 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - The gate is off for a subagent. A subagent does not own the branch. Sending one back over a failure its parent pushed has it fixing work it cannot see.
 - The switch is the persisted `[ui].stop_gate_ci_failing` toggle, default ON. The gate reads it before the `gh` call. So a session that turns the gate off spends nothing on it per turn end.
 
+## Harness model-slot notes
+
+- Every model the harness picks is a SLOT in `xai-grok-models/src/slots.rs`. A slot carries its `[models]` key, its environment variable, its settings-modal label and what it falls back to. A new model call adds a slot in the same change, or it is a model nobody can move.
+- The settings rows are BUILT from that table (`harness_model_settings` in the pager's `settings/defs.rs`), and the read, write, reset and rollback arms all match on `slot_for_setting_key`. So a new slot needs no per-key arm anywhere. The one thing it does need is a `[models]` field, and `harness_model_from_config` fails to compile without it.
+- A slot resolves ONE time, when the session actor is built (`session/harness_models.rs`), and the resolved map rides the actor. Resolution reads the environment and disk, so a per-turn read puts file I/O on the turn path. That is also why every slot row is `restart_required`.
+- Compaction, the laziness classifier and the permission classifier swap the whole sampler rather than the model id alone. `resolve_slot_sampler` builds the config from the CATALOG. The backend, the window and the credentials belong to the model the slot names. Writing one model's id onto another model's config sends the request to the wrong endpoint.
+- The side calls (`/btw`, `/todo`, recap, turn summary) deliberately share the parent turn's prompt-cache prefix. Pinning their slot to another model gives that up. That is the user's call to make. It is also why those slots default to inheriting.
+- Older, narrower keys win over their slot where they are set: `[auto_mode] classifier_model`, `[memory] flush_model`, `[goal] planner_model`/`strategist_model`/`skeptic_models`, and `[subagents.models]`. Each one says something the slot cannot, or predates it.
+- A `[goal]` role pin carries an agent type as well as a model. A `[models]` goal slot names a model only, and reaches the spawn as `GoalRoleModelChoice::ModelOnly`. In the skeptic POOL that rides as a pair with an EMPTY agent type, because the pool and its persisted assignment are `Vec<GoalRoleModel>`. An empty agent type means "keep the parent's harness" and skips the describe probe.
+
 ## `/debug` feature notes
 
 - `/debug <question>` injects the question plus an execution-context snapshot (`slash/commands/debug_context.rs`) through `CommandResult::InjectSkill`. Only `scroll`, `fps` and `log` are reserved. Everything else is free text. So a question must never come back as an "unknown option" error again.

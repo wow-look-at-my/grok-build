@@ -1557,13 +1557,31 @@ pub(crate) async fn spawn_session_actor(
             .into_iter()
             .filter_map(|c| match c {
                 crate::agent::config::GoalRoleModelChoice::Explicit(p) => Some(p),
+                // A `[models] goal_skeptic` slot names a model only. An
+                // empty agent type is what carries "keep the parent's
+                // harness" through the pool and its persisted assignment.
+                crate::agent::config::GoalRoleModelChoice::ModelOnly(model) => {
+                    Some(crate::util::config::GoalRoleModel {
+                        model,
+                        agent_type: String::new(),
+                    })
+                }
                 crate::agent::config::GoalRoleModelChoice::InheritCurrent => None,
             })
             .collect();
+        let summarizer = if goal_use_current_model_only {
+            crate::agent::config::GoalRoleModelChoice::InheritCurrent
+        } else {
+            match effective_config.resolve_harness_model("goal_summarizer") {
+                Some(m) => crate::agent::config::GoalRoleModelChoice::ModelOnly(m.value),
+                None => crate::agent::config::GoalRoleModelChoice::InheritCurrent,
+            }
+        };
         GoalRoleModelConfig {
             planner,
             strategist,
             skeptic_pool,
+            summarizer,
         }
     };
     let doom_loop_recovery = effective_config.resolve_doom_loop_recovery();
@@ -1731,6 +1749,9 @@ pub(crate) async fn spawn_session_actor(
             .value,
         goal_verifier_skeptic_count: effective_config.resolve_goal_verifier_count().value,
         goal_role_models,
+        harness_models: crate::session::harness_models::ResolvedHarnessModels::resolve(
+            &effective_config,
+        ),
         goal_use_current_model_only,
         goal_classifier_max_runs,
         goal_strategist_every,

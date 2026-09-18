@@ -6,7 +6,8 @@ use super::setters::{
     set_combine_queued_prompts_inner, set_compact_mode, set_compact_mode_inner,
     set_confirm_before_rewind_inner, set_contextual_hint_inner, set_default_model_inner,
     set_default_selected_permission_inner, set_display_refresh_auto_cadence_inner,
-    set_fork_secondary_model_inner, set_group_tool_verbs_inner, set_hunk_tracker_mode_inner,
+    set_fork_secondary_model_inner, set_group_tool_verbs_inner, set_harness_model_inner,
+    set_hunk_tracker_mode_inner,
     set_invert_scroll_inner, set_keep_text_selection_inner, set_max_thoughts_width_inner,
     set_min_output_tokens_per_sec_inner, set_output_rate_sustained_secs_inner,
     set_multiline_mode, set_page_flip_on_send_inner, set_prompt_suggestions_inner,
@@ -940,6 +941,23 @@ pub(in crate::app::dispatch) fn action_for_reset(
                 None
             }
         }
+        // Harness model slots: the registry default is the empty string,
+        // which clears the slot back to inheriting.
+        (key, SettingValue::String(s)) if xai_grok_models::slot_for_setting_key(key).is_some() => {
+            let slot = xai_grok_models::slot_for_setting_key(key)?;
+            if s.is_empty() {
+                Some(Action::SetHarnessModel(slot.id, String::new()))
+            } else {
+                tracing::error!(
+                    target: "settings",
+                    key,
+                    value = %s,
+                    "action_for_reset(harness model slot) received non-empty default — \
+                     registry/dispatch skew (default should be empty string)",
+                );
+                None
+            }
+        }
 
         _ => None,
     }
@@ -1232,6 +1250,13 @@ pub(in crate::app::dispatch) fn apply_setting_rollback(
                 s.clone()
             };
             set_fork_secondary_model_inner(app, restored);
+        }
+        // Harness model slots: an empty rollback value restores the slot
+        // to inheriting, which is what it was before the failed write.
+        (key, SettingValue::String(s)) if xai_grok_models::slot_for_setting_key(key).is_some() => {
+            let slot = xai_grok_models::slot_for_setting_key(key)
+                .expect("guard above matched this key");
+            set_harness_model_inner(app, slot.id, s.clone());
         }
         _ => {
             tracing::error!(

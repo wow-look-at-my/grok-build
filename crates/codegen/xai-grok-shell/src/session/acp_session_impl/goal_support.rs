@@ -943,6 +943,9 @@ pub(crate) struct GoalRoleModelConfig {
     /// Ordered skeptic pool; `pool[0]` is skeptic-0's model, the rest are
     /// assigned round-robin by index. Empty ⇒ all skeptics inherit.
     pub(crate) skeptic_pool: Vec<crate::util::config::GoalRoleModel>,
+    /// Summary role choice. It has no pair form: `[models] goal_summarizer`
+    /// is the only way to move it off the session model.
+    pub(crate) summarizer: crate::agent::config::GoalRoleModelChoice,
 }
 
 pub(crate) fn planner_failure_pause_message() -> String {
@@ -1780,9 +1783,16 @@ impl SessionActor {
             .lock()
             .expect("current_prompt_id mutex poisoned")
             .clone();
-        // The summarizer always inherits the current model (no per-role key);
-        // its §7 prompt names the parent toolset's tools.
+        // The summarizer keeps the parent toolset whatever model it runs on,
+        // so its §7 prompt names the parent toolset's tools either way.
         let tool_names = self.resolve_inherit_role_tool_names().await;
+        let summarizer_model = match &self.goal_role_models.summarizer {
+            crate::agent::config::GoalRoleModelChoice::ModelOnly(m) => self
+                .resolve_goal_role_model_only("summarizer", None, m)
+                .await
+                .model,
+            _ => None,
+        };
 
         let spawner: std::sync::Arc<dyn crate::session::goal_summarizer::GoalSummarizerSpawner> =
             std::sync::Arc::new(crate::session::goal_summarizer::ChannelSpawner {
@@ -1795,6 +1805,7 @@ impl SessionActor {
                 cwd: Some(self.tool_context.cwd.as_str().to_owned()),
                 trace_sink: Some((self.chat_state_handle.clone(), task_tool_name)),
                 events: Some(self.events.writer()),
+                model_override: summarizer_model,
             });
 
         let outcome = crate::session::goal_summarizer::run_goal_summarizer(

@@ -89,6 +89,14 @@ fn every_registered_setting_is_exercised() {
     let reg = SettingsRegistry::defaults();
     let mut missing: Vec<&str> = Vec::new();
     for meta in reg.all() {
+        // Harness model slots are built from one table and share every code
+        // path, so the family is covered by the `harness_model_slot_*` tests
+        // below rather than by one keyboard and mouse test per slot. Listing
+        // them here one by one would grow with the table and test nothing
+        // the shared tests do not already run.
+        if xai_grok_models::slot_for_setting_key(meta.key).is_some() {
+            continue;
+        }
         if !ALL_SETTINGS_EXERCISED.contains(&meta.key) {
             missing.push(meta.key);
         }
@@ -1902,10 +1910,20 @@ fn registry_kind_membership_through_pr_14() {
         "String kind membership drift: {string_keys:?}",
     );
 
+    // Every harness model slot is a DynamicEnum too. They come from their own
+    // table rather than a literal list, so adding a slot cannot drift here.
     let dynamic_enum_keys = by_kind.remove("DynamicEnum").unwrap_or_default();
+    let mut expected_dynamic: Vec<&str> = vec!["default_model", "fork_secondary_model"];
+    expected_dynamic.extend(
+        xai_grok_models::HARNESS_MODEL_SLOTS
+            .iter()
+            .map(|slot| slot.setting_key()),
+    );
+    let mut sorted_dynamic = dynamic_enum_keys.clone();
+    sorted_dynamic.sort();
+    expected_dynamic.sort();
     assert_eq!(
-        dynamic_enum_keys,
-        vec!["default_model", "fork_secondary_model",],
+        sorted_dynamic, expected_dynamic,
         "DynamicEnum kind membership drift",
     );
 
@@ -2052,6 +2070,10 @@ fn defaults_round_trip_through_registry() {
             "contextual_hints.small_screen" => SettingValue::Bool(true),
             "contextual_hints.word_select" => SettingValue::Bool(true),
             "contextual_hints.ssh_wrap" => SettingValue::Bool(true),
+            // Every harness model slot defaults to the empty inherit sentinel.
+            key if xai_grok_models::slot_for_setting_key(key).is_some() => {
+                SettingValue::String(String::new())
+            }
             other => panic!("test must list expected default for `{other}`"),
         }
     };
@@ -6620,6 +6642,88 @@ fn pr14_model_family_settings_are_discoverable_via_search() {
             hits.iter().any(|m| m.key == expected_key),
             "search(`{query}`) must include `{expected_key}` — hit keys: {:?}",
             hits.iter().map(|m| m.key).collect::<Vec<_>>(),
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Harness model slots (DynamicEnum per slot, restart_required: true)
+//
+// Every row is built from `xai_grok_models::HARNESS_MODEL_SLOTS`, so these
+// tests walk the table rather than naming slots. A slot added to the harness
+// with no working row fails here.
+// ---------------------------------------------------------------------------
+
+/// Every slot has a picker row, and each one is a `KnownModel`-style
+/// `DynamicEnum` under Models whose empty default means "inherit".
+#[test]
+fn harness_model_slot_rows_are_registered_model_pickers() {
+    use xai_grok_pager::settings::DynamicEnumSource;
+    let reg = SettingsRegistry::defaults();
+    for slot in xai_grok_models::HARNESS_MODEL_SLOTS {
+        let key = slot.setting_key();
+        let meta = reg
+            .find(key)
+            .unwrap_or_else(|| panic!("harness model slot `{}` has no row", slot.id));
+        assert_eq!(meta.category, SettingCategory::Models, "for `{key}`");
+        assert_eq!(meta.owner, SettingOwner::Shell, "for `{key}`");
+        assert!(
+            meta.restart_required,
+            "`{key}` must be restart_required — a slot is read when a session \
+             actor is built, so a running session keeps its model"
+        );
+        match &meta.kind {
+            SettingKind::DynamicEnum { source, default, .. } => {
+                assert_eq!(*source, DynamicEnumSource::ActiveModelCatalog, "for `{key}`");
+                assert!(
+                    default.is_empty(),
+                    "`{key}` default must be the empty inherit sentinel"
+                );
+            }
+            other => panic!("expected DynamicEnum kind for `{key}`, got {other:?}"),
+        }
+    }
+}
+
+/// An unset slot reads as "(no override)", and a set one reads back.
+#[test]
+fn harness_model_slot_rows_read_the_configured_model() {
+    use xai_grok_pager::settings::current_value_for;
+    let pager = PagerLocalSnapshot::default();
+    let mut ui = UiConfig::default();
+    for slot in xai_grok_models::HARNESS_MODEL_SLOTS {
+        assert_eq!(
+            current_value_for(slot.setting_key(), &ui, &pager),
+            Some(SettingValue::String(String::new())),
+            "an unset `{}` must read as the inherit sentinel",
+            slot.id
+        );
+    }
+    for slot in xai_grok_models::HARNESS_MODEL_SLOTS {
+        ui.harness_models
+            .insert(slot.id.to_string(), format!("pinned-{}", slot.id));
+    }
+    for slot in xai_grok_models::HARNESS_MODEL_SLOTS {
+        assert_eq!(
+            current_value_for(slot.setting_key(), &ui, &pager),
+            Some(SettingValue::String(format!("pinned-{}", slot.id))),
+            "a set `{}` must read back its model",
+            slot.id
+        );
+    }
+}
+
+/// Every slot is reachable from the settings search, by its own id.
+#[test]
+fn harness_model_slot_rows_are_discoverable_via_search() {
+    let reg = SettingsRegistry::defaults();
+    for slot in xai_grok_models::HARNESS_MODEL_SLOTS {
+        let query = slot.keywords[0];
+        let hits = reg.search(query);
+        assert!(
+            hits.iter().any(|m| m.key == slot.setting_key()),
+            "search(`{query}`) must reach `{}`",
+            slot.setting_key()
         );
     }
 }

@@ -729,6 +729,22 @@ pub fn current_value_for(
             }
         })),
 
+        // Harness model slots. An absent slot is "(no override)", the empty
+        // canonical. A set one persists a model id, and the DynamicEnum
+        // canonicals are catalog display names, so the snapshot resolves it.
+        key if xai_grok_models::slot_for_setting_key(key).is_some() => {
+            let slot = xai_grok_models::slot_for_setting_key(key)?;
+            Some(SettingValue::String(match ui.harness_models.get(slot.id) {
+                None => String::new(),
+                Some(id) => pager
+                    .available_models
+                    .iter()
+                    .find(|(_, mid)| mid.0.as_ref() == id.as_str())
+                    .map(|(name, _)| name.clone())
+                    .unwrap_or_else(|| id.clone()),
+            }))
+        }
+
         _ => None,
     }
 }
@@ -1226,6 +1242,22 @@ mod tests {
                          models::default_model() — drift here breaks the empty-fold contract",
                     );
                 }
+                // A harness model slot has no UiConfig field of its own: it
+                // lives in `[models]` and reaches the modal through the
+                // `harness_models` projection, which starts empty. Its
+                // registry default is the empty inherit sentinel.
+                (key, SettingKind::DynamicEnum { default, .. })
+                    if xai_grok_models::slot_for_setting_key(key).is_some() =>
+                {
+                    assert!(
+                        default.is_empty(),
+                        "`{key}` default must be the empty inherit sentinel"
+                    );
+                    assert!(
+                        ui.harness_models.is_empty(),
+                        "UiConfig::default() must pin no harness model slot"
+                    );
+                }
                 _ => panic!(
                     "settings::defs::default_settings() contains entry `{}` with no \
                      matching arm in defaults_match_ui_config_default. Add an arm.",
@@ -1544,6 +1576,66 @@ mod tests {
         assert_eq!(
             current_value_for("fork_secondary_model", &stale_ui, &pager),
             Some(SettingValue::String("retired-model".to_string())),
+        );
+    }
+
+    /// Every harness model slot has a row, under Models, that reads and
+    /// writes as a model picker. A slot with no row is a model the user
+    /// cannot change from the settings modal.
+    #[test]
+    fn every_harness_model_slot_has_a_settings_row() {
+        let reg = SettingsRegistry::defaults();
+        for slot in xai_grok_models::HARNESS_MODEL_SLOTS {
+            let key = slot.setting_key();
+            let meta = reg
+                .find(key)
+                .unwrap_or_else(|| panic!("slot `{}` has no settings row at `{key}`", slot.id));
+            assert_eq!(
+                meta.category,
+                SettingCategory::Models,
+                "`{key}` must live under Models"
+            );
+            assert_eq!(
+                meta.owner,
+                SettingOwner::Shell,
+                "`{key}` is SHELL-owned (persisted into [models])"
+            );
+            assert!(
+                matches!(
+                    meta.kind,
+                    SettingKind::DynamicEnum {
+                        default: "",
+                        source: DynamicEnumSource::ActiveModelCatalog,
+                        ..
+                    }
+                ),
+                "`{key}` must be a model picker whose empty default means inherit"
+            );
+            assert!(
+                meta.restart_required,
+                "`{key}` must be restart_required — a slot is resolved when a \
+                 session actor is built"
+            );
+        }
+    }
+
+    /// A slot's row reads back the model the user set, and reads back the
+    /// empty "(no override)" sentinel when the user set nothing.
+    #[test]
+    fn harness_model_slot_row_reads_the_configured_value() {
+        let pager = PagerLocalSnapshot::default();
+        let mut ui = UiConfig::default();
+        assert_eq!(
+            current_value_for("models.goal_skeptic", &ui, &pager),
+            Some(SettingValue::String(String::new())),
+            "an unset slot reads as the empty no-override sentinel"
+        );
+        ui.harness_models
+            .insert("goal_skeptic".to_string(), "some-model".to_string());
+        assert_eq!(
+            current_value_for("models.goal_skeptic", &ui, &pager),
+            Some(SettingValue::String("some-model".to_string())),
+            "a model the catalog does not list passes through as its id"
         );
     }
 

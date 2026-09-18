@@ -2965,10 +2965,24 @@ pub(crate) fn load_initial_ui_config() -> xai_grok_shell::agent::config::UiConfi
     let Ok(root) = xai_grok_shell::config::load_effective_config() else {
         return UiConfig::default();
     };
-    let Some(ui_value) = root.get("ui").cloned() else {
-        return UiConfig::default();
+    let mut ui = match root.get("ui").cloned() {
+        Some(ui_value) => ui_value.try_into::<UiConfig>().unwrap_or_default(),
+        None => UiConfig::default(),
     };
-    ui_value.try_into::<UiConfig>().unwrap_or_default()
+    // The harness model slots live under `[models]`, not `[ui]`, so they are
+    // read here rather than deserialized with the rest. A missing `[models]`
+    // table leaves every slot on "(no override)".
+    if let Some(models) = root.get("models") {
+        for slot in xai_grok_models::HARNESS_MODEL_SLOTS {
+            if let Some(value) = models.get(slot.id).and_then(|v| v.as_str())
+                && !value.trim().is_empty()
+            {
+                ui.harness_models
+                    .insert(slot.id.to_string(), value.trim().to_string());
+            }
+        }
+    }
+    ui
 }
 
 /// Config `Option<bool>` mirrors seeded once at startup. `None` = no

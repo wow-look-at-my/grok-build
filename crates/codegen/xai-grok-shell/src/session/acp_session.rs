@@ -910,6 +910,10 @@ pub(crate) struct SessionActor {
     /// `Default` (all `InheritCurrent`, empty pool) reproduces today's
     /// behavior. Consumed by the per-role spawn wiring.
     pub(crate) goal_role_models: GoalRoleModelConfig,
+    /// Every harness model slot, resolved when this actor was built. A slot
+    /// the user left alone is absent and its consumer keeps the session
+    /// model. See `session::harness_models`.
+    pub(crate) harness_models: crate::session::harness_models::ResolvedHarnessModels,
     /// Kill-switch (`GROK_GOAL_USE_CURRENT_MODEL_ONLY` / `[features]
     /// goal_use_current_model_only`) resolved at actor build. When `true`,
     /// every `/goal` role inherits the current model. `goal_role_models`
