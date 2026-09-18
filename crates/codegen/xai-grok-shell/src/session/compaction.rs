@@ -2519,6 +2519,7 @@ mod inline_auto_compact_flow_tests {
             streaming_turn_capture: parking_lot::Mutex::new(
                 crate::session::acp_session::StreamingTurnCapture::default(),
             ),
+            streaming_tool_titles: parking_lot::Mutex::new(std::collections::HashMap::new()),
             turn_stream_drained: parking_lot::Mutex::new(None),
             sampler_handle: xai_grok_sampler::SamplerHandle::noop(),
             rebuild_spec: crate::session::agent_rebuild::test_rebuild_spec_default(),

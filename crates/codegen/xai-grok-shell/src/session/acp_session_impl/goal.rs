@@ -498,18 +498,23 @@ impl SessionActor {
             )
         };
 
-        let (final_response, anchor_to_persist) = {
-            let current = {
-                let items = self.chat_state_handle.get_conversation().await;
-                crate::session::goal_classifier::evidence::extract_final_response(&items)
-                    .unwrap_or_default()
-            };
+        let start_prompt_index = self
+            .goal_tracker
+            .lock()
+            .snapshot()
+            .and_then(|o| o.start_prompt_index);
+        let (final_response, anchor_to_persist, run_log) = {
+            let items = self.chat_state_handle.get_conversation().await;
+            let current = crate::session::goal_classifier::evidence::extract_final_response(&items)
+                .unwrap_or_default();
+            let run_log =
+                crate::session::goal_classifier::run_log::build_run_log(&items, start_prompt_index);
             let composed =
                 crate::session::goal_classifier::evidence::compose_verifier_final_response(
                     first_final_response.as_deref(),
                     current,
                 );
-            (composed.to_send, composed.to_persist)
+            (composed.to_send, composed.to_persist, run_log)
         };
 
         let model_id = self
@@ -618,6 +623,7 @@ impl SessionActor {
             goal_created_at,
             plan_file: plan_file.as_deref(),
             plan_baseline_file: plan_baseline_file.as_deref(),
+            run_log: Some(run_log.body.as_str()),
             implementer_scratch_dir: implementer_scratch.as_path(),
             scratch_dir_ready,
             skeptic_count: self.goal_verifier_skeptic_count,
@@ -866,14 +872,21 @@ impl SessionActor {
         let baseline_commit =
             crate::session::goal_classifier::capture_git_baseline(self.tool_context.cwd.as_path())
                 .await;
-        self.goal_tracker.lock().create_goal(
-            goal_id,
-            objective.to_owned(),
-            token_budget,
-            token_baseline,
-            created_at,
-            baseline_commit,
-        );
+        let start_prompt_index = self.chat_state_handle.get_prompt_index().await;
+        {
+            let mut tracker = self.goal_tracker.lock();
+            tracker.create_goal(
+                goal_id,
+                objective.to_owned(),
+                token_budget,
+                token_baseline,
+                created_at,
+                baseline_commit,
+            );
+            if let Some(o) = tracker.snapshot_mut() {
+                o.start_prompt_index = Some(start_prompt_index);
+            }
+        }
         self.goal_turn_task_ids.lock().clear();
         self.clear_pending_classifier_completions();
         self.goal_continuation_streak

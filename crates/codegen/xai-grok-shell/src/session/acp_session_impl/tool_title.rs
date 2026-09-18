@@ -1,0 +1,259 @@
+//! The human-readable title of a tool call, from its parsed input alone.
+//!
+//! One function serves both the finished call and the one the model is still
+//! writing. A streaming call re-reads its half-written arguments on each
+//! fragment (`partial_json`), so a second copy of this match would let the row
+//! rename itself the moment the call completed.
+use super::tool_calls::{ci_tool_title, execute_tool_call_parts};
+use super::*;
+/// How much of a call's arguments is kept to read a title out of.
+///
+/// What names a call sits at the head of its arguments: a path, a command, a
+/// query. The rest is the body being written — a file's contents, a patch. Once
+/// the head is full the tail is DROPPED, not just left unparsed: a session that
+/// kept it would hold a second copy of every file the model writes, for as long
+/// as the write takes.
+pub(crate) const STREAMING_TITLE_ARG_CAP: usize = 4096;
+/// The head of what the model has written of one tool call.
+///
+/// Held per `tool_index` for the life of a stream. The name arrives once, on
+/// the opening fragment, and the arguments accumulate under it up to the cap.
+pub(crate) struct StreamingToolArgs {
+    /// The wire name the opening fragment carried.
+    pub(crate) name: String,
+    /// The head of the arguments, bounded by [`STREAMING_TITLE_ARG_CAP`].
+    pub(crate) args: String,
+    /// Set once a fragment has been cut. What is held is then a prefix of a
+    /// longer document, and completing a prefix that stops mid-body can name
+    /// the call something the whole document would not.
+    pub(crate) capped: bool,
+    /// The last title this call resolved to. Only a change is worth sending.
+    pub(crate) title: Option<String>,
+}
+impl StreamingToolArgs {
+    pub(crate) fn new(name: String) -> Self {
+        Self {
+            name,
+            args: String::new(),
+            capped: false,
+            title: None,
+        }
+    }
+    /// Take one argument fragment, keeping only what fits under the cap.
+    pub(crate) fn push(&mut self, delta: &str) {
+        let room = STREAMING_TITLE_ARG_CAP.saturating_sub(self.args.len());
+        if room == 0 {
+            // Sticky: a call that has lost bytes never becomes whole again, so
+            // a later empty fragment must not read as "nothing was cut".
+            self.capped |= !delta.is_empty();
+            return;
+        }
+        // A fragment can split a multi-byte character, so cut on a boundary.
+        let mut end = delta.len().min(room);
+        while end > 0 && !delta.is_char_boundary(end) {
+            end -= 1;
+        }
+        self.args.push_str(&delta[..end]);
+        self.capped |= end < delta.len();
+    }
+    /// Whether the bytes held are still worth re-reading for a title.
+    ///
+    /// Every fragment is re-read until the head fills, including a
+    /// one-character one. A cheaper rule that waited for a few bytes would skip
+    /// the LAST fragment of a call, which is usually two characters and is
+    /// exactly the one that completes the argument the title is read from.
+    pub(crate) fn wants_parse(&self) -> bool {
+        !self.capped
+    }
+}
+/// What the UI calls this tool call.
+///
+/// Pure: `cwd` is only read to shorten a command for display. Every arm takes
+/// what has arrived. A field the model has not written yet is absent from the
+/// parsed input, and the arm falls back the same way it does for a call that
+/// omits it.
+pub(crate) fn tool_input_title(input: &ToolInput, cwd: &std::path::Path) -> String {
+    match input {
+        ToolInput::ListDir(list_dir) => format!("List `{}`", list_dir.target_directory),
+        ToolInput::SearchReplace(sr) => format!("Edit `{}`", sr.file_path.as_str()),
+        ToolInput::Bash(bash_tool) => {
+            execute_tool_call_parts(
+                &bash_tool.command,
+                Some(bash_tool.description.as_str()),
+                cwd,
+            )
+            .0
+        }
+        ToolInput::ReadFile(read_file) => format!("Read `{}`", read_file.path),
+        ToolInput::TodoWrite(_) => "Updating plan".to_string(),
+        ToolInput::Grep(gs) => gs.pattern.clone(),
+        ToolInput::WebSearch(ws) => format!("Web search: \"{}\"", ws.query),
+        ToolInput::ImageGen(ig) => format!("imagine: {}", ig.prompt),
+        ToolInput::ImageEdit(ie) => format!("imagine-edit: {}", ie.prompt),
+        ToolInput::ImageToVideo(i2v) => format!(
+            "image-to-video: {}",
+            i2v.prompt.as_deref().unwrap_or(&i2v.image)
+        ),
+        ToolInput::ReferenceToVideo(r2v) => format!("reference-to-video: {}", r2v.prompt),
+        ToolInput::MCPTool(mcp_tool) => mcp_tool.tool_name.to_owned(),
+        ToolInput::TaskOutput(task_output) => {
+            let ids = task_output.resolved_task_ids();
+            match ids.as_slice() {
+                [] => "Get task output".to_string(),
+                [one] => format!("Get task output: {one}"),
+                many => format!("Get task output: {} tasks", many.len()),
+            }
+        }
+        ToolInput::WaitTasks(wait) => format!(
+            "Wait tasks: {} ids, mode={}",
+            wait.task_ids.len(),
+            match &wait.mode {
+                xai_tool_types::WaitMode::WaitAny => "wait_any",
+                xai_tool_types::WaitMode::WaitAll => "wait_all",
+            }
+        ),
+        ToolInput::KillTask(kill_task) => format!("Kill task: {}", kill_task.task_id),
+        ToolInput::Skill(skill) => format!("Skill: {}", skill.skill),
+        ToolInput::ApplyPatch(_) => "Apply patch".to_string(),
+        ToolInput::Dynamic(_) => "Dynamic tool call".to_string(),
+        ToolInput::MemorySearch(ms) => {
+            let end = ms
+                .query
+                .char_indices()
+                .nth(60)
+                .map_or(ms.query.len(), |(i, _)| i);
+            format!("Memory search: \"{}\"", &ms.query[..end])
+        }
+        ToolInput::MemoryGet(mg) => format!("Memory read: {}", mg.path),
+        ToolInput::HashlineEdit(he) => format!("Edit `{}`", he.file_path),
+        ToolInput::Task(task) => task.description.clone(),
+        ToolInput::EnterPlanMode(_) => "Plan: Enter".to_string(),
+        ToolInput::ExitPlanMode(_) => "Plan: Exit".to_string(),
+        ToolInput::AskUserQuestion(ask) => {
+            if ask.questions.len() == 1 {
+                format!("Ask: {}", ask.questions[0].question)
+            } else {
+                format!("Ask {} questions", ask.questions.len())
+            }
+        }
+        ToolInput::WebFetch(wf) => format!("Fetch: {}", wf.url),
+        ToolInput::SearchTool(st) => format!("Search tools: \"{}\"", st.query),
+        ToolInput::UseTool(ut) => ut.tool_name.clone(),
+        ToolInput::Write(w) => format!("Write `{}`", w.file_path),
+        ToolInput::Workflow(w) => {
+            let script_name = |script: &str| -> Option<String> {
+                let head = script.get(..600).unwrap_or(script);
+                let rest = &head[head.find("name:")? + 5..];
+                let rest = &rest[rest.find('"')? + 1..];
+                Some(rest[..rest.find('"')?].to_string())
+            };
+            let inline_name = w.script.as_deref().and_then(script_name);
+            if w.validate_only {
+                match inline_name.or_else(|| w.name.clone()) {
+                    Some(n) => format!("Validating workflow '{n}'"),
+                    None => "Validating workflow script".to_string(),
+                }
+            } else if w.script.is_some() {
+                match inline_name {
+                    Some(n) => format!("Creating workflow '{n}'"),
+                    None => "Creating workflow".to_string(),
+                }
+            } else if let Some(ref name) = w.name {
+                format!("Workflow: {name}")
+            } else if w.resume_from_run_id.is_some() {
+                "Workflow: resume run".to_string()
+            } else {
+                "Workflow: launch script".to_string()
+            }
+        }
+        ToolInput::UpdateGoal(ug) => {
+            if ug.completed == Some(true) {
+                "Goal: marking complete".to_string()
+            } else if let Some(ref reason) = ug.blocked_reason {
+                format!("Goal: blocked — {reason}")
+            } else if let Some(ref msg) = ug.message {
+                format!("Goal: {msg}")
+            } else {
+                "Goal: update".to_string()
+            }
+        }
+        ToolInput::Monitor(m) => format!("Start monitor: {}", m.description),
+        ToolInput::SchedulerCreate(sc) => match (&sc.task_id, &sc.interval) {
+            (Some(id), Some(interval)) => format!("Update scheduled task {id} (every {interval})"),
+            (Some(id), None) => format!("Update scheduled task {id}"),
+            (None, Some(interval)) => format!("Create scheduled task (every {interval})"),
+            (None, None) => "Create scheduled task".to_string(),
+        },
+        ToolInput::SchedulerDelete(sd) => format!("Delete scheduled task: {}", sd.id),
+        ToolInput::SchedulerList(_) => "List scheduled tasks".to_string(),
+        // The CI tool has its own row: without this arm it fell into the
+        // generic `_` below and every CI query read as "Tool call", which
+        // says nothing about what was asked of CI.
+        ToolInput::Ci(ci) => ci_tool_title(ci),
+        #[allow(unreachable_patterns)]
+        _ => "Tool call".to_string(),
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::{STREAMING_TITLE_ARG_CAP, StreamingToolArgs};
+    /// A write streams the whole file. Holding all of it to name the call would
+    /// put a second copy of every file the model writes in this session's
+    /// memory, for as long as the write takes.
+    #[test]
+    fn a_large_body_is_dropped_rather_than_held() {
+        let mut call = StreamingToolArgs::new("write_file".to_string());
+        call.push("{\"file_path\":\"big.txt\",\"content\":\"");
+        for _ in 0..1024 {
+            call.push(&"x".repeat(1024));
+        }
+        assert!(
+            call.args.len() <= STREAMING_TITLE_ARG_CAP,
+            "the head is bounded, not the whole body: {} bytes held",
+            call.args.len()
+        );
+        assert!(call.capped);
+        assert!(
+            !call.wants_parse(),
+            "a cut prefix must not be re-read: it can name the call something \
+             the whole document would not"
+        );
+    }
+    /// The head is what the title comes from, so it has to survive intact.
+    #[test]
+    fn the_head_is_kept_whole() {
+        let mut call = StreamingToolArgs::new("read_file".to_string());
+        call.push("{\"target_file\":\"");
+        call.push("src/main.rs\"}");
+        assert_eq!(call.args, "{\"target_file\":\"src/main.rs\"}");
+        assert!(!call.capped);
+        assert!(call.wants_parse());
+    }
+    /// Once a call has lost bytes it never becomes whole again — including
+    /// across a later fragment that would have fit, or an empty one.
+    #[test]
+    fn the_cut_flag_is_sticky() {
+        let mut call = StreamingToolArgs::new("write_file".to_string());
+        call.push(&"x".repeat(STREAMING_TITLE_ARG_CAP + 1));
+        assert!(call.capped);
+        call.push("");
+        assert!(call.capped, "an empty fragment cuts nothing and heals nothing");
+        call.push("y");
+        assert!(call.capped);
+    }
+    /// A fragment can split a multi-byte character exactly at the cap.
+    #[test]
+    fn the_cap_never_splits_a_character() {
+        let mut call = StreamingToolArgs::new("write_file".to_string());
+        call.push(&"a".repeat(STREAMING_TITLE_ARG_CAP - 1));
+        call.push("é");
+        assert_eq!(
+            call.args.len(),
+            STREAMING_TITLE_ARG_CAP - 1,
+            "a character that does not fit is left out whole"
+        );
+        assert!(call.capped);
+        // The real proof: the held bytes are still a string, not a broken one.
+        assert!(call.args.is_char_boundary(call.args.len()));
+    }
+}

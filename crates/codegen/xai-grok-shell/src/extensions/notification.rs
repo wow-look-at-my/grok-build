@@ -871,6 +871,15 @@ pub enum SessionUpdate {
         /// Raw JSON-fragment string. NOT valid JSON in isolation.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         arguments_delta: Option<String>,
+        /// What to call this row, read from the arguments received so far.
+        ///
+        /// The client has neither the tool registry nor the typed inputs a
+        /// title is derived from, so the shell resolves it and sends it here.
+        /// Present only on a chunk that CHANGED it: `None` means keep the title
+        /// the row already has, which for a call that has named nothing yet is
+        /// the wire `name`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        title: Option<String>,
     },
     /// One or more prompt images were resized to fit within API limits.
     ImageCompressed {
@@ -1940,6 +1949,7 @@ mod tests {
             tool_index: 0,
             name: Some("search_replace".into()),
             arguments_delta: None,
+            title: None,
         };
         let json = serde_json::to_value(&update).unwrap();
         assert_eq!(json["sessionUpdate"], "tool_call_delta_chunk");
@@ -1958,6 +1968,7 @@ mod tests {
             tool_index: 0,
             name: None,
             arguments_delta: Some("{\"file\":\"src/".into()),
+            title: None,
         };
         let json = serde_json::to_value(&update).unwrap();
         assert_eq!(json["sessionUpdate"], "tool_call_delta_chunk");
@@ -1976,18 +1987,21 @@ mod tests {
                 tool_index: 0,
                 name: Some("Bash".into()),
                 arguments_delta: None,
+                title: None,
             },
             SessionUpdate::ToolCallDeltaChunk {
                 tool_call_id: None,
                 tool_index: 0,
                 name: None,
                 arguments_delta: Some("{\"command\":\"ls\"}".into()),
+                title: Some("Execute `ls`".into()),
             },
             SessionUpdate::ToolCallDeltaChunk {
                 tool_call_id: Some("call_2".into()),
                 tool_index: 1,
                 name: Some("ReadFile".into()),
                 arguments_delta: Some("{\"path\":".into()),
+                title: None,
             },
         ];
         for update in cases {
@@ -2016,11 +2030,13 @@ mod tests {
                 tool_index,
                 name,
                 arguments_delta,
+                title,
             } => {
                 assert_eq!(tool_call_id.as_deref(), Some("call_x"));
                 assert_eq!(tool_index, 7);
                 assert_eq!(name.as_deref(), Some("future_tool"));
                 assert_eq!(arguments_delta.as_deref(), Some("..."));
+                assert_eq!(title, None);
             }
             other => panic!("expected ToolCallDeltaChunk, got {other:?}"),
         }

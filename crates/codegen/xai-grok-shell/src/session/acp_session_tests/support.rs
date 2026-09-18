@@ -444,6 +444,7 @@ pub(crate) async fn create_test_actor_with_terminal(
         turn_summary_enabled: false,
         session_turn_active: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         streaming_turn_capture: parking_lot::Mutex::new(StreamingTurnCapture::default()),
+        streaming_tool_titles: parking_lot::Mutex::new(std::collections::HashMap::new()),
         turn_stream_drained: parking_lot::Mutex::new(None),
         sampler_handle: xai_grok_sampler::SamplerHandle::noop(),
         rebuild_spec: crate::session::agent_rebuild::test_rebuild_spec_default(),

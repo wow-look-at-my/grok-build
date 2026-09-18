@@ -127,6 +127,14 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - `Plan: <path>` still renders on every plan-aware reminder — only the manual seed-todos directive is gone, replaced by a statement that the steps are already on the list.
 - A fail-closed planner publishes no plan, so nothing is seeded. Red/unseeded is the honest state there.
 
+## The run log is the goal verifier's runtime evidence
+
+- The verifier never asks the implementer for proof files. `goal_classifier/run_log.rs` builds `RUN_LOG` from the conversation at verification time. The log holds every tool call the implementer made since the goal started, with its arguments and the result the tool returned. The stage writes it beside the patch as `goal-classifier-{verifier_id}-{attempt}.runlog.md`. The evidence packet names the path.
+- Assistant prose and reasoning are left out on purpose. A verifier that reads the implementer's narration inherits its bias. A command line and its output carry none.
+- `GoalOrchestration::start_prompt_index` is the cut. A `User` item's `prompt_index` below it puts the calls that follow outside the goal. A compaction summary inside the goal is reported in the log header. The calls before it are gone from the conversation. So the verifier is told to run a missing plan step itself.
+- Each result keeps its head and its tail, because a test runner puts its verdict at the tail. Arguments are capped too. The whole log is capped and keeps the newest calls. The header states how many older calls it dropped. An absence then reads as an absence.
+- Every implementer-facing template (`goal_rules*.md`, `goal_continuation_directive*.md`, `goal_plan_block.md`, the planner prompt) says the run is the evidence and forbids proof files. `implementer_templates_never_ask_for_proof_files` pins that. The scratch dir stays, for temp scripts and a screenshot a plan step names.
+
 ## Verification does not widen the goal
 
 - A `## Verification plan` step reads back what the goal built. It is not a permit. The implementer read "do X to confirm Y" as an instruction to do X. A planner-invented check then became an action on a system nobody put in scope. Every place that demands verification says so now. Those are the planner prompt's `## Verification plan` contract, `goal_rules.md`'s VERIFY AS YOU GO, `goal_plan_block.md`, and the per-turn continuation directive.

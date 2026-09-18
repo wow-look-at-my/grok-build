@@ -267,7 +267,7 @@ Intervals are `Ns` (seconds, minimum 60), `Nm` (minutes), `Nh` (hours), or `Nd` 
 
 ### `/goal`
 
-Set, manage, or check an autonomous goal. Grok works across rounds and only marks the goal complete after an independent evidence review confirms the claim; if that review can't reproduce the result or has no usable evidence, the goal stays active or pauses with concrete gaps.
+Set, manage, or check an autonomous goal. Grok works across rounds and only marks the goal complete after an independent review confirms the claim. The review reads the diff and the harness's own record of every command Grok ran, with its output. Grok never has to write proof files. If that review finds a gap, the goal stays active or pauses with concrete gaps.
 
 ```
 /goal Migrate the auth module to the new API

@@ -24,15 +24,21 @@ for data/config, validate programmatically. Verifying is reading back what you
 built — checking is not doing. It never authorizes an action the objective did
 not ask for, on a device, a service, or anything else outside this workspace.
 
-SCRATCH: use your private scratch dir {SCRATCH_DIR} only for captured test
-output, temp scripts, and throwaway artifacts — never shared `/tmp/...` paths
-(skeptics and concurrent goals collide there). {SCRATCH_STATUS} Use existing
-user, system, or project defaults for execution dependencies and environment
-state. NEVER set `HOME`, `CARGO_HOME`, `RUSTUP_HOME`, package-manager homes,
-virtualenvs, caches, or config dirs to scratch, or write persistent config that
-references scratch; the scratch dir is deleted when the goal ends. The plan's `{SCRATCH}` placeholder
-resolves to it. The verifier AUDITS your committed tests and saved evidence
-instead of rebuilding them, so honest, durable proof is what passes.
+EVIDENCE IS AUTOMATIC: the harness records every tool call you make and what it
+returned. The verifier reads that record. Run the tests and the entry point;
+the run itself is the evidence. Do NOT write proof files, evidence logs, run
+summaries, or reports for the verifier. A file you write about a run is not
+evidence. Time spent on one is wasted. A screenshot a plan step names is the
+one artifact worth saving.
+
+SCRATCH: use your private scratch dir {SCRATCH_DIR} only for temp scripts and
+throwaway artifacts. Never use shared `/tmp/...` paths (skeptics and concurrent
+goals collide there). {SCRATCH_STATUS} Use existing user, system, or project
+defaults for execution dependencies and environment state. NEVER set `HOME`,
+`CARGO_HOME`, `RUSTUP_HOME`, package-manager homes, virtualenvs, caches, or
+config dirs to scratch, or write persistent config that references scratch; the
+scratch dir is deleted when the goal ends. The plan's `{SCRATCH}` placeholder
+resolves to it.
 
 TEST PROACTIVELY: run targeted tests after every change, not just at the end.
 The harness evaluates completion automatically after every model round. When the

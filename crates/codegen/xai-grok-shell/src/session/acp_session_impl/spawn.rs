@@ -1811,6 +1811,7 @@ pub(crate) async fn spawn_session_actor(
         turn_summary_enabled: effective_config.is_turn_summary_enabled(),
         session_turn_active: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         streaming_turn_capture: parking_lot::Mutex::new(StreamingTurnCapture::default()),
+        streaming_tool_titles: parking_lot::Mutex::new(std::collections::HashMap::new()),
         turn_stream_drained: parking_lot::Mutex::new(None),
         sampler_handle,
         rebuild_spec: rebuild_spec.clone(),
