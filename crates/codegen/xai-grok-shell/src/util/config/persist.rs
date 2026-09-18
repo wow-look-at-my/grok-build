@@ -11,6 +11,15 @@ use xai_grok_agent::prompt::skills::SkillsConfig;
 static SAVE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 /// [`save_config`] body; caller must hold [`SAVE_LOCK`].
 async fn save_config_locked(config: &Config) -> Result<()> {
+    save_config_locked_removing(config, &[]).await
+}
+/// [`save_config_locked`] plus a removal pass over `(section, key)` pairs,
+/// applied after the merges and before the write.
+///
+/// A field that serializes to nothing cannot clear a key already on disk,
+/// because `merge_section` keeps every key the serialized struct does not
+/// name. A setting whose UNSET state has to reach disk names its key here.
+async fn save_config_locked_removing(config: &Config, removals: &[(&str, &str)]) -> Result<()> {
     let path = user_config_path();
     let mut root: TomlValue = match tokio::fs::read_to_string(&path).await {
         Ok(s) => match toml::from_str::<TomlValue>(&s) {
@@ -45,6 +54,11 @@ async fn save_config_locked(config: &Config) -> Result<()> {
         table.remove("skills");
     } else {
         merge_section(table, "skills", &config.skills);
+    }
+    for (section, key) in removals {
+        if let Some(TomlValue::Table(section_table)) = table.get_mut(*section) {
+            section_table.remove(*key);
+        }
     }
     let toml_str = toml::to_string_pretty(&root)?;
     if let Some(parent) = path.parent() {
@@ -198,12 +212,20 @@ pub async fn update_config<F>(f: F) -> Result<()>
 where
     F: FnOnce(&mut Config),
 {
+    update_config_removing(&[], f).await
+}
+/// [`update_config`] plus a removal pass; see
+/// [`save_config_locked_removing`] for why a clear needs one.
+pub async fn update_config_removing<F>(removals: &[(&str, &str)], f: F) -> Result<()>
+where
+    F: FnOnce(&mut Config),
+{
     let _guard = SAVE_LOCK.lock().await;
     let root: TomlValue =
         crate::config::load_from_disk().unwrap_or_else(|_| TomlValue::Table(TomlMap::new()));
     let mut cfg = load_config_from_toml(&root);
     f(&mut cfg);
-    save_config_locked(&cfg).await
+    save_config_locked_removing(&cfg, removals).await
 }
 #[cfg(test)]
 mod tests {
@@ -804,6 +826,40 @@ auto_update = true
                 "use_leader",
                 "show_tips",
             ],
+        );
+    }
+    /// The removal pass is what makes "(no override)" reach disk. Without
+    /// it a cleared slot keeps its old model, because `merge_section` never
+    /// removes a key the serialized struct does not name — the assertion on
+    /// `web_search` below is the same behavior seen from the other side.
+    #[test]
+    fn removal_pass_clears_a_models_key_that_the_merge_would_keep() {
+        let mut table = TomlMap::new();
+        let mut models = TomlMap::new();
+        models.insert("goal_skeptic".into(), TomlValue::String("old-pin".into()));
+        models.insert("web_search".into(), TomlValue::String("keep-me".into()));
+        table.insert("models".into(), TomlValue::Table(models));
+
+        let cfg = crate::agent::config::ModelsConfig::default();
+        merge_section(&mut table, "models", &cfg);
+        assert_eq!(
+            table["models"]["goal_skeptic"].as_str(),
+            Some("old-pin"),
+            "the merge alone leaves the pin — this is the bug the removal fixes"
+        );
+
+        if let Some(TomlValue::Table(section)) = table.get_mut("models") {
+            section.remove("goal_skeptic");
+        }
+        let m = table.get("models").unwrap().as_table().unwrap();
+        assert!(
+            !m.contains_key("goal_skeptic"),
+            "a cleared slot must leave no key behind"
+        );
+        assert_eq!(
+            m.get("web_search").and_then(|v| v.as_str()),
+            Some("keep-me"),
+            "clearing one slot must not touch another"
         );
     }
     #[test]

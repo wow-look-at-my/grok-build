@@ -1,4 +1,4 @@
-use super::persist::update_config;
+use super::persist::{update_config, update_config_removing};
 use anyhow::Result;
 
 // ---------------------------------------------------------------------------
@@ -181,8 +181,16 @@ pub async fn set_harness_model(slot_id: &str, value: String) -> Result<()> {
     if xai_grok_models::slot_by_id(slot_id).is_none() {
         anyhow::bail!("unknown harness model slot '{slot_id}'");
     }
+    // Clearing a slot has to REMOVE its key. Setting the field to `None`
+    // only stops it serializing, and the merge then keeps the model already
+    // on disk — the modal would report "cleared" over an unchanged pin.
+    let removals: Vec<(&str, &str)> = if value.is_empty() {
+        vec![("models", slot_id)]
+    } else {
+        Vec::new()
+    };
     let slot_id = slot_id.to_owned();
-    update_config(move |cfg| {
+    update_config_removing(&removals, move |cfg| {
         let value = (!value.is_empty()).then_some(value);
         let m = &mut cfg.models;
         match slot_id.as_str() {
