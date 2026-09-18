@@ -711,7 +711,7 @@ pub fn default_settings() -> Vec<SettingMeta> {
             hidden_in_minimal: false,
         },
         // SHARED. `[ui].min_output_tokens_per_sec`, `Option<u32>` widened to
-        // `i64`. 0 is the off state, which is the default.
+        // `i64`. 0 is the off state.
         SettingMeta {
             key: "min_output_tokens_per_sec",
             category: SettingCategory::Agent,

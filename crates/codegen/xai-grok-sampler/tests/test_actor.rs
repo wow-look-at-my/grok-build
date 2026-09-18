@@ -1110,6 +1110,117 @@ async fn an_ungated_session_never_reissues_a_slow_stream() {
     assert_eq!(response.assistant_text(), "xxxxxxxxxxxx");
 }
 
+/// A server-side web search delivers nothing while it runs. The model is not
+/// generating during it, so the gap is the server's time and not a collapsed
+/// stream: a response that searches for longer than the sustained duration is
+/// answered, not reissued.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_hosted_search_gap_is_not_a_collapsed_stream() {
+    let counter = Arc::new(AtomicU32::new(0));
+    let counter_handler = Arc::clone(&counter);
+    let app = Router::new().route(
+        "/v1/responses",
+        post(move || {
+            let counter = Arc::clone(&counter_handler);
+            async move {
+                counter.fetch_add(1, Ordering::SeqCst);
+                // One 39-byte word plus its space is 40 bytes, and 40 bytes
+                // every 100 ms is 100 tok/s: five times the floor below, for
+                // two seconds before the search.
+                let word = "0".repeat(39);
+                let fast = vec![word; 20].join(" ");
+                let mut script = sse::responses_api_script_exact(&fast, "test-model");
+                // `response.created` first, then the healthy burst, then the
+                // search, then `response.completed` last.
+                let created = script.remove(0);
+                let completed = script.pop().expect("the terminal event");
+                let mut events = vec![Delayed::now(created)];
+                for event in script {
+                    events.push(Delayed::after(100, event));
+                }
+                events.push(Delayed::now(SseEvent::data(
+                    json!({
+                        "type": "response.web_search_call.in_progress",
+                        "sequence_number": 900,
+                        "output_index": 0,
+                        "item_id": "ws_1"
+                    })
+                    .to_string(),
+                )));
+                // The search runs for three seconds: longer than the window
+                // and the sustained duration together.
+                events.push(Delayed::after(
+                    3000,
+                    SseEvent::data(
+                        json!({
+                            "type": "response.output_item.done",
+                            "sequence_number": 901,
+                            "output_index": 0,
+                            "item": {
+                                "type": "web_search_call",
+                                "id": "ws_1",
+                                "status": "completed",
+                                "action": { "type": "search", "query": "q", "sources": [] }
+                            }
+                        })
+                        .to_string(),
+                    ),
+                ));
+                events.push(Delayed::after(100, completed));
+                Sse::new(
+                    stream::iter(events)
+                        .then(|event| async move {
+                            tokio::time::sleep(Duration::from_millis(event.delay_ms)).await;
+                            Ok::<_, std::convert::Infallible>(
+                                sse_events_to_axum(vec![event.event]).remove(0),
+                            )
+                        })
+                        .boxed(),
+                )
+            }
+        }),
+    );
+    let server = MockServer::spawn(app).await;
+    let (event_tx, _event_rx) = mpsc::unbounded_channel();
+    let mut cfg = responses_config(server.base_url(), None);
+    cfg.output_rate_floor = Some(OutputRateFloorPolicy {
+        min_tokens_per_sec: 20.0,
+        window_secs: 2,
+        sustained_secs: 1,
+        max_retries: 2,
+    });
+    let handle = SamplerActor::spawn(cfg, RetryPolicy::default(), event_tx);
+
+    let result = handle
+        .submit_and_collect(RequestId::from("req-hosted-search"), user_request("hi"))
+        .await;
+    server.shutdown();
+
+    let (response, _metrics) = result.expect("the searching response answers");
+    assert_eq!(
+        counter.load(Ordering::SeqCst),
+        1,
+        "the search must not be read as a collapse and reissued"
+    );
+    assert!(!response.assistant_text().is_empty());
+}
+
+/// One scripted SSE event and how long the mock server waits before it.
+struct Delayed {
+    delay_ms: u64,
+    event: SseEvent,
+}
+
+impl Delayed {
+    fn now(event: SseEvent) -> Self {
+        Self { delay_ms: 0, event }
+    }
+
+    fn after(delay_ms: u64, event: SseEvent) -> Self {
+        Self { delay_ms, event }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Helpers for draining the event channel
 // ---------------------------------------------------------------------------
