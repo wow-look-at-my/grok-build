@@ -241,6 +241,74 @@ mod tests {
         (id, info)
     }
 
+    fn favorite_model(id: &str, name: &str) -> (acp::ModelId, acp::ModelInfo) {
+        let id = acp::ModelId::new(Arc::from(id));
+        let mut meta = serde_json::Map::new();
+        meta.insert(
+            xai_grok_shell::sampling::types::FAVORITE_META_KEY.into(),
+            serde_json::Value::Bool(true),
+        );
+        let info = acp::ModelInfo::new(id.clone(), name.to_string())
+            .meta(serde_json::Value::Object(meta).as_object().cloned());
+        (id, info)
+    }
+
+    fn ctx_for(state: &ModelState) -> AppCtx<'_> {
+        AppCtx {
+            models: state,
+            cwd: std::path::Path::new("."),
+            has_session_announcements: false,
+            billing_surface_visible: true,
+            usage_command_visible: true,
+            workflows_available: true,
+            screen_mode: crate::app::ScreenMode::Fullscreen,
+        }
+    }
+
+    /// Three models, one of them marked, and the session is running an
+    /// unmarked one.
+    fn state_with_a_favorite() -> ModelState {
+        let mut state = ModelState::default();
+        let (fid, finfo) = favorite_model("kept", "Kept");
+        let (cid, cinfo) = plain_model("running", "Running");
+        let (oid, oinfo) = plain_model("crowd-1", "Crowd One");
+        state.available.insert(fid, finfo);
+        state.available.insert(cid.clone(), cinfo);
+        state.available.insert(oid, oinfo);
+        state.current = Some(cid);
+        state
+    }
+
+    #[test]
+    fn the_opening_list_is_the_favorites_plus_the_running_model() {
+        let state = state_with_a_favorite();
+        let items = ModelCommand.suggest_args(&ctx_for(&state), "").unwrap();
+        let names: Vec<&str> = items.iter().map(|i| i.match_text.as_str()).collect();
+        assert_eq!(names, vec!["Kept", "Running"]);
+    }
+
+    #[test]
+    fn a_typed_query_searches_past_the_favorites() {
+        let state = state_with_a_favorite();
+        // The caller ranks the rows, so the command's job is to offer every
+        // model the moment anything is typed.
+        let items = ModelCommand.suggest_args(&ctx_for(&state), "cro").unwrap();
+        let names: Vec<&str> = items.iter().map(|i| i.match_text.as_str()).collect();
+        assert_eq!(names, vec!["Kept", "Running", "Crowd One"]);
+    }
+
+    #[test]
+    fn a_catalog_with_no_favorite_lists_everything() {
+        let mut state = ModelState::default();
+        let (a, ainfo) = plain_model("one", "One");
+        let (b, binfo) = plain_model("two", "Two");
+        state.available.insert(a, ainfo);
+        state.available.insert(b, binfo);
+
+        let items = ModelCommand.suggest_args(&ctx_for(&state), "").unwrap();
+        assert_eq!(items.len(), 2, "an unconfigured session loses no model");
+    }
+
     static EMPTY_BUNDLE: crate::app::bundle::BundleState = crate::app::bundle::BundleState {
         has_cache: false,
         version: String::new(),

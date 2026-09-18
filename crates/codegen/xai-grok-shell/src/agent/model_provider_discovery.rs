@@ -155,3 +155,177 @@ async fn fetch_listing(
         Err(_) => Err(format!("no answer within {}s", FETCH_TIMEOUT.as_secs())),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A loopback listing at both the conventional path and a custom one, so a
+    /// test can prove which URL the discovery asked for.
+    async fn start_listing_server(
+        body: serde_json::Value,
+    ) -> (String, tokio::task::JoinHandle<()>) {
+        use axum::routing::get;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+        let for_custom = body.clone();
+        let app = axum::Router::new()
+            .route(
+                "/v1/models",
+                get(move || async move { axum::Json(body) }),
+            )
+            .route(
+                "/catalog.json",
+                get(move || async move { axum::Json(for_custom) }),
+            );
+        let handle = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        (base, handle)
+    }
+
+    fn two_model_listing() -> serde_json::Value {
+        serde_json::json!({
+            "data": [
+                { "model": "big-one", "contextWindow": 1_000_000 },
+                { "model": "small-one", "contextWindow": 128_000 },
+            ]
+        })
+    }
+
+    fn config_from(toml_text: &str) -> config::Config {
+        let raw: toml::Value = toml::from_str(toml_text).expect("test config should parse");
+        config::Config::new_from_toml_cfg(&raw).expect("test config should build")
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_provider_contributes_the_models_its_listing_names() {
+        let (base, server) = start_listing_server(two_model_listing()).await;
+        let cfg = config_from(&format!(
+            r#"
+            [model_providers.gateway]
+            base_url = "{base}/v1"
+            api_key = "sk-provider"
+            "#
+        ));
+
+        let discovered = discover_provider_models(&cfg).await;
+        server.abort();
+
+        let big = discovered
+            .get("gateway/big-one")
+            .expect("the listing's models are keyed by provider and slug");
+        assert_eq!(big.info.model, "big-one");
+        assert_eq!(big.info.context_window.get(), 1_000_000);
+        assert_eq!(big.info.base_url, format!("{base}/v1"));
+        assert_eq!(big.info.model_provider.as_deref(), Some("gateway"));
+        assert_eq!(
+            config::resolve_credentials(big, Some("session-jwt"))
+                .api_key
+                .as_deref(),
+            Some("sk-provider"),
+            "a discovered model inherits the provider's credential, and the \
+             session token never reaches the provider's endpoint"
+        );
+        assert!(discovered.contains_key("gateway/small-one"));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn autodetection_off_asks_for_nothing() {
+        let (base, server) = start_listing_server(two_model_listing()).await;
+        let cfg = config_from(&format!(
+            r#"
+            [model_providers.gateway]
+            base_url = "{base}/v1"
+            models_autodetect = false
+            "#
+        ));
+
+        let discovered = discover_provider_models(&cfg).await;
+        server.abort();
+
+        assert!(
+            discovered.is_empty(),
+            "a provider that flooded the picker must stay off: {:?}",
+            discovered.keys().collect::<Vec<_>>()
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_custom_list_url_is_asked_verbatim() {
+        let (base, server) = start_listing_server(two_model_listing()).await;
+        // The base serves no listing at all. Only the custom URL answers, so a
+        // discovery that derived `<base>/models` from it finds nothing.
+        let cfg = config_from(&format!(
+            r#"
+            [model_providers.gateway]
+            base_url = "{base}/inference"
+            models_list_url = "{base}/catalog.json"
+            "#
+        ));
+
+        let discovered = discover_provider_models(&cfg).await;
+        server.abort();
+
+        assert!(
+            discovered.contains_key("gateway/big-one"),
+            "the listing named by models_list_url is the one asked for"
+        );
+        assert_eq!(
+            discovered["gateway/big-one"].info.base_url,
+            format!("{base}/inference"),
+            "the models still route to the provider's own base, not to the listing"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn an_unreachable_provider_contributes_nothing_and_fails_no_other() {
+        let (base, server) = start_listing_server(two_model_listing()).await;
+        let cfg = config_from(&format!(
+            r#"
+            [model_providers.dead]
+            base_url = "http://127.0.0.1:1/v1"
+
+            [model_providers.gateway]
+            base_url = "{base}/v1"
+            "#
+        ));
+
+        let discovered = discover_provider_models(&cfg).await;
+        server.abort();
+
+        assert!(
+            !discovered.keys().any(|k| k.starts_with("dead/")),
+            "an unreachable provider contributes no models"
+        );
+        assert!(
+            discovered.contains_key("gateway/big-one"),
+            "and it does not take the reachable provider down with it"
+        );
+    }
+
+    #[test]
+    fn a_provider_with_no_endpoint_is_skipped() {
+        let cfg = config_from(
+            r#"
+            [model_providers.nameless]
+            context_window = 200000
+            "#,
+        );
+        let provider = cfg.model_providers.get("nameless").expect("provider");
+        assert!(provider.autodetect_enabled());
+        assert_eq!(provider.resolve_models_list_url(), None);
+    }
+
+    #[test]
+    fn a_base_that_already_names_the_listing_is_not_doubled() {
+        let cfg = config_from(
+            r#"
+            [model_providers.gateway]
+            base_url = "https://gateway.example/v1/models"
+            "#,
+        );
+        assert_eq!(
+            cfg.model_providers["gateway"].resolve_models_list_url(),
+            Some("https://gateway.example/v1/models".to_owned())
+        );
+    }
+}

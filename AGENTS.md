@@ -323,3 +323,14 @@ Every one of those is the test doing its job. Making them pass there means weake
 ## Workflow agent-concurrency notes
 
 - `WorkflowHostParams.agent_slots` is a semaphore owned by `WorkflowManager` and shared by every run it launches (`session/workflow/manager.rs`), not one fresh semaphore per run. Up to `WORKFLOW_MAX_ACTIVE_RUNS_PER_SESSION` runs can be active at once, so a per-run semaphore will let total live agent-spawned LLM requests scale with active run count instead of staying under the configured cap (`GROK_WORKFLOW_MAX_CONCURRENT_AGENTS` / `workflow_max_concurrent_agents`) — the knob operators lower to stay under a hard per-host concurrent-request limit.
+
+## Provider model autodetection and favorites notes
+
+- `[model_providers.<id>]` declares a base URL, and `model_provider_discovery.rs` asks that base what it serves (`models_autodetect`, default on; `models_list_url` for a listing that lives elsewhere). A discovered model is built through `config::entry_for_provider_model`. That is the SAME merge a `[model.<id>] model_provider = "..."` block gets, fail-closed auth ref included. A second construction path is how a discovered model reaches a third party's endpoint with the session bearer.
+- Keys are `<provider id>/<slug>`. An unqualified key lets one provider's listing overwrite another provider's model of the same name, and overwrite the user's own `[model.<id>]` block.
+- Discovery is additive, like Codex: `ModelsManager::provider_models`, folded on by `with_additive_catalogs`. Every rebuild of the catalog goes through that one method. A merge that some paths skip drops the provider's models on the next config reload.
+- It runs on a `spawn_local` off `initialize`, not awaited. A provider that answers slowly holds the whole handshake open otherwise. The catalog reaches the client by itself, through the models-updated push.
+- `fetch_models_for_list_url_blocking` takes the URL as given. `fetch_models_for_api_base_blocking` DERIVES one, which appends a second `/models` to a custom listing URL.
+- Favorites are marks, not filters. `apply_favorites` sets `ModelInfo.favorite` from `[models].favorite_models` and the provider's own list. It clears the mark on every other entry. A config reload can therefore take a mark away. `entry.info.model_provider` is what tells it which provider's globs apply.
+- An invalid favorites glob fails OPEN and marks nothing. `allowed_models` fails closed, because it decides what may be used at all. A favorite decides only what the picker shows first, and failing it closed empties that list.
+- The whole catalog crosses the wire either way. The pager's `build_model_items` narrows the list only while the query is EMPTY. A typed query searches every model, which is what keeps a provider with hundreds of them usable. The current model is never narrowed away, or the picker reads as a model that went missing.

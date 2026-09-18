@@ -615,6 +615,117 @@ fn default_model_honors_allowlist_when_no_default_set() {
 }
 
 #[test]
+fn favorites_come_from_both_the_catalog_list_and_the_provider_list() {
+    let cfg = config_from_toml(
+        r#"
+            [models]
+            favorite_models = ["grok-4*"]
+
+            [model_providers.gateway]
+            base_url = "https://gateway.example/v1"
+            favorite_models = ["*-sonnet"]
+
+            [model.grok-4]
+            model = "grok-4"
+            base_url = "https://api.x.ai/v1"
+            context_window = 256000
+
+            [model.grok-3]
+            model = "grok-3"
+            base_url = "https://api.x.ai/v1"
+            context_window = 256000
+
+            [model.claude-sonnet]
+            model = "claude-sonnet"
+            model_provider = "gateway"
+            context_window = 256000
+
+            [model.claude-opus]
+            model = "claude-opus"
+            model_provider = "gateway"
+            context_window = 256000
+            "#,
+    );
+    let catalog = resolve_model_catalog(&cfg, None);
+    let favorite = |key: &str| catalog.get(key).expect(key).info.favorite;
+    assert!(favorite("grok-4"), "the catalog-wide list matches");
+    assert!(favorite("claude-sonnet"), "the provider's own list matches");
+    assert!(!favorite("grok-3"));
+    assert!(
+        !favorite("claude-opus"),
+        "one provider's list must not mark a model it does not name"
+    );
+}
+
+#[test]
+fn a_providers_favorites_reach_only_that_providers_models() {
+    let cfg = config_from_toml(
+        r#"
+            [model_providers.a]
+            base_url = "https://a.example/v1"
+            favorite_models = ["shared-*"]
+
+            [model_providers.b]
+            base_url = "https://b.example/v1"
+
+            [model.a-shared]
+            model = "shared-one"
+            model_provider = "a"
+            context_window = 256000
+
+            [model.b-shared]
+            model = "shared-two"
+            model_provider = "b"
+            context_window = 256000
+            "#,
+    );
+    let catalog = resolve_model_catalog(&cfg, None);
+    assert!(catalog["a-shared"].info.favorite);
+    assert!(
+        !catalog["b-shared"].info.favorite,
+        "the glob belongs to provider a, and b's model matches it by slug alone"
+    );
+}
+
+#[test]
+fn no_favorites_configured_marks_nothing() {
+    let cfg = config_from_toml(
+        r#"
+            [model.grok-4]
+            model = "grok-4"
+            base_url = "https://api.x.ai/v1"
+            context_window = 256000
+            "#,
+    );
+    let catalog = resolve_model_catalog(&cfg, None);
+    assert!(
+        catalog.values().all(|e| !e.info.favorite),
+        "an unconfigured session has no favorites, so the picker lists everything"
+    );
+}
+
+#[test]
+fn an_invalid_favorites_glob_marks_nothing_and_keeps_the_catalog() {
+    let cfg = config_from_toml(
+        r#"
+            [models]
+            favorite_models = ["grok-4{"]
+
+            [model.grok-4]
+            model = "grok-4"
+            base_url = "https://api.x.ai/v1"
+            context_window = 256000
+            "#,
+    );
+    let catalog = resolve_model_catalog(&cfg, None);
+    assert!(
+        catalog.contains_key("grok-4"),
+        "a bad favorites pattern is cosmetic and must not drop a model"
+    );
+    assert!(!catalog["grok-4"].info.favorite);
+}
+
+#[test]
 fn validate_selectable_rejects_bad_allowlists() {
     let excluded = config_from_toml(
         r#"
