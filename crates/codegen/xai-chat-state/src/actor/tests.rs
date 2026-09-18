@@ -1606,6 +1606,7 @@ async fn build_request_fits_the_output_budget_into_the_context_window() {
         context_window: NonZeroU64::new(1_000_000).unwrap(),
         reasoning_effort: None,
         stream_tool_calls: None,
+        chat_message_profile: Default::default(),
     };
     // Bytes/4: this is a 737_857-token prompt.
     let items = vec![ConversationItem::user("x".repeat(737_857 * 4))];
