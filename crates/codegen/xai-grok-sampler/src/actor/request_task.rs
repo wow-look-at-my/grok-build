@@ -905,6 +905,17 @@ async fn drive_l2(
                         SamplingEvent::BackendToolCallCompleted { .. } => {
                             gate.resume(std::time::Instant::now());
                         }
+                        // A tool call that opens carrying only an id and a
+                        // name is one whose arguments this loop will never
+                        // see: `stream_tool_calls` is off by default, and the
+                        // upstream then writes the whole call before it says
+                        // anything. Generation nobody streams is not silence,
+                        // so the gate holds until output resumes.
+                        SamplingEvent::ToolCallDelta { id, arguments_delta, .. }
+                            if id.is_some() && arguments_delta.is_none() =>
+                        {
+                            gate.pause(std::time::Instant::now());
+                        }
                         _ => {}
                     }
                     // Tool-call arguments are generation like any other: a
