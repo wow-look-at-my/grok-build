@@ -68,6 +68,16 @@ impl SlashCommand for ModelCommand {
         Some(build_model_items(ctx.models, favorites_only))
     }
 
+    fn search_args(&self, ctx: &AppCtx, args_query: &str) -> Option<Vec<ArgItem>> {
+        if ctx.models.is_empty() {
+            return None;
+        }
+        if let Some(model_id) = detect_effort_phase(ctx.models, args_query) {
+            return Some(build_effort_items(ctx.models, &model_id));
+        }
+        Some(build_model_items(ctx.models, false))
+    }
+
     fn run(&self, ctx: &mut CommandExecCtx, args: &str) -> CommandResult {
         let trimmed = args.trim();
         if trimmed.is_empty() {
@@ -293,6 +303,16 @@ mod tests {
         // The caller ranks the rows, so the command's job is to offer every
         // model the moment anything is typed.
         let items = ModelCommand.suggest_args(&ctx_for(&state), "cro").unwrap();
+        let names: Vec<&str> = items.iter().map(|i| i.match_text.as_str()).collect();
+        assert_eq!(names, vec!["Kept", "Running", "Crowd One"]);
+    }
+
+    #[test]
+    fn the_modal_picker_is_handed_every_model_to_search() {
+        let state = state_with_a_favorite();
+        // The modal picker asks one time and filters its own copy, so this is
+        // the only chance it gets to see a model that is not a favorite.
+        let items = ModelCommand.search_args(&ctx_for(&state), "").unwrap();
         let names: Vec<&str> = items.iter().map(|i| i.match_text.as_str()).collect();
         assert_eq!(names, vec!["Kept", "Running", "Crowd One"]);
     }

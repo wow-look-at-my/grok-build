@@ -1378,11 +1378,16 @@ impl AgentView {
                     if let Some(items) = cmd.suggest_args(&ctx, "")
                         && !items.is_empty()
                     {
+                        // The picker opens on `items` and searches
+                        // `original_items`, so the wider set goes in the
+                        // second slot or the rows it opened without are
+                        // unreachable.
+                        let searchable = cmd.search_args(&ctx, "").unwrap_or_else(|| items.clone());
                         self.active_modal = Some(crate::views::modal::ActiveModal::ArgPicker {
                             command: command.to_string(),
                             args_query: String::new(),
-                            items: items.clone(),
-                            original_items: items,
+                            items,
+                            original_items: searchable,
                             state: crate::views::picker::PickerState::input_active(),
                             previous_palette: None,
                             window: crate::views::modal_window::ModalWindowState::new(),
