@@ -1121,6 +1121,15 @@ pub struct ModelsConfig {
     /// Remove these model IDs from the catalog entirely. Wins over `hidden_models`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub disabled_models: Option<Vec<String>>,
+    /// Force `supports_reasoning_effort = true` on these models, so `/effort`
+    /// and the effort menu work on a model the catalog never flagged. Globs
+    /// match the catalog key or the model id, like the other model filters.
+    ///
+    /// This is the escape hatch for a server catalog that omits the flag: it
+    /// applies after the whole catalog is resolved, so it does not depend on a
+    /// `[model.<key>]` table name matching the catalog key.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub force_reasoning_effort_models: Option<Vec<String>>,
     /// Fallback `agent_type` for models without a per-model override.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_type: Option<String>,
@@ -2041,6 +2050,10 @@ impl Config {
             ("allowed_models", &self.models.allowed_models),
             ("disabled_models", &self.models.disabled_models),
             ("hidden_models", &self.models.hidden_models),
+            (
+                "force_reasoning_effort_models",
+                &self.models.force_reasoning_effort_models,
+            ),
         ] {
             if let Err(bad) = crate::agent::models::ModelGlobSet::compile(list.as_ref()) {
                 return Err(format!(
@@ -8460,6 +8473,78 @@ reasoning_effort = "low"
         assert!(catalog["to-hide"].info.hidden);
         assert!(!available.values().any(|m| m.name == "to-hide"));
     }
+    #[test]
+    fn force_reasoning_effort_models_flags_a_model_the_catalog_left_unflagged() {
+        use crate::agent::models::resolve_model_catalog;
+        let raw: toml::Value = toml::from_str(
+            r#"
+            [models]
+            force_reasoning_effort_models = ["forced-*", "by-model-id"]
+            [model.forced-one]
+            model = "forced-one"
+            base_url = "https://api.x.ai/v1"
+            context_window = 200000
+            [model.some-key]
+            model = "by-model-id"
+            base_url = "https://api.x.ai/v1"
+            context_window = 200000
+            [model.untouched]
+            model = "untouched"
+            base_url = "https://api.x.ai/v1"
+            context_window = 200000
+            "#,
+        )
+        .unwrap();
+        let catalog = resolve_model_catalog(&Config::new_from_toml_cfg(&raw).unwrap(), None);
+        assert!(catalog["forced-one"].info.supports_reasoning_effort);
+        // The glob matches the model id as well as the catalog key.
+        assert!(catalog["some-key"].info.supports_reasoning_effort);
+        assert!(!catalog["untouched"].info.supports_reasoning_effort);
+    }
+
+    #[test]
+    fn forced_reasoning_effort_reaches_the_acp_meta_gate() {
+        use crate::agent::models::resolve_model_catalog;
+        use crate::sampling::types::supports_reasoning_effort_meta;
+        let raw: toml::Value = toml::from_str(
+            r#"
+            [models]
+            force_reasoning_effort_models = ["forced-one"]
+            [model.forced-one]
+            model = "forced-one"
+            base_url = "https://api.x.ai/v1"
+            context_window = 200000
+            "#,
+        )
+        .unwrap();
+        let catalog = resolve_model_catalog(&Config::new_from_toml_cfg(&raw).unwrap(), None);
+        let acp_models = to_acp_model_info(&catalog);
+        let info = acp_models
+            .values()
+            .find(|m| m.name == "forced-one")
+            .expect("forced model in acp catalog");
+        assert!(
+            supports_reasoning_effort_meta(info.meta.as_ref()),
+            "forcing must reach the key the pager's /effort gate reads",
+        );
+    }
+
+    #[test]
+    fn force_reasoning_effort_models_rejects_an_invalid_glob() {
+        let raw: toml::Value = toml::from_str(
+            r#"
+            [models]
+            force_reasoning_effort_models = ["grok["]
+            "#,
+        )
+        .unwrap();
+        let err = Config::new_from_toml_cfg(&raw)
+            .unwrap()
+            .validate_model_filters()
+            .expect_err("invalid glob must fail loudly");
+        assert!(err.contains("force_reasoning_effort_models"), "err={err}");
+    }
+
     #[test]
     fn allowed_models_marks_selectable_by_wildcard_key_or_model() {
         use crate::agent::models::resolve_model_catalog;
