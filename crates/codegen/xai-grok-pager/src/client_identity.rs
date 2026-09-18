@@ -1,7 +1,11 @@
 pub const PAGER_CLIENT_TYPE: &str = "grok-pager";
 pub const HEADLESS_CLIENT_TYPE: &str = "grok-shell";
 
-pub const PAGER_CLIENT_VERSION: &str = xai_grok_version::VERSION;
+/// A function, not a constant: the release number is written into the binary
+/// after it links, so it is not a value the compiler holds.
+pub fn pager_client_version() -> &'static str {
+    xai_grok_version::version()
+}
 
 /// `User-Agent` for pager-owned direct-to-`api.x.ai` clients (voice STT).
 ///
@@ -11,7 +15,7 @@ pub fn client_user_agent() -> String {
     format!(
         "{}/{} ({}; {})",
         HEADLESS_CLIENT_TYPE,
-        PAGER_CLIENT_VERSION,
+        pager_client_version(),
         std::env::consts::OS,
         std::env::consts::ARCH,
     )
@@ -30,7 +34,7 @@ mod tests {
             ua,
             format!(
                 "grok-shell/{} ({}; {})",
-                PAGER_CLIENT_VERSION,
+                pager_client_version(),
                 std::env::consts::OS,
                 std::env::consts::ARCH
             )

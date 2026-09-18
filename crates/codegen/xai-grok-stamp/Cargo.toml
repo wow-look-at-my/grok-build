@@ -1,0 +1,14 @@
+[package]
+license = "Apache-2.0"
+name = "xai-grok-stamp"
+version = "0.1.0"
+edition.workspace = true
+description = "Writes a release number into an already-linked grok binary"
+
+# The slot layout is shared with the crate that reads it, so the two cannot
+# disagree about the magic or the width.
+[dependencies]
+xai-grok-version = { path = "../xai-grok-version" }
+
+[lints]
+workspace = true

@@ -506,7 +506,7 @@ impl CodexRpc {
                 "clientInfo": {
                     "name": "grok_build",
                     "title": "Grok Build",
-                    "version": xai_grok_version::VERSION
+                    "version": xai_grok_version::version()
                 }
             }),
             RPC_TIMEOUT,

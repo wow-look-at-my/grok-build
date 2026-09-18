@@ -1109,7 +1109,7 @@ impl SessionActor {
             .map(|a| a.auth_mode)
             .unwrap_or(crate::auth::AuthMode::ApiKey);
         let auth_mode_str = format!("{auth_mode:?}");
-        let client_version = xai_grok_version::VERSION;
+        let client_version = xai_grok_version::version();
         if auth_mode == crate::auth::AuthMode::WebLogin {
             let msg = format!(
                 "{detailed_message}\n\n\
