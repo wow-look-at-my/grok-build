@@ -13,6 +13,8 @@
 //! - <path>
 //! ...
 //!
+//! RUN_LOG: <run-log path or `(unavailable)`>
+//!
 //! PLAN_FILE: <plan path or `(unavailable)`>
 //!
 //! PLAN_CHANGES: <unified diff of plan edits, or `(none)`>
@@ -29,7 +31,10 @@
 //! the anchor for the claim↔diff honesty check) — it may be truncated.
 //! `CHANGED_FILES` is the *complete* list of touched paths the skeptic
 //! reads in their current state; verification rests on the live files
-//! and on running the code, not on the diff alone. The section names
+//! and on the run log, not on the diff alone. `RUN_LOG` is the
+//! harness-written record of every tool call the implementer made and
+//! what it returned (see `run_log.rs`); it is the runtime evidence, so the
+//! implementer never has to write proof files. The section names
 //! are consumed verbatim by `templates/goal_verifier_prompt.md`, so the
 //! format constants here are load-bearing and must not change without
 //! updating the template (and bumping any prompt-eval baselines).
@@ -155,18 +160,22 @@ pub(crate) fn extract_changed_files(diff: &str) -> Vec<String> {
     files
 }
 
-/// Build the evidence packet. `CHANGES_FILE` / `PLAN_FILE` carry an
-/// absolute path or the `(unavailable)` sentinel — each skeptic reads
-/// them with its own `read_file` tool. `changed_files` is the complete
-/// list of touched paths (verification's primary anchor; the skeptic
-/// reads their current contents). `plan_file` is borrowed (never
-/// cloned); `None` renders [`PLAN_UNAVAILABLE`]. `plan_changes` is the
-/// borrowed baseline→current plan diff (already sanitized + truncated by
-/// the caller); `None` renders [`PLAN_CHANGES_NONE`].
+/// Build the evidence packet. `CHANGES_FILE` / `RUN_LOG` / `PLAN_FILE`
+/// carry an absolute path or the `(unavailable)` sentinel — each skeptic
+/// reads them with its own `read_file` tool. `changed_files` is the
+/// complete list of touched paths (verification's primary anchor; the
+/// skeptic reads their current contents). `run_log` is the path of the
+/// harness-written run log; `None` renders [`super::run_log::RUN_LOG_UNAVAILABLE`].
+/// `plan_file` is borrowed (never cloned); `None` renders
+/// [`PLAN_UNAVAILABLE`]. `plan_changes` is the borrowed baseline→current
+/// plan diff (already sanitized + truncated by the caller); `None` renders
+/// [`PLAN_CHANGES_NONE`].
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn build_classifier_evidence_packet(
     objective: &str,
     changes: ChangesRef<'_>,
     changed_files: &[String],
+    run_log: Option<&str>,
     plan_file: Option<&Path>,
     plan_changes: Option<&str>,
     final_response: &str,
@@ -175,6 +184,7 @@ pub(crate) fn build_classifier_evidence_packet(
         ChangesRef::File(p) => p,
         ChangesRef::Unavailable => CHANGES_UNAVAILABLE,
     };
+    let run_log_value: &str = run_log.unwrap_or(super::run_log::RUN_LOG_UNAVAILABLE);
     let plan_value: Cow<'_, str> = match plan_file {
         Some(p) => p.to_string_lossy(),
         None => Cow::Borrowed(PLAN_UNAVAILABLE),
@@ -182,6 +192,7 @@ pub(crate) fn build_classifier_evidence_packet(
     let mut out = String::with_capacity(
         objective.len()
             + changes_value.len()
+            + run_log_value.len()
             + plan_value.len()
             + plan_changes.map_or(0, str::len)
             + final_response.len()
@@ -213,7 +224,9 @@ pub(crate) fn build_classifier_evidence_packet(
             ));
         }
     }
-    out.push_str("\nPLAN_FILE: ");
+    out.push_str("\nRUN_LOG: ");
+    out.push_str(run_log_value);
+    out.push_str("\n\nPLAN_FILE: ");
     out.push_str(&plan_value);
     // PLAN_CHANGES is model-/workspace-derived (the agent authored the
     // plan), so the caller sanitizes it for control tokens exactly like
@@ -1168,6 +1181,7 @@ mod tests {
             "do X",
             ChangesRef::File("/tmp/goal-classifier-abc-1.patch"),
             &["js/main.js".to_string()],
+            Some("/tmp/goal-classifier-abc-1.runlog.md"),
             Some(Path::new("/home/u/.grok/sessions/s1/goal/plan.md")),
             None,
             "I did it.",
@@ -1177,6 +1191,7 @@ mod tests {
             "OBJECTIVE:\ndo X\n\n\
              CHANGES_FILE: /tmp/goal-classifier-abc-1.patch\n\n\
              CHANGED_FILES:\n- js/main.js\n\n\
+             RUN_LOG: /tmp/goal-classifier-abc-1.runlog.md\n\n\
              PLAN_FILE: /home/u/.grok/sessions/s1/goal/plan.md\n\n\
              PLAN_CHANGES: (none)\n\n\
              FINAL_RESPONSE:\nI did it.\n",
@@ -1193,6 +1208,7 @@ mod tests {
             "do X",
             ChangesRef::Unavailable,
             &files,
+            None,
             None,
             None,
             "resp",
@@ -1216,6 +1232,7 @@ mod tests {
             &files,
             None,
             None,
+            None,
             "resp",
         );
         assert!(
@@ -1236,6 +1253,7 @@ mod tests {
             &[],
             None,
             None,
+            None,
             "resp",
         );
         assert!(packet.contains("CHANGES_FILE: (unavailable)\n"));
@@ -1254,6 +1272,7 @@ mod tests {
             &[],
             None,
             None,
+            None,
             "resp",
         );
         assert!(packet.contains("PLAN_FILE: (unavailable)\n"));
@@ -1268,6 +1287,7 @@ mod tests {
             "obj",
             ChangesRef::File("/tmp/p.patch"),
             &["a.rs".to_string()],
+            None,
             Some(Path::new("/tmp/plan.md")),
             Some("@@ -1 +1 @@\n-old\n+new\n"),
             "resp",
@@ -1296,6 +1316,7 @@ mod tests {
             "obj",
             ChangesRef::Unavailable,
             &[],
+            None,
             Some(Path::new("/tmp/plan.md")),
             Some(diff),
             "resp",
@@ -1320,6 +1341,7 @@ mod tests {
             "obj",
             ChangesRef::Unavailable,
             &files,
+            None,
             None,
             None,
             "r",
@@ -1406,6 +1428,7 @@ mod tests {
             "obj",
             ChangesRef::Unavailable,
             &[],
+            None,
             Some(Path::new(plan)),
             None,
             "resp",
@@ -1415,11 +1438,19 @@ mod tests {
 
     #[test]
     fn evidence_packet_handles_empty_inputs() {
-        let packet =
-            build_classifier_evidence_packet("", ChangesRef::Unavailable, &[], None, None, "");
+        let packet = build_classifier_evidence_packet(
+            "",
+            ChangesRef::Unavailable,
+            &[],
+            None,
+            None,
+            None,
+            "",
+        );
         assert!(packet.contains("OBJECTIVE:\n"));
         assert!(packet.contains("CHANGES_FILE: (unavailable)"));
         assert!(packet.contains("CHANGED_FILES:\n(none captured)"));
+        assert!(packet.contains("RUN_LOG: (unavailable)"));
         assert!(packet.contains("PLAN_FILE: (unavailable)"));
         assert!(packet.contains("PLAN_CHANGES: (none)"));
         assert!(packet.contains("FINAL_RESPONSE:\n"));

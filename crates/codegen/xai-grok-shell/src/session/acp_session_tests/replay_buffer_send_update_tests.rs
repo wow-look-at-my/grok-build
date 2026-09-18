@@ -254,6 +254,7 @@ pub(super) async fn make_replay_send_update_fixture() -> ReplaySendUpdateFixture
         turn_summary_enabled: false,
         session_turn_active: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         streaming_turn_capture: parking_lot::Mutex::new(StreamingTurnCapture::default()),
+        streaming_tool_titles: parking_lot::Mutex::new(std::collections::HashMap::new()),
         turn_stream_drained: parking_lot::Mutex::new(None),
         sampler_handle: xai_grok_sampler::SamplerHandle::noop(),
         rebuild_spec: crate::session::agent_rebuild::test_rebuild_spec_default(),
@@ -1100,6 +1101,144 @@ async fn tool_call_delta_marks_streaming_capture_phase() {
                 "marking the tool-call phase must not discard the \
                      reasoning accumulated before the tool call",
             );
+        })
+        .await;
+}
+/// A call is named from the arguments it has so far, not from the arguments it
+/// ends with. Before this the row wore the wire name (`read_file`) for the
+/// whole stream and only became `Read ...` once the call had finished parsing.
+///
+/// Drives the real handler: the real partial-JSON completion, the real tool
+/// registry, and the real title match.
+#[tokio::test(flavor = "current_thread")]
+async fn a_streaming_tool_call_is_named_from_the_arguments_so_far() {
+    use xai_grok_sampler::{RequestId, SamplingEvent};
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let fixture = read_file_streaming_fixture().await;
+            let actor = Arc::new(fixture.actor);
+            let req = RequestId::random();
+            actor
+                .handle_sampling_event(SamplingEvent::StreamStarted {
+                    request_id: req.clone(),
+                    timestamp_ms: 0,
+                })
+                .await;
+            deliver_tool_delta(&actor, &req, 0, Some("read_file"), None).await;
+            assert_eq!(
+                streaming_title(&actor, 0),
+                None,
+                "the opening fragment carries no arguments, so nothing names it yet"
+            );
+            deliver_tool_delta(&actor, &req, 0, None, Some("{\"target_file\":\"src/ma")).await;
+            assert_eq!(
+                streaming_title(&actor, 0).as_deref(),
+                Some("Read `src/ma`"),
+                "a half-written path still names the call, on what has arrived"
+            );
+            // A second call opens while the first is unfinished. Each is read
+            // on its own arguments. This is the two-row case: both rows sat on
+            // their wire names until the whole turn had parsed.
+            deliver_tool_delta(
+                &actor,
+                &req,
+                1,
+                Some("read_file"),
+                Some("{\"target_file\":\"b.rs\"}"),
+            )
+            .await;
+            assert_eq!(streaming_title(&actor, 1).as_deref(), Some("Read `b.rs`"));
+            assert_eq!(
+                streaming_title(&actor, 0).as_deref(),
+                Some("Read `src/ma`"),
+                "the second call does not disturb the first one's name"
+            );
+            // The tail of a call is a couple of characters, and it is what
+            // completes the argument the title is read from.
+            deliver_tool_delta(&actor, &req, 0, None, Some("in.rs\"}")).await;
+            assert_eq!(
+                streaming_title(&actor, 0).as_deref(),
+                Some("Read `src/main.rs`")
+            );
+            // A new stream reuses index 0, so the abandoned attempt's arguments
+            // have to be gone by the time it opens.
+            actor
+                .handle_sampling_event(SamplingEvent::StreamStarted {
+                    request_id: RequestId::random(),
+                    timestamp_ms: 1,
+                })
+                .await;
+            assert_eq!(streaming_title(&actor, 0), None);
+        })
+        .await;
+}
+/// A tool the registry does not know, a key with no value yet, and bytes that
+/// are not JSON at all each leave the call unnamed rather than guess or die.
+#[tokio::test(flavor = "current_thread")]
+async fn an_unreadable_streaming_call_is_left_unnamed() {
+    use xai_grok_sampler::{RequestId, SamplingEvent};
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let fixture = read_file_streaming_fixture().await;
+            let actor = Arc::new(fixture.actor);
+            let req = RequestId::random();
+            actor
+                .handle_sampling_event(SamplingEvent::StreamStarted {
+                    request_id: req.clone(),
+                    timestamp_ms: 0,
+                })
+                .await;
+            for (index, name, args) in [
+                (0u32, "no_such_tool", "{\"target_file\":\"a.rs\"}"),
+                (1, "read_file", "{\"target_file\""),
+                (2, "read_file", "not json at all"),
+                (3, "read_file", "{\"target_file\":42}"),
+            ] {
+                deliver_tool_delta(&actor, &req, index, Some(name), Some(args)).await;
+                assert_eq!(
+                    streaming_title(&actor, index),
+                    None,
+                    "index {index} must stay unnamed rather than guess"
+                );
+            }
+        })
+        .await;
+}
+/// A fixture whose registry knows `read_file`, so a streaming call can actually
+/// be parsed into a typed input and named. The whole fixture comes back: its
+/// gateway and persistence ends have to outlive the actor that sends to them.
+async fn read_file_streaming_fixture() -> ReplaySendUpdateFixture {
+    use xai_grok_tools::implementations::grok_build::read_file::ReadFileTool;
+    use xai_grok_tools::registry::types::ToolConfig;
+    let fixture = make_replay_send_update_fixture().await;
+    *fixture.actor.agent.borrow_mut() =
+        test_agent_with_tools(vec![ToolConfig::for_tool::<ReadFileTool>()]).await;
+    fixture
+}
+/// The title the actor has resolved for the call at `tool_index`, if any.
+fn streaming_title(actor: &SessionActor, tool_index: u32) -> Option<String> {
+    actor
+        .streaming_tool_titles
+        .lock()
+        .get(&tool_index)
+        .and_then(|call| call.title.clone())
+}
+async fn deliver_tool_delta(
+    actor: &Arc<SessionActor>,
+    request_id: &xai_grok_sampler::RequestId,
+    tool_index: u32,
+    name: Option<&str>,
+    arguments_delta: Option<&str>,
+) {
+    actor
+        .handle_sampling_event(xai_grok_sampler::SamplingEvent::ToolCallDelta {
+            request_id: request_id.clone(),
+            tool_index,
+            id: name.map(|_| format!("call-{tool_index}")),
+            name: name.map(str::to_string),
+            arguments_delta: arguments_delta.map(str::to_string),
         })
         .await;
 }

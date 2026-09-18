@@ -109,6 +109,8 @@ pub(crate) use auth_retry::{
 mod interjection;
 #[path = "acp_session_impl/tool_calls.rs"]
 mod tool_calls;
+#[path = "acp_session_impl/tool_title.rs"]
+pub(crate) mod tool_title;
 pub(crate) use interjection::*;
 #[path = "acp_session_impl/laziness.rs"]
 mod laziness;
@@ -1068,6 +1070,16 @@ pub(crate) struct SessionActor {
     /// A `tracing::warn!` tripwire in the handler logs every occurrence so
     /// we can quantify the loss in production before investing in a stash.
     pub(crate) streaming_turn_capture: parking_lot::Mutex<StreamingTurnCapture>,
+    /// Arguments of the tool calls the model is still writing, keyed by the
+    /// wire's `tool_index`.
+    ///
+    /// A call is named from its arguments, and they arrive in fragments. This
+    /// holds the fragments so each one can be re-read into a title while the
+    /// rest is still on the wire. A stream start and a stream end both clear
+    /// it. The next stream reuses index 0, and the bytes left behind by the
+    /// previous call would name it.
+    pub(crate) streaming_tool_titles:
+        parking_lot::Mutex<std::collections::HashMap<u32, tool_title::StreamingToolArgs>>,
     /// Per-turn barrier that orders the streamed message against the turn's
     /// tool calls.
     ///

@@ -393,6 +393,9 @@ struct StreamingTool {
     /// When the first chunk landed. The adopted block keeps it, so the timing
     /// counts from when the model began the call.
     started_at: std::time::Instant,
+    /// Whether the shell has read a title out of the arguments yet. Once it
+    /// has, the row stops showing raw JSON under the name.
+    titled: bool,
 }
 /// How much of a call's arguments the preview keeps. Enough to carry the
 /// leading fields a write names first (the path), and bounded so a large
@@ -415,10 +418,10 @@ impl StreamingTool {
     }
     /// One line of what the model has written so far.
     ///
-    /// The arguments are raw JSON and a fragment of them parses as nothing, so
-    /// this shows the text itself rather than pretending to read fields out of
-    /// it. Newlines and runs of spaces collapse, because the summary is one
-    /// line and a file body is full of both.
+    /// The fallback for a call the shell has not named yet: raw argument text,
+    /// with newlines and runs of spaces collapsed, because the summary is one
+    /// line and a file body is full of both. A named call shows
+    /// [`Self::progress`] instead — its title already says what the call is.
     fn preview(&self) -> String {
         let mut out = String::with_capacity(self.args.len());
         let mut in_space = false;
@@ -439,6 +442,26 @@ impl StreamingTool {
             out.push_str(&format!(" … {}", format_arg_bytes(self.args_bytes)));
         }
         out
+    }
+    /// What a NAMED call shows beside its title: how much it has written.
+    ///
+    /// Empty until the arguments outgrow the preview cap. A title plus the JSON
+    /// it was read from says the same thing twice, but a body large enough to
+    /// keep arriving after the title settled still needs something that moves.
+    fn progress(&self) -> String {
+        if self.args_bytes > self.args.len() {
+            format_arg_bytes(self.args_bytes)
+        } else {
+            String::new()
+        }
+    }
+    /// The summary line for this call, given whether the shell has named it.
+    fn summary_line(&self, titled: bool) -> String {
+        if titled {
+            self.progress()
+        } else {
+            self.preview()
+        }
     }
 }
 /// Human-readable size of a call's arguments so far.
@@ -1405,6 +1428,7 @@ impl AcpUpdateTracker {
         tool_index: u32,
         name: Option<&str>,
         arguments_delta: Option<&str>,
+        title: Option<&str>,
         scrollback: &mut ScrollbackState,
     ) -> bool {
         // A call is the model's next act, so the message and the thinking that
@@ -1415,11 +1439,18 @@ impl AcpUpdateTracker {
             if let Some(id) = tool_call_id {
                 streaming.tool_call_id = Some(id.to_string());
             }
-            let Some(delta) = arguments_delta else {
+            if arguments_delta.is_none() && title.is_none() {
                 return false;
-            };
-            streaming.push_args(delta);
-            let preview = streaming.preview();
+            }
+            if let Some(delta) = arguments_delta {
+                streaming.push_args(delta);
+            }
+            // A chunk carries a title only when the arguments named the call
+            // differently than they did before, so an absent one means keep
+            // what the row already shows.
+            streaming.titled |= title.is_some();
+            let titled = streaming.titled;
+            let summary = streaming.summary_line(titled);
             let entry_id = streaming.entry_id;
             let Some(entry) = scrollback.get_by_id_mut(entry_id) else {
                 return false;
@@ -1429,7 +1460,10 @@ impl AcpUpdateTracker {
                 // block now, and overwriting it would undo that refinement.
                 return false;
             };
-            block.summary = preview;
+            if let Some(title) = title {
+                block.name = title.to_string();
+            }
+            block.summary = summary;
             entry.invalidate_cache();
             return true;
         }
@@ -1441,7 +1475,9 @@ impl AcpUpdateTracker {
             return false;
         };
         let started_at = std::time::Instant::now();
-        let mut block = OtherToolCallBlock::new(name, String::new());
+        // The wire name is the placeholder, not the answer: it is what the row
+        // shows until the arguments have named the call.
+        let mut block = OtherToolCallBlock::new(title.unwrap_or(name), String::new());
         block.started_at = Some(started_at);
         let entry_id = scrollback.push_block(RenderBlock::ToolCall(ToolCallBlock::Other(block)));
         scrollback.set_last_running(true);
@@ -1451,13 +1487,15 @@ impl AcpUpdateTracker {
             args: String::new(),
             args_bytes: 0,
             started_at,
+            titled: title.is_some(),
         };
         if let Some(delta) = arguments_delta {
             streaming.push_args(delta);
+            let summary = streaming.summary_line(streaming.titled);
             if let Some(entry) = scrollback.get_by_id_mut(entry_id)
                 && let RenderBlock::ToolCall(ToolCallBlock::Other(block)) = &mut entry.block
             {
-                block.summary = streaming.preview();
+                block.summary = summary;
             }
         }
         self.streaming_tools.insert(tool_index, streaming);
@@ -3322,13 +3360,21 @@ mod tests {
             0,
             Some("search_replace"),
             None,
+            None,
             &mut sb
         ));
         assert_eq!(sb.len(), 1, "the opening chunk is what puts it on screen");
         assert_eq!(streaming_block_at(&sb, 0).name, "search_replace");
 
-        assert!(tracker.handle_tool_call_delta(None, 0, None, Some("{\"path\":\"src/"), &mut sb));
-        assert!(tracker.handle_tool_call_delta(None, 0, None, Some("main.rs\"}"), &mut sb));
+        assert!(tracker.handle_tool_call_delta(
+            None,
+            0,
+            None,
+            Some("{\"path\":\"src/"),
+            None,
+            &mut sb
+        ));
+        assert!(tracker.handle_tool_call_delta(None, 0, None, Some("main.rs\"}"), None, &mut sb));
         assert_eq!(
             streaming_block_at(&sb, 0).summary,
             "{\"path\":\"src/main.rs\"}",
@@ -3336,14 +3382,147 @@ mod tests {
         );
         assert_eq!(sb.len(), 1, "fragments never push a second entry");
     }
+    /// The row is named the moment the arguments name it, not when the call
+    /// finishes. Before that it wears the wire name, which is the whole bug
+    /// this rail exists to close.
+    #[test]
+    fn a_streaming_title_renames_the_row_in_place() {
+        let mut sb = ScrollbackState::new();
+        let mut tracker = AcpUpdateTracker::new();
+        tracker.handle_tool_call_delta(
+            Some("call-1"),
+            0,
+            Some("run_terminal_command"),
+            None,
+            None,
+            &mut sb,
+        );
+        assert_eq!(streaming_block_at(&sb, 0).name, "run_terminal_command");
+
+        assert!(tracker.handle_tool_call_delta(
+            None,
+            0,
+            None,
+            Some("{\"command\":\"ls"),
+            Some("Execute `ls`"),
+            &mut sb
+        ));
+        assert_eq!(streaming_block_at(&sb, 0).name, "Execute `ls`");
+        assert_eq!(
+            streaming_block_at(&sb, 0).summary,
+            "",
+            "a named row does not also show the JSON its name was read from"
+        );
+
+        assert!(tracker.handle_tool_call_delta(
+            None,
+            0,
+            None,
+            Some(" -la\"}"),
+            Some("Execute `ls -la`"),
+            &mut sb
+        ));
+        assert_eq!(streaming_block_at(&sb, 0).name, "Execute `ls -la`");
+        assert_eq!(sb.len(), 1, "renaming never pushes a second entry");
+    }
+    /// A chunk with no title keeps the one the row already has. The shell sends
+    /// a title only when it CHANGED, so treating an absent one as "unnamed"
+    /// flips the row back to raw JSON on the next fragment.
+    #[test]
+    fn a_titleless_chunk_leaves_the_name_alone() {
+        let mut sb = ScrollbackState::new();
+        let mut tracker = AcpUpdateTracker::new();
+        tracker.handle_tool_call_delta(Some("c"), 0, Some("read_file"), None, None, &mut sb);
+        tracker.handle_tool_call_delta(
+            None,
+            0,
+            None,
+            Some("{\"path\":\"a.rs\""),
+            Some("Read `a.rs`"),
+            &mut sb,
+        );
+        tracker.handle_tool_call_delta(None, 0, None, Some(",\"offset\":1}"), None, &mut sb);
+        assert_eq!(streaming_block_at(&sb, 0).name, "Read `a.rs`");
+        assert_eq!(streaming_block_at(&sb, 0).summary, "");
+    }
+    /// Two calls in one turn are named independently. The first one's title
+    /// lands while the second is still being written — the second call cannot
+    /// hold the first one's name back.
+    #[test]
+    fn a_second_streaming_call_does_not_hold_the_first_ones_name_back() {
+        let mut sb = ScrollbackState::new();
+        let mut tracker = AcpUpdateTracker::new();
+        tracker.handle_tool_call_delta(
+            Some("a"),
+            0,
+            Some("run_terminal_command"),
+            None,
+            None,
+            &mut sb,
+        );
+        tracker.handle_tool_call_delta(
+            None,
+            0,
+            None,
+            Some("{\"command\":\"ls\"}"),
+            Some("Execute `ls`"),
+            &mut sb,
+        );
+        tracker.handle_tool_call_delta(
+            Some("b"),
+            1,
+            Some("run_terminal_command"),
+            None,
+            None,
+            &mut sb,
+        );
+        tracker.handle_tool_call_delta(None, 1, None, Some("{\"comm"), None, &mut sb);
+
+        assert_eq!(sb.len(), 2);
+        assert_eq!(streaming_block_at(&sb, 0).name, "Execute `ls`");
+        assert_eq!(
+            streaming_block_at(&sb, 1).name,
+            "run_terminal_command",
+            "the second call is still unnamed, and that is its own business"
+        );
+    }
+    /// A named call still needs something that moves once its body outgrows the
+    /// preview head: the title stops changing long before the write ends.
+    #[test]
+    fn a_named_write_reports_its_size_instead_of_its_arguments() {
+        let mut sb = ScrollbackState::new();
+        let mut tracker = AcpUpdateTracker::new();
+        tracker.handle_tool_call_delta(Some("w"), 0, Some("write_file"), None, None, &mut sb);
+        tracker.handle_tool_call_delta(
+            None,
+            0,
+            None,
+            Some("{\"file_path\":\"big.txt\",\"content\":\""),
+            Some("Write `big.txt`"),
+            &mut sb,
+        );
+        for _ in 0..600 {
+            tracker.handle_tool_call_delta(None, 0, None, Some(&"x".repeat(1024)), None, &mut sb);
+        }
+        assert_eq!(streaming_block_at(&sb, 0).name, "Write `big.txt`");
+        let summary = &streaming_block_at(&sb, 0).summary;
+        assert!(
+            summary.ends_with("KB") || summary.ends_with("MB"),
+            "the size is what still moves: {summary}"
+        );
+        assert!(
+            !summary.contains("file_path"),
+            "the arguments are not repeated under the name: {summary}"
+        );
+    }
     /// The call the user watched being written is the call that runs: the real
     /// `ToolCall` refines that entry rather than appending a second one.
     #[test]
     fn the_real_tool_call_adopts_the_streaming_entry() {
         let mut sb = ScrollbackState::new();
         let mut tracker = AcpUpdateTracker::new();
-        tracker.handle_tool_call_delta(Some("read-1"), 0, Some("read_file"), None, &mut sb);
-        tracker.handle_tool_call_delta(None, 0, None, Some("{\"path\":\"a.rs\"}"), &mut sb);
+        tracker.handle_tool_call_delta(Some("read-1"), 0, Some("read_file"), None, None, &mut sb);
+        tracker.handle_tool_call_delta(None, 0, None, Some("{\"path\":\"a.rs\"}"), None, &mut sb);
         assert_eq!(sb.len(), 1);
 
         assert!(tracker.handle_update(
@@ -3370,7 +3549,7 @@ mod tests {
     fn a_suppressed_tool_takes_its_preview_back_off_the_screen() {
         let mut sb = ScrollbackState::new();
         let mut tracker = AcpUpdateTracker::new();
-        tracker.handle_tool_call_delta(Some("todo-1"), 0, Some("todo_write"), None, &mut sb);
+        tracker.handle_tool_call_delta(Some("todo-1"), 0, Some("todo_write"), None, None, &mut sb);
         assert_eq!(sb.len(), 1);
 
         assert!(!tracker.handle_update(
@@ -3386,8 +3565,8 @@ mod tests {
     fn a_turn_that_ends_mid_argument_stops_the_preview_spinning() {
         let mut sb = ScrollbackState::new();
         let mut tracker = AcpUpdateTracker::new();
-        tracker.handle_tool_call_delta(Some("w-1"), 0, Some("write_file"), None, &mut sb);
-        tracker.handle_tool_call_delta(None, 0, None, Some("{\"path\":\"x"), &mut sb);
+        tracker.handle_tool_call_delta(Some("w-1"), 0, Some("write_file"), None, None, &mut sb);
+        tracker.handle_tool_call_delta(None, 0, None, Some("{\"path\":\"x"), None, &mut sb);
 
         tracker.finish_turn(&mut sb, None);
         assert_eq!(sb.len(), 1, "the partial call stays visible");
@@ -3403,9 +3582,9 @@ mod tests {
     fn the_preview_head_is_capped_and_the_size_keeps_moving() {
         let mut sb = ScrollbackState::new();
         let mut tracker = AcpUpdateTracker::new();
-        tracker.handle_tool_call_delta(Some("w-1"), 0, Some("write_file"), None, &mut sb);
+        tracker.handle_tool_call_delta(Some("w-1"), 0, Some("write_file"), None, None, &mut sb);
         for _ in 0..600 {
-            tracker.handle_tool_call_delta(None, 0, None, Some(&"x".repeat(1024)), &mut sb);
+            tracker.handle_tool_call_delta(None, 0, None, Some(&"x".repeat(1024)), None, &mut sb);
         }
 
         let streaming = tracker.streaming_tools.get(&0).expect("still streaming");
@@ -3426,11 +3605,11 @@ mod tests {
     fn the_cap_never_splits_a_character() {
         let mut sb = ScrollbackState::new();
         let mut tracker = AcpUpdateTracker::new();
-        tracker.handle_tool_call_delta(Some("w-1"), 0, Some("write_file"), None, &mut sb);
+        tracker.handle_tool_call_delta(Some("w-1"), 0, Some("write_file"), None, None, &mut sb);
         // Fill the head to one byte short, then offer a 3-byte character.
         let fill = "a".repeat(ARG_PREVIEW_CAP - 1);
-        tracker.handle_tool_call_delta(None, 0, None, Some(&fill), &mut sb);
-        tracker.handle_tool_call_delta(None, 0, None, Some("한글"), &mut sb);
+        tracker.handle_tool_call_delta(None, 0, None, Some(&fill), None, &mut sb);
+        tracker.handle_tool_call_delta(None, 0, None, Some("한글"), None, &mut sb);
 
         let streaming = tracker.streaming_tools.get(&0).expect("still streaming");
         assert_eq!(

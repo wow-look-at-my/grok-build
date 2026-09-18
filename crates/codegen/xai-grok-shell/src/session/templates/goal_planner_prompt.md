@@ -88,8 +88,9 @@ the user on first launch. Whenever the deliverable has a launchable entry
 point and the environment can run it, the verification plan MUST include one
 GATING launch on the real entry path with the cheapest available runtime,
 asserting NOT merely that it starts but that its PRIMARY OBSERVABLE is CORRECT
-(present and non-empty is INSUFFICIENT), and producing captured output in
-`{SCRATCH}`. Run the launch MORE THAN ONCE and assert CONSISTENT success:
+(present and non-empty is INSUFFICIENT). The harness records the command and
+its output for the verifier; the step names what that output must show, never
+a file to save it to. Run the launch MORE THAN ONCE and assert CONSISTENT success:
 non-deterministic launch output (a pass on one run, an empty/error capture on
 the next) is an APP-side defect to FIX, not to average away or
 cherry-pick a success from (if the ENVIRONMENT is what's flaky, capture that
@@ -116,10 +117,10 @@ Degradation MUST be honest, never fabricated: if the launch tool itself fails
 for environmental reasons (e.g. the headless browser cannot install or start
 in this sandbox, or it can start but
 cannot reliably read back the primary observable — headless pixel readback or
-input injection unavailable), the implementer captures THAT failure output to
-`{SCRATCH}` and the static/structural fallback + unit tests become the
+input injection unavailable), the implementer RUNS the launcher so that failure
+is in the record, and the static/structural fallback + unit tests become the
 accepted bar —
-write this escape hatch INTO the launch step ("...or captured evidence the
+write this escape hatch INTO the launch step ("...or a logged run showing the
 launcher cannot run here"). A readback that SUCCEEDS and returns a blank or
 partial buffer is the app's output, not an unavailable readback — fix it, do
 not fall back. Synthetic/hand-built stand-ins for launch evidence
@@ -200,18 +201,23 @@ exercise the entry point, read the artifact) and the
   unit-level functions are exercised directly against the real path. Never set a
   bar that can only be met by building a policy/oracle the verifier will then
   rightly call theater.
-- Fit every check to what is capturable in the CURRENT environment; if it cannot
-  run here, specify a capturable substitute OR record the limit under `## Risks /
+- Fit every check to what can RUN in the CURRENT environment. If it cannot run
+  here, specify a runnable substitute OR record the limit under `## Risks /
   Contradictions`. Never accept generated/mocked artifacts as proof.
-- Output paths use the literal `{SCRATCH}` placeholder (e.g. `{SCRATCH}/out.log`),
-  never a hardcoded `/tmp/...` — it resolves to a private per-runner dir.
+- A step is a command to run plus what its OUTPUT must show. The harness
+  records every command the implementer runs, with its output. The verifiers
+  read that record. So never require saving output, a log, a report, or an
+  "evidence file" — that is busywork nobody reads. The one file a step may
+  name is an image (a screenshot) the verifier must look at. Write it under
+  the literal `{SCRATCH}` placeholder (e.g. `{SCRATCH}/page.png`), never a
+  hardcoded `/tmp/...` — it resolves to a private per-runner dir.
 
-The plan also tells the IMPLEMENTER what evidence to PRODUCE, because
-the verifiers AUDIT that evidence rather than build their own. Require: real
-in-repo tests that drive the shipped functions (no hardcoded expected values, no
-mocking the unit under test, no starting past it, no asserting against a
-re-implementation) PLUS the captured run output under `{SCRATCH}`. A gating
-criterion proven only by prose, or with no captured evidence, will be refuted.
+The plan also tells the IMPLEMENTER what to RUN, because the verifiers audit
+the recorded runs rather than build their own. Require real in-repo tests that
+drive the shipped functions (no hardcoded expected values, no mocking the unit
+under test, no starting past it, no asserting against a re-implementation),
+RUN after the last change. A gating criterion proven only by prose, or whose
+test was never run, will be refuted.
 
 **Non-goals** — items not asked for that a reader might assume in scope; include
 at least one.

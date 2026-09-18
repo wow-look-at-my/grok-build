@@ -8,6 +8,7 @@ pub mod replay;
 pub mod session_compact;
 pub mod session_recap;
 pub mod session_summary;
+pub mod partial_json;
 pub mod tool_input_parsing;
 pub mod turn_summary;
 
