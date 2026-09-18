@@ -36,7 +36,7 @@ use xai_grok_pager::app::{
     warn_leader_disabled_by_sandbox,
 };
 use xai_grok_pager::app::{WorkspaceMgmtArgs, WorkspaceMgmtCommand, WorkspaceStartArgs};
-use xai_grok_pager::client_identity::PAGER_CLIENT_VERSION;
+use xai_grok_pager::client_identity::pager_client_version;
 use xai_grok_shell::agent::app::{run_headless, run_leader, run_stdio_agent};
 use xai_grok_shell::agent::config::Config as AgentConfig;
 use xai_grok_shell::leader::{
@@ -132,8 +132,8 @@ fn init_tracing_simple(app_entrypoint: &'static str) {
         .with(xai_grok_telemetry::otel_layer::build_otel_layer(
             xai_grok_telemetry::otel_layer::OtelClientInfo {
                 client_name: "grok-pager",
-                client_version: xai_grok_version::VERSION,
-                service_version: env!("VERSION_WITH_COMMIT"),
+                client_version: xai_grok_version::version(),
+                service_version: xai_grok_version::version_with_commit(),
                 app_entrypoint,
             },
             xai_grok_shell::auth::credential_provider::build_default_otel_layer_config(),
@@ -142,8 +142,8 @@ fn init_tracing_simple(app_entrypoint: &'static str) {
     xai_grok_telemetry::external::init(
         xai_grok_shell::agent::config::resolve_external_otel_config(
             xai_grok_telemetry::external::config::ExternalClientInfo {
-                service_version: env!("VERSION_WITH_COMMIT").to_owned(),
-                client_version: xai_grok_version::VERSION.to_owned(),
+                service_version: xai_grok_version::version_with_commit().to_owned(),
+                client_version: xai_grok_version::version().to_owned(),
                 app_entrypoint: app_entrypoint.to_owned(),
             },
         ),
@@ -558,7 +558,7 @@ async fn workspace_start(
     .await?;
     let env_urls = LeaderEnvUrls::from(&agent_config.grok_com_config);
     let capabilities = ClientCapabilities {
-        client_version: Some(PAGER_CLIENT_VERSION.to_string()),
+        client_version: Some(pager_client_version().to_string()),
         ..Default::default()
     };
     let conn = connect_or_spawn(
@@ -1109,7 +1109,7 @@ async fn run_agent_command(
         eprintln!(
             "Grok Build (pager) - v{}",
             xai_grok_version::display_version_with_commit(
-                env!("VERSION_WITH_COMMIT"),
+                xai_grok_version::version_with_commit(),
                 xai_grok_update::channel_label(),
             )
         );
@@ -1152,7 +1152,7 @@ async fn run_agent_command(
         .agent_profile
         .as_deref()
         .map(resolve_agent_profile_path);
-    agent_config.client_version = Some(PAGER_CLIENT_VERSION.to_string());
+    agent_config.client_version = Some(pager_client_version().to_string());
     if is_leader && !agent_args.plugin_dirs.is_empty() {
         eprintln!("{PLUGIN_DIR_LEADER_WARNING}");
     } else {
@@ -1250,7 +1250,7 @@ async fn run_agent_command(
             yolo_mode: launch_yolo.yolo,
             auto_mode: agent_config.default_auto_mode && !launch_yolo.yolo,
             default_model,
-            client_version: Some(PAGER_CLIENT_VERSION.to_string()),
+            client_version: Some(pager_client_version().to_string()),
             code_nav_enabled: false,
             terminal: false,
             fs_read: false,
@@ -1790,7 +1790,7 @@ fn install_heap_profile_hooks() {
 fn version_text(channel_label: &str) -> String {
     format!(
         "grok {}\n",
-        xai_grok_version::display_version_with_commit(env!("VERSION_WITH_COMMIT"), channel_label,)
+        xai_grok_version::display_version_with_commit(xai_grok_version::version_with_commit(), channel_label,)
     )
 }
 fn write_version(writer: &mut impl std::io::Write, channel_label: &str) -> std::io::Result<()> {
@@ -1874,8 +1874,8 @@ fn main() {
     }
     let _sentry_guard = xai_grok_telemetry::sentry::init(xai_grok_telemetry::sentry::Config {
         client: "grok-pager",
-        client_version: PAGER_CLIENT_VERSION,
-        release: env!("VERSION_WITH_COMMIT"),
+        client_version: pager_client_version(),
+        release: xai_grok_version::version_with_commit(),
         disabled: xai_grok_shell::agent::config::is_error_reporting_disabled_sync(),
     });
     xai_grok_pager::docs::extract_user_guide_docs(&xai_grok_shell::util::grok_home::grok_home());
@@ -1890,7 +1890,7 @@ fn main() {
             eprintln!();
         }
         if !xai_crash_handler::install(xai_crash_handler::CrashHandlerConfig {
-            app_version: env!("VERSION_WITH_COMMIT").to_string(),
+            app_version: xai_grok_version::version_with_commit().to_string(),
             crash_dir: crash_dir.clone(),
         }) {
             eprintln!(
@@ -1997,7 +1997,7 @@ async fn async_main(args: PagerArgs) -> Result<()> {
             Command::Version { json } => {
                 if json {
                     let payload = serde_json::json!({
-                        "currentVersion": env!("VERSION_WITH_COMMIT"),
+                        "currentVersion": xai_grok_version::version_with_commit(),
                         "channel": xai_grok_update::channel_name().unwrap_or("unknown"),
                     });
                     println!("{}", serde_json::to_string(&payload)?);
@@ -2610,7 +2610,7 @@ mod tests {
             write_version(&mut output, label).unwrap();
             let output = String::from_utf8(output).unwrap();
             assert!(output.starts_with("grok "));
-            assert!(output.contains(env!("VERSION_WITH_COMMIT")));
+            assert!(output.contains(xai_grok_version::version_with_commit()));
             assert!(output.ends_with(expected_suffix), "{output:?}");
         }
     }

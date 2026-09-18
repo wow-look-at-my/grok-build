@@ -544,7 +544,7 @@ pub fn channel_name() -> Option<&'static str> {
     static NAME: OnceLock<Option<&'static str>> = OnceLock::new();
     *NAME.get_or_init(|| {
         let stable = cached_stable_version()?;
-        derive_channel(xai_grok_version::VERSION, &stable)
+        derive_channel(xai_grok_version::version(), &stable)
     })
 }
 
@@ -565,7 +565,7 @@ pub fn channel_label() -> &'static str {
             Some(s) => s,
             None => return "",
         };
-        match derive_channel(xai_grok_version::VERSION, &stable) {
+        match derive_channel(xai_grok_version::version(), &stable) {
             Some("alpha") => " [alpha]",
             Some(_) => " [stable]",
             None => "",

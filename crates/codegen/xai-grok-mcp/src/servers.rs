@@ -3549,7 +3549,7 @@ impl McpClient {
             capabilities,
             Implementation::new(
                 format!("grok-shell-{server_name}"),
-                xai_grok_version::VERSION.to_string(),
+                xai_grok_version::version().to_string(),
             ),
         )
         // rmcp's default `ProtocolVersion` tracks its LATEST; pin explicitly

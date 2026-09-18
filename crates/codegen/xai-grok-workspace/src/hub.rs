@@ -220,7 +220,7 @@ impl HubHandle {
             .url(server_url)
             .auth_provider(config.auth.clone())
             .allow_insecure_ws(config.allow_insecure_ws)
-            .binary_version(xai_grok_version::VERSION)
+            .binary_version(xai_grok_version::version())
             .with_ws_ping_interval(ws_ping);
         if let Some(schedule) = ws_reconnect_backoff {
             server_builder = server_builder.with_reconnect_backoff(schedule);

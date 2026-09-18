@@ -1,28 +1,89 @@
 //! Installed grok CLI version, lockstepped with shipping binaries.
 
 use semver::Version;
+use std::sync::OnceLock;
 
 pub const TEST_VERSION_ENV: &str = "GROK_TEST_VERSION";
 
-/// An empty `GROK_VERSION` is a workflow expression that resolved to nothing, so it
-/// reads as no stamp at all rather than as a release whose version is the empty string.
-pub const VERSION: &str = match option_env!("GROK_VERSION") {
-    Some(v) => {
-        if v.is_empty() {
-            env!("CARGO_PKG_VERSION")
-        } else {
-            v
-        }
-    }
-    None => env!("CARGO_PKG_VERSION"),
-};
+/// Byte pattern `xai-grok-stamp` searches the linked binary for.
+///
+/// The release number is written into the binary AFTER it links, so a build
+/// needs no release number and never waits on one. Compiling the number in is
+/// what forced the whole release path to run before the build.
+pub const STAMP_MAGIC: &[u8; 16] = b"\0GROK-VER-STAMP\0";
 
-/// [`TEST_VERSION_ENV`] override first, then [`VERSION`]. Trimmed so
+/// Payload bytes reserved after the magic: one length byte, then the version.
+pub const STAMP_PAYLOAD_LEN: usize = 64;
+
+/// Total slot width. [`STAMP_SLOT`] is this long and the stamper writes within it.
+pub const STAMP_SLOT_LEN: usize = STAMP_MAGIC.len() + 1 + STAMP_PAYLOAD_LEN;
+
+/// The slot itself. A zero length byte is the unstamped state, which is what a
+/// local build and every CI test build carry.
+///
+/// `#[used]` and `#[no_mangle]` keep it in the binary: nothing reads it through
+/// this symbol, and a plain `static` the optimizer sees no load of is free to
+/// disappear.
+#[used]
+#[no_mangle]
+pub static STAMP_SLOT: [u8; STAMP_SLOT_LEN] = build_stamp_slot();
+
+/// The magic followed by a zero length and zero payload.
+const fn build_stamp_slot() -> [u8; STAMP_SLOT_LEN] {
+    let mut slot = [0u8; STAMP_SLOT_LEN];
+    let mut i = 0;
+    while i < STAMP_MAGIC.len() {
+        slot[i] = STAMP_MAGIC[i];
+        i += 1;
+    }
+    slot
+}
+
+/// The stamped release number, or `None` on an unstamped binary.
+///
+/// The read is volatile because the slot is an immutable `static` whose contents
+/// the compiler otherwise knows: it would fold the zero length in at compile
+/// time and never look at the bytes the stamper wrote.
+fn stamped() -> Option<&'static str> {
+    static STAMPED: OnceLock<Option<String>> = OnceLock::new();
+    STAMPED
+        .get_or_init(|| {
+            let slot = unsafe { std::ptr::read_volatile(&STAMP_SLOT) };
+            let len = usize::from(slot[STAMP_MAGIC.len()]);
+            if len == 0 || len > STAMP_PAYLOAD_LEN {
+                return None;
+            }
+            let start = STAMP_MAGIC.len() + 1;
+            let text = std::str::from_utf8(&slot[start..start + len]).ok()?;
+            Some(text.to_string())
+        })
+        .as_deref()
+}
+
+/// The version this binary reports: the post-link stamp when it carries one,
+/// else the crate's own version.
+pub fn version() -> &'static str {
+    stamped().unwrap_or(env!("CARGO_PKG_VERSION"))
+}
+
+/// Whether this binary carries a release stamp. False for a local build and for
+/// every binary CI tests, which is what makes those builds local-looking.
+pub fn is_release_stamped() -> bool {
+    stamped().is_some()
+}
+
+/// `"<version> (<short commit>)"` — the string `--version` prints.
+pub fn version_with_commit() -> &'static str {
+    static COMBINED: OnceLock<String> = OnceLock::new();
+    COMBINED.get_or_init(|| format!("{} ({})", version(), BUILD_COMMIT_SHORT))
+}
+
+/// [`TEST_VERSION_ENV`] override first, then [`version`]. Trimmed so
 /// non-semver-aware callers can pass the result straight into parsing.
 pub fn installed() -> String {
     std::env::var(TEST_VERSION_ENV)
         .map(|v| v.trim().to_string())
-        .unwrap_or_else(|_| VERSION.to_string())
+        .unwrap_or_else(|_| version().to_string())
 }
 
 pub fn installed_semver() -> Result<Version, semver::Error> {
@@ -37,7 +98,7 @@ pub fn installed_semver() -> Result<Version, semver::Error> {
 ///
 /// Example: `"0.2.5 [stable]"` or `"0.2.5 [alpha]"`.
 pub fn display_version(channel_label: &str) -> String {
-    format!("{}{}", VERSION, channel_label)
+    format!("{}{}", version(), channel_label)
 }
 
 /// Format a version-with-commit string with a channel label.
@@ -111,9 +172,33 @@ mod tests {
                 label,
             );
         }
-        // display_version uses compiled VERSION — just verify the label appends
-        assert_eq!(display_version(""), VERSION);
+        // display_version reads the stamp — just verify the label appends
+        assert_eq!(display_version(""), version());
         assert!(display_version(" [stable]").ends_with("[stable]"));
+    }
+
+    /// The slot the stamper searches for must be in this binary, must carry the
+    /// magic, and must read as unstamped until something writes a length.
+    #[test]
+    fn an_unstamped_slot_reads_as_no_release() {
+        let slot = unsafe { std::ptr::read_volatile(&STAMP_SLOT) };
+        assert_eq!(&slot[..STAMP_MAGIC.len()], &STAMP_MAGIC[..]);
+        assert_eq!(slot[STAMP_MAGIC.len()], 0, "length byte starts at zero");
+        assert_eq!(stamped(), None);
+        assert!(!is_release_stamped());
+        assert_eq!(version(), env!("CARGO_PKG_VERSION"));
+    }
+
+    /// `version_with_commit` is what `--version` prints, so it must carry both
+    /// halves in the shape the update checker parses back.
+    #[test]
+    fn version_with_commit_carries_version_and_commit() {
+        let combined = version_with_commit();
+        assert!(combined.starts_with(version()), "{combined}");
+        assert!(
+            combined.ends_with(&format!("({})", BUILD_COMMIT_SHORT)),
+            "{combined}",
+        );
     }
 
     /// `commit_github_url` with a full 40-char hash — the primary use case,

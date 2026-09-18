@@ -3025,7 +3025,7 @@ impl WorkspaceHandle {
                                  on session.bind (absent, or dropped as malformed — see \
                                  server logs) and this workspace requires one (presets are \
                                  not supported; server version {})",
-                                xai_grok_version::VERSION
+                                xai_grok_version::version()
                             ),
                             );
                             Some(empty_toolset())
@@ -3039,7 +3039,7 @@ impl WorkspaceHandle {
                             resolve_error = Some(
                                 format!(
                                 "invalid_tool_config: {err} (server version {})",
-                                xai_grok_version::VERSION
+                                xai_grok_version::version()
                             ),
                             );
                             Some(empty_toolset())
@@ -8519,7 +8519,7 @@ pub(crate) mod tests {
             "reason must name the fail-closed cause: {reason}"
         );
         assert!(
-            reason.contains(xai_grok_version::VERSION),
+            reason.contains(xai_grok_version::version()),
             "reason must carry the server version: {reason}"
         );
     }
