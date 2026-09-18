@@ -3,8 +3,9 @@
 use agent_client_protocol as acp;
 use indexmap::IndexMap;
 use xai_grok_shell::sampling::types::{
-    ReasoningEffort, ReasoningEffortOption, parse_reasoning_effort_meta,
-    parse_reasoning_efforts_meta, supports_reasoning_effort_meta,
+    REASONING_EFFORTS_META_KEY, ReasoningEffort, ReasoningEffortMetaState, ReasoningEffortOption,
+    parse_reasoning_effort_meta, parse_reasoning_efforts_meta, reasoning_effort_meta_state,
+    supports_reasoning_effort_meta,
 };
 
 use crate::slash::commands::effort_levels::legacy_effort_options;
@@ -14,8 +15,10 @@ use crate::slash::commands::effort_levels::legacy_effort_options;
 /// the same input identically and differ only in how they surface the error.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum EffortTokenError {
-    /// The target model does not advertise `supportsReasoningEffort`.
-    Unsupported,
+    /// The target model does not advertise `supportsReasoningEffort`. Carries
+    /// the evidence the gate acted on, because this is the refusal a user has to
+    /// argue with when the model does in fact take an effort.
+    Unsupported(Box<UnsupportedEffortDiagnosis>),
     /// The token is neither a menu id nor a canonical value offered by this
     /// model's menu. `offered` is the model-specific list of option ids the
     /// user can type (never a hardcoded global set — so we do not advertise
@@ -25,10 +28,78 @@ pub(crate) enum EffortTokenError {
     NoActiveModel,
 }
 
+/// Everything the effort gate saw when it refused a model, so the refusal can
+/// name its own basis instead of asserting a conclusion.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct UnsupportedEffortDiagnosis {
+    /// The catalog key the gate looked up — what `[model.<key>]` must be named.
+    pub(crate) model_id: String,
+    /// False when the id is not in this session's catalog at all, which is a
+    /// different fault from a model that is there and unflagged.
+    pub(crate) in_catalog: bool,
+    /// How many models the session's catalog holds, so an empty catalog (the
+    /// pre-`session/new` window) is visible as such.
+    pub(crate) catalog_len: usize,
+    /// What the gate read at `meta.supportsReasoningEffort`.
+    pub(crate) meta_state: ReasoningEffortMetaState,
+    /// Whether the entry carries a `reasoningEfforts` menu. A menu with no gate
+    /// flag is a contradiction in the catalog entry, and it names the bug.
+    pub(crate) efforts_menu_len: Option<usize>,
+}
+
+impl UnsupportedEffortDiagnosis {
+    fn message(&self) -> String {
+        let id = &self.model_id;
+        let mut out = format!(
+            "effort refused: '{id}' is not flagged as supporting reasoning effort.\n\
+             Mechanism: the only thing consulted is `meta.supportsReasoningEffort` \
+             on this session's ACP model-catalog entry for '{id}'. No request is \
+             made, and the model itself is never asked.\n"
+        );
+        if !self.in_catalog {
+            out.push_str(&format!(
+                "Basis: '{id}' is not in that catalog at all ({} model(s) known), \
+                 so the gate had nothing to read and defaulted to no.\n",
+                self.catalog_len
+            ));
+        } else {
+            out.push_str(&format!("Basis: {}.\n", self.meta_state.describe()));
+            match self.efforts_menu_len {
+                Some(n) => out.push_str(&format!(
+                    "Contradiction worth reporting: the same entry DOES carry a \
+                     `meta.{REASONING_EFFORTS_META_KEY}` menu of {n} option(s). \
+                     A menu with no gate flag is a catalog bug, not a model that \
+                     lacks effort.\n"
+                )),
+                None => out.push_str(&format!(
+                    "The entry also carries no `meta.{REASONING_EFFORTS_META_KEY}` menu.\n"
+                )),
+            }
+        }
+        out.push_str(&format!(
+            "Where that flag comes from: the shell writes the key only when \
+             `ModelInfo.supports_reasoning_effort` is true, which is set by, in \
+             precedence order — `[model.{id}].supports_reasoning_effort` in \
+             config.toml; a non-empty `[model.{id}].reasoning_efforts` menu; \
+             `supports_reasoning_effort` (or `supportsReasoningEffort`) on the \
+             entry the `/v1/models` catalog returned; or `api_backend = \
+             \"messages\"`, which defaults it on.\n\
+             If the model does take an effort, force it:\n\
+             \x20 [models]\n\
+             \x20 force_reasoning_effort_models = [\"{id}\"]\n\
+             Globs match the catalog key or the model id. The per-model spelling \
+             `[model.{id}] supports_reasoning_effort = true` also works, but its \
+             table name must equal the CATALOG KEY — a name that matches nothing \
+             adds a second model instead of overriding this one."
+        ));
+        out
+    }
+}
+
 impl EffortTokenError {
     pub(crate) fn message(&self) -> String {
         match self {
-            Self::Unsupported => "current model does not support reasoning effort".to_string(),
+            Self::Unsupported(diagnosis) => diagnosis.message(),
             Self::UnknownToken { token, offered } => {
                 if offered.is_empty() {
                     format!(
@@ -247,13 +318,24 @@ impl ModelState {
         id: &acp::ModelId,
         token: &str,
     ) -> Result<ReasoningEffort, EffortTokenError> {
-        let supports = self
-            .available
-            .get(id)
+        let info = self.available.get(id);
+        let supports = info
             .map(|info| supports_reasoning_effort_meta(info.meta.as_ref()))
             .unwrap_or(false);
         if !supports {
-            return Err(EffortTokenError::Unsupported);
+            return Err(EffortTokenError::Unsupported(Box::new(
+                UnsupportedEffortDiagnosis {
+                    model_id: id.0.to_string(),
+                    in_catalog: info.is_some(),
+                    catalog_len: self.available.len(),
+                    meta_state: info
+                        .map(|info| reasoning_effort_meta_state(info.meta.as_ref()))
+                        .unwrap_or(ReasoningEffortMetaState::NoMeta),
+                    efforts_menu_len: info
+                        .and_then(|info| parse_reasoning_efforts_meta(info.meta.as_ref()))
+                        .map(|opts| opts.len()),
+                },
+            )));
         }
         self.resolve_effort_token_for(id, token)
             .ok_or_else(|| EffortTokenError::UnknownToken {
@@ -619,6 +701,84 @@ mod tests {
             state.resolve_effort_token("low"),
             Some(ReasoningEffort::Low)
         );
+    }
+
+    /// The refusal has to name the key it read, what was there, and the knob
+    /// that overrides it. Asserting on the shape of the prose is the only way
+    /// this stays a diagnosis instead of decaying back to a verdict.
+    #[test]
+    fn unsupported_message_names_the_key_the_state_and_the_override() {
+        let state = state_with_meta(Some(serde_json::json!({ "totalContextTokens": 10 })));
+        let err = state
+            .resolve_effort_for_model(state.current.as_ref().unwrap(), "high")
+            .unwrap_err();
+        let msg = err.message();
+        assert!(msg.contains("supportsReasoningEffort"), "msg={msg}");
+        assert!(msg.contains("no `supportsReasoningEffort` key"), "msg={msg}");
+        assert!(msg.contains("'m'"), "must name the model: {msg}");
+        assert!(
+            msg.contains("force_reasoning_effort_models"),
+            "must name the override: {msg}"
+        );
+        assert!(
+            msg.contains("CATALOG KEY"),
+            "must warn about the key-vs-id footgun: {msg}"
+        );
+    }
+
+    #[test]
+    fn unsupported_message_separates_explicit_false_from_an_absent_key() {
+        let state = state_with_meta(Some(
+            serde_json::json!({ "supportsReasoningEffort": false }),
+        ));
+        let msg = state
+            .resolve_effort_for_model(state.current.as_ref().unwrap(), "high")
+            .unwrap_err()
+            .message();
+        assert!(msg.contains("explicitly false"), "msg={msg}");
+    }
+
+    #[test]
+    fn unsupported_message_reports_a_wrong_typed_flag_as_such() {
+        let state = state_with_meta(Some(
+            serde_json::json!({ "supportsReasoningEffort": "true" }),
+        ));
+        let msg = state
+            .resolve_effort_for_model(state.current.as_ref().unwrap(), "high")
+            .unwrap_err()
+            .message();
+        assert!(msg.contains("not a bool"), "msg={msg}");
+        assert!(msg.contains("\"true\""), "must quote what was there: {msg}");
+    }
+
+    /// A menu with no gate flag is the catalog contradicting itself, and that is
+    /// the case a user debugging a wrong refusal most needs pointed out.
+    #[test]
+    fn unsupported_message_reports_a_menu_present_without_the_flag() {
+        let state = state_with_meta(Some(serde_json::json!({
+            "reasoningEfforts": [
+                { "value": "high", "label": "High" },
+                { "value": "low", "label": "Low" },
+            ],
+        })));
+        let msg = state
+            .resolve_effort_for_model(state.current.as_ref().unwrap(), "high")
+            .unwrap_err()
+            .message();
+        assert!(msg.contains("Contradiction"), "msg={msg}");
+        assert!(msg.contains("2 option(s)"), "msg={msg}");
+    }
+
+    #[test]
+    fn unsupported_message_reports_a_model_missing_from_the_catalog() {
+        let state = state_with_meta(Some(serde_json::json!({ "supportsReasoningEffort": true })));
+        let absent = acp::ModelId::new(Arc::from("not-in-catalog"));
+        let msg = state
+            .resolve_effort_for_model(&absent, "high")
+            .unwrap_err()
+            .message();
+        assert!(msg.contains("is not in that catalog at all"), "msg={msg}");
+        assert!(msg.contains("1 model(s) known"), "msg={msg}");
     }
 
     #[test]

@@ -20,6 +20,8 @@ mod critical_announcement_session_banner_pty;
 mod dashboard_overlay_tab_esc_backout_and_ctrl_backslash;
 #[path = "pty_e2e/extensions_modal_copy_hints_pty.rs"]
 mod extensions_modal_copy_hints_pty;
+#[path = "pty_e2e/force_reasoning_effort_models_enables_effort.rs"]
+mod force_reasoning_effort_models_enables_effort;
 #[path = "pty_e2e/iterm_readline_editing.rs"]
 mod iterm_readline_editing;
 #[path = "pty_e2e/model_picker_shows_long_model_names.rs"]
