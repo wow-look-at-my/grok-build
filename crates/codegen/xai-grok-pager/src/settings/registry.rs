@@ -1242,6 +1242,22 @@ mod tests {
                          models::default_model() — drift here breaks the empty-fold contract",
                     );
                 }
+                // A harness model slot has no UiConfig field of its own: it
+                // lives in `[models]` and reaches the modal through the
+                // `harness_models` projection, which starts empty. Its
+                // registry default is the empty inherit sentinel.
+                (key, SettingKind::DynamicEnum { default, .. })
+                    if xai_grok_models::slot_for_setting_key(key).is_some() =>
+                {
+                    assert!(
+                        default.is_empty(),
+                        "`{key}` default must be the empty inherit sentinel"
+                    );
+                    assert!(
+                        ui.harness_models.is_empty(),
+                        "UiConfig::default() must pin no harness model slot"
+                    );
+                }
                 _ => panic!(
                     "settings::defs::default_settings() contains entry `{}` with no \
                      matching arm in defaults_match_ui_config_default. Add an arm.",

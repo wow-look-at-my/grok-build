@@ -1910,10 +1910,20 @@ fn registry_kind_membership_through_pr_14() {
         "String kind membership drift: {string_keys:?}",
     );
 
+    // Every harness model slot is a DynamicEnum too. They come from their own
+    // table rather than a literal list, so adding a slot cannot drift here.
     let dynamic_enum_keys = by_kind.remove("DynamicEnum").unwrap_or_default();
+    let mut expected_dynamic: Vec<&str> = vec!["default_model", "fork_secondary_model"];
+    expected_dynamic.extend(
+        xai_grok_models::HARNESS_MODEL_SLOTS
+            .iter()
+            .map(|slot| slot.setting_key()),
+    );
+    let mut sorted_dynamic = dynamic_enum_keys.clone();
+    sorted_dynamic.sort();
+    expected_dynamic.sort();
     assert_eq!(
-        dynamic_enum_keys,
-        vec!["default_model", "fork_secondary_model",],
+        sorted_dynamic, expected_dynamic,
         "DynamicEnum kind membership drift",
     );
 
@@ -2060,6 +2070,10 @@ fn defaults_round_trip_through_registry() {
             "contextual_hints.small_screen" => SettingValue::Bool(true),
             "contextual_hints.word_select" => SettingValue::Bool(true),
             "contextual_hints.ssh_wrap" => SettingValue::Bool(true),
+            // Every harness model slot defaults to the empty inherit sentinel.
+            key if xai_grok_models::slot_for_setting_key(key).is_some() => {
+                SettingValue::String(String::new())
+            }
             other => panic!("test must list expected default for `{other}`"),
         }
     };
