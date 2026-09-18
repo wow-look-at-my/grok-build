@@ -55,9 +55,8 @@ jobs:
       - name: Install ripgrep
         uses: wow-look-at-my/actions@cache-rg#latest
 
-      # bubblewrap: jail_bwrap_e2e drives the `--sandbox` command builder against real bwrap, and reports a skip without it. mold: .cargo/config.toml links x86_64-unknown-linux-gnu with it.
+      # bubblewrap: jail_bwrap_e2e drives the `--sandbox` command builder against real bwrap, and reports a skip without it. mold: .cargo/config.toml links x86_64-unknown-linux-gnu with it. The update is required: the image's baked apt index pins a bubblewrap the mirror drops the moment Ubuntu publishes a newer one, and the install then 404s on the .deb.
       - name: Install bubblewrap and mold
-        # The image's apt index outlives the mirror's pool: without the update, the install 404s on a superseded .deb.
         run: |
           sudo apt-get update
           sudo apt-get install -y bubblewrap mold
@@ -137,9 +136,11 @@ jobs:
           tar -xzf "$RUNNER_TEMP/nextest.tar.gz" -C "$RUNNER_TEMP/nextest-bin"
           echo "$RUNNER_TEMP/nextest-bin" >> "$GITHUB_PATH"
 
-      # .cargo/config.toml links x86_64-unknown-linux-gnu with mold.
+      # .cargo/config.toml links x86_64-unknown-linux-gnu with mold. The update keeps the install off a version the image's baked apt index still pins and the mirror has dropped.
       - name: Install mold
-        run: sudo apt-get update && sudo apt-get install -y mold
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mold
 
       - name: Build the PTY harnesses and the pager binary
         run: |
@@ -173,9 +174,11 @@ jobs:
 
       - uses: ./.github/actions/setup-cargo-timings
 
-      # .cargo/config.toml links x86_64-unknown-linux-gnu with mold.
+      # .cargo/config.toml links x86_64-unknown-linux-gnu with mold. The update keeps the install off a version the image's baked apt index still pins and the mirror has dropped.
       - name: Install mold
-        run: sudo apt-get update && sudo apt-get install -y mold
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mold
 
       - name: Build release binary
         run: cargo build --locked --release -p xai-grok-pager-bin
@@ -261,8 +264,11 @@ jobs:
           mkdir -p "$SDKROOT"
           tar -xJf "$RUNNER_TEMP/sdk.tar.xz" -C "$SDKROOT" --strip-components=1
 
+      # The update keeps the install off a version the image's baked apt index still pins and the mirror has dropped.
       - name: Install mold
-        run: sudo apt-get update && sudo apt-get install -y mold
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mold
 
       # cc-rs reads these per-target. ci/zig-cc replaces the target cc-rs chooses, which zig rejects; ar and ranlib take no target.
       - name: Point the C toolchain at zig
