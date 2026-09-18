@@ -500,7 +500,15 @@ impl SessionActor {
                 "Now write the memory summary as described in the system prompt.",
             ));
 
-            let model = match self.memory.flush_config.flush_model.clone() {
+            // `[memory] flush_model` is the older, narrower spelling and
+            // stays ahead of the `[models] memory_flush` slot.
+            let model = match self
+                .memory
+                .flush_config
+                .flush_model
+                .clone()
+                .or_else(|| self.harness_models.get("memory_flush").map(str::to_owned))
+            {
                 Some(m) => m,
                 None => self.chat_state_handle.get_sampling_config().await
                     .map(|c| c.model)
@@ -733,7 +741,7 @@ impl SessionActor {
     }
 
     /// Rewrite a raw memory note into well-structured markdown via a one-shot
-    /// LLM call using the `grok-build` model.
+    /// LLM call on the `[models] memory_flush` slot, else the session model.
     ///
     /// Follows the same streaming pattern as [`handle_ai_suggest`]: prepares
     /// a sampling client, builds a system+user prompt, streams the response,
@@ -777,10 +785,19 @@ impl SessionActor {
             ConversationItem::user(user_msg),
         ];
 
+        let model = match self.harness_models.get("memory_flush") {
+            Some(m) => m.to_owned(),
+            None => self
+                .chat_state_handle
+                .get_sampling_config()
+                .await
+                .map(|c| c.model)
+                .unwrap_or_default(),
+        };
         let request = ConversationRequest {
             items,
             tools: vec![],
-            model: Some("grok-build".to_owned()),
+            model: Some(model),
             temperature: Some(0.3),
             max_output_tokens: Some(1024),
             ..Default::default()

@@ -1755,6 +1755,25 @@ fn move_setting_away_from_default(app: &mut AppView, key: crate::settings::Setti
         "output_rate_sustained_secs" => {
             let _ = dispatch(Action::SetOutputRateSustainedSecs(30), app);
         }
+        // Every harness model slot moves the same way: pin it to a model the
+        // active agent's catalog carries, since the setter refuses an id the
+        // catalog does not list.
+        key if xai_grok_models::slot_for_setting_key(key).is_some() => {
+            use agent_client_protocol as acp;
+            use std::sync::Arc;
+            let slot = xai_grok_models::slot_for_setting_key(key).expect("guard matched");
+            if let ActiveView::Agent(aid) = app.active_view
+                && let Some(agent) = app.agents.get_mut(&aid)
+            {
+                let id = acp::ModelId::new(Arc::from("test-slot-move"));
+                let info = acp::ModelInfo::new(id.clone(), "Test Slot Move".to_string());
+                agent.session.models.available.insert(id.clone(), info);
+                let _ = dispatch(
+                    Action::SetHarnessModel(slot.id, id.0.to_string()),
+                    app,
+                );
+            }
+        }
         other => {
             panic!(
                 "move_setting_away_from_default: no arm for `{other}`. \

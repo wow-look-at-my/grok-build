@@ -441,6 +441,26 @@ fn every_dynamic_enum_setting_has_action_for_string_arm() {
                      SetForkSecondaryModel(_), got {nonempty_action:?}",
                 );
             }
+            // A harness model slot has no separate Clear action: one action
+            // carries the slot id, and an empty model id clears it.
+            key if xai_grok_models::slot_for_setting_key(key).is_some() => {
+                let slot = xai_grok_models::slot_for_setting_key(key).expect("guard matched");
+                match empty_action {
+                    Some(Action::SetHarnessModel(id, ref model)) => {
+                        assert_eq!(id, slot.id, "`{key}` must carry its own slot id");
+                        assert!(
+                            model.is_empty(),
+                            "`{key}` empty canonical must clear the slot, got {model:?}",
+                        );
+                    }
+                    other => panic!("`{key}` empty canonical must clear the slot, got {other:?}"),
+                }
+                assert!(
+                    matches!(nonempty_action, Some(Action::SetHarnessModel(id, ref m))
+                        if id == slot.id && !m.is_empty()),
+                    "`{key}` non-empty canonical must set its slot, got {nonempty_action:?}",
+                );
+            }
             other => panic!(
                 "Unknown DynamicEnum key `{other}` — add a discriminating arm in \
                  every_dynamic_enum_setting_has_action_for_string_arm so future \
@@ -612,9 +632,11 @@ fn rows_contain_categories_and_settings_through_pr_14() {
             }
         })
         .collect();
-    assert_eq!(
-        settings,
-        vec![
+    // The harness model slots are spliced in from their own table below.
+    // What this pins is WHERE they sit — under Models, after
+    // `fork_secondary_model` — and a literal list of them would go stale the
+    // moment a slot is added.
+    let mut expected: Vec<SettingKey> = vec![
             // Booleans.
             "compact_mode",
             "screen_mode",
@@ -695,6 +717,13 @@ fn rows_contain_categories_and_settings_through_pr_14() {
             // `web_search_model`, and `session_summary_model` are
             // not exposed in the modal.
             "fork_secondary_model",
+    ];
+    expected.extend(
+        xai_grok_models::HARNESS_MODEL_SLOTS
+            .iter()
+            .map(|slot| slot.setting_key()),
+    );
+    expected.extend_from_slice(&[
             // `auto_compact_threshold_percent` (Session category) is
             // not exposed in the modal.
             // Advanced category.
@@ -707,8 +736,8 @@ fn rows_contain_categories_and_settings_through_pr_14() {
             "auto_update",
             // SHELL-owned hunk_tracker_mode (Advanced; `off` disables it).
             "hunk_tracker_mode",
-        ]
-    );
+    ]);
+    assert_eq!(settings, expected);
     crate::app::set_voice_mode_enabled_for_test(prev_voice);
 }
 

@@ -100,6 +100,10 @@ pub(crate) struct ChannelSpawner {
     /// Event sink for the spawn-and-retry-once fail-open telemetry; `None` in
     /// tests / when no event log is wired.
     pub(crate) events: Option<EventWriter>,
+    /// Model from the `[models] goal_summarizer` slot. `None` inherits the
+    /// session model. The toolset is always the parent's, so this carries
+    /// no agent type.
+    pub(crate) model_override: Option<String>,
 }
 
 #[async_trait::async_trait]
@@ -111,9 +115,13 @@ impl GoalSummarizerSpawner for ChannelSpawner {
     ) -> Result<String, SpawnError> {
         // Clone the primary render for the trace pair only when tracing.
         let trace_prompt = self.trace_sink.as_ref().map(|_| prompt.primary.clone());
-        // The summarizer always inherits the current model + general-purpose
-        // toolset (no per-role model key), so the wrapper runs a single attempt.
-        let override_ = RoleSpawnOverride::default();
+        // The summarizer keeps the parent toolset whatever its model is, so
+        // the override carries no agent type and the wrapper's retry only
+        // ever has the model to drop.
+        let override_ = RoleSpawnOverride {
+            model: self.model_override.clone(),
+            agent_type: None,
+        };
         let outcome = spawn_with_fail_open_retry(
             "summarizer",
             None,
@@ -657,6 +665,7 @@ mod tests {
             cwd: None,
             trace_sink: None,
             events: None,
+            model_override: None,
         };
         let handle = tokio::spawn(async move {
             let _ = spawner

@@ -1736,4 +1736,37 @@ pub fn default_settings() -> Vec<SettingMeta> {
             hidden_in_minimal: false,
         },
     ]
+    .into_iter()
+    .chain(harness_model_settings())
+    .collect()
+}
+
+/// One picker per harness model slot, under Models.
+///
+/// The rows are built from `xai_grok_models::HARNESS_MODEL_SLOTS` rather
+/// than written out here, so a slot added to the harness cannot ship
+/// without a settings row.
+///
+/// Each row is SHELL-owned and writes its slot into the `[models]` table.
+/// A restart is required, because a slot is resolved when a session actor
+/// is built and a running session keeps the model it started with.
+fn harness_model_settings() -> Vec<SettingMeta> {
+    xai_grok_models::HARNESS_MODEL_SLOTS
+        .iter()
+        .map(|slot| SettingMeta {
+            key: slot.setting_key(),
+            category: SettingCategory::Models,
+            owner: SettingOwner::Shell,
+            label: slot.label,
+            description: slot.description,
+            keywords: slot.keywords,
+            kind: SettingKind::DynamicEnum {
+                default: "",
+                source: DynamicEnumSource::ActiveModelCatalog,
+                supports_preview: false,
+            },
+            restart_required: true,
+            hidden_in_minimal: false,
+        })
+        .collect()
 }

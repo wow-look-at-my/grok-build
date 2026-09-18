@@ -74,7 +74,7 @@ impl SessionActor {
             return;
         };
 
-        let setup = match self.prepare_side_call().await {
+        let setup = match self.prepare_side_call("turn_summary").await {
             Ok(s) => s,
             Err(e) => {
                 tracing::warn!(error = %e, "turn summary: failed to prepare sampling client");

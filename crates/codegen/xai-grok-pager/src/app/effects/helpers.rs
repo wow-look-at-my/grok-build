@@ -1458,6 +1458,18 @@ pub(crate) async fn persist_setting(
                 .await
                 .map_err(|e| e.to_string())
         }
+        // Harness model slots all persist into `[models]` through one
+        // helper, keyed by the slot the setting key names.
+        key if xai_grok_models::slot_for_setting_key(key).is_some() => {
+            let slot = xai_grok_models::slot_for_setting_key(key)
+                .expect("guard above matched this key");
+            let SettingValue::String(s) = value else {
+                return Err(kind_mismatch(key, "String", &value));
+            };
+            xai_grok_shell::util::config::set_harness_model(slot.id, s)
+                .await
+                .map_err(|e| e.to_string())
+        }
         other => Err(format!("unknown setting key for persist: `{other}`")),
     }
 }

@@ -2239,6 +2239,60 @@ async fn resolve_subagent_config_override_pin_applies_for_any_parent() {
         assert_eq!(model_id.0.as_ref(), "pinned-model");
     }
 }
+/// `[models] subagent_default` moves every unpinned subagent off the
+/// parent model. This is the slot's whole job: a user who wants their
+/// subagents on a cheaper model should not have to name each agent type.
+#[tokio::test]
+async fn subagent_default_slot_applies_when_nothing_else_pins() {
+    use xai_grok_agent::config::ModelOverride;
+    let mut ctx = ctx_with_toggle(HashMap::new());
+    ctx.sampling_config.model = "parent-model".to_string();
+    ctx.model_id = acp::ModelId::new("parent-model");
+    ctx.available_models
+        .insert("slot-model".to_string(), test_model_entry("slot-model"));
+    ctx.subagent_default_model = Some("slot-model".to_string());
+    let (config, model_id) =
+        resolve_subagent_sampling_config("explore", &ModelOverride::Inherit, &ctx).await;
+    assert_eq!(config.model, "slot-model");
+    assert_eq!(model_id.0.as_ref(), "slot-model");
+}
+
+/// The slot is the LAST resort. A `[subagents.models]` pin is more
+/// specific, so it wins, and the slot never overrides what the user
+/// asked for by agent name.
+#[tokio::test]
+async fn a_per_agent_pin_wins_over_the_subagent_default_slot() {
+    use xai_grok_agent::config::ModelOverride;
+    let mut ctx = ctx_with_toggle(HashMap::new());
+    ctx.sampling_config.model = "parent-model".to_string();
+    ctx.model_id = acp::ModelId::new("parent-model");
+    ctx.available_models
+        .insert("slot-model".to_string(), test_model_entry("slot-model"));
+    ctx.available_models
+        .insert("pinned-model".to_string(), test_model_entry("pinned-model"));
+    ctx.subagent_default_model = Some("slot-model".to_string());
+    ctx.subagent_model_overrides
+        .insert("explore".to_string(), "pinned-model".to_string());
+    let (config, _) =
+        resolve_subagent_sampling_config("explore", &ModelOverride::Inherit, &ctx).await;
+    assert_eq!(config.model, "pinned-model");
+}
+
+/// A slot naming a model the catalog does not carry falls through to
+/// the parent model rather than sending a request to a model that is
+/// not there.
+#[tokio::test]
+async fn an_unknown_subagent_default_slot_model_falls_through_to_inherit() {
+    use xai_grok_agent::config::ModelOverride;
+    let mut ctx = ctx_with_toggle(HashMap::new());
+    ctx.sampling_config.model = "parent-model".to_string();
+    ctx.model_id = acp::ModelId::new("parent-model");
+    ctx.subagent_default_model = Some("not-in-the-catalog".to_string());
+    let (config, _) =
+        resolve_subagent_sampling_config("explore", &ModelOverride::Inherit, &ctx).await;
+    assert_eq!(config.model, "parent-model");
+}
+
 /// An explicit `AgentDefinition.model = Override(id)` pin routes the
 /// subagent to that model even when the parent runs a light model.
 #[tokio::test]

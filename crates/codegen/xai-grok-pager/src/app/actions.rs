@@ -612,6 +612,11 @@ pub enum Action {
     /// Clear the persisted fork-secondary model — restores to built-in
     /// default. Active agent keeps its value; next fork uses the default.
     ClearForkSecondaryModel,
+    /// Commit one harness model slot into `[models]`. The first field is
+    /// the slot id from `xai_grok_models::HARNESS_MODEL_SLOTS`; an empty
+    /// model id clears the slot. Restart-required — a slot is resolved
+    /// when a session actor is built.
+    SetHarnessModel(&'static str, String),
     /// Commit the `show_tips` preference. Persisted to `[cli].show_tips`.
     /// Restart-required — tips are resolved once at startup.
     SetShowTips(bool),
