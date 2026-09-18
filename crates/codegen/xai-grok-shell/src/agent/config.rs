@@ -8791,7 +8791,9 @@ reasoning_effort = "low"
             xai_grok_sampling_types::ChatMessageProfile::PERMISSIVE,
             "an entry without the flag must stay permissive"
         );
-        assert_eq!(tolerant_sampling.base_url, "https://openrouter.ai/api/v1");
+        assert_eq!(
+            tolerant_sampling.base_url, "https://openrouter.ai/api/v1"
+        );
     }
     #[test]
     #[serial]
@@ -9528,9 +9530,7 @@ reasoning_effort = "low"
     #[test]
     fn resolve_output_rate_floor_prefers_the_model_over_the_session() {
         assert!(
-            Config::default()
-                .resolve_output_rate_floor("any-model")
-                .is_none(),
+            Config::default().resolve_output_rate_floor("any-model").is_none(),
             "a floor belongs to an endpoint that collapses, so nothing is assumed"
         );
 
@@ -9578,9 +9578,7 @@ reasoning_effort = "low"
             },
         );
         assert!(
-            model_off
-                .resolve_output_rate_floor("ungated-model")
-                .is_none(),
+            model_off.resolve_output_rate_floor("ungated-model").is_none(),
             "a zero on the model turns the gate off for that model alone"
         );
     }

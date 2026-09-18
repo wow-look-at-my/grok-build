@@ -212,7 +212,10 @@ async fn copy_session_data_fork_truncates_live_branch_inclusive() {
 
 /// Seed a source session whose subagent `done` finished and whose subagent
 /// `live` is still running, with one ordinary turn around them.
-async fn seed_session_with_one_live_subagent(adapter: &JsonlStorageAdapter, sid: &str) -> Info {
+async fn seed_session_with_one_live_subagent(
+    adapter: &JsonlStorageAdapter,
+    sid: &str,
+) -> Info {
     let source_info = Info {
         id: acp::SessionId::new(sid),
         cwd: "/src".to_string(),
@@ -290,7 +293,11 @@ async fn copy_session_data_carries_a_running_subagent_when_asked() {
 
     assert_eq!(
         copied_subagent_ids(&adapter, &target_info),
-        vec!["done".to_string(), "done".to_string(), "live".to_string()],
+        vec![
+            "done".to_string(),
+            "done".to_string(),
+            "live".to_string()
+        ],
         "--agents must carry the running subagent's spawn record"
     );
 }
