@@ -726,6 +726,7 @@ mod tests {
             compaction_at_tokens: Some(CompactionAtTokens::Fixed(100_000)),
             show_model_fingerprint: Some(true),
             stream_tool_calls: Some(false),
+            strict_message_schema: Some(false),
             pricing: Some(xai_grok_sampling_types::ModelPricing::default()),
             min_output_tokens_per_sec: None,
         }
@@ -883,5 +884,108 @@ mod tests {
             assert_eq!(warnings[0].kind, ConfigWarningKind::DuplicateAlias);
             assert_eq!(warnings[0].field(), Some(legacy));
         }
+    }
+
+    /// Drift guard across the two user-facing model structs.
+    ///
+    /// A `[model.<id>]` table in `config.toml` is parsed into
+    /// [`ConfigModelOverride`], not into `ModelEntryConfig`. When a field
+    /// exists on `ModelEntryConfig` but not on `ConfigModelOverride`, the key
+    /// parses as an **unknown field** and is silently discarded: the setting
+    /// appears to work but has no effect. That is exactly how
+    /// `strict_message_schema` shipped broken — a Cerebras entry could set it
+    /// and the resolved profile still came out permissive, so the provider
+    /// rejected every replayed message.
+    ///
+    /// The field list is read from the `ModelEntryConfig` declaration in the
+    /// source itself, so it cannot drift from the struct the way a hand-kept
+    /// list would. Each name is then fed through the real parser — the same
+    /// `parse_model_overrides` the config loader calls — and must not come
+    /// back as an unknown field.
+    ///
+    /// It deliberately does NOT compare serialized JSON: most of these fields
+    /// carry `skip_serializing_if`, so a `false`/`None` value vanishes from a
+    /// serialized comparison and hides the very gap being checked. (An earlier
+    /// draft of this test did exactly that and passed against a struct with
+    /// the field removed.) Driving the parser cannot be fooled that way.
+    ///
+    /// The three exclusions are deliberate and are not user config:
+    /// - `id` is the `[model.<id>]` table key itself, not an inner field.
+    /// - `auth_scheme` comes from credentials, never from the config file.
+    /// - `laziness_detector` is not exposed to `config.toml` (no docs, no
+    ///   parse path); it is set from the remote catalog.
+    #[test]
+    fn every_user_settable_model_entry_field_is_accepted_by_the_override() {
+        const NOT_USER_CONFIG: &[&str] = &["id", "auth_scheme", "laziness_detector"];
+
+        let candidates: Vec<String> = model_entry_config_field_names()
+            .into_iter()
+            .filter(|f| !NOT_USER_CONFIG.contains(&f.as_str()))
+            .collect();
+        assert!(
+            candidates.len() > 20,
+            "expected the full ModelEntryConfig field set, got {}: {candidates:?}",
+            candidates.len()
+        );
+
+        // Every candidate must be recognized as a real field by the parser —
+        // an unknown key is what makes a config.toml setting silently inert.
+        let mut unknown: Vec<String> = Vec::new();
+        for field in &candidates {
+            let mut entry_table = toml::map::Map::new();
+            // Any TOML value will do: the parser reports unknown *names*
+            // before it judges values, and a value that fails to parse is
+            // pruned separately (see `prune_invalid_fields`), so a name that
+            // is genuinely accepted never surfaces as unknown here.
+            entry_table.insert(field.clone(), toml::Value::Boolean(true));
+            let (_, warnings) = parse_single_entry(entry_table);
+            if warnings
+                .iter()
+                .any(|w| w.kind == ConfigWarningKind::UnknownField && w.field() == Some(field))
+            {
+                unknown.push(field.clone());
+            }
+        }
+
+        assert!(
+            unknown.is_empty(),
+            "these ModelEntryConfig fields are settable in `[model.*]` but \
+             ConfigModelOverride reports them as unknown, so config.toml silently ignores \
+             them: {unknown:?}. Add each to ConfigModelOverride and apply it in \
+             `ConfigModelOverride::apply`, or add it to NOT_USER_CONFIG with a reason if it \
+             is genuinely not user config."
+        );
+    }
+
+    /// Field names declared by `pub struct ModelEntryConfig`, read from the
+    /// source at compile time so the list is the struct's own contract rather
+    /// than a copy that can drift.
+    fn model_entry_config_field_names() -> Vec<String> {
+        const SOURCE: &str = include_str!("config.rs");
+        let decl = "pub struct ModelEntryConfig {";
+        let start = SOURCE
+            .find(decl)
+            .unwrap_or_else(|| panic!("`{decl}` not found in config.rs"))
+            + decl.len();
+        let body = &SOURCE[start..];
+        // The struct body ends at the first line that is a bare closing brace.
+        let end = body
+            .find("\n}")
+            .unwrap_or_else(|| panic!("unterminated ModelEntryConfig body"));
+        let mut names = Vec::new();
+        for line in body[..end].lines() {
+            let line = line.trim_start();
+            let Some(rest) = line.strip_prefix("pub ") else {
+                continue;
+            };
+            let Some((name, _)) = rest.split_once(':') else {
+                continue;
+            };
+            let name = name.trim();
+            if !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+                names.push(name.to_owned());
+            }
+        }
+        names
     }
 }
