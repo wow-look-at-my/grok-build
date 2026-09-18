@@ -1297,7 +1297,7 @@ async fn an_unstreamed_tool_call_is_not_a_collapsed_stream() {
         1,
         "writing a tool call must not be read as a collapse and reissued"
     );
-    assert_eq!(response.tool_calls.len(), 1);
+    assert_eq!(response.tool_calls().len(), 1);
 }
 
 /// One scripted SSE event and how long the mock server waits before it.
