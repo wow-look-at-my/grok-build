@@ -386,8 +386,11 @@ impl UiConfig {
             .unwrap_or(Self::STOP_GATE_CI_FAILING_DEFAULT)
     }
 
-    /// Default for [`Self::min_output_tokens_per_sec`] when unset: off.
-    pub const MIN_OUTPUT_TOKENS_PER_SEC_DEFAULT: u32 = 0;
+    /// Default for [`Self::min_output_tokens_per_sec`] when unset. Well under
+    /// what any endpoint here reaches in health, so an ordinary stream never
+    /// approaches it and a collapsed engine is still caught. A zero here ships
+    /// the gate dead, which is the same as not having it.
+    pub const MIN_OUTPUT_TOKENS_PER_SEC_DEFAULT: u32 = 15;
 
     /// Default for [`Self::output_rate_sustained_secs`] when unset.
     pub const OUTPUT_RATE_SUSTAINED_SECS_DEFAULT: u32 = 10;

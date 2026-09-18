@@ -57,7 +57,7 @@ jobs:
 
       # bubblewrap: jail_bwrap_e2e drives the `--sandbox` command builder against real bwrap, and reports a skip without it. mold: .cargo/config.toml links x86_64-unknown-linux-gnu with it.
       - name: Install bubblewrap and mold
-        # Without the refresh the stale image index names a .deb the mirror has dropped, and the fetch 404s.
+        # The image's apt index outlives the mirror's pool: without the update, the install 404s on a superseded .deb.
         run: sudo apt-get update && sudo apt-get install -y bubblewrap mold
 
       # Each test runs in its own process under a per-test timeout (.config/nextest.toml), which cargo test has none of.
@@ -137,7 +137,7 @@ jobs:
 
       # .cargo/config.toml links x86_64-unknown-linux-gnu with mold.
       - name: Install mold
-        run: sudo apt-get install -y mold
+        run: sudo apt-get update && sudo apt-get install -y mold
 
       - name: Build the PTY harnesses and the pager binary
         run: |
@@ -173,7 +173,7 @@ jobs:
 
       # .cargo/config.toml links x86_64-unknown-linux-gnu with mold.
       - name: Install mold
-        run: sudo apt-get install -y mold
+        run: sudo apt-get update && sudo apt-get install -y mold
 
       - name: Build release binary
         run: cargo build --locked --release -p xai-grok-pager-bin
@@ -260,7 +260,7 @@ jobs:
           tar -xJf "$RUNNER_TEMP/sdk.tar.xz" -C "$SDKROOT" --strip-components=1
 
       - name: Install mold
-        run: sudo apt-get install -y mold
+        run: sudo apt-get update && sudo apt-get install -y mold
 
       # cc-rs reads these per-target. ci/zig-cc replaces the target cc-rs chooses, which zig rejects; ar and ranlib take no target.
       - name: Point the C toolchain at zig

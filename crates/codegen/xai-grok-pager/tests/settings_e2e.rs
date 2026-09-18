@@ -2029,8 +2029,8 @@ fn defaults_round_trip_through_registry() {
             "permission_mode" => SettingValue::Enum("ask"),
             "default_model" => SettingValue::String(String::new()),
             "max_thoughts_width" => SettingValue::Int(120),
-            // The rate gate ships off; its grace period still has a value.
-            "min_output_tokens_per_sec" => SettingValue::Int(0),
+            // The rate gate ships armed, well under any healthy rate.
+            "min_output_tokens_per_sec" => SettingValue::Int(15),
             "output_rate_sustained_secs" => SettingValue::Int(10),
             "scroll_speed" => SettingValue::Int(50),
             "scroll_mode" => SettingValue::Enum("auto"),
