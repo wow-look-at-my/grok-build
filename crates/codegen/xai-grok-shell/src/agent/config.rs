@@ -9682,9 +9682,16 @@ reasoning_effort = "low"
     /// with a zero, which turns the gate off for that model alone.
     #[test]
     fn resolve_output_rate_floor_prefers_the_model_over_the_session() {
-        assert!(
-            Config::default().resolve_output_rate_floor("any-model").is_none(),
-            "a floor belongs to an endpoint that collapses, so nothing is assumed"
+        let shipped = Config::default()
+            .resolve_output_rate_floor("any-model")
+            .expect("the gate is armed out of the box");
+        assert_eq!(
+            shipped.min_tokens_per_sec,
+            f64::from(xai_grok_shared::ui_config::UiConfig::MIN_OUTPUT_TOKENS_PER_SEC_DEFAULT),
+        );
+        assert_eq!(
+            shipped.sustained_secs,
+            u64::from(xai_grok_shared::ui_config::UiConfig::OUTPUT_RATE_SUSTAINED_SECS_DEFAULT),
         );
 
         let mut session_wide = Config::default();
