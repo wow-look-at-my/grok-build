@@ -156,6 +156,10 @@ pub(crate) async fn run_request_task(
         .filter(OutputRateFloorPolicy::is_armed);
     let rate_max_retries = rate_policy.map_or(0, |p| p.max_retries);
     let mut rate_retry_count: u32 = 0;
+    // A fourth budget, for a stream that died mid-body. Same reasoning as the
+    // two above: a dropped connection is not a server fault, and it must not
+    // spend what the next 5xx needs.
+    let mut stream_retry_count: u32 = 0;
     let output_observed = Arc::new(AtomicBool::new(false));
 
     loop {
@@ -197,7 +201,8 @@ pub(crate) async fn run_request_task(
                 response,
                 mut metrics,
             } => {
-                metrics.attempts = retry_count + doom_retry_count + rate_retry_count + 1;
+                metrics.attempts =
+                    retry_count + doom_retry_count + rate_retry_count + stream_retry_count + 1;
                 if let Some(policy) = doom_policy {
                     let confident = policy.confident_triggers(&response.doom_loop_signals);
                     if !confident.is_empty() {
@@ -338,10 +343,18 @@ pub(crate) async fn run_request_task(
                     handle_cancellation(&event_tx, &request_id, &mut completion_tx);
                     return request_id;
                 }
+                let (attempt_count, attempt_budget) = if error.is_stream_interrupted() {
+                    (
+                        &mut stream_retry_count,
+                        retry_mod::stream_interrupt_budget(effective_max_retries),
+                    )
+                } else {
+                    (&mut retry_count, effective_max_retries)
+                };
                 if !apply_retry_decision(
                     &error,
-                    &mut retry_count,
-                    effective_max_retries,
+                    attempt_count,
+                    attempt_budget,
                     &retry_policy,
                     &event_tx,
                     &request_id,
@@ -362,10 +375,18 @@ pub(crate) async fn run_request_task(
                 return request_id;
             }
             AttemptOutcome::InitFailed { error } => {
+                let (attempt_count, attempt_budget) = if error.is_stream_interrupted() {
+                    (
+                        &mut stream_retry_count,
+                        retry_mod::stream_interrupt_budget(effective_max_retries),
+                    )
+                } else {
+                    (&mut retry_count, effective_max_retries)
+                };
                 if !apply_retry_decision(
                     &error,
-                    &mut retry_count,
-                    effective_max_retries,
+                    attempt_count,
+                    attempt_budget,
                     &retry_policy,
                     &event_tx,
                     &request_id,

@@ -288,6 +288,12 @@ Every one of those is the test doing its job. Making them pass there means weake
 - A rule file's frontmatter is stripped from the RULE, never from what the rule imports. The import is read as written.
 - `MAX_IMPORT_DEPTH` plus the seen-set bound the walk. The seen-set is what terminates a cycle. The depth cap only bounds a chain.
 
+## Stream-interruption retry notes
+
+- A response stream that dies mid-body has its own retry budget: `STREAM_INTERRUPT_MAX_RETRIES` = 10, on the transport path's exponential backoff (2s, 4s, 8s, ... capped at `MAX_RETRY_BACKOFF`, jittered). `SamplingError::is_stream_interrupted` names the class. `request_task` charges it to `stream_retry_count` and not to the transport budget. A dropped connection is not a server fault, and the next 5xx still needs its own retries.
+- The budget is a floor as well as a cap. A model configured with `max_retries = 3` still gets these 10. Only `max_retries = 0` (observe-only) and a caller that cannot take duplicate output (`retry_only_before_output` after output) get zero, through `stream_interrupt_budget`.
+- A reqwest decode failure is in that class, and `is_retryable_reqwest` answers true for it. Its Display is "error decoding response body". A body that stopped arriving mid-read is transient, so calling it fatal ends a turn on one network blip. The same failure reaches the user as `EventStreamError` when the SSE stream is what broke.
+
 ## Output-rate floor notes
 
 - One meter serves both halves (`xai-grok-sampling-types/src/output_rate.rs`). `OutputRateGate` owns an `OutputRateMeter` and the sustained-breach state machine. `OutputRateHealth`/`classify_rate` is the reduction the indicator color, the slowdown log and the reissue all read. A second meter for the display lets the number on screen disagree with the number the gate acted on.
