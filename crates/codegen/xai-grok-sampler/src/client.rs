@@ -377,11 +377,46 @@ fn record_stream_request_failure(err: &reqwest::Error) {
 }
 
 fn extract_retry_after(headers: &reqwest::header::HeaderMap) -> Option<u64> {
-    headers
+    let retry_after = headers
         .get(reqwest::header::RETRY_AFTER)
         .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.parse::<u64>().ok())
-        .map(|s| s.min(120))
+        .and_then(|s| s.parse::<u64>().ok());
+
+    // A token bucket answers a breach with the WHOLE window ("Retry-After:
+    // 60" on a per-minute limit), while its own reset header says when this
+    // caller's tokens actually come back. Take whichever is sooner. A
+    // provider runs SEVERAL token buckets (total and uncached, per minute,
+    // hour and day) and spells each reset differently, so the match is the
+    // reset prefix plus the word that names the resource. A request bucket
+    // is left out: it is not what a token breach waits on. A wait that turns
+    // out to be short earns another 429, which the budget covers.
+    let bucket_reset = headers
+        .iter()
+        .filter(|(name, _)| {
+            let name = name.as_str();
+            name.starts_with("x-ratelimit-reset-") && name.contains("tokens")
+        })
+        .filter_map(|(_, value)| parse_reset_seconds(value.to_str().ok()?))
+        .min();
+
+    match (retry_after, bucket_reset) {
+        (Some(a), Some(b)) => Some(a.min(b)),
+        (one, None) | (None, one) => one,
+    }
+    .map(|s| s.min(120))
+}
+
+/// Seconds from a rate-limit reset header, which is written as a bare number
+/// or with a unit (`1.5`, `1.5s`, `30s`). A fractional value rounds UP: a
+/// wait shorter than the reset earns the same 429 back.
+fn parse_reset_seconds(raw: &str) -> Option<u64> {
+    let raw = raw.trim();
+    let digits = raw.strip_suffix('s').unwrap_or(raw).trim();
+    let secs = digits.parse::<f64>().ok()?;
+    if !secs.is_finite() || secs < 0.0 {
+        return None;
+    }
+    Some(secs.ceil() as u64)
 }
 
 fn extract_should_retry(headers: &reqwest::header::HeaderMap) -> Option<bool> {
@@ -2589,6 +2624,49 @@ mod tests {
     fn extract_retry_after_none_when_missing() {
         let headers = reqwest::header::HeaderMap::new();
         assert_eq!(extract_retry_after(&headers), None);
+    }
+
+    /// A token bucket answers a breach with the whole window, while its own
+    /// reset says when the tokens come back. The sooner one is the wait.
+    #[test]
+    fn a_token_bucket_reset_beats_the_whole_window() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(reqwest::header::RETRY_AFTER, "60".parse().unwrap());
+        headers.insert("x-ratelimit-reset-tokens-minute", "12.4".parse().unwrap());
+        assert_eq!(
+            extract_retry_after(&headers),
+            Some(13),
+            "fractions round up"
+        );
+    }
+
+    /// Several token buckets can be breached at once. The request bucket is
+    /// not one of them and must not shorten a token wait.
+    #[test]
+    fn the_soonest_token_bucket_wins_and_requests_are_ignored() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(
+            "x-ratelimit-reset-uncached-tokens-minute",
+            "18s".parse().unwrap(),
+        );
+        headers.insert("x-ratelimit-reset-tokens-day", "4000".parse().unwrap());
+        headers.insert("x-ratelimit-reset-requests-minute", "1".parse().unwrap());
+        assert_eq!(extract_retry_after(&headers), Some(18));
+    }
+
+    #[test]
+    fn a_token_reset_alone_is_the_wait() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert("x-ratelimit-reset-tokens-minute", "7".parse().unwrap());
+        assert_eq!(extract_retry_after(&headers), Some(7));
+    }
+
+    #[test]
+    fn an_unparseable_token_reset_leaves_retry_after_alone() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(reqwest::header::RETRY_AFTER, "45".parse().unwrap());
+        headers.insert("x-ratelimit-reset-tokens-minute", "soon".parse().unwrap());
+        assert_eq!(extract_retry_after(&headers), Some(45));
     }
 
     #[test]

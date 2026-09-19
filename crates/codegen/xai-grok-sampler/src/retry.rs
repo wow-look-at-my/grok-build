@@ -983,7 +983,12 @@ mod tests {
         let mut waited = Duration::ZERO;
         let mut retries = 0u32;
         loop {
-            match classify_error(&err, retries, DEFAULT_MAX_RETRIES, RATE_LIMIT_RETRY_THRESHOLD) {
+            match classify_error(
+                &err,
+                retries,
+                DEFAULT_MAX_RETRIES,
+                RATE_LIMIT_RETRY_THRESHOLD,
+            ) {
                 RetryDecision::RetryWithBackoff { backoff, .. } => {
                     assert!(
                         backoff <= MAX_RETRY_BACKOFF,
@@ -1142,16 +1147,16 @@ mod tests {
         let budget = stream_interrupt_budget(3);
         let mut previous = Duration::ZERO;
         for retries_done in 0..STREAM_INTERRUPT_MAX_RETRIES {
-            let backoff = match classify_error(&err, retries_done, budget, RATE_LIMIT_RETRY_THRESHOLD)
-            {
-                // The first retry also escapes a poisoned HTTP/2 pool.
-                RetryDecision::RetryWithClientRebuild { backoff } => {
-                    assert_eq!(retries_done, 0);
-                    backoff
-                }
-                RetryDecision::Retry { backoff } => backoff,
-                other => panic!("retry {retries_done} must happen, got {other:?}"),
-            };
+            let backoff =
+                match classify_error(&err, retries_done, budget, RATE_LIMIT_RETRY_THRESHOLD) {
+                    // The first retry also escapes a poisoned HTTP/2 pool.
+                    RetryDecision::RetryWithClientRebuild { backoff } => {
+                        assert_eq!(retries_done, 0);
+                        backoff
+                    }
+                    RetryDecision::Retry { backoff } => backoff,
+                    other => panic!("retry {retries_done} must happen, got {other:?}"),
+                };
             // Only while the base is still under the ceiling: once every wait
             // is a jittered 30s, one can land below the last.
             if retries_done < 4 {
@@ -1181,7 +1186,12 @@ mod tests {
     fn observe_only_grants_a_stream_interruption_nothing() {
         assert_eq!(stream_interrupt_budget(0), 0);
         let err = SamplingError::EventStreamError("conn reset".into());
-        match classify_error(&err, 0, stream_interrupt_budget(0), RATE_LIMIT_RETRY_THRESHOLD) {
+        match classify_error(
+            &err,
+            0,
+            stream_interrupt_budget(0),
+            RATE_LIMIT_RETRY_THRESHOLD,
+        ) {
             RetryDecision::Fatal(_) => {}
             other => panic!("expected Fatal, got {other:?}"),
         }
