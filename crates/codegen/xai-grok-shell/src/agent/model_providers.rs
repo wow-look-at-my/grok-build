@@ -21,6 +21,40 @@ pub struct ModelProviderConfig {
     pub auth_provider: Option<String>,
     pub auth: Option<crate::auth::AuthProviderConfig>,
     pub context_window: Option<u64>,
+    /// Ask this provider for its model list. Default on. Turn it off for a
+    /// provider whose listing is too large to pick from.
+    pub models_autodetect: Option<bool>,
+    /// Listing URL for the discovery above. Unset asks `<base_url>/models`.
+    pub models_list_url: Option<String>,
+    /// Globs that mark a discovered or configured model of this provider as a
+    /// favorite. Matched against the catalog key and the routing slug.
+    pub favorite_models: Vec<String>,
+}
+
+impl ModelProviderConfig {
+    /// Discovery is on unless the provider turns it off.
+    pub(crate) fn autodetect_enabled(&self) -> bool {
+        self.models_autodetect.unwrap_or(true)
+    }
+
+    /// The URL that lists this provider's models, or `None` when the provider
+    /// declares no endpoint to ask.
+    pub(crate) fn resolve_models_list_url(&self) -> Option<String> {
+        if let Some(url) = self.models_list_url.as_deref().map(str::trim)
+            && !url.is_empty()
+        {
+            return Some(url.to_owned());
+        }
+        let base = self
+            .base_url
+            .as_deref()
+            .or(self.api_base_url.as_deref())
+            .map(str::trim)
+            .filter(|b| !b.is_empty())?;
+        Some(crate::remote::models_list_url_for_base(
+            base.trim_end_matches('/'),
+        ))
+    }
 }
 
 pub(crate) fn model_provider_auth_name(provider_id: &str) -> String {
@@ -185,6 +219,11 @@ impl ConfigModelOverride {
             auth_provider,
             auth,
             context_window,
+            // Discovery and favorites describe the provider's LISTING, not a
+            // model's connection. A model inherits neither.
+            models_autodetect: _,
+            models_list_url: _,
+            favorite_models: _,
         } = provider;
 
         let mut merged = self.clone();

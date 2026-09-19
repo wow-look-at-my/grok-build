@@ -169,6 +169,53 @@ Grok reads each variable when it builds the client for a session and places the 
 
 Both fields also work on a shared `[model_providers.<id>]` block. A model that points at a provider with `model_provider = "<id>"` inherits the provider's `query_params` and `env_http_headers` when it sets none of its own, matching how `extra_headers` is inherited.
 
+### Autodetected Provider Models
+
+A `[model_providers.<id>]` block declares a base URL. Grok asks that base what models it serves, at `<base_url>/models`, and adds every model it names to the catalog. You write no `[model.<id>]` block per model:
+
+```toml
+[model_providers.gateway]
+base_url = "https://gateway.example/v1"
+env_key = "GATEWAY_API_KEY"
+```
+
+Each autodetected model is keyed `<provider id>/<model slug>`, for example `gateway/claude-sonnet-4-6`. The key is qualified so a slug that several providers serve stays one entry per provider, and so your own `[model.<id>]` block is never shadowed. Every autodetected model inherits the provider's connection and credential fields, exactly as a model that names `model_provider` does.
+
+Discovery runs in the background at startup, so a slow provider never delays the session. A provider that cannot be reached contributes no models and never fails the others. Its models appear in the picker as soon as its listing answers.
+
+These keys control it:
+
+```toml
+[model_providers.huge]
+base_url = "https://huge.example/v1"
+# This provider serves hundreds of models. Do not ask.
+models_autodetect = false
+
+[model_providers.elsewhere]
+base_url = "https://elsewhere.example/inference"
+# The listing is not at <base_url>/models.
+models_list_url = "https://elsewhere.example/catalog.json"
+```
+
+`models_list_url` is asked for verbatim. The models it names still route to the provider's `base_url`.
+
+### Favorite Models
+
+A provider with a large catalog fills the picker. `favorite_models` is a list of glob patterns that marks the models you want in front of you:
+
+```toml
+[models]
+favorite_models = ["grok-4*"]
+
+[model_providers.gateway]
+base_url = "https://gateway.example/v1"
+favorite_models = ["*-sonnet-*", "*-opus-*"]
+```
+
+`/model` opens on the favorites plus the model the session is running. The moment you type, it searches the whole catalog, so a model nobody marked is still one search away and `-m` still reaches it.
+
+The lists are joined: `[models].favorite_models` matches any model, and a provider's own list matches only that provider's models. A pattern matches the catalog key or the routing slug, case-sensitive. When nothing is marked, the picker lists every model as before.
+
 ---
 
 ## Overriding Built-in Models
