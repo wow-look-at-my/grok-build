@@ -2336,6 +2336,8 @@ fn find_model_by_id_prefers_key_then_falls_back_to_slug() {
     let entry = |model: &str| ModelEntry {
         info: config::ModelInfo {
             user_selectable: true,
+            favorite: false,
+            model_provider: None,
             id: None,
             model: model.to_string(),
             base_url: String::new(),

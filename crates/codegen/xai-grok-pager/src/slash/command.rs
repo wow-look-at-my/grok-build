@@ -230,6 +230,18 @@ pub trait SlashCommand: Send + Sync {
         None
     }
 
+    /// Every row the modal picker may search, which can be wider than the rows
+    /// it opens on.
+    ///
+    /// The modal picker asks one time and filters its own copy as the user
+    /// types, so a command that opens on a subset (`/model` opens on the
+    /// favorites) has to hand over the whole set here. Otherwise the rows it
+    /// left out are unreachable from that picker. The inline dropdown asks
+    /// again on every keystroke and does not use this.
+    fn search_args(&self, ctx: &AppCtx, args_query: &str) -> Option<Vec<ArgItem>> {
+        self.suggest_args(ctx, args_query)
+    }
+
     /// Whether this command is currently visible / executable.
     ///
     /// Default is `true` (every command is visible). Override to gate a

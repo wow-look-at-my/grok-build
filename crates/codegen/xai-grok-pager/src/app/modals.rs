@@ -77,6 +77,11 @@ impl AgentView {
         if model_items.is_empty() {
             return false;
         }
+        // The opening rows and the searchable rows are not the same set: the
+        // model list opens on the favorites and searches the whole catalog.
+        let searchable = cmd
+            .search_args(&ctx, "")
+            .unwrap_or_else(|| model_items.clone());
         if let Some(ActiveModal::ArgPicker {
             args_query,
             items,
@@ -86,8 +91,8 @@ impl AgentView {
         }) = active_modal.as_mut()
         {
             args_query.clear();
-            *items = model_items.clone();
-            *original_items = model_items;
+            *items = model_items;
+            *original_items = searchable;
             // Model list is type-to-find: reopen input-default like the initial /model open.
             *state = crate::views::picker::PickerState::input_active();
         }
@@ -916,6 +921,11 @@ impl AgentView {
                                     if let Some(items) = command.suggest_args(&ctx, "")
                                         && !items.is_empty()
                                     {
+                                        // Searched rows can outnumber the rows
+                                        // the picker opens on.
+                                        let searchable = command
+                                            .search_args(&ctx, "")
+                                            .unwrap_or_else(|| items.clone());
                                         // Save palette state for Esc restore.
                                         let prev = {
                                             let ActiveModal::CommandPalette {
@@ -932,8 +942,8 @@ impl AgentView {
                                         self.active_modal = Some(ActiveModal::ArgPicker {
                                             command: trimmed,
                                             args_query: String::new(),
-                                            items: items.clone(),
-                                            original_items: items,
+                                            items,
+                                            original_items: searchable,
                                             // Type-to-find: open in input mode (vim: Esc→nav, i→input).
                                             state: crate::views::picker::PickerState::input_active(
                                             ),

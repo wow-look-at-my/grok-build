@@ -1821,6 +1821,8 @@ fn test_model_entry(model_id: &str) -> crate::agent::config::ModelEntry {
     crate::agent::config::ModelEntry {
         info: crate::agent::config::ModelInfo {
             user_selectable: true,
+            favorite: false,
+            model_provider: None,
             id: None,
             model: model_id.to_string(),
             base_url: String::new(),

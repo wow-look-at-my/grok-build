@@ -265,6 +265,23 @@ impl acp::Agent for MvpAgent {
                 tracing::debug!(%error, "Codex provider discovery unavailable");
             }
         }
+        {
+            // Every `[model_providers.<id>]` that autodetects answers with its
+            // own models. This runs off the startup path: a provider that
+            // answers slowly must not hold `initialize` open, and the catalog
+            // reaches the client on its own through the models-updated push.
+            let cfg = self.cfg.borrow().clone();
+            let models_manager = self.models_manager.clone();
+            tokio::task::spawn_local(async move {
+                let discovered =
+                    crate::agent::model_provider_discovery::discover_provider_models(&cfg).await;
+                if !discovered.is_empty() {
+                    let count = discovered.len();
+                    models_manager.set_provider_models(discovered);
+                    tracing::info!(count, "autodetected models from configured model providers");
+                }
+            });
+        }
         let disable_api_key_auth = self
             .cfg
             .borrow()

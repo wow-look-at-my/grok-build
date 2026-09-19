@@ -19,7 +19,7 @@ use std::sync::Arc;
 use xai_grok_agent::prompt::skills::SkillsConfig;
 use xai_grok_sampler::{AuthScheme, SamplerConfig};
 use xai_grok_sampling_types::{
-    CompactionAtTokens, CompactionsRemaining, REASONING_EFFORT_META_KEY,
+    CompactionAtTokens, CompactionsRemaining, FAVORITE_META_KEY, REASONING_EFFORT_META_KEY,
     REASONING_EFFORTS_META_KEY, ReasoningEffort, ReasoningEffortOption,
     reasoning_effort_meta_value, reasoning_efforts_meta_value,
 };
@@ -1121,6 +1121,11 @@ pub struct ModelsConfig {
     /// Remove these model IDs from the catalog entirely. Wins over `hidden_models`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub disabled_models: Option<Vec<String>>,
+    /// Globs that mark a model as a favorite, joined with every
+    /// `[model_providers.<id>].favorite_models` list. The picker opens on the
+    /// favorites when any model matches; typing searches the whole catalog.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub favorite_models: Option<Vec<String>>,
     /// Force `supports_reasoning_effort = true` on these models, so `/effort`
     /// and the effort menu work on a model the catalog never flagged. Globs
     /// match the catalog key or the model id, like the other model filters.
@@ -3742,6 +3747,63 @@ fn managed_settings_env_flag(key: &str) -> Option<bool> {
     let json: serde_json::Value = serde_json::from_str(&content).ok()?;
     xai_grok_workspace::permission::resolution::json_env_flag(json.get("env"), key)
 }
+/// Pin an unresolved provider-backed model to a credential that cannot mint, so
+/// the session bearer never reaches a third party's endpoint.
+fn fail_closed_on_provider_endpoint(entry: &mut ModelEntry, provider_id: &str) {
+    let session_bearer_unsafe = !crate::util::is_xai_api_bearer_url(&entry.info.base_url)
+        || entry
+            .api_base_url
+            .as_deref()
+            .is_some_and(|url| !crate::util::is_xai_api_bearer_url(url));
+    if entry.auth_provider.is_none() && session_bearer_unsafe {
+        entry.auth_provider = Some(crate::auth::AuthProviderRef::fail_closed(format!(
+            "model_provider:{provider_id} (fail-closed)"
+        )));
+    }
+}
+
+/// Bind this entry's auth provider reference to the config it names. A name with
+/// no `[auth_provider.<name>]` behind it keeps an empty command, which mints
+/// nothing.
+fn attach_trusted_auth_config(cfg: &Config, key: &str, entry: &mut ModelEntry) {
+    let Some(provider) = entry.auth_provider.as_mut() else {
+        return;
+    };
+    if provider.is_fail_closed() {
+        return;
+    }
+    let config = cfg.auth_providers.get(&provider.name);
+    if config.is_none() {
+        tracing::debug!(
+            model_key = %key,
+            provider = %provider.name,
+            "provider ref has no trusted config; failing closed with an empty command"
+        );
+    }
+    provider.attach_trusted_config(config);
+}
+
+/// Build one catalog entry that inherits `[model_providers.<provider_id>]`.
+///
+/// This is the same merge a `[model.<id>] model_provider = "..."` block gets,
+/// reachable for an entry that has no config block at all — an autodetected
+/// model.
+pub(crate) fn entry_for_provider_model(
+    cfg: &Config,
+    key: &str,
+    provider_id: &str,
+    provider: &crate::agent::model_providers::ModelProviderConfig,
+    model_override: &ConfigModelOverride,
+) -> ModelEntry {
+    let merged = model_override.with_provider_defaults(provider, provider_id);
+    let mut entry = merged.apply(key, None, &cfg.endpoints);
+    fail_closed_on_provider_endpoint(&mut entry, provider_id);
+    attach_trusted_auth_config(cfg, key, &mut entry);
+    entry.info.model_provider = Some(provider_id.to_owned());
+    entry.info.derive_reasoning_effort_fields();
+    entry
+}
+
 /// Assemble the final model map. Priority (highest wins):
 /// config.toml `[model.*]` > prefetched (remote) > hardcoded defaults.
 pub(crate) fn resolve_model_list(
@@ -3814,18 +3876,9 @@ pub(crate) fn resolve_model_list(
         });
         let effective = with_provider.as_ref().unwrap_or(model_override);
         let mut entry = effective.apply(key, base, &cfg.endpoints);
-        let session_bearer_unsafe = !crate::util::is_xai_api_bearer_url(&entry.info.base_url)
-            || entry
-                .api_base_url
-                .as_deref()
-                .is_some_and(|url| !crate::util::is_xai_api_bearer_url(url));
-        if let Some(pid) = model_override.model_provider.as_deref()
-            && entry.auth_provider.is_none()
-            && session_bearer_unsafe
-        {
-            entry.auth_provider = Some(crate::auth::AuthProviderRef::fail_closed(format!(
-                "model_provider:{pid} (fail-closed)"
-            )));
+        if let Some(pid) = model_override.model_provider.as_deref() {
+            fail_closed_on_provider_endpoint(&mut entry, pid);
+            entry.info.model_provider = Some(pid.to_owned());
         }
         tracing::debug!(
             model_key = %key,
@@ -3840,20 +3893,7 @@ pub(crate) fn resolve_model_list(
         resolved.insert(key.clone(), entry);
     }
     for (key, entry) in resolved.iter_mut() {
-        if let Some(ref mut provider) = entry.auth_provider {
-            if provider.is_fail_closed() {
-                continue;
-            }
-            let config = cfg.auth_providers.get(&provider.name);
-            if config.is_none() {
-                tracing::debug!(
-                    model_key = %key,
-                    provider = %provider.name,
-                    "provider ref has no trusted config; failing closed with an empty command"
-                );
-            }
-            provider.attach_trusted_config(config);
-        }
+        attach_trusted_auth_config(cfg, key, entry);
     }
     {
         let default_cw = DEFAULT_CONTEXT_WINDOW;
@@ -4586,6 +4626,14 @@ pub struct ModelInfo {
     /// `allowed_models` in `resolve_model_catalog`; never persisted.
     #[serde(skip_serializing, default = "default_true")]
     pub user_selectable: bool,
+    /// Matched a favorites glob. Derived in `resolve_model_catalog`; never
+    /// persisted. The picker opens on these entries and searches past them.
+    #[serde(skip_serializing, default)]
+    pub favorite: bool,
+    /// The `[model_providers.<id>]` this entry inherits from, when it has one.
+    /// Names which provider's `favorite_models` globs apply to it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_provider: Option<String>,
     /// When false, only OAuth users see this in the picker.
     #[serde(default = "default_true")]
     pub supported_in_api: bool,
@@ -4631,6 +4679,8 @@ impl ModelInfo {
     pub fn fallback(slug: &str) -> Self {
         ModelInfo {
             user_selectable: true,
+            favorite: false,
+            model_provider: None,
             id: None,
             model: slug.to_owned(),
             base_url: String::new(),
@@ -4671,6 +4721,8 @@ impl ModelInfo {
     pub(crate) fn from_config(entry: &ModelEntryConfig) -> Self {
         ModelInfo {
             user_selectable: true,
+            favorite: false,
+            model_provider: None,
             id: entry.id.clone(),
             model: entry.model.clone(),
             base_url: entry.base_url.clone(),
@@ -5505,6 +5557,8 @@ pub(crate) fn resolve_aux_model_sampling_config(
         let entry = ModelEntry {
             info: ModelInfo {
                 user_selectable: true,
+                favorite: false,
+                model_provider: None,
                 id: None,
                 model: catalog_entry
                     .map(|e| e.info.model)
@@ -5752,6 +5806,8 @@ fn resolve_hidden_default_web_search_sampling_config(
             max_retries: None,
             hidden: true,
             user_selectable: true,
+            favorite: false,
+            model_provider: None,
             supported_in_api: true,
             reasoning_effort: None,
             supports_reasoning_effort: false,
@@ -5851,6 +5907,16 @@ pub(crate) fn to_acp_model_info(
                         "provider".to_string(),
                         serde_json::Value::String("codex".to_string()),
                     );
+                } else if let Some(provider) = info.model_provider.as_deref() {
+                    map.insert(
+                        "provider".to_string(),
+                        serde_json::Value::String(provider.to_owned()),
+                    );
+                }
+                // The picker opens on the favorites and searches past them, so
+                // the flag has to cross the wire with the entry.
+                if info.favorite {
+                    map.insert(FAVORITE_META_KEY.to_string(), serde_json::Value::Bool(true));
                 }
                 if info.supports_reasoning_effort {
                     map.insert(
@@ -6957,6 +7023,8 @@ reasoning_effort = "low"
         ModelEntry {
             info: ModelInfo {
                 user_selectable: true,
+                favorite: false,
+                model_provider: None,
                 id: None,
                 model: model.to_string(),
                 base_url: base_url.to_string(),
@@ -12900,6 +12968,8 @@ default = "grok-4.5"
         ModelEntry {
             info: ModelInfo {
                 user_selectable: true,
+                favorite: false,
+                model_provider: None,
                 id: None,
                 model: slug.to_owned(),
                 base_url: "https://test.example.com/v1".to_owned(),

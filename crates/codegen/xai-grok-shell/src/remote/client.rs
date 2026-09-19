@@ -869,10 +869,26 @@ pub(crate) fn fetch_models_for_api_base_blocking(
     base_url: &str,
     api_key: Option<&str>,
 ) -> Result<Vec<crate::agent::config::ModelEntryConfig>, BackendError> {
-    let client = crate::http::shared_startup_blocking_client();
     let url = models_list_url_for_base(base_url.trim_end_matches('/'));
+    fetch_models_for_list_url_blocking(&url, api_key)
+}
+
+/// Fetch and parse a listing from an exact URL.
+///
+/// [`fetch_models_for_api_base_blocking`] derives the URL from an inference
+/// base. A provider that serves its listing somewhere else
+/// (`[model_providers.<id>].models_list_url`) names the URL itself, and
+/// deriving one from it would append a second `/models`.
+pub(crate) fn fetch_models_for_list_url_blocking(
+    url: &str,
+    api_key: Option<&str>,
+) -> Result<Vec<crate::agent::config::ModelEntryConfig>, BackendError> {
+    let client = crate::http::shared_startup_blocking_client();
+    // The listing carries no base of its own, so an entry that names none falls
+    // back to this. A caller that knows the inference base overwrites it.
+    let base_url = url.trim_end_matches("/models").trim_end_matches('/');
     tracing::debug!(models_url = %url, "Fetching models for BYOK/custom API base");
-    let mut request = client.get(&url);
+    let mut request = client.get(url);
     if let Some(key) = api_key
         && !key.is_empty()
     {
