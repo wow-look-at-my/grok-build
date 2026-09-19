@@ -352,6 +352,14 @@ Every one of those is the test doing its job. Making them pass there means weake
 
 - `WorkflowHostParams.agent_slots` is a semaphore owned by `WorkflowManager` and shared by every run it launches (`session/workflow/manager.rs`), not one fresh semaphore per run. Up to `WORKFLOW_MAX_ACTIVE_RUNS_PER_SESSION` runs can be active at once, so a per-run semaphore will let total live agent-spawned LLM requests scale with active run count instead of staying under the configured cap (`GROK_WORKFLOW_MAX_CONCURRENT_AGENTS` / `workflow_max_concurrent_agents`) — the knob operators lower to stay under a hard per-host concurrent-request limit.
 
+## `[model_providers.<id>]` notes
+
+- A provider block carries every `[model.<id>]` field except the ones that name one model: `model`, `name`, `description`. `ModelProviderConfig` and `with_provider_defaults` (`agent/model_providers.rs`) destructure the whole struct, so a field added to one is a compile error until the merge handles it.
+- The merge runs before `ConfigModelOverride::apply`, on a clone with `model_provider` cleared (`resolve_model_list`). So a provider's value is indistinguishable from one the model wrote, and every later layer treats it the same.
+- `extra_headers`, `query_params` and `env_http_headers` inherit PER KEY. Wholesale inheritance cost a model its whole inherited header set the moment it added one header of its own. That is the duplication the block exists to remove. Header names compare case-insensitively, because they lower into an `http::HeaderMap` where one name is one header whatever its casing.
+- Credentials are the one group that inherits as a SET. A model that sets `api_key`, `env_key` or `auth_provider` takes none of the provider's. A static key from one side and a helper from the other resolve to whichever wins at request time, which nobody wrote down.
+- A model behind a provider never falls back to the session bearer on a non-xAI URL. An unresolved credential becomes a fail-closed `auth_provider` ref instead.
+
 ## Provider model autodetection and favorites notes
 
 - `[model_providers.<id>]` declares a base URL, and `model_provider_discovery.rs` asks that base what it serves (`models_autodetect`, default on; `models_list_url` for a listing that lives elsewhere). A discovered model is built through `config::entry_for_provider_model`. That is the SAME merge a `[model.<id>] model_provider = "..."` block gets, fail-closed auth ref included. A second construction path is how a discovered model reaches a third party's endpoint with the session bearer.

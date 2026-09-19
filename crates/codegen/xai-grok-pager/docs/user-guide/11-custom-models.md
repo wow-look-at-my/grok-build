@@ -167,7 +167,81 @@ env_http_headers = { "X-Tenant-Token" = "GATEWAY_TENANT_TOKEN" }
 
 Grok reads each variable when it builds the client for a session and places the value in the request headers only, never on disk. A header is skipped when its variable is unset or blank, and a resolved value overrides an `extra_headers` entry of the same name. Use `extra_headers` for a static value and `env_http_headers` for one that comes from the environment.
 
-Both fields also work on a shared `[model_providers.<id>]` block. A model that points at a provider with `model_provider = "<id>"` inherits the provider's `query_params` and `env_http_headers` when it sets none of its own, matching how `extra_headers` is inherited.
+Both fields also work on a shared `[model_providers.<id>]` block -- see [Provider Defaults](#provider-defaults).
+
+---
+
+## Provider Defaults
+
+Most of a `[model.<id>]` block is not about the model at all. The endpoint, the API key, the wire format and the headers belong to the *provider*. Repeating them on every model is how one rotated key turns into a dozen edits.
+
+Put them in a `[model_providers.<id>]` block once, and point each model at it with `model_provider = "<id>"`:
+
+```toml
+[model_providers.acme]
+base_url    = "https://gateway.acme.com/v1"
+api_backend = "responses"
+env_key     = "ACME_API_KEY"
+context_window = 128000
+extra_headers = { "anthropic-version" = "2023-06-01" }
+query_params  = { api-version = "2026-07-22" }
+
+[model.acme-fast]
+model = "acme-fast-1"
+name  = "Acme Fast"
+
+[model.acme-deep]
+model = "acme-deep-1"
+name  = "Acme Deep"
+temperature = 0.2          # this model only
+```
+
+Both models reach the gateway with the same URL, key, backend and headers. Neither restates one.
+
+### What a provider can set
+
+Everything except what identifies a single model (`model`, `name`, `description`):
+
+| Group | Fields |
+|-------|--------|
+| Endpoint | `base_url`, `api_base_url`, `query_params` |
+| Credentials | `api_key`, `env_key`, `auth_provider`, `[model_providers.<id>.auth]` |
+| Wire format | `api_backend`, `strict_message_schema`, `stream_tool_calls` |
+| Headers | `extra_headers`, `env_http_headers` |
+| Sampling | `temperature`, `top_p`, `max_completion_tokens`, `context_window` |
+| Reasoning | `reasoning_effort`, `supports_reasoning_effort`, `reasoning_efforts` |
+| Behavior | `max_retries`, `inference_idle_timeout_secs`, `min_output_tokens_per_sec`, `supports_backend_search`, `use_concise`, `agent_type`, `show_model_fingerprint`, `compactions_remaining`, `compaction_at_tokens` |
+| Catalog | `hidden`, `supported_in_api`, `pricing` |
+
+### How inheritance resolves
+
+A model's own value always wins. The provider only fills in what the model left unset.
+
+- **Scalar fields** (`base_url`, `api_backend`, `temperature`, ...) inherit when the model omits the field. An explicit `false` or `0` on the model is a value, not an omission.
+- **Table fields** (`extra_headers`, `query_params`, `env_http_headers`) inherit **per key**. A model that sets one header of its own still gets every other header from the provider. Header names match case-insensitively, so a model's `x-tenant` shadows the provider's `X-Tenant` rather than riding beside it.
+- **Credentials inherit as a set.** Set any of `api_key`, `env_key` or `auth_provider` on a model, and that model inherits none of the provider's. Half a credential from each side is never what you meant.
+- A model naming a provider that does not exist warns and falls back to its own fields.
+
+### Credential helpers
+
+A provider can mint tokens with a credential helper in place of a static key. Name an existing `[auth_provider.<name>]` block, or declare one inline:
+
+```toml
+[model_providers.corp]
+base_url = "https://llm.corp.internal/v1"
+
+[model_providers.corp.auth]
+command         = "/usr/local/bin/corp-token"
+token_ttl_secs  = 3600
+```
+
+Every model behind `model_provider = "corp"` runs that helper. A model with its own `api_key` or `env_key` bypasses it.
+
+A provider endpoint is not an xAI endpoint, so a model behind one never falls back to your `grok login` session token. A credential that does not resolve fails the request closed. The session bearer is never sent to a third party.
+
+### Global defaults vs provider defaults
+
+`[models]` (see [Global Default Values](#global-default-values)) covers *every* model in the catalog, including built-in and prefetched ones. `[model_providers.<id>]` covers only the models that name it. Precedence runs model → provider → `[models]` global → built-in default.
 
 ### Autodetected Provider Models
 
@@ -260,6 +334,27 @@ extra_headers = { "x-api-key" = "sk-ant-...", "anthropic-version" = "2023-06-01"
 ```
 
 The `messages` backend uses the Anthropic Messages protocol. Anthropic authenticates with an `x-api-key` header rather than `Authorization: Bearer`, so pass your key through `extra_headers`, which Grok sends verbatim.
+
+For more than one Claude model, move the shared half to a provider block:
+
+```toml
+[model_providers.anthropic]
+base_url = "https://api.anthropic.com/v1"
+api_backend = "messages"
+context_window = 200000
+env_http_headers = { "x-api-key" = "ANTHROPIC_API_KEY" }
+extra_headers = { "anthropic-version" = "2023-06-01" }
+
+[model.claude-opus]
+model = "claude-opus-4-6"
+name  = "Claude Opus 4.6"
+model_provider = "anthropic"
+
+[model.claude-haiku]
+model = "claude-haiku-4-5"
+name  = "Claude Haiku 4.5"
+model_provider = "anthropic"
+```
 
 ### OpenAI (Chat Completions)
 
