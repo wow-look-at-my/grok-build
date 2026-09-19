@@ -100,7 +100,7 @@ fn test_config(base_url: String, model: &str) -> SamplerConfig {
         compactions_remaining: None,
         compaction_at_tokens: None,
         doom_loop_recovery: None,
-    output_rate_floor: None,
+        output_rate_floor: None,
         header_injector: None,
     }
 }

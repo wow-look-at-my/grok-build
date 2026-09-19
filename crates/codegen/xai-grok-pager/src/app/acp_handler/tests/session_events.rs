@@ -140,6 +140,7 @@
             attempt: 1,
             max_retries: 3,
             reason: "rate limited".into(),
+            retry_in_ms: None,
         };
         apply_retry_state(&retry, &mut session, &mut scrollback, false);
         assert!(

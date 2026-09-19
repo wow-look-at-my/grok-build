@@ -306,6 +306,15 @@ Every one of those is the test doing its job. Making them pass there means weake
 - A rule file's frontmatter is stripped from the RULE, never from what the rule imports. The import is read as written.
 - `MAX_IMPORT_DEPTH` plus the seen-set bound the walk. The seen-set is what terminates a cycle. The depth cap only bounds a chain.
 
+## Retry-visibility notes
+
+- A retry says what failed and how long the wait is. `SamplingEvent::Retrying` already carried `reason`, which is the error's own `Display`. It now also carries `retry_in_ms`, the backoff the actor is about to sleep.
+- Both ride `RetryState::Retrying` to the pager. It renders `Retrying in 27s (1/5): <reason>…` and drops the countdown once the wait is over. The retried request is then in flight. See `retry_label` in `views/turn_status.rs`.
+- `retry_in_ms` is `None` for a retry that sleeps nothing. An image strip, a reasoning strip and a message-property strip are those. A shell older than the field also sends `None`.
+- The countdown needs no tick source of its own. `tick_demand` already reports Fast for a session whose turn is running, which a retry always is.
+- A server `Retry-After` is clamped to `MAX_RETRY_BACKOFF` on the 429 path too, not just the generic one. A per-minute bucket answers `Retry-After: 60`, and one attempt then sat idle for the whole minute. The limit had often cleared sooner.
+- `RATE_LIMIT_RETRY_THRESHOLD` covers the wait the server asked for across several attempts. So the turn fails no earlier than before, and an attempt in between can find the limit clear.
+
 ## Stream-interruption retry notes
 
 - A response stream that dies mid-body has its own retry budget: `STREAM_INTERRUPT_MAX_RETRIES` = 10, on the transport path's exponential backoff (2s, 4s, 8s, ... capped at `MAX_RETRY_BACKOFF`, jittered). `SamplingError::is_stream_interrupted` names the class. `request_task` charges it to `stream_retry_count` and not to the transport budget. A dropped connection is not a server fault, and the next 5xx still needs its own retries.

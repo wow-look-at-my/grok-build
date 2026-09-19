@@ -20,9 +20,9 @@
 //!   failure ("error decoding response body"):
 //!   [`STREAM_INTERRUPT_MAX_RETRIES`] = 10, same exponential backoff.
 //!
-//! **Retried with lower cap** ([`RATE_LIMIT_RETRY_THRESHOLD`] = 2):
-//! - 429 (rate limited) — waits the full `Retry-After`, so the attempt
-//!   count is what bounds the total wait
+//! **Retried with lower cap** ([`RATE_LIMIT_RETRY_THRESHOLD`] = 5):
+//! - 429 (rate limited) — waits the server's `Retry-After`, clamped per
+//!   attempt to [`MAX_RETRY_BACKOFF`]; the attempt count bounds the total
 //!
 //! **Special handling** (not counted against retry budget):
 //! - 413 / image processing errors → strip images and retry once
@@ -56,9 +56,10 @@ use std::time::Duration;
 use xai_grok_sampling_types::{SamplingError, is_retryable_api_status};
 
 /// After this many rate-limit (429) retries, escalate to the caller
-/// instead of waiting again. Rate-limit waits can be long and there is
-/// no point burning a long backoff just to be rate-limited again.
-pub const RATE_LIMIT_RETRY_THRESHOLD: u32 = 2;
+/// instead of waiting again. Each wait is capped at [`MAX_RETRY_BACKOFF`],
+/// so the budget bounds the total 429 wait at the 120s the header parser
+/// admits (`extract_retry_after`) rather than at one attempt.
+pub const RATE_LIMIT_RETRY_THRESHOLD: u32 = 5;
 
 /// Default retry budget when no env or model override is set: at most 14
 /// retries (the attempt reaching this count is fatal). With the 30s cap:
@@ -91,12 +92,13 @@ pub fn stream_interrupt_budget(transport_budget: u32) -> u32 {
 }
 
 /// Longest single wait on the generic retry path — the exponential-backoff
-/// ceiling, and the clamp for a server `Retry-After`. Cloudflare answers 52x
-/// with `Retry-After: 60`–`120`; honoring that verbatim across 14 retries
-/// would stall a turn ~28 min instead of the ~5.5 min budget above. The 429
-/// path deliberately waits the full `Retry-After` instead, bounded by
-/// [`RATE_LIMIT_RETRY_THRESHOLD`] attempts (and by the parse-level 120s cap
-/// on the header).
+/// ceiling, and the clamp for a server `Retry-After` on every path. Cloudflare
+/// answers 52x with `Retry-After: 60`–`120`; honoring that verbatim across 14
+/// retries would stall a turn ~28 min instead of the ~5.5 min budget above. A
+/// 429 is clamped to the same ceiling and retried up to
+/// [`RATE_LIMIT_RETRY_THRESHOLD`] times, so a header asking for longer is
+/// still waited out across attempts — one of which may find the limit already
+/// clear.
 pub const MAX_RETRY_BACKOFF: Duration = Duration::from_secs(30);
 
 /// Resolve max API retries from an optional env override, model config,
@@ -335,7 +337,11 @@ pub fn classify_error(
     }
 
     // Rate-limited (429): cap retries at the rate-limit threshold to
-    // avoid burning long waits.
+    // avoid burning long waits. A server `Retry-After` is clamped to
+    // [`MAX_RETRY_BACKOFF`] like every other wait — a provider that answers a
+    // per-minute bucket with `Retry-After: 60` makes one attempt sit idle for
+    // the whole minute, and the limit often clears before the header says.
+    // The budget above is what covers the rest of the server's wait.
     if err.is_rate_limited() {
         let next_attempt = retry_count + 1;
         // `next_attempt >= 1` also catches an effective cap of 0.
@@ -344,7 +350,7 @@ pub fn classify_error(
         }
         let backoff = err
             .retry_after()
-            .map(Duration::from_secs)
+            .map(|secs| Duration::from_secs(secs).min(MAX_RETRY_BACKOFF))
             .unwrap_or_else(|| retry_backoff_with_jitter(next_attempt));
         return RetryDecision::RetryWithBackoff {
             backoff,
@@ -960,12 +966,45 @@ mod tests {
     fn classify_rate_limited_capped_at_threshold() {
         let err = api_err(StatusCode::TOO_MANY_REQUESTS, "slow");
         // retry_count=1, threshold=2 -> next_attempt=2 >= 2 -> Fatal.
-        match classify_error(&err, 1, 5, RATE_LIMIT_RETRY_THRESHOLD) {
+        match classify_error(&err, 1, 5, 2) {
             RetryDecision::Fatal(SamplingError::Api { status, .. }) => {
                 assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
             }
             other => panic!("expected Fatal at threshold, got {other:?}"),
         }
+    }
+
+    /// A per-minute bucket answers `Retry-After: 60`. One attempt must not sit
+    /// idle for the whole minute, and the budget must still cover the wait the
+    /// server asked for, so the turn is never failed earlier than before.
+    #[test]
+    fn a_long_rate_limit_wait_is_split_across_attempts() {
+        let err = api_err_with_retry_after(StatusCode::TOO_MANY_REQUESTS, 60);
+        let mut waited = Duration::ZERO;
+        let mut retries = 0u32;
+        loop {
+            match classify_error(
+                &err,
+                retries,
+                DEFAULT_MAX_RETRIES,
+                RATE_LIMIT_RETRY_THRESHOLD,
+            ) {
+                RetryDecision::RetryWithBackoff { backoff, .. } => {
+                    assert!(
+                        backoff <= MAX_RETRY_BACKOFF,
+                        "one wait must stay under the ceiling: {backoff:?}"
+                    );
+                    waited += backoff;
+                    retries += 1;
+                }
+                RetryDecision::Fatal(_) => break,
+                other => panic!("expected RetryWithBackoff, got {other:?}"),
+            }
+        }
+        assert!(
+            waited >= Duration::from_secs(60),
+            "the budget must still cover the server's own wait, got {waited:?}"
+        );
     }
 
     #[test]
@@ -1045,7 +1084,7 @@ mod tests {
     }
 
     #[test]
-    fn classify_clamps_and_jitters_retry_after_on_generic_path_but_not_on_429() {
+    fn classify_clamps_retry_after_on_every_path_and_jitters_the_generic_one() {
         // Cloudflare answers 52x with Retry-After: 60-120. Honoring that
         // verbatim across 14 retries would stall the turn ~28 min, and an
         // unjittered wait would re-hit the recovering origin in lockstep.
@@ -1059,12 +1098,12 @@ mod tests {
             other => panic!("expected Retry for 522, got {other:?}"),
         }
 
-        // The 429 path keeps the full wait; its total is bounded by
-        // RATE_LIMIT_RETRY_THRESHOLD attempts and the parse-level 120s cap.
+        // The 429 path takes the same clamp, unjittered: the server named a
+        // deadline, so a wait under it is the one thing that cannot help.
         let rate_limited = api_err_with_retry_after(StatusCode::TOO_MANY_REQUESTS, 120);
         match classify_error(&rate_limited, 0, 15, RATE_LIMIT_RETRY_THRESHOLD) {
             RetryDecision::RetryWithBackoff { backoff, .. } => {
-                assert_eq!(backoff, Duration::from_secs(120));
+                assert_eq!(backoff, MAX_RETRY_BACKOFF);
             }
             other => panic!("expected RetryWithBackoff for 429, got {other:?}"),
         }
@@ -1108,16 +1147,16 @@ mod tests {
         let budget = stream_interrupt_budget(3);
         let mut previous = Duration::ZERO;
         for retries_done in 0..STREAM_INTERRUPT_MAX_RETRIES {
-            let backoff = match classify_error(&err, retries_done, budget, RATE_LIMIT_RETRY_THRESHOLD)
-            {
-                // The first retry also escapes a poisoned HTTP/2 pool.
-                RetryDecision::RetryWithClientRebuild { backoff } => {
-                    assert_eq!(retries_done, 0);
-                    backoff
-                }
-                RetryDecision::Retry { backoff } => backoff,
-                other => panic!("retry {retries_done} must happen, got {other:?}"),
-            };
+            let backoff =
+                match classify_error(&err, retries_done, budget, RATE_LIMIT_RETRY_THRESHOLD) {
+                    // The first retry also escapes a poisoned HTTP/2 pool.
+                    RetryDecision::RetryWithClientRebuild { backoff } => {
+                        assert_eq!(retries_done, 0);
+                        backoff
+                    }
+                    RetryDecision::Retry { backoff } => backoff,
+                    other => panic!("retry {retries_done} must happen, got {other:?}"),
+                };
             // Only while the base is still under the ceiling: once every wait
             // is a jittered 30s, one can land below the last.
             if retries_done < 4 {
@@ -1147,7 +1186,12 @@ mod tests {
     fn observe_only_grants_a_stream_interruption_nothing() {
         assert_eq!(stream_interrupt_budget(0), 0);
         let err = SamplingError::EventStreamError("conn reset".into());
-        match classify_error(&err, 0, stream_interrupt_budget(0), RATE_LIMIT_RETRY_THRESHOLD) {
+        match classify_error(
+            &err,
+            0,
+            stream_interrupt_budget(0),
+            RATE_LIMIT_RETRY_THRESHOLD,
+        ) {
             RetryDecision::Fatal(_) => {}
             other => panic!("expected Fatal, got {other:?}"),
         }

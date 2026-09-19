@@ -968,6 +968,7 @@ async fn doom_loop_recovery_stamps_capture_segments_and_counters() {
                     max_retries: 2,
                     kind: SamplingErrorKind::DoomLoopDetected,
                     reason: "doom loop detected: tail_repetition:8@thinking".to_string(),
+                    retry_in_ms: None,
                     doom_loop_triggers: Some(vec!["tail_repetition:8@thinking".to_string()]),
                     doom_loop_aborted_at_chunk: Some(421),
                 })

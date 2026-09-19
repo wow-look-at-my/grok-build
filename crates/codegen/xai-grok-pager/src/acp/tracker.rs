@@ -182,6 +182,11 @@ pub enum TurnActivity {
         max_retries: u32,
         /// Human-readable reason for the retry.
         reason: String,
+        /// When the wait before the retry ends. `None` when the retry is
+        /// immediate, or when the shell predates the field. The status bar
+        /// counts it down, so a wait the server asked for reads as a wait
+        /// rather than as a hang.
+        retry_until: Option<std::time::Instant>,
     },
     /// Turn is open but nothing is streaming; `reason` says what we're waiting
     /// on. Replaces the implicit "no activity == generic Waiting…" placeholder.

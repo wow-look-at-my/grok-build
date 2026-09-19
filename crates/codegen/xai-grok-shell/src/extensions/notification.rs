@@ -1221,6 +1221,12 @@ pub enum RetryState {
         max_retries: u32,
         /// Human-readable reason for the retry
         reason: String,
+        /// How long the wait before this retry goes out lasts. `None` when
+        /// the retry is immediate, or when the peer predates this field. A
+        /// client counts it down, so a wait the server asked for reads as a
+        /// wait rather than as a hang.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        retry_in_ms: Option<u64>,
     },
     /// All retries have been exhausted
     Exhausted {

@@ -1507,11 +1507,15 @@ pub(super) fn apply_retry_state(
             attempt,
             max_retries,
             reason,
+            retry_in_ms,
         } => {
             session.set_retry_activity(Some(TurnActivity::Retrying {
                 attempt: *attempt,
                 max_retries: *max_retries,
                 reason: reason.clone(),
+                retry_until: retry_in_ms.map(|ms| {
+                    std::time::Instant::now() + std::time::Duration::from_millis(ms)
+                }),
             }));
         }
         RetryState::Exhausted {

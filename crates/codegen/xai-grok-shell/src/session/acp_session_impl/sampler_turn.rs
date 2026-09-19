@@ -1304,6 +1304,7 @@ impl SessionActor {
                      were converted to plain text ({} items). Continuing.",
                     report.items_after
                 ),
+                retry_in_ms: None,
             },
         ))
         .await;

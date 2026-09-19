@@ -505,7 +505,7 @@ fn minimal_advance_phase_timer(
 ///
 /// Reuses the full-TUI [`turn_status::render_turn_status`] widget so minimal
 /// surfaces the same rich activity detail (`Run …` / `Thinking…` /
-/// `Waiting on subagent…` / `Retrying (attempt N)…` / `Cancelling…`), the
+/// `Waiting on subagent…` / `Retrying in Ns (N/M): <reason>…` / `Cancelling…`), the
 /// per-phase + turn timers, and the "… still running" cue (running commands /
 /// monitors / loops / background subagents) — instead of collapsing
 /// everything to "working…". Keyboard-only, so the mouse `[stop]` / `[↓]`
@@ -902,6 +902,7 @@ mod tests {
                 attempt: 2,
                 max_retries: 3,
                 reason: "transient error".to_string(),
+                retry_until: None,
             }),
             None,
             &theme,

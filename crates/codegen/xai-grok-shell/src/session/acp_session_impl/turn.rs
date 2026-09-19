@@ -2422,6 +2422,7 @@ impl SessionActor {
                                     reason: "Re-authenticated after 401 (request carried no \
                                              credential); retrying request"
                                         .to_string(),
+                                    retry_in_ms: None,
                                 },
                             ))
                             .await;
@@ -2451,6 +2452,7 @@ impl SessionActor {
                                     max_retries: AuthRetrySchedule::MAX_RETRIES,
                                     reason: "Re-authenticated after 401; retrying request"
                                         .to_string(),
+                                    retry_in_ms: Some(delay_ms),
                                 },
                             ))
                             .await;
