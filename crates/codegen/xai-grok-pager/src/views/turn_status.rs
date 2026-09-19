@@ -676,6 +676,38 @@ pub fn render_turn_status(
     }
 }
 
+/// Longest retry reason the status bar carries. The whole failure is in the
+/// session log; this line only has to say which one it was.
+const RETRY_REASON_MAX: usize = 80;
+
+/// Label for a retry in progress.
+///
+/// `waiting_secs` is how much of the backoff is left, `Some(0)` or `None`
+/// once the retried request is in flight. Both halves matter: the reason says
+/// WHY the turn stalled, and the countdown says the wait is bounded. Without
+/// them the bar read `Retrying (attempt 1)…` for a whole minute and named
+/// neither.
+fn retry_label(attempt: u32, max_retries: u32, reason: &str, waiting_secs: Option<u64>) -> String {
+    let reason = reason.trim();
+    let mut label = match waiting_secs {
+        Some(secs) if secs > 0 => format!("Retrying in {secs}s ({attempt}/{max_retries})"),
+        _ => format!("Retrying ({attempt}/{max_retries})"),
+    };
+    if reason.is_empty() {
+        label.push('…');
+        return label;
+    }
+    label.push_str(": ");
+    if reason.chars().count() > RETRY_REASON_MAX {
+        let head: String = reason.chars().take(RETRY_REASON_MAX - 1).collect();
+        label.push_str(head.trim_end());
+    } else {
+        label.push_str(reason);
+    }
+    label.push('…');
+    label
+}
+
 /// Compute activity style, label, and whether it's a tool.
 fn compute_activity(
     theme: &Theme,
@@ -734,11 +766,27 @@ fn compute_activity(
             "Compacting…".to_string(),
             false,
         ),
-        (AgentState::TurnRunning, Some(TurnActivity::Retrying { attempt, .. })) => (
-            Style::default().fg(theme.warning),
-            format!("Retrying (attempt {attempt})…"),
-            false,
-        ),
+        (
+            AgentState::TurnRunning,
+            Some(TurnActivity::Retrying {
+                attempt,
+                max_retries,
+                reason,
+                retry_until,
+            }),
+        ) => {
+            let waiting_secs = retry_until.map(|until| {
+                until
+                    .saturating_duration_since(std::time::Instant::now())
+                    .as_secs_f64()
+                    .ceil() as u64
+            });
+            (
+                Style::default().fg(theme.warning),
+                retry_label(*attempt, *max_retries, reason, waiting_secs),
+                false,
+            )
+        }
         (AgentState::TurnRunning, Some(TurnActivity::Waiting(reason))) => (
             // Explicit wait reason (model / subagent / task output / tasks /
             // sleep): name what the agent is blocked on instead of a generic
@@ -917,6 +965,43 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
+
+    /// A retry line names the failure and says how long the wait lasts. Both
+    /// facts are on the wire, so both belong on the line.
+    #[test]
+    fn a_retry_names_its_error_and_counts_its_wait_down() {
+        let reason = "API error (status 429 Too Many Requests): rate limit exceeded";
+        assert_eq!(
+            retry_label(1, 5, reason, Some(27)),
+            format!("Retrying in 27s (1/5): {reason}…")
+        );
+        // The wait is over; the retried request is in flight.
+        assert_eq!(
+            retry_label(1, 5, reason, Some(0)),
+            format!("Retrying (1/5): {reason}…")
+        );
+        assert_eq!(
+            retry_label(1, 5, reason, None),
+            format!("Retrying (1/5): {reason}…")
+        );
+    }
+
+    #[test]
+    fn a_long_retry_reason_is_cut_to_the_bar() {
+        let reason = "x".repeat(RETRY_REASON_MAX * 2);
+        let label = retry_label(2, 5, &reason, None);
+        assert!(label.starts_with("Retrying (2/5): "));
+        assert!(
+            label.chars().count() < "Retrying (2/5): ".chars().count() + RETRY_REASON_MAX + 2,
+            "reason must be cut: {label}"
+        );
+        assert!(label.ends_with('…'));
+    }
+
+    #[test]
+    fn a_retry_with_no_reason_still_reads_as_one() {
+        assert_eq!(retry_label(3, 5, "   ", Some(4)), "Retrying in 4s (3/5)…");
+    }
 
     /// Sendable waits = exactly the wait reasons the shell aborts on a queued
     /// user prompt (blocking task-output / wait_tasks / Await, and a blocked

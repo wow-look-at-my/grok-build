@@ -2603,6 +2603,7 @@ impl SessionActor {
                 max_retries,
                 kind,
                 reason,
+                retry_in_ms,
                 doom_loop_triggers,
                 doom_loop_aborted_at_chunk,
             } => {
@@ -2634,6 +2635,7 @@ impl SessionActor {
                         "max_retries": max_retries,
                         "kind": kind.as_str(),
                         "reason": crate::util::truncate(&reason, 300),
+                        "retry_in_ms": retry_in_ms,
                     })),
                 );
                 self.send_xai_notification(XaiSessionUpdate::RetryState(
@@ -2641,6 +2643,7 @@ impl SessionActor {
                         attempt,
                         max_retries,
                         reason,
+                        retry_in_ms,
                     },
                 ))
                 .await;

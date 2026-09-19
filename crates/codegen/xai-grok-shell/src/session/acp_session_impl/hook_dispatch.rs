@@ -329,6 +329,7 @@ mod notification_hook_filter_tests {
             attempt: 1,
             max_retries: 3,
             reason: "timeout".into(),
+            retry_in_ms: None,
         });
         assert!(notification_hook_for_update(&update).is_none());
     }

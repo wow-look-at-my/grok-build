@@ -119,6 +119,11 @@ pub enum SamplingEvent {
         /// (e.g. the shell's doom-loop recovery counter).
         kind: SamplingErrorKind,
         reason: String,
+        /// How long the actor sleeps before the retry goes out. `None` when
+        /// the retry is immediate (an image or reasoning strip). A consumer
+        /// shows it so a wait the server asked for reads as a wait rather
+        /// than as a hang.
+        retry_in_ms: Option<u64>,
         /// Doom-loop telemetry payload when `kind == DoomLoopDetected`:
         /// raw trigger labels + the chunk index the mid-stream abort fired
         /// at (`None` for terminal-response detections). Labels only.

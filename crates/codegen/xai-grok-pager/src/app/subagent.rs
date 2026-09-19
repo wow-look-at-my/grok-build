@@ -1181,6 +1181,7 @@ mod tests {
                 attempt: 2,
                 max_retries: 5,
                 reason: "rate limited".into(),
+                retry_until: None,
             }),
             "Retrying (2/5)",
         );

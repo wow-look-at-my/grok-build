@@ -295,6 +295,7 @@ pub(crate) async fn run_request_task(
                         doom_retry_count,
                         doom_max_retries,
                         &error,
+                        Some(backoff),
                     );
                     if sleep_or_cancel(backoff, &cancel_token).await {
                         continue;
@@ -336,6 +337,7 @@ pub(crate) async fn run_request_task(
                         rate_retry_count,
                         rate_max_retries,
                         &error,
+                        Some(backoff),
                     );
                     if sleep_or_cancel(backoff, &cancel_token).await {
                         continue;
@@ -450,7 +452,14 @@ async fn apply_retry_decision(
     match decision {
         RetryDecision::Retry { backoff } => {
             *retry_count += 1;
-            emit_retrying(event_tx, request_id, *retry_count, max_retries, err);
+            emit_retrying(
+                event_tx,
+                request_id,
+                *retry_count,
+                max_retries,
+                err,
+                Some(backoff),
+            );
             if sleep_or_cancel(backoff, cancel_token).await {
                 true
             } else {
@@ -460,7 +469,14 @@ async fn apply_retry_decision(
         }
         RetryDecision::RetryWithBackoff { backoff, .. } => {
             *retry_count += 1;
-            emit_retrying(event_tx, request_id, *retry_count, max_retries, err);
+            emit_retrying(
+                event_tx,
+                request_id,
+                *retry_count,
+                max_retries,
+                err,
+                Some(backoff),
+            );
             if sleep_or_cancel(backoff, cancel_token).await {
                 true
             } else {
@@ -491,7 +507,7 @@ async fn apply_retry_decision(
                 return false;
             }
             *retry_count += 1;
-            emit_retrying(event_tx, request_id, *retry_count, max_retries, err);
+            emit_retrying(event_tx, request_id, *retry_count, max_retries, err, None);
             true
         }
         RetryDecision::RetryWithReasoningStrip => {
@@ -509,7 +525,7 @@ async fn apply_retry_decision(
                 "model rejected a replayed thinking signature; converted {converted} reasoning item(s) to plain text for this turn"
             );
             *retry_count += 1;
-            emit_retrying(event_tx, request_id, *retry_count, max_retries, err);
+            emit_retrying(event_tx, request_id, *retry_count, max_retries, err, None);
             true
         }
         RetryDecision::RetryWithMessagePropertyStrip => {
@@ -536,7 +552,7 @@ async fn apply_retry_decision(
                 "provider rejected unsupported message properties; omitting them for retry"
             );
             *retry_count += 1;
-            emit_retrying(event_tx, request_id, *retry_count, max_retries, err);
+            emit_retrying(event_tx, request_id, *retry_count, max_retries, err, None);
             true
         }
         RetryDecision::RetryWithReasoningEffortRemap => {
@@ -551,12 +567,19 @@ async fn apply_retry_decision(
                 "model requires reasoning; remapping requested effort to the lowest enabled tier for retry"
             );
             *retry_count += 1;
-            emit_retrying(event_tx, request_id, *retry_count, max_retries, err);
+            emit_retrying(event_tx, request_id, *retry_count, max_retries, err, None);
             true
         }
         RetryDecision::RetryWithClientRebuild { backoff } => {
             *retry_count += 1;
-            emit_retrying(event_tx, request_id, *retry_count, max_retries, err);
+            emit_retrying(
+                event_tx,
+                request_id,
+                *retry_count,
+                max_retries,
+                err,
+                Some(backoff),
+            );
             if !sleep_or_cancel(backoff, cancel_token).await {
                 handle_cancellation(event_tx, request_id, completion_tx);
                 return false;
@@ -1132,6 +1155,7 @@ fn emit_retrying(
     attempt: u32,
     max_retries: u32,
     err: &SamplingError,
+    retry_in: Option<Duration>,
 ) {
     let info = SamplingErrorInfo::from(err);
     let _ = event_tx.send(SamplingEvent::Retrying {
@@ -1140,6 +1164,7 @@ fn emit_retrying(
         max_retries,
         kind: info.kind,
         reason: err.to_string(),
+        retry_in_ms: retry_in.map(|d| d.as_millis() as u64),
         doom_loop_triggers: info.doom_loop_triggers,
         doom_loop_aborted_at_chunk: info.doom_loop_aborted_at_chunk,
     });
@@ -1342,10 +1367,23 @@ mod tests {
         .await;
 
         assert!(!should_continue);
-        assert!(matches!(
-            event_rx.recv().await,
-            Some(SamplingEvent::Retrying { .. })
-        ));
+        // The event carries the wait it is about to take and the error that
+        // caused it, so a client can say both instead of showing a bare
+        // "Retrying" for however long the backoff runs.
+        match event_rx.recv().await {
+            Some(SamplingEvent::Retrying {
+                retry_in_ms,
+                reason,
+                ..
+            }) => {
+                assert!(
+                    retry_in_ms.is_some_and(|ms| ms > 0),
+                    "a backoff retry must report its wait, got {retry_in_ms:?}"
+                );
+                assert!(reason.contains("retry me"), "reason was {reason}");
+            }
+            other => panic!("expected Retrying, got {other:?}"),
+        }
         assert!(matches!(
             event_rx.recv().await,
             Some(SamplingEvent::Failed { .. })
