@@ -414,3 +414,108 @@
         assert!(agent.plan_mode_pending.is_none());
     }
 
+    /// Rapid Shift+Tab presses must keep the mode the LAST press selected: the
+    /// shell's confirmation of an earlier press arrives after the ring already
+    /// moved on, and must not step the displayed mode back.
+    #[test]
+    fn late_confirmation_of_an_earlier_press_does_not_rewind_the_ring() {
+        use crate::app::actions::Action;
+
+        let mut app = make_app_with_agent("sess-ring");
+        app.auto_mode_gate = true;
+        let id = AgentId(0);
+
+        // Two rapid presses from Normal, with no confirmation in between:
+        // Normal -> Plan -> Auto.
+        let _ = crate::app::dispatch::dispatch(Action::CycleMode, &mut app);
+        let _ = crate::app::dispatch::dispatch(Action::CycleMode, &mut app);
+        {
+            let agent = app.agents.get(&id).unwrap();
+            assert!(
+                !agent.plan_mode_pending.unwrap_or(agent.plan_mode_active),
+                "setup: the ring stands on Auto"
+            );
+            assert!(agent.session.is_auto(), "setup: the auto flag is set");
+        }
+
+        // The confirmation of the FIRST press (plan) lands now, after the
+        // second press already moved the ring to Auto.
+        let (tx, _rx) = tokio::sync::oneshot::channel();
+        handle(
+            AcpClientMessage::SessionNotification(xai_acp_lib::AcpArgs {
+                request: acp::SessionNotification::new(
+                    acp::SessionId::new("sess-ring"),
+                    make_current_mode_update("plan"),
+                ),
+                response_tx: tx,
+            }),
+            &mut app,
+        );
+
+        let agent = app.agents.get(&id).unwrap();
+        assert!(
+            !agent.plan_mode_pending.unwrap_or(agent.plan_mode_active),
+            "a confirmation of the earlier press must not put the display back on Plan"
+        );
+        assert!(
+            agent.session.is_auto(),
+            "the auto flag must still match the displayed mode (Auto)"
+        );
+        assert!(
+            !agent.session.is_yolo(),
+            "no arm of the ring may arm always-approve here"
+        );
+        assert_eq!(
+            app.current_ui.permission_mode.as_deref(),
+            Some("auto"),
+            "canonical mode must stay on the last press's stop"
+        );
+    }
+
+    /// The newest press still applies its own confirmation, and a mode nobody
+    /// asked for (an agent-driven change) is never mistaken for a stale echo.
+    #[test]
+    fn newest_press_and_agent_driven_changes_still_apply() {
+        use crate::app::actions::Action;
+
+        let mut app = make_app_with_agent("sess-ring-2");
+        app.auto_mode_gate = true;
+        let id = AgentId(0);
+        let _ = crate::app::dispatch::dispatch(Action::CycleMode, &mut app);
+        let _ = crate::app::dispatch::dispatch(Action::CycleMode, &mut app);
+
+        let (tx, _rx) = tokio::sync::oneshot::channel();
+        handle(
+            AcpClientMessage::SessionNotification(xai_acp_lib::AcpArgs {
+                request: acp::SessionNotification::new(
+                    acp::SessionId::new("sess-ring-2"),
+                    make_current_mode_update("default"),
+                ),
+                response_tx: tx,
+            }),
+            &mut app,
+        );
+        assert_eq!(
+            app.agents[&id].plan_mode_pending,
+            None,
+            "the newest press's confirmation settles the optimistic pending state"
+        );
+
+        // An agent-driven plan entry, with nothing outstanding, still applies.
+        let (tx, _rx) = tokio::sync::oneshot::channel();
+        handle(
+            AcpClientMessage::SessionNotification(xai_acp_lib::AcpArgs {
+                request: acp::SessionNotification::new(
+                    acp::SessionId::new("sess-ring-2"),
+                    make_current_mode_update("plan"),
+                ),
+                response_tx: tx,
+            }),
+            &mut app,
+        );
+        assert!(
+            app.agents[&id].plan_mode_active,
+            "a mode the user did not ask for must still take effect"
+        );
+    }
+

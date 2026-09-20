@@ -1503,8 +1503,10 @@ pub(crate) fn execute(
         }
         Effect::SetSessionMode { session_id, mode_id } => {
             let tx = acp_tx.clone();
+            let gate = mode_request_gate(&session_id);
             tasks
                 .spawn(async move {
+                    let _ordered = gate.lock().await;
                     let req = acp::SetSessionModeRequest::new(session_id, mode_id);
                     if let Err(e) = acp_send(req, &tx).await {
                         tracing::warn!("Failed to set session mode: {e}");
@@ -1518,8 +1520,10 @@ pub(crate) fn execute(
             second_mode_id,
         } => {
             let tx = acp_tx.clone();
+            let gate = mode_request_gate(&session_id);
             tasks
                 .spawn(async move {
+                    let _ordered = gate.lock().await;
                     let first_req =
                         acp::SetSessionModeRequest::new(session_id.clone(), first_mode_id);
                     if let Err(e) = acp_send(first_req, &tx).await {
@@ -1541,16 +1545,22 @@ pub(crate) fn execute(
             skill_token_ranges,
         } => {
             let tx = acp_tx.clone();
+            let gate = mode_request_gate(&session_id);
             let screen_mode = session_flags.screen_mode_label;
             let is_api_key_auth = session_flags.is_api_key_auth;
             tasks
                 .spawn(async move {
-                    let mode_req = acp::SetSessionModeRequest::new(
-                        session_id.clone(),
-                        mode_id,
-                    );
-                    if let Err(e) = acp_send(mode_req, &tx).await {
-                        tracing::warn!("Failed to set session mode: {e}");
+                    {
+                        // Ordering covers the mode request only: the prompt below
+                        // runs a whole turn and must not hold the gate.
+                        let _ordered = gate.lock().await;
+                        let mode_req = acp::SetSessionModeRequest::new(
+                            session_id.clone(),
+                            mode_id,
+                        );
+                        if let Err(e) = acp_send(mode_req, &tx).await {
+                            tracing::warn!("Failed to set session mode: {e}");
+                        }
                     }
                     ulog::info(
                         "prompt submitted",

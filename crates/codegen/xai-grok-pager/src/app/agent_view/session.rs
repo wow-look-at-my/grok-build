@@ -3,8 +3,9 @@
 #[cfg(test)]
 use super::test_agent_view;
 use super::{
-    ActivePane, AgentView, InlineMediaHitAreas, InputMode, PaneAreas, PluginCtaState,
-    PromptInputMode, PromptMode, REWOUND_PROMPT_ID_CAP, SELF_ORIGINATED_PROMPT_CAP, SessionReload,
+    ActivePane, AgentView, InlineMediaHitAreas, InputMode, MODE_REQUEST_LOG_CAP, ModeRequest,
+    PaneAreas, PluginCtaState, PromptInputMode, PromptMode, REWOUND_PROMPT_ID_CAP,
+    SELF_ORIGINATED_PROMPT_CAP, SessionReload, superseded_mode_request,
 };
 use crate::app::agent::AgentSession;
 use crate::app::app_view::InputOutcome;
@@ -80,6 +81,31 @@ impl AgentView {
     }
     pub(crate) fn is_rewound_prompt(&self, prompt_id: &str) -> bool {
         self.rewound_prompt_ids.iter().any(|p| p == prompt_id)
+    }
+    /// Record a user-driven session-mode change this pager is about to request.
+    ///
+    /// The shell's confirmation carries only a mode id, so this ordered log is
+    /// what lets [`Self::superseded_mode_request`] tell a press's own
+    /// confirmation from an earlier press's arriving late.
+    pub(crate) fn note_mode_request(&mut self, mode_id: &str) {
+        self.next_mode_request_seq += 1;
+        self.mode_requests.push_back(ModeRequest {
+            seq: self.next_mode_request_seq,
+            mode_id: mode_id.to_string(),
+        });
+        while self.mode_requests.len() > MODE_REQUEST_LOG_CAP {
+            self.mode_requests.pop_front();
+        }
+    }
+    /// The press a `CurrentModeUpdate` naming `mode_id` reports on, when a
+    /// later press superseded it. See [`superseded_mode_request`].
+    pub(crate) fn superseded_mode_request(&self, mode_id: &str) -> Option<&ModeRequest> {
+        superseded_mode_request(&self.mode_requests, mode_id)
+    }
+    /// Forget the outstanding mode-change requests: the shell has reported the
+    /// mode this session is actually in, so nothing is left to attribute.
+    pub(crate) fn clear_mode_requests(&mut self) {
+        self.mode_requests.clear();
     }
     /// Create a new agent view with default UI state.
     ///
@@ -277,6 +303,8 @@ impl AgentView {
             plan_mode_active: false,
             plan_mode_pending: None,
             deferred_session_mode: None,
+            mode_requests: VecDeque::new(),
+            next_mode_request_seq: 0,
             pending_extensions_fetch: false,
             in_dashboard_overlay: false,
             overlay_can_cycle: false,

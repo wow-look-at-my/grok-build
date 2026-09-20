@@ -770,6 +770,32 @@ pub(crate) enum AgentDeferredSend {
     /// Ctrl+Enter — a mid-turn interjection.
     Interject,
 }
+/// One user-driven session-mode change this pager asked the shell to apply.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ModeRequest {
+    /// Sequence claimed when the request was emitted, monotonic per session.
+    pub(crate) seq: u64,
+    /// The mode id the pager asked for.
+    pub(crate) mode_id: String,
+}
+/// How many mode-change requests a session remembers. Rapid presses are the
+/// only source of a multi-entry log, and they resolve within one round trip.
+pub(crate) const MODE_REQUEST_LOG_CAP: usize = 8;
+/// Whether a mode confirmation naming `incoming` belongs to a press the ring
+/// has already moved past, and which request that was.
+///
+/// `requests` is the ordered log of session-mode changes this pager emitted,
+/// so the newest entry naming the confirmed mode is the press that confirmation
+/// reports on. An older entry is a confirmation that arrived after a later
+/// press already advanced the ring, and applying it would step the displayed
+/// mode backwards.
+pub(crate) fn superseded_mode_request<'a>(
+    requests: &'a VecDeque<ModeRequest>,
+    incoming: &str,
+) -> Option<&'a ModeRequest> {
+    let idx = requests.iter().rposition(|r| r.mode_id == incoming)?;
+    (idx + 1 < requests.len()).then(|| &requests[idx])
+}
 pub struct AgentView {
     pub session: AgentSession,
     pub(crate) session_binding_epoch: u32,
@@ -1340,6 +1366,14 @@ pub struct AgentView {
     /// Consumed in the `SessionCreated` / `WorktreeSessionCreated` handlers,
     /// mirroring `AgentSession.deferred_model_switch`.
     pub(crate) deferred_session_mode: Option<xai_grok_tools::types::SessionMode>,
+    /// Session-mode changes this pager has requested for this session, oldest
+    /// first. A `CurrentModeUpdate` names only a mode, so this log is what
+    /// attributes one to the press that caused it: an entry that is not the
+    /// newest is an earlier press reporting in late, and applying it would
+    /// step the displayed mode backwards.
+    pub(crate) mode_requests: VecDeque<ModeRequest>,
+    /// Sequence for the next entry appended to [`Self::mode_requests`].
+    pub(crate) next_mode_request_seq: u64,
     pub(crate) pending_extensions_fetch: bool,
     /// Whether this view was last rendered inside the dashboard's session
     /// overlay. Updated every frame by `draw`; read when building the

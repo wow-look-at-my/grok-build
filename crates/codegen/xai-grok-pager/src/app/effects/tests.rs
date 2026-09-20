@@ -1741,6 +1741,71 @@ async fn debounce_session_search_echoes_query_and_seq() {
         other => panic!("expected SessionSearchDebounceExpired, got {other:?}"),
     }
 }
+/// Two Shift+Tab presses in a row must reach the shell in press order, so the
+/// mode it applies last is the mode the user pressed last. Each mode change is
+/// its own spawned task, so the second request must wait for the first one's
+/// answer instead of racing it onto the wire.
+#[tokio::test]
+async fn consecutive_mode_changes_reach_the_shell_in_press_order() {
+    use xai_acp_lib::AcpAgentMessage;
+
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<AcpAgentMessage>();
+
+    // The shell half of the wire.
+    let peer = tokio::spawn(async move {
+        let mut seen: Vec<String> = Vec::new();
+        while let Some(msg) = rx.recv().await {
+            let AcpAgentMessage::SetSessionMode(args) = msg else {
+                panic!("expected a session/set_mode request");
+            };
+            seen.push(args.request.mode_id.0.to_string());
+            if seen.len() == 1 {
+                // Give a second request every chance to arrive behind this one
+                // before the first has been answered.
+                for _ in 0..16 {
+                    tokio::task::yield_now().await;
+                }
+                assert!(
+                    rx.is_empty(),
+                    "a later mode-change request raced ahead of the previous answer: {seen:?}"
+                );
+            }
+            let _ = args.response_tx.send(Ok(acp::SetSessionModeResponse::new()));
+        }
+        seen
+    });
+
+    let mut tasks = JoinSet::new();
+    let (progress_tx, _progress_rx) = tokio::sync::mpsc::unbounded_channel();
+    let flags = SessionFlags::default();
+    let session_id = acp::SessionId::new("press-order-session");
+    for mode_id in ["plan", "default"] {
+        execute(
+            Effect::SetSessionMode {
+                session_id: session_id.clone(),
+                mode_id: acp::SessionModeId::new(mode_id),
+            },
+            &mut tasks,
+            &tx,
+            Path::new("."),
+            &flags,
+            &progress_tx,
+        );
+        // The event loop returns to the terminal for the next keypress between
+        // the two dispatches.
+        tokio::task::yield_now().await;
+    }
+    while let Some(joined) = tasks.join_next().await {
+        joined.expect("mode-change task panicked");
+    }
+    drop(tx);
+    let seen = peer.await.expect("wire peer panicked");
+    assert_eq!(
+        seen,
+        vec!["plan".to_string(), "default".to_string()],
+        "the last mode the shell is asked for must be the last one pressed"
+    );
+}
 /// Verify that every profile name produced by `SessionFlags::agent_profile()`
 /// is a valid `BuiltinAgentName` that the shell can resolve.
 #[test]
