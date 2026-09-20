@@ -65,3 +65,12 @@ regex = { workspace = true }
 [[example]]
 name = "sandbox_smoke_test"
 required-features = ["enforce"]
+
+# The profile-sandbox CI hand-off is verified by launching the shipped worker
+# and the shipped confinement for real. That needs the child to re-enter this
+# binary the way the pager's `main` does and dispatch the worker on the marker
+# env var, which a libtest binary cannot do (its harness ignores the marker and
+# would run the whole suite instead of serving the protocol).
+[[test]]
+name = "profile_ci_host_e2e"
+harness = false

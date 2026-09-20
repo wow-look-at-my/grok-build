@@ -1523,6 +1523,20 @@ pub fn apply_sandbox(
         .and_then(|p| dunce::canonicalize(p).ok())
         .or_else(|| std::env::current_dir().ok())
         .unwrap_or_else(|| std::path::PathBuf::from("."));
+    // Start the unsandboxed `gh` worker before the confinement below is
+    // installed. `gh` keeps its OAuth token in the login keychain, and the
+    // profile's macOS rules deny the keychain mach services, so a `gh` spawned
+    // under this sandbox sends no Authorization header and every CI query
+    // answers 401. A child forked now is unconfined and answers those queries
+    // from the host instead. On Linux the exec into bwrap may follow, so the fd
+    // is made exec-surviving there; on macOS the session is confined in place
+    // and the fd stays close-on-exec.
+    if sandbox_profile != xai_grok_sandbox::ProfileName::Off {
+        let _ = xai_grok_sandbox::ci_host::start_ci_host_for_session(
+            &workspace,
+            cfg!(target_os = "linux"),
+        );
+    }
     #[cfg(target_os = "linux")]
     let requires_read_deny = xai_grok_sandbox::requires_read_deny(&sandbox_profile, &workspace);
     #[cfg(target_os = "linux")]
