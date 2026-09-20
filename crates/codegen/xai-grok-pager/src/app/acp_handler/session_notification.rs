@@ -1639,7 +1639,23 @@ pub(super) fn detect_plan_mode_change(update: &acp::SessionUpdate, agent: &mut A
     let acp::SessionUpdate::CurrentModeUpdate(cmu) = update else {
         return false;
     };
-    let mode = SessionMode::from_id(cmu.current_mode_id.0.as_ref());
+    let mode_id = cmu.current_mode_id.0.as_ref();
+    // A press is applied optimistically, so its own confirmation is already
+    // reflected on screen. A confirmation belonging to an EARLIER press is
+    // only arriving now, and applying it would step the mode back to where
+    // the ring stood before the newer press.
+    if let Some(superseded) = agent.superseded_mode_request(mode_id) {
+        tracing::info!(
+            mode_id,
+            superseded_seq = superseded.seq,
+            "Ignored a mode confirmation a later press superseded"
+        );
+        return false;
+    }
+    // The shell is reporting where it actually stands, so nothing outstanding
+    // is left to attribute.
+    agent.clear_mode_requests();
+    let mode = SessionMode::from_id(mode_id);
     let was_active = agent.plan_mode_active;
     let now_active = mode.is_plan();
     agent.plan_mode_active = now_active;
