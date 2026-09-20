@@ -34,17 +34,23 @@
 use std::path::{Path, PathBuf};
 
 /// The mode a spawned child runs in. Absent means "the parent".
+#[cfg(target_os = "macos")]
 const MODE_ENV: &str = "GROK_PROFILE_CI_HOST_MODE";
 /// The session workspace: what the worker runs `gh` in, and what the child
 /// confines itself to.
+#[cfg(target_os = "macos")]
 const WORKSPACE_ENV: &str = "GROK_PROFILE_CI_HOST_WORKSPACE";
 /// The directory the child names as the query's cwd, instead of the session
 /// workspace, so the answer says which side ran `gh`.
+#[cfg(target_os = "macos")]
 const QUERY_CWD_ENV: &str = "GROK_PROFILE_CI_HOST_QUERY_CWD";
 /// The branch every query asks about.
+#[cfg(target_os = "macos")]
 const BRANCH_ENV: &str = "GROK_PROFILE_CI_HOST_BRANCH";
 
+#[cfg(target_os = "macos")]
 const MODE_JAILED: &str = "jailed";
+#[cfg(target_os = "macos")]
 const MODE_JAILED_NO_WORKER: &str = "jailed-no-worker";
 
 /// Every line a child reports so the parent can read it back.

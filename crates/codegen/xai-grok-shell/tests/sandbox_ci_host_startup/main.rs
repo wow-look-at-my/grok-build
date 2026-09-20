@@ -24,11 +24,16 @@
 use std::path::{Path, PathBuf};
 
 /// Which side of the test a spawned child runs. Absent means "the parent".
+#[cfg(target_os = "macos")]
 const MODE_ENV: &str = "GROK_CI_HOST_STARTUP_MODE";
+#[cfg(target_os = "macos")]
 const PROFILE_ENV: &str = "GROK_CI_HOST_STARTUP_PROFILE";
+#[cfg(target_os = "macos")]
 const WORKSPACE_ENV: &str = "GROK_CI_HOST_STARTUP_WORKSPACE";
+#[cfg(target_os = "macos")]
 const BRANCH_ENV: &str = "GROK_CI_HOST_STARTUP_BRANCH";
 
+#[cfg(target_os = "macos")]
 const MODE_SESSION: &str = "session";
 
 const REPORT: &str = "sandbox-ci-host-startup: ";
