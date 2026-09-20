@@ -388,7 +388,7 @@ fn run_session_child(profile: &str, workspace: &Path) -> SessionReport {
             }
         }
     }
-    if output.status.success() {
+    if status.success() {
         assert!(saw_done, "the session child must report back: {stdout}");
     }
     report
