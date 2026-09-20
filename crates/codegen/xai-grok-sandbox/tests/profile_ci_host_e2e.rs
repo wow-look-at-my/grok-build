@@ -22,9 +22,13 @@
 //!
 //! The two children are told apart by where their `gh` ran: the worker queries
 //! from its own working directory (the session workspace), while the unassisted
-//! child's own `gh` runs from the directory the query names. So this test
-//! discriminates the two paths on a host with no authenticated `gh` too, where
-//! both answers are a `401` and the run list is empty either way.
+//! child's own `gh` runs from the directory the query names.
+//!
+//! That only tells them apart where the host's `gh` gets far enough to look at
+//! its working directory. An unauthenticated one does not: it asks for
+//! `GH_TOKEN` and stops, so both sides answer identically whatever directory
+//! they ran in. The parent measures that first, from the two directories, and
+//! says so rather than asserting a difference the host cannot produce.
 //!
 //! `harness = false` (see Cargo.toml): the worker child is this binary
 //! re-entered with the marker env var set and nothing else, which is how the
@@ -149,6 +153,20 @@ fn parent() {
     let direct = query(&workspace, &branch);
     println!("{REPORT}unsandboxed={}", direct.summary());
 
+    // The same query from the directory the child names, still with no worker
+    // anywhere: this is what a `gh` INSIDE the confinement answers. Where it
+    // differs from the workspace answer, the child's own answer says which side
+    // ran `gh`. Where it does not, this host's `gh` refuses before it ever looks
+    // at its working directory - an unauthenticated one asks for `GH_TOKEN` and
+    // stops - and no answer can tell the two sides apart here.
+    let direct_from_query_cwd = query(&query_cwd, &branch);
+    let cwd_tells_the_sides_apart = direct_from_query_cwd.answer != direct.answer;
+    println!(
+        "{REPORT}unsandboxed_from_query_cwd={}",
+        direct_from_query_cwd.summary()
+    );
+    println!("{REPORT}cwd_tells_the_sides_apart={cwd_tells_the_sides_apart}");
+
     // The shipped hand-off: the worker starts here, while this process can
     // still reach the keychain, and the session finds it by fd.
     let fd = xai_grok_sandbox::ci_host::start_ci_host_for_session(&workspace, false)
@@ -221,16 +239,23 @@ fn parent() {
         "the confined child's query must be answered by the worker, exactly as \
          the unconfined one was: {with_worker}"
     );
-    if without_worker.gh_ran() {
-        assert!(
-            without_worker.answer.contains("not a git repository"),
+    if !without_worker.gh_ran() {
+        println!(
+            "{REPORT}no-worker control=no `gh` on this host to run, so the \
+             fall-through cannot be observed here"
+        );
+    } else if cwd_tells_the_sides_apart {
+        assert_eq!(
+            without_worker.answer, direct_from_query_cwd.answer,
             "with no worker the query must fall through to a `gh` inside the \
              confinement, running where the query asked: {without_worker}"
         );
     } else {
         println!(
-            "{REPORT}no-worker control=no `gh` on this host to run, so the \
-             fall-through cannot be observed here"
+            "{REPORT}no-worker control=unverified: this host's `gh` answers the \
+             same from either directory ({}), so which side ran it cannot be \
+             observed here",
+            direct.summary()
         );
     }
 
