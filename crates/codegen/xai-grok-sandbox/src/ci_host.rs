@@ -881,6 +881,8 @@ mod tests {
     #[test]
     #[serial_test::serial(ci_host_env)]
     fn a_failed_exec_puts_the_worker_back_out_of_reach_of_children() {
+        use std::os::fd::AsRawFd;
+
         let (ours, _theirs) = UnixStream::pair().expect("socketpair");
         let fd = ours.as_raw_fd();
         inherit_across_exec(fd).expect("clear close-on-exec");
