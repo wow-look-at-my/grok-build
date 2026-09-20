@@ -336,11 +336,29 @@ fn run_session_child(profile: &str, workspace: &Path) -> SessionReport {
         // The startup path materializes hook directories under `$GROK_HOME`;
         // a fixture keeps the session's own home out of a test run.
         .env("GROK_HOME", fixture_dir("grok-home"));
-    let output = cmd.output().expect("spawn the session child");
-    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
-    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    // The worker this session forks keeps the session's STDERR: the spawn
+    // dup2s only stdin and stdout onto its socket. So a piped stderr reaches
+    // EOF when the WORKER dies, not when the session does, and reading one to
+    // the end waits on a process that outlives the thing under test. A file
+    // holds it instead, and nothing here waits on a pipe the worker holds.
+    let stderr_path = fixture_dir("stderr").join("session.stderr");
+    cmd.stdout(std::process::Stdio::piped())
+        .stderr(std::fs::File::create(&stderr_path).expect("create the stderr file"));
+    let mut child = cmd.spawn().expect("spawn the session child");
+    // Reap first, THEN read. Reading to EOF ahead of the wait would block past
+    // the deadline on a session that hangs, which is the case this exists for.
+    // The report is a few hundred bytes, far under a pipe buffer, so the child
+    // never blocks writing it while nothing is draining.
+    let status = wait_with_deadline(&mut child, std::time::Duration::from_secs(30));
+    let mut stdout = String::new();
+    if let Some(mut pipe) = child.stdout.take() {
+        use std::io::Read as _;
+        pipe.read_to_string(&mut stdout)
+            .expect("read the session's report");
+    }
+    let stderr = std::fs::read_to_string(&stderr_path).unwrap_or_default();
     let mut report = SessionReport {
-        status: output.status,
+        status,
         fd: "?".to_string(),
         keychain: "?".to_string(),
         answered: "?".to_string(),
@@ -374,6 +392,31 @@ fn run_session_child(profile: &str, workspace: &Path) -> SessionReport {
         assert!(saw_done, "the session child must report back: {stdout}");
     }
     report
+}
+
+/// Wait for a child, and kill it once `limit` is up.
+///
+/// A hang here is otherwise the test runner's per-test timeout, which reports
+/// the whole case as timed out and none of what the session managed to say.
+/// Killing it keeps the report, and the assertions then name what is missing.
+#[cfg(unix)]
+fn wait_with_deadline(
+    child: &mut std::process::Child,
+    limit: std::time::Duration,
+) -> std::process::ExitStatus {
+    let deadline = std::time::Instant::now() + limit;
+    loop {
+        match child.try_wait().expect("wait on the session child") {
+            Some(status) => return status,
+            None if std::time::Instant::now() < deadline => {
+                std::thread::sleep(std::time::Duration::from_millis(25));
+            }
+            None => {
+                let _ = child.kill();
+                return child.wait().expect("reap the killed session child");
+            }
+        }
+    }
 }
 
 #[cfg(unix)]
