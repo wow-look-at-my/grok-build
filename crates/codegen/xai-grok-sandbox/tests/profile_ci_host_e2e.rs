@@ -50,12 +50,18 @@ const MODE_JAILED_NO_WORKER: &str = "jailed-no-worker";
 /// Every line a child reports so the parent can read it back.
 const REPORT: &str = "profile-ci-host: ";
 
+/// The one case this binary runs, under the name a test runner lists it by.
+const TEST_NAME: &str = "a_profile_confined_session_answers_its_ci_query_through_the_worker";
+
 fn main() {
     // A worker child re-enters this binary with the marker set and NOTHING
     // else, exactly as the pager's `main` dispatches it.
     if xai_grok_sandbox::ci_host::is_ci_host_subprocess() {
         xai_grok_sandbox::ci_host::run_ci_host_worker();
         std::process::exit(0);
+    }
+    if serve_list_protocol(TEST_NAME) {
+        return;
     }
     #[cfg(target_os = "macos")]
     match std::env::var(MODE_ENV).as_deref() {
@@ -65,6 +71,49 @@ fn main() {
     }
     #[cfg(not(target_os = "macos"))]
     println!("{REPORT}skip: the profile sandbox is a macOS Seatbelt profile");
+}
+
+/// Answer the listing a test runner asks for before it runs anything, and say
+/// whether that is all this run was.
+///
+/// `harness = false` leaves the protocol to this binary. nextest lists with
+/// `--list --format terse` and refuses a binary that answers with anything but
+/// `<name>: test` lines. `cargo test` never lists, which is why a binary that
+/// ignores the argument passes there and fails under nextest.
+fn serve_list_protocol(name: &str) -> bool {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if !args.iter().any(|arg| arg == "--list") {
+        return false;
+    }
+    // A listing of the ignored tests alone. This binary has none to name.
+    if !args.iter().any(|arg| arg == "--ignored") {
+        println!("{name}: test");
+    }
+    true
+}
+
+/// Hex, because a report line carries one value on one line and `gh`'s own
+/// error text is several. Splitting the child's stdout into lines kept the
+/// first line of a multi-line answer and compared it against the whole one.
+#[cfg(target_os = "macos")]
+fn encode(text: &str) -> String {
+    text.bytes().map(|b| format!("{b:02x}")).collect()
+}
+
+#[cfg(target_os = "macos")]
+fn decode(hex: &str) -> String {
+    let bytes: Option<Vec<u8>> = hex
+        .as_bytes()
+        .chunks(2)
+        .map(|pair| {
+            let pair = std::str::from_utf8(pair).ok()?;
+            u8::from_str_radix(pair, 16).ok()
+        })
+        .collect();
+    bytes.map_or_else(
+        || format!("<undecodable report value {hex:?}>"),
+        |bytes| String::from_utf8_lossy(&bytes).into_owned(),
+    )
 }
 
 /// The unconfined side: start the worker the shipped way, then send a child
@@ -235,7 +284,7 @@ fn jailed_child(worker: bool) {
         "{REPORT}runs={}",
         if answer.is_run_list() { "yes" } else { "no" }
     );
-    println!("{REPORT}answer_text={}", answer.answer);
+    println!("{REPORT}answer_text={}", encode(&answer.answer));
     println!("{REPORT}answer_code={}", answer.code);
     println!("{REPORT}child_done");
 }
@@ -432,7 +481,7 @@ fn run_child(
         ] {
             if let Some(value) = rest.strip_prefix(key) {
                 if key == "answer_text=" {
-                    *slot = value.to_string();
+                    *slot = decode(value.trim());
                 } else {
                     *slot = value.split_whitespace().next().unwrap_or("").to_string();
                 }

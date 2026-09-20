@@ -33,12 +33,18 @@ const MODE_SESSION: &str = "session";
 
 const REPORT: &str = "sandbox-ci-host-startup: ";
 
+/// The one case this binary runs, under the name a test runner lists it by.
+const TEST_NAME: &str = "the_shipped_startup_path_hands_a_confined_session_its_worker";
+
 fn main() {
     // A worker child re-enters this binary with the marker set and nothing
     // else, exactly as the pager's `main` dispatches it.
     if xai_grok_sandbox::ci_host::is_ci_host_subprocess() {
         xai_grok_sandbox::ci_host::run_ci_host_worker();
         std::process::exit(0);
+    }
+    if serve_list_protocol(TEST_NAME) {
+        return;
     }
     #[cfg(target_os = "macos")]
     match std::env::var(MODE_ENV).as_deref() {
@@ -47,6 +53,25 @@ fn main() {
     }
     #[cfg(not(target_os = "macos"))]
     println!("{REPORT}skip: the profile sandbox is a macOS Seatbelt profile");
+}
+
+/// Answer the listing a test runner asks for before it runs anything, and say
+/// whether that is all this run was.
+///
+/// `harness = false` leaves the protocol to this binary. nextest lists with
+/// `--list --format terse` and refuses a binary that answers with anything but
+/// `<name>: test` lines. `cargo test` never lists, which is why a binary that
+/// ignores the argument passes there and fails under nextest.
+fn serve_list_protocol(name: &str) -> bool {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if !args.iter().any(|arg| arg == "--list") {
+        return false;
+    }
+    // A listing of the ignored tests alone. This binary has none to name.
+    if !args.iter().any(|arg| arg == "--ignored") {
+        println!("{name}: test");
+    }
+    true
 }
 
 /// The confined side: run the shipped startup call, then the session's own
