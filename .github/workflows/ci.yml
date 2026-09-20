@@ -70,25 +70,6 @@ jobs:
           tar -xzf "$RUNNER_TEMP/nextest.tar.gz" -C "$RUNNER_TEMP/nextest-bin"
           echo "$RUNNER_TEMP/nextest-bin" >> "$GITHUB_PATH"
 
-      # Without the container format the wrapper packs into, every upload here fails before the wire.
-      - name: Install binpazer
-        run: |
-          curl -fSsL --location-trusted \
-            "https://dl.pazer.build/bin-file-fmt/binpazer?os=linux&arch=amd64" -o "$RUNNER_TEMP/binpazer"
-          chmod +x "$RUNNER_TEMP/binpazer"
-          echo "BINPAZER=$RUNNER_TEMP/binpazer" >> "$GITHUB_ENV"
-
-      # A run step is not given the cache service env, so without this the remote layer never runs here.
-      - name: Export the cache service env for the shell steps
-        uses: wow-look-at-my/actions@typescript#latest
-        with:
-          script: |
-            for (const key of ["ACTIONS_RESULTS_URL", "ACTIONS_CACHE_URL", "ACTIONS_RUNTIME_TOKEN"]) {
-              const value = process.env[key];
-              if (value) core.exportVariable(key, value);
-              core.info(`${key}: ${value ? "present" : "absent"}`);
-            }
-
       # -j3 is the widest -j the runner's 15 GiB holds.
       - name: Build test harnesses (compile, no-run)
         env:
@@ -106,61 +87,17 @@ jobs:
           cargo nextest run --locked --workspace --profile ci
           "$PAGER_BINARY" --version
 
-      - uses: ./.github/actions/upload-cargo-timings
-        with:
-          name: cargo-timings-build-test
-
-  # These assert on what a virtual terminal actually shows, which a unit test over the width function cannot stand in for.
-  pty-e2e:
-    name: Test (PTY end-to-end)
-    # Hosted for the same reason as build-test: these need a real /bin/bash.
-    runs-on: ubuntu-22.04
-    timeout-minutes: 45
-    env:
-      PAGER_BINARY: ${{ github.workspace }}/target/debug/xai-grok-pager
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-
-      - name: Report disk before build
-        run: df -h /
-
-      - uses: ./.github/actions/setup-protoc
-
-      - uses: ./.github/actions/setup-cargo-timings
-
-      - name: Install cargo-nextest
-        run: |
-          mkdir -p "$RUNNER_TEMP/nextest-bin"
-          curl -fsSL -o "$RUNNER_TEMP/nextest.tar.gz" \
-            https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-0.9.143/cargo-nextest-0.9.143-x86_64-unknown-linux-gnu.tar.gz
-          tar -xzf "$RUNNER_TEMP/nextest.tar.gz" -C "$RUNNER_TEMP/nextest-bin"
-          echo "$RUNNER_TEMP/nextest-bin" >> "$GITHUB_PATH"
-
-      # .cargo/config.toml links x86_64-unknown-linux-gnu with mold. The update keeps the install off a version the image's baked apt index still pins and the mirror has dropped.
-      - name: Install mold
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y mold
-
-      - name: Build the PTY harnesses and the pager binary
-        run: |
-          cargo test --locked -p xai-grok-pager --no-run \
-            --test pty_e2e_smoke \
-            --test pty_e2e_config_ui \
-            --test pty_e2e_minimal
-          cargo build --locked -p xai-grok-pager-bin
-
+      # The PTY cases are #[ignore]d, so the run above built their binaries and skipped every case; this is the only thing that executes them. Same `--workspace` scope as the compile step on purpose: `-p xai-grok-pager` resolves its own feature set and rebuilds the graph instead of reusing target/. `!cancelled()` keeps a workspace-test failure from hiding a PTY failure.
       - name: Test (PTY end-to-end)
+        if: ${{ !cancelled() }}
         run: |
-          cargo nextest run --locked -p xai-grok-pager --profile ci \
-            --test pty_e2e_smoke \
-            --test pty_e2e_config_ui \
-            --test pty_e2e_minimal \
+          cargo nextest run --locked --workspace --profile ci \
+            -E 'binary(pty_e2e_smoke) or binary(pty_e2e_config_ui) or binary(pty_e2e_minimal)' \
             --run-ignored all --test-threads 4
 
       - uses: ./.github/actions/upload-cargo-timings
         with:
-          name: cargo-timings-pty-e2e
+          name: cargo-timings-build-test
 
   build-release:
     name: Build release binary (linux/amd64)
@@ -345,7 +282,7 @@ jobs:
 
   publish:
     # Every test AND every build first: a number is only assigned to a tree that already built and passed.
-    needs: [build-test, pty-e2e, test-darwin-sandbox, build-release, link-darwin]
+    needs: [build-test, test-darwin-sandbox, build-release, link-darwin]
     name: Publish buildhost release
     # macOS because patching an arm64 Mach-O invalidates the ad-hoc signature `ld` left, and `codesign` is the only thing that puts one back. The linux binary is stamped here too: patching an ELF needs no Linux.
     runs-on: macos-14
