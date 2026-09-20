@@ -293,6 +293,28 @@ pub fn inherit_across_exec(fd: std::os::unix::io::RawFd) -> Option<()> {
     (rc >= 0).then_some(())
 }
 
+/// Take the worker back from an exec that did not happen.
+///
+/// The hand-off clears `FD_CLOEXEC` and names the fd in the environment for the
+/// image an exec is about to produce. Where that exec fails and this process
+/// carries on instead, both have to be undone: the session is confined in place
+/// after all, and every child it spawns would otherwise inherit a live socket to
+/// an UNCONFINED `gh`, with the environment naming the number to read it on.
+///
+/// The session itself keeps the worker. It finds the fd through
+/// [`SESSION_CI_HOST_FD`], which no child of it can read.
+#[cfg(unix)]
+pub fn reclaim_from_failed_exec(fd: std::os::unix::io::RawFd) {
+    // SAFETY: fcntl on an fd this process owns; F_GETFD and F_SETFD only touch its flags.
+    let flags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
+    if flags >= 0 {
+        // SAFETY: see above.
+        unsafe { libc::fcntl(fd, libc::F_SETFD, flags | libc::FD_CLOEXEC) };
+    }
+    // SAFETY: this runs on the startup path, before the session exists.
+    unsafe { std::env::remove_var(CI_HOST_FD_ENV) };
+}
+
 /// `pre_exec` helper: point stdin (0) and stdout (1) at the given fd.
 ///
 /// Runs in the child just after fork, before exec, so it is async-signal-safe
@@ -849,6 +871,34 @@ mod tests {
             start_ci_host_for_session(Path::new("/tmp"), false),
             None,
             "the jail brought its own worker; the jailed process starts none"
+        );
+    }
+
+    /// An exec that was prepared for and then did not happen must leave nothing
+    /// behind. The session is confined in place in that case, and an
+    /// inheritable fd whose number is in the environment is a live socket to an
+    /// unconfined `gh` for every child the session spawns.
+    #[test]
+    #[serial_test::serial(ci_host_env)]
+    fn a_failed_exec_puts_the_worker_back_out_of_reach_of_children() {
+        let (ours, _theirs) = UnixStream::pair().expect("socketpair");
+        let fd = ours.as_raw_fd();
+        inherit_across_exec(fd).expect("clear close-on-exec");
+        let _env = EnvGuard::set(CI_HOST_FD_ENV, &fd.to_string());
+
+        reclaim_from_failed_exec(fd);
+
+        // SAFETY: fcntl F_GETFD on an fd this test owns.
+        let flags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
+        assert!(flags >= 0, "the fd must still be open");
+        assert_ne!(
+            flags & libc::FD_CLOEXEC,
+            0,
+            "the worker fd must not survive an exec once the exec is off"
+        );
+        assert!(
+            std::env::var(CI_HOST_FD_ENV).is_err(),
+            "no child may be handed the number that names the worker"
         );
     }
 
