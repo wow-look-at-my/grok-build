@@ -261,6 +261,18 @@ warm pass, 2836 entries, -j16, no cache service 12660 ms  4 ms/call  2836 hits  
 - `SCCACHE_IDLE_TIMEOUT: "0"` is what makes any of this observable. The server exits after 600s idle, and the test step is a longer gap than that. The post-job `--show-stats` then reports a fresh server's zeroes instead of the build's numbers.
 - The runner is an EPYC 7763 with 2 physical cores plus SMT, 15 GiB, and 337/394 MB/s sequential disk. A developer box with 4 physical cores is faster. So a local build time is optimistic and does not transfer as an equal.
 
+## The dependency tar: one lockfile-keyed cache entry, and why it cannot grow
+
+- `build-test` restores ONE `actions/cache` entry. The entry holds the registry-dependency artifacts and the cargo registry. The job saves it again on `master`. Measured on run 35459915405: registry crates are 1909 of that job's 4161 compile CPU-seconds.
+- Workspace crates are the rest of that time. They are not cacheable. Cargo fingerprints a path package by the mtime of its sources. A checkout gives every source a fresh mtime. Cargo then rebuilds the restored artifact whatever the entry holds. It fingerprints a registry package by content at an immutable version. That is what makes a registry package restorable.
+- The key is exact and carries NO `restore-keys`. That is the whole size bound. A prefix fallback restores a stale set and compiles the delta. It then saves both under a new key. Repeat that and one entry grows until it evicts everything else in the repository's 10 GB. An exact key holds one lockfile's dependencies. The cost is a branch that CHANGES `Cargo.lock`. Such a branch misses and compiles cold until it merges and `master` publishes the new tar.
+- The save is gated on `master` because that is what shares the entry. GitHub states the rule in "Restrictions for accessing a cache". A run restores a cache created in the current branch or in the default branch. A run cannot restore one created for a child branch or a sibling branch. An entry minted on a feature branch reaches nobody. It still counts against the 10 GB.
+- This workflow triggers on `push`, so `github.ref` is `refs/heads/<branch>`. A `pull_request` trigger writes to the merge ref instead. Only re-runs of that pull request read such an entry.
+- The scoping is enforced server-side and has no readable implementation. The `@actions/cache` client sends the key, the version and the runtime bearer. It never transmits the ref. The scope rides the `ACTIONS_RUNTIME_TOKEN` claims.
+- `ci/cache-deps.sh prune` keeps the entry to the registry half. It DESTROYS the workspace artifacts it matches. So it runs after the tests, never before.
+- The prune reads TARGET names beside package names from `cargo metadata`. Cargo stems a test binary with the target's name. No package name is in that stem. A package-only prune therefore leaves every `pty_e2e_smoke-<hash>` in the tar. Those binaries are most of the bytes. `crates/codegen/xai-ci-scripts/tests/cache_deps.rs` pins both halves. It also pins the near miss that a bare prefix match takes wrongly.
+- The parked `ci/pkg-cache.sh` rig is a different technique. Nothing wires it into `ci.yml`. It is a `RUSTC_WRAPPER` that mints ONE cache entry per package. It carries no eviction, no TTL and no cap. `measure-leg.yml` is its harness and no workflow calls that file.
+
 ## Why build-test is not on the self-hosted runner
 
 Pointing `build-test` at `vars.CI_RUNNER` turns ~20 tests red, because they assert on host semantics the org's lean image does not provide. Measured on that runner, with unmodified test sources:

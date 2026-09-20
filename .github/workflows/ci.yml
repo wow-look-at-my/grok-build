@@ -70,6 +70,20 @@ jobs:
           tar -xzf "$RUNNER_TEMP/nextest.tar.gz" -C "$RUNNER_TEMP/nextest-bin"
           echo "$RUNNER_TEMP/nextest-bin" >> "$GITHUB_PATH"
 
+      # One tar of the REGISTRY dependency artifacts, which a lockfile determines and a push does not. The key is exact and carries NO restore-keys on purpose: a prefix fallback restores a stale set, compiles the delta and saves both under a new key, which is how such an entry grows until it evicts everything else. An exact key holds one lockfile's dependencies and never accumulates. Measured on run 35459915405: registry crates are 1909 of build-test's 4161 compile CPU-seconds.
+      - name: Restore the dependency artifacts
+        id: deps-cache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target/debug/deps
+            target/debug/build
+            target/debug/.fingerprint
+          key: rustdeps-v1-${{ runner.os }}-dev-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+
       # -j3 is the widest -j the runner's 15 GiB holds.
       - name: Build test harnesses (compile, no-run)
         env:
@@ -94,6 +108,24 @@ jobs:
           cargo nextest run --locked --workspace --profile ci \
             -E 'binary(pty_e2e_smoke) or binary(pty_e2e_config_ui) or binary(pty_e2e_minimal)' \
             --run-ignored all --test-threads 4
+
+      # Saving only on master is what shares the entry. A run reads caches written on its own ref and on the default branch, never one written on a sibling branch, so an entry minted per feature branch is read by nobody and still counts against the repository's 10 GB.
+      - name: Strip the workspace artifacts before saving
+        if: github.ref == 'refs/heads/master' && steps.deps-cache.outputs.cache-hit != 'true'
+        run: ci/cache-deps.sh prune target/debug
+
+      - name: Save the dependency artifacts
+        if: github.ref == 'refs/heads/master' && steps.deps-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target/debug/deps
+            target/debug/build
+            target/debug/.fingerprint
+          key: rustdeps-v1-${{ runner.os }}-dev-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
 
       - uses: ./.github/actions/upload-cargo-timings
         with:
