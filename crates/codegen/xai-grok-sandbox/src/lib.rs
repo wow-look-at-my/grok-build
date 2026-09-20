@@ -656,6 +656,35 @@ pub fn bwrap_reexec_planned(profile: &ProfileName, workspace: &Path) -> bool {
 mod tests {
     use super::*;
     use serial_test::serial;
+
+    /// The predicate and the builder must never disagree about whether an exec
+    /// follows.
+    ///
+    /// `apply_sandbox` asks the predicate BEFORE it starts the CI host worker,
+    /// and the answer decides whether the worker's fd is made exec-surviving.
+    /// A predicate that says yes where the builder then produces no command
+    /// leaves an inheritable fd, and its number in the environment, in a
+    /// session that went on to confine itself in place. Every child of that
+    /// session can then reach an unconfined `gh`.
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn the_reexec_predicate_agrees_with_the_builder() {
+        let workspace = std::env::current_dir().expect("cwd");
+        for profile in [
+            ProfileName::Workspace,
+            ProfileName::ReadOnly,
+            ProfileName::Strict,
+            ProfileName::Devbox,
+            ProfileName::Off,
+        ] {
+            assert_eq!(
+                bwrap_reexec_planned(&profile, &workspace),
+                bwrap_reexec_for_profile(&profile, &workspace).is_some(),
+                "{profile:?}: the predicate and the builder disagree about \
+                 whether an exec follows"
+            );
+        }
+    }
     /// Save, set/remove, and auto-restore an env var on drop.
     struct EnvGuard {
         key: &'static str,
