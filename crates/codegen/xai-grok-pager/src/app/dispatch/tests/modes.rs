@@ -2372,6 +2372,43 @@ fn set_plan_mode_idempotency_uses_pending_over_active() {
     );
 }
 
+/// The ring's stop order is the documented one, and the fix neither reorders
+/// nor drops a stop: Normal -> Plan -> Auto -> Always-Approve -> Orchestrator
+/// -> Explore -> Plan, one step per press.
+#[test]
+fn the_ring_keeps_its_stop_order_across_a_full_cycle() {
+    let mut app = test_app_with_agent();
+    let id = AgentId(0);
+
+    let mut labels: Vec<String> = Vec::new();
+    for _ in 0..6 {
+        let _ = dispatch(Action::CycleMode, &mut app);
+        let banner = app.agents[&id]
+            .mode_switch_banner
+            .as_ref()
+            .map(|(label, _)| label.clone())
+            .unwrap_or_default();
+        labels.push(banner);
+    }
+
+    assert_eq!(
+        labels,
+        vec![
+            "Switched to mode: Plan",
+            "Switched to mode: Auto",
+            "Switched to mode: Always-Approve",
+            "Switched to mode: Orchestrator",
+            "Switched to mode: Explore",
+            "Switched to mode: Plan",
+        ],
+        "the ring's stops and their order are unchanged"
+    );
+    assert!(
+        app.agents[&id].plan_mode_pending.unwrap_or(false),
+        "the ring closes back onto Plan"
+    );
+}
+
 /// Rapid Shift+Tab presses land on the Nth ring stop and keep it: two presses
 /// with no confirmation in between leave the effective mode on Auto (the 2nd
 /// stop), with the plan and auto signals agreeing.
