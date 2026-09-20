@@ -107,8 +107,17 @@ async fn discover_one_provider(
             model: Some(listed.model.clone()),
             name: listed.name.clone(),
             description: listed.description.clone(),
-            api_backend: Some(listed.api_backend.clone()),
-            context_window: Some(listed.context_window.get()),
+            // A value the user wrote on the provider is the value. Listing
+            // fields are the fallback, and a listing that named no window
+            // carries the client default, which is a guess about a provider
+            // whose own block states the answer.
+            api_backend: provider
+                .api_backend
+                .clone()
+                .or_else(|| Some(listed.api_backend.clone())),
+            context_window: provider
+                .context_window
+                .or_else(|| Some(listed.context_window.get())),
             model_provider: Some(provider_id.to_owned()),
             reasoning_efforts: listed.reasoning_efforts.clone(),
             supports_reasoning_effort: listed
@@ -248,6 +257,44 @@ mod tests {
              session token never reaches the provider's endpoint"
         );
         assert!(discovered.contains_key("gateway/small-one"));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_providers_own_window_and_backend_beat_the_listing() {
+        // `small-one` names a window, `no-window-one` names none and so carries
+        // the client default. The provider states both answers itself.
+        let listing = serde_json::json!({
+            "data": [
+                { "model": "small-one", "contextWindow": 128_000 },
+                { "model": "no-window-one" },
+            ]
+        });
+        let (base, server) = start_listing_server(listing).await;
+        let cfg = config_from(&format!(
+            r#"
+            [model_providers.gateway]
+            base_url = "{base}/v1"
+            context_window = 1048576
+            api_backend = "messages"
+            "#
+        ));
+
+        let discovered = discover_provider_models(&cfg).await;
+        server.abort();
+
+        for key in ["gateway/small-one", "gateway/no-window-one"] {
+            let entry = discovered.get(key).expect("the listing's models");
+            assert_eq!(
+                entry.info.context_window.get(),
+                1_048_576,
+                "{key}: the window the user wrote is the window"
+            );
+            assert_eq!(
+                entry.info.api_backend,
+                crate::sampling::ApiBackend::Messages,
+                "{key}: the backend the user wrote is the backend"
+            );
+        }
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
