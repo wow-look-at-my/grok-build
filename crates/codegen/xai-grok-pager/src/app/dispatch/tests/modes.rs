@@ -2371,3 +2371,75 @@ fn set_plan_mode_idempotency_uses_pending_over_active() {
         "OFF transition must set optimistic pending to Some(false)"
     );
 }
+
+/// Rapid Shift+Tab presses land on the Nth ring stop and keep it: two presses
+/// with no confirmation in between leave the effective mode on Auto (the 2nd
+/// stop), with the plan and auto signals agreeing.
+#[test]
+fn rapid_cycle_presses_land_on_and_keep_the_last_stop() {
+    use crate::app::agent_view::ModeRequest;
+
+    let mut app = test_app_with_agent();
+    let id = AgentId(0);
+
+    let _ = dispatch(Action::CycleMode, &mut app);
+    let _ = dispatch(Action::CycleMode, &mut app);
+
+    let agent = app.agents.get(&id).unwrap();
+    let effective_plan = agent.plan_mode_pending.unwrap_or(agent.plan_mode_active);
+    assert!(!effective_plan, "the 2nd ring stop is Auto");
+    assert!(agent.session.is_auto(), "the displayed mode is Auto");
+    assert!(!agent.session.is_yolo(), "Auto must not arm always-approve");
+    assert_eq!(
+        app.current_ui.permission_mode.as_deref(),
+        Some("auto"),
+        "canonical mode must agree with the ring stop"
+    );
+
+    let asked: Vec<&str> = agent
+        .mode_requests
+        .iter()
+        .map(|r: &ModeRequest| r.mode_id.as_str())
+        .collect();
+    assert_eq!(
+        asked,
+        vec!["plan", "default"],
+        "the ring took exactly one step per press, in press order"
+    );
+}
+
+/// Table test for the predicate the confirmation path is guarded by: a
+/// confirmation is superseded exactly when the log holds a newer request.
+#[test]
+fn mode_confirmation_staleness_follows_the_request_log() {
+    use crate::app::agent_view::{ModeRequest, superseded_mode_request};
+    use std::collections::VecDeque;
+
+    let log = |ids: &[&str]| -> VecDeque<ModeRequest> {
+        ids.iter()
+            .enumerate()
+            .map(|(i, id)| ModeRequest {
+                seq: i as u64 + 1,
+                mode_id: id.to_string(),
+            })
+            .collect()
+    };
+    let superseded_seq = |ids: &[&str], incoming: &str| -> Option<u64> {
+        superseded_mode_request(&log(ids), incoming).map(|r| r.seq)
+    };
+
+    // No user-driven request outstanding: an agent-driven change applies.
+    assert_eq!(superseded_seq(&[], "plan"), None);
+    // The newest request's own confirmation applies.
+    assert_eq!(superseded_seq(&["plan"], "plan"), None);
+    // Plan then Auto: the plan confirmation is one press behind.
+    assert_eq!(superseded_seq(&["plan", "default"], "plan"), Some(1));
+    assert_eq!(superseded_seq(&["plan", "default"], "default"), None);
+    // A mode nobody asked for is the shell reporting its own change.
+    assert_eq!(superseded_seq(&["plan", "default"], "browser_use"), None);
+    // The ring wrapping back onto Plan supersedes the earlier Plan request.
+    let ring = ["plan", "default", "default", "orchestrator", "explore", "plan"];
+    assert_eq!(superseded_seq(&ring, "plan"), None);
+    assert_eq!(superseded_seq(&ring, "default"), Some(3));
+    assert_eq!(superseded_seq(&ring, "explore"), Some(5));
+}

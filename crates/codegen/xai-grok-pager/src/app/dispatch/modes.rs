@@ -8,6 +8,49 @@ use crate::app::app_view::{ActiveView, AppView};
 use agent_client_protocol as acp;
 use xai_grok_telemetry::session_ctx::log_event;
 
+/// Record the session-mode changes an effect list will emit, in emission
+/// order, against the agent that owns their session.
+///
+/// A mode change is applied optimistically when the user asks for it, but the
+/// shell's confirmation names only a mode. This ordered log is what attributes
+/// a confirmation to the request that caused it, so a confirmation belonging
+/// to an earlier press cannot rewind the state a later press set. See
+/// `AgentView::mode_confirmation_is_stale`.
+pub(super) fn record_mode_change_requests(app: &mut AppView, effects: &[Effect]) {
+    for effect in effects {
+        let (session_id, mode_ids): (&acp::SessionId, Vec<&str>) = match effect {
+            Effect::SetSessionMode {
+                session_id,
+                mode_id,
+            } => (session_id, vec![mode_id.0.as_ref()]),
+            Effect::SetModeThenMode {
+                session_id,
+                first_mode_id,
+                second_mode_id,
+            } => (
+                session_id,
+                vec![first_mode_id.0.as_ref(), second_mode_id.0.as_ref()],
+            ),
+            Effect::SetModeThenPrompt {
+                session_id,
+                mode_id,
+                ..
+            } => (session_id, vec![mode_id.0.as_ref()]),
+            _ => continue,
+        };
+        let Some(agent) = app
+            .agents
+            .values_mut()
+            .find(|a| a.session.session_id.as_ref() == Some(session_id))
+        else {
+            continue;
+        };
+        for mode_id in mode_ids {
+            agent.note_mode_request(mode_id);
+        }
+    }
+}
+
 /// Show the current plan: if a plan file exists, open it in the preview
 /// overlay popover. If no plan has been written yet, show a toast.
 ///
@@ -63,7 +106,7 @@ pub(super) fn dispatch_enter_plan_mode(
 
     let mode_id = acp::SessionModeId::new("plan");
 
-    if let Some(desc) = description {
+    let effects = if let Some(desc) = description {
         // Enqueue and drain: maybe_drain_queue does all synchronous turn
         // setup (scrollback, start_turn, prompt_id) and returns a SendPrompt.
         // We combine it with the mode switch into a single sequential effect
@@ -122,7 +165,9 @@ pub(super) fn dispatch_enter_plan_mode(
             session_id,
             mode_id,
         }]
-    }
+    };
+    record_mode_change_requests(app, &effects);
+    effects
 }
 
 /// Set plan mode (on / off). PAGER-owned + ACP-mediated, per-session.
@@ -187,10 +232,12 @@ pub(super) fn set_plan_mode(
         xai_grok_tools::types::SessionMode::Default.as_id()
     });
 
-    vec![Effect::SetSessionMode {
+    let effects = vec![Effect::SetSessionMode {
         session_id,
         mode_id,
-    }]
+    }];
+    record_mode_change_requests(app, &effects);
+    effects
 }
 
 /// Format the `Plan mode` toast. Non-destructive in both directions
@@ -609,6 +656,7 @@ fn collapse_to_ask_for_nudge_jump(app: &mut AppView) -> Option<Vec<Effect>> {
 pub(super) fn dispatch_cycle_mode_and_sync(app: &mut AppView) -> Vec<Effect> {
     app.permission_mode_from_soft_default = false;
     let effects = dispatch_cycle_mode_inner(app);
+    record_mode_change_requests(app, &effects);
     sync_active_auto_flag(app);
     effects
 }
