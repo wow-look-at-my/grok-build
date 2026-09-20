@@ -1,39 +1,33 @@
 //! Drives the shipped startup path that starts the CI host worker.
 //!
-//! `xai_grok_shell::config::apply_sandbox` is what the pager's `main` calls to
-//! confine a session. It starts the unsandboxed `gh` worker before the
-//! confinement is installed, because the macOS profile it applies denies the
-//! keychain mach services and a `gh` running under it has no token to send:
-//! every CI query would answer `401`. This test runs that function for real, in
-//! a child process, and then asks the questions the session itself asks:
+//! `apply_sandbox` starts the unsandboxed `gh` worker before it confines the
+//! session. This runs it for real, in a child, and asks whether the session
+//! finds the worker, gets a framed answer, is confined, and — the hand-off's
+//! contract — keeps the worker away from its OWN children.
 //!
-//!   * does the session find the worker (`ci_host::ci_host_fd`)?
-//!   * does the shipped query path (`ci_host::run_gh`) get a framed answer?
-//!   * is the process actually confined (the login keychain out of reach)?
-//!
-//! Two profiles are run. `workspace` is the one `--sandbox=workspace` uses, and
-//! it proves the whole thing on a host that can install a profile. `devbox` is
-//! the profile whose apply never refuses, so the hand-off is exercised even on a
-//! host that is already confined and cannot nest a second profile.
+//! A session confined IN PLACE keeps it. Only a Linux bwrap re-exec is handed
+//! the fd's number, and there the jail is the confinement. Both unix platforms
+//! run this: macOS installs a Seatbelt profile, Linux applies Landlock and
+//! re-execs only for a profile carrying denials.
 //!
 //! `harness = false` (see Cargo.toml): the worker child is this binary
-//! re-entered with the marker env var set and nothing else, which is how the
-//! shipped spawn starts it, and only a hand-written `main` can dispatch that.
+//! re-entered with the marker env var set and nothing else, and only a
+//! hand-written `main` can dispatch that.
 
-#[cfg(target_os = "macos")]
+#[cfg(unix)]
 use std::path::{Path, PathBuf};
 
 /// Which side of the test a spawned child runs. Absent means "the parent".
-#[cfg(target_os = "macos")]
+#[cfg(unix)]
 const MODE_ENV: &str = "GROK_CI_HOST_STARTUP_MODE";
-#[cfg(target_os = "macos")]
+#[cfg(unix)]
 const PROFILE_ENV: &str = "GROK_CI_HOST_STARTUP_PROFILE";
-#[cfg(target_os = "macos")]
+#[cfg(unix)]
 const WORKSPACE_ENV: &str = "GROK_CI_HOST_STARTUP_WORKSPACE";
-#[cfg(target_os = "macos")]
+#[cfg(unix)]
 const BRANCH_ENV: &str = "GROK_CI_HOST_STARTUP_BRANCH";
 
-#[cfg(target_os = "macos")]
+#[cfg(unix)]
 const MODE_SESSION: &str = "session";
 
 const REPORT: &str = "sandbox-ci-host-startup: ";
@@ -51,13 +45,13 @@ fn main() {
     if serve_list_protocol(TEST_NAME) {
         return;
     }
-    #[cfg(target_os = "macos")]
+    #[cfg(unix)]
     match std::env::var(MODE_ENV).as_deref() {
         Ok(MODE_SESSION) => session_child(),
         _ => parent(),
     }
-    #[cfg(not(target_os = "macos"))]
-    println!("{REPORT}skip: the profile sandbox is a macOS Seatbelt profile");
+    #[cfg(not(unix))]
+    println!("{REPORT}skip: the profile sandbox is a unix confinement");
 }
 
 /// Answer the listing a test runner asks for before it runs anything, and say
@@ -81,7 +75,7 @@ fn serve_list_protocol(name: &str) -> bool {
 
 /// The confined side: run the shipped startup call, then the session's own
 /// questions about the worker it should have.
-#[cfg(target_os = "macos")]
+#[cfg(unix)]
 fn session_child() {
     let workspace = PathBuf::from(std::env::var(WORKSPACE_ENV).expect(WORKSPACE_ENV));
     let profile = std::env::var(PROFILE_ENV).unwrap_or_else(|_| "workspace".to_string());
@@ -119,6 +113,26 @@ fn session_child() {
     if let Some(response) = &answer {
         println!("{REPORT}answer_code={}", response.code);
     }
+
+    // What an ordinary child of this session can see of the worker. A session
+    // confined in place keeps the worker to itself: the fd stays close-on-exec
+    // and its number never reaches the environment. Only a re-exec into bwrap
+    // is handed the number, and there the jail is the confinement.
+    println!(
+        "{REPORT}reexeced={}",
+        u8::from(xai_grok_sandbox::is_inside_bwrap())
+    );
+    let probe = std::process::Command::new("/bin/sh")
+        .arg("-c")
+        .arg("printf '%s' \"${GROK_CI_HOST_FD:-unset}\"")
+        .output();
+    println!(
+        "{REPORT}grandchild_env={}",
+        match &probe {
+            Ok(out) => String::from_utf8_lossy(&out.stdout).trim().to_string(),
+            Err(e) => format!("probe-failed-{e}"),
+        }
+    );
     println!("{REPORT}child_done");
 }
 
@@ -136,10 +150,18 @@ fn keychain_state() -> &'static str {
     }
 }
 
+/// There is no keychain off this platform, so nothing here says whether the
+/// confinement took. Linux proves that a different way: see the grandchild
+/// probe, which a Landlock-confined session still has to keep the worker from.
+#[cfg(all(unix, not(target_os = "macos")))]
+fn keychain_state() -> &'static str {
+    "n/a"
+}
+
 /// Whether the `gh` the worker runs exists on this host. With none, the worker
 /// still answers, but every query it runs comes back as its nothing-usable
 /// sentinel and no answer can be asserted.
-#[cfg(target_os = "macos")]
+#[cfg(unix)]
 fn gh_is_installed() -> bool {
     std::process::Command::new("gh")
         .arg("--version")
@@ -150,7 +172,7 @@ fn gh_is_installed() -> bool {
 }
 
 /// A child's report.
-#[cfg(target_os = "macos")]
+#[cfg(unix)]
 #[derive(Debug)]
 struct SessionReport {
     status: std::process::ExitStatus,
@@ -158,15 +180,27 @@ struct SessionReport {
     keychain: String,
     answered: String,
     gh: String,
+    /// What an ordinary child of the session read out of `GROK_CI_HOST_FD`.
+    grandchild_env: String,
+    /// Whether the session was the image a bwrap re-exec produced.
+    reexeced: String,
     stderr: String,
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(unix)]
 impl SessionReport {
     fn summary(&self) -> String {
         format!(
-            "status={} fd={} keychain={} answered={} gh={} stderr={:?}",
-            self.status, self.fd, self.keychain, self.answered, self.gh, self.stderr
+            "status={} fd={} keychain={} answered={} gh={} reexeced={} \
+             grandchild_env={} stderr={:?}",
+            self.status,
+            self.fd,
+            self.keychain,
+            self.answered,
+            self.gh,
+            self.reexeced,
+            self.grandchild_env,
+            self.stderr
         )
     }
 
@@ -175,7 +209,7 @@ impl SessionReport {
     }
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(unix)]
 fn parent() {
     let workspace = match repo_root() {
         Some(path) => path,
@@ -212,6 +246,7 @@ fn parent() {
             "the shipped startup path must leave the session a worker: {}",
             workspace_leg.summary()
         );
+        #[cfg(target_os = "macos")]
         assert_eq!(
             workspace_leg.keychain, "denied",
             "a `--sandbox=workspace` session must be confined (the login \
@@ -219,6 +254,7 @@ fn parent() {
             workspace_leg.summary()
         );
         assert_answered(&workspace_leg);
+        assert_worker_is_the_sessions_alone(&workspace_leg);
         println!("{REPORT}workspace_leg=applied and answering");
     }
 
@@ -237,13 +273,41 @@ fn parent() {
         devbox_leg.summary()
     );
     assert_answered(&devbox_leg);
+    assert_worker_is_the_sessions_alone(&devbox_leg);
     println!("{REPORT}PASS");
+}
+
+/// A session confined IN PLACE keeps the worker to itself.
+///
+/// The hand-off makes the worker's fd exec-surviving, and names it in the
+/// environment, only where an exec follows. Where none does, doing either
+/// leaves every child of the session holding a live socket to an UNCONFINED
+/// `gh`, with the number to read it on. That is the whole point of the fd
+/// riding a `OnceLock` instead of the environment.
+///
+/// A session that DID re-exec is the image the jail produced, and there the
+/// number is supposed to be in its environment: the jail is the confinement.
+#[cfg(unix)]
+fn assert_worker_is_the_sessions_alone(report: &SessionReport) {
+    if report.reexeced == "1" {
+        println!(
+            "{REPORT}grandchild=re-exec: the jail owns this session, so the fd's \
+             name belongs in its environment ({})",
+            report.summary()
+        );
+        return;
+    }
+    assert_eq!(
+        report.grandchild_env, "unset",
+        "a session confined in place must not hand its children the worker: {}",
+        report.summary()
+    );
 }
 
 /// The session's query has to reach the worker over the fd it published. With
 /// no `gh` on the host there is nothing for the worker to run, so only the fd is
 /// asserted and the leg says so.
-#[cfg(target_os = "macos")]
+#[cfg(unix)]
 fn assert_answered(report: &SessionReport) {
     if report.gh == "absent" {
         println!(
@@ -262,7 +326,7 @@ fn assert_answered(report: &SessionReport) {
 
 /// Re-enter this binary as a session confined by `profile`, started the way the
 /// pager starts one.
-#[cfg(target_os = "macos")]
+#[cfg(unix)]
 fn run_session_child(profile: &str, workspace: &Path) -> SessionReport {
     let mut cmd = std::process::Command::new(std::env::current_exe().expect("current exe"));
     cmd.env(MODE_ENV, MODE_SESSION)
@@ -281,6 +345,8 @@ fn run_session_child(profile: &str, workspace: &Path) -> SessionReport {
         keychain: "?".to_string(),
         answered: "?".to_string(),
         gh: "?".to_string(),
+        grandchild_env: "?".to_string(),
+        reexeced: "?".to_string(),
         stderr: clip(&stderr),
     };
     let mut saw_done = false;
@@ -296,6 +362,8 @@ fn run_session_child(profile: &str, workspace: &Path) -> SessionReport {
             ("keychain=", &mut report.keychain),
             ("answered=", &mut report.answered),
             ("gh=", &mut report.gh),
+            ("grandchild_env=", &mut report.grandchild_env),
+            ("reexeced=", &mut report.reexeced),
         ] {
             if let Some(value) = rest.strip_prefix(key) {
                 *slot = value.split_whitespace().next().unwrap_or("").to_string();
@@ -308,7 +376,7 @@ fn run_session_child(profile: &str, workspace: &Path) -> SessionReport {
     report
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(unix)]
 fn clip(text: &str) -> String {
     const MAX: usize = 600;
     if text.len() <= MAX {
@@ -320,14 +388,14 @@ fn clip(text: &str) -> String {
 
 /// The repository root, which is the workspace a `--sandbox=workspace` session
 /// in this repo confines to.
-#[cfg(target_os = "macos")]
+#[cfg(unix)]
 fn repo_root() -> Option<PathBuf> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
     let root = dunce::canonicalize(root).ok()?;
     root.join(".git").exists().then_some(root)
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(unix)]
 fn fixture_dir(name: &str) -> PathBuf {
     let path = std::env::temp_dir().join(format!(
         "grok-ci-host-startup-{}-{name}-{}",
