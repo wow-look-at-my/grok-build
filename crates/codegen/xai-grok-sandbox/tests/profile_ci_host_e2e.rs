@@ -18,7 +18,7 @@
 //!     drives the shipped query path (`ci_host::run_gh`) exactly as the `ci`
 //!     tool and the CI dot do;
 //!   * the same child, with NO worker handed in, drives the same query and gets
-//!     the in-jail `gh` — the behaviour the fix replaces.
+//!     the in-jail `gh` - the behaviour the fix replaces.
 //!
 //! The two children are told apart by where their `gh` ran: the worker queries
 //! from its own working directory (the session workspace), while the unassisted
@@ -166,11 +166,18 @@ fn parent() {
         "the confined child's query must be answered by the worker, exactly as \
          the unconfined one was: {with_worker}"
     );
-    assert!(
-        without_worker.answer.contains("not a git repository"),
-        "with no worker the query must fall through to a `gh` inside the \
-         confinement, running where the query asked: {without_worker}"
-    );
+    if without_worker.gh_ran() {
+        assert!(
+            without_worker.answer.contains("not a git repository"),
+            "with no worker the query must fall through to a `gh` inside the \
+             confinement, running where the query asked: {without_worker}"
+        );
+    } else {
+        println!(
+            "{REPORT}no-worker control=no `gh` on this host to run, so the \
+             fall-through cannot be observed here"
+        );
+    }
 
     // Where the host has an authenticated `gh`, the whole point is that the
     // confined child sees the same runs as the unsandboxed one.
@@ -326,6 +333,8 @@ struct ChildReport {
     answer: String,
     /// Whether the child's own answer was a real `gh run list` array.
     runs: String,
+    /// The exit code of the child's answer, or `-1` when no `gh` ran at all.
+    answer_code: String,
     /// Whether the keychain was already unreachable BEFORE the child applied
     /// anything: a host that is confined already cannot nest a second profile,
     /// and that is how this child says it inherited one.
@@ -338,19 +347,25 @@ struct ChildReport {
 impl ChildReport {
     fn summary(&self) -> String {
         format!(
-            "applied={} fd={} keychain={} keychain_before={} runs={} answer={} stderr={:?}",
+            "applied={} fd={} keychain={} keychain_before={} runs={} answer={} answer_code={} stderr={:?}",
             self.applied,
             self.fd,
             self.keychain,
             self.keychain_before,
             self.runs,
             self.answer,
+            self.answer_code,
             self.stderr
         )
     }
 
     fn is_run_list(&self) -> bool {
         self.runs == "yes"
+    }
+
+    /// Whether a `gh` actually ran for this child, or there was none to run.
+    fn gh_ran(&self) -> bool {
+        self.answer_code != "-1"
     }
 }
 
@@ -394,6 +409,7 @@ fn run_child(
         keychain: "?".to_string(),
         answer: "?".to_string(),
         runs: "?".to_string(),
+        answer_code: "?".to_string(),
         keychain_before: "?".to_string(),
         stderr: clip(&stderr),
     };
@@ -411,6 +427,7 @@ fn run_child(
             ("keychain_before=", &mut report.keychain_before),
             ("keychain=", &mut report.keychain),
             ("runs=", &mut report.runs),
+            ("answer_code=", &mut report.answer_code),
             ("answer_text=", &mut report.answer),
         ] {
             if let Some(value) = rest.strip_prefix(key) {
