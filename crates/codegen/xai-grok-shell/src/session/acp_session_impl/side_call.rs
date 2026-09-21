@@ -116,39 +116,29 @@ impl SessionActor {
     /// keeps reasoning verbatim so the prefix matches the last turn and the
     /// provider's prefix KV cache stays warm. Mirrors compaction's
     /// `summary_strips_reasoning`.
-    /// `slot` is the harness model slot this call belongs to. A slot the user
-    /// set brings its OWN sampler, not just its model id: the backend, the
-    /// context window and the credentials belong to the model the slot names,
-    /// and writing that id onto the session's client sends one model's id to
-    /// another model's endpoint. That costs the shared prompt-cache prefix,
-    /// which is the point of the alignment here — a user who pins the slot has
-    /// asked for the other model and pays for the cache miss.
-    ///
-    /// An unset slot, or one the session cannot reach, keeps the session's own
-    /// client, so nothing changes until a slot is pinned.
+    /// `slot` is the harness model slot this call belongs to. The slot's
+    /// model replaces the session model when the user set one. That costs
+    /// the shared prompt-cache prefix, which is the point of the alignment
+    /// here — a user who pins the slot has asked for the other model and
+    /// pays for the cache miss.
     pub(crate) async fn prepare_side_call(
         &self,
         slot: &str,
     ) -> Result<SideCallSetup, acp::Error> {
-        // One config read serves the window, model, and reasoning effort.
-        let sampling_config = self.chat_state_handle.get_sampling_config().await;
-        let reasoning_effort = sampling_config.as_ref().and_then(|c| c.reasoning_effort);
-        if let Some((client, cfg)) = self.resolve_slot_sampler(slot).await {
-            return Ok(SideCallSetup {
-                strip_reasoning: client.api_backend().requires_reasoning_strip(),
-                context_window: cfg.context_window,
-                model: cfg.model.clone(),
-                client,
-                reasoning_effort,
-            });
-        }
         let client = self.prepare_chat_completion(false).await?;
         let strip_reasoning = client.api_backend().requires_reasoning_strip();
+        // One config read serves the window, model, and reasoning effort.
+        let sampling_config = self.chat_state_handle.get_sampling_config().await;
         let context_window = sampling_config
             .as_ref()
             .map(|c| c.context_window.get())
             .unwrap_or(DEFAULT_CONTEXT_WINDOW);
-        let model = sampling_config.map(|c| c.model).unwrap_or_default();
+        let reasoning_effort = sampling_config.as_ref().and_then(|c| c.reasoning_effort);
+        let model = self
+            .harness_models
+            .get(slot)
+            .map(str::to_owned)
+            .unwrap_or_else(|| sampling_config.map(|c| c.model).unwrap_or_default());
         Ok(SideCallSetup {
             client,
             strip_reasoning,
