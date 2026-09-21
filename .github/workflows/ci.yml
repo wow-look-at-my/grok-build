@@ -292,12 +292,12 @@ jobs:
           server: ${{ env.BUILDHOST_SERVER }}
           project: ${{ env.BUILDHOST_PROJECT }}
 
-  # The one job that needs a Mac, and it does everything a Mac is needed for. Patching a Mach-O invalidates the ad-hoc signature `ld` left, and `codesign` is the only thing that puts one back, so the stamp lands here rather than leaving a second macOS job to re-sign what this one linked.
+  # One cc, and the only step in the workflow that needs a Mac. It waits on the tests as well as its bundle: it takes seconds, so starting it early buys nothing and spends a macOS runner on a tree that may not pass.
   link-darwin:
-    name: Link and stamp darwin/arm64 (macOS)
-    needs: release
+    name: Link darwin/arm64 (macOS)
+    needs: [build-release, build-test]
     runs-on: macos-14
-    timeout-minutes: 20
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
@@ -311,35 +311,6 @@ jobs:
           mkdir -p "$RUNNER_TEMP/darwin-link"
           tar -xf dist/darwin-link.tar -C "$RUNNER_TEMP/darwin-link"
           ci/darwin-relink.sh "$RUNNER_TEMP/darwin-link" "$PWD/dist/grok-darwin-arm64"
-
-      - name: Install Rust toolchain (pinned by rust-toolchain.toml)
-        run: rustup show
-
-      - name: Build the stamper
-        run: cargo build --locked --release -p xai-grok-stamp
-
-      # The stamper reads the slot back off disk after writing it, so a binary that did not take the number fails here.
-      - name: Write the release number into the binary
-        run: |
-          set -euo pipefail
-          chmod +x dist/grok-darwin-arm64
-          target/release/xai-grok-stamp dist/grok-darwin-arm64 '${{ needs.release.outputs.version }}'
-
-      - name: Re-sign the darwin binary
-        run: codesign --force --sign - dist/grok-darwin-arm64
-
-      # This runner is the arm64 Mac, so this is the darwin binary itself answering.
-      - name: Verify the darwin binary reports the release number
-        run: |
-          set -euo pipefail
-          got="$(dist/grok-darwin-arm64 --version)"
-          want="grok ${{ needs.release.outputs.version }}"
-          echo "buildhost release: $want"
-          echo "binary reports:    $got"
-          case "$got" in
-            "$want"*) echo "PASS: the stamp matches the buildhost release" ;;
-            *) echo "FAIL: the binary does not report the buildhost release" ; exit 1 ;;
-          esac
 
       - uses: wow-look-at-my/actions@cache-upload#latest
         with:
@@ -361,7 +332,7 @@ jobs:
         run: cargo test --locked -p xai-grok-sandbox
 
   publish:
-    # The darwin binary arrives stamped and signed from link-darwin, so nothing here needs a Mac.
+    # Both binaries are stamped here. Patching bytes needs no Mac, and no signature is restored afterwards: a Homebrew install clears the quarantine that would otherwise make one matter.
     needs: [release, link-darwin]
     name: Publish buildhost release
     runs-on: ubuntu-22.04
@@ -390,14 +361,16 @@ jobs:
       - name: Build the stamper
         run: cargo build --locked --release -p xai-grok-stamp
 
-      # Patching an ELF invalidates no signature, so the linux binary is stamped here. The stamper reads the slot back off disk after writing it, so a binary that did not take the number fails here.
-      - name: Write the release number into the linux binary
+      # The stamper reads each slot back off disk after writing it, so a binary that did not take the number fails here.
+      - name: Write the release number into both binaries
         run: |
           set -euo pipefail
-          chmod +x dist/grok-linux-amd64
-          target/release/xai-grok-stamp dist/grok-linux-amd64 '${{ needs.release.outputs.version }}'
+          for binary in dist/grok-linux-amd64 dist/grok-darwin-arm64; do
+            chmod +x "$binary"
+            target/release/xai-grok-stamp "$binary" '${{ needs.release.outputs.version }}'
+          done
 
-      # This runner is the linux/amd64 box, so this is the binary itself answering. The darwin binary answered for itself on the Mac that stamped it.
+      # This runner is the linux/amd64 box, so this is the binary itself answering. Nothing here can execute a Mach-O, so the darwin stamp rests on the stamper's own read-back.
       - name: Verify the linux binary reports the release number
         run: |
           set -euo pipefail
