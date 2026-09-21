@@ -200,6 +200,23 @@ jobs:
           cargo build --locked --release -p xai-darwin-link
           echo "CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER=$PWD/target/release/xai-darwin-link" >> "$GITHUB_ENV"
 
+      # The registry dependencies for this row's target, the way build-test caches its own. The digest covers the script text, and the target is in it, so each row keys its own entry without naming one.
+      - name: Build the dependencies
+        uses: wow-look-at-my/actions@cached-run#latest
+        with:
+          key: rustdeps-release
+          paths: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target/${{ matrix.target }}/release/deps
+            target/${{ matrix.target }}/release/build
+            target/${{ matrix.target }}/release/.fingerprint
+          run: |
+            # ${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+            cargo build --locked --release --target ${{ matrix.target }} -p xai-grok-pager-bin
+            ci/cache-deps.sh prune target/${{ matrix.target }}/release
+
       # On the darwin row the link at the end of this records itself into GROK_DARWIN_LINK_BUNDLE rather than running.
       - name: Build release binary
         run: cargo build --locked --release --target ${{ matrix.target }} -p xai-grok-pager-bin
