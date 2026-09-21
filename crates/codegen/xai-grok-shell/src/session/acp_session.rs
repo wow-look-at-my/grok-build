@@ -2190,6 +2190,9 @@ mod goal_planner_e2e_tests;
 #[path = "acp_session_tests/interjection_tests.rs"]
 mod interjection_tests;
 #[cfg(test)]
+#[path = "acp_session_tests/harness_slot_side_call_tests.rs"]
+mod harness_slot_side_call_tests;
+#[cfg(test)]
 #[path = "acp_session_tests/recap_display_only_tests.rs"]
 mod recap_display_only_tests;
 #[cfg(test)]

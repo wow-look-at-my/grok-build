@@ -723,6 +723,19 @@ impl SessionActor {
         slot: &str,
     ) -> Option<(xai_grok_sampler::SamplingClient, xai_grok_sampler::SamplerConfig)> {
         let slug = self.harness_models.get(slot)?.to_string();
+        self.resolve_sampler_for_model(slot, &slug).await
+    }
+    /// [`Self::resolve_slot_sampler`] for a model named by something other
+    /// than a slot — `[memory] flush_model` is the narrower key that still
+    /// wins over its slot, and it needs the same catalog resolution.
+    ///
+    /// `label` names the caller in the warnings.
+    pub(crate) async fn resolve_sampler_for_model(
+        &self,
+        label: &str,
+        slug: &str,
+    ) -> Option<(xai_grok_sampler::SamplingClient, xai_grok_sampler::SamplerConfig)> {
+        let slug = slug.to_string();
         let active_session_config = self.reconstruct_full_config().await;
         if slug == active_session_config.model {
             return None;
@@ -731,7 +744,7 @@ impl SessionActor {
             Some(cfg) => cfg,
             None => {
                 tracing::warn!(
-                    slot,
+                    slot = label,
                     model = %slug,
                     "harness model slot names a model this session cannot reach; using the session model"
                 );
@@ -748,7 +761,7 @@ impl SessionActor {
             Ok(client) => Some((client, cfg)),
             Err(e) => {
                 tracing::warn!(
-                    slot,
+                    slot = label,
                     model = %slug,
                     error = %e,
                     "harness model slot sampler build failed; using the session model"

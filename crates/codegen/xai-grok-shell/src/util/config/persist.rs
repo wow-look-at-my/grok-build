@@ -235,6 +235,75 @@ mod tests {
     use toml::Value as TomlValue;
     use toml::map::Map as TomlMap;
 
+    /// Every harness model slot survives the whole write path: the settings
+    /// modal's writer sets the field, `merge_section` serializes `[models]`,
+    /// the file is re-read, and the session's own resolver answers with the
+    /// model that was picked.
+    ///
+    /// The two halves are written independently — one match on the slot id in
+    /// `settings_writes`, another in `Config::harness_model_from_config` — so
+    /// nothing else catches a pair that names different fields.
+    #[test]
+    fn every_harness_model_slot_round_trips_from_the_settings_write_to_the_resolver() {
+        for slot in xai_grok_models::HARNESS_MODEL_SLOTS {
+            let mut models = crate::agent::config::ModelsConfig::default();
+            super::super::settings_writes::apply_harness_model(
+                &mut models,
+                slot.id,
+                Some(format!("pinned-{}", slot.id)),
+            );
+
+            let mut root = TomlMap::new();
+            merge_section(&mut root, "models", &models);
+            let on_disk = toml::to_string_pretty(&TomlValue::Table(root)).unwrap();
+
+            let reread: TomlValue = toml::from_str(&on_disk).unwrap();
+            let cfg = crate::agent::config::Config::new_from_toml_cfg(&reread)
+                .unwrap_or_else(|e| panic!("`{}` wrote unparseable config: {e}", slot.id));
+            assert_eq!(
+                cfg.resolve_harness_model(slot.id).map(|r| r.value),
+                Some(format!("pinned-{}", slot.id)),
+                "`{}` was written to [models] as `{on_disk}` and did not resolve back",
+                slot.id
+            );
+        }
+    }
+
+    /// Clearing a slot removes its key, so the resolver falls back again.
+    /// Setting the field to `None` only stops it serializing, which would
+    /// leave the model already on disk in place under a "cleared" toast.
+    #[test]
+    fn clearing_a_harness_model_slot_removes_its_key_from_the_file() {
+        for slot in xai_grok_models::HARNESS_MODEL_SLOTS {
+            let mut models = crate::agent::config::ModelsConfig::default();
+            super::super::settings_writes::apply_harness_model(
+                &mut models,
+                slot.id,
+                Some("pinned".to_string()),
+            );
+            let mut root = TomlMap::new();
+            merge_section(&mut root, "models", &models);
+
+            // The clear path: the field goes to `None` and the removal pass
+            // drops the key `set_harness_model` names.
+            super::super::settings_writes::apply_harness_model(&mut models, slot.id, None);
+            merge_section(&mut root, "models", &models);
+            if let Some(TomlValue::Table(section)) = root.get_mut("models") {
+                section.remove(slot.id);
+            }
+
+            let reread: TomlValue =
+                toml::from_str(&toml::to_string_pretty(&TomlValue::Table(root)).unwrap()).unwrap();
+            let cfg = crate::agent::config::Config::new_from_toml_cfg(&reread).unwrap();
+            assert_eq!(
+                cfg.resolve_harness_model(slot.id).map(|r| r.value),
+                slot.compiled_default().map(str::to_owned),
+                "a cleared `{}` must fall back, not keep the pin",
+                slot.id
+            );
+        }
+    }
+
     /// The `[toolset.ask_user_question]` settings write merges only that
     /// sub-table: the toggled field lands, hand-written sibling keys survive,
     /// and no other `[toolset]` defaults (bash/web_search) are splatted into
