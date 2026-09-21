@@ -396,52 +396,26 @@ jobs:
             *) echo "FAIL: the binary does not report the buildhost release" ; exit 1 ;;
           esac
 
-      # The CLI takes a plain bearer, and buildhost accepts a GitHub OIDC token as one. Its audience is the server URL.
-      - name: Mint a buildhost bearer from GitHub OIDC
-        uses: wow-look-at-my/actions@typescript#latest
+      # Each upload is the org action, not the CLI. buildhost publishes its CLI as one APE, so `?os=linux` serves the same MZ file a Mac gets, and this runner's binfmt handler claims that magic: `run-detectors: unable to find an interpreter`. The action is TypeScript, mints its own OIDC bearer, and chunks a body past the edge's cap by itself.
+      - name: Upload the linux binary
+        uses: wow-look-at-my/buildhost/.github/actions/buildhost-upload-artifact@master
         with:
-          script: |
-            const server = "${{ env.BUILDHOST_SERVER }}";
-            const token = await core.getIDToken(server);
-            core.setSecret(token);
-            core.exportVariable("BUILDHOST_TOKEN", token);
+          server: ${{ env.BUILDHOST_SERVER }}
+          project: ${{ env.BUILDHOST_PROJECT }}
+          version: ${{ needs.release.outputs.version }}
+          os: linux
+          arch: amd64
+          path: dist/grok-linux-amd64
 
-      - name: Install the buildhost CLI
-        run: |
-          set -euo pipefail
-          curl -fLo "$RUNNER_TEMP/buildhost" \
-            "https://dl.pazer.build/buildhost?os=linux&arch=amd64"
-          chmod +x "$RUNNER_TEMP/buildhost"
-          "$RUNNER_TEMP/buildhost" version
-
-      # Both uploads at once. The CLI chunks a body past the edge's cap by itself, and `--draft` keeps each call from publishing the release out from under the other.
-      - name: Upload both binaries in parallel
-        run: |
-          set -euo pipefail
-          upload() {
-            "$RUNNER_TEMP/buildhost" publish \
-              --server '${{ env.BUILDHOST_SERVER }}' \
-              --token "$BUILDHOST_TOKEN" \
-              --project '${{ env.BUILDHOST_PROJECT }}' \
-              --version '${{ needs.release.outputs.version }}' \
-              --os "$1" --arch "$2" --kind binary \
-              --artifact "dist/grok-$1-$2" \
-              --draft
-          }
-          upload linux amd64 &
-          linux=$!
-          upload darwin arm64 &
-          darwin=$!
-          # Both are waited on before either exit code is read, so one failure never leaves the other upload orphaned.
-          linux_status=0
-          darwin_status=0
-          wait "$linux" || linux_status=$?
-          wait "$darwin" || darwin_status=$?
-          echo "linux/amd64 exit $linux_status, darwin/arm64 exit $darwin_status"
-          if [ "$linux_status" -ne 0 ] || [ "$darwin_status" -ne 0 ]; then
-            echo "FAIL: an upload did not complete"
-            exit 1
-          fi
+      - name: Upload the darwin binary
+        uses: wow-look-at-my/buildhost/.github/actions/buildhost-upload-artifact@master
+        with:
+          server: ${{ env.BUILDHOST_SERVER }}
+          project: ${{ env.BUILDHOST_PROJECT }}
+          version: ${{ needs.release.outputs.version }}
+          os: darwin
+          arch: arm64
+          path: dist/grok-darwin-arm64
 
       - name: Publish release
         uses: wow-look-at-my/buildhost/.github/actions/buildhost-publish-release@master
