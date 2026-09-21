@@ -117,40 +117,38 @@ jobs:
         with:
           name: cargo-timings-build-test
 
-  # One matrix over every release target. Each row compiles on Linux: only the darwin link needs a Mac, and publish does it. No `needs`: the release number is written in after the link, so a row starts at t=0 beside the tests.
+  # Every release target, enabled or not. A disabled row stays declared and is filtered out of the matrix, so turning one on is a single field. The filter is a job because `strategy` reads no context a workflow-level list could sit in, and a job-level `if` cannot see `matrix`.
+  release-targets:
+    name: Plan the release targets
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    outputs:
+      rows: ${{ steps.rows.outputs.rows }}
+    steps:
+      - id: rows
+        run: |
+          cat > rows.json <<'JSON'
+          [
+            {"name": "linux/amd64",   "runs-on": "ubuntu-22.04",   "target": "x86_64-unknown-linux-gnu",  "darwin": false, "enabled": true},
+            {"name": "darwin/arm64",  "runs-on": "ubuntu-22.04",   "target": "aarch64-apple-darwin",      "darwin": true,  "enabled": true},
+            {"name": "windows/amd64", "runs-on": "windows-latest", "target": "x86_64-pc-windows-msvc",    "darwin": false, "enabled": false},
+            {"name": "windows/arm64", "runs-on": "windows-latest", "target": "aarch64-pc-windows-msvc",   "darwin": false, "enabled": false}
+          ]
+          JSON
+          jq -e 'length > 0' rows.json > /dev/null
+          echo "rows=$(jq -c '[.[] | select(.enabled)]' rows.json)" >> "$GITHUB_OUTPUT"
+          jq -r '.[] | "\(.name): \(if .enabled then "enabled" else "DISABLED" end)"' rows.json
+
   build-release:
     name: Build release (${{ matrix.name }})
-    # A disabled row is skipped here rather than deleted from the matrix, so it stays visible and turns on by flipping one field.
-    if: matrix.enabled
+    needs: release-targets
     runs-on: ${{ matrix.runs-on }}
     timeout-minutes: 45
     strategy:
       # One target's failure leaves the others' results worth reading.
       fail-fast: false
       matrix:
-        include:
-          # ubuntu-22.04 holds every GLIBC_x.y dependency at or below what a 22.04 user has.
-          - name: linux/amd64
-            runs-on: ubuntu-22.04
-            target: x86_64-unknown-linux-gnu
-            darwin: false
-            enabled: true
-          - name: darwin/arm64
-            runs-on: ubuntu-22.04
-            target: aarch64-apple-darwin
-            darwin: true
-            enabled: true
-          # DISABLED, not removed. msvc has no cross from Linux, so these rows carry their own runner. Flip `enabled` to turn one on.
-          - name: windows/amd64
-            runs-on: windows-latest
-            target: x86_64-pc-windows-msvc
-            darwin: false
-            enabled: false
-          - name: windows/arm64
-            runs-on: windows-latest
-            target: aarch64-pc-windows-msvc
-            darwin: false
-            enabled: false
+        include: ${{ fromJSON(needs.release-targets.outputs.rows) }}
     env:
       SDKROOT: ${{ github.workspace }}/.darwin-sdk
       GROK_DARWIN_LINK_BUNDLE: ${{ github.workspace }}/.darwin-link
@@ -273,6 +271,31 @@ jobs:
           name: grok-linux-amd64
           path: dist/grok-linux-amd64
 
+  # The link is the one step that needs a Mac. It waits on the tests as well as its bundle: it takes seconds, so starting it early buys nothing and spends a macOS runner on a tree that may not pass.
+  link-darwin:
+    name: Link darwin/arm64 (macOS)
+    needs: [build-release, build-test]
+    runs-on: macos-14
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: wow-look-at-my/actions@cache-download#latest
+        with:
+          name: darwin-link-bundle
+          path: dist
+
+      - name: Link the darwin binary
+        run: |
+          mkdir -p "$RUNNER_TEMP/darwin-link"
+          tar -xf dist/darwin-link.tar -C "$RUNNER_TEMP/darwin-link"
+          ci/darwin-relink.sh "$RUNNER_TEMP/darwin-link" "$PWD/dist/grok-darwin-arm64"
+
+      - uses: wow-look-at-my/actions@cache-upload#latest
+        with:
+          name: grok-darwin-arm64
+          path: dist/grok-darwin-arm64
+
   # The jail and the CI host worker have a macOS half (Seatbelt, sandbox-exec) that a Linux runner cannot execute. This crate is small enough to compile natively here.
   test-darwin-sandbox:
     name: Test sandbox crate (macOS)
@@ -289,7 +312,7 @@ jobs:
 
   publish:
     # Every test AND every build first: a number is only assigned to a tree that already built and passed.
-    needs: [build-test, test-darwin-sandbox, build-release]
+    needs: [build-test, test-darwin-sandbox, build-release, link-darwin]
     name: Publish buildhost release
     # macOS because patching an arm64 Mach-O invalidates the ad-hoc signature `ld` left, and `codesign` is the only thing that puts one back. The linux binary is stamped here too: patching an ELF needs no Linux.
     runs-on: macos-14
@@ -309,15 +332,8 @@ jobs:
 
       - uses: wow-look-at-my/actions@cache-download#latest
         with:
-          name: darwin-link-bundle
+          name: grok-darwin-arm64
           path: dist
-
-      # One cc over a bundle Linux built. It took 8 s as a job of its own, against a macOS runner's minute of startup, so it rides the macOS job that already exists.
-      - name: Link the darwin binary
-        run: |
-          mkdir -p "$RUNNER_TEMP/darwin-link"
-          tar -xf dist/darwin-link.tar -C "$RUNNER_TEMP/darwin-link"
-          ci/darwin-relink.sh "$RUNNER_TEMP/darwin-link" "$PWD/dist/grok-darwin-arm64"
 
       - name: Install Rust toolchain (pinned by rust-toolchain.toml)
         run: rustup show
