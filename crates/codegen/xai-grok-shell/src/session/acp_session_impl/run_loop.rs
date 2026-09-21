@@ -541,6 +541,17 @@ pub(super) async fn run_session(
                     // Drain any monitor events that were routed to the mid-turn buffer
                     // but arrived after the turn ended (race between is_turn_active and buffer push).
                     session.drain_monitor_buffer_to_pending().await;
+                    // Backstop for a `/compact` armed mid-turn: a turn that
+                    // answered in one pass reaches no second pre-sampling
+                    // boundary, so nothing inside it ran the request. Spawned,
+                    // not awaited — a compaction on this loop blocks the Cancel
+                    // the user presses to stop it.
+                    if session.has_pending_manual_compact() {
+                        let s = session.clone();
+                        tokio::task::spawn_local(async move {
+                            s.run_pending_manual_compact().await;
+                        });
+                    }
                     if let Some((message, retry_can_clear)) = infra_pause {
                         session
                             .apply_infra_pause_after_turn_err(message, retry_can_clear)
@@ -1110,8 +1121,7 @@ pub(super) async fn run_session(
                         SessionCommand::CompactSession { user_context, respond_to } => {
                             let s = session.clone();
                             tokio::task::spawn_local(async move {
-                                let compact_session = s.run_compact(user_context).await;
-                                let _ = respond_to.send(compact_session);
+                                s.compact_on_request(user_context, respond_to).await;
                             });
                         }
                         SessionCommand::ReloadPlugins { registry } => {

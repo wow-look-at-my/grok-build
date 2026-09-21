@@ -25,6 +25,22 @@ pub(crate) const SUPPRESS_UNTIL_SUCCESS: u8 = 3;
 /// (waiting for a sample deadlocks when context is already over the window).
 pub(crate) const SUPPRESS_AUTH: u8 = 4;
 
+/// A `/compact` the user asked for while a turn was running.
+///
+/// Compaction REPLACES the conversation wholesale
+/// (`replace_conversation_for_compaction`), so running it beside a live turn
+/// destroys every tool call and response that turn appends after the snapshot.
+/// The turn instead runs this at its next pre-sampling boundary, where no model
+/// call is in flight, and at turn end if it reaches no further boundary.
+pub(crate) struct PendingManualCompact {
+    /// The command's argument, from `/compact <instructions>`.
+    pub instructions: Option<String>,
+    /// The waiting `x.ai/compact_conversation` caller. Held until the
+    /// compaction actually runs, so the client reports the real outcome
+    /// instead of a success for work that has not happened.
+    pub respond_to: tokio::sync::oneshot::Sender<Result<(), agent_client_protocol::Error>>,
+}
+
 /// Model slug and context window from the previous turn.
 #[derive(Clone, Debug)]
 pub(crate) struct PreviousModelInfo {
@@ -207,6 +223,9 @@ pub(crate) struct CompactionConfig {
     pub threshold_percent: Cell<u8>,
     /// Debug: when set, next auto-compact check triggers unconditionally.
     pub force_compact: Arc<AtomicBool>,
+    /// See [`PendingManualCompact`]. `Cell` because `SessionActor` is `!Send`.
+    /// Default `None`: nothing is pending until a `/compact` lands mid-turn.
+    pub pending_manual_compact: Cell<Option<PendingManualCompact>>,
     /// Auto-compaction suppression state (`SUPPRESS_*`) after a deterministic
     /// failure; the gates early-return unless `SUPPRESS_NONE`. Manual `/compact` ignores it.
     pub auto_compact_suppressed: AtomicU8,

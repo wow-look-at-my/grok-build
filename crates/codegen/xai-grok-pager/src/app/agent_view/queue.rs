@@ -362,10 +362,11 @@ impl AgentView {
 
     /// Whether [`Self::force_interject_queue_row`] will actually deliver
     /// `id` rather than bounce it off the "Can't send this now" toast: any
-    /// server row (the shell folds any kind), or a local Prompt-kind row
-    /// (plain or an expanded skill — its wire_blocks rides along). A local
-    /// bash/command/cron row is neither: it runs from block meta this path
-    /// has no field for.
+    /// server row (the shell folds any kind), a local Prompt-kind row (plain
+    /// or an expanded skill — its wire_blocks rides along), or a local
+    /// Command row (`/compact`, which sends as its own request). A local
+    /// bash/cron row is neither: it runs from block meta this path has no
+    /// field for.
     fn queue_row_force_sendable(&self, id: u64) -> bool {
         let Some(row) = self.queue.row_ref(id) else {
             return false;
@@ -373,11 +374,14 @@ impl AgentView {
         if row.origin == crate::views::queue_pane::QueueRowOrigin::Server {
             return true;
         }
-        self.session
-            .pending_prompts
-            .iter()
-            .find(|p| p.id == id)
-            .is_some_and(|p| p.kind == crate::app::agent::QueueEntryKind::Prompt)
+        self.session.pending_prompts.iter().any(|p| {
+            p.id == id
+                && matches!(
+                    p.kind,
+                    crate::app::agent::QueueEntryKind::Prompt
+                        | crate::app::agent::QueueEntryKind::Command
+                )
+        })
     }
 
     /// Send one merged-queue row now (cancel-and-send), by selection id. The
@@ -416,16 +420,27 @@ impl AgentView {
             }
             return InputOutcome::Changed;
         }
-        // Local rows: only Prompt-kind rows can re-send. Bash/command/cron
-        // rows run from block meta this action has no field for, so they
-        // stay queued — an expanded skill's wire_blocks rides along below,
-        // so it no longer needs the same refusal.
-        let is_prompt_kind = self
+        let local_kind = self
             .session
             .pending_prompts
             .iter()
             .find(|p| p.id == id)
-            .is_some_and(|p| p.kind == crate::app::agent::QueueEntryKind::Prompt);
+            .map(|p| p.kind);
+        // A queued `/compact` sends now. It does not cancel the turn the way
+        // a prompt send-now does: the shell arms it and the turn compacts at
+        // its next safe point, which is the whole reason a long task no
+        // longer has to end before the context can be reclaimed.
+        if local_kind == Some(crate::app::agent::QueueEntryKind::Command)
+            && let Some(row) = self.remove_local_queue_row(id)
+        {
+            self.show_toast("Compacting at this turn's next safe point");
+            return InputOutcome::Action(Action::CompactNow { text: row.text });
+        }
+        // Local rows: only Prompt-kind rows can re-send. Bash/cron rows run
+        // from block meta this action has no field for, so they stay queued —
+        // an expanded skill's wire_blocks rides along below, so it no longer
+        // needs the same refusal.
+        let is_prompt_kind = local_kind == Some(crate::app::agent::QueueEntryKind::Prompt);
         if !is_prompt_kind {
             self.show_toast("Can't send this now — it runs when the current turn ends");
             return InputOutcome::Changed;
