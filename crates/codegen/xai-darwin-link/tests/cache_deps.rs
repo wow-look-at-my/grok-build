@@ -1,20 +1,27 @@
 //! Drives `ci/cache-deps.sh prune` over a synthetic target directory.
+//!
+//! The prune decides what the dependency cache entry carries. Over-matching deletes a
+//! registry artifact the entry exists to hold. Under-matching leaves this workspace's own
+//! test binaries in it, which are most of the bytes.
+//!
+//! It lives beside the tests for `ci/darwin-relink.sh` and `ci/zig-cc` because this crate
+//! is where a `ci/` script's test goes. A crate holding nothing but this test would add a
+//! workspace member, and that moves `Cargo.lock`, which is the key the cache entry uses.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 fn repo_root() -> PathBuf {
-	// CARGO_MANIFEST_DIR is <root>/crates/codegen/xai-ci-scripts.
 	Path::new(env!("CARGO_MANIFEST_DIR"))
 		.ancestors()
 		.nth(3)
-		.expect("manifest dir has a repo root above it")
+		.expect("the manifest dir has a repo root above it")
 		.to_path_buf()
 }
 
 /// A `cargo` that answers `metadata` and nothing else, so the check states its own
-/// workspace rather than depending on what this repo happens to contain today.
+/// workspace rather than depending on what this repo happens to hold today.
 fn stub_cargo(dir: &Path, metadata: &str) -> PathBuf {
 	let bin = dir.join("bin");
 	fs::create_dir_all(&bin).unwrap();
@@ -36,8 +43,9 @@ fn touch(path: PathBuf) {
 #[test]
 #[cfg_attr(not(unix), ignore = "cache-deps.sh is a POSIX shell script")]
 fn prune_keeps_registry_artifacts_and_takes_every_workspace_one() {
-	let tmp = tempfile::tempdir().unwrap();
-	let profile = tmp.path().join("target/debug");
+	let tmp = Path::new(env!("CARGO_TARGET_TMPDIR")).join("cache-deps");
+	let _ = fs::remove_dir_all(&tmp);
+	let profile = tmp.join("target/debug");
 
 	let workspace = [
 		"deps/libxai_grok_pager-aaaa.rlib",
@@ -66,7 +74,7 @@ fn prune_keeps_registry_artifacts_and_takes_every_workspace_one() {
  {"name":"xai-grok-pager","targets":[{"name":"xai-grok-pager"},{"name":"pty_e2e_smoke"}]},
  {"name":"xai-grok-shell","targets":[{"name":"xai-grok-shell"}]},
  {"name":"xai-grok-pager-pty-harness","targets":[{"name":"xai-grok-pager-pty-harness"}]}]}"#;
-	let bin = stub_cargo(tmp.path(), metadata);
+	let bin = stub_cargo(&tmp, metadata);
 	let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap_or_default());
 
 	let out = Command::new(repo_root().join("ci/cache-deps.sh"))

@@ -13079,13 +13079,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "xai-ci-scripts"
-version = "0.1.0"
-dependencies = [
- "tempfile",
-]
-
-[[package]]
 name = "xai-circuit-breaker"
 version = "0.1.0"
 dependencies = [

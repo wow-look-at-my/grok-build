@@ -117,11 +117,43 @@ jobs:
         with:
           name: cargo-timings-build-test
 
+  # One matrix over every release target. Each row compiles on Linux: only the darwin link needs a Mac, and publish does it. No `needs`: the release number is written in after the link, so a row starts at t=0 beside the tests.
   build-release:
-    name: Build release binary (linux/amd64)
-    # Every Linux job is ubuntu-22.04 so they share one cache. Here it also matters for output: glibc 2.35 holds every GLIBC_x.y dependency at or below what a 22.04 user has. No `needs`: the release number is written in after the link, so this starts at t=0 beside the tests.
-    runs-on: ubuntu-22.04
+    name: Build release (${{ matrix.name }})
+    # A disabled row is skipped here rather than deleted from the matrix, so it stays visible and turns on by flipping one field.
+    if: matrix.enabled
+    runs-on: ${{ matrix.runs-on }}
     timeout-minutes: 45
+    strategy:
+      # One target's failure leaves the others' results worth reading.
+      fail-fast: false
+      matrix:
+        include:
+          # ubuntu-22.04 holds every GLIBC_x.y dependency at or below what a 22.04 user has.
+          - name: linux/amd64
+            runs-on: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            darwin: false
+            enabled: true
+          - name: darwin/arm64
+            runs-on: ubuntu-22.04
+            target: aarch64-apple-darwin
+            darwin: true
+            enabled: true
+          # DISABLED, not removed. msvc has no cross from Linux, so these rows carry their own runner. Flip `enabled` to turn one on.
+          - name: windows/amd64
+            runs-on: windows-latest
+            target: x86_64-pc-windows-msvc
+            darwin: false
+            enabled: false
+          - name: windows/arm64
+            runs-on: windows-latest
+            target: aarch64-pc-windows-msvc
+            darwin: false
+            enabled: false
+    env:
+      SDKROOT: ${{ github.workspace }}/.darwin-sdk
+      GROK_DARWIN_LINK_BUNDLE: ${{ github.workspace }}/.darwin-link
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
@@ -129,20 +161,67 @@ jobs:
 
       - uses: ./.github/actions/setup-cargo-timings
 
+      - name: Add the target
+        run: rustup target add ${{ matrix.target }}
+
+      # zig compiles the C in the build scripts for macOS. It never links: xai-darwin-link records that step instead.
+      - name: Install zig (pinned 0.14.1)
+        if: matrix.darwin
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/zig.tar.xz" https://ziglang.org/download/0.14.1/zig-x86_64-linux-0.14.1.tar.xz
+          echo "24aeeec8af16c381934a6cd7d95c807a8cb2cf7df9fa40d359aa884195c4716c  $RUNNER_TEMP/zig.tar.xz" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/zig"
+          tar -xJf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP/zig" --strip-components=1
+          echo "$RUNNER_TEMP/zig" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/zig/zig" version
+
+      # aws-lc-sys and its siblings include Apple headers (CoreServices, CoreFoundation), which zig does not carry.
+      - name: Install the macOS SDK (pinned 14.5)
+        if: matrix.darwin
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/sdk.tar.xz" \
+            https://github.com/joseluisq/macosx-sdks/releases/download/14.5/MacOSX14.5.sdk.tar.xz
+          echo "6e146275d19f027faa2e8354da5e0267513abf013b8f16ad65a231653a2b1c5d  $RUNNER_TEMP/sdk.tar.xz" | sha256sum -c -
+          mkdir -p "$SDKROOT"
+          tar -xJf "$RUNNER_TEMP/sdk.tar.xz" -C "$SDKROOT" --strip-components=1
+
       # .cargo/config.toml links x86_64-unknown-linux-gnu with mold. Restored files need no apt index, so the version the image's index pins and the mirror has dropped stops mattering.
       - name: Install mold
         uses: wow-look-at-my/actions@cached-apt#latest
         with:
           packages: mold
 
-      - name: Build release binary
-        run: cargo build --locked --release -p xai-grok-pager-bin
+      # cc-rs reads these per-target. ci/zig-cc replaces the target cc-rs chooses, which zig rejects; ar and ranlib take no target.
+      - name: Point the C toolchain at zig
+        if: matrix.darwin
+        run: |
+          printf '#!/bin/sh\nexec zig ar "$@"\n' > "$RUNNER_TEMP/zig-ar"
+          printf '#!/bin/sh\nexec zig ranlib "$@"\n' > "$RUNNER_TEMP/zig-ranlib"
+          chmod +x "$RUNNER_TEMP/zig-ar" "$RUNNER_TEMP/zig-ranlib"
+          {
+            echo "CC_aarch64_apple_darwin=$PWD/ci/zig-cc"
+            echo "CXX_aarch64_apple_darwin=$PWD/ci/zig-cxx"
+            echo "AR_aarch64_apple_darwin=$RUNNER_TEMP/zig-ar"
+            echo "RANLIB_aarch64_apple_darwin=$RUNNER_TEMP/zig-ranlib"
+          } >> "$GITHUB_ENV"
 
-      # Proves the slot is reachable and that a stamp reaches `--version`, on a COPY so the uploaded artifact stays unstamped for the real number.
+      # The recorder is a host binary, so it takes no --target.
+      - name: Build the link recorder
+        if: matrix.darwin
+        run: |
+          cargo build --locked --release -p xai-darwin-link
+          echo "CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER=$PWD/target/release/xai-darwin-link" >> "$GITHUB_ENV"
+
+      # On the darwin row the link at the end of this records itself into GROK_DARWIN_LINK_BUNDLE rather than running.
+      - name: Build release binary
+        run: cargo build --locked --release --target ${{ matrix.target }} -p xai-grok-pager-bin
+
+      # Proves the slot is reachable and that a stamp reaches `--version`, on a COPY so the uploaded artifact stays unstamped for the real number. Only a row whose output this runner can execute.
       - name: Probe the version stamp on a copy
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
         run: |
           cargo build --locked --release -p xai-grok-stamp
-          cp target/release/xai-grok-pager "$RUNNER_TEMP/probe"
+          cp target/${{ matrix.target }}/release/xai-grok-pager "$RUNNER_TEMP/probe"
           target/release/xai-grok-stamp "$RUNNER_TEMP/probe" 0.0.0-slot-probe
           got="$("$RUNNER_TEMP/probe" --version)"
           echo "stamped copy reports: $got"
@@ -153,9 +232,10 @@ jobs:
 
       # Guards the floor the build above buys: a symbol newer than 2.35 is a load error on Ubuntu 22.04.
       - name: Verify glibc symbols are <= 2.35 (linux/amd64)
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
         shell: bash
         run: |
-          max_glibc="$(readelf --version-info target/release/xai-grok-pager 2>/dev/null \
+          max_glibc="$(readelf --version-info target/${{ matrix.target }}/release/xai-grok-pager 2>/dev/null \
             | grep -oE 'GLIBC_[0-9]+\.[0-9]+' | sed 's/GLIBC_//' | sort -V | tail -n1)"
           echo "max GLIBC symbol referenced: ${max_glibc:-none}"
           if [[ -z "$max_glibc" ]]; then exit 1; fi
@@ -168,121 +248,30 @@ jobs:
 
       - uses: ./.github/actions/upload-cargo-timings
         with:
-          name: cargo-timings-build-release
+          name: cargo-timings-build-release-${{ matrix.target }}
 
-      - name: Stage artifact
-        run: |
-          mkdir -p dist
-          cp target/release/xai-grok-pager dist/grok-linux-amd64
-
-      - uses: wow-look-at-my/actions@cache-upload#latest
-        with:
-          name: grok-linux-amd64
-          path: dist/grok-linux-amd64
-
-  # Every crate of the darwin binary compiles here. Only the link needs a Mac, and it is its own job below.
-  build-darwin-objects:
-    name: Compile darwin/arm64 (Linux)
-    # No `needs`, for the same reason as build-release: nothing here needs a release number.
-    runs-on: ubuntu-22.04
-    timeout-minutes: 45
-    env:
-      SDKROOT: ${{ github.workspace }}/.darwin-sdk
-      GROK_DARWIN_LINK_BUNDLE: ${{ github.workspace }}/.darwin-link
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-
-      # protoc runs on the host for this cross build; the shared action installs the Linux binary.
-      - uses: ./.github/actions/setup-protoc
-
-      - uses: ./.github/actions/setup-cargo-timings
-
-      - name: Add the darwin target
-        run: rustup target add aarch64-apple-darwin
-
-      # zig compiles the C in the build scripts for macOS. It never links here: xai-darwin-link records that step instead.
-      - name: Install zig (pinned 0.14.1)
-        run: |
-          curl -fsSL -o "$RUNNER_TEMP/zig.tar.xz" https://ziglang.org/download/0.14.1/zig-x86_64-linux-0.14.1.tar.xz
-          echo "24aeeec8af16c381934a6cd7d95c807a8cb2cf7df9fa40d359aa884195c4716c  $RUNNER_TEMP/zig.tar.xz" | sha256sum -c -
-          mkdir -p "$RUNNER_TEMP/zig"
-          tar -xJf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP/zig" --strip-components=1
-          echo "$RUNNER_TEMP/zig" >> "$GITHUB_PATH"
-          "$RUNNER_TEMP/zig/zig" version
-
-      # aws-lc-sys and its siblings include Apple headers (CoreServices, CoreFoundation), which zig does not carry.
-      - name: Install the macOS SDK (pinned 14.5)
-        run: |
-          curl -fsSL -o "$RUNNER_TEMP/sdk.tar.xz" \
-            https://github.com/joseluisq/macosx-sdks/releases/download/14.5/MacOSX14.5.sdk.tar.xz
-          echo "6e146275d19f027faa2e8354da5e0267513abf013b8f16ad65a231653a2b1c5d  $RUNNER_TEMP/sdk.tar.xz" | sha256sum -c -
-          mkdir -p "$SDKROOT"
-          tar -xJf "$RUNNER_TEMP/sdk.tar.xz" -C "$SDKROOT" --strip-components=1
-
-      # Restored files need no apt index, so the version the image's index pins and the mirror has dropped stops mattering.
-      - name: Install mold
-        uses: wow-look-at-my/actions@cached-apt#latest
-        with:
-          packages: mold
-
-      # cc-rs reads these per-target. ci/zig-cc replaces the target cc-rs chooses, which zig rejects; ar and ranlib take no target.
-      - name: Point the C toolchain at zig
-        run: |
-          printf '#!/bin/sh\nexec zig ar "$@"\n' > "$RUNNER_TEMP/zig-ar"
-          printf '#!/bin/sh\nexec zig ranlib "$@"\n' > "$RUNNER_TEMP/zig-ranlib"
-          chmod +x "$RUNNER_TEMP/zig-ar" "$RUNNER_TEMP/zig-ranlib"
-          {
-            echo "CC_aarch64_apple_darwin=$PWD/ci/zig-cc"
-            echo "CXX_aarch64_apple_darwin=$PWD/ci/zig-cxx"
-            echo "AR_aarch64_apple_darwin=$RUNNER_TEMP/zig-ar"
-            echo "RANLIB_aarch64_apple_darwin=$RUNNER_TEMP/zig-ranlib"
-          } >> "$GITHUB_ENV"
-
-      - name: Build the link recorder
-        run: |
-          cargo build --locked --release -p xai-darwin-link
-          echo "CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER=$PWD/target/release/xai-darwin-link" >> "$GITHUB_ENV"
-
-      # The link at the end of this records itself into GROK_DARWIN_LINK_BUNDLE rather than running.
-      - name: Compile every crate for darwin/arm64
-        run: cargo build --locked --release --target aarch64-apple-darwin -p xai-grok-pager-bin
-
-      - uses: ./.github/actions/upload-cargo-timings
-        with:
-          name: cargo-timings-build-darwin-objects
-
+      # The darwin row hands over the recorded link instead of a binary, because the link has not run yet.
       - name: Bundle the recorded link
+        if: matrix.darwin
         run: ci/darwin-bundle.sh "$GROK_DARWIN_LINK_BUNDLE" dist/darwin-link.tar
 
       - uses: wow-look-at-my/actions@cache-upload#latest
+        if: matrix.darwin
         with:
           name: darwin-link-bundle
           path: dist/darwin-link.tar
 
-  # The only macOS job in this workflow: one cc invocation over a bundle Linux built.
-  link-darwin:
-    name: Link darwin/arm64 (macOS)
-    needs: build-darwin-objects
-    runs-on: macos-14
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-
-      - uses: wow-look-at-my/actions@cache-download#latest
-        with:
-          name: darwin-link-bundle
-          path: dist
-
-      - name: Link the darwin binary
+      - name: Stage artifact
+        if: '!matrix.darwin'
         run: |
-          mkdir -p "$RUNNER_TEMP/darwin-link"
-          tar -xf dist/darwin-link.tar -C "$RUNNER_TEMP/darwin-link"
-          ci/darwin-relink.sh "$RUNNER_TEMP/darwin-link" "$PWD/dist/grok-darwin-arm64"
+          mkdir -p dist
+          cp target/${{ matrix.target }}/release/xai-grok-pager dist/grok-linux-amd64
 
       - uses: wow-look-at-my/actions@cache-upload#latest
+        if: '!matrix.darwin'
         with:
-          name: grok-darwin-arm64
-          path: dist/grok-darwin-arm64
+          name: grok-linux-amd64
+          path: dist/grok-linux-amd64
 
   # The jail and the CI host worker have a macOS half (Seatbelt, sandbox-exec) that a Linux runner cannot execute. This crate is small enough to compile natively here.
   test-darwin-sandbox:
@@ -300,7 +289,7 @@ jobs:
 
   publish:
     # Every test AND every build first: a number is only assigned to a tree that already built and passed.
-    needs: [build-test, test-darwin-sandbox, build-release, link-darwin]
+    needs: [build-test, test-darwin-sandbox, build-release]
     name: Publish buildhost release
     # macOS because patching an arm64 Mach-O invalidates the ad-hoc signature `ld` left, and `codesign` is the only thing that puts one back. The linux binary is stamped here too: patching an ELF needs no Linux.
     runs-on: macos-14
@@ -320,8 +309,15 @@ jobs:
 
       - uses: wow-look-at-my/actions@cache-download#latest
         with:
-          name: grok-darwin-arm64
+          name: darwin-link-bundle
           path: dist
+
+      # One cc over a bundle Linux built. It took 8 s as a job of its own, against a macOS runner's minute of startup, so it rides the macOS job that already exists.
+      - name: Link the darwin binary
+        run: |
+          mkdir -p "$RUNNER_TEMP/darwin-link"
+          tar -xf dist/darwin-link.tar -C "$RUNNER_TEMP/darwin-link"
+          ci/darwin-relink.sh "$RUNNER_TEMP/darwin-link" "$PWD/dist/grok-darwin-arm64"
 
       - name: Install Rust toolchain (pinned by rust-toolchain.toml)
         run: rustup show

@@ -12,7 +12,6 @@ members = [
     "crates/codegen/xai-acp-lib",
     "crates/codegen/xai-agent-lifecycle",
     "crates/codegen/xai-chat-state",
-    "crates/codegen/xai-ci-scripts",
     "crates/codegen/xai-codebase-graph",
     "crates/codegen/xai-crash-handler",
     "crates/codegen/xai-darwin-link",
