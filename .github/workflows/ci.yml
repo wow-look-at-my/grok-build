@@ -365,6 +365,12 @@ jobs:
       - name: Install Rust toolchain (pinned by rust-toolchain.toml)
         run: rustup show
 
+      # .cargo/config.toml links x86_64-unknown-linux-gnu with mold, and this job compiles the stamper. Without it `cc` answers "cannot find 'ld'".
+      - name: Install mold
+        uses: wow-look-at-my/actions@cached-apt#latest
+        with:
+          packages: mold
+
       - name: Build the stamper
         run: cargo build --locked --release -p xai-grok-stamp
 

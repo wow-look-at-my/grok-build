@@ -51,12 +51,24 @@ prune)
 		printf 'cache-deps:   %-28s %6d MB\n' "$label" "$((bytes / 1048576))"
 	}
 	cargo_home="${CARGO_HOME:-$HOME/.cargo}"
-	group 'deps/*.rlib' "$dir/deps" -maxdepth 1 -name '*.rlib'
-	group 'deps/*.rmeta' "$dir/deps" -maxdepth 1 -name '*.rmeta'
-	group 'deps/*.so' "$dir/deps" -maxdepth 1 -name '*.so'
-	group 'deps/*.d' "$dir/deps" -maxdepth 1 -name '*.d'
-	group 'deps, everything else' "$dir/deps" -maxdepth 1 -type f \
-		! -name '*.rlib' ! -name '*.rmeta' ! -name '*.so' ! -name '*.d'
+
+	# deps/ is reported by file extension. A hand-named "everything else" bucket
+	# hides what it holds, and that bucket was the one worth naming.
+	if [ -d "$dir/deps" ]; then
+		find "$dir/deps" -maxdepth 1 -type f -printf '%s %f\n' 2>/dev/null |
+			awk '{
+				ext = "(no extension)"
+				if (match($2, /\.[A-Za-z0-9_]+$/)) { ext = substr($2, RSTART) }
+				total[ext] += $1
+				count[ext] += 1
+			}
+			END {
+				for (e in total) {
+					printf "cache-deps:   deps/*%-22s %6d MB  %d files\n",
+						e, total[e] / 1048576, count[e]
+				}
+			}' | sort -k3 -rn
+	fi
 	group 'build, script binaries' "$dir/build" -type f -name 'build-script-*' ! -name '*.d'
 	group 'build, out trees' "$dir/build" -type f -path '*/out/*'
 	group 'build, everything else' "$dir/build" -type f \
