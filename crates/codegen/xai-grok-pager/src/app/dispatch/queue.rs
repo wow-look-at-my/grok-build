@@ -310,6 +310,18 @@ fn format_cron_prompt(prompt: &str, task_id: &str, human_schedule: &str) -> Stri
     xai_grok_tools::reminders::format_scheduled_task_prompt(prompt, task_id, human_schedule)
 }
 
+/// The `<instructions>` half of a `/compact <instructions>` row, or `None` for
+/// a bare `/compact`. The row carries the command word because it is re-emitted
+/// verbatim (`CompactCommand::run`), and the shell wants the argument alone.
+pub(super) fn compact_instructions(text: &str) -> Option<String> {
+    let rest = text
+        .trim_start()
+        .strip_prefix("/compact")
+        .unwrap_or(text)
+        .trim();
+    (!rest.is_empty()).then(|| rest.to_string())
+}
+
 /// Try to send the next queued entry (prompt, command, bash, or cron) if the agent is idle.
 ///
 /// Called after enqueue operations and task completions to advance the queue.
@@ -612,6 +624,7 @@ pub(super) fn maybe_drain_queue(agent: &mut AgentView) -> QueueDrain {
                 effects: vec![Effect::Compact {
                     agent_id,
                     session_id,
+                    user_context: compact_instructions(&queued.text),
                 }],
                 page_flip_entry: None,
             }

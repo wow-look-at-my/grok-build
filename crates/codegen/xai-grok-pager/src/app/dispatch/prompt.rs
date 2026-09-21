@@ -1626,10 +1626,13 @@ pub(super) fn handle_compact_complete(
             }
             Err(err) => {
                 tracing::error!(agent = ?agent_id, error = %err, "Compaction failed");
+                // The error reaches here already sanitized and length-capped
+                // (`sanitize_user_error` on the Compact effect). Blanking it
+                // renders a bare "Compaction failed." — a manual `/compact`
+                // emits no `AutoCompactFailed` notification, so this block is
+                // the ONLY place the reason can reach the user at all.
                 agent.scrollback.push_block(RenderBlock::session_event(
-                    SessionEvent::CompactionFailed {
-                        error: String::new(),
-                    },
+                    SessionEvent::CompactionFailed { error: err.clone() },
                 ));
             }
         }

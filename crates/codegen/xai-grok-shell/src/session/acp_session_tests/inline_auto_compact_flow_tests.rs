@@ -117,6 +117,7 @@ async fn create_test_actor(
         forked_tool_override: None,
         compaction: crate::session::compaction_config::CompactionConfig {
             threshold_percent: std::cell::Cell::new(threshold_percent),
+            pending_manual_compact: std::cell::Cell::new(None),
             force_compact: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             context_window_override: None,
             count: std::sync::atomic::AtomicU64::new(0),
@@ -573,6 +574,7 @@ async fn create_test_actor_with_memory(
         forked_tool_override: None,
         compaction: crate::session::compaction_config::CompactionConfig {
             threshold_percent: std::cell::Cell::new(threshold_percent),
+            pending_manual_compact: std::cell::Cell::new(None),
             force_compact: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             context_window_override: None,
             count: std::sync::atomic::AtomicU64::new(0),
@@ -1508,6 +1510,7 @@ async fn test_e2e_idle_resume_refreshes_model_metadata() {
                 forked_tool_override: None,
                 compaction: crate::session::compaction_config::CompactionConfig {
                     threshold_percent: std::cell::Cell::new(85),
+                    pending_manual_compact: std::cell::Cell::new(None),
                     force_compact: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
                     context_window_override: None,
                     count: std::sync::atomic::AtomicU64::new(0),
@@ -1941,6 +1944,78 @@ async fn reseed_context_budget_output_cap_floors_near_a_full_window() {
                 .0
                 .clone();
             assert_eq!(cfg.context_budget_max_output_bytes, Some(4_000));
+        })
+        .await;
+}
+
+/// A `/compact` that lands while a turn is running is ARMED, not run.
+/// Compaction replaces the conversation wholesale, so running one beside a
+/// live turn destroys what that turn appends. The caller stays parked on its
+/// oneshot until the turn's own safe point runs the request.
+#[tokio::test(flavor = "current_thread")]
+async fn a_mid_turn_compact_is_armed_rather_than_run() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (gateway_tx, _g) = mpsc::unbounded_channel();
+            let (persistence_tx, _p) = mpsc::unbounded_channel();
+            let actor = std::sync::Arc::new(
+                create_test_actor(10_000, 200_000, 85, gateway_tx, persistence_tx).await,
+            );
+            {
+                let mut state = actor.state.lock().await;
+                state.running_task = Some(running_task_stub("running"));
+            }
+            let (tx, mut rx) = tokio::sync::oneshot::channel();
+            actor
+                .compact_on_request(Some("keep the auth notes".to_string()), tx)
+                .await;
+            assert!(
+                actor.has_pending_manual_compact(),
+                "the request must be armed for the turn's next boundary"
+            );
+            assert!(
+                rx.try_recv().is_err(),
+                "answering the caller now reports a compaction that has not run"
+            );
+            // A second request neither displaces the armed one nor reports a
+            // success it will not get: its instructions would be dropped.
+            let (tx2, mut rx2) = tokio::sync::oneshot::channel();
+            actor.compact_on_request(None, tx2).await;
+            assert!(
+                matches!(rx2.try_recv(), Ok(Err(_))),
+                "a second /compact is refused out loud, not silently discarded"
+            );
+            assert!(
+                actor.has_pending_manual_compact(),
+                "the first request survives the second"
+            );
+            // Reading the flag must not consume the request.
+            assert!(actor.has_pending_manual_compact());
+        })
+        .await;
+}
+
+/// With no turn running there is nothing to race, so the request runs inline
+/// and never arms. This actor has no model behind it, so the compaction
+/// fails — what matters is that the caller is answered rather than parked.
+#[tokio::test(flavor = "current_thread")]
+async fn an_idle_compact_runs_inline_and_arms_nothing() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (gateway_tx, _g) = mpsc::unbounded_channel();
+            let (persistence_tx, _p) = mpsc::unbounded_channel();
+            let actor = std::sync::Arc::new(
+                create_test_actor(10_000, 200_000, 85, gateway_tx, persistence_tx).await,
+            );
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            actor.compact_on_request(None, tx).await;
+            assert!(
+                !actor.has_pending_manual_compact(),
+                "an idle /compact must not arm a mid-turn request"
+            );
+            assert!(rx.await.is_ok(), "the caller must be answered");
         })
         .await;
 }
