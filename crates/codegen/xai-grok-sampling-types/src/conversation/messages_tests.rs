@@ -710,32 +710,36 @@ fn thinking_without_a_recorded_origin_is_replayed() {
     assert_eq!(thinking_blocks(&req).len(), 1);
 }
 
-/// The recovery the sampler applies when the server rejects a signature
-/// anyway: the block stops being thinking, its words stay as assistant text,
-/// and the turn it belongs to stays.
+/// The recovery the sampler applies when the server rejects a signature the
+/// table let through: the level steps to `TextOnly`, and the block that was
+/// the model's own stops being thinking. Its words stay as assistant text. One
+/// more step and nothing of it reaches the wire.
 #[test]
-fn reasoning_to_plain_text_keeps_the_words_and_drops_the_signature() {
-    let mut req = ConversationRequest::from_items(switched_model_conversation(Some("grok-4-fast")))
-        .with_model("claude-opus-5");
-
-    assert_eq!(req.reasoning_to_plain_text(), 1);
-    assert_eq!(req.reasoning_to_plain_text(), 0, "no reasoning left");
-    assert!(thinking_blocks(&req).is_empty());
+fn a_rejected_signature_steps_the_replay_level_down() {
+    let mut req =
+        ConversationRequest::from_items(switched_model_conversation(Some("claude-opus-5")))
+            .with_model("claude-opus-5");
     assert_eq!(
-        req.items.len(),
-        4,
-        "the reasoning became a fourth item, as assistant text: {:?}",
-        req.items
+        thinking_blocks(&req).len(),
+        1,
+        "the model's own block is replayed"
     );
-    let has_thinking_text = req.items.iter().any(|item| match item {
-        ConversationItem::Assistant(a) => a.content.contains("<thinking>"),
-        _ => false,
-    });
+
+    assert!(req.degrade_thinking_replay());
+    assert!(thinking_blocks(&req).is_empty());
+    let text = request_text(&req);
     assert!(
-        has_thinking_text,
-        "the reasoning text must survive as a plain message: {:?}",
-        req.items
+        text.contains("<thinking>") && text.contains("weighing the options"),
+        "the words survive as a plain message: {text}"
     );
+
+    assert!(req.degrade_thinking_replay());
+    assert!(thinking_blocks(&req).is_empty());
+    assert!(
+        !request_text(&req).contains("weighing the options"),
+        "scrubbed means the words are gone too"
+    );
+    assert!(!req.degrade_thinking_replay(), "the ladder ends");
 }
 
 /// Switching models mid-tool-loop: the turn the provider is being asked to

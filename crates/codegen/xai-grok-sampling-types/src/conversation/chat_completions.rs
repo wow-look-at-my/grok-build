@@ -308,8 +308,14 @@ impl From<ChatResponseMessage> for ConversationItem {
 
 impl From<ConversationRequest> for ChatCompletionRequest {
     fn from(req: ConversationRequest) -> Self {
+        // `reasoning_content` is unverified text, so `Native` and `TextOnly`
+        // are one and the same here. Only `Scrubbed` changes the body.
+        let items = match req.thinking_replay {
+            ThinkingReplay::Scrubbed => apply_thinking_replay(req.items, ThinkingReplay::Scrubbed),
+            ThinkingReplay::Native | ThinkingReplay::TextOnly => req.items,
+        };
         let messages: Vec<ChatRequestMessage> =
-            conversation_to_chat_messages_with_profile(req.items, req.chat_message_profile);
+            conversation_to_chat_messages_with_profile(items, req.chat_message_profile);
 
         let tools_is_empty = req.tools.is_empty();
         let tools: Option<Vec<ToolDefinition>> = if tools_is_empty {

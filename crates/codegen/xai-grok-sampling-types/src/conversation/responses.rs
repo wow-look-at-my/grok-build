@@ -165,11 +165,41 @@ impl From<&ConversationRequest> for rs::CreateResponse {
 /// Reasoning items stay top-level siblings rather than folding into the
 /// assistant, so the input replays the model's original order.
 pub(super) fn build_responses_input(req: &ConversationRequest) -> rs::InputParam {
+    // A model that returns `encrypted_content` signs. Nothing else on this
+    // backend says so, so the conversation's own evidence is the whole plan.
+    let plan = ThinkingReplayPlan::new(req, false);
+    let mut left_behind = 0usize;
     let items: Vec<rs::InputItem> = req
         .items
         .iter()
-        .flat_map(conversation_item_to_input_items)
+        .enumerate()
+        .flat_map(|(idx, item)| match item {
+            ConversationItem::Reasoning(r) => match plan.disposition(&req.items, idx, r) {
+                ThinkingDisposition::Native => conversation_item_to_input_items(item),
+                ThinkingDisposition::Text => {
+                    left_behind += 1;
+                    vec![rs::InputItem::EasyMessage(rs::EasyInputMessage {
+                        r#type: rs::MessageType::Message,
+                        role: rs::Role::Assistant,
+                        content: rs::EasyInputContent::Text(thinking_as_text(r)),
+                    })]
+                }
+                ThinkingDisposition::Drop => {
+                    left_behind += 1;
+                    Vec::new()
+                }
+            },
+            other => conversation_item_to_input_items(other),
+        })
         .collect();
+    if left_behind > 0 {
+        tracing::warn!(
+            left_behind,
+            model = req.model.as_deref().unwrap_or_default(),
+            level = plan.level().as_str(),
+            "reasoning item(s) this model cannot take were sent as text or left out"
+        );
+    }
     rs::InputParam::Items(items)
 }
 

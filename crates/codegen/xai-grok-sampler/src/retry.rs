@@ -191,8 +191,9 @@ pub enum RetryDecision {
     /// Payload Too Large or image processing rejection).
     RetryWithImageStrip,
 
-    /// Retry after dropping replayed reasoning from the request (a thinking
-    /// block whose signature this model cannot verify).
+    /// Retry with the request's thinking replay stepped down one level (a
+    /// thinking block whose signature, or `encrypted_content`, this model
+    /// cannot take).
     RetryWithReasoningStrip,
 
     /// Retry after marking the target reasoning-mandatory and remapping a
@@ -239,11 +240,18 @@ pub fn classify_error(
     if err.is_auth_error() {
         return RetryDecision::EmitToSession(clone_error(err));
     }
-    if err.is_encrypted_content_error() {
-        return RetryDecision::EmitToSession(clone_error(err));
-    }
     if max_retries == 0 {
         return RetryDecision::Fatal(clone_error(err));
+    }
+
+    // A blob another model minted, on either backend. It has to come before
+    // the status-code arms below, which would call this 400 fatal: the blocks
+    // are in conversation history, so every following turn on the same
+    // history fails the same way. The replay level steps down and the
+    // request goes again. The session's own flatten-and-resubmit covers what
+    // is left once the level is spent.
+    if err.is_encrypted_content_error() || err.is_thinking_signature_error() {
+        return RetryDecision::RetryWithReasoningStrip;
     }
 
     // 413 Payload Too Large: strip inline images and try once. The
@@ -267,14 +275,6 @@ pub fn classify_error(
     // session.
     if err.is_image_input_unsupported_error() {
         return RetryDecision::RetryWithImageStrip;
-    }
-
-    // A thinking block signed by another model. Like the image arms it has to
-    // come before the status-code arms below, which would call this 400 fatal:
-    // the blocks are in conversation history, so every following turn on the
-    // same history fails the same way with no way out but a new session.
-    if err.is_thinking_signature_error() {
-        return RetryDecision::RetryWithReasoningStrip;
     }
 
     // The provider mandates reasoning and we sent a disabling/omitting body
@@ -697,15 +697,15 @@ mod tests {
     }
 
     #[test]
-    fn classify_encrypted_content_emits_to_session() {
+    fn classify_encrypted_content_steps_the_replay_level_down() {
         let err = api_err(
             StatusCode::BAD_REQUEST,
             "Could not decrypt the provided encrypted_content",
         );
-        match classify_error(&err, 0, 5, RATE_LIMIT_RETRY_THRESHOLD) {
-            RetryDecision::EmitToSession(_) => {}
-            other => panic!("expected EmitToSession, got {other:?}"),
-        }
+        assert!(matches!(
+            classify_error(&err, 0, 5, RATE_LIMIT_RETRY_THRESHOLD),
+            RetryDecision::RetryWithReasoningStrip
+        ));
     }
 
     /// A rejected thinking signature is a 400, which every other rule calls

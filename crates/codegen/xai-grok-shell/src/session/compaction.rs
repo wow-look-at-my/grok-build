@@ -1055,11 +1055,25 @@ impl SessionActor {
             );
             span.record("compaction_trigger", trigger_str);
         }
-        let summary_strips_reasoning = sampling_config
-            .as_ref()
-            .map(|c| c.api_backend == ApiBackend::Messages)
-            .unwrap_or(false);
         let model_id = sampling_config.map(|c| c.model).unwrap_or_default();
+        // A pinned `[models] compaction` brings its own client AND config:
+        // the backend and the window belong to the model, not to the
+        // session. An unpinned slot keeps both as they were.
+        let (sampling_client, sampling_config) = match self.resolve_slot_sampler("compaction").await
+        {
+            Some((client, cfg)) => (client, cfg),
+            None => (
+                self.prepare_chat_completion(false).await?,
+                self.reconstruct_full_config().await,
+            ),
+        };
+        // The summary needs none of the thinking. It stays only where it
+        // buys a prompt-cache hit: the same model, on a backend that takes a
+        // block it did not mint as text. A Messages target rejects a block
+        // whose text the tool-message step mutated. Another model reads
+        // none of the blobs, and its own summary is the whole point.
+        let summary_strips_reasoning = sampling_config.api_backend == ApiBackend::Messages
+            || !xai_grok_sampling_types::same_model(&model_id, &sampling_config.model);
         let compaction = xai_grok_telemetry::events::CompactionScope::begin(
             trigger,
             tokens_before,
@@ -1146,17 +1160,6 @@ impl SessionActor {
             return Err(acp::Error::internal_error()
                 .data("Compaction failed: no system message in simplified conversation"));
         }
-        // A pinned `[models] compaction` brings its own client AND config:
-        // the backend and the window belong to the model, not to the
-        // session. An unpinned slot keeps both as they were.
-        let (sampling_client, sampling_config) = match self.resolve_slot_sampler("compaction").await
-        {
-            Some((client, cfg)) => (client, cfg),
-            None => (
-                self.prepare_chat_completion(false).await?,
-                self.reconstruct_full_config().await,
-            ),
-        };
         let backend_search_active = self.backend_search_active();
         let effective_tool_defs: Vec<xai_grok_sampling_types::ToolDefinition> = self
             .prepare_tool_definitions()
@@ -1240,6 +1243,10 @@ impl SessionActor {
         };
         let mut request_turns = simplified_messages.clone();
         let mut input_overflow_rejections: u32 = 0;
+        // The wire builders leave another model's thinking behind on their
+        // own. This ladder is for the blob they let through: a same-model
+        // check the server disagrees with, or an origin nobody recorded.
+        let mut thinking_stage = xai_grok_sampling_types::ThinkingReplay::Native;
         let two_pass_output = self
             .try_two_pass_pass2_apply(user_context.as_deref(), summary_strips_reasoning)
             .await;
@@ -1317,7 +1324,7 @@ impl SessionActor {
                                 "Compaction input overflowed deterministically; stepping down the input ladder to avoid an incompactable state"
                             );
                             let conv = self.chat_state_handle.get_conversation().await;
-                            request_turns = match stage {
+                            let refit = match stage {
                                 InputStage::VerbatimFitted => {
                                     let budget = context_window
                                         .saturating_sub(SUMMARY_BUDGET_RESERVE_TOKENS)
@@ -1344,6 +1351,10 @@ impl SessionActor {
                                     unreachable!("ladder only steps forward")
                                 }
                             };
+                            request_turns = xai_grok_sampling_types::apply_thinking_replay(
+                                refit,
+                                thinking_stage,
+                            );
                             input_stage = stage;
                             continue;
                         }
@@ -1359,6 +1370,33 @@ impl SessionActor {
                         }
                         last_error = Some(acp::Error::internal_error().data(message));
                         break;
+                    }
+                    if deterministic
+                        && xai_grok_sampling_types::names_replayed_thinking(&message)
+                        && let Some(stage) = thinking_stage.degraded()
+                    {
+                        xai_grok_telemetry::session_ctx::log_event(
+                            xai_grok_telemetry::events::CompactionRetryDegraded {
+                                trigger,
+                                reason: "thinking_replay",
+                                from_stage: Some(thinking_stage.as_str()),
+                                to_stage: Some(stage.as_str()),
+                                summary_chars: None,
+                                attempt: observer.attempt_count(),
+                                context_window,
+                                compaction_id: compaction.compaction_id.clone(),
+                            },
+                        );
+                        tracing::warn!(
+                            session_id = %self.session_info.id.0,
+                            ?stage,
+                            error = %message,
+                            "Compaction model rejected replayed thinking; stepping the replay level down"
+                        );
+                        request_turns =
+                            xai_grok_sampling_types::apply_thinking_replay(request_turns, stage);
+                        thinking_stage = stage;
+                        continue;
                     }
                     if deterministic {
                         last_failure_outcome = CompactionOutcome::Deterministic;
@@ -3325,6 +3363,84 @@ mod inline_auto_compact_flow_tests {
                 assert!(
                     saw_retry_auth,
                     "expected RetryState::Failed auth so pager can stash + reauth"
+                );
+            })
+            .await;
+    }
+    /// The compaction model rejects a replayed thinking block it cannot verify.
+    /// The ladder sends the words as text and the summary lands. The rejection
+    /// is neither a deterministic failure nor a reason to suppress AUTO.
+    #[tokio::test(flavor = "current_thread")]
+    async fn e2e_compact_steps_the_thinking_replay_down_on_a_signature_rejection() {
+        use crate::session::compaction_config::SUPPRESS_NONE;
+        use std::sync::atomic::Ordering::Relaxed;
+        use xai_grok_test_support::MockInferenceServer;
+        use xai_grok_test_support::scripted::ScriptedResponse;
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let (gateway_tx, _gateway_rx) = mpsc::unbounded_channel();
+                let (persistence_tx, _persistence_rx) = mpsc::unbounded_channel();
+                let actor = Arc::new(
+                    create_test_actor(180_000, 200_000, 85, gateway_tx, persistence_tx).await,
+                );
+                let server = MockInferenceServer::start().await.unwrap();
+                server.enqueue_response(
+                    "/v1/chat/completions",
+                    ScriptedResponse::json(
+                        400,
+                        serde_json::json!({"error": {
+                            "type": "invalid_request_error",
+                            "message": "messages.3.content.0: Invalid `signature` in `thinking` block",
+                        }}),
+                    ),
+                );
+                server.set_response("Summary of the work so far. ".repeat(20));
+                let mut cfg = actor.chat_state_handle.get_sampling_config().await.unwrap();
+                cfg.base_url = server.url();
+                actor.chat_state_handle.update_sampling_config(cfg);
+                // No `model_id` on the assistant: nothing records who minted the
+                // block, so the builder replays it and the server has to object.
+                actor.chat_state_handle.replace_conversation(vec![
+                    ConversationItem::system("sys"),
+                    ConversationItem::user("hello"),
+                    ConversationItem::Reasoning(xai_grok_sampling_types::rs::ReasoningItem {
+                        id: "r1".into(),
+                        summary: vec![xai_grok_sampling_types::rs::SummaryPart::SummaryText(
+                            xai_grok_sampling_types::rs::SummaryTextContent {
+                                text: "weighing the options".into(),
+                            },
+                        )],
+                        content: None,
+                        encrypted_content: Some("sig-from-another-model".into()),
+                        status: None,
+                    }),
+                    ConversationItem::assistant("hi"),
+                    ConversationItem::user("compact me"),
+                ]);
+                actor
+                    .run_compact_only(AutoCompactTriggerInfo {
+                        tokens_used: 180_000,
+                        context_window: 200_000,
+                        percentage: 90,
+                    })
+                    .await
+                    .expect("the ladder must carry the compaction past the rejection");
+                let bodies = server.request_bodies();
+                assert_eq!(bodies.len(), 2, "one rejection, one retry: {bodies:#?}");
+                let retry = serde_json::to_string(&bodies[1]).unwrap();
+                assert!(
+                    !retry.contains("reasoning_content") && !retry.contains("sig-from-another-model"),
+                    "the retry carries no typed reasoning: {retry}"
+                );
+                assert!(
+                    retry.contains("<thinking>") && retry.contains("weighing the options"),
+                    "the retry carries the words as text: {retry}"
+                );
+                assert_eq!(
+                    actor.compaction.auto_compact_suppressed.load(Relaxed),
+                    SUPPRESS_NONE,
+                    "a rejection the ladder answered must not suppress AUTO"
                 );
             })
             .await;

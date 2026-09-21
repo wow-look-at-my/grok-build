@@ -1775,3 +1775,116 @@ fn todo_capture_loop_keeps_reasoning_with_its_function_call() {
          got {reasoning_at} / {call_at} / {output_at}"
     );
 }
+
+/// The input items a request sends, each reduced to what the test reads: a
+/// reasoning item as `("reasoning", encrypted_content)`, an assistant text as
+/// `("assistant", text)`.
+fn reasoning_and_assistant_items(req: &ConversationRequest) -> Vec<(&'static str, String)> {
+    let cr: rs::CreateResponse = req.into();
+    let rs::InputParam::Items(items) = cr.input else {
+        panic!("expected Items input");
+    };
+    items
+        .iter()
+        .filter_map(|item| match item {
+            rs::InputItem::Item(rs::Item::Reasoning(r)) => {
+                Some(("reasoning", r.encrypted_content.clone().unwrap_or_default()))
+            }
+            rs::InputItem::EasyMessage(rs::EasyInputMessage {
+                role: rs::Role::Assistant,
+                content: rs::EasyInputContent::Text(text),
+                ..
+            }) => Some(("assistant", text.clone())),
+            _ => None,
+        })
+        .collect()
+}
+
+fn encrypted_turn(origin: &str, summary: &str) -> Vec<ConversationItem> {
+    vec![
+        ConversationItem::user("q1"),
+        reasoning_sibling("r1", summary, Some("enc-blob-from-origin")),
+        ConversationItem::assistant_with_model("The answer.", origin),
+        ConversationItem::user("q2"),
+    ]
+}
+
+/// A Responses model reads its own `encrypted_content` and nobody else's. On a
+/// switch the blob stays home and the summary rides as assistant text, so the
+/// next model still knows what the last one was thinking.
+#[test]
+fn encrypted_reasoning_from_another_model_rides_as_its_summary() {
+    let req = ConversationRequest::from_items(encrypted_turn("grok-4", "carry the one"))
+        .with_model("grok-3-mini");
+    let items = reasoning_and_assistant_items(&req);
+    assert!(
+        !items.iter().any(|(kind, _)| *kind == "reasoning"),
+        "the blob must not reach another model: {items:?}"
+    );
+    assert!(
+        items
+            .iter()
+            .any(|(kind, text)| *kind == "assistant" && text.contains("carry the one")),
+        "the summary must: {items:?}"
+    );
+    assert!(
+        items.iter().any(|(_, text)| text == "The answer."),
+        "the turn it belongs to stays: {items:?}"
+    );
+}
+
+/// The same turn back on its own model, under an alias or a snapshot date,
+/// replays the blob untouched.
+#[test]
+fn encrypted_reasoning_replays_to_its_own_model() {
+    for target in ["grok-4", "xai/grok-4", "grok-4-20260101"] {
+        let req = ConversationRequest::from_items(encrypted_turn("grok-4", "carry the one"))
+            .with_model(target);
+        let items = reasoning_and_assistant_items(&req);
+        assert!(
+            items
+                .iter()
+                .any(|(kind, blob)| *kind == "reasoning" && blob == "enc-blob-from-origin"),
+            "{target}: the model's own blob must be replayed: {items:?}"
+        );
+    }
+}
+
+/// A blob with no summary has nothing to say as text, so on a switch it goes.
+#[test]
+fn encrypted_reasoning_without_a_summary_is_left_out_on_a_switch() {
+    let req =
+        ConversationRequest::from_items(encrypted_turn("grok-4", "")).with_model("grok-3-mini");
+    let items = reasoning_and_assistant_items(&req);
+    assert_eq!(
+        items,
+        vec![("assistant", "The answer.".to_string())],
+        "nothing of the block reaches the other model"
+    );
+}
+
+/// The ladder the sampler walks on a rejection: `TextOnly` sends the words
+/// and no blob even to the minting model, `Scrubbed` sends nothing.
+#[test]
+fn the_replay_level_steps_a_responses_request_down() {
+    let mut req = ConversationRequest::from_items(encrypted_turn("grok-4", "carry the one"))
+        .with_model("grok-4");
+    assert!(req.degrade_thinking_replay());
+    let items = reasoning_and_assistant_items(&req);
+    assert!(
+        !items.iter().any(|(kind, _)| *kind == "reasoning"),
+        "TextOnly: no blob: {items:?}"
+    );
+    assert!(
+        items.iter().any(|(_, text)| text.contains("carry the one")),
+        "TextOnly: the words: {items:?}"
+    );
+
+    assert!(req.degrade_thinking_replay());
+    let items = reasoning_and_assistant_items(&req);
+    assert_eq!(
+        items,
+        vec![("assistant", "The answer.".to_string())],
+        "Scrubbed: nothing of the block"
+    );
+}
