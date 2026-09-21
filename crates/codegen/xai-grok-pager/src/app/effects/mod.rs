@@ -1591,6 +1591,7 @@ pub(crate) fn execute(
         }
         Effect::Compact { agent_id, session_id, user_context } => {
             let tx = acp_tx.clone();
+            let is_api_key_auth = session_flags.is_api_key_auth;
             tasks
                 .spawn(async move {
                     let params = serde_json::json!({

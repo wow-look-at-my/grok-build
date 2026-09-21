@@ -677,7 +677,8 @@ impl SessionActor {
         user_context: Option<String>,
         respond_to: tokio::sync::oneshot::Sender<Result<(), acp::Error>>,
     ) {
-        if self.state.lock().await.running_task.is_none() {
+        let turn_in_flight = self.state.lock().await.running_task.is_some();
+        if !turn_in_flight {
             let _ = respond_to.send(self.run_compact(user_context).await);
             return;
         }
@@ -3044,6 +3045,24 @@ mod inline_auto_compact_flow_tests {
                 );
             })
             .await;
+    }
+    /// The advice and the provider's own words are both kept, and a long
+    /// provider body is cut rather than carried whole into a status line.
+    #[test]
+    fn compose_compact_failure_keeps_advice_and_detail() {
+        assert_eq!(compose_compact_failure("do X.", ""), "do X.");
+        assert_eq!(compose_compact_failure("do X.", "   "), "do X.");
+        assert_eq!(compose_compact_failure("do X.", "  why  "), "do X. — why");
+        let long = "é".repeat(COMPACT_FAILURE_DETAIL_LIMIT + 50);
+        let composed = compose_compact_failure("do X.", &long);
+        assert!(composed.starts_with("do X. — "));
+        assert!(composed.ends_with('…'));
+        // Cut on a CHARACTER boundary: a byte cut through this 2-byte char
+        // panics, and a provider error is not guaranteed to be ASCII.
+        assert_eq!(
+            composed.chars().filter(|c| *c == 'é').count(),
+            COMPACT_FAILURE_DETAIL_LIMIT
+        );
     }
     /// The per-turn suppression notification is tailored to the failure reason,
     /// and every reason carries what the provider actually said. Advice alone

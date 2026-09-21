@@ -26,6 +26,7 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - Prefer committing real tests that drive the shipped code (not mocks of the unit under test, not hand-built expected objects).
 - **A web session cannot link the workspace.** `target/` reaches ~16 GB after a `cargo check` of the pager, against a ~12 GB session disk allowance, so `cargo build -p xai-grok-pager-bin` runs the container out of space. Check the crate, run that crate's tests, push, and let CI produce the binary.
 - `protoc` is missing from the image and the `bin/protoc` dotslash shim cannot run either, so any build that reaches `xai-grok-tools-api` dies in its build script. Run `apt-get install -y protobuf-compiler` first.
+- `mold` is missing too, and the repo's cargo config passes `-fuse-ld=mold`. Every build script then fails to link with `collect2: fatal error: cannot find 'ld'`, on `proc-macro2` and `libc` — which reads as a broken C toolchain and is not one. Run `apt-get install -y mold`.
 
 ## `--sandbox` jail notes
 
@@ -91,6 +92,21 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - Only RED blocks. Green, no runs, and a run still in flight each allow the stop. A gate on yellow spends the whole continuation budget on a wait for a verdict. And a repository with no workflows then never ends a turn.
 - The gate is off for a subagent. A subagent does not own the branch. Sending one back over a failure its parent pushed has it fixing work it cannot see.
 - The switch is the persisted `[ui].stop_gate_ci_failing` toggle, default ON. The gate reads it before the `gh` call. So a session that turns the gate off spends nothing on it per turn end.
+
+## Compaction-failure reporting and mid-turn `/compact`
+
+- A compaction failure reports what the PROVIDER said. The fixed phrase for each `SuppressReason` stays, as the advice half. `compose_compact_failure` appends the provider's own sentence after it, cut at `COMPACT_FAILURE_DETAIL_LIMIT` on a character boundary.
+- The advice alone names a CLASS of failure. "This conversation cannot be summarized" fits a rejected thinking signature, an orphaned tool call and an unsupported field equally. Each one needs a different fix.
+- Several places dropped that detail, and each one needed its own repair. `suppress_auto_compaction` substituted the phrase. The non-suppressed arm of `run_compact_only` sent an EMPTY string. The pager's `handle_compact_complete` blanked the error on the manual path.
+- `Effect::Compact` is the subtle one. It stringified the `acp::Error`. That `Display` is the error CODE's generic phrase. The provider's text rides in `data`. So every manual failure read "Internal error". `format_acp_error` reads `data`, and every other effect already called it.
+- A manual `/compact` sends NO `AutoCompactFailed` notification. The pager's own block is therefore the only report its failure gets. An auto compaction is the other way round. Neither path covers the other.
+- `/compact` works while a turn is running. It arms `PendingManualCompact`. The turn runs it at its next pre-sampling boundary, which is the point `check_auto_compact_needed` fires at.
+- It cannot simply run beside the turn. `replace_conversation_for_compaction` swaps the whole conversation. A compaction next to a live turn therefore destroys every tool call that turn appends after the snapshot.
+- A turn that answers in one pass reaches no second boundary. The run loop runs the armed request at turn end instead. That backstop is the OLD behavior, which makes this feature no slower than what it replaces. The run loop spawns it rather than awaiting it: a compaction on the command loop blocks the Cancel that stops it.
+- The requesting caller stays parked on its oneshot until the compaction runs. An answer at arming time reports a success for work that has not started.
+- A later mid-turn `/compact` is refused out loud. The armed request stays. A silent replacement runs a compaction with instructions the answered caller never sent.
+- The pager's "Send now" on that row raises `Action::CompactNow`, NOT `SendPromptNow`. A prompt send-now cancels the running turn. It also skips `start_command`, because the turn still owns the session state. The shell's `AutoCompactStarted` is what renders the progress.
+- `/compact <instructions>` reaches the shell only since `Effect::Compact` carries `user_context`. The wire request has always read `userContext`. The pager never set it. The argument was dropped in silence.
 
 ## Harness model-slot notes
 

@@ -536,8 +536,11 @@ fn unaffected_paths_keep_their_routing() {
     agent.shared_queue.clear();
     let drained = dispatch(Action::DrainQueue, &mut app);
     assert!(
-        matches!(drained.as_slice(), [Effect::Compact { .. }]),
-        "the queued command runs: {drained:?}"
+        matches!(
+            drained.as_slice(),
+            [Effect::Compact { user_context: Some(ctx), .. }] if ctx == "keep the auth notes"
+        ),
+        "the queued command runs, carrying its instructions: {drained:?}"
     );
 
     // Plain prompt mid-turn: still delivered to the running turn ASAP.
@@ -550,5 +553,57 @@ fn unaffected_paths_keep_their_routing() {
             [Effect::SendPrompt { text, .. }] if text == "read this next"
         ),
         "a plain mid-turn prompt still reaches the shell queue: {effects:?}"
+    );
+}
+
+/// The command word is not part of the instructions, and a bare `/compact`
+/// asks for no particular focus.
+#[test]
+fn compact_instructions_takes_the_argument_alone() {
+    use crate::app::dispatch::queue::compact_instructions;
+    assert_eq!(compact_instructions("/compact"), None);
+    assert_eq!(compact_instructions("  /compact   "), None);
+    assert_eq!(
+        compact_instructions("/compact keep the auth notes"),
+        Some("keep the auth notes".to_string())
+    );
+}
+
+/// "Send now" on a queued `/compact` compacts DURING the turn. It must not
+/// take the session's command state: the turn still owns it, and the shell
+/// runs the request at the turn's own safe point.
+#[test]
+fn compact_now_sends_during_a_running_turn_without_taking_the_turn() {
+    let mut app = test_app_with_agent();
+    let id = AgentId(0);
+    running_agent_with_a_queued_message(&mut app, id);
+    assert!(app.agents.get(&id).unwrap().session.state.is_turn_running());
+    let effects = dispatch(
+        Action::CompactNow {
+            text: "/compact keep the auth notes".into(),
+        },
+        &mut app,
+    );
+    assert!(
+        matches!(
+            effects.as_slice(),
+            [Effect::Compact { user_context: Some(ctx), .. }] if ctx == "keep the auth notes"
+        ),
+        "expected a Compact effect carrying the instructions: {effects:?}"
+    );
+    let state = &app.agents.get(&id).unwrap().session.state;
+    assert!(
+        state.is_turn_running(),
+        "the running turn keeps the session state, got {state:?}"
+    );
+    assert!(
+        !matches!(
+            state,
+            AgentState::CommandRunning {
+                command: AgentCommand::Compact,
+                ..
+            }
+        ),
+        "compacting mid-turn must not take the turn's state"
     );
 }
