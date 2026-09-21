@@ -530,6 +530,48 @@ impl ProfileName {
 mod tests {
     use super::*;
 
+    /// No built-in profile grants a keychain database.
+    ///
+    /// This is the condition nono's macOS generator reads to decide whether to
+    /// emit its keychain mach-lookup denials. A profile that granted a keychain
+    /// DB path would skip them, and every item in the login keychain, `gh`'s
+    /// OAuth token among them, would be readable from inside the confinement.
+    /// The CI query being answered by an unsandboxed host worker is the fix for
+    /// that; widening the profile is not.
+    #[test]
+    #[cfg(all(feature = "enforce", unix))]
+    fn no_built_in_profile_grants_the_login_keychain() {
+        let workspace = std::env::current_dir().expect("cwd");
+        let home = std::env::var("HOME").expect("HOME");
+        let keychain_dbs: Vec<PathBuf> = ["login.keychain-db", "metadata.keychain-db"]
+            .iter()
+            .flat_map(|name| {
+                [
+                    PathBuf::from(&home).join("Library/Keychains").join(name),
+                    PathBuf::from("/Library/Keychains").join(name),
+                ]
+            })
+            .collect();
+        for profile in [
+            ProfileName::Workspace,
+            ProfileName::ReadOnly,
+            ProfileName::Strict,
+            ProfileName::Devbox,
+        ] {
+            let caps = profile.to_capability_set(&workspace).expect("caps");
+            for cap in caps.fs_capabilities() {
+                for db in &keychain_dbs {
+                    assert_ne!(
+                        &cap.resolved, db,
+                        "{profile:?} grants the keychain database {db:?}, which \
+                         lifts the keychain denials off the whole session"
+                    );
+                    assert_ne!(&cap.original, db, "{profile:?} grants {db:?}");
+                }
+            }
+        }
+    }
+
     #[test]
     fn parse_profile_names() {
         assert_eq!(

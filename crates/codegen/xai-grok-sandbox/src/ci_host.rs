@@ -146,7 +146,66 @@ pub fn is_ci_host_subprocess() -> bool {
 /// The inherited host-worker fd, when this process is a sandboxed session that
 /// was handed one at jail entry.
 pub fn ci_host_fd() -> Option<i32> {
-    std::env::var(CI_HOST_FD_ENV).ok()?.parse().ok()
+    resolve_fd(
+        SESSION_CI_HOST_FD.get().copied(),
+        std::env::var(CI_HOST_FD_ENV).ok().as_deref(),
+    )
+}
+
+/// Which fd a session's CI queries ride: the one this process started and
+/// published, else the one a jail handed in by name.
+///
+/// The published fd wins because a process that started its own worker is not
+/// going to be handed another, and a stale `CI_HOST_FD_ENV` (inherited by a
+/// child that did not get the fd itself) must never override the live one.
+fn resolve_fd(published: Option<i32>, from_env: Option<&str>) -> Option<i32> {
+    published.or_else(|| from_env.and_then(|raw| raw.parse().ok()))
+}
+
+/// The worker fd a session started in THIS process, as
+/// [`start_ci_host_for_session`] publishes it.
+///
+/// The profile sandbox confines the session in place rather than re-execing it,
+/// so nothing carries the fd number across except this. It is deliberately not
+/// an env var: an `exec` that does not carry the fd would leave the number
+/// naming whatever descriptor the child opened next, and every child of the
+/// session would inherit the connection.
+static SESSION_CI_HOST_FD: std::sync::OnceLock<i32> = std::sync::OnceLock::new();
+
+/// Start the host worker for a session that is confined in place, before the
+/// confinement is installed, and publish its fd to this process.
+///
+/// A confining profile sandbox (`--sandbox=workspace`, `read-only`, `strict`, a
+/// custom profile) is applied to the running session by `sandbox_init`. The
+/// macOS profile it installs denies the keychain mach services, so a `gh` that
+/// runs under it finds its account but no token and answers `401`; the same
+/// `gh` outside the confinement works. Forking the worker first is what puts an
+/// unconfined `gh` behind the session's queries, which is what the pathbox jail
+/// does with [`spawn_ci_host`].
+///
+/// `survives_exec` says whether an `exec` follows the hand-off (the Linux
+/// bwrap re-exec for a deny-carrying profile). Where one does, the fd is made
+/// exec-surviving and its NUMBER is exported as [`CI_HOST_FD_ENV`] for the
+/// re-executed image. Where none does (macOS, and Linux profiles that need no
+/// bwrap), the fd stays close-on-exec and the number moves through
+/// [`SESSION_CI_HOST_FD`] alone, so no child of the session inherits it.
+///
+/// Returns the fd, or `None` when a worker is not this process's to start: this
+/// process IS the worker, one is already published, or the process is already
+/// inside a jail that started its own.
+pub fn start_ci_host_for_session(repo_root: &Path, survives_exec: bool) -> Option<i32> {
+    if is_ci_host_subprocess() || ci_host_fd().is_some() || crate::is_jailed() {
+        return None;
+    }
+    let fd = spawn_ci_host_with(repo_root, survives_exec)?;
+    if survives_exec {
+        // The image that reads this is the session the exec replaces us with,
+        // and it is the fd's owner from then on.
+        // SAFETY: this runs on the startup path, before the session exists.
+        unsafe { std::env::set_var(CI_HOST_FD_ENV, fd.to_string()) };
+    }
+    let _ = SESSION_CI_HOST_FD.set(fd);
+    Some(fd)
 }
 
 /// Host-side spawn, called from `main` immediately before the jail re-exec.
@@ -162,6 +221,13 @@ pub fn ci_host_fd() -> Option<i32> {
 /// the (already) jailed worker process re-entry (guarded by
 /// [`is_ci_host_subprocess`]).
 pub fn spawn_ci_host(repo_root: &Path) -> Option<i32> {
+    spawn_ci_host_with(repo_root, true)
+}
+
+/// [`spawn_ci_host`] with the exec rule made explicit: `survives_exec` clears
+/// `FD_CLOEXEC` on the fd this process keeps, and passes the fd number on to the
+/// image it execs into.
+fn spawn_ci_host_with(repo_root: &Path, survives_exec: bool) -> Option<i32> {
     if is_ci_host_subprocess() {
         return None;
     }
@@ -169,8 +235,10 @@ pub fn spawn_ci_host(repo_root: &Path) -> Option<i32> {
     let exe = std::env::current_exe().ok()?;
     let (ours, theirs) = UnixStream::pair().ok()?;
     let our_fd: RawFd = ours.as_raw_fd();
-    // The pair is created close-on-exec, and the jail is entered by exec. Without this the fd is gone before the jailed pager reads the env var that names it.
-    inherit_across_exec(our_fd)?;
+    // The pair is created close-on-exec. A jail is entered by exec, so without this the fd is gone before the jailed pager reads the env var that names it.
+    if survives_exec {
+        inherit_across_exec(our_fd)?;
+    }
     let theirs_fd: RawFd = theirs.into_raw_fd();
 
     let mut cmd = std::process::Command::new(exe);
@@ -223,6 +291,28 @@ pub fn inherit_across_exec(fd: std::os::unix::io::RawFd) -> Option<()> {
     }
     let rc = unsafe { libc::fcntl(fd, libc::F_SETFD, flags & !libc::FD_CLOEXEC) };
     (rc >= 0).then_some(())
+}
+
+/// Take the worker back from an exec that did not happen.
+///
+/// The hand-off clears `FD_CLOEXEC` and names the fd in the environment for the
+/// image an exec is about to produce. Where that exec fails and this process
+/// carries on instead, both have to be undone: the session is confined in place
+/// after all, and every child it spawns would otherwise inherit a live socket to
+/// an UNCONFINED `gh`, with the environment naming the number to read it on.
+///
+/// The session itself keeps the worker. It finds the fd through
+/// [`SESSION_CI_HOST_FD`], which no child of it can read.
+#[cfg(unix)]
+pub fn reclaim_from_failed_exec(fd: std::os::unix::io::RawFd) {
+    // SAFETY: fcntl on an fd this process owns; F_GETFD and F_SETFD only touch its flags.
+    let flags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
+    if flags >= 0 {
+        // SAFETY: see above.
+        unsafe { libc::fcntl(fd, libc::F_SETFD, flags | libc::FD_CLOEXEC) };
+    }
+    // SAFETY: this runs on the startup path, before the session exists.
+    unsafe { std::env::remove_var(CI_HOST_FD_ENV) };
 }
 
 /// `pre_exec` helper: point stdin (0) and stdout (1) at the given fd.
@@ -701,6 +791,117 @@ mod tests {
         let mut sink = Sink(Vec::new());
         handle_request(line, &mut sink);
         sink.0
+    }
+
+    /// Set an env var for one test and restore it on drop.
+    struct EnvGuard {
+        key: &'static str,
+        prev: Option<std::ffi::OsString>,
+    }
+    impl EnvGuard {
+        fn set(key: &'static str, val: &str) -> Self {
+            let prev = std::env::var_os(key);
+            // SAFETY: every test that mutates these vars is serialized on
+            // `ci_host_env`, so no other thread is reading the environment.
+            unsafe { std::env::set_var(key, val) };
+            Self { key, prev }
+        }
+    }
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            // SAFETY: see `EnvGuard::set`.
+            unsafe {
+                match &self.prev {
+                    Some(v) => std::env::set_var(self.key, v),
+                    None => std::env::remove_var(self.key),
+                }
+            }
+        }
+    }
+
+    /// A session finds the worker it published in its own process, and the
+    /// fd a jail named is what it finds when nothing was published. The
+    /// env-var route is what a re-executed session has and an ordinary
+    /// confined session does not, so both have to resolve.
+    #[test]
+    fn a_session_finds_its_own_worker_fd_before_the_one_a_jail_named() {
+        assert_eq!(resolve_fd(Some(7), Some("9")), Some(7));
+        assert_eq!(resolve_fd(Some(7), None), Some(7));
+        assert_eq!(resolve_fd(None, Some("9")), Some(9));
+        assert_eq!(resolve_fd(None, None), None);
+        assert_eq!(resolve_fd(None, Some("")), None);
+        assert_eq!(
+            resolve_fd(None, Some("not-an-fd")),
+            None,
+            "a name that is not an fd number must resolve to no worker"
+        );
+    }
+
+    /// The hand-off starts a worker only where one is this process's to start.
+    /// Each of these is a process that must NOT fork another: the worker
+    /// itself re-entering `main`, a session a jail already handed a worker, and
+    /// a process already inside the pathbox jail.
+    #[test]
+    #[serial_test::serial(ci_host_env)]
+    fn the_hand_off_starts_no_worker_where_one_is_not_this_processes_to_start() {
+        let _marker = EnvGuard::set(CI_HOST_MARKER_ENV, "1");
+        assert_eq!(
+            start_ci_host_for_session(Path::new("/tmp"), false),
+            None,
+            "the worker must not start a worker"
+        );
+    }
+
+    #[test]
+    #[serial_test::serial(ci_host_env)]
+    fn the_hand_off_is_skipped_when_a_worker_fd_is_already_present() {
+        let _fd = EnvGuard::set(CI_HOST_FD_ENV, "9");
+        assert_eq!(
+            start_ci_host_for_session(Path::new("/tmp"), false),
+            None,
+            "a session that already has a worker does not start a second"
+        );
+    }
+
+    #[test]
+    #[serial_test::serial(ci_host_env)]
+    fn the_hand_off_is_skipped_inside_the_pathbox_jail() {
+        let _jail = EnvGuard::set(crate::jail::JAIL_ENV_VAR, "1");
+        assert_eq!(
+            start_ci_host_for_session(Path::new("/tmp"), false),
+            None,
+            "the jail brought its own worker; the jailed process starts none"
+        );
+    }
+
+    /// An exec that was prepared for and then did not happen must leave nothing
+    /// behind. The session is confined in place in that case, and an
+    /// inheritable fd whose number is in the environment is a live socket to an
+    /// unconfined `gh` for every child the session spawns.
+    #[test]
+    #[serial_test::serial(ci_host_env)]
+    fn a_failed_exec_puts_the_worker_back_out_of_reach_of_children() {
+        use std::os::fd::AsRawFd;
+
+        let (ours, _theirs) = UnixStream::pair().expect("socketpair");
+        let fd = ours.as_raw_fd();
+        inherit_across_exec(fd).expect("clear close-on-exec");
+        let _env = EnvGuard::set(CI_HOST_FD_ENV, &fd.to_string());
+
+        reclaim_from_failed_exec(fd);
+
+        // SAFETY: fcntl F_GETFD on an fd this test owns.
+        let flags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
+        assert!(flags >= 0, "the fd must still be open");
+        assert_ne!(
+            flags & libc::FD_CLOEXEC,
+            0,
+            "the worker fd must not survive an exec once the exec is off"
+        );
+        assert!(
+            std::env::var(CI_HOST_FD_ENV).is_err(),
+            "no child may be handed the number that names the worker"
+        );
     }
 
     /// The jailed pager is a process this one execs into, so the worker fd must survive an exec.
