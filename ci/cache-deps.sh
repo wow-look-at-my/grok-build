@@ -1,16 +1,7 @@
 #!/usr/bin/env bash
-# Prunes a cargo target directory down to the REGISTRY DEPENDENCY artifacts, so a cache
-# entry keyed on the lockfile holds only what that lockfile determines.
-#
-# A workspace artifact is dead weight in such an entry. Cargo fingerprints a path package
-# by the mtime of its sources, a checkout gives every source a fresh mtime, and the
-# restored artifact is rebuilt whatever the entry holds. A registry package is
-# fingerprinted by content at an immutable version, which is what makes it restorable.
-#
-# This DESTROYS the workspace artifacts it finds. Run it after the tests, never before.
-#
-# Usage: ci/cache-deps.sh prune <target-profile-dir>
-#        ci/cache-deps.sh size  <dir>
+# Cuts a cargo target dir down to the registry artifacts a lockfile determines. DESTRUCTIVE:
+# run it after the tests. Usage: cache-deps.sh prune|size <dir>. See AGENTS.md for why a
+# workspace artifact is never restorable.
 set -euo pipefail
 
 op="${1:?usage: cache-deps.sh prune|size <dir>}"
