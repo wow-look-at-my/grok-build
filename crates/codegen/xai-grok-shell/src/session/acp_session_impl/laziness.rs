@@ -348,13 +348,6 @@ impl SessionActor {
         let model_id_acp = self.models_manager.current_model_id();
         let model_id = model_id_acp.0.to_string();
         let cfg = self.models_manager.laziness_detector_for(&model_id);
-        // The model that answers the classifier question. The rest of this
-        // function keeps using `model_id`, the model being judged.
-        let classifier_model = self
-            .harness_models
-            .get("laziness_classifier")
-            .map(str::to_owned)
-            .unwrap_or_else(|| model_id.clone());
         let debug_mode = self.laziness_debug_log.is_some();
 
         // Classifier-fire predicate (NOT the nudge-fire predicate —
@@ -548,17 +541,17 @@ impl SessionActor {
         // so backend trace correlation can distinguish "classifier
         // fired in session X" from background traffic.
         let session_id_str = self.session_info.id.to_string();
-        let request = ConversationRequest {
+        let mut request = ConversationRequest {
             items,
             tools: vec![],
             hosted_tools: vec![],
             tool_choice: None,
-            // The `[models] laziness_classifier` slot, else the session
-            // model. `model_id` stays the SESSION model everywhere else in
-            // this function: the per-model enable, the nudge budget and the
+            // Set below, once the client that carries it is resolved.
+            // `model_id` stays the SESSION model everywhere else in this
+            // function: the per-model enable, the nudge budget and the
             // telemetry all describe the model being judged, not the one
             // doing the judging.
-            model: Some(classifier_model.clone()),
+            model: None,
             temperature: Some(0.0),
             max_output_tokens: Some(LAZINESS_MAX_OUTPUT_TOKENS),
             // Don't pass `reasoning_effort` — `grok-4.5` (and
@@ -587,6 +580,14 @@ impl SessionActor {
         // reasoning + text deltas. `conversation_collect` does NOT
         // publish on that channel, so the client sees nothing.
         let slot_sampler = self.resolve_slot_sampler("laziness_classifier").await;
+        // The model has to come from whichever client ends up carrying the
+        // request. A slot that resolved to nothing leaves the session's
+        // client, and the pinned id on that client reaches the session
+        // model's endpoint under a name it does not serve.
+        request.model = Some(match &slot_sampler {
+            Some((_, cfg)) => cfg.model.clone(),
+            None => model_id.clone(),
+        });
         let sampling_client = match slot_sampler.map(|(client, _)| client) {
             Some(c) => Ok(c),
             None => self.prepare_chat_completion(false).await,
