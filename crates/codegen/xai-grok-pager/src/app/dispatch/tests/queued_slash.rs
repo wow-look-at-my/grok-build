@@ -600,7 +600,7 @@ fn compact_now_sends_during_a_running_turn_without_taking_the_turn() {
         !matches!(
             state,
             AgentState::CommandRunning {
-                command: AgentCommand::Compact,
+                command: crate::app::agent::AgentCommand::Compact,
                 ..
             }
         ),
