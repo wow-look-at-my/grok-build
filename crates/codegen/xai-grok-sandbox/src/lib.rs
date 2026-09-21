@@ -611,26 +611,80 @@ pub fn bwrap_reexec_for_profile(
     profile: &ProfileName,
     workspace: &Path,
 ) -> Option<std::process::Command> {
-    if is_inside_bwrap() {
-        return None;
-    }
     let BwrapDenyPlan {
         deny_write_optional,
         hook_plan,
         deny_read,
-        has_globs,
-    } = bwrap_deny_plan(profile, workspace)?;
-    if deny_write_optional.is_empty() && hook_plan.is_none() && deny_read.is_empty() && !has_globs {
-        return None;
-    }
+        has_globs: _,
+    } = bwrap_reexec_plan(profile, workspace)?;
     let write_opt: Vec<&str> = deny_write_optional.iter().map(String::as_str).collect();
     let read_refs: Vec<&str> = deny_read.iter().map(String::as_str).collect();
     bwrap_reexec_command_ex(&write_opt, hook_plan.as_ref(), &read_refs)
+}
+
+/// The deny plan a re-exec would carry, or `None` where no re-exec happens.
+#[cfg(target_os = "linux")]
+fn bwrap_reexec_plan(profile: &ProfileName, workspace: &Path) -> Option<BwrapDenyPlan> {
+    if is_inside_bwrap() {
+        return None;
+    }
+    let plan = bwrap_deny_plan(profile, workspace)?;
+    if plan.deny_write_optional.is_empty()
+        && plan.hook_plan.is_none()
+        && plan.deny_read.is_empty()
+        && !plan.has_globs
+    {
+        return None;
+    }
+    Some(plan)
+}
+
+/// Whether a bwrap re-exec follows for this profile, without building the
+/// command for it.
+///
+/// A caller has to know this BEFORE it hands anything to the image the exec
+/// produces, and building the command first is not an option: the command
+/// snapshots this process's environment the moment it sets its own marker, so
+/// anything the new image reads from the environment must already be there.
+/// That is why this shares [`bwrap_reexec_plan`] with the builder rather than
+/// repeating its conditions, which would drift apart.
+#[cfg(target_os = "linux")]
+pub fn bwrap_reexec_planned(profile: &ProfileName, workspace: &Path) -> bool {
+    bwrap_reexec_plan(profile, workspace).is_some()
 }
 #[cfg(test)]
 mod tests {
     use super::*;
     use serial_test::serial;
+
+    /// The predicate and the builder must never disagree about whether an exec
+    /// follows.
+    ///
+    /// `apply_sandbox` asks the predicate BEFORE it starts the CI host worker,
+    /// and the answer decides whether the worker's fd is made exec-surviving.
+    /// A predicate that says yes where the builder then produces no command
+    /// leaves an inheritable fd, and its number in the environment, in a
+    /// session that went on to confine itself in place. Every child of that
+    /// session can then reach an unconfined `gh`.
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn the_reexec_predicate_agrees_with_the_builder() {
+        let workspace = std::env::current_dir().expect("cwd");
+        for profile in [
+            ProfileName::Workspace,
+            ProfileName::ReadOnly,
+            ProfileName::Strict,
+            ProfileName::Devbox,
+            ProfileName::Off,
+        ] {
+            assert_eq!(
+                bwrap_reexec_planned(&profile, &workspace),
+                bwrap_reexec_for_profile(&profile, &workspace).is_some(),
+                "{profile:?}: the predicate and the builder disagree about \
+                 whether an exec follows"
+            );
+        }
+    }
     /// Save, set/remove, and auto-restore an env var on drop.
     struct EnvGuard {
         key: &'static str,

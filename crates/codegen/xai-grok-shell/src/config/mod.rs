@@ -1523,6 +1523,28 @@ pub fn apply_sandbox(
         .and_then(|p| dunce::canonicalize(p).ok())
         .or_else(|| std::env::current_dir().ok())
         .unwrap_or_else(|| std::path::PathBuf::from("."));
+    // Whether a bwrap re-exec follows decides how the worker's fd is handed
+    // over, so it is settled before the worker starts. Only an exec-surviving
+    // fd reaches the new image, and only an exec takes the fd out of reach of
+    // this process's other children: clearing close-on-exec without an exec
+    // hands every child of the session a live socket to an UNCONFINED `gh`.
+    // The re-exec command cannot be built first to answer this. It snapshots
+    // this process's environment when it sets its own marker, and the fd's
+    // name has to be in that snapshot.
+    #[cfg(target_os = "linux")]
+    let reexec_follows = xai_grok_sandbox::bwrap_reexec_planned(&sandbox_profile, &workspace);
+    #[cfg(not(target_os = "linux"))]
+    let reexec_follows = false;
+    // Start the unsandboxed `gh` worker before the confinement below is
+    // installed. `gh` keeps its OAuth token in the login keychain, and the
+    // profile's macOS rules deny the keychain mach services, so a `gh` spawned
+    // under this sandbox sends no Authorization header and every CI query
+    // answers 401. The worker forked here stays unconfined, and answers those
+    // queries from the host instead.
+    if sandbox_profile != xai_grok_sandbox::ProfileName::Off {
+        let _ =
+            xai_grok_sandbox::ci_host::start_ci_host_for_session(&workspace, reexec_follows);
+    }
     #[cfg(target_os = "linux")]
     let requires_read_deny = xai_grok_sandbox::requires_read_deny(&sandbox_profile, &workspace);
     #[cfg(target_os = "linux")]
@@ -1575,6 +1597,16 @@ pub fn apply_sandbox(
                 std::process::exit(1);
             }
             None => {}
+        }
+        // Still running, so the exec the worker's fd was prepared for never
+        // happened: the command would not build, or `exec` itself failed and
+        // this process fell back to Landlock. Either way the session is
+        // confined in place, and an inheritable fd with its number in the
+        // environment would hand every child a socket to an unconfined `gh`.
+        if reexec_follows
+            && let Some(fd) = xai_grok_sandbox::ci_host::ci_host_fd()
+        {
+            xai_grok_sandbox::ci_host::reclaim_from_failed_exec(fd);
         }
     }
     if sandbox_profile != xai_grok_sandbox::ProfileName::Off {
