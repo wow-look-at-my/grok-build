@@ -299,8 +299,8 @@ pub(crate) fn apply_favorites(cfg: &config::Config, catalog: &mut IndexMap<Strin
     let per_provider: std::collections::HashMap<&str, ModelGlobSet> = cfg
         .model_providers
         .iter()
-        .filter_map(|(id, provider)| {
-            match ModelGlobSet::compile(Some(&provider.favorite_models)) {
+        .filter_map(
+            |(id, provider)| match ModelGlobSet::compile(Some(&provider.favorite_models)) {
                 Ok(set) => set.map(|set| (id.as_str(), set)),
                 Err(bad) => {
                     tracing::error!(
@@ -309,8 +309,8 @@ pub(crate) fn apply_favorites(cfg: &config::Config, catalog: &mut IndexMap<Strin
                     );
                     None
                 }
-            }
-        })
+            },
+        )
         .collect();
 
     for (key, entry) in catalog.iter_mut() {

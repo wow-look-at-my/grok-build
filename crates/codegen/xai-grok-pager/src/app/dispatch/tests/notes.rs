@@ -945,7 +945,8 @@ fn todo_capture_requests_and_shows_a_running_block() {
             capture_id,
             ..
         },
-    ] = effects.as_slice() else {
+    ] = effects.as_slice()
+    else {
         panic!("expected SendTodo effect, got {effects:?}");
     };
     assert_eq!(request, "push to 2 git repos");
@@ -1110,10 +1111,7 @@ fn an_urgent_capture_carries_the_flag_to_the_shell() {
     );
 
     assert!(
-        matches!(
-            effects.as_slice(),
-            [Effect::SendTodo { urgent: true, .. }]
-        ),
+        matches!(effects.as_slice(), [Effect::SendTodo { urgent: true, .. }]),
         "expected an urgent SendTodo effect, got {effects:?}"
     );
 }

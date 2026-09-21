@@ -200,7 +200,8 @@ fn parent() {
     // `keychain_before` is how it says so. Either way the query below runs
     // under a real confinement, and the keychain stays out of reach.
     let confined_here = with_worker.applied == "1";
-    let confined_by_inheritance = with_worker.applied == "0" && with_worker.keychain_before == "denied";
+    let confined_by_inheritance =
+        with_worker.applied == "0" && with_worker.keychain_before == "denied";
     assert!(
         confined_here || confined_by_inheritance,
         "the child must be confined: {with_worker}"
@@ -234,8 +235,7 @@ fn parent() {
     // answer must therefore be the worker's own answer to the same query,
     // whatever that answer is on this host.
     assert_eq!(
-        with_worker.answer,
-        via_worker.answer,
+        with_worker.answer, via_worker.answer,
         "the confined child's query must be answered by the worker, exactly as \
          the unconfined one was: {with_worker}"
     );
@@ -399,7 +399,10 @@ fn clip(text: &str) -> String {
     if text.len() <= MAX {
         return text.to_string();
     }
-    let end = (0..=MAX).rev().find(|i| text.is_char_boundary(*i)).unwrap_or(0);
+    let end = (0..=MAX)
+        .rev()
+        .find(|i| text.is_char_boundary(*i))
+        .unwrap_or(0);
     format!("{}...", &text[..end])
 }
 

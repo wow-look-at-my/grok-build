@@ -26,9 +26,7 @@ pub(crate) fn discovered_model_key(provider_id: &str, slug: &str) -> String {
 /// Returns one additive catalog for all of them. A provider that declares no
 /// endpoint, that cannot be reached, or that answers with an empty listing
 /// contributes nothing and never fails the others.
-pub(crate) async fn discover_provider_models(
-    cfg: &config::Config,
-) -> IndexMap<String, ModelEntry> {
+pub(crate) async fn discover_provider_models(cfg: &config::Config) -> IndexMap<String, ModelEntry> {
     let mut discovered = IndexMap::new();
     for (id, provider) in &cfg.model_providers {
         if !provider.autodetect_enabled() {
@@ -120,14 +118,18 @@ async fn discover_one_provider(
                 .or_else(|| Some(listed.context_window.get())),
             model_provider: Some(provider_id.to_owned()),
             reasoning_efforts: listed.reasoning_efforts.clone(),
-            supports_reasoning_effort: listed
-                .supports_reasoning_effort
-                .then_some(true),
+            supports_reasoning_effort: listed.supports_reasoning_effort.then_some(true),
             ..Default::default()
         };
         entries.insert(
             key.clone(),
-            config::entry_for_provider_model(cfg, &key, provider_id, provider, &override_for_listed),
+            config::entry_for_provider_model(
+                cfg,
+                &key,
+                provider_id,
+                provider,
+                &override_for_listed,
+            ),
         );
     }
     tracing::info!(
@@ -201,10 +203,7 @@ mod tests {
         let base = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
         let for_custom = body.clone();
         let app = axum::Router::new()
-            .route(
-                "/v1/models",
-                get(move || async move { axum::Json(body) }),
-            )
+            .route("/v1/models", get(move || async move { axum::Json(body) }))
             .route(
                 "/catalog.json",
                 get(move || async move { axum::Json(for_custom) }),

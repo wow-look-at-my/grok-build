@@ -126,10 +126,7 @@ impl SessionActor {
     ///
     /// An unset slot, or one the session cannot reach, keeps the session's own
     /// client, so nothing changes until a slot is pinned.
-    pub(crate) async fn prepare_side_call(
-        &self,
-        slot: &str,
-    ) -> Result<SideCallSetup, acp::Error> {
+    pub(crate) async fn prepare_side_call(&self, slot: &str) -> Result<SideCallSetup, acp::Error> {
         // One config read serves the window, model, and reasoning effort.
         let sampling_config = self.chat_state_handle.get_sampling_config().await;
         let reasoning_effort = sampling_config.as_ref().and_then(|c| c.reasoning_effort);

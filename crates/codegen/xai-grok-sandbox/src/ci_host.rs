@@ -545,7 +545,10 @@ fn query_pr_checks(branch: &str) -> Option<Vec<u8>> {
         &[0],
     )?;
     let pr: serde_json::Value = serde_json::from_slice(&pr_view).ok()?;
-    let state = pr.get("state").and_then(serde_json::Value::as_str).unwrap_or("");
+    let state = pr
+        .get("state")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("");
     let merged = pr
         .get("merged")
         .and_then(serde_json::Value::as_bool)
@@ -921,7 +924,10 @@ mod tests {
                 .status()
                 .expect("spawn sh")
         };
-        assert!(!write_to_fd(fd).success(), "the fd must be closed on exec before the fix");
+        assert!(
+            !write_to_fd(fd).success(),
+            "the fd must be closed on exec before the fix"
+        );
 
         inherit_across_exec(fd).expect("fcntl");
         assert!(write_to_fd(fd).success());

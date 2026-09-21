@@ -637,86 +637,86 @@ fn rows_contain_categories_and_settings_through_pr_14() {
     // `fork_secondary_model` — and a literal list of them would go stale the
     // moment a slot is added.
     let mut expected: Vec<SettingKey> = vec![
-            // Booleans.
-            "compact_mode",
-            "screen_mode",
-            "show_timestamps",
-            "show_timeline",
-            // PAGER-owned page_flip_on_send (Appearance).
-            "page_flip_on_send",
-            "simple_mode",
-            // PAGER-owned vim_mode (Appearance,
-            // paired with simple_mode).
-            "vim_mode",
-            // Theme enums.
-            "theme",
-            "auto_dark_theme",
-            "auto_light_theme",
-            // SHELL-owned render_mermaid (Appearance,
-            // declared after the theme enums).
-            "render_mermaid",
-            // Int in Appearance category.
-            "max_thoughts_width",
-            // SHELL-owned show_thinking_blocks (Appearance; live cache).
-            "show_thinking_blocks",
-            // PAGER-owned respect_manual_folds (Appearance,
-            // persisted to pager.toml).
-            "respect_manual_folds",
-            // SHELL-owned group_tool_verbs (Appearance; live cache).
-            "group_tool_verbs",
-            // SHELL-owned collapsed_edit_blocks (Appearance; live cache,
-            // default OFF rollout flag).
-            "collapsed_edit_blocks",
-            // SHELL-owned display_refresh_auto_cadence (Appearance).
-            "display_refresh_auto_cadence",
-            // Mouse — scroll + drag selection. The scroll
-            // classification/lines/direction knobs follow scroll_speed.
-            "scroll_speed",
-            "scroll_mode",
-            "scroll_lines",
-            "invert_scroll",
-            "keep_text_selection",
-            // SHARED-owned combine_queued_prompts (Editor category; read by
-            // both the pager drain and the shell promote. Registered before
-            // multiline_mode, so it renders first).
-            "combine_queued_prompts",
-            "confirm_before_rewind",
-            // PAGER-owned multiline (Editor category).
-            "multiline_mode",
-            // SHELL-owned prompt_suggestions (Editor; tab autocomplete
-            // ghost text, live cache).
-            "prompt_suggestions",
-            // voice_keybind_enabled + voice_capture_mode + voice_stt_language
-            // hidden when the voice gate is off.
-            // SHELL-owned permission_mode (Agent category).
-            // PAGER-owned stop_gate_unfinished_todos (Agent category,
-            // declares before permission_mode).
-            "stop_gate_unfinished_todos",
-            "stop_gate_ci_failing",
-            // The output-rate floor and its grace period, registered with the
-            // other agent-behaviour gates.
-            "min_output_tokens_per_sec",
-            "output_rate_sustained_secs",
-            "permission_mode",
-            // SHELL-owned remember_tool_approvals (Agent category,
-            // registered right after permission_mode).
-            "remember_tool_approvals",
-            // SHELL-owned default_selected_permission (Agent category,
-            // colocated with permission_mode / plan_mode).
-            "default_selected_permission",
-            // SHELL-owned ask_user_question timeout (Agent category,
-            // registered directly above plan_mode).
-            "toolset.ask_user_question.timeout_enabled",
-            // PAGER-owned plan_mode (Agent category).
-            "plan_mode",
-            // SHELL-owned coding_data_sharing (Privacy category).
-            "coding_data_sharing",
-            // SHELL-owned default_model (Models category).
-            "default_model",
-            // Models category. `default_reasoning_effort`,
-            // `web_search_model`, and `session_summary_model` are
-            // not exposed in the modal.
-            "fork_secondary_model",
+        // Booleans.
+        "compact_mode",
+        "screen_mode",
+        "show_timestamps",
+        "show_timeline",
+        // PAGER-owned page_flip_on_send (Appearance).
+        "page_flip_on_send",
+        "simple_mode",
+        // PAGER-owned vim_mode (Appearance,
+        // paired with simple_mode).
+        "vim_mode",
+        // Theme enums.
+        "theme",
+        "auto_dark_theme",
+        "auto_light_theme",
+        // SHELL-owned render_mermaid (Appearance,
+        // declared after the theme enums).
+        "render_mermaid",
+        // Int in Appearance category.
+        "max_thoughts_width",
+        // SHELL-owned show_thinking_blocks (Appearance; live cache).
+        "show_thinking_blocks",
+        // PAGER-owned respect_manual_folds (Appearance,
+        // persisted to pager.toml).
+        "respect_manual_folds",
+        // SHELL-owned group_tool_verbs (Appearance; live cache).
+        "group_tool_verbs",
+        // SHELL-owned collapsed_edit_blocks (Appearance; live cache,
+        // default OFF rollout flag).
+        "collapsed_edit_blocks",
+        // SHELL-owned display_refresh_auto_cadence (Appearance).
+        "display_refresh_auto_cadence",
+        // Mouse — scroll + drag selection. The scroll
+        // classification/lines/direction knobs follow scroll_speed.
+        "scroll_speed",
+        "scroll_mode",
+        "scroll_lines",
+        "invert_scroll",
+        "keep_text_selection",
+        // SHARED-owned combine_queued_prompts (Editor category; read by
+        // both the pager drain and the shell promote. Registered before
+        // multiline_mode, so it renders first).
+        "combine_queued_prompts",
+        "confirm_before_rewind",
+        // PAGER-owned multiline (Editor category).
+        "multiline_mode",
+        // SHELL-owned prompt_suggestions (Editor; tab autocomplete
+        // ghost text, live cache).
+        "prompt_suggestions",
+        // voice_keybind_enabled + voice_capture_mode + voice_stt_language
+        // hidden when the voice gate is off.
+        // SHELL-owned permission_mode (Agent category).
+        // PAGER-owned stop_gate_unfinished_todos (Agent category,
+        // declares before permission_mode).
+        "stop_gate_unfinished_todos",
+        "stop_gate_ci_failing",
+        // The output-rate floor and its grace period, registered with the
+        // other agent-behaviour gates.
+        "min_output_tokens_per_sec",
+        "output_rate_sustained_secs",
+        "permission_mode",
+        // SHELL-owned remember_tool_approvals (Agent category,
+        // registered right after permission_mode).
+        "remember_tool_approvals",
+        // SHELL-owned default_selected_permission (Agent category,
+        // colocated with permission_mode / plan_mode).
+        "default_selected_permission",
+        // SHELL-owned ask_user_question timeout (Agent category,
+        // registered directly above plan_mode).
+        "toolset.ask_user_question.timeout_enabled",
+        // PAGER-owned plan_mode (Agent category).
+        "plan_mode",
+        // SHELL-owned coding_data_sharing (Privacy category).
+        "coding_data_sharing",
+        // SHELL-owned default_model (Models category).
+        "default_model",
+        // Models category. `default_reasoning_effort`,
+        // `web_search_model`, and `session_summary_model` are
+        // not exposed in the modal.
+        "fork_secondary_model",
     ];
     expected.extend(
         xai_grok_models::HARNESS_MODEL_SLOTS
@@ -724,18 +724,18 @@ fn rows_contain_categories_and_settings_through_pr_14() {
             .map(|slot| slot.setting_key()),
     );
     expected.extend_from_slice(&[
-            // `auto_compact_threshold_percent` (Session category) is
-            // not exposed in the modal.
-            // Advanced category.
-            "show_tips",
-            // Per-tip contextual-hints GROUP row, repositioned right after
-            // `show_tips`. Its 3 child toggles
-            // (`contextual_hints.{undo,plan_mode,image_input}`) are hidden
-            // from the top-level list and reached via the sub-sheet.
-            "contextual_hints",
-            "auto_update",
-            // SHELL-owned hunk_tracker_mode (Advanced; `off` disables it).
-            "hunk_tracker_mode",
+        // `auto_compact_threshold_percent` (Session category) is
+        // not exposed in the modal.
+        // Advanced category.
+        "show_tips",
+        // Per-tip contextual-hints GROUP row, repositioned right after
+        // `show_tips`. Its 3 child toggles
+        // (`contextual_hints.{undo,plan_mode,image_input}`) are hidden
+        // from the top-level list and reached via the sub-sheet.
+        "contextual_hints",
+        "auto_update",
+        // SHELL-owned hunk_tracker_mode (Advanced; `off` disables it).
+        "hunk_tracker_mode",
     ]);
     assert_eq!(settings, expected);
     crate::app::set_voice_mode_enabled_for_test(prev_voice);

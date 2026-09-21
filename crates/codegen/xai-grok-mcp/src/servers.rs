@@ -4892,7 +4892,12 @@ mod tests {
         // redirects.
         let mut cmd = Command::new(&uv);
         cmd.arg("tool").arg("list").env("HOME", &readonly_home);
-        for unset in ["UV_CACHE_DIR", "UV_TOOL_DIR", "UV_TOOL_BIN_DIR", "UV_PYTHON_INSTALL_DIR"] {
+        for unset in [
+            "UV_CACHE_DIR",
+            "UV_TOOL_DIR",
+            "UV_TOOL_BIN_DIR",
+            "UV_PYTHON_INSTALL_DIR",
+        ] {
             cmd.env_remove(unset);
         }
         apply_runner_cache_env(&mut cmd, "uv", true, &fixture);

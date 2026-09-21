@@ -161,7 +161,8 @@ impl TodoState {
             self.todos.insert(id, todo);
             return;
         }
-        self.todos.shift_insert(index.min(self.todos.len()), id, todo);
+        self.todos
+            .shift_insert(index.min(self.todos.len()), id, todo);
     }
 
     // There is deliberately no `clear`, and no remove of any shape. The list

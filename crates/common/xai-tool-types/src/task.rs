@@ -1435,7 +1435,10 @@ mod tests {
             AgentUsageFrequency::parse("VERY OFTEN"),
             Some(AgentUsageFrequency::VeryOften)
         );
-        assert_eq!(AgentUsageFrequency::parse("normal"), Some(AgentUsageFrequency::Default));
+        assert_eq!(
+            AgentUsageFrequency::parse("normal"),
+            Some(AgentUsageFrequency::Default)
+        );
         assert_eq!(AgentUsageFrequency::parse("not-a-level"), None);
     }
 
@@ -1454,7 +1457,10 @@ mod tests {
             AgentUsageFrequency::Often,
             AgentUsageFrequency::VeryOften,
         ] {
-            assert!(level.task_tool_note().is_some(), "{level:?} should have a task tool note");
+            assert!(
+                level.task_tool_note().is_some(),
+                "{level:?} should have a task tool note"
+            );
             assert!(
                 level.system_prompt_note().is_some(),
                 "{level:?} should have a system prompt note"

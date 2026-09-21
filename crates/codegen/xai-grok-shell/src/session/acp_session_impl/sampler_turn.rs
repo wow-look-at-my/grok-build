@@ -568,10 +568,11 @@ impl SessionActor {
         // `[auto_mode] classifier_model` is the older, narrower spelling and
         // stays ahead of the `[models] permission_classifier` slot, so a
         // config that already sets it keeps the model it named.
-        let classifier_slug = auto_cfg
-            .classifier_model
-            .clone()
-            .or_else(|| self.harness_models.get("permission_classifier").map(str::to_owned));
+        let classifier_slug = auto_cfg.classifier_model.clone().or_else(|| {
+            self.harness_models
+                .get("permission_classifier")
+                .map(str::to_owned)
+        });
         let aux_classifier_sampler = match classifier_slug.as_deref() {
             Some(slug) => self.resolve_auto_classifier_sampler(slug).await,
             None => None,
@@ -721,7 +722,10 @@ impl SessionActor {
     pub(crate) async fn resolve_slot_sampler(
         &self,
         slot: &str,
-    ) -> Option<(xai_grok_sampler::SamplingClient, xai_grok_sampler::SamplerConfig)> {
+    ) -> Option<(
+        xai_grok_sampler::SamplingClient,
+        xai_grok_sampler::SamplerConfig,
+    )> {
         let slug = self.harness_models.get(slot)?.to_string();
         self.resolve_sampler_for_model(slot, &slug).await
     }

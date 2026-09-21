@@ -307,8 +307,9 @@ impl ConfigModelOverride {
         merged.stream_tool_calls = merged.stream_tool_calls.or(*stream_tool_calls);
         merged.strict_message_schema = merged.strict_message_schema.or(*strict_message_schema);
         merged.reasoning_effort = merged.reasoning_effort.or(*reasoning_effort);
-        merged.supports_reasoning_effort =
-            merged.supports_reasoning_effort.or(*supports_reasoning_effort);
+        merged.supports_reasoning_effort = merged
+            .supports_reasoning_effort
+            .or(*supports_reasoning_effort);
         merged.supports_backend_search =
             merged.supports_backend_search.or(*supports_backend_search);
         merged.show_model_fingerprint = merged.show_model_fingerprint.or(*show_model_fingerprint);
@@ -319,8 +320,9 @@ impl ConfigModelOverride {
         merged.compactions_remaining = merged.compactions_remaining.or(*compactions_remaining);
         merged.compaction_at_tokens = merged.compaction_at_tokens.or(*compaction_at_tokens);
         merged.pricing = merged.pricing.or_else(|| pricing.clone());
-        merged.min_output_tokens_per_sec =
-            merged.min_output_tokens_per_sec.or(*min_output_tokens_per_sec);
+        merged.min_output_tokens_per_sec = merged
+            .min_output_tokens_per_sec
+            .or(*min_output_tokens_per_sec);
         if merged.reasoning_efforts.is_empty() {
             merged.reasoning_efforts = reasoning_efforts.clone();
         }

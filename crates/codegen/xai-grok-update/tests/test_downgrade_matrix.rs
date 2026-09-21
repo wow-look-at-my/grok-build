@@ -13,7 +13,9 @@ use serial_test::serial;
 
 use common::{FakeBinGuard, reset_home, set_test_version, test_home};
 use xai_grok_update::UpdateConfig;
-use xai_grok_update::auto_update::{auto_update_target, check_update_status, ensure_latest_on_disk};
+use xai_grok_update::auto_update::{
+    auto_update_target, check_update_status, ensure_latest_on_disk,
+};
 use xai_grok_update::version::installed_on_disk_version;
 
 fn host_platform() -> String {

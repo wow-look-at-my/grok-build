@@ -2475,7 +2475,14 @@ fn mode_confirmation_staleness_follows_the_request_log() {
     // A mode nobody asked for is the shell reporting its own change.
     assert_eq!(superseded_seq(&["plan", "default"], "browser_use"), None);
     // The ring wrapping back onto Plan supersedes the earlier Plan request.
-    let ring = ["plan", "default", "default", "orchestrator", "explore", "plan"];
+    let ring = [
+        "plan",
+        "default",
+        "default",
+        "orchestrator",
+        "explore",
+        "plan",
+    ];
     assert_eq!(superseded_seq(&ring, "plan"), None);
     assert_eq!(superseded_seq(&ring, "default"), Some(3));
     assert_eq!(superseded_seq(&ring, "explore"), Some(5));

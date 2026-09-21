@@ -11,5 +11,5 @@
 //! the pager (sanitized extraction, checksummed cache, bounded archive size);
 //! `builtin` extracts the built-in metadata files (e.g. README) to `~/.grok/`.
 
-pub mod bundle;
 pub mod builtin;
+pub mod bundle;

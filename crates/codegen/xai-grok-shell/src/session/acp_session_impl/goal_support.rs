@@ -1787,10 +1787,11 @@ impl SessionActor {
         // so its §7 prompt names the parent toolset's tools either way.
         let tool_names = self.resolve_inherit_role_tool_names().await;
         let summarizer_model = match &self.goal_role_models.summarizer {
-            crate::agent::config::GoalRoleModelChoice::ModelOnly(m) => self
-                .resolve_goal_role_model_only("summarizer", None, m)
-                .await
-                .model,
+            crate::agent::config::GoalRoleModelChoice::ModelOnly(m) => {
+                self.resolve_goal_role_model_only("summarizer", None, m)
+                    .await
+                    .model
+            }
             _ => None,
         };
 

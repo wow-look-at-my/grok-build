@@ -1049,16 +1049,17 @@ impl PagerArgs {
     ///  - `--sandbox=pathbox` and path flags alone are valid (the pathbox jail).
     /// Returns `Ok(())` for a valid request or a user-facing error otherwise.
     pub fn validate_sandbox(&self) -> Result<(), String> {
-        let has_path_flags =
-            !(self.sandbox_ro.is_empty() && self.sandbox_rw.is_empty() && self.sandbox_rn.is_empty());
+        let has_path_flags = !(self.sandbox_ro.is_empty()
+            && self.sandbox_rw.is_empty()
+            && self.sandbox_rn.is_empty());
         match self.sandbox.as_deref() {
-            Some("") => Err(
-                "a bare `--sandbox` (no profile value) is no longer valid; \
+            Some("") => Err("a bare `--sandbox` (no profile value) is no longer valid; \
                  use --sandbox=pathbox for the path-mount jail, or \
                  --sandbox <profile> for a sandbox profile"
-                    .to_owned(),
-            ),
-            Some(profile) if profile != xai_grok_sandbox::jail::PATHBOX_PROFILE && has_path_flags => {
+                .to_owned()),
+            Some(profile)
+                if profile != xai_grok_sandbox::jail::PATHBOX_PROFILE && has_path_flags =>
+            {
                 Err(format!(
                     "cannot combine sandbox profile '{profile}' with --ro/--rw/--rn \
                      path flags; use --sandbox=pathbox for path mounts"
@@ -1308,13 +1309,29 @@ mod tests {
     fn bare_sandbox_parses_but_is_rejected_by_validation() {
         let args = PagerArgs::try_parse_from(["grok", "--sandbox"]).unwrap();
         assert_eq!(args.sandbox.as_deref(), Some(""));
-        assert!(args.validate_sandbox().is_err(), "bare --sandbox must be invalid");
+        assert!(
+            args.validate_sandbox().is_err(),
+            "bare --sandbox must be invalid"
+        );
         let empty = PagerArgs::try_parse_from(["grok", "--sandbox", ""]).unwrap();
-        assert!(empty.validate_sandbox().is_err(), "--sandbox '' must be invalid");
+        assert!(
+            empty.validate_sandbox().is_err(),
+            "--sandbox '' must be invalid"
+        );
     }
     #[test]
     fn ro_rw_rn_paths_parse_and_imply_pathbox() {
-        let args = PagerArgs::try_parse_from(["grok", "--rw", "/a", "--ro", "/b", "--rw=/c", "--rn", "/a/secrets"]).unwrap();
+        let args = PagerArgs::try_parse_from([
+            "grok",
+            "--rw",
+            "/a",
+            "--ro",
+            "/b",
+            "--rw=/c",
+            "--rn",
+            "/a/secrets",
+        ])
+        .unwrap();
         assert_eq!(
             args.sandbox_rw,
             vec![PathBuf::from("/a"), PathBuf::from("/c")]

@@ -101,16 +101,22 @@ mod tests {
         // A dispatch-resolved /TODO passes the typed all-caps token through,
         // which must mark the capture urgent (front-of-list prepend). (TodoCommand
         // never touches ctx; a minimal one is enough to prove the token wiring.)
-        match cmd.run_with_token(&mut todo_ctx(&models, &bundle, mode), "TODO", "finish the polish")
-        {
+        match cmd.run_with_token(
+            &mut todo_ctx(&models, &bundle, mode),
+            "TODO",
+            "finish the polish",
+        ) {
             CommandResult::Action(Action::SendTodo { urgent, .. }) => {
                 assert!(urgent, "/TODO must be urgent");
             }
             other => panic!("expected SendTodo urgent, got {other:?}"),
         }
         // Lowercase is a normal append.
-        match cmd.run_with_token(&mut todo_ctx(&models, &bundle, mode), "todo", "finish the polish")
-        {
+        match cmd.run_with_token(
+            &mut todo_ctx(&models, &bundle, mode),
+            "todo",
+            "finish the polish",
+        ) {
             CommandResult::Action(Action::SendTodo { urgent, .. }) => {
                 assert!(!urgent, "/todo must not be urgent");
             }

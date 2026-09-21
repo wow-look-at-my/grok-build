@@ -388,85 +388,46 @@ struct StreamingTool {
     entry_id: EntryId,
     /// Known once the naming chunk arrives; what the adoption matches on.
     tool_call_id: Option<String>,
-    /// The HEAD of the arguments, capped at [`ARG_PREVIEW_CAP`]. A file write
-    /// streams the whole file, so keeping all of it here would hold a second
-    /// copy of the content for a preview one line long.
-    args: String,
-    /// Every argument byte seen, including what the cap dropped. This is what
-    /// makes a long write show progress once the head stops growing.
+    /// Every argument byte seen. A tail of five lines looks the same at 4 KB
+    /// as at 4 MB, so this is what says how far a long write has got.
     args_bytes: usize,
+    /// The LAST few lines of what the model has written, escapes decoded. This
+    /// is what the row draws under the call's name while the body streams.
+    tail: crate::acp::streaming_args::StreamingArgsTail,
     /// When the first chunk landed. The adopted block keeps it, so the timing
     /// counts from when the model began the call.
     started_at: std::time::Instant,
     /// Whether the shell has read a title out of the arguments yet. Once it
-    /// has, the row stops showing raw JSON under the name.
+    /// has, the wire name on the row is replaced by that title.
     titled: bool,
 }
-/// How much of a call's arguments the preview keeps. Enough to carry the
-/// leading fields a write names first (the path), and bounded so a large
-/// body costs nothing.
-const ARG_PREVIEW_CAP: usize = 512;
 impl StreamingTool {
-    /// Take one argument fragment. Bytes past the cap are counted, not kept.
+    /// Take one argument fragment.
     fn push_args(&mut self, delta: &str) {
         self.args_bytes += delta.len();
-        let room = ARG_PREVIEW_CAP.saturating_sub(self.args.len());
-        if room == 0 {
-            return;
-        }
-        // A fragment can split a multi-byte character, so cut on a boundary.
-        let mut end = delta.len().min(room);
-        while end > 0 && !delta.is_char_boundary(end) {
-            end -= 1;
-        }
-        self.args.push_str(&delta[..end]);
+        self.tail.push(delta);
     }
-    /// One line of what the model has written so far.
+    /// What the row shows beside the call's name: how much it has written.
     ///
-    /// The fallback for a call the shell has not named yet: raw argument text,
-    /// with newlines and runs of spaces collapsed, because the summary is one
-    /// line and a file body is full of both. A named call shows
-    /// [`Self::progress`] instead — its title already says what the call is.
-    fn preview(&self) -> String {
-        let mut out = String::with_capacity(self.args.len());
-        let mut in_space = false;
-        for ch in self.args.chars() {
-            if ch.is_whitespace() {
-                in_space = true;
-                continue;
-            }
-            if in_space && !out.is_empty() {
-                out.push(' ');
-            }
-            in_space = false;
-            out.push(ch);
-        }
-        // Past the cap the head stops moving, so the byte count is the only
-        // thing left that shows the call is still being written.
-        if self.args_bytes > self.args.len() {
-            out.push_str(&format!(" … {}", format_arg_bytes(self.args_bytes)));
-        }
-        out
-    }
-    /// What a NAMED call shows beside its title: how much it has written.
-    ///
-    /// Empty until the arguments outgrow the preview cap. A title plus the JSON
-    /// it was read from says the same thing twice, but a body large enough to
-    /// keep arriving after the title settled still needs something that moves.
-    fn progress(&self) -> String {
-        if self.args_bytes > self.args.len() {
+    /// The CONTENT lives in [`Self::preview_lines`]. This is the one number
+    /// those lines cannot carry, because the tail of a large body looks the
+    /// same at 4 KB as it does at 4 MB.
+    fn summary_line(&self) -> String {
+        if self.args_bytes > 0 {
             format_arg_bytes(self.args_bytes)
         } else {
             String::new()
         }
     }
-    /// The summary line for this call, given whether the shell has named it.
-    fn summary_line(&self, titled: bool) -> String {
-        if titled {
-            self.progress()
-        } else {
-            self.preview()
+    /// The last few lines of the arguments, for the block to draw under the
+    /// header. A trailing empty line is dropped: it is where the next
+    /// character goes, and drawing it costs a blank row on every fragment.
+    fn preview_lines(&self) -> Vec<String> {
+        let mut lines: Vec<String> = self.tail.lines().map(str::to_string).collect();
+        while lines.last().is_some_and(String::is_empty) {
+            lines.pop();
         }
+        lines
     }
 }
 /// Human-readable size of a call's arguments so far.
@@ -1454,8 +1415,8 @@ impl AcpUpdateTracker {
             // differently than they did before, so an absent one means keep
             // what the row already shows.
             streaming.titled |= title.is_some();
-            let titled = streaming.titled;
-            let summary = streaming.summary_line(titled);
+            let summary = streaming.summary_line();
+            let preview = streaming.preview_lines();
             let entry_id = streaming.entry_id;
             let Some(entry) = scrollback.get_by_id_mut(entry_id) else {
                 return false;
@@ -1469,6 +1430,7 @@ impl AcpUpdateTracker {
                 block.name = title.to_string();
             }
             block.summary = summary;
+            block.streaming_preview = preview;
             entry.invalidate_cache();
             return true;
         }
@@ -1489,18 +1451,20 @@ impl AcpUpdateTracker {
         let mut streaming = StreamingTool {
             entry_id,
             tool_call_id: tool_call_id.map(str::to_string),
-            args: String::new(),
             args_bytes: 0,
+            tail: crate::acp::streaming_args::StreamingArgsTail::default(),
             started_at,
             titled: title.is_some(),
         };
         if let Some(delta) = arguments_delta {
             streaming.push_args(delta);
-            let summary = streaming.summary_line(streaming.titled);
+            let summary = streaming.summary_line();
+            let preview = streaming.preview_lines();
             if let Some(entry) = scrollback.get_by_id_mut(entry_id)
                 && let RenderBlock::ToolCall(ToolCallBlock::Other(block)) = &mut entry.block
             {
                 block.summary = summary;
+                block.streaming_preview = preview;
             }
         }
         self.streaming_tools.insert(tool_index, streaming);
@@ -3381,11 +3345,91 @@ mod tests {
         ));
         assert!(tracker.handle_tool_call_delta(None, 0, None, Some("main.rs\"}"), None, &mut sb));
         assert_eq!(
-            streaming_block_at(&sb, 0).summary,
-            "{\"path\":\"src/main.rs\"}",
+            streaming_block_at(&sb, 0).streaming_preview,
+            vec!["{\"path\":\"src/main.rs\"}".to_string()],
             "each fragment extends the same preview"
         );
         assert_eq!(sb.len(), 1, "fragments never push a second entry");
+    }
+    /// The bug this rail exists to close: a write showed its name and then
+    /// nothing at all until the whole file had been sent. Every fragment has
+    /// to change what is on screen.
+    #[test]
+    fn a_named_write_shows_its_body_arriving() {
+        let mut sb = ScrollbackState::new();
+        let mut tracker = AcpUpdateTracker::new();
+        tracker.handle_tool_call_delta(Some("c"), 0, Some("write"), None, None, &mut sb);
+        tracker.handle_tool_call_delta(
+            None,
+            0,
+            None,
+            Some("{\"file_path\":\"a.rs\",\"contents\":\"fn main() {"),
+            Some("Write `a.rs`"),
+            &mut sb,
+        );
+        let after_open = streaming_block_at(&sb, 0).streaming_preview.clone();
+        assert_eq!(
+            after_open.last().map(String::as_str),
+            Some("{\"file_path\":\"a.rs\",\"contents\":\"fn main() {"),
+            "the row shows what the model has typed, not just its title"
+        );
+
+        assert!(
+            tracker.handle_tool_call_delta(
+                None,
+                0,
+                None,
+                Some("\\n    println!(\\\"hi\\\");"),
+                None,
+                &mut sb
+            ),
+            "a body fragment changes the screen"
+        );
+        let block = streaming_block_at(&sb, 0);
+        assert_eq!(block.name, "Write `a.rs`");
+        assert_eq!(
+            block.streaming_preview.last().map(String::as_str),
+            Some("    println!(\"hi\");"),
+            "an escaped newline breaks the line and the escapes are decoded"
+        );
+        assert_ne!(
+            block.streaming_preview, after_open,
+            "the preview moved with the body"
+        );
+    }
+    /// A body past the tail's line budget keeps the row at a fixed height and
+    /// keeps showing the NEWEST lines, which is where the model is writing.
+    #[test]
+    fn a_long_body_shows_its_newest_lines_at_a_fixed_height() {
+        let mut sb = ScrollbackState::new();
+        let mut tracker = AcpUpdateTracker::new();
+        tracker.handle_tool_call_delta(Some("c"), 0, Some("write"), None, None, &mut sb);
+        for i in 0..50 {
+            tracker.handle_tool_call_delta(
+                None,
+                0,
+                None,
+                Some(&format!("line{i}\\n")),
+                None,
+                &mut sb,
+            );
+        }
+        let block = streaming_block_at(&sb, 0);
+        assert!(
+            block.streaming_preview.len() <= crate::acp::streaming_args::MAX_TAIL_LINES,
+            "the row height is bounded"
+        );
+        assert_eq!(
+            block.streaming_preview.last().map(String::as_str),
+            Some("line49"),
+            "the newest line is the one on screen"
+        );
+        assert_eq!(
+            // Ten `line0\n` fragments of 7 bytes, forty `line10\n` of 8.
+            block.summary,
+            "390 B",
+            "the size is what the tail alone cannot say"
+        );
     }
     /// The row is named the moment the arguments name it, not when the call
     /// finishes. Before that it wears the wire name, which is the whole bug
@@ -3414,9 +3458,9 @@ mod tests {
         ));
         assert_eq!(streaming_block_at(&sb, 0).name, "Execute `ls`");
         assert_eq!(
-            streaming_block_at(&sb, 0).summary,
-            "",
-            "a named row does not also show the JSON its name was read from"
+            streaming_block_at(&sb, 0).streaming_preview,
+            vec!["{\"command\":\"ls".to_string()],
+            "a named row still shows what is arriving under it"
         );
 
         assert!(tracker.handle_tool_call_delta(
@@ -3448,7 +3492,11 @@ mod tests {
         );
         tracker.handle_tool_call_delta(None, 0, None, Some(",\"offset\":1}"), None, &mut sb);
         assert_eq!(streaming_block_at(&sb, 0).name, "Read `a.rs`");
-        assert_eq!(streaming_block_at(&sb, 0).summary, "");
+        assert_eq!(
+            streaming_block_at(&sb, 0).streaming_preview,
+            vec!["{\"path\":\"a.rs\",\"offset\":1}".to_string()],
+            "a titleless fragment still extends the preview"
+        );
     }
     /// Two calls in one turn are named independently. The first one's title
     /// lands while the second is still being written — the second call cannot
@@ -3581,48 +3629,36 @@ mod tests {
         );
         assert!(tracker.streaming_tools.is_empty());
     }
-    /// A file write streams the whole file. The preview keeps a bounded head,
-    /// so the size is what carries the progress once the head is full.
+    /// A 600 KB write costs a bounded preview and a size that keeps moving.
     #[test]
-    fn the_preview_head_is_capped_and_the_size_keeps_moving() {
+    fn a_large_body_costs_a_bounded_preview_and_a_moving_size() {
         let mut sb = ScrollbackState::new();
         let mut tracker = AcpUpdateTracker::new();
         tracker.handle_tool_call_delta(Some("w-1"), 0, Some("write_file"), None, None, &mut sb);
         for _ in 0..600 {
-            tracker.handle_tool_call_delta(None, 0, None, Some(&"x".repeat(1024)), None, &mut sb);
+            tracker.handle_tool_call_delta(
+                None,
+                0,
+                None,
+                Some(&format!("{}\\n", "x".repeat(1022))),
+                None,
+                &mut sb,
+            );
         }
 
         let streaming = tracker.streaming_tools.get(&0).expect("still streaming");
-        assert!(
-            streaming.args.len() <= ARG_PREVIEW_CAP,
-            "the head is bounded, not the whole body: {}",
-            streaming.args.len()
-        );
         assert_eq!(streaming.args_bytes, 600 * 1024);
+        let preview = &streaming_block_at(&sb, 0).streaming_preview;
+        assert!(
+            preview.len() <= crate::acp::streaming_args::MAX_TAIL_LINES,
+            "the preview holds a tail, never the body: {} lines",
+            preview.len()
+        );
         let summary = &streaming_block_at(&sb, 0).summary;
         assert!(
             summary.ends_with("600.0 KB"),
-            "the size is what still moves: {summary}"
+            "the size says how far a 600 KB write has got: {summary}"
         );
-    }
-    /// A fragment can split a multi-byte character at the cap boundary.
-    #[test]
-    fn the_cap_never_splits_a_character() {
-        let mut sb = ScrollbackState::new();
-        let mut tracker = AcpUpdateTracker::new();
-        tracker.handle_tool_call_delta(Some("w-1"), 0, Some("write_file"), None, None, &mut sb);
-        // Fill the head to one byte short, then offer a 3-byte character.
-        let fill = "a".repeat(ARG_PREVIEW_CAP - 1);
-        tracker.handle_tool_call_delta(None, 0, None, Some(&fill), None, &mut sb);
-        tracker.handle_tool_call_delta(None, 0, None, Some("한글"), None, &mut sb);
-
-        let streaming = tracker.streaming_tools.get(&0).expect("still streaming");
-        assert_eq!(
-            streaming.args.len(),
-            ARG_PREVIEW_CAP - 1,
-            "a character that does not fit is left out whole"
-        );
-        assert_eq!(streaming.args_bytes, ARG_PREVIEW_CAP - 1 + "한글".len());
     }
     #[test]
     fn streaming_agent_message() {

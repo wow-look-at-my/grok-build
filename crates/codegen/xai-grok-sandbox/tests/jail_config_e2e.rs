@@ -88,13 +88,19 @@ fn config_subprocess() {
     let section = std::env::var(SECTION_ENV).unwrap_or_default();
     let defaults = JailDefaults::load(&grok_home);
     println!("section:\n{}", section);
-    println!("defaults: cwd={:?} grok_home={:?} tmp={:?} system={:?}",
-        defaults.cwd, defaults.grok_home, defaults.tmp, defaults.system);
+    println!(
+        "defaults: cwd={:?} grok_home={:?} tmp={:?} system={:?}",
+        defaults.cwd, defaults.grok_home, defaults.tmp, defaults.system
+    );
 
     // A bare jail request, as `maybe_reexec_into_jail` would see it.
     let request = parse_jail_args(vec![OsString::from("--sandbox=pathbox")]).unwrap();
-    let plan =
-        build_plan(&request, &defaults, vec![OsString::from("--sandbox=pathbox")]).unwrap();
+    let plan = build_plan(
+        &request,
+        &defaults,
+        vec![OsString::from("--sandbox=pathbox")],
+    )
+    .unwrap();
     println!("plan:");
     println!("  cwd          = {}", plan.cwd.display());
     println!("  grok_home    = {}", plan.grok_home.display());
@@ -106,13 +112,18 @@ fn config_subprocess() {
     #[cfg(target_os = "linux")]
     {
         let cmd = xai_grok_sandbox::jail::bwrap_command(&plan);
-        let argv: Vec<String> =
-            cmd.get_args().map(|a| a.to_string_lossy().to_string()).collect();
+        let argv: Vec<String> = cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().to_string())
+            .collect();
         println!("bwrap argv: {argv:?}");
     }
     #[cfg(target_os = "macos")]
     {
-        println!("seatbelt profile:\n{}", xai_grok_sandbox::jail::seatbelt_profile(&plan));
+        println!(
+            "seatbelt profile:\n{}",
+            xai_grok_sandbox::jail::seatbelt_profile(&plan)
+        );
     }
 
     // Emit machine-checkable markers so the parent can assert the override
@@ -120,7 +131,12 @@ fn config_subprocess() {
     use std::fmt::Write;
     let mut markers = String::new();
     writeln!(markers, "MARK cwd_default={:?}", defaults.cwd).unwrap();
-    writeln!(markers, "MARK grok_home_ro={}", defaults.grok_home == Access::Ro).unwrap();
+    writeln!(
+        markers,
+        "MARK grok_home_ro={}",
+        defaults.grok_home == Access::Ro
+    )
+    .unwrap();
     writeln!(markers, "MARK tmp={:?}", defaults.tmp).unwrap();
     writeln!(markers, "MARK system_rw={}", defaults.system == Access::Rw).unwrap();
     writeln!(markers, "MARK ring={defaults:?}").unwrap();

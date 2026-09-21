@@ -465,7 +465,10 @@ fn dispatch_fork_without_agents_flag_asks_the_shell_to_drop_them() {
     let effects = dispatch(Action::Fork(fork_args(Some(false), None)), &mut app);
     match effects.as_slice() {
         [Effect::ForkSession { include_agents, .. }] => {
-            assert!(!include_agents, "a plain /fork must not carry running agents");
+            assert!(
+                !include_agents,
+                "a plain /fork must not carry running agents"
+            );
         }
         other => panic!("expected ForkSession, got {other:?}"),
     }

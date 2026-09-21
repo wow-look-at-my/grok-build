@@ -592,7 +592,11 @@ impl UploadAttempt<'_> {
         let _ = writeln!(log, "Trace upload debug log");
         let _ = writeln!(log, "======================");
         let _ = writeln!(log, "Timestamp:    {}", chrono::Utc::now().to_rfc3339());
-        let _ = writeln!(log, "Grok version: {}", xai_grok_version::version_with_commit());
+        let _ = writeln!(
+            log,
+            "Grok version: {}",
+            xai_grok_version::version_with_commit()
+        );
         let _ = writeln!(
             log,
             "OS:           {} {}",
