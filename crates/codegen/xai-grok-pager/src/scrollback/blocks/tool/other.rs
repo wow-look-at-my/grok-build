@@ -25,6 +25,10 @@ pub struct OtherToolCallBlock {
     pub started_at: Option<std::time::Instant>,
     /// Elapsed time in ms after completion (Phase 2: time tracking).
     pub elapsed_ms: Option<i64>,
+    /// The tail of the arguments the model is writing right now, decoded and
+    /// split into lines. Only a call still being streamed has any: the real
+    /// `ToolCall` replaces this block outright once the call is whole.
+    pub streaming_preview: Vec<String>,
     /// Image references detected in the tool output.
     image_refs: Vec<crate::prompt_images::ScrollbackImageRef>,
     /// Video references detected in the tool output.
@@ -45,6 +49,7 @@ impl OtherToolCallBlock {
             output: None,
             started_at: None,
             elapsed_ms: None,
+            streaming_preview: Vec::new(),
             image_refs: Vec::new(),
             video_refs: Vec::new(),
         }
@@ -182,6 +187,29 @@ impl OtherToolCallBlock {
             line
         }
     }
+
+    /// The arguments arriving right now, one dim line each.
+    ///
+    /// Indented under the header and truncated rather than wrapped: the tail
+    /// is redrawn on every fragment, and a wrapped line changes the block's
+    /// height as the model types, which makes the whole transcript jump.
+    fn streaming_preview_lines(&self, theme: &Theme, width: usize) -> Vec<BlockLine> {
+        const INDENT: &str = "  ";
+        let body_width = width.saturating_sub(INDENT.len()).max(8);
+        self.streaming_preview
+            .iter()
+            .map(|text| {
+                let line = Line::from(vec![
+                    Span::raw(INDENT),
+                    Span::styled(text.clone(), theme.dim()),
+                ]);
+                BlockLine::styled(crate::render::line_utils::truncate_line(
+                    line,
+                    body_width + INDENT.len(),
+                ))
+            })
+            .collect()
+    }
 }
 
 impl BlockContent for OtherToolCallBlock {
@@ -245,15 +273,21 @@ impl BlockContent for OtherToolCallBlock {
         }
 
         match ctx.mode {
-            DisplayMode::Collapsed => BlockOutput {
-                lines: vec![
+            DisplayMode::Collapsed => {
+                // Collapsed is the default mode, so a call being streamed is
+                // collapsed the whole time it is written. Its live tail has to
+                // render here or it is never seen at all.
+                let mut lines: Vec<BlockLine> = vec![
                     self.collapsed_line(&theme, muted_collapsed, Some(ctx.content_width()))
                         .into(),
-                ],
-            },
+                ];
+                lines.extend(self.streaming_preview_lines(&theme, ctx.content_width()));
+                BlockOutput { lines }
+            }
             DisplayMode::Truncated | DisplayMode::Expanded => {
                 let mut lines: Vec<BlockLine> =
                     vec![self.collapsed_line(&theme, false, None).into()];
+                lines.extend(self.streaming_preview_lines(&theme, ctx.content_width()));
 
                 if let Some(output) = &self.output {
                     // Try to render as structured Q&A (AskUserQuestion output).

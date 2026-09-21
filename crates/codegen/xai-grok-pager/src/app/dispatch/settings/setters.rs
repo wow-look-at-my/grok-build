@@ -1000,10 +1000,7 @@ pub(in crate::app::dispatch) fn set_confirm_before_rewind(
     }]
 }
 
-pub(in crate::app::dispatch) fn set_stop_gate_unfinished_todos_inner(
-    app: &mut AppView,
-    new: bool,
-) {
+pub(in crate::app::dispatch) fn set_stop_gate_unfinished_todos_inner(app: &mut AppView, new: bool) {
     app.current_ui.stop_gate_unfinished_todos = Some(new);
 }
 
@@ -2194,7 +2191,8 @@ pub(in crate::app::dispatch) fn set_min_output_tokens_per_sec(
 }
 
 pub(super) fn set_output_rate_sustained_secs_inner(app: &mut AppView, value: i64) {
-    app.current_ui.output_rate_sustained_secs = Some(clamp_output_rate_sustained_secs(value) as u32);
+    app.current_ui.output_rate_sustained_secs =
+        Some(clamp_output_rate_sustained_secs(value) as u32);
 }
 
 pub(in crate::app::dispatch) fn set_output_rate_sustained_secs(

@@ -43,9 +43,7 @@ use std::time::{Duration, Instant};
 
 // The pure run→state reduction is shared with the agent's `ci` tool, so the
 // dot and the tool can never disagree about what red means.
-pub use xai_grok_sandbox::ci_state::{
-    CiStatus, GhRun, ci_from_runs, map_ci_status, parse_gh_runs,
-};
+pub use xai_grok_sandbox::ci_state::{CiStatus, GhRun, ci_from_runs, map_ci_status, parse_gh_runs};
 
 /// Minimum interval between off-thread `gh` refreshes for the same target, so
 /// a per-frame caller can't spawn a storm of `gh` subprocesses.
@@ -232,11 +230,7 @@ fn gh_run_list(repo_root: &Path, branch: &str) -> Option<Vec<GhRun>> {
 /// runs", so the dot degrades to the "off" state rather than falling through
 /// to an in-jail `gh` spawn. Only a genuinely absent/unusable worker
 /// connection returns `None`.
-fn run_gh_via_ci_host(
-    repo_root: &Path,
-    args: &[&str],
-    fd: i32,
-) -> Option<std::process::Output> {
+fn run_gh_via_ci_host(repo_root: &Path, args: &[&str], fd: i32) -> Option<std::process::Output> {
     #[cfg(unix)]
     {
         let _ = repo_root;
@@ -778,7 +772,11 @@ mod tests {
             br#"[{"status":"in_progress","conclusion":"","headBranch":"master","workflowName":"CI"}]"#,
         );
         let (_runs, status) = gh_ci_status(Path::new("/no/such/repo"), "master");
-        assert_eq!(status, CiStatus::Yellow, "a live run must pulse, not go dark");
+        assert_eq!(
+            status,
+            CiStatus::Yellow,
+            "a live run must pulse, not go dark"
+        );
         unsafe { std::env::remove_var(xai_grok_sandbox::ci_host::CI_HOST_FD_ENV) };
     }
 
@@ -824,7 +822,10 @@ mod tests {
         // does. `run_gh_via_ci_host` reads it, roots the (real) transport,
         // and clones one handle per call.
         unsafe {
-            std::env::set_var(xai_grok_sandbox::ci_host::CI_HOST_FD_ENV, ours_raw.to_string());
+            std::env::set_var(
+                xai_grok_sandbox::ci_host::CI_HOST_FD_ENV,
+                ours_raw.to_string(),
+            );
         }
         let output = run_gh_via_ci_host(
             Path::new("/repo"),
@@ -886,7 +887,10 @@ mod tests {
             peer.flush().unwrap();
         });
         unsafe {
-            std::env::set_var(xai_grok_sandbox::ci_host::CI_HOST_FD_ENV, ours_raw.to_string());
+            std::env::set_var(
+                xai_grok_sandbox::ci_host::CI_HOST_FD_ENV,
+                ours_raw.to_string(),
+            );
         }
         let got = run_gh_via_ci_host(
             Path::new("/repo"),
@@ -923,7 +927,10 @@ mod tests {
             }
         });
         unsafe {
-            std::env::set_var(xai_grok_sandbox::ci_host::CI_HOST_FD_ENV, ours_raw.to_string());
+            std::env::set_var(
+                xai_grok_sandbox::ci_host::CI_HOST_FD_ENV,
+                ours_raw.to_string(),
+            );
         }
         // Three successive polls over the single inherited connection. The
         // first poll's success transitions to the in-progress yellow the dot
@@ -1060,12 +1067,12 @@ mod tests {
         // three quarters (min).
         let quarter = CI_PULSE_PERIOD / 4;
         assert!(
-            (pulse_value(quarter, CI_PULSE_MIN_VALUE, CI_PULSE_MAX_VALUE) - CI_PULSE_MAX_VALUE).abs()
+            (pulse_value(quarter, CI_PULSE_MIN_VALUE, CI_PULSE_MAX_VALUE) - CI_PULSE_MAX_VALUE)
+                .abs()
                 < 1e-2
         );
         assert!(
-            (pulse_value(quarter * 3, CI_PULSE_MIN_VALUE, CI_PULSE_MAX_VALUE)
-                - CI_PULSE_MIN_VALUE)
+            (pulse_value(quarter * 3, CI_PULSE_MIN_VALUE, CI_PULSE_MAX_VALUE) - CI_PULSE_MIN_VALUE)
                 .abs()
                 < 1e-2
         );

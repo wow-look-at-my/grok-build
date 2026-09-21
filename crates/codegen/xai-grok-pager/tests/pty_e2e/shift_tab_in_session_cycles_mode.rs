@@ -115,8 +115,12 @@ async fn rapid_shift_tab_presses_stay_on_the_last_stop() {
 
     // Normal -> Plan -> Auto in one burst, with no confirmation read in
     // between: the whole point of the case.
-    harness.inject_keys(b"\x1b[Z").expect("inject first BackTab");
-    harness.inject_keys(b"\x1b[Z").expect("inject second BackTab");
+    harness
+        .inject_keys(b"\x1b[Z")
+        .expect("inject first BackTab");
+    harness
+        .inject_keys(b"\x1b[Z")
+        .expect("inject second BackTab");
     harness
         .wait_for_text("Switched to mode: Auto", Duration::from_secs(10))
         .expect("second press must show Auto");

@@ -462,7 +462,11 @@ fn finish_todo_capture_ui(agent: &mut AgentView, ok: bool) {
     if let Some(task_id) = agent.pending_todo_task_id.take()
         && let Some(task) = agent.session.bg_tasks.get_mut(&task_id)
     {
-        task.status = if ok { BgTaskStatus::Done } else { BgTaskStatus::Failed };
+        task.status = if ok {
+            BgTaskStatus::Done
+        } else {
+            BgTaskStatus::Failed
+        };
         task.end_time = Some(std::time::SystemTime::now());
         // The running scrollback entry is gone above, so a row pointing at it
         // would open a viewer on an entry that no longer exists.
