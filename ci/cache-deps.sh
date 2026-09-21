@@ -36,6 +36,35 @@ prune)
 	after="$(du -sm "$dir" 2>/dev/null | cut -f1)"
 	printf 'cache-deps: pruned %d workspace entries, %s MB -> %s MB\n' \
 		"$removed" "$before" "$after"
+
+	# The entry is one tar. Only a per-group size says which group is worth an exclusion.
+	# A group whose directory is absent reports zero. Every path here is optional.
+	group() {
+		label="$1"
+		root="$2"
+		shift 2
+		bytes=0
+		if [ -d "$root" ]; then
+			bytes="$( (find "$root" "$@" -printf '%s\n' 2>/dev/null || true) |
+				awk '{t+=$1} END {printf "%d", t}')"
+		fi
+		printf 'cache-deps:   %-28s %6d MB\n' "$label" "$((bytes / 1048576))"
+	}
+	cargo_home="${CARGO_HOME:-$HOME/.cargo}"
+	group 'deps/*.rlib' "$dir/deps" -maxdepth 1 -name '*.rlib'
+	group 'deps/*.rmeta' "$dir/deps" -maxdepth 1 -name '*.rmeta'
+	group 'deps/*.so' "$dir/deps" -maxdepth 1 -name '*.so'
+	group 'deps/*.d' "$dir/deps" -maxdepth 1 -name '*.d'
+	group 'deps, everything else' "$dir/deps" -maxdepth 1 -type f \
+		! -name '*.rlib' ! -name '*.rmeta' ! -name '*.so' ! -name '*.d'
+	group 'build, script binaries' "$dir/build" -type f -name 'build-script-*' ! -name '*.d'
+	group 'build, out trees' "$dir/build" -type f -path '*/out/*'
+	group 'build, everything else' "$dir/build" -type f \
+		! -path '*/out/*' ! -name 'build-script-*'
+	group '.fingerprint' "$dir/.fingerprint" -type f
+	group 'cargo registry/index' "$cargo_home/registry/index" -type f
+	group 'cargo registry/cache' "$cargo_home/registry/cache" -type f
+	group 'cargo git/db' "$cargo_home/git/db" -type f
 	;;
 *)
 	echo "cache-deps: unknown op $op" >&2
