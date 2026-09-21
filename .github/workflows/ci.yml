@@ -55,11 +55,11 @@ jobs:
       - name: Install ripgrep
         uses: wow-look-at-my/actions@cache-rg#latest
 
-      # bubblewrap: jail_bwrap_e2e drives the `--sandbox` command builder against real bwrap, and reports a skip without it. mold: .cargo/config.toml links x86_64-unknown-linux-gnu with it. The update is required: the image's baked apt index pins a bubblewrap the mirror drops the moment Ubuntu publishes a newer one, and the install then 404s on the .deb.
+      # bubblewrap: jail_bwrap_e2e drives the `--sandbox` command builder against real bwrap, and reports a skip without it. mold: .cargo/config.toml links x86_64-unknown-linux-gnu with it. Restored files need no apt index, so the version the image's index pins and the mirror has dropped stops mattering.
       - name: Install bubblewrap and mold
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y bubblewrap mold
+        uses: wow-look-at-my/actions@cached-apt#latest
+        with:
+          packages: bubblewrap mold
 
       # Each test runs in its own process under a per-test timeout (.config/nextest.toml), which cargo test has none of.
       - name: Install cargo-nextest
@@ -70,19 +70,23 @@ jobs:
           tar -xzf "$RUNNER_TEMP/nextest.tar.gz" -C "$RUNNER_TEMP/nextest-bin"
           echo "$RUNNER_TEMP/nextest-bin" >> "$GITHUB_PATH"
 
-      # One tar of the REGISTRY dependency artifacts, which a lockfile determines and a push does not. The key is exact and carries NO restore-keys on purpose: a prefix fallback restores a stale set, compiles the delta and saves both under a new key, which is how such an entry grows until it evicts everything else. An exact key holds one lockfile's dependencies and never accumulates. Measured on run 35459915405: registry crates are 1909 of build-test's 4161 compile CPU-seconds.
-      - name: Restore the dependency artifacts
-        id: deps-cache
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      # The registry dependencies, which a lockfile determines and a push does not. Measured on run 35459915405: they are 1909 of build-test's 4161 compile CPU-seconds. The script builds the workspace to reach them, then prunes the workspace artifacts back out, so what the entry carries is the dependency tree alone. The hashFiles comment is what keys the entry: cached-run digests the script text, and the runner expands the expression before the action sees it. No restore-keys, so an entry holds one lockfile's dependencies and never accumulates.
+      - name: Build the dependencies
+        uses: wow-look-at-my/actions@cached-run#latest
         with:
-          path: |
+          key: rustdeps-dev
+          paths: |
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             target/debug/deps
             target/debug/build
             target/debug/.fingerprint
-          key: rustdeps-v1-${{ runner.os }}-dev-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          run: |
+            # ${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+            export CARGO_BUILD_JOBS=3
+            cargo test --locked --workspace --no-run --no-fail-fast
+            ci/cache-deps.sh prune target/debug
 
       # -j3 is the widest -j the runner's 15 GiB holds.
       - name: Build test harnesses (compile, no-run)
@@ -109,24 +113,6 @@ jobs:
             -E 'binary(pty_e2e_smoke) or binary(pty_e2e_config_ui) or binary(pty_e2e_minimal)' \
             --run-ignored all --test-threads 4
 
-      # Saving only on master is what shares the entry. A run reads caches written on its own ref and on the default branch, never one written on a sibling branch, so an entry minted per feature branch is read by nobody and still counts against the repository's 10 GB.
-      - name: Strip the workspace artifacts before saving
-        if: github.ref == 'refs/heads/master' && steps.deps-cache.outputs.cache-hit != 'true'
-        run: ci/cache-deps.sh prune target/debug
-
-      - name: Save the dependency artifacts
-        if: github.ref == 'refs/heads/master' && steps.deps-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-            target/debug/deps
-            target/debug/build
-            target/debug/.fingerprint
-          key: rustdeps-v1-${{ runner.os }}-dev-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
-
       - uses: ./.github/actions/upload-cargo-timings
         with:
           name: cargo-timings-build-test
@@ -143,11 +129,11 @@ jobs:
 
       - uses: ./.github/actions/setup-cargo-timings
 
-      # .cargo/config.toml links x86_64-unknown-linux-gnu with mold. The update keeps the install off a version the image's baked apt index still pins and the mirror has dropped.
+      # .cargo/config.toml links x86_64-unknown-linux-gnu with mold. Restored files need no apt index, so the version the image's index pins and the mirror has dropped stops mattering.
       - name: Install mold
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y mold
+        uses: wow-look-at-my/actions@cached-apt#latest
+        with:
+          packages: mold
 
       - name: Build release binary
         run: cargo build --locked --release -p xai-grok-pager-bin
@@ -233,11 +219,11 @@ jobs:
           mkdir -p "$SDKROOT"
           tar -xJf "$RUNNER_TEMP/sdk.tar.xz" -C "$SDKROOT" --strip-components=1
 
-      # The update keeps the install off a version the image's baked apt index still pins and the mirror has dropped.
+      # Restored files need no apt index, so the version the image's index pins and the mirror has dropped stops mattering.
       - name: Install mold
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y mold
+        uses: wow-look-at-my/actions@cached-apt#latest
+        with:
+          packages: mold
 
       # cc-rs reads these per-target. ci/zig-cc replaces the target cc-rs chooses, which zig rejects; ar and ranlib take no target.
       - name: Point the C toolchain at zig
