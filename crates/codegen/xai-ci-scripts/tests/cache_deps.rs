@@ -1,8 +1,4 @@
 //! Drives `ci/cache-deps.sh prune` over a synthetic target directory.
-//!
-//! The prune decides what a lockfile-keyed cache entry carries. Over-matching deletes a
-//! registry artifact the entry exists to hold; under-matching leaves this workspace's own
-//! test binaries in it, which are most of the bytes.
 
 use std::fs;
 use std::path::{Path, PathBuf};
