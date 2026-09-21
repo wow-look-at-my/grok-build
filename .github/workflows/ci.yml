@@ -27,6 +27,10 @@ env:
   CARGO_PROFILE_TEST_DEBUG: "0"
   BUILDHOST_SERVER: https://pazer.build
   BUILDHOST_PROJECT: grok-build
+  # Release targets that exist and are OFF. Move a row into build-release's matrix to turn it on. They are declared rather than commented out because a commented block is what this repo's own comment rule refuses.
+  DISABLED_RELEASE_TARGETS: >-
+    [{"name": "windows/amd64", "runs-on": "windows-latest", "target": "x86_64-pc-windows-msvc", "darwin": false},
+    {"name": "windows/arm64", "runs-on": "windows-latest", "target": "aarch64-pc-windows-msvc", "darwin": false}]
 
 jobs:
   build-test:
@@ -55,11 +59,11 @@ jobs:
       - name: Install ripgrep
         uses: wow-look-at-my/actions@cache-rg#latest
 
-      # bubblewrap: jail_bwrap_e2e drives the `--sandbox` command builder against real bwrap, and reports a skip without it. mold: .cargo/config.toml links x86_64-unknown-linux-gnu with it. The update is required: the image's baked apt index pins a bubblewrap the mirror drops the moment Ubuntu publishes a newer one, and the install then 404s on the .deb.
+      # bubblewrap: jail_bwrap_e2e drives the `--sandbox` command builder against real bwrap, and reports a skip without it. mold: .cargo/config.toml links x86_64-unknown-linux-gnu with it. Restored files need no apt index, so the version the image's index pins and the mirror has dropped stops mattering.
       - name: Install bubblewrap and mold
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y bubblewrap mold
+        uses: wow-look-at-my/actions@cached-apt#latest
+        with:
+          packages: bubblewrap mold
 
       # Each test runs in its own process under a per-test timeout (.config/nextest.toml), which cargo test has none of.
       - name: Install cargo-nextest
@@ -70,24 +74,23 @@ jobs:
           tar -xzf "$RUNNER_TEMP/nextest.tar.gz" -C "$RUNNER_TEMP/nextest-bin"
           echo "$RUNNER_TEMP/nextest-bin" >> "$GITHUB_PATH"
 
-      # Without the container format the wrapper packs into, every upload here fails before the wire.
-      - name: Install binpazer
-        run: |
-          curl -fSsL --location-trusted \
-            "https://dl.pazer.build/bin-file-fmt/binpazer?os=linux&arch=amd64" -o "$RUNNER_TEMP/binpazer"
-          chmod +x "$RUNNER_TEMP/binpazer"
-          echo "BINPAZER=$RUNNER_TEMP/binpazer" >> "$GITHUB_ENV"
-
-      # A run step is not given the cache service env, so without this the remote layer never runs here.
-      - name: Export the cache service env for the shell steps
-        uses: wow-look-at-my/actions@typescript#latest
+      # The registry dependencies, which a lockfile determines and a push does not. Measured on run 35459915405: they are 1909 of build-test's 4161 compile CPU-seconds. The script builds the workspace to reach them, then prunes the workspace artifacts back out, so what the entry carries is the dependency tree alone. The hashFiles comment is what keys the entry: cached-run digests the script text, and the runner expands the expression before the action sees it. No restore-keys, so an entry holds one lockfile's dependencies and never accumulates.
+      - name: Build the dependencies
+        uses: wow-look-at-my/actions@cached-run#latest
         with:
-          script: |
-            for (const key of ["ACTIONS_RESULTS_URL", "ACTIONS_CACHE_URL", "ACTIONS_RUNTIME_TOKEN"]) {
-              const value = process.env[key];
-              if (value) core.exportVariable(key, value);
-              core.info(`${key}: ${value ? "present" : "absent"}`);
-            }
+          key: rustdeps-dev
+          paths: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target/debug/deps
+            target/debug/build
+            target/debug/.fingerprint
+          run: |
+            # ${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+            export CARGO_BUILD_JOBS=3
+            cargo test --locked --workspace --no-run --no-fail-fast
+            ci/cache-deps.sh prune target/debug
 
       # -j3 is the widest -j the runner's 15 GiB holds.
       - name: Build test harnesses (compile, no-run)
@@ -106,67 +109,39 @@ jobs:
           cargo nextest run --locked --workspace --profile ci
           "$PAGER_BINARY" --version
 
-      - uses: ./.github/actions/upload-cargo-timings
-        with:
-          name: cargo-timings-build-test
-
-  # These assert on what a virtual terminal actually shows, which a unit test over the width function cannot stand in for.
-  pty-e2e:
-    name: Test (PTY end-to-end)
-    # Hosted for the same reason as build-test: these need a real /bin/bash.
-    runs-on: ubuntu-22.04
-    timeout-minutes: 45
-    env:
-      PAGER_BINARY: ${{ github.workspace }}/target/debug/xai-grok-pager
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-
-      - name: Report disk before build
-        run: df -h /
-
-      - uses: ./.github/actions/setup-protoc
-
-      - uses: ./.github/actions/setup-cargo-timings
-
-      - name: Install cargo-nextest
-        run: |
-          mkdir -p "$RUNNER_TEMP/nextest-bin"
-          curl -fsSL -o "$RUNNER_TEMP/nextest.tar.gz" \
-            https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-0.9.143/cargo-nextest-0.9.143-x86_64-unknown-linux-gnu.tar.gz
-          tar -xzf "$RUNNER_TEMP/nextest.tar.gz" -C "$RUNNER_TEMP/nextest-bin"
-          echo "$RUNNER_TEMP/nextest-bin" >> "$GITHUB_PATH"
-
-      # .cargo/config.toml links x86_64-unknown-linux-gnu with mold. The update keeps the install off a version the image's baked apt index still pins and the mirror has dropped.
-      - name: Install mold
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y mold
-
-      - name: Build the PTY harnesses and the pager binary
-        run: |
-          cargo test --locked -p xai-grok-pager --no-run \
-            --test pty_e2e_smoke \
-            --test pty_e2e_config_ui \
-            --test pty_e2e_minimal
-          cargo build --locked -p xai-grok-pager-bin
-
+      # The PTY cases are #[ignore]d, so the run above built their binaries and skipped every case; this is the only thing that executes them. Same `--workspace` scope as the compile step on purpose: `-p xai-grok-pager` resolves its own feature set and rebuilds the graph instead of reusing target/. `!cancelled()` keeps a workspace-test failure from hiding a PTY failure.
       - name: Test (PTY end-to-end)
+        if: ${{ !cancelled() }}
         run: |
-          cargo nextest run --locked -p xai-grok-pager --profile ci \
-            --test pty_e2e_smoke \
-            --test pty_e2e_config_ui \
-            --test pty_e2e_minimal \
+          cargo nextest run --locked --workspace --profile ci \
+            -E 'binary(pty_e2e_smoke) or binary(pty_e2e_config_ui) or binary(pty_e2e_minimal)' \
             --run-ignored all --test-threads 4
 
       - uses: ./.github/actions/upload-cargo-timings
         with:
-          name: cargo-timings-pty-e2e
+          name: cargo-timings-build-test
 
   build-release:
-    name: Build release binary (linux/amd64)
-    # Every Linux job is ubuntu-22.04 so they share one cache. Here it also matters for output: glibc 2.35 holds every GLIBC_x.y dependency at or below what a 22.04 user has. No `needs`: the release number is written in after the link, so this starts at t=0 beside the tests.
-    runs-on: ubuntu-22.04
+    name: Build release (${{ matrix.name }})
+    runs-on: ${{ matrix.runs-on }}
     timeout-minutes: 45
+    strategy:
+      # One target's failure leaves the others' results worth reading.
+      fail-fast: false
+      matrix:
+        include:
+          # ubuntu-22.04 holds every GLIBC_x.y dependency at or below what a 22.04 user has.
+          - name: linux/amd64
+            runs-on: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            darwin: false
+          - name: darwin/arm64
+            runs-on: ubuntu-22.04
+            target: aarch64-apple-darwin
+            darwin: true
+    env:
+      SDKROOT: ${{ github.workspace }}/.darwin-sdk
+      GROK_DARWIN_LINK_BUNDLE: ${{ github.workspace }}/.darwin-link
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
@@ -174,20 +149,84 @@ jobs:
 
       - uses: ./.github/actions/setup-cargo-timings
 
-      # .cargo/config.toml links x86_64-unknown-linux-gnu with mold. The update keeps the install off a version the image's baked apt index still pins and the mirror has dropped.
-      - name: Install mold
+      - name: Add the target
+        run: rustup target add ${{ matrix.target }}
+
+      # zig compiles the C in the build scripts for macOS. It never links: xai-darwin-link records that step instead.
+      - name: Install zig (pinned 0.14.1)
+        if: matrix.darwin
         run: |
-          sudo apt-get update
-          sudo apt-get install -y mold
+          curl -fsSL -o "$RUNNER_TEMP/zig.tar.xz" https://ziglang.org/download/0.14.1/zig-x86_64-linux-0.14.1.tar.xz
+          echo "24aeeec8af16c381934a6cd7d95c807a8cb2cf7df9fa40d359aa884195c4716c  $RUNNER_TEMP/zig.tar.xz" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/zig"
+          tar -xJf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP/zig" --strip-components=1
+          echo "$RUNNER_TEMP/zig" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/zig/zig" version
 
+      # aws-lc-sys and its siblings include Apple headers (CoreServices, CoreFoundation), which zig does not carry.
+      - name: Install the macOS SDK (pinned 14.5)
+        if: matrix.darwin
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/sdk.tar.xz" \
+            https://github.com/joseluisq/macosx-sdks/releases/download/14.5/MacOSX14.5.sdk.tar.xz
+          echo "6e146275d19f027faa2e8354da5e0267513abf013b8f16ad65a231653a2b1c5d  $RUNNER_TEMP/sdk.tar.xz" | sha256sum -c -
+          mkdir -p "$SDKROOT"
+          tar -xJf "$RUNNER_TEMP/sdk.tar.xz" -C "$SDKROOT" --strip-components=1
+
+      # .cargo/config.toml links x86_64-unknown-linux-gnu with mold. Restored files need no apt index, so the version the image's index pins and the mirror has dropped stops mattering.
+      - name: Install mold
+        uses: wow-look-at-my/actions@cached-apt#latest
+        with:
+          packages: mold
+
+      # cc-rs reads these per-target. ci/zig-cc replaces the target cc-rs chooses, which zig rejects; ar and ranlib take no target.
+      - name: Point the C toolchain at zig
+        if: matrix.darwin
+        run: |
+          printf '#!/bin/sh\nexec zig ar "$@"\n' > "$RUNNER_TEMP/zig-ar"
+          printf '#!/bin/sh\nexec zig ranlib "$@"\n' > "$RUNNER_TEMP/zig-ranlib"
+          chmod +x "$RUNNER_TEMP/zig-ar" "$RUNNER_TEMP/zig-ranlib"
+          {
+            echo "CC_aarch64_apple_darwin=$PWD/ci/zig-cc"
+            echo "CXX_aarch64_apple_darwin=$PWD/ci/zig-cxx"
+            echo "AR_aarch64_apple_darwin=$RUNNER_TEMP/zig-ar"
+            echo "RANLIB_aarch64_apple_darwin=$RUNNER_TEMP/zig-ranlib"
+          } >> "$GITHUB_ENV"
+
+      # The recorder is a host binary, so it takes no --target.
+      - name: Build the link recorder
+        if: matrix.darwin
+        run: |
+          cargo build --locked --release -p xai-darwin-link
+          echo "CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER=$PWD/target/release/xai-darwin-link" >> "$GITHUB_ENV"
+
+      # The registry dependencies for this row's target, the way build-test caches its own. The digest covers the script text, and the target is in it, so each row keys its own entry without naming one.
+      - name: Build the dependencies
+        uses: wow-look-at-my/actions@cached-run#latest
+        with:
+          key: rustdeps-release
+          paths: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target/${{ matrix.target }}/release/deps
+            target/${{ matrix.target }}/release/build
+            target/${{ matrix.target }}/release/.fingerprint
+          run: |
+            # ${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+            cargo build --locked --release --target ${{ matrix.target }} -p xai-grok-pager-bin
+            ci/cache-deps.sh prune target/${{ matrix.target }}/release
+
+      # On the darwin row the link at the end of this records itself into GROK_DARWIN_LINK_BUNDLE rather than running.
       - name: Build release binary
-        run: cargo build --locked --release -p xai-grok-pager-bin
+        run: cargo build --locked --release --target ${{ matrix.target }} -p xai-grok-pager-bin
 
-      # Proves the slot is reachable and that a stamp reaches `--version`, on a COPY so the uploaded artifact stays unstamped for the real number.
+      # Proves the slot is reachable and that a stamp reaches `--version`, on a COPY so the uploaded artifact stays unstamped for the real number. Only a row whose output this runner can execute.
       - name: Probe the version stamp on a copy
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
         run: |
           cargo build --locked --release -p xai-grok-stamp
-          cp target/release/xai-grok-pager "$RUNNER_TEMP/probe"
+          cp target/${{ matrix.target }}/release/xai-grok-pager "$RUNNER_TEMP/probe"
           target/release/xai-grok-stamp "$RUNNER_TEMP/probe" 0.0.0-slot-probe
           got="$("$RUNNER_TEMP/probe" --version)"
           echo "stamped copy reports: $got"
@@ -198,9 +237,10 @@ jobs:
 
       # Guards the floor the build above buys: a symbol newer than 2.35 is a load error on Ubuntu 22.04.
       - name: Verify glibc symbols are <= 2.35 (linux/amd64)
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
         shell: bash
         run: |
-          max_glibc="$(readelf --version-info target/release/xai-grok-pager 2>/dev/null \
+          max_glibc="$(readelf --version-info target/${{ matrix.target }}/release/xai-grok-pager 2>/dev/null \
             | grep -oE 'GLIBC_[0-9]+\.[0-9]+' | sed 's/GLIBC_//' | sort -V | tail -n1)"
           echo "max GLIBC symbol referenced: ${max_glibc:-none}"
           if [[ -z "$max_glibc" ]]; then exit 1; fi
@@ -213,101 +253,56 @@ jobs:
 
       - uses: ./.github/actions/upload-cargo-timings
         with:
-          name: cargo-timings-build-release
+          name: cargo-timings-build-release-${{ matrix.target }}
 
-      - name: Stage artifact
-        run: |
-          mkdir -p dist
-          cp target/release/xai-grok-pager dist/grok-linux-amd64
-
-      - uses: wow-look-at-my/actions@cache-upload#latest
-        with:
-          name: grok-linux-amd64
-          path: dist/grok-linux-amd64
-
-  # Every crate of the darwin binary compiles here. Only the link needs a Mac, and it is its own job below.
-  build-darwin-objects:
-    name: Compile darwin/arm64 (Linux)
-    # No `needs`, for the same reason as build-release: nothing here needs a release number.
-    runs-on: ubuntu-22.04
-    timeout-minutes: 45
-    env:
-      SDKROOT: ${{ github.workspace }}/.darwin-sdk
-      GROK_DARWIN_LINK_BUNDLE: ${{ github.workspace }}/.darwin-link
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-
-      # protoc runs on the host for this cross build; the shared action installs the Linux binary.
-      - uses: ./.github/actions/setup-protoc
-
-      - uses: ./.github/actions/setup-cargo-timings
-
-      - name: Add the darwin target
-        run: rustup target add aarch64-apple-darwin
-
-      # zig compiles the C in the build scripts for macOS. It never links here: xai-darwin-link records that step instead.
-      - name: Install zig (pinned 0.14.1)
-        run: |
-          curl -fsSL -o "$RUNNER_TEMP/zig.tar.xz" https://ziglang.org/download/0.14.1/zig-x86_64-linux-0.14.1.tar.xz
-          echo "24aeeec8af16c381934a6cd7d95c807a8cb2cf7df9fa40d359aa884195c4716c  $RUNNER_TEMP/zig.tar.xz" | sha256sum -c -
-          mkdir -p "$RUNNER_TEMP/zig"
-          tar -xJf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP/zig" --strip-components=1
-          echo "$RUNNER_TEMP/zig" >> "$GITHUB_PATH"
-          "$RUNNER_TEMP/zig/zig" version
-
-      # aws-lc-sys and its siblings include Apple headers (CoreServices, CoreFoundation), which zig does not carry.
-      - name: Install the macOS SDK (pinned 14.5)
-        run: |
-          curl -fsSL -o "$RUNNER_TEMP/sdk.tar.xz" \
-            https://github.com/joseluisq/macosx-sdks/releases/download/14.5/MacOSX14.5.sdk.tar.xz
-          echo "6e146275d19f027faa2e8354da5e0267513abf013b8f16ad65a231653a2b1c5d  $RUNNER_TEMP/sdk.tar.xz" | sha256sum -c -
-          mkdir -p "$SDKROOT"
-          tar -xJf "$RUNNER_TEMP/sdk.tar.xz" -C "$SDKROOT" --strip-components=1
-
-      # The update keeps the install off a version the image's baked apt index still pins and the mirror has dropped.
-      - name: Install mold
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y mold
-
-      # cc-rs reads these per-target. ci/zig-cc replaces the target cc-rs chooses, which zig rejects; ar and ranlib take no target.
-      - name: Point the C toolchain at zig
-        run: |
-          printf '#!/bin/sh\nexec zig ar "$@"\n' > "$RUNNER_TEMP/zig-ar"
-          printf '#!/bin/sh\nexec zig ranlib "$@"\n' > "$RUNNER_TEMP/zig-ranlib"
-          chmod +x "$RUNNER_TEMP/zig-ar" "$RUNNER_TEMP/zig-ranlib"
-          {
-            echo "CC_aarch64_apple_darwin=$PWD/ci/zig-cc"
-            echo "CXX_aarch64_apple_darwin=$PWD/ci/zig-cxx"
-            echo "AR_aarch64_apple_darwin=$RUNNER_TEMP/zig-ar"
-            echo "RANLIB_aarch64_apple_darwin=$RUNNER_TEMP/zig-ranlib"
-          } >> "$GITHUB_ENV"
-
-      - name: Build the link recorder
-        run: |
-          cargo build --locked --release -p xai-darwin-link
-          echo "CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER=$PWD/target/release/xai-darwin-link" >> "$GITHUB_ENV"
-
-      # The link at the end of this records itself into GROK_DARWIN_LINK_BUNDLE rather than running.
-      - name: Compile every crate for darwin/arm64
-        run: cargo build --locked --release --target aarch64-apple-darwin -p xai-grok-pager-bin
-
-      - uses: ./.github/actions/upload-cargo-timings
-        with:
-          name: cargo-timings-build-darwin-objects
-
+      # The darwin row hands over the recorded link instead of a binary, because the link has not run yet.
       - name: Bundle the recorded link
+        if: matrix.darwin
         run: ci/darwin-bundle.sh "$GROK_DARWIN_LINK_BUNDLE" dist/darwin-link.tar
 
       - uses: wow-look-at-my/actions@cache-upload#latest
+        if: matrix.darwin
         with:
           name: darwin-link-bundle
           path: dist/darwin-link.tar
 
-  # The only macOS job in this workflow: one cc invocation over a bundle Linux built.
+      - name: Stage artifact
+        if: '!matrix.darwin'
+        run: |
+          mkdir -p dist
+          cp target/${{ matrix.target }}/release/xai-grok-pager dist/grok-linux-amd64
+
+      - uses: wow-look-at-my/actions@cache-upload#latest
+        if: '!matrix.darwin'
+        with:
+          name: grok-linux-amd64
+          path: dist/grok-linux-amd64
+
+  # buildhost assigns the number here, after every build and test passed, so a number only ever names a tree that already built and passed.
+  release:
+    name: Create buildhost release
+    needs: [build-test, test-darwin-sandbox, build-release]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write # GitHub OIDC -> buildhost
+    outputs:
+      version: ${{ steps.rel.outputs.version }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Create release
+        id: rel
+        uses: wow-look-at-my/buildhost/.github/actions/buildhost-create-release@master
+        with:
+          server: ${{ env.BUILDHOST_SERVER }}
+          project: ${{ env.BUILDHOST_PROJECT }}
+
+  # One cc, and the only step in the workflow that needs a Mac. It waits on the tests as well as its bundle: it takes seconds, so starting it early buys nothing and spends a macOS runner on a tree that may not pass.
   link-darwin:
     name: Link darwin/arm64 (macOS)
-    needs: build-darwin-objects
+    needs: [build-release, build-test]
     runs-on: macos-14
     timeout-minutes: 15
     steps:
@@ -344,11 +339,10 @@ jobs:
         run: cargo test --locked -p xai-grok-sandbox
 
   publish:
-    # Every test AND every build first: a number is only assigned to a tree that already built and passed.
-    needs: [build-test, pty-e2e, test-darwin-sandbox, build-release, link-darwin]
+    # Both binaries are stamped here. Patching bytes needs no Mac, and no signature is restored afterwards: a Homebrew install clears the quarantine that would otherwise make one matter.
+    needs: [release, link-darwin]
     name: Publish buildhost release
-    # macOS because patching an arm64 Mach-O invalidates the ad-hoc signature `ld` left, and `codesign` is the only thing that puts one back. The linux binary is stamped here too: patching an ELF needs no Linux.
-    runs-on: macos-14
+    runs-on: ubuntu-22.04
     timeout-minutes: 30
     permissions:
       contents: read
@@ -371,16 +365,14 @@ jobs:
       - name: Install Rust toolchain (pinned by rust-toolchain.toml)
         run: rustup show
 
+      # .cargo/config.toml links x86_64-unknown-linux-gnu with mold, and this job compiles the stamper. Without it `cc` answers "cannot find 'ld'".
+      - name: Install mold
+        uses: wow-look-at-my/actions@cached-apt#latest
+        with:
+          packages: mold
+
       - name: Build the stamper
         run: cargo build --locked --release -p xai-grok-stamp
-
-      # buildhost assigns the number here. Nothing before this point needed it, which is why every build and test already ran.
-      - name: Create release
-        id: rel
-        uses: wow-look-at-my/buildhost/.github/actions/buildhost-create-release@master
-        with:
-          server: ${{ env.BUILDHOST_SERVER }}
-          project: ${{ env.BUILDHOST_PROJECT }}
 
       # The stamper reads each slot back off disk after writing it, so a binary that did not take the number fails here.
       - name: Write the release number into both binaries
@@ -388,18 +380,15 @@ jobs:
           set -euo pipefail
           for binary in dist/grok-linux-amd64 dist/grok-darwin-arm64; do
             chmod +x "$binary"
-            target/release/xai-grok-stamp "$binary" '${{ steps.rel.outputs.version }}'
+            target/release/xai-grok-stamp "$binary" '${{ needs.release.outputs.version }}'
           done
 
-      - name: Re-sign the darwin binary
-        run: codesign --force --sign - dist/grok-darwin-arm64
-
-      # This runner is the arm64 Mac, so this is the darwin binary itself answering. The linux binary's own `--version` runs in build-release.
-      - name: Verify the darwin binary reports the release number
+      # This runner is the linux/amd64 box, so this is the binary itself answering. Nothing here can execute a Mach-O, so the darwin stamp rests on the stamper's own read-back.
+      - name: Verify the linux binary reports the release number
         run: |
           set -euo pipefail
-          got="$(dist/grok-darwin-arm64 --version)"
-          want="grok ${{ steps.rel.outputs.version }}"
+          got="$(dist/grok-linux-amd64 --version)"
+          want="grok ${{ needs.release.outputs.version }}"
           echo "buildhost release: $want"
           echo "binary reports:    $got"
           case "$got" in
@@ -407,59 +396,33 @@ jobs:
             *) echo "FAIL: the binary does not report the buildhost release" ; exit 1 ;;
           esac
 
-      # The CLI takes a plain bearer, and buildhost accepts a GitHub OIDC token as one. Its audience is the server URL.
-      - name: Mint a buildhost bearer from GitHub OIDC
-        uses: wow-look-at-my/actions@typescript#latest
+      # Each upload is the org action, not the CLI. buildhost publishes its CLI as one APE, so `?os=linux` serves the same MZ file a Mac gets, and this runner's binfmt handler claims that magic: `run-detectors: unable to find an interpreter`. The action is TypeScript, mints its own OIDC bearer, and chunks a body past the edge's cap by itself.
+      - name: Upload the linux binary
+        uses: wow-look-at-my/buildhost/.github/actions/buildhost-upload-artifact@master
         with:
-          script: |
-            const server = "${{ env.BUILDHOST_SERVER }}";
-            const token = await core.getIDToken(server);
-            core.setSecret(token);
-            core.exportVariable("BUILDHOST_TOKEN", token);
+          server: ${{ env.BUILDHOST_SERVER }}
+          project: ${{ env.BUILDHOST_PROJECT }}
+          version: ${{ needs.release.outputs.version }}
+          os: linux
+          arch: amd64
+          path: dist/grok-linux-amd64
 
-      - name: Install the buildhost CLI
-        run: |
-          set -euo pipefail
-          curl -fLo "$RUNNER_TEMP/buildhost" \
-            "https://dl.pazer.build/buildhost?os=darwin&arch=arm64"
-          chmod +x "$RUNNER_TEMP/buildhost"
-          "$RUNNER_TEMP/buildhost" version
-
-      # Both uploads at once. The CLI chunks a body past the edge's cap by itself, and `--draft` keeps each call from publishing the release out from under the other.
-      - name: Upload both binaries in parallel
-        run: |
-          set -euo pipefail
-          upload() {
-            "$RUNNER_TEMP/buildhost" publish \
-              --server '${{ env.BUILDHOST_SERVER }}' \
-              --token "$BUILDHOST_TOKEN" \
-              --project '${{ env.BUILDHOST_PROJECT }}' \
-              --version '${{ steps.rel.outputs.version }}' \
-              --os "$1" --arch "$2" --kind binary \
-              --artifact "dist/grok-$1-$2" \
-              --draft
-          }
-          upload linux amd64 &
-          linux=$!
-          upload darwin arm64 &
-          darwin=$!
-          # Both are waited on before either exit code is read, so one failure never leaves the other upload orphaned.
-          linux_status=0
-          darwin_status=0
-          wait "$linux" || linux_status=$?
-          wait "$darwin" || darwin_status=$?
-          echo "linux/amd64 exit $linux_status, darwin/arm64 exit $darwin_status"
-          if [ "$linux_status" -ne 0 ] || [ "$darwin_status" -ne 0 ]; then
-            echo "FAIL: an upload did not complete"
-            exit 1
-          fi
+      - name: Upload the darwin binary
+        uses: wow-look-at-my/buildhost/.github/actions/buildhost-upload-artifact@master
+        with:
+          server: ${{ env.BUILDHOST_SERVER }}
+          project: ${{ env.BUILDHOST_PROJECT }}
+          version: ${{ needs.release.outputs.version }}
+          os: darwin
+          arch: arm64
+          path: dist/grok-darwin-arm64
 
       - name: Publish release
         uses: wow-look-at-my/buildhost/.github/actions/buildhost-publish-release@master
         with:
           server: ${{ env.BUILDHOST_SERVER }}
           project: ${{ env.BUILDHOST_PROJECT }}
-          version: ${{ steps.rel.outputs.version }}
+          version: ${{ needs.release.outputs.version }}
 
       # always(), so a failed publish still clears the run-scoped copies buildhost has now superseded.
       - name: Clean up binary hand-offs
