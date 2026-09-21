@@ -459,16 +459,21 @@ impl SuppressReason {
         }
     }
     /// Suppression scope for this reason:
-    /// - `size | schema` → [`SUPPRESS_STICKY`]: cleared only on a context-budget change.
+    /// - `size` → [`SUPPRESS_STICKY`]: cleared only on a context-budget change.
     /// - `credit_block` → [`SUPPRESS_UNTIL_SUCCESS`]: wait for a model `200`.
     /// - `auth` → [`SUPPRESS_AUTH`]: clear on login/token refresh (not 200 — over-window deadlock).
-    /// - `other` → [`SUPPRESS_TURN`]: optimistic per-turn retry.
+    /// - `schema | other` → [`SUPPRESS_TURN`]: optimistic per-turn retry.
+    ///
+    /// A schema rejection is about the one request that was sent. The next
+    /// turn appends to the history and the replay ladder rewrites it, so the
+    /// next attempt is a different request. Holding it sticky turned one bad
+    /// response into a session with no compaction at all.
     fn suppress_state(self) -> u8 {
         match self {
-            SuppressReason::Size | SuppressReason::Schema => SUPPRESS_STICKY,
+            SuppressReason::Size => SUPPRESS_STICKY,
             SuppressReason::CreditBlock => SUPPRESS_UNTIL_SUCCESS,
             SuppressReason::Auth => SUPPRESS_AUTH,
-            SuppressReason::Other => SUPPRESS_TURN,
+            SuppressReason::Schema | SuppressReason::Other => SUPPRESS_TURN,
         }
     }
 }
@@ -766,8 +771,9 @@ impl SessionActor {
         Err(crate::session::helpers::session_compact::CompactFailure::cancelled_error())
     }
     /// Suppress AUTO compaction after a deterministic failure. Scope depends on
-    /// the reason (see [`SuppressReason::suppress_state`]): size/schema sticky,
-    /// credit until 200, auth until credentials recover, other clears next turn.
+    /// the reason (see [`SuppressReason::suppress_state`]): size sticky, credit
+    /// until 200, auth until credentials recover, schema and other clear next
+    /// turn.
     /// Telemetry + one notification per transition; manual `/compact` exempt.
     ///
     /// `detail` is what the provider actually said. It rides the notification
@@ -2783,8 +2789,9 @@ mod inline_auto_compact_flow_tests {
             .await;
     }
     /// Suppression gates both AUTO paths; the reset scope depends on the reason:
-    /// `other` clears next turn, `credit_block` holds until a successful model call,
-    /// `size` is sticky until a full reset (success / rewind / model switch).
+    /// `other` and `schema` clear next turn, `credit_block` holds until a
+    /// successful model call, `size` is sticky until a full reset (success /
+    /// rewind / model switch).
     #[tokio::test(flavor = "current_thread")]
     async fn suppression_gates_and_reset_is_reason_scoped() {
         use crate::session::compaction_config::{
@@ -2801,18 +2808,28 @@ mod inline_auto_compact_flow_tests {
                 let err = api_error_with_context_window(200_000);
                 assert!(actor.check_auto_compact_needed().await.is_some());
                 assert!(actor.should_compact_on_error(&err).await);
-                actor
-                    .suppress_auto_compaction(SuppressReason::Other, "boom", 1_000, 200_000)
-                    .await;
-                assert!(actor.check_auto_compact_needed().await.is_none());
-                assert!(!actor.should_compact_on_error(&err).await);
-                let _ = actor.compaction.auto_compact_suppressed.compare_exchange(
-                    SUPPRESS_TURN,
-                    SUPPRESS_NONE,
-                    Relaxed,
-                    Relaxed,
-                );
-                assert!(actor.check_auto_compact_needed().await.is_some());
+                for per_turn in [SuppressReason::Other, SuppressReason::Schema] {
+                    actor
+                        .suppress_auto_compaction(per_turn, "boom", 1_000, 200_000)
+                        .await;
+                    assert_eq!(
+                        actor.compaction.auto_compact_suppressed.load(Relaxed),
+                        SUPPRESS_TURN,
+                        "{per_turn:?} suppresses for one turn only"
+                    );
+                    assert!(actor.check_auto_compact_needed().await.is_none());
+                    assert!(!actor.should_compact_on_error(&err).await);
+                    let _ = actor.compaction.auto_compact_suppressed.compare_exchange(
+                        SUPPRESS_TURN,
+                        SUPPRESS_NONE,
+                        Relaxed,
+                        Relaxed,
+                    );
+                    assert!(
+                        actor.check_auto_compact_needed().await.is_some(),
+                        "{per_turn:?} is re-armed by the next turn"
+                    );
+                }
                 actor
                     .suppress_auto_compaction(SuppressReason::CreditBlock, "boom", 1_000, 200_000)
                     .await;
@@ -2862,7 +2879,7 @@ mod inline_auto_compact_flow_tests {
             .await;
     }
     /// A model switch clears suppression the switch (or the fresh budget-driven
-    /// trigger) can resolve — sticky size/schema and a stale per-turn `other` — so
+    /// trigger) can resolve — sticky size and a stale per-turn `other` — so
     /// the gates re-evaluate against the new window. Account-state credit/auth is
     /// covered by `model_switch_keeps_account_state_suppression`.
     #[tokio::test(flavor = "current_thread")]

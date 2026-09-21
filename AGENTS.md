@@ -96,6 +96,7 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 
 ## Compaction-failure reporting and mid-turn `/compact`
 
+- A schema rejection (`invalid_request_error`) suppresses auto-compaction for ONE turn, like `other`. Only `size` is sticky. The next turn changes the history and the replay ladder rewrites it. So the next attempt is a different request. A sticky schema scope turned one rejected thinking block into a session with no compaction.
 - A compaction failure reports what the PROVIDER said. The fixed phrase for each `SuppressReason` stays, as the advice half. `compose_compact_failure` appends the provider's own sentence after it, cut at `COMPACT_FAILURE_DETAIL_LIMIT` on a character boundary.
 - The advice alone names a CLASS of failure. "This conversation cannot be summarized" fits a rejected thinking signature, an orphaned tool call and an unsupported field equally. Each one needs a different fix.
 - Several places dropped that detail, and each one needed its own repair. `suppress_auto_compaction` substituted the phrase. The non-suppressed arm of `run_compact_only` sent an EMPTY string. The pager's `handle_compact_complete` blanked the error on the manual path.
