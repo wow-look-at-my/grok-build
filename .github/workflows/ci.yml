@@ -27,6 +27,10 @@ env:
   CARGO_PROFILE_TEST_DEBUG: "0"
   BUILDHOST_SERVER: https://pazer.build
   BUILDHOST_PROJECT: grok-build
+  # Release targets that exist and are OFF. Move a row into build-release's matrix to turn it on. They are declared rather than commented out because a commented block is what this repo's own comment rule refuses.
+  DISABLED_RELEASE_TARGETS: >-
+    [{"name": "windows/amd64", "runs-on": "windows-latest", "target": "x86_64-pc-windows-msvc", "darwin": false},
+    {"name": "windows/arm64", "runs-on": "windows-latest", "target": "aarch64-pc-windows-msvc", "darwin": false}]
 
 jobs:
   build-test:
@@ -117,38 +121,24 @@ jobs:
         with:
           name: cargo-timings-build-test
 
-  # Every release target, enabled or not. A disabled row stays declared and is filtered out of the matrix, so turning one on is a single field. The filter is a job because `strategy` reads no context a workflow-level list could sit in, and a job-level `if` cannot see `matrix`.
-  release-targets:
-    name: Plan the release targets
-    runs-on: ubuntu-22.04
-    timeout-minutes: 5
-    outputs:
-      rows: ${{ steps.rows.outputs.rows }}
-    steps:
-      - id: rows
-        run: |
-          cat > rows.json <<'JSON'
-          [
-            {"name": "linux/amd64",   "runs-on": "ubuntu-22.04",   "target": "x86_64-unknown-linux-gnu",  "darwin": false, "enabled": true},
-            {"name": "darwin/arm64",  "runs-on": "ubuntu-22.04",   "target": "aarch64-apple-darwin",      "darwin": true,  "enabled": true},
-            {"name": "windows/amd64", "runs-on": "windows-latest", "target": "x86_64-pc-windows-msvc",    "darwin": false, "enabled": false},
-            {"name": "windows/arm64", "runs-on": "windows-latest", "target": "aarch64-pc-windows-msvc",   "darwin": false, "enabled": false}
-          ]
-          JSON
-          jq -e 'length > 0' rows.json > /dev/null
-          echo "rows=$(jq -c '[.[] | select(.enabled)]' rows.json)" >> "$GITHUB_OUTPUT"
-          jq -r '.[] | "\(.name): \(if .enabled then "enabled" else "DISABLED" end)"' rows.json
-
   build-release:
     name: Build release (${{ matrix.name }})
-    needs: release-targets
     runs-on: ${{ matrix.runs-on }}
     timeout-minutes: 45
     strategy:
       # One target's failure leaves the others' results worth reading.
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(needs.release-targets.outputs.rows) }}
+        include:
+          # ubuntu-22.04 holds every GLIBC_x.y dependency at or below what a 22.04 user has.
+          - name: linux/amd64
+            runs-on: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            darwin: false
+          - name: darwin/arm64
+            runs-on: ubuntu-22.04
+            target: aarch64-apple-darwin
+            darwin: true
     env:
       SDKROOT: ${{ github.workspace }}/.darwin-sdk
       GROK_DARWIN_LINK_BUNDLE: ${{ github.workspace }}/.darwin-link
