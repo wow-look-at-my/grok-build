@@ -2219,6 +2219,11 @@ impl SessionActor {
             if self.tool_context.task_output_token_budget.is_none() {
                 self.refresh_token_if_expired().await;
             }
+            // A `/compact` the user sent while this turn was running. Here is
+            // the turn's own safe point: no model call is in flight, so
+            // replacing the conversation loses nothing. Ungated by the
+            // subagent budget check below — the user asked for this one.
+            self.run_pending_manual_compact().await;
             if self.tool_context.task_output_token_budget.is_none()
                 && let Some(trigger_info) = self.check_auto_compact_needed().await
                 && let Err(e) = self.run_compact_only(trigger_info).await

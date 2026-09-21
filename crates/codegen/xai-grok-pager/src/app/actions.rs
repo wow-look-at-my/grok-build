@@ -180,6 +180,15 @@ pub enum Action {
         /// place of the skill's real wire payload.
         wire_blocks: Option<Vec<acp::ContentBlock>>,
     },
+    /// Compact without waiting for the running turn, from "Send now" on a
+    /// queued `/compact`. It does NOT cancel the turn, which is what separates
+    /// it from [`Self::SendPromptNow`]: the shell arms the request and the
+    /// turn runs it at its next safe point. It also leaves the session's
+    /// command state alone, because the turn still owns it.
+    CompactNow {
+        /// The row's text, `/compact` or `/compact <instructions>`.
+        text: String,
+    },
     /// Enable session voice mode and start recording (the Ctrl+Space
     /// hold-to-talk key-press, on terminals that report key releases).
     /// Start-only — never stops; use [`Self::VoiceStop`] / [`Self::VoiceToggle`]
@@ -1597,6 +1606,10 @@ pub enum Effect {
     Compact {
         agent_id: AgentId,
         session_id: acp::SessionId,
+        /// The `/compact <instructions>` argument. The shell has always read
+        /// this (`CompactConversationRequest::user_context`); omitting it from
+        /// the request is what made the argument a no-op.
+        user_context: Option<String>,
     },
     /// Kill a background task.
     KillBgTask {

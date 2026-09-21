@@ -9,8 +9,8 @@ use super::SessionActor;
 use super::is_project_instructions;
 use crate::remote::DEFAULT_CONTEXT_WINDOW;
 use crate::session::compaction_config::{
-    AsyncCompactionCache, SUPPRESS_AUTH, SUPPRESS_NONE, SUPPRESS_STICKY, SUPPRESS_TURN,
-    SUPPRESS_UNTIL_SUCCESS,
+    AsyncCompactionCache, PendingManualCompact, SUPPRESS_AUTH, SUPPRESS_NONE, SUPPRESS_STICKY,
+    SUPPRESS_TURN, SUPPRESS_UNTIL_SUCCESS,
 };
 use crate::session::helpers::CompactionStateContext;
 use crate::session::helpers::compaction_context::CompactionInputs;
@@ -472,6 +472,30 @@ impl SuppressReason {
         }
     }
 }
+/// Longest provider error text carried into the user-facing compaction failure.
+/// A provider echoes the rejected request in some errors, and the whole body is
+/// not a status line.
+const COMPACT_FAILURE_DETAIL_LIMIT: usize = 400;
+/// Join the fixed advice for a [`SuppressReason`] to what the provider said.
+/// The advice states what to DO. The detail states what went wrong, and it is
+/// the only half that names the field, the item or the id that has to be fixed.
+fn compose_compact_failure(advice: &str, detail: &str) -> String {
+    let detail = detail.trim();
+    if detail.is_empty() {
+        return advice.to_string();
+    }
+    let mut out = String::with_capacity(advice.len() + detail.len() + 3);
+    out.push_str(advice);
+    out.push_str(" — ");
+    match detail.char_indices().nth(COMPACT_FAILURE_DETAIL_LIMIT) {
+        Some((cut, _)) => {
+            out.push_str(&detail[..cut]);
+            out.push('…');
+        }
+        None => out.push_str(detail),
+    }
+    out
+}
 /// Splice the preserved prefix (`conversation[0..prefix_len]`) onto the compacted
 /// suffix, dropping the suffix's leading System and — if the prefix already has an
 /// AGENTS.md item — its re-injected AGENTS.md too (else the model sees it twice).
@@ -641,6 +665,95 @@ impl SessionActor {
         .await;
         Ok(())
     }
+    /// Answer a `/compact` request, whether or not a turn is running.
+    ///
+    /// Idle: compact now. Mid-turn: arm [`PendingManualCompact`] and let the
+    /// turn run it at its next pre-sampling boundary, because a compaction
+    /// beside a live turn replaces the conversation out from under it.
+    /// The caller keeps waiting either way, so the client reports the real
+    /// outcome rather than a success for work that has not started.
+    pub(crate) async fn compact_on_request(
+        self: &Arc<Self>,
+        user_context: Option<String>,
+        respond_to: tokio::sync::oneshot::Sender<Result<(), acp::Error>>,
+    ) {
+        if self.state.lock().await.running_task.is_none() {
+            let _ = respond_to.send(self.run_compact(user_context).await);
+            return;
+        }
+        if let Some(already_armed) = self.compaction.pending_manual_compact.take() {
+            // First request wins: it is the one the user has been waiting on.
+            // Answering the new caller `Ok` would report a compaction that ran
+            // with instructions this one never carried.
+            self.compaction
+                .pending_manual_compact
+                .set(Some(already_armed));
+            let _ = respond_to.send(Err(acp::Error::internal_error().data(
+                "a /compact is already armed for this turn; it runs at the next \
+                 safe point. This request's instructions were not applied.",
+            )));
+            return;
+        }
+        tracing::info!(
+            session_id = %self.session_info.id.0,
+            has_instructions = user_context.is_some(),
+            "/compact armed mid-turn; runs at the turn's next pre-sampling boundary"
+        );
+        self.compaction
+            .pending_manual_compact
+            .set(Some(PendingManualCompact {
+                instructions: user_context,
+                respond_to,
+            }));
+    }
+    /// Whether a mid-turn `/compact` is waiting for a boundary.
+    pub(crate) fn has_pending_manual_compact(&self) -> bool {
+        let pending = self.compaction.pending_manual_compact.take();
+        let armed = pending.is_some();
+        self.compaction.pending_manual_compact.set(pending);
+        armed
+    }
+    /// Run a `/compact` armed by [`Self::compact_on_request`], if one is.
+    ///
+    /// Called at each pre-sampling boundary and once more after the turn ends,
+    /// so a turn that reaches no further boundary still honors the request.
+    pub(crate) async fn run_pending_manual_compact(self: &Arc<Self>) {
+        let Some(pending) = self.compaction.pending_manual_compact.take() else {
+            return;
+        };
+        use crate::extensions::notification::SessionUpdate as XaiSessionUpdate;
+        let tokens_used = self.chat_state_handle.get_estimated_total_tokens().await;
+        let context_window = self
+            .chat_state_handle
+            .get_sampling_config()
+            .await
+            .map(|c| c.context_window.get())
+            .unwrap_or(DEFAULT_CONTEXT_WINDOW);
+        // The request was accepted a while ago, at a point the client could
+        // not render as work. Announce the start so the wait is visible.
+        self.send_xai_notification(XaiSessionUpdate::AutoCompactStarted {
+            tokens_used,
+            context_window,
+            percentage: xai_token_estimation::usage_percentage_u8(tokens_used, context_window),
+            reason: "Requested with /compact".to_string(),
+        })
+        .await;
+        let result = self.run_compact(pending.instructions).await;
+        if let Err(e) = &result {
+            // The client is mid-turn, so it is not in the command state that
+            // renders this request's own reply. The notification is the only
+            // report that reaches the transcript.
+            tracing::error!(error = %e, "mid-turn /compact failed");
+            self.send_xai_notification(XaiSessionUpdate::AutoCompactFailed {
+                error: compose_compact_failure(
+                    "the /compact you asked for could not run.",
+                    &Self::acp_error_message(e),
+                ),
+            })
+            .await;
+        }
+        let _ = pending.respond_to.send(result);
+    }
     async fn emit_compact_cancelled(&self, auto_trigger: bool) -> Result<(), acp::Error> {
         if auto_trigger {
             use crate::extensions::notification::SessionUpdate as XaiSessionUpdate;
@@ -655,9 +768,16 @@ impl SessionActor {
     /// the reason (see [`SuppressReason::suppress_state`]): size/schema sticky,
     /// credit until 200, auth until credentials recover, other clears next turn.
     /// Telemetry + one notification per transition; manual `/compact` exempt.
+    ///
+    /// `detail` is what the provider actually said. It rides the notification
+    /// beside the fixed phrase. The phrase alone names a CLASS of failure and
+    /// leaves the reader with nothing to act on: "can't be summarized" fits a
+    /// rejected thinking signature, an orphaned tool call and an unsupported
+    /// field equally, and each needs a different fix.
     async fn suppress_auto_compaction(
         &self,
         reason: SuppressReason,
+        detail: &str,
         estimated_tokens: u64,
         context_window: u64,
     ) {
@@ -675,6 +795,7 @@ impl SessionActor {
         {
             tracing::warn!(
                 suppress_reason = reason.as_str(),
+                error = %detail,
                 estimated_tokens,
                 context_window,
                 "auto-compaction suppressed after deterministic compaction failure"
@@ -686,7 +807,7 @@ impl SessionActor {
                     context_window,
                 },
             );
-            let message = match reason {
+            let advice = match reason {
                 SuppressReason::CreditBlock => {
                     "out of credits or over your spending limit. Add credits and retry."
                 }
@@ -694,14 +815,16 @@ impl SessionActor {
                     "authentication problem — re-authenticate using /login and retry."
                 }
                 SuppressReason::Size => "this conversation is too large to compact.",
-                SuppressReason::Schema => "this conversation can't be summarized.",
+                SuppressReason::Schema => {
+                    "the model rejected the summarization request as malformed."
+                }
                 SuppressReason::Other => {
                     "it'll retry on the next turn, or start a new session using /new."
                 }
             };
             self.send_xai_notification(
                 crate::extensions::notification::SessionUpdate::AutoCompactFailed {
-                    error: message.to_string(),
+                    error: compose_compact_failure(advice, detail),
                 },
             )
             .await;
@@ -1227,6 +1350,7 @@ impl SessionActor {
                         if auto_trigger {
                             self.suppress_auto_compaction(
                                 SuppressReason::Size,
+                                &message,
                                 estimated_input_tokens,
                                 context_window,
                             )
@@ -1241,6 +1365,7 @@ impl SessionActor {
                             let reason = Self::classify_suppress_reason(&message);
                             self.suppress_auto_compaction(
                                 reason,
+                                &message,
                                 estimated_input_tokens,
                                 context_window,
                             )
@@ -2119,8 +2244,16 @@ impl SessionActor {
                         .load(std::sync::atomic::Ordering::Relaxed)
                         == SUPPRESS_NONE
                 {
+                    // Not suppressed, so no `suppress_auto_compaction`
+                    // notification went out and this is the only report the
+                    // user gets. An empty string renders as a bare
+                    // "Compaction failed." with no way to tell a rate limit
+                    // from a rejected request.
                     self.send_xai_notification(XaiSessionUpdate::AutoCompactFailed {
-                        error: String::new(),
+                        error: compose_compact_failure(
+                            "it'll retry on the next turn.",
+                            &Self::acp_error_message(&e),
+                        ),
                     })
                     .await;
                 }
@@ -2379,6 +2512,7 @@ mod inline_auto_compact_flow_tests {
             forked_tool_override: None,
             compaction: crate::session::compaction_config::CompactionConfig {
                 threshold_percent: std::cell::Cell::new(threshold_percent),
+                pending_manual_compact: std::cell::Cell::new(None),
                 force_compact: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 context_window_override: None,
                 count: std::sync::atomic::AtomicU64::new(0),
@@ -2626,7 +2760,7 @@ mod inline_auto_compact_flow_tests {
                 assert!(actor.check_auto_compact_needed().await.is_some());
                 assert!(actor.should_compact_on_error(&err).await);
                 actor
-                    .suppress_auto_compaction(SuppressReason::Other, 1_000, 200_000)
+                    .suppress_auto_compaction(SuppressReason::Other, "boom", 1_000, 200_000)
                     .await;
                 assert!(actor.check_auto_compact_needed().await.is_none());
                 assert!(!actor.should_compact_on_error(&err).await);
@@ -2638,7 +2772,7 @@ mod inline_auto_compact_flow_tests {
                 );
                 assert!(actor.check_auto_compact_needed().await.is_some());
                 actor
-                    .suppress_auto_compaction(SuppressReason::CreditBlock, 1_000, 200_000)
+                    .suppress_auto_compaction(SuppressReason::CreditBlock, "boom", 1_000, 200_000)
                     .await;
                 assert_eq!(
                     actor.compaction.auto_compact_suppressed.load(Relaxed),
@@ -2664,7 +2798,7 @@ mod inline_auto_compact_flow_tests {
                 );
                 assert!(actor.check_auto_compact_needed().await.is_some());
                 actor
-                    .suppress_auto_compaction(SuppressReason::Size, 1_000, 200_000)
+                    .suppress_auto_compaction(SuppressReason::Size, "boom", 1_000, 200_000)
                     .await;
                 assert!(actor.check_auto_compact_needed().await.is_none());
                 let _ = actor.compaction.auto_compact_suppressed.compare_exchange(
@@ -2702,7 +2836,9 @@ mod inline_auto_compact_flow_tests {
                     create_test_actor(50_000, 200_000, 85, gateway_tx, persistence_tx).await,
                 );
                 for reason in [SuppressReason::Size, SuppressReason::Other] {
-                    actor.suppress_auto_compaction(reason, 1_000, 200_000).await;
+                    actor
+                        .suppress_auto_compaction(reason, "boom", 1_000, 200_000)
+                        .await;
                     assert_ne!(
                         actor.compaction.auto_compact_suppressed.load(Relaxed),
                         SUPPRESS_NONE,
@@ -2744,7 +2880,9 @@ mod inline_auto_compact_flow_tests {
                     (SuppressReason::CreditBlock, SUPPRESS_UNTIL_SUCCESS),
                     (SuppressReason::Auth, SUPPRESS_AUTH),
                 ] {
-                    actor.suppress_auto_compaction(reason, 1_000, 200_000).await;
+                    actor
+                        .suppress_auto_compaction(reason, "boom", 1_000, 200_000)
+                        .await;
                     assert_eq!(
                         actor.compaction.auto_compact_suppressed.load(Relaxed),
                         expected,
@@ -2784,7 +2922,7 @@ mod inline_auto_compact_flow_tests {
                 let actor =
                     create_test_actor(180_000, 200_000, 85, gateway_tx, persistence_tx).await;
                 actor
-                    .suppress_auto_compaction(SuppressReason::Auth, 1_000, 200_000)
+                    .suppress_auto_compaction(SuppressReason::Auth, "boom", 1_000, 200_000)
                     .await;
                 assert_eq!(
                     actor.compaction.auto_compact_suppressed.load(Relaxed),
@@ -2813,7 +2951,7 @@ mod inline_auto_compact_flow_tests {
                 let actor =
                     create_test_actor(180_000, 200_000, 85, gateway_tx, persistence_tx).await;
                 actor
-                    .suppress_auto_compaction(SuppressReason::CreditBlock, 1_000, 200_000)
+                    .suppress_auto_compaction(SuppressReason::CreditBlock, "boom", 1_000, 200_000)
                     .await;
                 actor.clear_auth_compact_suppression();
                 assert_eq!(
@@ -2838,7 +2976,7 @@ mod inline_auto_compact_flow_tests {
                 let actor =
                     create_test_actor(180_000, 200_000, 85, gateway_tx, persistence_tx).await;
                 actor
-                    .suppress_auto_compaction(SuppressReason::Auth, 1_000, 200_000)
+                    .suppress_auto_compaction(SuppressReason::Auth, "boom", 1_000, 200_000)
                     .await;
                 assert_eq!(
                     actor.compaction.auto_compact_suppressed.load(Relaxed),
@@ -2907,12 +3045,15 @@ mod inline_auto_compact_flow_tests {
             })
             .await;
     }
-    /// The per-turn suppression notification is tailored to the failure reason.
+    /// The per-turn suppression notification is tailored to the failure reason,
+    /// and every reason carries what the provider actually said. Advice alone
+    /// names a class of failure and leaves nothing to act on.
     #[tokio::test(flavor = "current_thread")]
     async fn suppression_notification_is_reason_specific() {
         let local = tokio::task::LocalSet::new();
         local
             .run_until(async {
+                const DETAIL: &str = "invalid_request_error: messages.3: unexpected `thinking`";
                 async fn notification_for(reason: SuppressReason) -> String {
                     let (gateway_tx, _gateway_rx) = mpsc::unbounded_channel();
                     let (persistence_tx, mut persistence_rx) = mpsc::unbounded_channel();
@@ -2924,7 +3065,9 @@ mod inline_auto_compact_flow_tests {
                             persistence_tx,
                         )
                         .await;
-                    actor.suppress_auto_compaction(reason, 1_000, 200_000).await;
+                    actor
+                        .suppress_auto_compaction(reason, DETAIL, 1_000, 200_000)
+                        .await;
                     let mut text = None;
                     while let Ok(msg) = persistence_rx.try_recv() {
                         if let PersistenceMsg::Update(
@@ -2946,9 +3089,21 @@ mod inline_auto_compact_flow_tests {
                 let size = notification_for(SuppressReason::Size).await;
                 assert!(size.contains("too large to compact"), "size: {size}");
                 let schema = notification_for(SuppressReason::Schema).await;
-                assert!(schema.contains("can't be summarized"), "schema: {schema}");
+                assert!(schema.contains("rejected the summarization"), "schema: {schema}");
                 let other = notification_for(SuppressReason::Other).await;
                 assert!(other.contains("/new"), "other: {other}");
+                for (name, text) in [
+                    ("credit_block", &credit),
+                    ("auth", &auth),
+                    ("size", &size),
+                    ("schema", &schema),
+                    ("other", &other),
+                ] {
+                    assert!(
+                        text.contains(DETAIL),
+                        "{name} dropped the provider's own error: {text}"
+                    );
+                }
             })
             .await;
     }
@@ -3204,7 +3359,7 @@ mod inline_auto_compact_flow_tests {
                     create_test_actor(214_000, 200_000, 85, gateway_tx, persistence_tx).await,
                 );
                 actor
-                    .suppress_auto_compaction(SuppressReason::Auth, 1_000, 200_000)
+                    .suppress_auto_compaction(SuppressReason::Auth, "boom", 1_000, 200_000)
                     .await;
                 assert_eq!(
                     actor.compaction.auto_compact_suppressed.load(Relaxed),

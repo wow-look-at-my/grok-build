@@ -1589,12 +1589,13 @@ pub(crate) fn execute(
                     }
                 });
         }
-        Effect::Compact { agent_id, session_id } => {
+        Effect::Compact { agent_id, session_id, user_context } => {
             let tx = acp_tx.clone();
             tasks
                 .spawn(async move {
                     let params = serde_json::json!({
                     "sessionId": session_id.0.to_string(),
+                    "userContext": user_context,
                 });
                     let req = acp::ExtRequest::new(
                         "x.ai/compact_conversation",
@@ -1605,9 +1606,14 @@ pub(crate) fn execute(
                     let result = acp_send(req, &tx).await;
                     TaskResult::CompactComplete {
                         agent_id,
+                        // `format_acp_error`, not `to_string`: an acp::Error's
+                        // Display is its CODE's generic phrase, and the
+                        // provider's own sentence rides in `data`. Stringifying
+                        // it reports every compaction failure as "Internal
+                        // error", whatever actually went wrong.
                         result: result
                             .map(|_| ())
-                            .map_err(|e| sanitize_user_error(&e.to_string())),
+                            .map_err(|e| format_acp_error(&e, is_api_key_auth)),
                     }
                 });
         }

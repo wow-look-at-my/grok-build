@@ -397,6 +397,19 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
             images,
             wire_blocks,
         } => super::interject::dispatch_send_prompt_now(app, text, images, wire_blocks),
+        Action::CompactNow { text } => match (app.active_view, active_agent_session_id(app)) {
+            // No `start_command`: the turn still owns the session state, and
+            // taking it over here would strand the turn's own completion.
+            // The shell announces the compaction over `AutoCompactStarted`.
+            (crate::app::app_view::ActiveView::Agent(agent_id), Some(session_id)) => {
+                vec![Effect::Compact {
+                    agent_id,
+                    session_id,
+                    user_context: super::queue::compact_instructions(&text),
+                }]
+            }
+            _ => vec![],
+        },
         Action::EnableVoiceMode => dispatch_enable_voice_mode(app, true),
         Action::VoiceToggle => dispatch_voice_toggle(app),
         Action::VoiceStop => dispatch_voice_stop(app),

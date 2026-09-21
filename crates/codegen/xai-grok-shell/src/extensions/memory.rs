@@ -36,9 +36,11 @@ async fn handle_compact(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
             respond_to: tx,
         });
     }
+    // Pass the compaction error through as-is. Re-wrapping it in a second
+    // `internal_error` and a `{:?}` of the first buries the provider's own
+    // sentence inside a debug-printed struct the pager then renders verbatim.
     rx.await
-        .map_err(|_| acp::Error::internal_error().data("session failed to respond"))?
-        .map_err(|e| acp::Error::internal_error().data(format!("Internal error: {:?}", e)))?;
+        .map_err(|_| acp::Error::internal_error().data("session failed to respond"))??;
     to_raw_response(&CompactConversationResponse {})
 }
 
