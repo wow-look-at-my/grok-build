@@ -2391,7 +2391,10 @@ impl SessionActor {
 mod inline_auto_compact_flow_tests {
     use super::super::support::*;
     use super::super::*;
-    use super::{AutoCompactTriggerInfo, SuppressReason};
+    use super::{
+        AutoCompactTriggerInfo, COMPACT_FAILURE_DETAIL_LIMIT, SuppressReason,
+        compose_compact_failure,
+    };
     use crate::session::acp_session::McpReminderMode;
     use crate::terminal::AsyncTerminalRunner;
     use crate::terminal::runner::{TerminalError, TerminalRunRequest, TerminalRunResult};
