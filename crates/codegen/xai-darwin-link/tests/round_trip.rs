@@ -39,11 +39,7 @@ fn a_recorded_link_replays_into_a_binary_that_runs() {
     let recorder = PathBuf::from(env!("CARGO_BIN_EXE_xai-darwin-link"));
     let work = temp_dir("round-trip");
     let source = work.join("hello.rs");
-    std::fs::write(
-        &source,
-        "fn main() { println!(\"relinked\"); }\n",
-    )
-    .unwrap();
+    std::fs::write(&source, "fn main() { println!(\"relinked\"); }\n").unwrap();
     let bundle = work.join("bundle");
     let recorded_output = work.join("hello-recorded");
 
@@ -88,7 +84,10 @@ fn a_recorded_link_replays_into_a_binary_that_runs() {
     );
 
     let ran = Command::new(&linked).output().expect("the binary must run");
-    assert!(ran.status.success(), "the relinked binary must exit cleanly");
+    assert!(
+        ran.status.success(),
+        "the relinked binary must exit cleanly"
+    );
     assert_eq!(String::from_utf8_lossy(&ran.stdout).trim(), "relinked");
     let _ = std::fs::remove_dir_all(&work);
 }

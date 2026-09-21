@@ -21,6 +21,7 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 
 ## Verification
 
+- `cargo fmt --all` before pushing. The `fmt` job in `ci.yml` runs `cargo fmt --all --check` and fails the build on any unformatted file. It is its own job, because rustfmt parses and never compiles. It answers in seconds rather than waiting on the cold build.
 - `cargo check -p <touched-crate>` before pushing.
 - `cargo test -p <touched-crate>` for the crate you changed.
 - Prefer committing real tests that drive the shipped code (not mocks of the unit under test, not hand-built expected objects).

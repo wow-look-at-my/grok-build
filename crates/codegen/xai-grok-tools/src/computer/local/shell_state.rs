@@ -1276,7 +1276,11 @@ mod tests {
         }
 
         // allexport must survive the round-trips it just stopped breaking.
-        let (code, stdout) = run_command(&mut state, "case $- in *a*) echo SET;; *) echo UNSET;; esac").await;
+        let (code, stdout) = run_command(
+            &mut state,
+            "case $- in *a*) echo SET;; *) echo UNSET;; esac",
+        )
+        .await;
         assert_eq!(code, 0);
         assert!(
             stdout.contains("SET"),

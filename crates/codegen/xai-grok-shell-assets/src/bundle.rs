@@ -103,10 +103,7 @@ pub fn read_cached_manifest(root: &Path) -> Result<Option<BundleManifest>> {
         .map(Some)
 }
 
-pub fn write_bundle_to_cache(
-    root: &Path,
-    bundle: &SubagentBundle,
-) -> Result<BundleManifest> {
+pub fn write_bundle_to_cache(root: &Path, bundle: &SubagentBundle) -> Result<BundleManifest> {
     let old_manifest = read_cached_manifest(root)?.map(sanitize_manifest);
     ensure_bundle_dirs(root)?;
 

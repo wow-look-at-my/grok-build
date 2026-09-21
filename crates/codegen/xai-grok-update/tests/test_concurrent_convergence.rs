@@ -14,9 +14,7 @@ use std::os::unix::fs::PermissionsExt;
 
 use serial_test::serial;
 
-use common::{
-    host_platform, reset_home, small_good_artifact, test_home,
-};
+use common::{host_platform, reset_home, small_good_artifact, test_home};
 use xai_grok_update::version::installed_on_disk_version;
 
 /// Lay down a managed-install layout in the test GROK_HOME:

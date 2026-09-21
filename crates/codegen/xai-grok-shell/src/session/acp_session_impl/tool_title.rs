@@ -237,7 +237,10 @@ mod tests {
         call.push(&"x".repeat(STREAMING_TITLE_ARG_CAP + 1));
         assert!(call.capped);
         call.push("");
-        assert!(call.capped, "an empty fragment cuts nothing and heals nothing");
+        assert!(
+            call.capped,
+            "an empty fragment cuts nothing and heals nothing"
+        );
         call.push("y");
         assert!(call.capped);
     }

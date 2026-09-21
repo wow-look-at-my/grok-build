@@ -26,8 +26,12 @@ impl std::fmt::Display for StampError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::SlotMissing => write!(f, "no version stamp slot in this binary"),
-            Self::SlotAmbiguous(n) => write!(f, "{n} version stamp slots in this binary, expected 1"),
-            Self::SlotTruncated => write!(f, "the version stamp slot runs past the end of the file"),
+            Self::SlotAmbiguous(n) => {
+                write!(f, "{n} version stamp slots in this binary, expected 1")
+            }
+            Self::SlotTruncated => {
+                write!(f, "the version stamp slot runs past the end of the file")
+            }
             Self::VersionTooLong { len, max } => {
                 write!(f, "version is {len} bytes, the slot holds {max}")
             }
@@ -110,7 +114,10 @@ mod tests {
         let mut buf = buffer_with_slot();
         assert_eq!(read_stamp(&buf), Ok(None), "starts unstamped");
         stamp(&mut buf, "0.1.220-alpha.7").unwrap();
-        assert_eq!(read_stamp(&buf).unwrap().as_deref(), Some("0.1.220-alpha.7"));
+        assert_eq!(
+            read_stamp(&buf).unwrap().as_deref(),
+            Some("0.1.220-alpha.7")
+        );
     }
 
     /// The bytes on either side of the slot are the rest of the binary. Writing
@@ -136,7 +143,10 @@ mod tests {
 
     #[test]
     fn a_binary_with_no_slot_is_refused() {
-        assert_eq!(stamp(&mut vec![0u8; 512], "v1"), Err(StampError::SlotMissing));
+        assert_eq!(
+            stamp(&mut vec![0u8; 512], "v1"),
+            Err(StampError::SlotMissing)
+        );
     }
 
     /// Two slots mean the running binary reads one of them and the stamper

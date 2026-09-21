@@ -1097,7 +1097,8 @@ mod tests {
 
     #[test]
     fn a_request_stream_error_names_the_request_not_the_http_crate() {
-        let msg = SamplingError::EventStreamError("error decoding response body".into()).to_string();
+        let msg =
+            SamplingError::EventStreamError("error decoding response body".into()).to_string();
         assert_eq!(msg, "request stream error: error decoding response body");
     }
 

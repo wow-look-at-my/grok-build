@@ -396,10 +396,8 @@ impl ModelsManager {
             return;
         }
         let prefetched = self.inner.catalog.read().prefetched.clone();
-        let new_catalog = self.with_additive_catalogs(
-            &new_config,
-            resolve_model_catalog(&new_config, prefetched),
-        );
+        let new_catalog = self
+            .with_additive_catalogs(&new_config, resolve_model_catalog(&new_config, prefetched));
         let has_real_catalog = self.inner.catalog.read().has_fetched_real_catalog;
         if has_real_catalog && let Err(e) = validate_selectable(&new_config, &new_catalog) {
             tracing::error!(error = %e, "ignoring config reload: allowed_models excludes all models");

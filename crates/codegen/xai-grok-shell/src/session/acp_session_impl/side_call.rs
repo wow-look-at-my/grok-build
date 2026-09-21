@@ -121,10 +121,7 @@ impl SessionActor {
     /// the shared prompt-cache prefix, which is the point of the alignment
     /// here — a user who pins the slot has asked for the other model and
     /// pays for the cache miss.
-    pub(crate) async fn prepare_side_call(
-        &self,
-        slot: &str,
-    ) -> Result<SideCallSetup, acp::Error> {
+    pub(crate) async fn prepare_side_call(&self, slot: &str) -> Result<SideCallSetup, acp::Error> {
         let client = self.prepare_chat_completion(false).await?;
         let strip_reasoning = client.api_backend().requires_reasoning_strip();
         // One config read serves the window, model, and reasoning effort.

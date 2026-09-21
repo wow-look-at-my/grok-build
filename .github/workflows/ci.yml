@@ -33,6 +33,21 @@ env:
     {"name": "windows/arm64", "runs-on": "windows-latest", "target": "aarch64-pc-windows-msvc", "darwin": false}]
 
 jobs:
+  fmt:
+    name: Rustfmt
+    runs-on: ubuntu-22.04
+    # Its own job, not a step of build-test: rustfmt parses and never compiles, so it answers in seconds rather than waiting on the cold build it would otherwise sit behind.
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Install Rust toolchain (pinned by rust-toolchain.toml)
+        run: rustup show
+
+      # --all covers every workspace crate. A per-crate run leaves a new crate unchecked until somebody remembers to add it here.
+      - name: Check formatting
+        run: cargo fmt --all --check
+
   build-test:
     name: Build & test
     # Hosted deliberately: this suite asserts host semantics the org's lean self-hosted image lacks. See AGENTS.md.

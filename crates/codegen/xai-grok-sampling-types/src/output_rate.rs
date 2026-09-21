@@ -583,12 +583,7 @@ mod tests {
             "expected only a slowdown start in the first nine seconds: {early:?}"
         );
 
-        let late = drive(
-            &mut gate,
-            start + Duration::from_secs(9),
-            30 * 4,
-            |_| 1,
-        );
+        let late = drive(&mut gate, start + Duration::from_secs(9), 30 * 4, |_| 1);
         let breaches: Vec<_> = late
             .iter()
             .filter(|t| matches!(t, RateTick::Breached { .. }))
@@ -698,7 +693,10 @@ mod tests {
         let mut gate = OutputRateGate::new(Some(policy));
 
         let before = drive(&mut gate, start, 8 * 4, |_| 400);
-        assert!(before.is_empty(), "the opening burst is healthy: {before:?}");
+        assert!(
+            before.is_empty(),
+            "the opening burst is healthy: {before:?}"
+        );
         let healthy = gate
             .rate(start + Duration::from_secs(8))
             .expect("eight seconds of stream");

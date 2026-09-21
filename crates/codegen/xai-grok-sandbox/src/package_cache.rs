@@ -175,10 +175,7 @@ mod tests {
         let root = cache_root(&scratch);
 
         let vars = cache_env(&root);
-        let names: Vec<&str> = vars
-            .iter()
-            .filter_map(|(n, _)| n.to_str())
-            .collect();
+        let names: Vec<&str> = vars.iter().filter_map(|(n, _)| n.to_str()).collect();
         for expected in [
             "UV_CACHE_DIR",
             "UV_TOOL_DIR",

@@ -63,6 +63,7 @@ pub fn requires_hook_write_deny(profile: &ProfileName, workspace: &Path) -> bool
         _ => true,
     }
 }
+pub use jail::is_jailed;
 #[cfg(all(feature = "enforce", unix))]
 use nono::Sandbox;
 use std::path::Path;
@@ -70,7 +71,6 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
-pub use jail::is_jailed;
 static SANDBOX: OnceLock<GlobalSandboxState> = OnceLock::new();
 static CONFIGURED_PROFILE: OnceLock<String> = OnceLock::new();
 static AUTO_ALLOW_BASH: AtomicBool = AtomicBool::new(false);

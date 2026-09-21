@@ -325,4 +325,3 @@ async fn gcs_pointer_connection_refused_is_retried_and_returns_error() {
 // download_with_progress — same contract; covers the spinner path
 // (no Content-Length) and the progress-bar path (with Content-Length).
 // ─────────────────────────────────────────────────────────────────────────────
-

@@ -92,7 +92,11 @@ fn session_child() {
     println!("{REPORT}keychain={}", keychain_state());
     println!(
         "{REPORT}gh={}",
-        if gh_is_installed() { "present" } else { "absent" }
+        if gh_is_installed() {
+            "present"
+        } else {
+            "absent"
+        }
     );
 
     // The query the `ci` tool's `status` action issues, over the shipped path.
@@ -242,13 +246,15 @@ fn parent() {
             workspace_leg.summary()
         );
         assert_ne!(
-            workspace_leg.fd, "none",
+            workspace_leg.fd,
+            "none",
             "the shipped startup path must leave the session a worker: {}",
             workspace_leg.summary()
         );
         #[cfg(target_os = "macos")]
         assert_eq!(
-            workspace_leg.keychain, "denied",
+            workspace_leg.keychain,
+            "denied",
             "a `--sandbox=workspace` session must be confined (the login \
              keychain out of reach): {}",
             workspace_leg.summary()
@@ -268,7 +274,8 @@ fn parent() {
         devbox_leg.summary()
     );
     assert_ne!(
-        devbox_leg.fd, "none",
+        devbox_leg.fd,
+        "none",
         "the shipped startup path must start the worker and publish its fd: {}",
         devbox_leg.summary()
     );
@@ -298,7 +305,8 @@ fn assert_worker_is_the_sessions_alone(report: &SessionReport) {
         return;
     }
     assert_eq!(
-        report.grandchild_env, "unset",
+        report.grandchild_env,
+        "unset",
         "a session confined in place must not hand its children the worker: {}",
         report.summary()
     );
@@ -318,7 +326,8 @@ fn assert_answered(report: &SessionReport) {
         return;
     }
     assert_eq!(
-        report.answered, "1",
+        report.answered,
+        "1",
         "the session's CI query must be answered by the worker: {}",
         report.summary()
     );
@@ -425,7 +434,10 @@ fn clip(text: &str) -> String {
     if text.len() <= MAX {
         return text.to_string();
     }
-    let end = (0..=MAX).rev().find(|i| text.is_char_boundary(*i)).unwrap_or(0);
+    let end = (0..=MAX)
+        .rev()
+        .find(|i| text.is_char_boundary(*i))
+        .unwrap_or(0);
     format!("{}...", &text[..end])
 }
 

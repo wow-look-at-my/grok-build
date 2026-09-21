@@ -194,8 +194,7 @@ fn scan_single_plugin(plugin_dir: &Path, relative_path: &str) -> MarketplaceEntr
             .filter_map(|e| e.ok())
             .filter(|e| e.path().join("SKILL.md").exists())
             .count();
-        let hk = m.hooks_path(plugin_dir).is_some_and(|p| p.exists())
-            || m.inline_hooks().is_some();
+        let hk = m.hooks_path(plugin_dir).is_some_and(|p| p.exists()) || m.inline_hooks().is_some();
         let ag = m.agent_dirs(plugin_dir).iter().any(|d| {
             d.is_dir()
                 && std::fs::read_dir(d)

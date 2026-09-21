@@ -1790,7 +1790,10 @@ fn install_heap_profile_hooks() {
 fn version_text(channel_label: &str) -> String {
     format!(
         "grok {}\n",
-        xai_grok_version::display_version_with_commit(xai_grok_version::version_with_commit(), channel_label,)
+        xai_grok_version::display_version_with_commit(
+            xai_grok_version::version_with_commit(),
+            channel_label,
+        )
     )
 }
 fn write_version(writer: &mut impl std::io::Write, channel_label: &str) -> std::io::Result<()> {
