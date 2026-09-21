@@ -262,8 +262,12 @@ mod tests {
 
     #[test]
     fn parse_agents_repeated_returns_error() {
-        let err = parse_fork_args("--agents --agents x").expect_err("duplicate --agents must error");
-        assert!(err.contains("twice"), "error should mention duplicate: {err}");
+        let err =
+            parse_fork_args("--agents --agents x").expect_err("duplicate --agents must error");
+        assert!(
+            err.contains("twice"),
+            "error should mention duplicate: {err}"
+        );
     }
 
     #[test]

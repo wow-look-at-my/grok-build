@@ -7,16 +7,16 @@ use super::setters::{
     set_confirm_before_rewind_inner, set_contextual_hint_inner, set_default_model_inner,
     set_default_selected_permission_inner, set_display_refresh_auto_cadence_inner,
     set_fork_secondary_model_inner, set_group_tool_verbs_inner, set_harness_model_inner,
-    set_hunk_tracker_mode_inner,
-    set_invert_scroll_inner, set_keep_text_selection_inner, set_max_thoughts_width_inner,
-    set_min_output_tokens_per_sec_inner, set_output_rate_sustained_secs_inner,
-    set_multiline_mode, set_page_flip_on_send_inner, set_prompt_suggestions_inner,
-    set_remember_tool_approvals_inner, set_render_mermaid_inner, set_respect_manual_folds_inner,
-    set_screen_mode_inner, set_scroll_lines_inner, set_scroll_mode_inner, set_scroll_speed_inner,
-    set_show_thinking_blocks_inner, set_show_tips_inner, set_simple_mode_inner,
-    set_stop_gate_ci_failing_inner, set_stop_gate_unfinished_todos_inner, set_theme_inner,
-    set_timeline_inner, set_timestamps, set_timestamps_inner, set_vim_mode_inner,
-    set_voice_capture_mode_inner, set_voice_keybind_enabled_inner, set_voice_stt_language_inner,
+    set_hunk_tracker_mode_inner, set_invert_scroll_inner, set_keep_text_selection_inner,
+    set_max_thoughts_width_inner, set_min_output_tokens_per_sec_inner, set_multiline_mode,
+    set_output_rate_sustained_secs_inner, set_page_flip_on_send_inner,
+    set_prompt_suggestions_inner, set_remember_tool_approvals_inner, set_render_mermaid_inner,
+    set_respect_manual_folds_inner, set_screen_mode_inner, set_scroll_lines_inner,
+    set_scroll_mode_inner, set_scroll_speed_inner, set_show_thinking_blocks_inner,
+    set_show_tips_inner, set_simple_mode_inner, set_stop_gate_ci_failing_inner,
+    set_stop_gate_unfinished_todos_inner, set_theme_inner, set_timeline_inner, set_timestamps,
+    set_timestamps_inner, set_vim_mode_inner, set_voice_capture_mode_inner,
+    set_voice_keybind_enabled_inner, set_voice_stt_language_inner,
 };
 use crate::app::actions::{Action, Effect};
 use crate::app::app_view::{ActiveView, AppView};
@@ -1254,8 +1254,8 @@ pub(in crate::app::dispatch) fn apply_setting_rollback(
         // Harness model slots: an empty rollback value restores the slot
         // to inheriting, which is what it was before the failed write.
         (key, SettingValue::String(s)) if xai_grok_models::slot_for_setting_key(key).is_some() => {
-            let slot = xai_grok_models::slot_for_setting_key(key)
-                .expect("guard above matched this key");
+            let slot =
+                xai_grok_models::slot_for_setting_key(key).expect("guard above matched this key");
             set_harness_model_inner(app, slot.id, s.clone());
         }
         _ => {

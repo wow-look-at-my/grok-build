@@ -8,7 +8,10 @@ fn main() {
         println!("cargo:rerun-if-changed={}", head.display());
     }
 
-    println!("cargo:rustc-env=BUILD_COMMIT={}", git(&["rev-parse", "HEAD"]));
+    println!(
+        "cargo:rustc-env=BUILD_COMMIT={}",
+        git(&["rev-parse", "HEAD"])
+    );
     println!(
         "cargo:rustc-env=BUILD_COMMIT_SHORT={}",
         git(&["rev-parse", "--short", "HEAD"])

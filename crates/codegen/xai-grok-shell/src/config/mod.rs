@@ -1542,8 +1542,7 @@ pub fn apply_sandbox(
     // answers 401. The worker forked here stays unconfined, and answers those
     // queries from the host instead.
     if sandbox_profile != xai_grok_sandbox::ProfileName::Off {
-        let _ =
-            xai_grok_sandbox::ci_host::start_ci_host_for_session(&workspace, reexec_follows);
+        let _ = xai_grok_sandbox::ci_host::start_ci_host_for_session(&workspace, reexec_follows);
     }
     #[cfg(target_os = "linux")]
     let requires_read_deny = xai_grok_sandbox::requires_read_deny(&sandbox_profile, &workspace);
@@ -1603,9 +1602,7 @@ pub fn apply_sandbox(
         // this process fell back to Landlock. Either way the session is
         // confined in place, and an inheritable fd with its number in the
         // environment would hand every child a socket to an unconfined `gh`.
-        if reexec_follows
-            && let Some(fd) = xai_grok_sandbox::ci_host::ci_host_fd()
-        {
+        if reexec_follows && let Some(fd) = xai_grok_sandbox::ci_host::ci_host_fd() {
             xai_grok_sandbox::ci_host::reclaim_from_failed_exec(fd);
         }
     }

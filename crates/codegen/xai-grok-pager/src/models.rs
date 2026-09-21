@@ -17,7 +17,12 @@ pub async fn list_available_models(agent_config: &AgentConfig) -> Result<()> {
     let _agent_guard =
         crate::acp::spawn::AgentShutdownGuard::new(cancel.clone(), Some(spawned.thread_handle));
 
-    let state = list_models(&spawned.channel.tx, PAGER_CLIENT_TYPE, pager_client_version()).await?;
+    let state = list_models(
+        &spawned.channel.tx,
+        PAGER_CLIENT_TYPE,
+        pager_client_version(),
+    )
+    .await?;
     let has_codex = state
         .available_models
         .iter()

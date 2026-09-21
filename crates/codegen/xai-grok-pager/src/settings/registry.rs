@@ -523,9 +523,9 @@ pub fn current_value_for(
             crate::appearance::cache::load_combine_queued_prompts(),
         )),
         "confirm_before_rewind" => Some(SettingValue::Bool(ui.confirm_before_rewind_enabled())),
-        "stop_gate_unfinished_todos" => Some(SettingValue::Bool(
-            ui.stop_gate_unfinished_todos_enabled(),
-        )),
+        "stop_gate_unfinished_todos" => {
+            Some(SettingValue::Bool(ui.stop_gate_unfinished_todos_enabled()))
+        }
         "stop_gate_ci_failing" => Some(SettingValue::Bool(ui.stop_gate_ci_failing_enabled())),
         "simple_mode" => Some(SettingValue::Bool(ui.simple_mode.unwrap_or(true))),
         // Per-tip contextual hints — `None` (inherit) reads as the default ON.

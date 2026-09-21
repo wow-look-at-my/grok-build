@@ -9058,9 +9058,7 @@ reasoning_effort = "low"
             xai_grok_sampling_types::ChatMessageProfile::PERMISSIVE,
             "an entry without the flag must stay permissive"
         );
-        assert_eq!(
-            tolerant_sampling.base_url, "https://openrouter.ai/api/v1"
-        );
+        assert_eq!(tolerant_sampling.base_url, "https://openrouter.ai/api/v1");
     }
     #[test]
     #[serial]
@@ -9852,7 +9850,9 @@ reasoning_effort = "low"
             },
         );
         assert!(
-            model_off.resolve_output_rate_floor("ungated-model").is_none(),
+            model_off
+                .resolve_output_rate_floor("ungated-model")
+                .is_none(),
             "a zero on the model turns the gate off for that model alone"
         );
     }
@@ -11328,7 +11328,8 @@ planner_model = { model = "pair-model", agent_type = "cursor" }
         )
         .unwrap();
         let cfg = Config::new_from_toml_cfg(&raw).unwrap();
-        let GoalRoleModelChoice::Explicit(pair) = cfg.resolve_goal_planner_model(false).value else {
+        let GoalRoleModelChoice::Explicit(pair) = cfg.resolve_goal_planner_model(false).value
+        else {
             panic!("the [goal] pair must win");
         };
         assert_eq!(pair.model, "pair-model");

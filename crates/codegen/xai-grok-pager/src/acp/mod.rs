@@ -7,6 +7,7 @@ pub mod leader_bridge;
 pub mod meta;
 pub mod model_state;
 pub mod spawn;
+pub mod streaming_args;
 pub mod tracker;
 mod version_mismatch;
 

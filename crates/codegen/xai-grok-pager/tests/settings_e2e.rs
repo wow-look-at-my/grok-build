@@ -241,7 +241,10 @@ fn assert_set_bool_action(outcome: SettingsKeyOutcome, key: &str, expected: bool
             )
         }
         ("stop_gate_ci_failing", Action::SetStopGateCiFailing(b)) => {
-            assert_eq!(b, expected, "SetStopGateCiFailing value differs from expected")
+            assert_eq!(
+                b, expected,
+                "SetStopGateCiFailing value differs from expected"
+            )
         }
         ("combine_queued_prompts", Action::SetCombineQueuedPrompts(b)) => {
             assert_eq!(
@@ -6673,8 +6676,14 @@ fn harness_model_slot_rows_are_registered_model_pickers() {
              actor is built, so a running session keeps its model"
         );
         match &meta.kind {
-            SettingKind::DynamicEnum { source, default, .. } => {
-                assert_eq!(*source, DynamicEnumSource::ActiveModelCatalog, "for `{key}`");
+            SettingKind::DynamicEnum {
+                source, default, ..
+            } => {
+                assert_eq!(
+                    *source,
+                    DynamicEnumSource::ActiveModelCatalog,
+                    "for `{key}`"
+                );
                 assert!(
                     default.is_empty(),
                     "`{key}` default must be the empty inherit sentinel"

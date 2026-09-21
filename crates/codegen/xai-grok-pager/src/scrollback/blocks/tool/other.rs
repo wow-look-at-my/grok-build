@@ -25,6 +25,10 @@ pub struct OtherToolCallBlock {
     pub started_at: Option<std::time::Instant>,
     /// Elapsed time in ms after completion (Phase 2: time tracking).
     pub elapsed_ms: Option<i64>,
+    /// The tail of the arguments the model is writing right now, decoded and
+    /// split into lines. Only a call still being streamed has any: the real
+    /// `ToolCall` replaces this block outright once the call is whole.
+    pub streaming_preview: Vec<String>,
     /// Image references detected in the tool output.
     image_refs: Vec<crate::prompt_images::ScrollbackImageRef>,
     /// Video references detected in the tool output.
@@ -45,6 +49,7 @@ impl OtherToolCallBlock {
             output: None,
             started_at: None,
             elapsed_ms: None,
+            streaming_preview: Vec::new(),
             image_refs: Vec::new(),
             video_refs: Vec::new(),
         }
@@ -182,6 +187,29 @@ impl OtherToolCallBlock {
             line
         }
     }
+
+    /// The arguments arriving right now, one dim line each.
+    ///
+    /// Indented under the header and truncated rather than wrapped: the tail
+    /// is redrawn on every fragment, and a wrapped line changes the block's
+    /// height as the model types, which makes the whole transcript jump.
+    fn streaming_preview_lines(&self, theme: &Theme, width: usize) -> Vec<BlockLine> {
+        const INDENT: &str = "  ";
+        let body_width = width.saturating_sub(INDENT.len()).max(8);
+        self.streaming_preview
+            .iter()
+            .map(|text| {
+                let line = Line::from(vec![
+                    Span::raw(INDENT),
+                    Span::styled(text.clone(), theme.dim()),
+                ]);
+                BlockLine::styled(crate::render::line_utils::truncate_line(
+                    line,
+                    body_width + INDENT.len(),
+                ))
+            })
+            .collect()
+    }
 }
 
 impl BlockContent for OtherToolCallBlock {
@@ -245,15 +273,21 @@ impl BlockContent for OtherToolCallBlock {
         }
 
         match ctx.mode {
-            DisplayMode::Collapsed => BlockOutput {
-                lines: vec![
+            DisplayMode::Collapsed => {
+                // Collapsed is the default mode, so a call being streamed is
+                // collapsed the whole time it is written. Its live tail has to
+                // render here or it is never seen at all.
+                let mut lines: Vec<BlockLine> = vec![
                     self.collapsed_line(&theme, muted_collapsed, Some(ctx.content_width()))
                         .into(),
-                ],
-            },
+                ];
+                lines.extend(self.streaming_preview_lines(&theme, ctx.content_width()));
+                BlockOutput { lines }
+            }
             DisplayMode::Truncated | DisplayMode::Expanded => {
                 let mut lines: Vec<BlockLine> =
                     vec![self.collapsed_line(&theme, false, None).into()];
+                lines.extend(self.streaming_preview_lines(&theme, ctx.content_width()));
 
                 if let Some(output) = &self.output {
                     // Try to render as structured Q&A (AskUserQuestion output).
@@ -541,4 +575,102 @@ fn parse_ask_user_qa_pairs(output: &str) -> Vec<(String, String)> {
     }
 
     vec![]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::scrollback::types::BlockContext;
+
+    fn ctx(mode: DisplayMode) -> BlockContext {
+        BlockContext {
+            width: 80,
+            mode,
+            is_running: true,
+            raw: false,
+            max_lines: None,
+            appearance: Default::default(),
+            is_selected: false,
+            cwd: None,
+        }
+    }
+
+    fn rendered(block: &OtherToolCallBlock, mode: DisplayMode) -> Vec<String> {
+        block
+            .output(&ctx(mode))
+            .lines
+            .iter()
+            .map(|l| {
+                l.content
+                    .spans
+                    .iter()
+                    .map(|s| s.content.as_ref())
+                    .collect::<String>()
+            })
+            .collect()
+    }
+
+    fn streaming_write() -> OtherToolCallBlock {
+        let mut block = OtherToolCallBlock::new("Write `a.rs`", "42 B");
+        block.streaming_preview = vec!["fn main() {".to_string(), "    work();".to_string()];
+        block
+    }
+
+    /// `Collapsed` is the mode a call is in the whole time it streams, so a
+    /// preview only drawn when expanded is a preview nobody sees. That is the
+    /// bug the streaming rail exists to close.
+    #[test]
+    fn a_collapsed_streaming_call_draws_what_is_arriving() {
+        let lines = rendered(&streaming_write(), DisplayMode::Collapsed);
+        assert!(
+            lines[0].contains("Write `a.rs`"),
+            "the header still names the call: {lines:?}"
+        );
+        assert!(
+            lines.iter().any(|l| l.contains("fn main() {")),
+            "the body the model is typing is on screen: {lines:?}"
+        );
+        assert!(
+            lines.iter().any(|l| l.contains("    work();")),
+            "every preview line is drawn, not just the first: {lines:?}"
+        );
+    }
+
+    /// The same lines when the row is opened. Folding a running call must not
+    /// take the live view away from it.
+    #[test]
+    fn an_expanded_streaming_call_draws_the_same_lines() {
+        let block = streaming_write();
+        let collapsed = rendered(&block, DisplayMode::Collapsed);
+        let expanded = rendered(&block, DisplayMode::Expanded);
+        for text in &block.streaming_preview {
+            assert!(
+                collapsed.iter().any(|l| l.contains(text.as_str()))
+                    && expanded.iter().any(|l| l.contains(text.as_str())),
+                "{text:?} is missing from one of the modes"
+            );
+        }
+    }
+
+    /// A finished call carries no preview, so its row is the header alone.
+    #[test]
+    fn a_call_with_no_preview_is_one_line() {
+        let block = OtherToolCallBlock::new("Write `a.rs`", "");
+        assert_eq!(rendered(&block, DisplayMode::Collapsed).len(), 1);
+    }
+
+    /// A preview line wider than the terminal is cut, never wrapped: a wrapped
+    /// line changes the row's height on the next fragment.
+    #[test]
+    fn a_long_preview_line_is_cut_to_one_row() {
+        let mut block = OtherToolCallBlock::new("Write `a.rs`", "");
+        block.streaming_preview = vec!["x".repeat(400)];
+        let lines = rendered(&block, DisplayMode::Collapsed);
+        assert_eq!(lines.len(), 2, "header plus one preview row: {lines:?}");
+        assert!(
+            unicode_width::UnicodeWidthStr::width(lines[1].as_str()) <= 80,
+            "the preview row fits the terminal: {}",
+            lines[1].len()
+        );
+    }
 }

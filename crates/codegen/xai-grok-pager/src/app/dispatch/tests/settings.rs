@@ -1768,10 +1768,7 @@ fn move_setting_away_from_default(app: &mut AppView, key: crate::settings::Setti
                 let id = acp::ModelId::new(Arc::from("test-slot-move"));
                 let info = acp::ModelInfo::new(id.clone(), "Test Slot Move".to_string());
                 agent.session.models.available.insert(id.clone(), info);
-                let _ = dispatch(
-                    Action::SetHarnessModel(slot.id, id.0.to_string()),
-                    app,
-                );
+                let _ = dispatch(Action::SetHarnessModel(slot.id, id.0.to_string()), app);
             }
         }
         other => {

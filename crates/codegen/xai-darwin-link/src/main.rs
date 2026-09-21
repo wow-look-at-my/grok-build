@@ -158,11 +158,7 @@ fn search_dir(arg: &str, next: Option<&String>) -> Option<PathBuf> {
 ///
 /// A name already copied is kept: the first `-L` wins, which is the order the
 /// linker itself searches.
-fn copy_libraries(
-    dir: &Path,
-    libs: &Path,
-    copied: &mut HashSet<String>,
-) -> Result<(), String> {
+fn copy_libraries(dir: &Path, libs: &Path, copied: &mut HashSet<String>) -> Result<(), String> {
     let Ok(entries) = std::fs::read_dir(dir) else {
         // A search path that does not exist is one the real link also skips.
         return Ok(());
@@ -197,8 +193,7 @@ fn file_name(path: &Path) -> String {
 }
 
 fn create_dir(path: &Path) -> Result<(), String> {
-    std::fs::create_dir_all(path)
-        .map_err(|e| format!("could not create '{}': {e}", path.display()))
+    std::fs::create_dir_all(path).map_err(|e| format!("could not create '{}': {e}", path.display()))
 }
 
 fn write_file(path: &Path, bytes: &[u8]) -> Result<(), String> {
@@ -330,7 +325,10 @@ mod tests {
         ];
         record(&args, &bundle).expect("record");
         assert!(bundle.join("libs/libring.a").is_file());
-        assert_eq!(read_args(&bundle), vec!["-o", "@OUT@", "-L", "@BUNDLE@/libs"]);
+        assert_eq!(
+            read_args(&bundle),
+            vec!["-o", "@OUT@", "-L", "@BUNDLE@/libs"]
+        );
         let _ = std::fs::remove_dir_all(&work);
     }
 

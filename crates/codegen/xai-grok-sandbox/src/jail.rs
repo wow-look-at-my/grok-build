@@ -189,8 +189,12 @@ impl JailDefaults {
             return defaults;
         };
         for (key, value) in table {
-            let Some(kind) = default_key(key) else { continue };
-            let Some(token) = value.as_str() else { continue };
+            let Some(kind) = default_key(key) else {
+                continue;
+            };
+            let Some(token) = value.as_str() else {
+                continue;
+            };
             match (kind, token) {
                 (DefaultKey::Cwd, "ro") => defaults.cwd = Access::Ro,
                 (DefaultKey::Cwd, "rw") => defaults.cwd = Access::Rw,
@@ -261,8 +265,10 @@ pub enum JailError {
          flags; use --sandbox={PATHBOX_PROFILE} for path mounts."
     )]
     ProfileWithPathFlags { profile: String },
-    #[error("the path '{path}' is denied by `--rn`, but it is the working \
-         directory; the jail cannot start a process in a hidden cwd")]
+    #[error(
+        "the path '{path}' is denied by `--rn`, but it is the working \
+         directory; the jail cannot start a process in a hidden cwd"
+    )]
     CwdDenied { path: String },
     #[error("could not resolve the current executable: {0}")]
     NoSelfExe(std::io::Error),
@@ -274,7 +280,10 @@ pub enum JailError {
     )]
     CwdNotBound { cwd: String },
     #[error("could not create the sandbox temp directory '{path}': {source}")]
-    NoTempDir { path: String, source: std::io::Error },
+    NoTempDir {
+        path: String,
+        source: std::io::Error,
+    },
     #[error("`{0}` is not installed, so --sandbox cannot confine this process")]
     MissingBackend(&'static str),
     #[error("--sandbox is not supported on this platform")]
@@ -711,9 +720,7 @@ pub fn bwrap_command(plan: &JailPlan) -> std::process::Command {
     // binds win for the paths they name.
     for mount in &plan.mounts {
         if mount.access == Access::Deny {
-            cmd.arg("--ro-bind")
-                .arg(&plan.deny_sink)
-                .arg(&mount.path);
+            cmd.arg("--ro-bind").arg(&plan.deny_sink).arg(&mount.path);
         }
     }
     cmd.arg("--chdir").arg(&plan.cwd);
@@ -788,12 +795,18 @@ pub fn seatbelt_profile(plan: &JailPlan) -> String {
     // per directory, never a subtree — so the granted trees resolve while a
     // path nobody granted stays as invisible as bwrap leaves it.
     for path in std::iter::once(&plan.self_exe)
-        .chain(plan.mounts.iter().filter_map(|mount| {
-            (mount.access != Access::Deny).then_some(&mount.path)
-        }))
+        .chain(
+            plan.mounts
+                .iter()
+                .filter_map(|mount| (mount.access != Access::Deny).then_some(&mount.path)),
+        )
         .chain([&plan.grok_home, &plan.temp_dir])
     {
-        for ancestor in path.ancestors().skip(1).filter(|dir| *dir != Path::new("/")) {
+        for ancestor in path
+            .ancestors()
+            .skip(1)
+            .filter(|dir| *dir != Path::new("/"))
+        {
             profile.push_str(&format!(
                 "(allow file-read-metadata (literal \"{}\"))\n",
                 sbpl_escape(ancestor)
@@ -1408,7 +1421,8 @@ mod tests {
 
     #[test]
     #[cfg(target_os = "macos")]
-    fn seatbelt_reads_cover_the_macos_system_base() {        // macOS needs /System, /Library and the real /private tree readable or
+    fn seatbelt_reads_cover_the_macos_system_base() {
+        // macOS needs /System, /Library and the real /private tree readable or
         // the binary cannot dyld-load; without them the read-deny bricks the
         // sandboxed process outright.
         let plan = plan_fixture(Vec::new());
@@ -1456,7 +1470,11 @@ mod tests {
     fn cwd_defaults_to_rw_when_no_cwd_flag_is_given() {
         let plan = plan_for(&["--sandbox=pathbox"]);
         let front = front_cwd_mount(&plan);
-        assert_eq!(front.access, Access::Rw, "pathbox (no mounts) must mount the cwd rw");
+        assert_eq!(
+            front.access,
+            Access::Rw,
+            "pathbox (no mounts) must mount the cwd rw"
+        );
         assert_eq!(
             front.path, plan.cwd,
             "the injected mount must be exactly the working directory"
@@ -1559,8 +1577,12 @@ mod tests {
             "parse_jail_args must not inject a cwd mount"
         );
         // And the plan must honor the user's ro (no stale write-allow).
-        let plan = build_plan(&request, &JailDefaults::default(), argv(&["--sandbox=pathbox", "--ro", "."]))
-            .expect("build_plan");
+        let plan = build_plan(
+            &request,
+            &JailDefaults::default(),
+            argv(&["--sandbox=pathbox", "--ro", "."]),
+        )
+        .expect("build_plan");
         assert_eq!(
             front_cwd_mount(&plan).access,
             Access::Ro,
@@ -1589,13 +1611,7 @@ mod tests {
             let mounts: Vec<String> = plan
                 .mounts
                 .iter()
-                .map(|m| {
-                    format!(
-                        "{:?} {}",
-                        m.access,
-                        m.path.display()
-                    )
-                })
+                .map(|m| format!("{:?} {}", m.access, m.path.display()))
                 .collect();
             println!("== {label} ==");
             println!("cwd: {}", plan.cwd.display());
@@ -1712,7 +1728,9 @@ mod tests {
         );
         // Explicitly spelling the release values round-trips to release.
         assert_eq!(
-            config_defaults("[jail]\ncwd = \"rw\"\ngrok_home = \"rw\"\ntmp = \"tmpfs\"\nsystem = \"ro\""),
+            config_defaults(
+                "[jail]\ncwd = \"rw\"\ngrok_home = \"rw\"\ntmp = \"tmpfs\"\nsystem = \"ro\""
+            ),
             RELEASE
         );
     }
@@ -1733,7 +1751,10 @@ mod tests {
         );
         // Sanity: grok-build sandbox profile keys (`deny`, `read_write`, profile
         // tables) are not `[jail]` axes and never leak in.
-        assert_eq!(config_defaults("[profiles.strict]\ndeny = [\".env\"]"), RELEASE);
+        assert_eq!(
+            config_defaults("[profiles.strict]\ndeny = [\".env\"]"),
+            RELEASE
+        );
     }
 
     /// A throwaway directory for a fixture `config.toml`, under this process's
@@ -1964,7 +1985,10 @@ mod tests {
         let deny_secrets = profile
             .find("(deny file-read* (subpath \"/work/secrets\"))\n")
             .expect("deny rule");
-        assert!(allow_work < deny_secrets, "deny must come after the allow: {profile}");
+        assert!(
+            allow_work < deny_secrets,
+            "deny must come after the allow: {profile}"
+        );
     }
 
     #[test]
@@ -2012,7 +2036,9 @@ mod tests {
             "deny bind must come after the ancestor grant: {args:?}"
         );
         assert!(
-            !args.windows(3).any(|w| w == ["--bind", "/work/secrets", "/work/secrets"]),
+            !args
+                .windows(3)
+                .any(|w| w == ["--bind", "/work/secrets", "/work/secrets"]),
             "a --rn path must not be bound rw: {args:?}"
         );
     }
@@ -2027,7 +2053,8 @@ mod tests {
             .map(|a| a.to_string_lossy().to_string())
             .collect();
         assert!(
-            args.windows(3).any(|w| w[0] == "--ro-bind-try" && w[1] == "/usr"),
+            args.windows(3)
+                .any(|w| w[0] == "--ro-bind-try" && w[1] == "/usr"),
             "release system base must be ro-bind-try: {args:?}"
         );
         assert!(
@@ -2035,7 +2062,8 @@ mod tests {
             "release /tmp must be a tmpfs: {args:?}"
         );
         assert!(
-            args.windows(3).any(|w| w == ["--bind", "/home/u/.grok", "/home/u/.grok"]),
+            args.windows(3)
+                .any(|w| w == ["--bind", "/home/u/.grok", "/home/u/.grok"]),
             "release grok home must be bound rw: {args:?}"
         );
     }
@@ -2063,7 +2091,8 @@ mod tests {
             "tmp=rw must bind /tmp: {args:?}"
         );
         assert!(
-            args.windows(3).any(|w| w == ["--ro-bind", "/home/u/.grok", "/home/u/.grok"]),
+            args.windows(3)
+                .any(|w| w == ["--ro-bind", "/home/u/.grok", "/home/u/.grok"]),
             "grok_home=ro must --ro-bind the home: {args:?}"
         );
         assert!(

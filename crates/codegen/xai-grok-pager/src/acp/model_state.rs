@@ -714,7 +714,10 @@ mod tests {
             .unwrap_err();
         let msg = err.message();
         assert!(msg.contains("supportsReasoningEffort"), "msg={msg}");
-        assert!(msg.contains("no `supportsReasoningEffort` key"), "msg={msg}");
+        assert!(
+            msg.contains("no `supportsReasoningEffort` key"),
+            "msg={msg}"
+        );
         assert!(msg.contains("'m'"), "must name the model: {msg}");
         assert!(
             msg.contains("force_reasoning_effort_models"),

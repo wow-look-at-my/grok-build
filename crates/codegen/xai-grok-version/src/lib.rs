@@ -207,7 +207,9 @@ mod tests {
         let hash = "11cc538ef81131e8a6a730a431e36784c0d488b9";
         assert_eq!(
             commit_github_url(hash).as_deref(),
-            Some("https://github.com/wow-look-at-my/grok-build/commit/11cc538ef81131e8a6a730a431e36784c0d488b9"),
+            Some(
+                "https://github.com/wow-look-at-my/grok-build/commit/11cc538ef81131e8a6a730a431e36784c0d488b9"
+            ),
         );
     }
 
