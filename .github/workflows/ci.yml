@@ -271,12 +271,33 @@ jobs:
           name: grok-linux-amd64
           path: dist/grok-linux-amd64
 
-  # The link is the one step that needs a Mac. It waits on the tests as well as its bundle: it takes seconds, so starting it early buys nothing and spends a macOS runner on a tree that may not pass.
+  # buildhost assigns the number here, after every build and test passed, so a number only ever names a tree that already built and passed.
+  release:
+    name: Create buildhost release
+    needs: [build-test, test-darwin-sandbox, build-release]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write # GitHub OIDC -> buildhost
+    outputs:
+      version: ${{ steps.rel.outputs.version }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Create release
+        id: rel
+        uses: wow-look-at-my/buildhost/.github/actions/buildhost-create-release@master
+        with:
+          server: ${{ env.BUILDHOST_SERVER }}
+          project: ${{ env.BUILDHOST_PROJECT }}
+
+  # The one job that needs a Mac, and it does everything a Mac is needed for. Patching a Mach-O invalidates the ad-hoc signature `ld` left, and `codesign` is the only thing that puts one back, so the stamp lands here rather than leaving a second macOS job to re-sign what this one linked.
   link-darwin:
-    name: Link darwin/arm64 (macOS)
-    needs: [build-release, build-test]
+    name: Link and stamp darwin/arm64 (macOS)
+    needs: release
     runs-on: macos-14
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
@@ -290,6 +311,35 @@ jobs:
           mkdir -p "$RUNNER_TEMP/darwin-link"
           tar -xf dist/darwin-link.tar -C "$RUNNER_TEMP/darwin-link"
           ci/darwin-relink.sh "$RUNNER_TEMP/darwin-link" "$PWD/dist/grok-darwin-arm64"
+
+      - name: Install Rust toolchain (pinned by rust-toolchain.toml)
+        run: rustup show
+
+      - name: Build the stamper
+        run: cargo build --locked --release -p xai-grok-stamp
+
+      # The stamper reads the slot back off disk after writing it, so a binary that did not take the number fails here.
+      - name: Write the release number into the binary
+        run: |
+          set -euo pipefail
+          chmod +x dist/grok-darwin-arm64
+          target/release/xai-grok-stamp dist/grok-darwin-arm64 '${{ needs.release.outputs.version }}'
+
+      - name: Re-sign the darwin binary
+        run: codesign --force --sign - dist/grok-darwin-arm64
+
+      # This runner is the arm64 Mac, so this is the darwin binary itself answering.
+      - name: Verify the darwin binary reports the release number
+        run: |
+          set -euo pipefail
+          got="$(dist/grok-darwin-arm64 --version)"
+          want="grok ${{ needs.release.outputs.version }}"
+          echo "buildhost release: $want"
+          echo "binary reports:    $got"
+          case "$got" in
+            "$want"*) echo "PASS: the stamp matches the buildhost release" ;;
+            *) echo "FAIL: the binary does not report the buildhost release" ; exit 1 ;;
+          esac
 
       - uses: wow-look-at-my/actions@cache-upload#latest
         with:
@@ -311,11 +361,10 @@ jobs:
         run: cargo test --locked -p xai-grok-sandbox
 
   publish:
-    # Every test AND every build first: a number is only assigned to a tree that already built and passed.
-    needs: [build-test, test-darwin-sandbox, build-release, link-darwin]
+    # The darwin binary arrives stamped and signed from link-darwin, so nothing here needs a Mac.
+    needs: [release, link-darwin]
     name: Publish buildhost release
-    # macOS because patching an arm64 Mach-O invalidates the ad-hoc signature `ld` left, and `codesign` is the only thing that puts one back. The linux binary is stamped here too: patching an ELF needs no Linux.
-    runs-on: macos-14
+    runs-on: ubuntu-22.04
     timeout-minutes: 30
     permissions:
       contents: read
@@ -341,32 +390,19 @@ jobs:
       - name: Build the stamper
         run: cargo build --locked --release -p xai-grok-stamp
 
-      # buildhost assigns the number here. Nothing before this point needed it, which is why every build and test already ran.
-      - name: Create release
-        id: rel
-        uses: wow-look-at-my/buildhost/.github/actions/buildhost-create-release@master
-        with:
-          server: ${{ env.BUILDHOST_SERVER }}
-          project: ${{ env.BUILDHOST_PROJECT }}
-
-      # The stamper reads each slot back off disk after writing it, so a binary that did not take the number fails here.
-      - name: Write the release number into both binaries
+      # Patching an ELF invalidates no signature, so the linux binary is stamped here. The stamper reads the slot back off disk after writing it, so a binary that did not take the number fails here.
+      - name: Write the release number into the linux binary
         run: |
           set -euo pipefail
-          for binary in dist/grok-linux-amd64 dist/grok-darwin-arm64; do
-            chmod +x "$binary"
-            target/release/xai-grok-stamp "$binary" '${{ steps.rel.outputs.version }}'
-          done
+          chmod +x dist/grok-linux-amd64
+          target/release/xai-grok-stamp dist/grok-linux-amd64 '${{ needs.release.outputs.version }}'
 
-      - name: Re-sign the darwin binary
-        run: codesign --force --sign - dist/grok-darwin-arm64
-
-      # This runner is the arm64 Mac, so this is the darwin binary itself answering. The linux binary's own `--version` runs in build-release.
-      - name: Verify the darwin binary reports the release number
+      # This runner is the linux/amd64 box, so this is the binary itself answering. The darwin binary answered for itself on the Mac that stamped it.
+      - name: Verify the linux binary reports the release number
         run: |
           set -euo pipefail
-          got="$(dist/grok-darwin-arm64 --version)"
-          want="grok ${{ steps.rel.outputs.version }}"
+          got="$(dist/grok-linux-amd64 --version)"
+          want="grok ${{ needs.release.outputs.version }}"
           echo "buildhost release: $want"
           echo "binary reports:    $got"
           case "$got" in
@@ -388,7 +424,7 @@ jobs:
         run: |
           set -euo pipefail
           curl -fLo "$RUNNER_TEMP/buildhost" \
-            "https://dl.pazer.build/buildhost?os=darwin&arch=arm64"
+            "https://dl.pazer.build/buildhost?os=linux&arch=amd64"
           chmod +x "$RUNNER_TEMP/buildhost"
           "$RUNNER_TEMP/buildhost" version
 
@@ -401,7 +437,7 @@ jobs:
               --server '${{ env.BUILDHOST_SERVER }}' \
               --token "$BUILDHOST_TOKEN" \
               --project '${{ env.BUILDHOST_PROJECT }}' \
-              --version '${{ steps.rel.outputs.version }}' \
+              --version '${{ needs.release.outputs.version }}' \
               --os "$1" --arch "$2" --kind binary \
               --artifact "dist/grok-$1-$2" \
               --draft
@@ -426,7 +462,7 @@ jobs:
         with:
           server: ${{ env.BUILDHOST_SERVER }}
           project: ${{ env.BUILDHOST_PROJECT }}
-          version: ${{ steps.rel.outputs.version }}
+          version: ${{ needs.release.outputs.version }}
 
       # always(), so a failed publish still clears the run-scoped copies buildhost has now superseded.
       - name: Clean up binary hand-offs
