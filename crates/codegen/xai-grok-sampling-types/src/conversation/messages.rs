@@ -440,6 +440,7 @@ pub fn build_messages_request(req: &ConversationRequest) -> crate::messages::Mes
                     name: t.name.clone(),
                     description: t.description.clone(),
                     input_schema: t.parameters.clone(),
+                    eager_input_streaming: crate::messages::True,
                 })
                 .collect(),
         )
