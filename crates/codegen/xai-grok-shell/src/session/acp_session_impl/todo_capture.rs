@@ -9,12 +9,9 @@
 //!
 //! see AGENTS.md, "`/todo` capture feature notes"
 
-use super::side_call::{
-    AuxCall, aux_retry_policy, fresh_req_id, log_prompt_cache_hit, should_retry_aux_call,
-};
+use super::side_call::{AuxCall, collect_aux_call, log_prompt_cache_hit};
 use super::*;
 
-use backon::Retryable as _;
 use std::path::{Path, PathBuf};
 use xai_grok_sampling_types::ToolCall;
 use xai_grok_tools::types::tool::ToolKind;

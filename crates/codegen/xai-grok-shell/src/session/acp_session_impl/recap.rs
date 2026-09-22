@@ -3,13 +3,10 @@
 //! Shared cache-aligned request setup lives in [`super::side_call`].
 //! Per-turn dashboard summary lifecycle lives in [`super::turn_summary`].
 
-use super::side_call::{
-    AuxCall, aux_retry_policy, fresh_req_id, log_prompt_cache_hit, should_retry_aux_call,
-};
+use super::side_call::{AuxCall, collect_aux_call, log_prompt_cache_hit};
 use super::*;
 
 use crate::session::SideQuestionError;
-use xai_grok_sampling_types::SamplingError;
 
 impl SessionActor {
     /// Answers a `/btw` side question with one model call over the parent session's context, and saves it to `btw_history.jsonl` under a new
