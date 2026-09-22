@@ -2062,10 +2062,11 @@ fn registry_kind_membership_through_pr_14() {
         "Int kind membership drift (PR 8)",
     );
 
-    let group_keys = by_kind.remove("Group").unwrap_or_default();
+    let mut group_keys = by_kind.remove("Group").unwrap_or_default();
+    group_keys.sort();
     assert_eq!(
         group_keys,
-        vec!["output_rate_floor", "contextual_hints"],
+        vec!["contextual_hints", "output_rate_floor"],
         "Group kind membership drift",
     );
 
