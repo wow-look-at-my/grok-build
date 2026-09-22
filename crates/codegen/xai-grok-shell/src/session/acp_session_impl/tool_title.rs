@@ -84,6 +84,21 @@ pub(crate) fn tool_input_title(
     kind: Option<ToolKind>,
     cwd: &std::path::Path,
 ) -> String {
+    // The pager shows an empty title as the ACP kind, which is "Other" for
+    // most tools. The wire name at least says which tool ran.
+    let title = input_title(input, wire_name, kind, cwd);
+    if title.is_empty() {
+        wire_name.to_string()
+    } else {
+        title
+    }
+}
+fn input_title(
+    input: &ToolInput,
+    wire_name: &str,
+    kind: Option<ToolKind>,
+    cwd: &std::path::Path,
+) -> String {
     match input {
         ToolInput::ListDir(list_dir) => format!("List `{}`", list_dir.target_directory),
         ToolInput::SearchReplace(sr) => format!("Edit `{}`", sr.file_path.as_str()),
@@ -392,6 +407,13 @@ mod title_tests {
         let empty = ToolInput::Dynamic(json!({}));
         assert_eq!(title(&empty, "read", Some(ToolKind::Read)), "read");
         assert_eq!(title(&empty, "frobnicate", None), "frobnicate");
+    }
+    /// An arm that yields nothing would reach the pager as an empty title,
+    /// which it draws as the bare ACP kind.
+    #[test]
+    fn an_empty_title_falls_back_to_the_wire_name() {
+        let grep = input("CodexGrepFiles", json!({"pattern": ""}));
+        assert_eq!(title(&grep, "grep_files", None), "grep_files");
     }
 }
 #[cfg(test)]
