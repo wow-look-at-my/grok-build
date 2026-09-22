@@ -740,7 +740,10 @@ impl SessionActor {
         &self,
         label: &str,
         slug: &str,
-    ) -> Option<(xai_grok_sampler::SamplingClient, xai_grok_sampler::SamplerConfig)> {
+    ) -> Option<(
+        xai_grok_sampler::SamplingClient,
+        xai_grok_sampler::SamplerConfig,
+    )> {
         let slug = slug.to_string();
         let active_session_config = self.reconstruct_full_config().await;
         if slug == active_session_config.model {
