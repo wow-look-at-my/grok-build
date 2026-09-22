@@ -32,6 +32,7 @@ fn test_config_with_window(context_window: u64) -> SamplingConfig {
         reasoning_effort: None,
         stream_tool_calls: None,
         chat_message_profile: Default::default(),
+        extra_body: Default::default(),
     }
 }
 
@@ -1182,6 +1183,7 @@ async fn update_sampling_config_is_queryable() {
         reasoning_effort: None,
         stream_tool_calls: None,
         chat_message_profile: Default::default(),
+        extra_body: Default::default(),
     };
     h.handle.update_sampling_config(new_config.clone());
 
@@ -1571,6 +1573,7 @@ async fn build_request_uses_sampling_config() {
         reasoning_effort: None,
         stream_tool_calls: None,
         chat_message_profile: Default::default(),
+        extra_body: Default::default(),
     };
     let h = TestHarness::with_config(vec![ConversationItem::user("hi")], config);
 
@@ -1607,6 +1610,7 @@ async fn build_request_fits_the_output_budget_into_the_context_window() {
         reasoning_effort: None,
         stream_tool_calls: None,
         chat_message_profile: Default::default(),
+        extra_body: Default::default(),
     };
     // Bytes/4: this is a 737_857-token prompt.
     let items = vec![ConversationItem::user("x".repeat(737_857 * 4))];
@@ -3788,6 +3792,7 @@ async fn sampling_config_survives_compaction_replacement() {
         reasoning_effort: None,
         stream_tool_calls: None,
         chat_message_profile: Default::default(),
+        extra_body: Default::default(),
     };
 
     let h = TestHarness::with_config(
@@ -3874,6 +3879,7 @@ async fn model_metadata_lost_after_compaction_then_recovered_on_next_turn() {
         reasoning_effort: None,
         stream_tool_calls: None,
         chat_message_profile: Default::default(),
+        extra_body: Default::default(),
     };
 
     let h = TestHarness::with_config(
@@ -3965,6 +3971,7 @@ async fn context_window_downgrade_triggers_auto_compact() {
         reasoning_effort: None,
         stream_tool_calls: None,
         chat_message_profile: Default::default(),
+        extra_body: Default::default(),
     };
 
     let h = TestHarness::with_config(vec![], config);

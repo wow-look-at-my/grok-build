@@ -426,6 +426,7 @@ impl SessionActor {
                 reasoning_effort: None,
                 chat_message_profile: Default::default(),
                 stream_tool_calls: None,
+                extra_body: Default::default(),
             });
         let creds = self.chat_state_handle.get_credentials().await;
         let codex_backend = crate::codex_provider::is_codex_backend(&cfg.base_url);
@@ -492,6 +493,7 @@ impl SessionActor {
             extra_headers,
             query_params: cfg.query_params.clone(),
             env_http_headers: cfg.env_http_headers.clone(),
+            extra_body: cfg.extra_body.clone(),
             context_window: cfg.context_window.get(),
             client_version: creds.client_version,
             reasoning_effort: cfg.reasoning_effort,

@@ -14,7 +14,7 @@
 
 use eventsource_stream::Eventsource;
 use futures_util::StreamExt;
-use futures_util::stream::BoxStream;
+use futures_util::stream::{BoxStream, Stream};
 use indexmap::IndexMap;
 use reqwest::header::{
     ACCEPT, AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue, USER_AGENT,
@@ -517,6 +517,9 @@ pub struct SamplingClient {
     http: reqwest::Client,
     default_headers: HeaderMap,
     base_url: String,
+    /// Extra top-level body fields merged into every request this client
+    /// sends; see [`SamplerConfig::extra_body`].
+    extra_body: serde_json::Map<String, serde_json::Value>,
     defaults: ClientDefaults,
     /// Optional 401-attribution hook. The shell wires this to emit a
     /// structured event at every UNAUTHORIZED arm so 401s can be
@@ -872,12 +875,22 @@ impl SamplingClient {
             chat_message_profile: config.chat_message_profile,
         };
 
-        let endpoint = EndpointTemplate::new(&config.base_url, &config.query_params);
+        // Ollama's native paths are siblings of the OpenAI-compatible endpoint
+        // at the host root, not children of it. A provider block names one
+        // base URL for both, so `http://host:11434/v1` has to resolve
+        // `api/chat` at `http://host:11434/api/chat`.
+        let endpoint_base = if defaults.api_backend == ApiBackend::Ollama {
+            native_host_root(&config.base_url)
+        } else {
+            config.base_url.clone()
+        };
+        let endpoint = EndpointTemplate::new(&endpoint_base, &config.query_params);
 
         Ok(Self {
             http,
             default_headers: headers,
             base_url: config.base_url,
+            extra_body: config.extra_body,
             defaults,
             attribution_callback: config.attribution_callback,
             bearer_resolver: config.bearer_resolver,
@@ -1216,8 +1229,18 @@ impl SamplingClient {
         } = self.post(self.endpoint("chat/completions"));
         let http_request = grok_headers
             .apply(builder)
-            .header(ACCEPT, HeaderValue::from_static("text/event-stream"))
-            .json(&streaming_request);
+            .header(ACCEPT, HeaderValue::from_static("text/event-stream"));
+        // The typed request is closed, so a per-deployment field only this
+        // target understands (LM Studio's `ttl`) rides here. The extra
+        // serialization is paid only by a caller that configured one.
+        let http_request = if self.extra_body.is_empty() {
+            http_request.json(&streaming_request)
+        } else {
+            let mut body =
+                serde_json::to_value(&streaming_request).map_err(SamplingError::Serialization)?;
+            xai_grok_sampling_types::merge_extra_body(&mut body, &self.extra_body);
+            http_request.json(&body)
+        };
 
         let built_request = http_request.build().map_err(|e| {
             tracing::error!("Failed to build HTTP request: {}", e);
@@ -1903,8 +1926,15 @@ impl SamplingClient {
         } = self.post(self.endpoint("messages"));
         let http_request = grok_headers
             .apply(builder)
-            .header(ACCEPT, HeaderValue::from_static("text/event-stream"))
-            .json(&request.inner);
+            .header(ACCEPT, HeaderValue::from_static("text/event-stream"));
+        let http_request = if self.extra_body.is_empty() {
+            http_request.json(&request.inner)
+        } else {
+            let mut body =
+                serde_json::to_value(&request.inner).map_err(SamplingError::Serialization)?;
+            xai_grok_sampling_types::merge_extra_body(&mut body, &self.extra_body);
+            http_request.json(&body)
+        };
 
         let built_request = http_request.build().map_err(|e| {
             tracing::error!("Failed to build HTTP request: {}", e);
@@ -2247,6 +2277,96 @@ impl SamplingClient {
         self.create_message_stream(wrapper).await
     }
 
+    /// Stream a conversation through Ollama's native `/api/chat`.
+    ///
+    /// The response is NDJSON: one whole JSON object per line, no SSE framing
+    /// and no `[DONE]` sentinel. Lines are reassembled here because a chunk
+    /// boundary lands at an arbitrary byte, so a line can straddle two of
+    /// them.
+    pub async fn conversation_stream_ollama(
+        &self,
+        mut request: ConversationRequest,
+    ) -> Result<(
+        BoxStream<'static, Result<xai_grok_sampling_types::ollama::OllamaChatChunk>>,
+        Option<ResponseModelMetadata>,
+    )> {
+        use xai_grok_sampling_types::build_ollama_chat_request;
+
+        self.apply_conversation_defaults(&mut request)?;
+        request.trace.take();
+
+        let model_id = request.model.clone().unwrap_or_default();
+        let chat_request = build_ollama_chat_request(&request);
+
+        let mut body = serde_json::to_value(&chat_request).map_err(SamplingError::Serialization)?;
+        // `keep_alive`, `truncate` and `options.num_ctx` reach the wire from
+        // here and nowhere else: they are per-deployment settings with no
+        // cross-provider meaning, so they live in config rather than in the
+        // typed request.
+        xai_grok_sampling_types::merge_extra_body(&mut body, &self.extra_body);
+
+        let endpoint = self.endpoint("api/chat");
+        tracing::debug!(url = %endpoint, model_id = %model_id, "Sending ollama /api/chat request");
+        let SentRequest {
+            builder,
+            sent_bearer,
+        } = self.post(endpoint.clone());
+        let built_request = builder
+            .header(ACCEPT, HeaderValue::from_static("application/x-ndjson"))
+            .json(&body)
+            .build()
+            .map_err(|e| {
+                tracing::error!("Failed to build HTTP request: {}", e);
+                SamplingError::Http(e)
+            })?;
+        Self::log_request_headers(&built_request, "ollama");
+
+        let response = self.http.execute(built_request).await.map_err(|e| {
+            tracing::debug!("HTTP request failed: {}", e);
+            record_stream_request_failure(&e);
+            e
+        })?;
+
+        let status = response.status();
+        let request_url = response.url().to_string();
+        if !status.is_success() {
+            if status == reqwest::StatusCode::UNAUTHORIZED {
+                self.record_401_attribution(
+                    crate::attribution::SamplingConsumer::ChatCompletionsStream,
+                    sent_bearer.as_deref(),
+                );
+                let body = response.bytes().await.unwrap_or_default();
+                let server_message = user_facing_api_error_message(status, body.as_ref());
+                return Err(auth_rejected(
+                    format!("Unauthorized (401) from {endpoint}: {server_message}"),
+                    sent_bearer.as_deref(),
+                ));
+            }
+            let model_metadata = extract_model_metadata(response.headers());
+            let retry_after_secs = extract_retry_after(response.headers());
+            let should_retry = extract_should_retry(response.headers());
+            let bytes = response.bytes().await?;
+            let message = api_error_message_for_endpoint(status, bytes.as_ref(), &request_url);
+            tracing::error!(
+                status = %status,
+                error_message = %message,
+                model_id = %model_id,
+                "ollama API error"
+            );
+            return Err(SamplingError::Api {
+                status,
+                message,
+                model_metadata,
+                retry_after_secs,
+                should_retry,
+            });
+        }
+
+        let model_metadata = extract_model_metadata(response.headers());
+        let chunks = ndjson_chunk_stream(response.bytes_stream()).boxed();
+        Ok((chunks, model_metadata))
+    }
+
     /// Send a conversation request using the Anthropic Messages API (non-streaming).
     ///
     /// Converts the `ConversationRequest` to Messages API format internally.
@@ -2304,10 +2424,103 @@ impl SamplingClient {
                 let events = crate::stream::stream_messages(raw, meta, request_id, idle_timeout);
                 crate::stream::collect_response(events).await
             }
+            ApiBackend::Ollama => {
+                let (raw, meta) = self.conversation_stream_ollama(request).await?;
+                let events = crate::stream::stream_ollama(raw, meta, request_id, idle_timeout);
+                crate::stream::collect_response(events).await
+            }
         };
         result
             .map(|(response, _metrics)| response)
             .map_err(stream_collect_error)
+    }
+}
+
+/// The host root Ollama's native API lives under.
+///
+/// A provider names ONE base URL and it points at the OpenAI-compatible
+/// endpoint, because that is what every other client wants. `/api/chat` is a
+/// sibling of that endpoint rather than a child, so the suffix comes off.
+fn native_host_root(base_url: &str) -> String {
+    let trimmed = base_url.trim().trim_end_matches('/');
+    for suffix in ["/api/v1", "/api/v0", "/v1", "/api"] {
+        if let Some(root) = trimmed.strip_suffix(suffix) {
+            return root.trim_end_matches('/').to_owned();
+        }
+    }
+    trimmed.to_owned()
+}
+
+/// Reassemble an NDJSON byte stream into one parsed object per line.
+///
+/// A transport chunk boundary lands at an arbitrary byte, so a line can
+/// straddle two of them and the tail has to be carried across. The final line
+/// often arrives without a trailing newline, so what is left in the buffer at
+/// end of stream is a line too.
+fn ndjson_chunk_stream<S, B, T>(byte_stream: S) -> impl Stream<Item = Result<T>> + Send
+where
+    S: Stream<Item = std::result::Result<B, reqwest::Error>> + Send + 'static,
+    B: AsRef<[u8]> + Send + 'static,
+    T: serde::de::DeserializeOwned + Send + 'static,
+{
+    async_stream::stream! {
+        let mut buffer: Vec<u8> = Vec::new();
+        let mut stream = std::pin::pin!(byte_stream);
+        let mut failed = false;
+
+        while let Some(next) = stream.next().await {
+            let bytes = match next {
+                Ok(bytes) => bytes,
+                Err(error) => {
+                    // A body that stopped arriving mid-read is transient, and
+                    // the sampler's stream-interrupt budget is what answers
+                    // it; reporting it as a finished response would hand the
+                    // turn a truncated answer.
+                    failed = true;
+                    yield Err(SamplingError::EventStreamError(error.to_string()));
+                    break;
+                }
+            };
+            buffer.extend_from_slice(bytes.as_ref());
+
+            while let Some(newline) = buffer.iter().position(|&b| b == b'\n') {
+                let line: Vec<u8> = buffer.drain(..=newline).collect();
+                if let Some(item) = parse_ndjson_line(&line[..line.len() - 1]) {
+                    yield item;
+                }
+            }
+        }
+
+        if !failed && !buffer.is_empty() {
+            if let Some(item) = parse_ndjson_line(&buffer) {
+                yield item;
+            }
+        }
+    }
+}
+
+/// Parse one NDJSON line, or `None` for a line carrying nothing.
+fn parse_ndjson_line<T: serde::de::DeserializeOwned>(line: &[u8]) -> Option<Result<T>> {
+    let text = String::from_utf8_lossy(line);
+    let text = text.trim();
+    if text.is_empty() {
+        return None;
+    }
+    tracing::info!(
+        target: crate::sampling_log::TARGET,
+        event = "ndjson_chunk",
+        backend = "ollama",
+        data = %text,
+    );
+    match serde_json::from_str::<T>(text) {
+        Ok(item) => Some(Ok(item)),
+        Err(error) => {
+            tracing::error!(%error, raw_data = %text, "failed to deserialize an NDJSON line");
+            Some(Err(SamplingError::StreamError {
+                error_type: "malformed_ndjson".to_owned(),
+                message: format!("malformed NDJSON line from the model endpoint: {error}"),
+            }))
+        }
     }
 }
 

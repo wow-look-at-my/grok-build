@@ -19,8 +19,8 @@ use std::sync::Arc;
 use xai_grok_agent::prompt::skills::SkillsConfig;
 use xai_grok_sampler::{AuthScheme, SamplerConfig};
 use xai_grok_sampling_types::{
-    CompactionAtTokens, CompactionsRemaining, FAVORITE_META_KEY, REASONING_EFFORT_META_KEY,
-    REASONING_EFFORTS_META_KEY, ReasoningEffort, ReasoningEffortOption,
+    CompactionAtTokens, CompactionsRemaining, FAVORITE_META_KEY, LOADED_IN_VRAM_META_KEY,
+    REASONING_EFFORT_META_KEY, REASONING_EFFORTS_META_KEY, ReasoningEffort, ReasoningEffortOption,
     reasoning_effort_meta_value, reasoning_efforts_meta_value,
 };
 use xai_grok_tools::types::compat::{
@@ -4241,11 +4241,60 @@ fn default_models(endpoints: &EndpointsConfig) -> IndexMap<String, ModelEntryCon
                 laziness_detector: LazinessDetectorPerModelConfig::default(),
                 pricing: xai_grok_sampling_types::ModelPricing::default(),
                 min_output_tokens_per_sec: None,
+                loaded_in_vram: None,
             };
             (key, config)
         })
         .collect()
 }
+impl ModelEntryConfig {
+    /// A listing entry with nothing set but the endpoint it is reached at.
+    ///
+    /// A parser that knows only a model's name and window fills those in over
+    /// this, rather than restating thirty fields it has no answer for.
+    pub(crate) fn minimal(base_url: &str) -> Self {
+        Self {
+            id: None,
+            model: String::new(),
+            base_url: base_url.to_owned(),
+            api_base_url: None,
+            name: None,
+            description: None,
+            context_window: NonZeroU64::new(crate::remote::DEFAULT_CONTEXT_WINDOW)
+                .expect("the default window is non-zero"),
+            auto_compact_threshold_percent: None,
+            system_prompt_label: None,
+            temperature: None,
+            top_p: None,
+            max_completion_tokens: None,
+            api_backend: ApiBackend::default(),
+            auth_scheme: None,
+            agent_type: default_agent_type(),
+            inference_idle_timeout_secs: None,
+            max_retries: None,
+            api_key: None,
+            env_key: None,
+            extra_headers: IndexMap::new(),
+            use_concise: false,
+            hidden: false,
+            supported_in_api: true,
+            reasoning_effort: None,
+            supports_reasoning_effort: false,
+            reasoning_efforts: Vec::new(),
+            supports_backend_search: false,
+            compactions_remaining: None,
+            compaction_at_tokens: None,
+            show_model_fingerprint: false,
+            stream_tool_calls: None,
+            strict_message_schema: false,
+            laziness_detector: LazinessDetectorPerModelConfig::default(),
+            pricing: xai_grok_sampling_types::ModelPricing::default(),
+            min_output_tokens_per_sec: None,
+            loaded_in_vram: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelEntryConfig {
     /// Stable unique identifier for this catalog entry. When present,
@@ -4389,6 +4438,35 @@ pub struct ModelEntryConfig {
     /// `[output_rate_floor]` value applies when this is absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub min_output_tokens_per_sec: Option<f64>,
+    /// Whether this model is resident in VRAM, for a listing dialect that
+    /// reports residency. `None` where the listing does not say. Runtime
+    /// state, so it is never serialized into a persisted catalog.
+    #[serde(skip, default)]
+    pub loaded_in_vram: Option<bool>,
+}
+
+/// Convert a `[.*.extra_body]` TOML table into the JSON body fields it names.
+///
+/// A TOML value has no null, and every other scalar maps straight across, so
+/// nothing is lost. A value that cannot be represented is dropped with a
+/// warning rather than being sent as a guess.
+pub(crate) fn toml_map_to_json(
+    table: &IndexMap<String, toml::Value>,
+) -> serde_json::Map<String, serde_json::Value> {
+    let mut out = serde_json::Map::with_capacity(table.len());
+    for (key, value) in table {
+        match serde_json::to_value(value) {
+            Ok(json) => {
+                out.insert(key.clone(), json);
+            }
+            Err(error) => tracing::warn!(
+                %key,
+                %error,
+                "extra_body value could not be represented as JSON; field dropped"
+            ),
+        }
+    }
+    out
 }
 
 /// True when `pricing` equals the all-zero default.
@@ -4494,6 +4572,16 @@ pub struct ConfigModelOverride {
     pub strict_message_schema: Option<bool>,
     pub pricing: Option<xai_grok_sampling_types::ModelPricing>,
     pub min_output_tokens_per_sec: Option<f64>,
+    /// Extra top-level fields merged into every request body for this model.
+    /// The typed request structs are closed, so a per-deployment setting only
+    /// one target understands (LM Studio's `ttl`, Ollama's `keep_alive` and
+    /// `options.num_ctx`) has nowhere else to go. A dotted key addresses a
+    /// nested object.
+    #[serde(default)]
+    pub extra_body: IndexMap<String, toml::Value>,
+    /// Suppress the modelinfo price lookup for this model; set by a local
+    /// provider, whose models are free and are in no catalog.
+    pub pricing_lookup_enabled: Option<bool>,
 }
 impl ConfigModelOverride {
     pub(crate) fn apply(
@@ -4596,6 +4684,12 @@ impl ConfigModelOverride {
         }
         if self.min_output_tokens_per_sec.is_some() {
             entry.info.min_output_tokens_per_sec = self.min_output_tokens_per_sec;
+        }
+        if !self.extra_body.is_empty() {
+            entry.info.extra_body = toml_map_to_json(&self.extra_body);
+        }
+        if let Some(v) = self.pricing_lookup_enabled {
+            entry.info.pricing_lookup_enabled = v;
         }
         if self.api_key.is_some() {
             entry.api_key.clone_from(&self.api_key);
@@ -4713,6 +4807,24 @@ pub struct ModelInfo {
     /// session-wide `[ui].min_output_tokens_per_sec`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub min_output_tokens_per_sec: Option<f64>,
+    /// Extra top-level fields merged into this model's request body.
+    /// See [`ConfigModelOverride::extra_body`].
+    #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
+    pub extra_body: serde_json::Map<String, serde_json::Value>,
+    /// Whether the modelinfo price lookup may run for this model. A local
+    /// runtime's models are free and are in no catalog, so the lookup there is
+    /// a request that can only fail and then be re-tried on the next TTL.
+    #[serde(default = "default_true")]
+    pub pricing_lookup_enabled: bool,
+    /// Whether this model is resident in VRAM right now, for a provider whose
+    /// listing reports residency (Ollama `/api/ps`, LM Studio
+    /// `loaded_instances`). `None` means nobody can say — every remote
+    /// provider, and a local one whose listing could not be reached.
+    ///
+    /// Derived at catalog build and never persisted: it describes the runtime
+    /// at one instant, and a replayed value would claim a load that ended.
+    #[serde(skip, default)]
+    pub loaded_in_vram: Option<bool>,
 }
 impl ModelInfo {
     /// Minimal fallback descriptor for an unknown model slug.
@@ -4756,6 +4868,9 @@ impl ModelInfo {
             laziness_detector: LazinessDetectorPerModelConfig::default(),
             pricing: xai_grok_sampling_types::ModelPricing::default(),
             min_output_tokens_per_sec: None,
+            extra_body: Default::default(),
+            pricing_lookup_enabled: true,
+            loaded_in_vram: None,
         }
     }
     /// Extract shared model metadata from a flat config entry.
@@ -4798,6 +4913,9 @@ impl ModelInfo {
             laziness_detector: entry.laziness_detector.clone(),
             pricing: entry.pricing.clone(),
             min_output_tokens_per_sec: entry.min_output_tokens_per_sec,
+            extra_body: Default::default(),
+            pricing_lookup_enabled: true,
+            loaded_in_vram: entry.loaded_in_vram,
         }
     }
     /// Derive the legacy effort gate/default from `reasoning_efforts` so the
@@ -5507,12 +5625,15 @@ pub(crate) fn resolve_configured_pricing(model_id: &str) -> ConfiguredPricing {
         };
     };
     let models = resolve_model_list(&cfg, None);
-    let model = find_model_by_id(&models, model_id)
-        .map(|e| e.info.pricing.clone())
-        .unwrap_or_default();
+    let entry = find_model_by_id(&models, model_id);
+    let model = entry.map(|e| e.info.pricing.clone()).unwrap_or_default();
+    // A model that says its price is not in any catalog is believed: the
+    // global switch can only turn lookups OFF, never back on for one that
+    // opted out.
+    let model_allows_lookup = entry.is_none_or(|e| e.info.pricing_lookup_enabled);
     ConfiguredPricing {
         model,
-        lookup_enabled: cfg.pricing.lookup_enabled,
+        lookup_enabled: cfg.pricing.lookup_enabled && model_allows_lookup,
         catalog_url: cfg.pricing.catalog_url,
     }
 }
@@ -5636,6 +5757,9 @@ pub(crate) fn resolve_aux_model_sampling_config(
                 laziness_detector: LazinessDetectorPerModelConfig::default(),
                 pricing: xai_grok_sampling_types::ModelPricing::default(),
                 min_output_tokens_per_sec: None,
+                extra_body: Default::default(),
+                pricing_lookup_enabled: true,
+                loaded_in_vram: None,
             },
             api_key: Some(bearer),
             env_key: None,
@@ -5755,6 +5879,7 @@ pub(crate) fn sampling_config_for_model(
         extra_headers,
         query_params: info.query_params.clone(),
         env_http_headers: info.env_http_headers.clone(),
+        extra_body: info.extra_body.clone(),
         context_window: info.context_window.get(),
         client_version,
         reasoning_effort: info.reasoning_effort,
@@ -5862,6 +5987,9 @@ fn resolve_hidden_default_web_search_sampling_config(
             laziness_detector: LazinessDetectorPerModelConfig::default(),
             pricing: xai_grok_sampling_types::ModelPricing::default(),
             min_output_tokens_per_sec: None,
+            extra_body: Default::default(),
+            pricing_lookup_enabled: true,
+            loaded_in_vram: None,
         },
         api_key: None,
         env_key: None,
@@ -5975,6 +6103,16 @@ pub(crate) fn to_acp_model_info(
                     map.insert(
                         REASONING_EFFORTS_META_KEY.to_string(),
                         reasoning_efforts_meta_value(&info.reasoning_efforts),
+                    );
+                }
+                // Only a provider that REPORTS residency writes this key. The
+                // absent case and the not-loaded case are different answers —
+                // "nobody can say" must not render as a dot that claims the
+                // model is cold — so `None` writes nothing at all.
+                if let Some(loaded) = info.loaded_in_vram {
+                    map.insert(
+                        LOADED_IN_VRAM_META_KEY.to_string(),
+                        serde_json::Value::Bool(loaded),
                     );
                 }
                 if map.is_empty() { None } else { Some(map) }
@@ -7100,6 +7238,9 @@ reasoning_effort = "low"
                 laziness_detector: LazinessDetectorPerModelConfig::default(),
                 pricing: xai_grok_sampling_types::ModelPricing::default(),
                 min_output_tokens_per_sec: None,
+                extra_body: Default::default(),
+                pricing_lookup_enabled: true,
+                loaded_in_vram: None,
             },
             api_key: api_key.map(|s| s.to_string()),
             env_key: env_key.map(EnvKeys::single),
@@ -8143,6 +8284,7 @@ reasoning_effort = "low"
             laziness_detector: LazinessDetectorPerModelConfig::default(),
             pricing: xai_grok_sampling_types::ModelPricing::default(),
             min_output_tokens_per_sec: None,
+            loaded_in_vram: None,
         };
         let info = ModelInfo::from_config(&entry);
         assert!(info.use_concise);
@@ -8305,6 +8447,7 @@ reasoning_effort = "low"
             laziness_detector: LazinessDetectorPerModelConfig::default(),
             pricing: xai_grok_sampling_types::ModelPricing::default(),
             min_output_tokens_per_sec: None,
+            loaded_in_vram: None,
         };
         let info = ModelInfo::from_config(&entry);
         assert_eq!(info.agent_type, "codex");
@@ -8831,6 +8974,7 @@ reasoning_effort = "low"
             laziness_detector: LazinessDetectorPerModelConfig::default(),
             pricing: xai_grok_sampling_types::ModelPricing::default(),
             min_output_tokens_per_sec: None,
+            loaded_in_vram: None,
         };
         let info = ModelInfo::from_config(&entry);
         assert_eq!(info.inference_idle_timeout_secs, Some(120));

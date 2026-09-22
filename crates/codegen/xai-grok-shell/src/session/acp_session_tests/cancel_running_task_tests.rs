@@ -104,6 +104,7 @@ async fn persist_ack_waits_for_disk_flush_before_success() {
                     reasoning_effort: None,
                     stream_tool_calls: None,
                     chat_message_profile: Default::default(),
+                    extra_body: Default::default(),
                 },
                 Box::new(
                     crate::session::chat_persistence::ChannelChatPersistence::new(
@@ -436,6 +437,7 @@ async fn first_turn_memory_injection_persists_to_chat_history() {
                     reasoning_effort: None,
                     stream_tool_calls: None,
                     chat_message_profile: Default::default(),
+                extra_body: Default::default(),
                 },
                 Box::new(
                     crate::session::chat_persistence::ChannelChatPersistence::new(
@@ -575,6 +577,7 @@ async fn first_turn_memory_injection_disabled_does_not_persist_to_chat_history()
                     reasoning_effort: None,
                     stream_tool_calls: None,
                     chat_message_profile: Default::default(),
+                    extra_body: Default::default(),
                 },
                 Box::new(
                     crate::session::chat_persistence::ChannelChatPersistence::new(

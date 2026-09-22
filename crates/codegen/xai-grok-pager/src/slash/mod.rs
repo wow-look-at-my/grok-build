@@ -55,6 +55,10 @@ pub struct SuggestionRow {
     pub tag: Option<String>,
     /// Provenance badge; `Some` only on rows in a builtin/skill name collision.
     pub provenance: Option<CommandProvenance>,
+    /// Whether this model is resident in VRAM, for a provider that reports it
+    /// (Ollama, LM Studio). `None` — every other row, and every remote model —
+    /// draws no dot at all: "nobody can say" is not "not loaded".
+    pub loaded_in_vram: Option<bool>,
 }
 
 impl SuggestionRow {
@@ -74,6 +78,7 @@ impl SuggestionRow {
             indices: Vec::new(),
             tag: None,
             provenance: collides_with_builtin_or_skill.then(|| trigger.provenance.clone()),
+            loaded_in_vram: None,
         }
     }
 
@@ -85,6 +90,7 @@ impl SuggestionRow {
             indices: Vec::new(),
             tag: None,
             provenance: None,
+            loaded_in_vram: item.loaded_in_vram,
         }
     }
 
@@ -2402,6 +2408,7 @@ mod tests {
             indices: Vec::new(),
             tag: None,
             provenance: None,
+            loaded_in_vram: None,
         };
         // Without smart-case, starts_with("p") fails on "Privacy" and ghost disappears
         // while the dropdown still highlights the row via CaseMatching::Smart.
@@ -3147,6 +3154,7 @@ mod tests {
                 match_text: match_text.into(),
                 insert_text: insert.into(),
                 description: String::new(),
+                loaded_in_vram: None,
             };
             if let Some(rest) = args_query.strip_prefix("first")
                 && rest.starts_with(char::is_whitespace)

@@ -10,6 +10,7 @@ pub mod conversation;
 pub mod doom_loop;
 pub mod error;
 pub mod messages;
+pub mod ollama;
 pub mod output_rate;
 pub mod provider_error;
 pub mod serde_helpers;
