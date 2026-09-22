@@ -772,6 +772,8 @@ mod tests {
             strict_message_schema: Some(false),
             pricing: Some(xai_grok_sampling_types::ModelPricing::default()),
             min_output_tokens_per_sec: None,
+            extra_body: Default::default(),
+            pricing_lookup_enabled: None,
         }
     }
 

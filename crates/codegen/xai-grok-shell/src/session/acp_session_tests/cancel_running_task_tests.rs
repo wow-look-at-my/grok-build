@@ -70,6 +70,7 @@ async fn persist_ack_waits_for_disk_flush_before_success() {
                 doom_loop_recovery: None,
                 output_rate_floor: None,
                 header_injector: None,
+                extra_body: Default::default(),
             })
             .expect("sampling client should build for persistence actor");
             let persistence = crate::session::persistence::new_with_explicit_dir(
@@ -400,6 +401,7 @@ async fn first_turn_memory_injection_persists_to_chat_history() {
                     doom_loop_recovery: None,
                     output_rate_floor: None,
                     header_injector: None,
+                                    extra_body: Default::default(),
                 })
                 .expect("sampling client should build for persistence actor");
             let persistence = crate::session::persistence::new_with_explicit_dir(
