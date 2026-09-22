@@ -38,12 +38,21 @@ impl AuthStatus {
             return Self::LoggedIn(host.to_owned());
         }
         let models = crate::agent::config::resolve_model_list(agent_config, None);
+        let provider_credentials =
+            crate::agent::config::any_provider_has_own_credentials(agent_config);
         if crate::agent::auth_method::should_advertise_xai_api_key(
             agent_config.grok_com_config.api_key_auth_disabled(),
             models.values(),
+            provider_credentials,
         ) && let Some(name) = models
             .iter()
             .find_map(|(name, entry)| entry.has_own_credentials().then(|| name.clone()))
+            // A provider whose models have not been autodetected yet is still
+            // a credential of the user's own; name the provider itself.
+            .or_else(|| {
+                crate::agent::config::first_provider_with_own_credentials(agent_config)
+                    .map(|id| format!("model_provider:{id}"))
+            })
         {
             return Self::ModelCredentials(name);
         }

@@ -361,7 +361,78 @@ impl ConfigModelOverride {
 
 #[cfg(test)]
 mod tests {
-    use crate::agent::config::{Config, resolve_credentials, resolve_model_list};
+    use crate::agent::config::{
+        Config, any_provider_has_own_credentials, first_provider_with_own_credentials,
+        resolve_credentials, resolve_model_list,
+    };
+
+    /// The whole point of the provider-side credential probe: a session that
+    /// declared another endpoint must not be sent to the grok.com sign-in, and
+    /// the catalog cannot say so here because autodetection has not run yet.
+    #[test]
+    fn a_declared_provider_is_byok_before_any_of_its_models_are_known() {
+        let raw_config: toml::Value = toml::from_str(
+            r#"
+            [model_providers.generic]
+            base_url = "https://generic.example/v1"
+            api_key = "sk-generic"
+            "#,
+        )
+        .unwrap();
+        let cfg = Config::new_from_toml_cfg(&raw_config).expect("config should parse");
+
+        let models = resolve_model_list(&cfg, None);
+        assert!(
+            !models
+                .values()
+                .any(crate::agent::config::ModelEntry::has_own_credentials),
+            "no [model.<id>] block was written, so the catalog carries no BYOK model",
+        );
+        assert_eq!(first_provider_with_own_credentials(&cfg), Some("generic"));
+        assert!(
+            crate::agent::auth_method::should_advertise_xai_api_key(
+                false,
+                models.values(),
+                any_provider_has_own_credentials(&cfg),
+            ),
+            "the provider's own credential is what makes the sign-in optional",
+        );
+    }
+
+    /// A provider that declares no endpoint of its own resolves to the xAI base
+    /// with no credential. Nothing there stands in for a sign-in.
+    #[test]
+    fn a_provider_that_declares_no_endpoint_is_not_a_credential() {
+        let raw_config: toml::Value = toml::from_str(
+            r#"
+            [model_providers.tweaks]
+            temperature = 0.5
+            "#,
+        )
+        .unwrap();
+        let cfg = Config::new_from_toml_cfg(&raw_config).expect("config should parse");
+        assert!(!any_provider_has_own_credentials(&cfg));
+    }
+
+    /// The admin kill switch is above every credential, provider included.
+    #[test]
+    fn disable_api_key_auth_still_wins_over_a_provider() {
+        let raw_config: toml::Value = toml::from_str(
+            r#"
+            [model_providers.generic]
+            base_url = "https://generic.example/v1"
+            api_key = "sk-generic"
+            "#,
+        )
+        .unwrap();
+        let cfg = Config::new_from_toml_cfg(&raw_config).expect("config should parse");
+        assert!(any_provider_has_own_credentials(&cfg));
+        assert!(!crate::agent::auth_method::should_advertise_xai_api_key(
+            true,
+            resolve_model_list(&cfg, None).values(),
+            any_provider_has_own_credentials(&cfg),
+        ));
+    }
     #[test]
     fn model_inherits_provider_connection_defaults() {
         let raw_config: toml::Value = toml::from_str(
