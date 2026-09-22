@@ -212,8 +212,7 @@ impl AgentView {
                 }
                 // Esc: close dropdown, revert any live preview.
                 KeyCode::Esc => {
-                    self.prompt.slash_cancel_preview();
-                    self.prompt.slash_close();
+                    self.prompt.slash_dismiss();
                     return InputOutcome::Changed;
                 }
                 // Enter: accept completion, then send (terminal row) or

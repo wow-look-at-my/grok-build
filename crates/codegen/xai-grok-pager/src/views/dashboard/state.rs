@@ -3373,7 +3373,7 @@ impl DashboardState {
                     return InputOutcome::Changed;
                 }
                 KeyCode::Esc => {
-                    self.dispatch.slash_close();
+                    self.dispatch.slash_dismiss();
                     return InputOutcome::Changed;
                 }
                 KeyCode::Enter if key.modifiers.is_empty() => {
