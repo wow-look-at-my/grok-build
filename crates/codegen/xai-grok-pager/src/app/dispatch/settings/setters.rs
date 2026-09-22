@@ -2138,9 +2138,10 @@ pub(in crate::app::dispatch) fn set_max_thoughts_width(app: &mut AppView, new: i
 }
 
 // ---------------------------------------------------------------------------
-// min_output_tokens_per_sec, output_rate_sustained_secs — the output-rate
-// floor. `Option<u32>` in UiConfig, `i64` on the registry surface. A change
-// applies to the next model call: the session re-reads the floor per turn.
+// min_output_tokens_per_sec, output_rate_sustained_secs, output_rate_window_secs,
+// output_rate_max_retries — the output-rate floor. `Option<u32>` in UiConfig,
+// `i64` on the registry surface. The config watcher tells every running
+// session to re-read the floor, so a change applies to its next model call.
 // ---------------------------------------------------------------------------
 
 fn clamp_min_output_tokens_per_sec(value: i64) -> i64 {
@@ -2215,6 +2216,82 @@ pub(in crate::app::dispatch) fn set_output_rate_sustained_secs(
     app.show_toast(&format!("\u{2713} Slow-output grace period: {clamped}s"));
     vec![Effect::PersistSetting {
         key: "output_rate_sustained_secs",
+        value: crate::settings::SettingValue::Int(clamped),
+        rollback_value: crate::settings::SettingValue::Int(prev),
+    }]
+}
+
+fn clamp_output_rate_window_secs(value: i64) -> i64 {
+    value.clamp(
+        crate::settings::defs::OUTPUT_RATE_WINDOW_SECS_MIN,
+        crate::settings::defs::OUTPUT_RATE_WINDOW_SECS_MAX,
+    )
+}
+
+fn clamp_output_rate_max_retries(value: i64) -> i64 {
+    value.clamp(
+        crate::settings::defs::OUTPUT_RATE_MAX_RETRIES_MIN,
+        crate::settings::defs::OUTPUT_RATE_MAX_RETRIES_MAX,
+    )
+}
+
+pub(super) fn set_output_rate_window_secs_inner(app: &mut AppView, value: i64) {
+    app.current_ui.output_rate_window_secs = Some(clamp_output_rate_window_secs(value) as u32);
+}
+
+pub(in crate::app::dispatch) fn set_output_rate_window_secs(
+    app: &mut AppView,
+    new: i64,
+) -> Vec<Effect> {
+    let prev = i64::from(app.current_ui.output_rate_window_secs_value());
+    let clamped = clamp_output_rate_window_secs(new);
+    if prev == clamped {
+        return vec![];
+    }
+    set_output_rate_window_secs_inner(app, new);
+    refresh_open_settings_modals(app);
+    tracing::info!(
+        target: "settings",
+        key = "output_rate_window_secs",
+        value = clamped,
+        "setting changed",
+    );
+    app.show_toast(&format!("\u{2713} Output-rate window: {clamped}s"));
+    vec![Effect::PersistSetting {
+        key: "output_rate_window_secs",
+        value: crate::settings::SettingValue::Int(clamped),
+        rollback_value: crate::settings::SettingValue::Int(prev),
+    }]
+}
+
+pub(super) fn set_output_rate_max_retries_inner(app: &mut AppView, value: i64) {
+    app.current_ui.output_rate_max_retries = Some(clamp_output_rate_max_retries(value) as u32);
+}
+
+pub(in crate::app::dispatch) fn set_output_rate_max_retries(
+    app: &mut AppView,
+    new: i64,
+) -> Vec<Effect> {
+    let prev = i64::from(app.current_ui.output_rate_max_retries_value());
+    let clamped = clamp_output_rate_max_retries(new);
+    if prev == clamped {
+        return vec![];
+    }
+    set_output_rate_max_retries_inner(app, new);
+    refresh_open_settings_modals(app);
+    tracing::info!(
+        target: "settings",
+        key = "output_rate_max_retries",
+        value = clamped,
+        "setting changed",
+    );
+    if clamped == 0 {
+        app.show_toast("\u{2713} Slow-output retries: off");
+    } else {
+        app.show_toast(&format!("\u{2713} Slow-output retries: {clamped}"));
+    }
+    vec![Effect::PersistSetting {
+        key: "output_rate_max_retries",
         value: crate::settings::SettingValue::Int(clamped),
         rollback_value: crate::settings::SettingValue::Int(prev),
     }]

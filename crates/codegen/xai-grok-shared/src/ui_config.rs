@@ -88,6 +88,17 @@ pub struct UiConfig {
     /// a collapsed engine. (`[ui].output_rate_sustained_secs`.)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_rate_sustained_secs: Option<u32>,
+    /// Trailing window the output rate is averaged over. `None` = 10 seconds.
+    /// A legacy `[output_rate_floor].window_secs` applies when this is unset.
+    /// (`[ui].output_rate_window_secs`.)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_rate_window_secs: Option<u32>,
+    /// How many times one model call is reissued for slow output before the
+    /// response is accepted at whatever rate it runs. `None` = 2. A legacy
+    /// `[output_rate_floor].max_retries` applies when this is unset.
+    /// (`[ui].output_rate_max_retries`.)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_rate_max_retries: Option<u32>,
     /// Theme to use when the OS is in dark mode. Written by the pager's theme persist module.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auto_dark_theme: Option<String>,
@@ -304,6 +315,8 @@ impl Default for UiConfig {
             stop_gate_ci_failing: None,
             min_output_tokens_per_sec: None,
             output_rate_sustained_secs: None,
+            output_rate_window_secs: None,
+            output_rate_max_retries: None,
             auto_dark_theme: None,
             auto_light_theme: None,
             scroll_speed: None,
@@ -403,6 +416,38 @@ impl UiConfig {
     pub fn output_rate_sustained_secs_value(&self) -> u32 {
         self.output_rate_sustained_secs
             .unwrap_or(Self::OUTPUT_RATE_SUSTAINED_SECS_DEFAULT)
+    }
+
+    /// Default for [`Self::output_rate_window_secs`] when unset.
+    pub const OUTPUT_RATE_WINDOW_SECS_DEFAULT: u32 = 10;
+
+    /// Default for [`Self::output_rate_max_retries`] when unset.
+    pub const OUTPUT_RATE_MAX_RETRIES_DEFAULT: u32 = 2;
+
+    pub fn output_rate_window_secs_value(&self) -> u32 {
+        self.output_rate_window_secs
+            .unwrap_or(Self::OUTPUT_RATE_WINDOW_SECS_DEFAULT)
+    }
+
+    pub fn output_rate_max_retries_value(&self) -> u32 {
+        self.output_rate_max_retries
+            .unwrap_or(Self::OUTPUT_RATE_MAX_RETRIES_DEFAULT)
+    }
+
+    /// Fill the `[ui]` window and retry budget from a legacy
+    /// `[output_rate_floor]` table. A `[ui]` value wins where both are set.
+    pub fn adopt_legacy_output_rate_floor(
+        &mut self,
+        window_secs: Option<u64>,
+        max_retries: Option<u32>,
+    ) {
+        if self.output_rate_window_secs.is_none() {
+            self.output_rate_window_secs =
+                window_secs.map(|w| u32::try_from(w).unwrap_or(u32::MAX));
+        }
+        if self.output_rate_max_retries.is_none() {
+            self.output_rate_max_retries = max_retries;
+        }
     }
 
     /// True when the highlight should not timer-dismiss (`hold` / `word_select`,

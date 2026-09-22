@@ -167,6 +167,27 @@ invert_scroll = false
 
 Each setting also has an environment-variable override, applied on first load only (again, handy for headless / test runs): `GROK_SCROLL_SPEED`, `GROK_SCROLL_MODE`, `GROK_INVERT_SCROLL` (`1`/`true`/`0`/`false`), and `GROK_SCROLL_LINES`. Precedence: env var → `config.toml` → default. Unrecognized values fall back to the default, and out-of-range numbers clamp.
 
+#### Slow output
+
+Some inference engines drop to a crawl in the middle of a response. Grok watches the output rate and reissues a model call that stays too slow. Tune it in `/settings` → **Slow output**, or in `[ui]`. A change applies to the next model call of every running session.
+
+| Key | Values (default) | Behavior |
+|-----|------------------|----------|
+| `min_output_tokens_per_sec` | `0`–`500` (`15`) | The floor. `0` turns detection off. `[model.<id>].min_output_tokens_per_sec` overrides it for one model. |
+| `output_rate_sustained_secs` | `1`–`600` (`10`) | How long the rate must stay under the floor before the call is reissued. |
+| `output_rate_window_secs` | `2`–`120` (`10`) | How many seconds of output the rate is averaged over. |
+| `output_rate_max_retries` | `0`–`5` (`2`) | How many times one call is reissued. After that the response is kept at whatever rate it runs. `0` never reissues. |
+
+```toml
+[ui]
+min_output_tokens_per_sec = 15
+output_rate_sustained_secs = 10
+output_rate_window_secs = 10
+output_rate_max_retries = 2
+```
+
+The older `[output_rate_floor]` table (`window_secs`, `max_retries`) still works. A `[ui]` key wins where both are set.
+
 ### Tool configuration
 
 ```toml

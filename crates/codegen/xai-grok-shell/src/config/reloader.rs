@@ -70,6 +70,9 @@ pub enum ConfigUpdate {
     /// drop redundant `ProjectMcpServersChanged` dispatches on
     /// the reloader doesn't have.
     ModelsCacheChanged,
+    /// A key the output-rate floor resolves from changed. Every resident
+    /// session re-reads its floor.
+    OutputRateFloorChanged,
     /// Updated UI settings — agent broadcasts `x.ai/config_changed` to IPC clients.
     Ui {
         theme: Option<String>,
@@ -392,6 +395,15 @@ impl ConfigReloader {
             let _ = self.config_update_tx.send(ConfigUpdate::ModelsChanged);
         }
 
+        if output_rate_floor_inputs(&self.last_global_config)
+            != output_rate_floor_inputs(&new_global)
+        {
+            info!("output-rate floor config change detected");
+            let _ = self
+                .config_update_tx
+                .send(ConfigUpdate::OutputRateFloorChanged);
+        }
+
         // UI fields (theme, yolo, fork_secondary_model)
         let old_ui = extract_ui_fields(&self.last_global_config);
         let new_ui = extract_ui_fields(&new_global);
@@ -407,6 +419,22 @@ impl ConfigReloader {
         self.last_global_config = new_global;
         Ok(())
     }
+}
+
+/// Every config value `Config::resolve_output_rate_floor` reads. A change to
+/// any one of them changes some session's policy.
+fn output_rate_floor_inputs(config: &toml::Value) -> [Option<&toml::Value>; 7] {
+    let ui = config.get("ui");
+    let ui_key = |key: &str| ui.and_then(|ui| ui.get(key));
+    [
+        ui_key("min_output_tokens_per_sec"),
+        ui_key("output_rate_sustained_secs"),
+        ui_key("output_rate_window_secs"),
+        ui_key("output_rate_max_retries"),
+        config.get("output_rate_floor"),
+        config.get("model"),
+        config.get("model_providers"),
+    ]
 }
 
 /// Derive the unique project cwds whose files were touched in this
@@ -917,6 +945,32 @@ fork_secondary_model = "grok-4.5"
         assert_eq!(theme.as_deref(), Some("dark"));
         assert!(yolo);
         assert_eq!(fork.as_deref(), Some("grok-4.5"));
+    }
+
+    #[test]
+    fn output_rate_floor_inputs_see_every_rate_key_and_nothing_else() {
+        let base: toml::Value = toml::from_str("[ui]\ntheme = \"dark\"").unwrap();
+        for changed in [
+            "[ui]\ntheme = \"dark\"\nmin_output_tokens_per_sec = 5",
+            "[ui]\ntheme = \"dark\"\noutput_rate_sustained_secs = 5",
+            "[ui]\ntheme = \"dark\"\noutput_rate_window_secs = 5",
+            "[ui]\ntheme = \"dark\"\noutput_rate_max_retries = 5",
+            "[ui]\ntheme = \"dark\"\n[output_rate_floor]\nmax_retries = 1",
+            "[ui]\ntheme = \"dark\"\n[model.slow]\nmin_output_tokens_per_sec = 3.0",
+            "[ui]\ntheme = \"dark\"\n[model_providers.local]\nmin_output_tokens_per_sec = 3.0",
+        ] {
+            let other: toml::Value = toml::from_str(changed).unwrap();
+            assert_ne!(
+                output_rate_floor_inputs(&base),
+                output_rate_floor_inputs(&other),
+                "{changed}"
+            );
+        }
+        let unrelated: toml::Value = toml::from_str("[ui]\ntheme = \"light\"").unwrap();
+        assert_eq!(
+            output_rate_floor_inputs(&base),
+            output_rate_floor_inputs(&unrelated)
+        );
     }
 
     #[test]

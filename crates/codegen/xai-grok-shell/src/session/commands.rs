@@ -305,6 +305,10 @@ pub enum SessionCommand {
     FlattenHistory {
         responds_to: oneshot::Sender<xai_grok_sampling_types::conversation::FlattenReport>,
     },
+    /// Re-read the output-rate floor from config.toml for the session's
+    /// current model. Sent when a rate key changes on disk. The next model
+    /// call uses the new policy.
+    ReloadOutputRateFloor,
     /// Override the model name and optionally inject extra HTTP headers
     /// into the session's sampling config.
     ///

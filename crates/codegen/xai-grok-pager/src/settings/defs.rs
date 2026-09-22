@@ -37,6 +37,19 @@ pub(crate) const MIN_OUTPUT_TOKENS_PER_SEC_MIN: i64 = 0;
 pub(crate) const MIN_OUTPUT_TOKENS_PER_SEC_MAX: i64 = 500;
 pub(crate) const OUTPUT_RATE_SUSTAINED_SECS_MIN: i64 = 1;
 pub(crate) const OUTPUT_RATE_SUSTAINED_SECS_MAX: i64 = 600;
+pub(crate) const OUTPUT_RATE_WINDOW_SECS_MIN: i64 = 2;
+pub(crate) const OUTPUT_RATE_WINDOW_SECS_MAX: i64 = 120;
+pub(crate) const OUTPUT_RATE_MAX_RETRIES_MIN: i64 = 0;
+pub(crate) const OUTPUT_RATE_MAX_RETRIES_MAX: i64 = 5;
+
+/// The rows of the "Slow output" sub-screen: how slow output is detected and
+/// what is done about it.
+pub(crate) const OUTPUT_RATE_FLOOR_CHILDREN: &[&str] = &[
+    "min_output_tokens_per_sec",
+    "output_rate_sustained_secs",
+    "output_rate_window_secs",
+    "output_rate_max_retries",
+];
 
 // ---------------------------------------------------------------------------
 // Theme choice catalogs.
@@ -766,6 +779,77 @@ pub fn default_settings() -> Vec<SettingMeta> {
                 default: i64::from(ui_default.output_rate_sustained_secs_value()),
                 min: OUTPUT_RATE_SUSTAINED_SECS_MIN,
                 max: OUTPUT_RATE_SUSTAINED_SECS_MAX,
+            },
+            restart_required: false,
+            hidden_in_minimal: false,
+        },
+        // SHARED. `[ui].output_rate_window_secs`, `Option<u32>` widened to `i64`.
+        SettingMeta {
+            key: "output_rate_window_secs",
+            category: SettingCategory::Agent,
+            owner: SettingOwner::Shared,
+            label: "Output-rate window",
+            description: "How many seconds of output the tokens/sec rate is averaged over. \
+                          A short window reacts fast and also reads a brief pause as a \
+                          slowdown. A long window smooths pauses out and catches a real \
+                          collapse later.",
+            keywords: &[
+                "tokens", "rate", "slow", "window", "average", "tok/s", "measure",
+            ],
+            kind: SettingKind::Int {
+                default: i64::from(ui_default.output_rate_window_secs_value()),
+                min: OUTPUT_RATE_WINDOW_SECS_MIN,
+                max: OUTPUT_RATE_WINDOW_SECS_MAX,
+            },
+            restart_required: false,
+            hidden_in_minimal: false,
+        },
+        // SHARED. `[ui].output_rate_max_retries`, `Option<u32>` widened to `i64`.
+        SettingMeta {
+            key: "output_rate_max_retries",
+            category: SettingCategory::Agent,
+            owner: SettingOwner::Shared,
+            label: "Slow-output max retries",
+            description: "How many times one model call is reissued because its output \
+                          stayed under the floor. When the retries are spent, the response \
+                          is accepted at whatever rate it runs. 0 never reissues. These \
+                          retries do not use the budget for network and server errors.",
+            keywords: &[
+                "tokens", "rate", "slow", "retry", "retries", "reissue", "attempts",
+                "budget", "tok/s",
+            ],
+            kind: SettingKind::Int {
+                default: i64::from(ui_default.output_rate_max_retries_value()),
+                min: OUTPUT_RATE_MAX_RETRIES_MIN,
+                max: OUTPUT_RATE_MAX_RETRIES_MAX,
+            },
+            restart_required: false,
+            hidden_in_minimal: false,
+        },
+        // The sub-screen that holds every slow-output row above.
+        SettingMeta {
+            key: "output_rate_floor",
+            category: SettingCategory::Agent,
+            owner: SettingOwner::Shared,
+            label: "Slow output",
+            description: "Detect a response whose tokens/sec collapses, and reissue it.",
+            keywords: &[
+                "tokens",
+                "rate",
+                "speed",
+                "slow",
+                "stall",
+                "retry",
+                "retries",
+                "reissue",
+                "throughput",
+                "tok/s",
+                "floor",
+                "window",
+                "grace",
+            ],
+            kind: SettingKind::Group {
+                children: OUTPUT_RATE_FLOOR_CHILDREN,
             },
             restart_required: false,
             hidden_in_minimal: false,
