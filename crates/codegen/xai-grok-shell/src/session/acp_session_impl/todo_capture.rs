@@ -540,17 +540,14 @@ impl SessionActor {
             // of them would otherwise throw away the whole run's work. Same
             // bounded budget `/btw` uses.
             let response =
-                (|| sampling_client.conversation_collect(fresh_req_id(&base_request, "todo")))
-                    .retry(aux_retry_policy())
-                    .when(should_retry_aux_call)
-                    .notify(|e: &SamplingError, backoff: std::time::Duration| {
-                        tracing::warn!(
-                            backoff_ms = backoff.as_millis() as u64,
-                            error = %e,
-                            "todo capture transient failure; retrying"
-                        );
-                    })
-                    .await?;
+                collect_aux_call(&sampling_client, &base_request, "todo", |e, backoff| {
+                    tracing::warn!(
+                        backoff_ms = backoff.as_millis() as u64,
+                        error = %e,
+                        "todo capture transient failure; retrying"
+                    );
+                })
+                .await?;
             log_prompt_cache_hit("todo", sampling_client.api_backend(), &response);
 
             let calls: Vec<ToolCall> = response.tool_calls().to_vec();
