@@ -1115,9 +1115,6 @@ impl PromptWidget {
         // when the toolset arrived alongside fresh ACP commands.
         let registry = self.slash_controller.registry_mut();
         registry.set_acp_state(commands, tools.cloned());
-        if self.slash_dismissed {
-            return;
-        }
         self.refresh_slash(models);
     }
 
