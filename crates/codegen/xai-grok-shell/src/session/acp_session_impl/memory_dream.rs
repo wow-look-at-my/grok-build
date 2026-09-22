@@ -453,7 +453,24 @@ impl SessionActor {
             .await;
 
         let result = async {
-            let sampling_client = self.prepare_chat_completion(false).await?;
+            // `[memory] flush_model` is the older, narrower spelling and
+            // stays ahead of the `[models] memory_flush` slot. Either one
+            // brings the model's OWN sampler: its id on the session's client
+            // would reach the session model's endpoint instead.
+            let flush_model = self
+                .memory
+                .flush_config
+                .flush_model
+                .clone()
+                .or_else(|| self.harness_models.get("memory_flush").map(str::to_owned));
+            let flush_sampler = match flush_model.as_deref() {
+                Some(slug) => self.resolve_sampler_for_model("memory_flush", slug).await,
+                None => None,
+            };
+            let sampling_client = match &flush_sampler {
+                Some((client, _)) => client.clone(),
+                None => self.prepare_chat_completion(false).await?,
+            };
             let MemoryFlushSnapshot {
                 counts,
                 chat_history,
@@ -500,17 +517,15 @@ impl SessionActor {
                 "Now write the memory summary as described in the system prompt.",
             ));
 
-            // `[memory] flush_model` is the older, narrower spelling and
-            // stays ahead of the `[models] memory_flush` slot.
-            let model = match self
-                .memory
-                .flush_config
-                .flush_model
-                .clone()
-                .or_else(|| self.harness_models.get("memory_flush").map(str::to_owned))
-            {
-                Some(m) => m,
-                None => self.chat_state_handle.get_sampling_config().await
+            // The catalog's own id for the model the pin named. A pin the
+            // session cannot reach falls back to the session model, the same
+            // as every other slot.
+            let model = match &flush_sampler {
+                Some((_, cfg)) => cfg.model.clone(),
+                None => self
+                    .chat_state_handle
+                    .get_sampling_config()
+                    .await
                     .map(|c| c.model)
                     .unwrap_or_default(),
             };
@@ -760,10 +775,16 @@ impl SessionActor {
             ));
         }
 
-        let sampling_client = self
-            .prepare_chat_completion(false)
-            .await
-            .map_err(|e| format!("failed to prepare client: {e}"))?;
+        // A pinned slot brings its own client; its id on the session's client
+        // would reach the session model's endpoint instead.
+        let slot_sampler = self.resolve_slot_sampler("memory_flush").await;
+        let sampling_client = match &slot_sampler {
+            Some((client, _)) => client.clone(),
+            None => self
+                .prepare_chat_completion(false)
+                .await
+                .map_err(|e| format!("failed to prepare client: {e}"))?,
+        };
 
         let system = "You are a memory note formatter. Rewrite the user's note into \
             well-structured markdown suitable for a persistent MEMORY.md file. The note should be:\n\
@@ -785,8 +806,8 @@ impl SessionActor {
             ConversationItem::user(user_msg),
         ];
 
-        let model = match self.harness_models.get("memory_flush") {
-            Some(m) => m.to_owned(),
+        let model = match &slot_sampler {
+            Some((_, cfg)) => cfg.model.clone(),
             None => self
                 .chat_state_handle
                 .get_sampling_config()

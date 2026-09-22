@@ -22,19 +22,21 @@ impl SessionActor {
         let parent_session_id = self.session_info.id.to_string();
         let asked_at = chrono::Utc::now();
 
-        let sampling_client = self
-            .prepare_chat_completion(false)
+        // A pinned `side_note` slot brings its own client, so the question
+        // reaches the endpoint that serves the model the user named.
+        let setup = self
+            .prepare_side_call("side_note")
             .await
             .map_err(|e| SideQuestionError::PrepareClient(e.to_string()))?;
+        let sampling_client = setup.client;
 
         // Full conversation snapshot including system prompt, tool calls, and results.
         let conversation = self.chat_state_handle.get_conversation().await;
-        let mut items: Vec<ConversationItem> =
-            if sampling_client.api_backend().requires_reasoning_strip() {
-                xai_chat_state::compaction_utils::strip_reasoning_blocks(conversation)
-            } else {
-                conversation
-            };
+        let mut items: Vec<ConversationItem> = if setup.strip_reasoning {
+            xai_chat_state::compaction_utils::strip_reasoning_blocks(conversation)
+        } else {
+            conversation
+        };
 
         // /btw fires mid-turn, so the snapshot may end with an assistant message whose tool_calls have no matching ToolResult yet.
         crate::session::helpers::session_recap::pop_trailing_tool_run(&mut items);
@@ -43,13 +45,8 @@ impl SessionActor {
             self.side_question_prompt_and_tools(question).await;
         items.push(instruction);
 
-        let sampling_config = self.chat_state_handle.get_sampling_config().await;
-        let reasoning_effort = sampling_config.as_ref().and_then(|c| c.reasoning_effort);
-        let model = self
-            .harness_models
-            .get("side_note")
-            .map(str::to_owned)
-            .unwrap_or_else(|| sampling_config.map(|c| c.model).unwrap_or_default());
+        let reasoning_effort = setup.reasoning_effort;
+        let model = setup.model;
 
         let persist = |answer: String, success: bool, error: Option<String>, attempts: u32| {
             let _ = self.notifications.persistence_tx.send(PersistenceMsg::Btw(

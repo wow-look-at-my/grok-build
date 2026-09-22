@@ -192,30 +192,42 @@ pub async fn set_harness_model(slot_id: &str, value: String) -> Result<()> {
     let slot_id = slot_id.to_owned();
     update_config_removing(&removals, move |cfg| {
         let value = (!value.is_empty()).then_some(value);
-        let m = &mut cfg.models;
-        match slot_id.as_str() {
-            "web_search" => m.web_search = value,
-            "image_description" => m.image_description = value,
-            "session_summary" => m.session_summary = value,
-            "prompt_suggestion" => m.prompt_suggestion = value,
-            "permission_classifier" => m.permission_classifier = value,
-            "laziness_classifier" => m.laziness_classifier = value,
-            "compaction" => m.compaction = value,
-            "recap" => m.recap = value,
-            "turn_summary" => m.turn_summary = value,
-            "side_note" => m.side_note = value,
-            "todo_capture" => m.todo_capture = value,
-            "memory_flush" => m.memory_flush = value,
-            "goal_planner" => m.goal_planner = value,
-            "goal_strategist" => m.goal_strategist = value,
-            "goal_skeptic" => m.goal_skeptic = value,
-            "goal_summarizer" => m.goal_summarizer = value,
-            "subagent_default" => m.subagent_default = value,
-            // Unreachable: the id was checked against the slot table above.
-            other => tracing::error!(slot = other, "harness model slot has no config field"),
-        }
+        apply_harness_model(&mut cfg.models, &slot_id, value);
     })
     .await
+}
+
+/// Write one slot's model into `[models]`. `None` clears the field.
+///
+/// Split out of [`set_harness_model`] so the writer is exercised without
+/// the disk: a test walks the slot table through this and reads the result
+/// back with `Config::resolve_harness_model`.
+pub(crate) fn apply_harness_model(
+    m: &mut crate::agent::config::ModelsConfig,
+    slot_id: &str,
+    value: Option<String>,
+) {
+    match slot_id {
+        "web_search" => m.web_search = value,
+        "image_description" => m.image_description = value,
+        "session_summary" => m.session_summary = value,
+        "prompt_suggestion" => m.prompt_suggestion = value,
+        "permission_classifier" => m.permission_classifier = value,
+        "laziness_classifier" => m.laziness_classifier = value,
+        "compaction" => m.compaction = value,
+        "recap" => m.recap = value,
+        "turn_summary" => m.turn_summary = value,
+        "side_note" => m.side_note = value,
+        "todo_capture" => m.todo_capture = value,
+        "memory_flush" => m.memory_flush = value,
+        "goal_planner" => m.goal_planner = value,
+        "goal_strategist" => m.goal_strategist = value,
+        "goal_skeptic" => m.goal_skeptic = value,
+        "goal_summarizer" => m.goal_summarizer = value,
+        "subagent_default" => m.subagent_default = value,
+        // Unreachable: the id was checked against the slot table above.
+        other => tracing::error!(slot = other, "harness model slot has no config field"),
+    }
 }
 
 /// Bounds for [`set_max_thoughts_width`]. Mirrored from the pager's

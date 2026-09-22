@@ -89,11 +89,12 @@ fn every_registered_setting_is_exercised() {
     let reg = SettingsRegistry::defaults();
     let mut missing: Vec<&str> = Vec::new();
     for meta in reg.all() {
-        // Harness model slots are built from one table and share every code
-        // path, so the family is covered by the `harness_model_slot_*` tests
-        // below rather than by one keyboard and mouse test per slot. Listing
-        // them here one by one would grow with the table and test nothing
-        // the shared tests do not already run.
+        // Harness model slots are built from one table, so the keyboard and
+        // mouse tests below WALK that table and cover every slot rather than
+        // naming each key here. See
+        // `harness_model_slot_picker_commits_the_catalog_model_for_every_slot`,
+        // `harness_model_slot_picker_row_zero_clears_the_slot` and
+        // `mouse_click_on_a_harness_model_slot_row_opens_the_picker`.
         if xai_grok_models::slot_for_setting_key(meta.key).is_some() {
             continue;
         }
@@ -6733,6 +6734,129 @@ fn harness_model_slot_rows_are_discoverable_via_search() {
             hits.iter().any(|m| m.key == slot.setting_key()),
             "search(`{query}`) must reach `{}`",
             slot.setting_key()
+        );
+    }
+}
+
+/// Build a modal whose catalog carries one model, focused on `key`.
+///
+/// The slot rows sit deep in the Models category, past `navigate_to`'s
+/// keystroke guard, so the focus is placed directly.
+fn slot_modal_focused_on(key: &str) -> SettingsModalState {
+    let snapshot = PagerLocalSnapshot {
+        available_models: vec![(
+            "Grok 4.5".to_string(),
+            agent_client_protocol::ModelId::new(std::sync::Arc::from("grok-4.5")),
+        )],
+        ..PagerLocalSnapshot::default()
+    };
+    let mut state = SettingsModalState::new(
+        Arc::new(SettingsRegistry::defaults()),
+        UiConfig::default(),
+        snapshot,
+    );
+    state.selected = row_idx_for(&state, key);
+    state
+}
+
+/// Keyboard path for every slot: Enter opens the picker, and a catalog row
+/// commits that model id against the slot the row names.
+#[test]
+fn harness_model_slot_picker_commits_the_catalog_model_for_every_slot() {
+    for slot in xai_grok_models::HARNESS_MODEL_SLOTS {
+        let key = slot.setting_key();
+        let mut s = slot_modal_focused_on(key);
+
+        let outcome = handle_settings_key(&mut s, &press(KeyCode::Enter));
+        assert!(
+            matches!(outcome, SettingsKeyOutcome::Changed),
+            "Enter on `{key}` must open the picker, got {outcome:?}"
+        );
+        assert!(
+            matches!(s.mode(), SettingsModalMode::PickingEnum { key: k, .. } if k == key),
+            "Enter on `{key}` must transition to PickingEnum, got {:?}",
+            s.mode()
+        );
+
+        // Row 0 is "(no override)"; row 1 is the one catalog model.
+        let outcome = handle_settings_key(&mut s, &press(KeyCode::Down));
+        assert!(
+            matches!(outcome, SettingsKeyOutcome::Changed),
+            "Down in the `{key}` picker must move the focus, got {outcome:?}"
+        );
+
+        match handle_settings_key(&mut s, &press(KeyCode::Enter)) {
+            SettingsKeyOutcome::Action(Action::SetHarnessModel(slot_id, model)) => {
+                assert_eq!(slot_id, slot.id, "`{key}` must commit against its own slot");
+                assert_eq!(
+                    model, "grok-4.5",
+                    "`{key}` must commit the catalog model id, not its display name"
+                );
+            }
+            other => panic!("expected SetHarnessModel on `{key}` commit, got {other:?}"),
+        }
+        assert!(
+            matches!(s.mode(), SettingsModalMode::Browse),
+            "a committed `{key}` pick must return to Browse"
+        );
+    }
+}
+
+/// Row 0 of the picker clears the slot back to inheriting the session model.
+#[test]
+fn harness_model_slot_picker_row_zero_clears_the_slot() {
+    for slot in xai_grok_models::HARNESS_MODEL_SLOTS {
+        let key = slot.setting_key();
+        let mut s = slot_modal_focused_on(key);
+        let _ = handle_settings_key(&mut s, &press(KeyCode::Enter));
+        match handle_settings_key(&mut s, &press(KeyCode::Enter)) {
+            SettingsKeyOutcome::Action(Action::SetHarnessModel(slot_id, model)) => {
+                assert_eq!(slot_id, slot.id, "`{key}` must clear its own slot");
+                assert!(
+                    model.is_empty(),
+                    "row 0 of the `{key}` picker must clear the slot, got `{model}`"
+                );
+            }
+            other => panic!("expected SetHarnessModel(\"\") on `{key}` row 0, got {other:?}"),
+        }
+    }
+}
+
+/// Mouse parity: a second click on a slot row opens the same picker.
+#[test]
+fn mouse_click_on_a_harness_model_slot_row_opens_the_picker() {
+    for slot in xai_grok_models::HARNESS_MODEL_SLOTS {
+        let key = slot.setting_key();
+        let mut s = slot_modal_focused_on(key);
+        s.list_area = Rect {
+            x: 0,
+            y: 0,
+            width: 80,
+            height: 200,
+        };
+        s.row_rects.resize(s.rows.len(), Rect::default());
+        let row_idx = row_idx_for(&s, key);
+        s.row_rects[row_idx] = Rect {
+            x: 0,
+            y: row_idx as u16,
+            width: 80,
+            height: 1,
+        };
+        // The row is already focused, so one click opens the picker.
+        let outcome = handle_settings_mouse(
+            &mut s,
+            MouseEventKind::Down(crossterm::event::MouseButton::Left),
+            20,
+            row_idx as u16,
+        );
+        assert!(
+            matches!(outcome, SettingsKeyOutcome::Changed),
+            "clicking `{key}` must open the picker, got {outcome:?}"
+        );
+        assert!(
+            matches!(s.mode(), SettingsModalMode::PickingEnum { key: k, .. } if k == key),
+            "clicking `{key}` must transition to PickingEnum, got {:?}",
+            s.mode()
         );
     }
 }
