@@ -459,7 +459,8 @@ async fn chat_completions_upgrade_folds_reconstructed_reasoning_into_request() {
 /// the Responses API as a **typed** `reasoning` input item — `summary`,
 /// `encrypted_content`, and `id` all preserved — NOT flattened to a
 /// string. This is the byte-stable SGLang-prefix path; it must not go
-/// through `reasoning_item_text`.
+/// through `reasoning_item_text`. The recorded `model_id` is the model the
+/// client sends to: a blob replays verbatim only to the model that minted it.
 #[tokio::test]
 async fn responses_upgrade_roundtrips_reconstructed_reasoning_as_typed_input() {
     // 1. Seed a legacy grok-build chat_history.jsonl (inline reasoning
@@ -472,7 +473,7 @@ async fn responses_upgrade_roundtrips_reconstructed_reasoning_as_typed_input() {
             "\n",
             r#"{"type":"user","content":[{"type":"text","text":"q1"}]}"#,
             "\n",
-            r#"{"type":"assistant","content":"a1","reasoning":{"text":"legacy grok-build reasoning","encrypted":"ENC_BLOB_xyz","id":"rs_grokbuild_legacy"},"model_id":"grok-build"}"#,
+            r#"{"type":"assistant","content":"a1","reasoning":{"text":"legacy grok-build reasoning","encrypted":"ENC_BLOB_xyz","id":"rs_grokbuild_legacy"},"model_id":"test-model"}"#,
             "\n",
         ),
     )

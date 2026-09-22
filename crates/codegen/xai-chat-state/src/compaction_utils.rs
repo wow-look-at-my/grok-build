@@ -97,6 +97,9 @@ pub fn prepare_conversation_for_segment(
     strip_images(strip_reasoning_blocks(conversation))
 }
 /// Drop a trailing assistant turn whose `tool_calls` lack a `ToolResult` (else strict backends reject the dangling `tool_use`).
+/// The `Reasoning` and `BackendToolCall` siblings ahead of it go with it. A
+/// reasoning item with no assistant behind it has no recorded origin, so the
+/// wire builders replay its blob to whatever model comes next.
 pub fn truncate_trailing_incomplete_tool_call(
     mut conversation: Vec<ConversationItem>,
 ) -> Vec<ConversationItem> {
@@ -105,6 +108,12 @@ pub fn truncate_trailing_incomplete_tool_call(
         Some(ConversationItem::Assistant(a)) if !a.tool_calls.is_empty()
     ) {
         conversation.pop();
+        while matches!(
+            conversation.last(),
+            Some(ConversationItem::Reasoning(_) | ConversationItem::BackendToolCall(_))
+        ) {
+            conversation.pop();
+        }
     }
     conversation
 }
@@ -1041,6 +1050,35 @@ pub fn strip_displaced_tool_results(items: &mut Vec<ConversationItem>) -> Vec<St
 mod tests {
     use super::*;
     use xai_grok_sampling_types::SyntheticReason;
+
+    /// The reasoning ahead of a dropped tool call goes with it. Left behind,
+    /// it ends the conversation with no assistant to name its model, and the
+    /// wire builders then replay its blob to whatever model compacts.
+    #[test]
+    fn truncating_an_open_tool_call_takes_its_reasoning_with_it() {
+        let reasoning = ConversationItem::Reasoning(xai_grok_sampling_types::rs::ReasoningItem {
+            id: "r1".into(),
+            summary: vec![],
+            content: None,
+            encrypted_content: Some("blob".into()),
+            status: None,
+        });
+        let conversation = vec![
+            ConversationItem::user("q"),
+            ConversationItem::assistant("a"),
+            reasoning,
+            ConversationItem::assistant_tool_calls(vec![xai_grok_sampling_types::ToolCall {
+                id: "call_1".into(),
+                name: "read_file".into(),
+                arguments: "{}".into(),
+                vendor: Default::default(),
+            }]),
+        ];
+        let kept = truncate_trailing_incomplete_tool_call(conversation);
+        assert_eq!(kept.len(), 2, "{kept:?}");
+        assert!(matches!(kept.last(), Some(ConversationItem::Assistant(a)) if &*a.content == "a"));
+    }
+
     #[test]
     fn compaction_attempt_serde_roundtrip_and_skips_none() {
         let attempt = CompactionAttempt {

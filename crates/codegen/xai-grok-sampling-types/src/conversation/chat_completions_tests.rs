@@ -39,6 +39,51 @@ fn test_conversation_item_roundtrip() {
     assert_eq!(chat_msg.tool_call_id, Some("call_123".to_string()));
 }
 
+/// `reasoning_content` is unverified text, so `Native` and `TextOnly` send the
+/// same body. `Scrubbed` is the one level that changes it: the fold has
+/// nothing to fold.
+#[test]
+fn the_replay_level_only_scrubs_a_chat_completions_request() {
+    let items = || {
+        vec![
+            ConversationItem::user("q1"),
+            reasoning_sibling("r1", "carry the one", Some("enc-blob-from-origin")),
+            ConversationItem::assistant_with_model("The answer.", "grok-4"),
+            ConversationItem::user("q2"),
+        ]
+    };
+    let reasoning_content = |req: ConversationRequest| -> Option<String> {
+        let chat: ChatCompletionRequest = req.into();
+        chat.messages
+            .into_iter()
+            .find(|m| m.role == Role::Assistant)
+            .and_then(|m| m.reasoning_content)
+    };
+
+    let native = ConversationRequest::from_items(items()).with_model("grok-3-mini");
+    assert_eq!(
+        reasoning_content(native).as_deref(),
+        Some("carry the one"),
+        "another model's words still ride as reasoning_content"
+    );
+
+    let mut text_only = ConversationRequest::from_items(items()).with_model("grok-3-mini");
+    assert!(text_only.degrade_thinking_replay());
+    assert_eq!(
+        reasoning_content(text_only).as_deref(),
+        Some("carry the one")
+    );
+
+    let mut scrubbed = ConversationRequest::from_items(items()).with_model("grok-3-mini");
+    assert!(scrubbed.degrade_thinking_replay());
+    assert!(scrubbed.degrade_thinking_replay());
+    assert_eq!(
+        reasoning_content(scrubbed),
+        None,
+        "scrubbed sends no reasoning"
+    );
+}
+
 #[test]
 fn test_conversation_request_to_chat_completion() {
     let req = ConversationRequest::from_items(vec![

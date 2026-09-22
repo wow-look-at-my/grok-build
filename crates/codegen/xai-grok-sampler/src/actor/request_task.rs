@@ -511,18 +511,18 @@ async fn apply_retry_decision(
             true
         }
         RetryDecision::RetryWithReasoningStrip => {
-            let converted = request.reasoning_to_plain_text();
-            if converted == 0 {
-                // No reasoning left to convert; upgrade to fatal.
+            if !request.degrade_thinking_replay() {
+                // The ladder is spent, or there was no reasoning to begin
+                // with. The session reads the error and flattens or reports.
                 emit_failed(event_tx, request_id, err);
                 send_completion(completion_tx, Err(clone_error(err)));
                 return false;
             }
             tracing::warn!(
-                converted,
+                level = request.thinking_replay.as_str(),
                 model = %config.model,
                 reason = %err,
-                "model rejected a replayed thinking signature; converted {converted} reasoning item(s) to plain text for this turn"
+                "model rejected replayed thinking; stepping the replay level down for this turn"
             );
             *retry_count += 1;
             emit_retrying(event_tx, request_id, *retry_count, max_retries, err, None);
