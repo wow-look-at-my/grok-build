@@ -260,6 +260,7 @@ pub(crate) async fn create_test_actor_with_terminal(
             reasoning_effort: None,
             stream_tool_calls: None,
             chat_message_profile: Default::default(),
+            extra_body: Default::default(),
         },
         Box::new(xai_chat_state::NullChatPersistence),
         chat_event_tx,

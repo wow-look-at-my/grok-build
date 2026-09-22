@@ -4,6 +4,7 @@ pub mod agent;
 pub(crate) mod chat_models_client;
 pub mod client;
 pub mod conversations_client;
+pub(crate) mod local_runtime;
 pub mod pull;
 #[cfg(test)]
 mod pull_smoke_test;
@@ -36,6 +37,7 @@ pub use conversations_client::{
     ConvError, ConvQuery, Conversation, ConversationsClient, ListConversationsPage,
     UpdateConversationBody,
 };
+pub(crate) use local_runtime::{fetch_local_listing_blocking, fetch_residency_blocking};
 pub use pull::{PullResult, pull_session_to_local};
 pub use skills_client::{
     BundledSkill, CHAT_PRODUCT_META_KEY, CHAT_PRODUCT_META_VALUE, ListBundledSkillsResponse,

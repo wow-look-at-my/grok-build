@@ -76,8 +76,23 @@ fn compute_label_column_w(items: &[SuggestionRow], content_w: usize) -> usize {
         .map(|r| r.display.width() + tag_suffix_width(r))
         .max()
         .unwrap_or(0);
-    max_display_w.min(budget)
+    (max_display_w + dot_column_w(items)).min(budget)
 }
+
+/// Columns reserved for the residency dot, for the WHOLE list.
+///
+/// List-wide rather than per-row on purpose: a per-row reservation starts the
+/// label at a different column on a dotted row than on a plain one, and a
+/// model picker holding both local and cloud models would read as two ragged
+/// lists. Reserved once, every label starts in the same place and only the
+/// dot itself differs.
+fn dot_column_w(items: &[SuggestionRow]) -> usize {
+    usize::from(items.iter().any(|r| r.loaded_in_vram.is_some())) * (DOT_W + DOT_GAP)
+}
+
+/// The dot and the space after it.
+const DOT_W: usize = 1;
+const DOT_GAP: usize = 1;
 
 /// Build a flat list of styled lines for all visible items.
 ///
@@ -96,6 +111,7 @@ fn build_flat_lines(
     theme: &Theme,
 ) -> (Vec<Line<'static>>, Vec<usize>) {
     let hover_bg = theme.bg_hover;
+    let dot_w = dot_column_w(items);
     let mut flat: Vec<Line<'static>> = Vec::new();
     let mut starts: Vec<usize> = Vec::new();
 
@@ -116,6 +132,7 @@ fn build_flat_lines(
             item,
             is_selected,
             label_col_w,
+            dot_w,
             row_w,
             row_bg,
             theme,
@@ -311,6 +328,7 @@ fn build_item_lines(
     item: &SuggestionRow,
     is_selected: bool,
     label_col_w: usize,
+    dot_w: usize,
     total_w: usize,
     row_bg: ratatui::style::Color,
     theme: &Theme,
@@ -352,9 +370,32 @@ fn build_item_lines(
     let tag_text = tag_suffix(item).map(|s| truncate_str(&s, label_col_w));
     let tag_w = tag_text.as_deref().map(|s| s.width()).unwrap_or(0);
 
-    let label = truncate_str(&item.display, label_col_w.saturating_sub(tag_w));
+    let label = truncate_str(&item.display, label_col_w.saturating_sub(tag_w + dot_w));
     let label_w = label.width();
-    let padding = label_col_w.saturating_sub(label_w + tag_w);
+    let padding = label_col_w.saturating_sub(label_w + tag_w + dot_w);
+
+    // Residency dot, in the column reserved for the whole list. A row that
+    // reports nothing draws spaces there so every label still lines up.
+    let dot_spans: Vec<Span<'static>> = if dot_w == 0 {
+        Vec::new()
+    } else {
+        match item.loaded_in_vram {
+            Some(loaded) => {
+                let style = Style::default()
+                    .fg(if loaded {
+                        theme.accent_success
+                    } else {
+                        theme.gray_dim
+                    })
+                    .bg(row_bg);
+                vec![
+                    Span::styled(crate::glyphs::filled_dot().to_string(), style),
+                    Span::styled(" ".repeat(DOT_GAP), bg_style),
+                ]
+            }
+            None => vec![Span::styled(" ".repeat(dot_w), bg_style)],
+        }
+    };
 
     // Build per-character spans for the label with fuzzy highlight.
     let label_spans = build_highlighted_spans(&label, &item.indices, normal_style, match_style);
@@ -375,6 +416,7 @@ fn build_item_lines(
     // 2. First line: prefix + label + padding + [tag] + gap + first desc + right badge.
     {
         let mut spans = vec![prefix_span];
+        spans.extend(dot_spans);
         spans.extend(label_spans);
         if padding > 0 {
             spans.push(Span::styled(" ".repeat(padding), bg_style));
@@ -534,6 +576,7 @@ mod tests {
                 indices: vec![],
                 tag: None,
                 provenance: None,
+                loaded_in_vram: None,
             })
             .collect();
         assert_eq!(desired_item_rows(&matches, 80), MAX_DROPDOWN_ROWS);
@@ -556,6 +599,7 @@ mod tests {
                 indices: vec![],
                 tag: None,
                 provenance: None,
+                loaded_in_vram: None,
             })
             .collect();
         let snap = SlashSnapshot {
@@ -571,6 +615,100 @@ mod tests {
         let mut buf = Buffer::empty(Rect::new(0, 0, 80, 10));
         let area = Rect::new(2, 8, 76, 8);
         render_dropdown(&mut buf, area, &snap, Some(1), &theme);
+    }
+
+    fn model_row(name: &str, loaded: Option<bool>) -> SuggestionRow {
+        SuggestionRow {
+            display: name.to_string(),
+            description: String::new(),
+            insert_text: name.to_string(),
+            indices: vec![],
+            tag: None,
+            provenance: None,
+            loaded_in_vram: loaded,
+        }
+    }
+
+    /// The dot's column belongs to the whole list, so a cloud model and a
+    /// local one start their names in the same place.
+    #[test]
+    fn the_residency_dot_reserves_one_column_for_every_row() {
+        use ratatui::buffer::Buffer;
+        use ratatui::layout::Rect;
+
+        let theme = Theme::current();
+        let rows = vec![
+            model_row("qwen3-coder", Some(true)),
+            model_row("llama3.2", Some(false)),
+            model_row("grok-4", None),
+        ];
+        let label_col_w = compute_label_column_w(&rows, 76 - PREFIX_W);
+        let (lines, starts) = build_flat_lines(&rows, 0, None, label_col_w, 76, &theme);
+
+        let mut buf = Buffer::empty(Rect::new(0, 0, 76, lines.len() as u16));
+        for (y, line) in lines.iter().enumerate() {
+            buf.set_line(0, y as u16, line, 76);
+        }
+
+        let dot = crate::glyphs::filled_dot();
+        let loaded_row = starts[0] as u16;
+        let cold_row = starts[1] as u16;
+        let remote_row = starts[2] as u16;
+
+        let cell = |x: u16, y: u16| buf[(x, y)].symbol().to_string();
+        assert_eq!(cell(PREFIX_W as u16, loaded_row), dot);
+        assert_eq!(cell(PREFIX_W as u16, cold_row), dot);
+        assert_eq!(
+            cell(PREFIX_W as u16, remote_row),
+            " ",
+            "a model nobody can report on draws no dot"
+        );
+
+        let name_col = PREFIX_W as u16 + (DOT_W + DOT_GAP) as u16;
+        for (row, first) in [(loaded_row, "q"), (cold_row, "l"), (remote_row, "g")] {
+            assert_eq!(
+                cell(name_col, row),
+                first,
+                "every name starts in the same column whether or not its row has a dot"
+            );
+        }
+    }
+
+    #[test]
+    fn a_loaded_model_is_green_and_an_unloaded_one_is_dim() {
+        let theme = Theme::current();
+        let rows = vec![
+            model_row("loaded-one", Some(true)),
+            model_row("cold-one", Some(false)),
+        ];
+        let mut out = Vec::new();
+        let dot_w = dot_column_w(&rows);
+        for row in &rows {
+            build_item_lines(&mut out, row, false, 20, dot_w, 76, theme.bg_light, &theme);
+        }
+
+        let dot_fg = |line: &Line<'static>| {
+            line.spans
+                .iter()
+                .find(|s| s.content.as_ref() == crate::glyphs::filled_dot())
+                .and_then(|s| s.style.fg)
+        };
+        assert_eq!(dot_fg(&out[0]), Some(theme.accent_success));
+        assert_eq!(dot_fg(&out[1]), Some(theme.gray_dim));
+        assert_ne!(
+            theme.accent_success, theme.gray_dim,
+            "the two states have to be distinguishable at a glance"
+        );
+    }
+
+    /// A list with no local models in it must look exactly as it did before
+    /// the dot existed.
+    #[test]
+    fn a_list_with_no_local_models_reserves_nothing() {
+        let rows = vec![model_row("grok-4", None), model_row("claude", None)];
+        assert_eq!(dot_column_w(&rows), 0);
+        let with_dots = vec![model_row("grok-4", None), model_row("local", Some(false))];
+        assert_eq!(dot_column_w(&with_dots), DOT_W + DOT_GAP);
     }
 
     #[test]
@@ -598,6 +736,7 @@ mod tests {
                 indices: vec![],
                 tag: None,
                 provenance: Some(CommandProvenance::Builtin),
+                loaded_in_vram: None,
             },
             SuggestionRow {
                 display: "/acme:login".into(),
@@ -608,6 +747,7 @@ mod tests {
                 provenance: Some(CommandProvenance::Skill {
                     source: "acme".to_string(),
                 }),
+                loaded_in_vram: None,
             },
         ];
         let snap = SlashSnapshot {
@@ -641,6 +781,7 @@ mod tests {
             indices: vec![],
             tag: None,
             provenance: None,
+            loaded_in_vram: None,
         }
     }
 
@@ -904,6 +1045,7 @@ mod label_column_width_tests {
             indices: vec![],
             tag: None,
             provenance: None,
+            loaded_in_vram: None,
         }
     }
 

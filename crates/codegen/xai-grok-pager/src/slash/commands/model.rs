@@ -3,7 +3,9 @@
 //! re-opens the dropdown into a `low|medium|high|xhigh` sub-menu.
 
 use agent_client_protocol as acp;
-use xai_grok_shell::sampling::types::{favorite_meta, supports_reasoning_effort_meta};
+use xai_grok_shell::sampling::types::{
+    favorite_meta, loaded_in_vram_meta, supports_reasoning_effort_meta,
+};
 
 use crate::acp::model_state::ModelState;
 use crate::app::actions::Action;
@@ -204,6 +206,9 @@ fn build_model_items(models: &ModelState, favorites_only: bool) -> Vec<ArgItem> 
             match_text: info.name.clone(),
             insert_text,
             description: info.description.clone().unwrap_or_default(),
+            // Only a provider that reports residency answers this, so the dot
+            // appears beside local models and nowhere else.
+            loaded_in_vram: loaded_in_vram_meta(info.meta.as_ref()),
         });
     }
     items

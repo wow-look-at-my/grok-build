@@ -1857,6 +1857,9 @@ fn test_model_entry(model_id: &str) -> crate::agent::config::ModelEntry {
             laziness_detector: crate::agent::config::LazinessDetectorPerModelConfig::default(),
             pricing: xai_grok_sampling_types::ModelPricing::default(),
             min_output_tokens_per_sec: None,
+                    extra_body: Default::default(),
+            pricing_lookup_enabled: true,
+            loaded_in_vram: None,
         },
         api_key: None,
         env_key: None,
@@ -2141,6 +2144,7 @@ fn test_sampling_config(model_slug: &str) -> xai_grok_sampling_types::SamplingCo
         reasoning_effort: None,
         stream_tool_calls: None,
         chat_message_profile: Default::default(),
+            extra_body: Default::default(),
     }
 }
 fn spawn_test_parent_chat_state(model_slug: &str) -> xai_chat_state::ChatStateHandle {

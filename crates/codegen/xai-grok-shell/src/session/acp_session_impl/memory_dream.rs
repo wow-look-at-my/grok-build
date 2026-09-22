@@ -859,6 +859,14 @@ impl SessionActor {
                 let events = xai_grok_sampler::stream_messages(raw, meta, request_id, idle_timeout);
                 xai_grok_sampler::collect_response(events).await
             }
+            crate::sampling::ApiBackend::Ollama => {
+                let (raw, meta) = sampling_client
+                    .conversation_stream_ollama(request)
+                    .await
+                    .map_err(|e| format!("rewrite stream failed: {e}"))?;
+                let events = xai_grok_sampler::stream_ollama(raw, meta, request_id, idle_timeout);
+                xai_grok_sampler::collect_response(events).await
+            }
         };
 
         match result {

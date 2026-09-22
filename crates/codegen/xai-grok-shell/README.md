@@ -1892,14 +1892,18 @@ name = "Local Llama"
 temperature = 0.8
 ```
 
-**Ollama:**
+**Ollama / LM Studio (local):**
 
 ```toml
-[model.ollama-codellama]
-model = "codellama"
-base_url = "http://localhost:11434/v1"
-name = "CodeLlama (Ollama)"
+[model_providers.ollama]
 ```
+
+The provider id fills in the endpoint, the listing dialect and the pricing
+switch, so every model the runtime serves appears in `/model` with its real
+context window and a dot showing whether it is loaded in VRAM. Use
+`[model_providers.lmstudio]` for LM Studio. To pin Ollama's window or keep a
+model resident, add `api_backend = "ollama"` and an `extra_body` table — see
+the user guide's Custom Models chapter.
 
 **Together AI:**
 

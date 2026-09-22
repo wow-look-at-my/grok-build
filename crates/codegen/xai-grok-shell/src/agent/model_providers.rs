@@ -63,12 +63,74 @@ pub struct ModelProviderConfig {
     /// Globs that mark a discovered or configured model of this provider as a
     /// favorite. Matched against the catalog key and the routing slug.
     pub favorite_models: Vec<String>,
+    /// Which shape this provider's model listing has. The default reads an
+    /// OpenAI `{data: [...]}` body. A local runtime's own listing answers the
+    /// questions that one cannot: the real context window, whether the model
+    /// was trained for tools, and whether it is resident right now.
+    pub models_list_dialect: Option<ModelsListDialect>,
+    /// Which window a local dialect reports: the one the runner is LOADED at,
+    /// or the model's maximum. Defaults to `Loaded`, because compaction has to
+    /// respect the window inference actually runs under. Ignored by the
+    /// OpenAI dialect, which reports only one number.
+    pub context_window_source: Option<ContextWindowSource>,
+    /// Suppress the modelinfo price lookup for this provider's models.
+    /// A local runtime charges nothing, and its model names are not in any
+    /// catalog, so the lookup is a request that can only fail.
+    pub pricing_lookup_enabled: Option<bool>,
+    /// Extra top-level fields merged into every request body this provider
+    /// serves. Inherited per key, like `extra_headers`.
+    pub extra_body: IndexMap<String, toml::Value>,
+}
+
+/// The shape of a provider's model listing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelsListDialect {
+    /// `GET <base>/models` answering `{ "data": [...] }`.
+    #[default]
+    Openai,
+    /// `GET <host>/api/tags`, with `POST <host>/api/show` per model for the
+    /// window and capabilities and `GET <host>/api/ps` for residency.
+    Ollama,
+    /// `GET <host>/api/v1/models`, which carries all three in one answer.
+    Lmstudio,
+}
+
+impl ModelsListDialect {
+    /// Whether this dialect describes a local runtime — one that serves models
+    /// off this machine, charges nothing, and loads and unloads them.
+    pub(crate) fn is_local_runtime(self) -> bool {
+        matches!(self, Self::Ollama | Self::Lmstudio)
+    }
+}
+
+/// Which of a local runtime's two windows reaches the catalog.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ContextWindowSource {
+    /// The window the loaded instance is running at. Falls back to the
+    /// maximum when nothing is loaded, because an unloaded model has no
+    /// running window to report.
+    #[default]
+    Loaded,
+    /// The model's own maximum, whatever it is loaded at.
+    Max,
 }
 
 impl ModelProviderConfig {
     /// Discovery is on unless the provider turns it off.
     pub(crate) fn autodetect_enabled(&self) -> bool {
         self.models_autodetect.unwrap_or(true)
+    }
+
+    /// Which listing shape to read. Unset means the OpenAI one.
+    pub(crate) fn dialect(&self) -> ModelsListDialect {
+        self.models_list_dialect.unwrap_or_default()
+    }
+
+    /// Which window a local dialect reports.
+    pub(crate) fn window_source(&self) -> ContextWindowSource {
+        self.context_window_source.unwrap_or_default()
     }
 
     /// The URL that lists this provider's models, or `None` when the provider
@@ -88,6 +150,35 @@ impl ModelProviderConfig {
         Some(crate::remote::models_list_url_for_base(
             base.trim_end_matches('/'),
         ))
+    }
+}
+
+/// The defaults a well-known provider id carries, so `[model_providers.ollama]`
+/// with nothing in it is a complete configuration.
+///
+/// Only fields the user LEFT UNSET are filled. Someone who runs Ollama on
+/// another port writes `base_url` and keeps the dialect; someone who wants the
+/// OpenAI listing writes `models_list_dialect = "openai"` and keeps the URL.
+pub(crate) fn apply_builtin_preset(id: &str, provider: &mut ModelProviderConfig) {
+    let (default_base, dialect) = match id {
+        "ollama" => ("http://localhost:11434/v1", ModelsListDialect::Ollama),
+        "lmstudio" | "lm-studio" | "lm_studio" => {
+            ("http://localhost:1234/v1", ModelsListDialect::Lmstudio)
+        }
+        _ => return,
+    };
+    if provider.base_url.is_none() && provider.api_base_url.is_none() {
+        provider.base_url = Some(default_base.to_owned());
+    }
+    if provider.models_list_dialect.is_none() {
+        provider.models_list_dialect = Some(dialect);
+    }
+    // A local runtime needs no credential, and a session bearer must never be
+    // sent to one. `entry_for_provider_model` already fails closed on an
+    // unresolved credential; this only keeps the listing fetch from carrying
+    // an Authorization header nothing asked for.
+    if provider.pricing_lookup_enabled.is_none() {
+        provider.pricing_lookup_enabled = Some(false);
     }
 }
 
@@ -168,7 +259,8 @@ pub(crate) fn parse_model_providers(
         match serde_ignored::deserialize::<_, _, ModelProviderConfig>(value.clone(), |path| {
             unknown.push(path.to_string());
         }) {
-            Ok(provider) => {
+            Ok(mut provider) => {
+                apply_builtin_preset(id, &mut provider);
                 for key in unknown {
                     warnings.push(ConfigWarning::model_provider(
                         id,
@@ -289,6 +381,10 @@ impl ConfigModelOverride {
             models_autodetect: _,
             models_list_url: _,
             favorite_models: _,
+            models_list_dialect: _,
+            context_window_source: _,
+            pricing_lookup_enabled: _,
+            extra_body,
         } = provider;
 
         let mut merged = self.clone();
@@ -333,6 +429,13 @@ impl ConfigModelOverride {
         for (k, v) in query_params {
             if !merged.query_params.contains_key(k) {
                 merged.query_params.insert(k.clone(), v.clone());
+            }
+        }
+        // Per key for the same reason as the headers: a model that sets one
+        // body field of its own keeps the provider's others.
+        for (k, v) in extra_body {
+            if !merged.extra_body.contains_key(k) {
+                merged.extra_body.insert(k.clone(), v.clone());
             }
         }
         let model_sets_own_api_key = self

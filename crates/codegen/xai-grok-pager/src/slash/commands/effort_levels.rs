@@ -72,6 +72,7 @@ pub(crate) fn build_effort_arg_items(
                 match_text: format!("{sort_prefix} {insert_text}"),
                 insert_text,
                 description: option.description.clone().unwrap_or_default(),
+                loaded_in_vram: None,
             }
         })
         .collect()

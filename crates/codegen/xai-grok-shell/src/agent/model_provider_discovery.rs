@@ -8,7 +8,7 @@
 use indexmap::IndexMap;
 
 use crate::agent::config::{self, ConfigModelOverride, ModelEntry};
-use crate::agent::model_providers::ModelProviderConfig;
+use crate::agent::model_providers::{ContextWindowSource, ModelProviderConfig, ModelsListDialect};
 
 /// Deadline for one provider's listing. Discovery is additive and runs off the
 /// startup path, but an unreachable provider must not hold a thread forever.
@@ -71,7 +71,23 @@ async fn discover_one_provider(
         },
     };
 
-    let listing = fetch_listing(url, api_key.as_deref()).await;
+    let dialect = provider.dialect();
+    let window_source = provider.window_source();
+    let inference_base = provider
+        .base_url
+        .as_deref()
+        .or(provider.api_base_url.as_deref())
+        .unwrap_or(url)
+        .trim_end_matches('/')
+        .to_owned();
+    let listing = fetch_listing(
+        dialect,
+        url,
+        &inference_base,
+        api_key.as_deref(),
+        window_source,
+    )
+    .await;
     let listing = match listing {
         Ok(models) => models,
         Err(error) => {
@@ -119,17 +135,33 @@ async fn discover_one_provider(
             model_provider: Some(provider_id.to_owned()),
             reasoning_efforts: listed.reasoning_efforts.clone(),
             supports_reasoning_effort: listed.supports_reasoning_effort.then_some(true),
+            // A local runtime charges nothing and its model names are in no
+            // catalog, so the price lookup there is a request that can only
+            // fail. The provider's own value wins where it wrote one.
+            pricing_lookup_enabled: provider
+                .pricing_lookup_enabled
+                .or_else(|| dialect.is_local_runtime().then_some(false)),
             ..Default::default()
         };
-        entries.insert(
-            key.clone(),
-            config::entry_for_provider_model(
-                cfg,
-                &key,
-                provider_id,
-                provider,
-                &override_for_listed,
-            ),
+        let mut entry = config::entry_for_provider_model(
+            cfg,
+            &key,
+            provider_id,
+            provider,
+            &override_for_listed,
+        );
+        // Residency is runtime state, not config, so it is written onto the
+        // finished entry rather than routed through the override merge.
+        entry.info.loaded_in_vram = listed.loaded_in_vram;
+        entries.insert(key.clone(), entry);
+    }
+    if dialect.is_local_runtime() {
+        // A local model charges nothing and is in no catalog, so the price
+        // lookup can only 404. `resolve_configured_pricing` rebuilds the
+        // catalog from config alone and never sees a DISCOVERED model, so the
+        // suppression has to be registered here.
+        crate::agent::model_pricing::suppress_lookup_for(
+            entries.values().map(|e| e.info.model.clone()),
         );
     }
     tracing::info!(
@@ -139,6 +171,64 @@ async fn discover_one_provider(
         "autodetected models from the provider's listing"
     );
     entries
+}
+
+/// How long a residency answer is good for. A model loads on its first
+/// request and LM Studio's idle TTL unloads it again, so the dot is stale
+/// within minutes of a catalog build. One localhost request per provider per
+/// tick is cheap; the poll is what makes the dot mean "right now".
+pub(crate) const RESIDENCY_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// Whether any configured provider can report residency at all. Nothing polls
+/// for a session with only remote providers.
+pub(crate) fn has_local_runtime(cfg: &config::Config) -> bool {
+    cfg.model_providers
+        .values()
+        .any(|p| p.autodetect_enabled() && p.dialect().is_local_runtime())
+}
+
+/// Re-read which of every local provider's models are resident, keyed by the
+/// catalog key discovery gave them.
+///
+/// Only residency: the window, the capabilities and the price do not change
+/// while the runtime is up, and re-reading them costs an `/api/show` per
+/// model.
+pub(crate) async fn refresh_local_residency(cfg: &config::Config) -> IndexMap<String, bool> {
+    let mut out = IndexMap::new();
+    for (id, provider) in &cfg.model_providers {
+        let dialect = provider.dialect();
+        if !provider.autodetect_enabled() || !dialect.is_local_runtime() {
+            continue;
+        }
+        let Some(base) = provider
+            .base_url
+            .clone()
+            .or_else(|| provider.api_base_url.clone())
+        else {
+            continue;
+        };
+        let probe = config::provider_probe_entry(cfg, id, provider);
+        let api_key = probe.own_credential();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        std::thread::spawn(move || {
+            let result =
+                crate::remote::fetch_residency_blocking(dialect, &base, api_key.as_deref());
+            let _ = tx.send(result);
+        });
+        let answer = match tokio::time::timeout(FETCH_TIMEOUT, rx).await {
+            Ok(Ok(Ok(map))) => map,
+            // An unreachable runtime leaves the dots as they were. Reporting
+            // every model cold would claim an unload nothing observed.
+            other => {
+                tracing::debug!(provider = %id, "no residency answer: {other:?}");
+                continue;
+            }
+        };
+        for (slug, loaded) in answer {
+            out.insert(discovered_model_key(id, &slug), loaded);
+        }
+    }
+    out
 }
 
 /// Whether a `[model.<id>]` block of this provider already routes to `slug`.
@@ -159,13 +249,30 @@ fn config_model_claims(cfg: &config::Config, provider_id: &str, slug: &str) -> b
 /// thread. That is the same reason `resolve_context_window_from_provider`
 /// spawns one.
 async fn fetch_listing(
+    dialect: ModelsListDialect,
     url: &str,
+    inference_base_url: &str,
     api_key: Option<&str>,
+    window_source: ContextWindowSource,
 ) -> Result<Vec<config::ModelEntryConfig>, String> {
     let (url, key) = (url.to_owned(), api_key.map(str::to_owned));
+    let inference_base_url = inference_base_url.to_owned();
     let (tx, rx) = tokio::sync::oneshot::channel();
     std::thread::spawn(move || {
-        let result = crate::remote::fetch_models_for_list_url_blocking(&url, key.as_deref());
+        let result = match dialect {
+            // The OpenAI dialect asks the listing URL as written, which may be
+            // a `models_list_url` that lives nowhere near the inference base.
+            ModelsListDialect::Openai => {
+                crate::remote::fetch_models_for_list_url_blocking(&url, key.as_deref())
+            }
+            local => crate::remote::fetch_local_listing_blocking(
+                local,
+                &inference_base_url,
+                &inference_base_url,
+                key.as_deref(),
+                window_source,
+            ),
+        };
         let _ = tx.send(result.map_err(|e| e.to_string()));
     });
     match tokio::time::timeout(FETCH_TIMEOUT, rx).await {
@@ -205,6 +312,262 @@ mod tests {
                 { "model": "small-one", "contextWindow": 128_000 },
             ]
         })
+    }
+
+    /// A loopback Ollama: `/api/tags`, `/api/ps` and `/api/show`, which is
+    /// the whole set the dialect reads.
+    async fn start_ollama_server() -> (String, tokio::task::JoinHandle<()>) {
+        use axum::routing::{get, post};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+        let app = axum::Router::new()
+            .route(
+                "/api/tags",
+                get(|| async {
+                    axum::Json(serde_json::json!({
+                        "models": [
+                            {"name": "qwen3-coder:30b", "model": "qwen3-coder:30b",
+                             "details": {"parameter_size": "30B", "quantization_level": "Q4_K_M"}},
+                            {"name": "llama3.2:latest", "model": "llama3.2:latest"},
+                        ]
+                    }))
+                }),
+            )
+            .route(
+                "/api/ps",
+                get(|| async {
+                    axum::Json(serde_json::json!({
+                        "models": [{
+                            "name": "qwen3-coder:30b", "model": "qwen3-coder:30b",
+                            "size_vram": 21_474_836_480u64, "context_length": 32768,
+                        }]
+                    }))
+                }),
+            )
+            .route(
+                "/api/show",
+                post(|body: axum::Json<serde_json::Value>| async move {
+                    let model = body.get("model").and_then(|m| m.as_str()).unwrap_or("");
+                    let arch = if model.starts_with("qwen") {
+                        "qwen2"
+                    } else {
+                        "llama"
+                    };
+                    axum::Json(serde_json::json!({
+                        "capabilities": ["completion", "tools", "thinking"],
+                        "model_info": {
+                            "general.architecture": arch,
+                            format!("{arch}.context_length"): 131072,
+                        },
+                    }))
+                }),
+            );
+        let handle = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        (base, handle)
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_ollama_dialect_reads_the_loaded_window_and_the_residency() {
+        let (base, server) = start_ollama_server().await;
+        let cfg = config_from(&format!(
+            r#"
+            [model_providers.ollama]
+            base_url = "{base}/v1"
+            "#
+        ));
+
+        let discovered = discover_provider_models(&cfg).await;
+        server.abort();
+
+        let loaded = discovered
+            .get("ollama/qwen3-coder:30b")
+            .expect("the tag listing's models are discovered");
+        assert_eq!(
+            loaded.info.context_window.get(),
+            32768,
+            "the loaded runner's window is what inference enforces, not the model's 131072 maximum"
+        );
+        assert_eq!(loaded.info.loaded_in_vram, Some(true));
+        assert!(
+            loaded.info.supports_reasoning_effort,
+            "`thinking` in the capabilities opens the effort gate"
+        );
+        assert!(
+            !loaded.info.pricing_lookup_enabled,
+            "a local model is in no catalog, so its price is never looked up"
+        );
+
+        let cold = discovered
+            .get("ollama/llama3.2:latest")
+            .expect("an unloaded model is still listed");
+        assert_eq!(cold.info.loaded_in_vram, Some(false));
+        assert_eq!(
+            cold.info.context_window.get(),
+            131_072,
+            "nothing is loaded, so the model's own maximum stands in — never the client default"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn residency_is_re_read_without_re_reading_anything_else() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+        let loaded = Arc::new(AtomicBool::new(false));
+        // `/api/show` is the expensive call — one per model — and the poll
+        // must never make it: only residency changes while the runtime is up.
+        let show_calls = Arc::new(AtomicUsize::new(0));
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+        let ps_loaded = Arc::clone(&loaded);
+        let counted = Arc::clone(&show_calls);
+        let app = axum::Router::new()
+            .route(
+                "/api/tags",
+                axum::routing::get(|| async {
+                    axum::Json(serde_json::json!({
+                        "models": [{"name": "m:latest", "model": "m:latest"}]
+                    }))
+                }),
+            )
+            .route(
+                "/api/ps",
+                axum::routing::get(move || {
+                    let loaded = Arc::clone(&ps_loaded);
+                    async move {
+                        let models = if loaded.load(Ordering::SeqCst) {
+                            serde_json::json!([{
+                                "name": "m:latest", "model": "m:latest",
+                                "size_vram": 1024, "context_length": 8192
+                            }])
+                        } else {
+                            serde_json::json!([])
+                        };
+                        axum::Json(serde_json::json!({ "models": models }))
+                    }
+                }),
+            )
+            .route(
+                "/api/show",
+                axum::routing::post(move |_: axum::Json<serde_json::Value>| {
+                    let counted = Arc::clone(&counted);
+                    async move {
+                        counted.fetch_add(1, Ordering::SeqCst);
+                        axum::Json(serde_json::json!({
+                            "capabilities": ["completion"],
+                            "model_info": {
+                                "general.architecture": "llama",
+                                "llama.context_length": 4096,
+                            },
+                        }))
+                    }
+                }),
+            );
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+        let cfg = config_from(&format!(
+            r#"
+            [model_providers.ollama]
+            base_url = "{base}/v1"
+            "#
+        ));
+
+        let discovered = discover_provider_models(&cfg).await;
+        assert_eq!(
+            discovered
+                .get("ollama/m:latest")
+                .unwrap()
+                .info
+                .loaded_in_vram,
+            Some(false)
+        );
+        let show_after_discovery = show_calls.load(Ordering::SeqCst);
+        assert!(show_after_discovery > 0, "discovery reads the window");
+
+        loaded.store(true, Ordering::SeqCst);
+        let residency = refresh_local_residency(&cfg).await;
+        server.abort();
+
+        assert_eq!(
+            residency.get("ollama/m:latest"),
+            Some(&true),
+            "the poll sees the model that just loaded"
+        );
+        assert_eq!(
+            show_calls.load(Ordering::SeqCst),
+            show_after_discovery,
+            "the poll re-reads residency only; /api/show is one request per model"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn an_unreachable_runtime_reports_no_residency_rather_than_cold() {
+        let cfg = config_from(
+            r#"
+            [model_providers.ollama]
+            base_url = "http://127.0.0.1:1/v1"
+            "#,
+        );
+
+        let residency = refresh_local_residency(&cfg).await;
+
+        assert!(
+            residency.is_empty(),
+            "an empty answer leaves the dots alone; reporting cold claims an unload nobody saw"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn only_a_local_provider_is_worth_polling() {
+        assert!(has_local_runtime(&config_from(
+            "[model_providers.ollama]\n"
+        )));
+        assert!(!has_local_runtime(&config_from(
+            r#"
+            [model_providers.gateway]
+            base_url = "https://gateway.example/v1"
+            "#
+        )));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_provider_id_alone_configures_a_local_runtime() {
+        let cfg = config_from("[model_providers.ollama]\n");
+        let provider = cfg
+            .model_providers
+            .get("ollama")
+            .expect("the block is parsed");
+
+        assert_eq!(
+            provider.base_url.as_deref(),
+            Some("http://localhost:11434/v1"),
+            "a well-known id carries its own default endpoint"
+        );
+        assert_eq!(provider.dialect(), ModelsListDialect::Ollama);
+        assert_eq!(provider.pricing_lookup_enabled, Some(false));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_written_value_beats_the_preset() {
+        let cfg = config_from(
+            r#"
+            [model_providers.ollama]
+            base_url = "http://box.local:9999/v1"
+            models_list_dialect = "openai"
+            "#,
+        );
+        let provider = cfg.model_providers.get("ollama").expect("the block");
+
+        assert_eq!(
+            provider.base_url.as_deref(),
+            Some("http://box.local:9999/v1")
+        );
+        assert_eq!(
+            provider.dialect(),
+            ModelsListDialect::Openai,
+            "the preset fills only what the user left unset"
+        );
     }
 
     fn config_from(toml_text: &str) -> config::Config {

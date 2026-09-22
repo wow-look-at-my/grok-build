@@ -13,7 +13,8 @@
 //!
 //! The type skeleton, the pure retry / metrics / client logic, the
 //! Layer-2 stream transforms ([`stream_chat_completions`],
-//! [`stream_responses`], [`stream_messages`], [`collect_response`]),
+//! [`stream_responses`], [`stream_messages`], [`stream_ollama`],
+//! [`collect_response`]),
 //! and the actor with its per-request task tie these layers together.
 
 pub mod actor;
@@ -51,5 +52,7 @@ pub use retry::{
     stream_interrupt_budget,
 };
 pub use sampling_log::AuthInfo;
-pub use stream::{collect_response, stream_chat_completions, stream_messages, stream_responses};
+pub use stream::{
+    collect_response, stream_chat_completions, stream_messages, stream_ollama, stream_responses,
+};
 pub use types::RequestId;

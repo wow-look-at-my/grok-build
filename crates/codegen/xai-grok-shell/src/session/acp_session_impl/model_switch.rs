@@ -66,6 +66,7 @@ impl SessionActor {
                 reasoning_effort: sampling_config.reasoning_effort,
                 chat_message_profile: sampling_config.chat_message_profile,
                 stream_tool_calls: Some(sampling_config.stream_tool_calls),
+                extra_body: Default::default(),
             });
         let existing = self.chat_state_handle.get_credentials().await;
         let session_key = self

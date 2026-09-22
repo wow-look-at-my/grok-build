@@ -97,6 +97,10 @@ pub struct ArgItem {
     pub insert_text: String,
     /// Description shown alongside the item.
     pub description: String,
+    /// Whether the model this row names is resident in VRAM. `None` on every
+    /// row that is not a local model, which is what keeps the dot off the
+    /// cloud models in the same list.
+    pub loaded_in_vram: Option<bool>,
 }
 
 /// Read-only context for generating suggestions.

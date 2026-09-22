@@ -1021,6 +1021,23 @@ pub fn favorite_meta(meta: Option<&serde_json::Map<String, serde_json::Value>>) 
         .unwrap_or(false)
 }
 
+/// Set only by a provider whose listing reports residency (Ollama's
+/// `/api/ps`, LM Studio's `loaded_instances`). The picker draws a dot from it.
+pub const LOADED_IN_VRAM_META_KEY: &str = "loadedInVram";
+
+/// Whether this model is resident in VRAM, or `None` where nobody can say.
+///
+/// The three answers are distinct and the picker renders each differently: a
+/// remote model has no dot at all, a local model that is loaded has a lit one,
+/// and a local model that is not has a dim one. Collapsing the absent case
+/// into `false` puts a cold dot beside every cloud model in the list.
+pub fn loaded_in_vram_meta(
+    meta: Option<&serde_json::Map<String, serde_json::Value>>,
+) -> Option<bool> {
+    meta.and_then(|m| m.get(LOADED_IN_VRAM_META_KEY))
+        .and_then(|v| v.as_bool())
+}
+
 pub fn supports_reasoning_effort_meta(
     meta: Option<&serde_json::Map<String, serde_json::Value>>,
 ) -> bool {
@@ -1245,6 +1262,14 @@ pub enum ApiBackend {
     Responses,
     /// Use the Anthropic Messages API (/v1/messages)
     Messages,
+    /// Use Ollama's native chat API (/api/chat).
+    ///
+    /// Ollama also serves an OpenAI-compatible endpoint, and that one is the
+    /// default for it. This backend exists for the three fields the compat
+    /// endpoint cannot carry: `options.num_ctx` (the window the runner loads
+    /// at), `keep_alive` (residency) and `truncate` (whether the server may
+    /// silently drop the head of the conversation).
+    Ollama,
 }
 
 impl ApiBackend {
@@ -1252,7 +1277,9 @@ impl ApiBackend {
     /// tool calls. The Messages API does not (a schema there blocks tool use),
     /// so structured output there goes through the StructuredOutput tool.
     pub fn supports_native_schema(&self) -> bool {
-        matches!(self, Self::ChatCompletions | Self::Responses)
+        // Ollama's `format` takes a bare JSON schema and enforces it
+        // alongside tool calls, so it belongs with the two that do.
+        matches!(self, Self::ChatCompletions | Self::Responses | Self::Ollama)
     }
 
     /// Whether replayed reasoning must be stripped. Only the Messages API rejects thinking blocks sent without a top-level `thinking` config.
@@ -1365,6 +1392,12 @@ pub struct SamplingConfig {
     /// resolved secret.
     #[serde(default, skip_serializing_if = "indexmap::IndexMap::is_empty")]
     pub env_http_headers: indexmap::IndexMap<String, String>,
+    /// Extra top-level fields merged into every request body for this model
+    /// (`[model.<id>].extra_body`). Carries the per-deployment settings a
+    /// closed request struct has no field for, such as a local runtime's
+    /// residency and context-length knobs.
+    #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
+    pub extra_body: serde_json::Map<String, serde_json::Value>,
     /// Total context window size in tokens. Used for auto-compact thresholds.
     pub context_window: NonZeroU64,
     /// Reasoning effort level for reasoning models.

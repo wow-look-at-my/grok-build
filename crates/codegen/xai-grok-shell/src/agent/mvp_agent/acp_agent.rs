@@ -273,12 +273,26 @@ impl acp::Agent for MvpAgent {
             let cfg = self.cfg.borrow().clone();
             let models_manager = self.models_manager.clone();
             tokio::task::spawn_local(async move {
-                let discovered =
-                    crate::agent::model_provider_discovery::discover_provider_models(&cfg).await;
+                use crate::agent::model_provider_discovery as discovery;
+                let discovered = discovery::discover_provider_models(&cfg).await;
                 if !discovered.is_empty() {
                     let count = discovered.len();
                     models_manager.set_provider_models(discovered);
                     tracing::info!(count, "autodetected models from configured model providers");
+                }
+                // A local runtime loads a model on its first request and
+                // unloads it on an idle TTL, so residency painted once at
+                // startup is wrong within minutes. Only the residency is
+                // re-read: the window and the capabilities do not move while
+                // the runtime is up, and re-reading those costs one
+                // `/api/show` per model.
+                if !discovery::has_local_runtime(&cfg) {
+                    return;
+                }
+                loop {
+                    tokio::time::sleep(discovery::RESIDENCY_POLL_INTERVAL).await;
+                    let residency = discovery::refresh_local_residency(&cfg).await;
+                    models_manager.apply_local_residency(&residency);
                 }
             });
         }

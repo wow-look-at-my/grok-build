@@ -7,6 +7,7 @@
 mod chat_completions;
 mod flatten;
 mod messages;
+mod ollama;
 mod output_budget;
 mod responses;
 mod thinking_replay;
@@ -17,6 +18,7 @@ pub use chat_completions::{
 };
 pub use flatten::{FlattenReport, flatten_conversation, needs_flattening};
 pub use messages::build_messages_request;
+pub use ollama::{NUM_CTX_OPTION, NUM_PREDICT_OPTION, build_ollama_chat_request};
 pub use output_budget::{OutputBudgetClamp, estimate_item_tokens, estimate_tool_spec_tokens};
 pub use responses::{
     extra_tool_entries, patch_reasoning_text_types, response_to_conversation_items,
@@ -601,6 +603,69 @@ impl From<ToolDefinition> for ToolSpec {
             name: td.function.name,
             description: td.function.description,
             parameters: td.function.parameters,
+        }
+    }
+}
+
+/// Merge caller-supplied extra fields into a serialized request body.
+///
+/// A dotted key addresses a nested object (`"options.num_ctx"` reaches
+/// `options: { num_ctx }`), because TOML cannot spell a nested table inline
+/// beside scalar siblings and an `[extra_body.options]` sub-table is a
+/// different shape from the flat map the rest of the config uses.
+///
+/// Objects merge key by key so an extra never wipes out a sibling the builder
+/// set; anything else replaces. `body` must be a JSON object — a body of any
+/// other shape is left alone rather than being overwritten with one.
+pub fn merge_extra_body(
+    body: &mut serde_json::Value,
+    extras: &serde_json::Map<String, serde_json::Value>,
+) {
+    if extras.is_empty() {
+        return;
+    }
+    let Some(target) = body.as_object_mut() else {
+        tracing::warn!("extra_body ignored: the request body is not a JSON object");
+        return;
+    };
+    for (key, value) in extras {
+        insert_dotted(target, key, value.clone());
+    }
+}
+
+fn insert_dotted(
+    target: &mut serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    value: serde_json::Value,
+) {
+    match key.split_once('.') {
+        Some((head, rest)) if !head.is_empty() && !rest.is_empty() => {
+            let entry = target
+                .entry(head.to_owned())
+                .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
+            if !entry.is_object() {
+                *entry = serde_json::Value::Object(serde_json::Map::new());
+            }
+            let nested = entry.as_object_mut().expect("just made an object");
+            insert_dotted(nested, rest, value);
+        }
+        _ => {
+            match (target.get_mut(key), &value) {
+                // Two objects merge rather than replace, so setting one
+                // `options` key keeps the ones the builder wrote.
+                (Some(existing @ serde_json::Value::Object(_)), serde_json::Value::Object(_)) => {
+                    let existing = existing.as_object_mut().expect("checked");
+                    let serde_json::Value::Object(incoming) = value else {
+                        unreachable!("checked")
+                    };
+                    for (k, v) in incoming {
+                        insert_dotted(existing, &k, v);
+                    }
+                }
+                _ => {
+                    target.insert(key.to_owned(), value);
+                }
+            }
         }
     }
 }
@@ -2594,6 +2659,7 @@ mod tests {
             crate::ApiBackend::ChatCompletions,
             crate::ApiBackend::Responses,
             crate::ApiBackend::Messages,
+            crate::ApiBackend::Ollama,
         ] {
             let on_wire = match backend {
                 crate::ApiBackend::Responses => {
@@ -2613,6 +2679,13 @@ mod tests {
                     let mapped = super::messages::build_messages_request(&request());
                     serde_json::to_value(&mapped)
                         .expect("messages request serializes")
+                        .get("prompt_cache_key")
+                        .is_some()
+                }
+                crate::ApiBackend::Ollama => {
+                    let mapped = super::ollama::build_ollama_chat_request(&request());
+                    serde_json::to_value(&mapped)
+                        .expect("ollama request serializes")
                         .get("prompt_cache_key")
                         .is_some()
                 }

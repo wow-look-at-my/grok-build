@@ -140,6 +140,7 @@ fn list_path_completions(cwd: &Path, query: &str) -> Vec<ArgItem> {
             } else {
                 "file".to_string()
             },
+            loaded_in_vram: None,
         });
 
         // Pre-sort cap to avoid pathological directories.
