@@ -11,10 +11,11 @@ use std::sync::atomic::Ordering;
 
 /// Auto-compaction is gated whenever `auto_compact_suppressed` is not [`SUPPRESS_NONE`].
 pub(crate) const SUPPRESS_NONE: u8 = 0;
-/// Resolvable failure (`other`): suppressed for the current turn, then
-/// cleared at the next turn start so compaction self-heals once the cause clears.
+/// Resolvable failure (`other`, `schema`): suppressed for the current turn,
+/// then cleared at the next turn start so compaction self-heals once the cause
+/// clears.
 pub(crate) const SUPPRESS_TURN: u8 = 1;
-/// Fatal failure (size/schema) retrying can never fix: survives turn boundaries,
+/// Fatal failure (size) retrying can never fix: survives turn boundaries,
 /// cleared only when the context budget changes — a successful compaction, a
 /// rewind (context shrank), or a model switch (a larger window may now fit).
 pub(crate) const SUPPRESS_STICKY: u8 = 2;

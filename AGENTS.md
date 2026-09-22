@@ -96,6 +96,7 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 
 ## Compaction-failure reporting and mid-turn `/compact`
 
+- A schema rejection (`invalid_request_error`) suppresses auto-compaction for ONE turn, like `other`. Only `size` is sticky. The next turn changes the history and the replay ladder rewrites it. So the next attempt is a different request. A sticky schema scope turned one rejected thinking block into a session with no compaction.
 - A compaction failure reports what the PROVIDER said. The fixed phrase for each `SuppressReason` stays, as the advice half. `compose_compact_failure` appends the provider's own sentence after it, cut at `COMPACT_FAILURE_DETAIL_LIMIT` on a character boundary.
 - The advice alone names a CLASS of failure. "This conversation cannot be summarized" fits a rejected thinking signature, an orphaned tool call and an unsupported field equally. Each one needs a different fix.
 - Several places dropped that detail, and each one needed its own repair. `suppress_auto_compaction` substituted the phrase. The non-suppressed arm of `run_compact_only` sent an EMPTY string. The pager's `handle_compact_complete` blanked the error on the manual path.
@@ -232,13 +233,16 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - `GROK_LOG_STREAM_TIMING=1` adds it to `shell.turn.inference_done` in `~/.grok/logs/unified.jsonl`. Opt-in: it is one number per chunk on a log that is otherwise one line per model call. The gate is read once per process (`inference_metrics::log_stream_timing`), so one run's entries agree.
 - The offsets are client-side SSE-parse times, so transport jitter is in them. They are not a measurement of server decode.
 
-## Thinking-signature notes
+## Thinking-replay notes
 
-- The Messages API verifies a thinking block's `signature` against the model that minted it, so replaying one to any other model is a 400 ("Invalid `signature` in `thinking` block") on every turn the block stays in history. It cannot be re-minted. So the block is what gives.
-- `build_messages_request` reads a `Reasoning` sibling's origin off the `Assistant` item behind it (`model_id`). An alias, the dated snapshot it answers as, and a gateway's routing prefix are one model (`same_model`). An item with no recorded `model_id` is replayed as before.
-- A switch only costs the thinking when a signature is in play (`thinking_is_foreign`): a signed block cannot cross one, and a model that signs rejects an unsigned block just as hard. Thinking that is plain text on both sides is nothing either end verifies. So it is replayed untouched. Whether the target signs is read off the conversation — a block it signed earlier in this one (`target_signs_thinking`) — and no evidence reads as unsigned.
-- That guess, and history predating the check, are why the sampler also treats the 400 as recoverable: `RetryDecision::RetryWithReasoningStrip` drops the replayed reasoning and retries once, so history predating the check is not dead-ended.
-- A conversation that ends mid-tool-loop on a turn that lost its thinking to the rule above goes out with thinking off entirely (`open_tool_loop_lost_its_thinking` asks the same predicate, so a loop that kept its thinking keeps thinking on): a provider validates the thinking of the tool-calling turn it is continuing, and a config-less thinking block is rejected in turn. Reasoning effort is untouched and the next turn pairs normally.
+- One policy decides what a replayed `Reasoning` item does on every backend: `conversation/thinking_replay.rs` (`ThinkingReplayPlan::disposition`). A reasoning item carries words (`summary`/`content`) and a model-bound blob (`encrypted_content`: a Messages signature or a Responses encrypted body). The blob is verified against the model that minted it. The words are verified by nobody.
+- The origin is the `model_id` of the `Assistant` item behind the reasoning. An alias, the dated snapshot it answers as, and a gateway's routing prefix are one model (`same_model`). Same model, or an origin nobody recorded: the item goes out as is.
+- Another model: a blob with words goes out as `<thinking>` assistant text. A blob alone is dropped. Words alone go out as is, unless the target signs. Then they are dropped. Whether the target signs is read off the conversation (`target_signs_thinking`). The Messages builder adds a Claude id as knowledge of its own.
+- `build_messages_request`, `build_responses_input` and the Chat Completions conversion all read the plan. Chat Completions has no blob and `reasoning_content` is unverified text. So only `Scrubbed` changes that body.
+- The static answer is a guess where the origin is missing or a same-model check is wrong. So every path also has a fallback ladder on `ConversationRequest::thinking_replay`: `Native`, then `TextOnly`, then `Scrubbed`. The sampler steps it down on a thinking-signature or `encrypted_content` 400 (`RetryDecision::RetryWithReasoningStrip`, `degrade_thinking_replay`). Compaction calls the client directly and walks the same ladder in `run_compact_inner` over its items (`apply_thinking_replay`, `names_replayed_thinking`). A spent ladder reaches the session. Its flatten-and-resubmit covers the rest.
+- Compaction strips reasoning ahead of time when the compaction model differs from the session model or runs on Messages. That decision reads the COMPACTION slot's config, resolved before the input is prepared. Reading the session's config there let a pinned slot on another backend receive blocks it never minted.
+- `truncate_trailing_incomplete_tool_call` drops the reasoning ahead of the tool call it drops. A reasoning item with no assistant behind it has no origin. No origin reads as "replay it".
+- A conversation that ends mid-tool-loop on a turn whose thinking the plan leaves behind goes out with thinking off entirely (`open_tool_loop_lost_its_thinking`). A provider validates the thinking of the tool-calling turn it is continuing. A config-less thinking block is rejected in turn. Reasoning effort is untouched and the next turn pairs normally.
 
 ## Tool-call provider-field notes
 
@@ -353,7 +357,7 @@ Every one of those is the test doing its job. Making them pass there means weake
 - `needs_flattening` is also the loop bound. One flattening leaves nothing for a second to find. So a model that still refuses a flat history gets a terminal error that quotes what it said, in place of another resubmit.
 - A model switch onto another harness sends `SessionCommand::FlattenHistory` and switches (`agent/handlers/model_switch.rs`). `MODEL_SWITCH_INCOMPATIBLE_AGENT` is dead on this path. A mid-turn rejection naming `encrypted_content` flattens and resubmits the turn instead of ending it (`acp_session_impl/sampler_turn.rs`, `SamplerFailureRecovery::FlattenAndResubmit`).
 - `SessionCommand::RebuildAgentForDefinition` carries `zero_turn`. That flag gates conversation surgery which assumes `conversation[1]` is the synthetic zero-turn prefix. A mid-session switch reaches this path now. A `true` there writes over the session's first real user message.
-- Thinking a model cannot verify rides as text, in both places that handle it: `build_messages_request` and the sampler's `RetryWithReasoningStrip` recovery (`ConversationRequest::reasoning_to_plain_text`). A block carrying only a signature has no words. That block is what goes.
+- Thinking a model cannot verify rides as text, in both places that handle it: the wire builders' `ThinkingReplayPlan` and the sampler's `RetryWithReasoningStrip` recovery (`ConversationRequest::degrade_thinking_replay`). A block carrying only a signature has no words. That block is what goes.
 - The pager keeps its `MODEL_SWITCH_INCOMPATIBLE_AGENT` handling and its `model_incompatible` flag. The shell sends neither on the recoverable paths. An older shell on the other end of ACP still can.
 
 ## Project-instruction `@import` notes

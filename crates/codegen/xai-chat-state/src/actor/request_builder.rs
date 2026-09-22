@@ -147,6 +147,7 @@ impl ChatStateActor {
             reasoning_mandatory: false,
             json_schema: None,
             chat_message_profile: self.state.sampling_config.chat_message_profile,
+            thinking_replay: Default::default(),
         };
 
         // The output budget shares the context window with the prompt, so a
