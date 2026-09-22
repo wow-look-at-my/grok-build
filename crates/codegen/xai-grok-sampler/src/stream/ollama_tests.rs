@@ -55,11 +55,7 @@ async fn text_chunks_accumulate_into_one_assistant_item() {
     .await;
 
     let response = completed(&events);
-    let assistant = response
-        .items
-        .iter()
-        .find_map(ConversationItem::assistant)
-        .expect("an assistant item");
+    let assistant = response.assistant().expect("an assistant item");
     assert_eq!(&*assistant.content, "The sky");
     assert_eq!(response.stop_reason, Some(StopReason::Stop));
     let usage = response.usage.as_ref().expect("usage from the final line");
@@ -105,11 +101,7 @@ async fn a_tool_call_arrives_whole_and_its_arguments_become_a_string() {
 
     let response = completed(&events);
     assert_eq!(response.stop_reason, Some(StopReason::ToolCalls));
-    let assistant = response
-        .items
-        .iter()
-        .find_map(ConversationItem::assistant)
-        .expect("an assistant item");
+    let assistant = response.assistant().expect("an assistant item");
     assert_eq!(assistant.tool_calls.len(), 1);
     assert!(
         !assistant.tool_calls[0].id.is_empty(),
@@ -142,11 +134,7 @@ async fn two_calls_to_one_tool_get_distinct_ids() {
     .await;
 
     let response = completed(&events);
-    let assistant = response
-        .items
-        .iter()
-        .find_map(ConversationItem::assistant)
-        .expect("an assistant item");
+    let assistant = response.assistant().expect("an assistant item");
     assert_eq!(assistant.tool_calls.len(), 2);
     assert_ne!(
         assistant.tool_calls[0].id, assistant.tool_calls[1].id,

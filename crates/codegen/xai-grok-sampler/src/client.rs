@@ -2715,6 +2715,7 @@ mod tests {
             extra_headers: IndexMap::new(),
             query_params: IndexMap::new(),
             env_http_headers: IndexMap::new(),
+            extra_body: Default::default(),
             context_window: 8192,
             force_http1: false,
             max_retries: None,
