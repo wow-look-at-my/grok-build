@@ -339,7 +339,7 @@ mod tests {
                     axum::Json(serde_json::json!({
                         "models": [{
                             "name": "qwen3-coder:30b", "model": "qwen3-coder:30b",
-                            "size_vram": 21474836480, "context_length": 32768,
+                            "size_vram": 21_474_836_480u64, "context_length": 32768,
                         }]
                     }))
                 }),
