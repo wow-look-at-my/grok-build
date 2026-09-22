@@ -70,6 +70,25 @@ async fn shared_client_keeps_per_config_headers_isolated() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn with_http1_moves_a_pooled_client_onto_the_pool_less_transport() {
+    pin_env();
+    let (base_url, accepts, heads) = spawn_counting_server().await;
+    let pooled = SamplingClient::new(test_config(&base_url, "token-a")).unwrap();
+    let http1 = pooled.with_http1().unwrap();
+    send_one(&http1).await;
+    send_one(&http1).await;
+    assert_eq!(accepts.load(Ordering::SeqCst), 2);
+    assert!(
+        heads
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|h| h.contains("Bearer token-a")),
+        "the HTTP/1.1 copy keeps the original client's credentials"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn shared_http1_fallback_never_pools() {
     pin_env();
     let (base_url, accepts, _heads) = spawn_counting_server().await;
