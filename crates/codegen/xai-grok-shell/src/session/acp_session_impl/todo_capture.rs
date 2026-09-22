@@ -445,27 +445,22 @@ impl SessionActor {
         let bridge = self.agent.borrow().tool_bridge().clone();
         let todo_tool = self.resolve_capture_todo_tool(&bridge).await?;
 
-        let sampling_client = self
-            .prepare_chat_completion(false)
+        // A pinned `todo_capture` slot brings its own client and its own
+        // window, so the capture reaches the endpoint that serves it.
+        let setup = self
+            .prepare_side_call("todo_capture")
             .await
             .map_err(|e| TodoCaptureError::PrepareClient(e.to_string()))?;
+        let sampling_client = setup.client;
 
         // Only the Messages backend rejects thinking blocks it was not
         // configured for; every other backend keeps reasoning verbatim, which
         // is what the provider's prefix cache and its own tool-call
         // continuations expect. Applies to the loop's own turns too.
-        let strip_reasoning = sampling_client.api_backend().requires_reasoning_strip();
-        let sampling_config = self.chat_state_handle.get_sampling_config().await;
-        let reasoning_effort = sampling_config.as_ref().and_then(|c| c.reasoning_effort);
-        let context_window = sampling_config
-            .as_ref()
-            .map(|c| c.context_window.get())
-            .unwrap_or(crate::remote::DEFAULT_CONTEXT_WINDOW);
-        let model = self
-            .harness_models
-            .get("todo_capture")
-            .map(str::to_owned)
-            .unwrap_or_else(|| sampling_config.map(|c| c.model).unwrap_or_default());
+        let strip_reasoning = setup.strip_reasoning;
+        let reasoning_effort = setup.reasoning_effort;
+        let context_window = setup.context_window;
+        let model = setup.model;
 
         let tag = self.reminder_wrapper_tag();
         let conversation = self.chat_state_handle.get_conversation().await;
