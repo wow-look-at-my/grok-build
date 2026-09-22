@@ -117,6 +117,7 @@ async fn test_e2e_idle_resume_refreshes_model_metadata() {
                     reasoning_effort: None,
                     stream_tool_calls: None,
                     chat_message_profile: Default::default(),
+                    extra_body: Default::default(),
                 },
                 Box::new(xai_chat_state::NullChatPersistence),
                 chat_event_tx,

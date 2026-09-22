@@ -974,6 +974,7 @@ pub(crate) fn parse_remote_model_value(
             "responses" => Some(crate::sampling::ApiBackend::Responses),
             "chat_completions" => Some(crate::sampling::ApiBackend::ChatCompletions),
             "messages" => Some(crate::sampling::ApiBackend::Messages),
+            "ollama" => Some(crate::sampling::ApiBackend::Ollama),
             _ => None,
         })
         .unwrap_or_default();
@@ -1007,6 +1008,7 @@ pub(crate) fn parse_remote_model_value(
             .and_then(|v| v.as_bool())
             .unwrap_or(false),
         agent_type,
+        loaded_in_vram: None,
         inference_idle_timeout_secs: get_u64(obj, "inferenceIdleTimeoutSecs")
             .or_else(|| get_u64(obj, "inference_idle_timeout_secs")),
         max_retries: get_u64(obj, "maxRetries")

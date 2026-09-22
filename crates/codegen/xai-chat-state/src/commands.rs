@@ -415,6 +415,7 @@ mod tests {
                 reasoning_effort: None,
                 stream_tool_calls: None,
                 chat_message_profile: Default::default(),
+                extra_body: Default::default(),
             },
         };
         let _ = ChatStateCommand::RecordAgentEditedPath {

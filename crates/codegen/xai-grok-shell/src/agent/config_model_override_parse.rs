@@ -772,6 +772,8 @@ mod tests {
             strict_message_schema: Some(false),
             pricing: Some(xai_grok_sampling_types::ModelPricing::default()),
             min_output_tokens_per_sec: None,
+            extra_body: Default::default(),
+            pricing_lookup_enabled: None,
         }
     }
 
@@ -959,7 +961,12 @@ mod tests {
     ///   parse path); it is set from the remote catalog.
     #[test]
     fn every_user_settable_model_entry_field_is_accepted_by_the_override() {
-        const NOT_USER_CONFIG: &[&str] = &["id", "auth_scheme", "laziness_detector"];
+        // `loaded_in_vram` is runtime state, not config: the local-runtime
+        // discovery fills it from `/api/ps` (or LM Studio's listing) at
+        // catalog build and re-reads it on a poll. A user-written value would
+        // claim a residency nobody observed, and the next poll overwrites it.
+        const NOT_USER_CONFIG: &[&str] =
+            &["id", "auth_scheme", "laziness_detector", "loaded_in_vram"];
 
         let candidates: Vec<String> = model_entry_config_field_names()
             .into_iter()

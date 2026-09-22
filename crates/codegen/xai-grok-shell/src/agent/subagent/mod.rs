@@ -829,6 +829,7 @@ async fn read_parent_sampling_config(
                 extra_headers,
                 query_params: cfg.query_params.clone(),
                 env_http_headers: cfg.env_http_headers.clone(),
+                extra_body: cfg.extra_body.clone(),
                 context_window: cfg.context_window.get(),
                 client_version: creds.client_version,
                 reasoning_effort: cfg.reasoning_effort,

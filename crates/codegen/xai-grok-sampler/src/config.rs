@@ -74,6 +74,16 @@ pub struct SamplerConfig {
     /// client build and never persisted.
     #[serde(default)]
     pub env_http_headers: IndexMap<String, String>,
+    /// Extra top-level fields merged into every request body, from
+    /// `[model.<id>].extra_body` / `[model_providers.<id>].extra_body`.
+    ///
+    /// The typed request structs here are closed, so a per-deployment setting
+    /// that only one target understands has nowhere else to go: LM Studio's
+    /// `ttl` and Ollama's `keep_alive`, `truncate` and `options.num_ctx` are
+    /// each one of those. Merged after the body is built, so it can never
+    /// displace a field a builder decided.
+    #[serde(default)]
+    pub extra_body: serde_json::Map<String, serde_json::Value>,
     /// Total context window size in tokens. The session reads it for its
     /// compaction decisions. The sampler holds one thing to it: the requested
     /// output shares this window with the prompt, so `apply_conversation_defaults`
@@ -173,6 +183,7 @@ impl Default for SamplerConfig {
             extra_headers: IndexMap::new(),
             query_params: IndexMap::new(),
             env_http_headers: IndexMap::new(),
+            extra_body: serde_json::Map::new(),
             context_window: 0,
             force_http1: false,
             max_retries: None,

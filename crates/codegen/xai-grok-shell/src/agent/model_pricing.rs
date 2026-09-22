@@ -144,10 +144,41 @@ pub(crate) fn resolve(model_id: &str) -> ModelPricing {
     if !configured.model.is_unusable() {
         return configured.model;
     }
-    if model_id.is_empty() || !configured.lookup_enabled {
+    if model_id.is_empty() || !configured.lookup_enabled || lookup_suppressed(model_id) {
         return configured.model;
     }
     cached_or_schedule(model_id, &configured.catalog_url).unwrap_or(configured.model)
+}
+
+/// Model ids no lookup may run for, registered at catalog build.
+///
+/// A model DISCOVERED from a local runtime is not in config, so
+/// `resolve_configured_pricing` — which rebuilds the catalog from config
+/// alone — cannot see its `pricing_lookup_enabled = false`. Without this the
+/// session asks the modelinfo catalog to price `qwen3-coder:30b` on every TTL
+/// expiry, forever, and every one of those requests is a 404 by construction:
+/// the model runs on this machine, charges nothing, and is in no catalog.
+fn suppressed() -> &'static std::sync::Mutex<std::collections::HashSet<String>> {
+    static SUPPRESSED: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> =
+        std::sync::OnceLock::new();
+    SUPPRESSED.get_or_init(Default::default)
+}
+
+/// Register model ids whose price must never be looked up. Additive: a
+/// catalog rebuild that drops a provider leaves its ids registered, which
+/// costs nothing and keeps a rebuild from re-enabling a lookup mid-session.
+pub(crate) fn suppress_lookup_for(model_ids: impl IntoIterator<Item = String>) {
+    let Ok(mut guard) = suppressed().lock() else {
+        return;
+    };
+    guard.extend(model_ids);
+}
+
+fn lookup_suppressed(model_id: &str) -> bool {
+    suppressed()
+        .lock()
+        .map(|guard| guard.contains(model_id))
+        .unwrap_or(false)
 }
 
 /// The cached answer for `model_id`, or `None` after arranging a fetch.
