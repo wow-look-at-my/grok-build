@@ -307,11 +307,15 @@ mod tests {
 
     #[test]
     fn thinking_rides_on_the_assistant_message_it_belongs_to() {
-        let mut reasoning = rs::ReasoningItem::default();
-        reasoning.summary = vec![rs::ReasoningSummary {
-            r#type: "summary_text".to_owned(),
-            text: "first I look".to_owned(),
-        }];
+        let reasoning = rs::ReasoningItem {
+            id: String::new(),
+            summary: vec![rs::SummaryPart::SummaryText(rs::SummaryTextContent {
+                text: "first I look".to_owned(),
+            })],
+            content: None,
+            encrypted_content: None,
+            status: None,
+        };
         let req = request_with(vec![
             ConversationItem::user("hi"),
             ConversationItem::Reasoning(reasoning),

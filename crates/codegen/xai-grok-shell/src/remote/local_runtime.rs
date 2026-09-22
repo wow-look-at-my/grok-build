@@ -94,6 +94,47 @@ pub(crate) fn fetch_local_listing_blocking(
         .collect())
 }
 
+/// Which of a local runtime's models are resident RIGHT NOW, by routing slug.
+///
+/// Residency changes without anything else changing: a model loads on its
+/// first request, and LM Studio's idle TTL unloads it again. A dot painted
+/// once at startup is therefore wrong within minutes, so this is the cheap
+/// re-read behind it — one request for Ollama, one for LM Studio, and no
+/// `/api/show` per model.
+pub(crate) fn fetch_residency_blocking(
+    dialect: ModelsListDialect,
+    base_url: &str,
+    api_key: Option<&str>,
+) -> Result<std::collections::HashMap<String, bool>, BackendError> {
+    let host = host_root(base_url);
+    let client = crate::http::shared_startup_blocking_client();
+    let mut residency = std::collections::HashMap::new();
+    match dialect {
+        ModelsListDialect::Ollama => {
+            let running: OllamaPsResponse = get_json(&client, &format!("{host}/api/ps"), api_key)?;
+            for model in running.models {
+                // A CPU-resident runner is not in VRAM, and the dot says VRAM.
+                let in_vram = model.size_vram.unwrap_or(0) > 0;
+                for name in [model.model, model.name] {
+                    if !name.is_empty() {
+                        residency.insert(name, in_vram);
+                    }
+                }
+            }
+        }
+        ModelsListDialect::Lmstudio => {
+            let models = fetch_lmstudio_models(&host, api_key)?;
+            for model in models {
+                residency.insert(model.slug, model.loaded_in_vram);
+            }
+        }
+        // A remote provider reports no residency, so there is nothing to poll
+        // and nothing draws a dot.
+        ModelsListDialect::Openai => {}
+    }
+    Ok(residency)
+}
+
 fn to_entry(
     model: LocalModel,
     inference_base_url: &str,

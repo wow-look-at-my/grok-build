@@ -418,7 +418,9 @@ number true.
 
 The green dot beside a model in `/model` means it is resident in VRAM. A dim
 dot means it is on disk and would have to load first. Models that are not from
-a local runtime have no dot at all.
+a local runtime have no dot at all. The dot keeps up with the runtime on its
+own: a model that loads on its first request, or that LM Studio's idle TTL
+unloads, changes colour within a few seconds without a restart.
 
 #### Pinning the window and keeping the model warm
 

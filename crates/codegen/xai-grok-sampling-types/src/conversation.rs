@@ -2659,6 +2659,7 @@ mod tests {
             crate::ApiBackend::ChatCompletions,
             crate::ApiBackend::Responses,
             crate::ApiBackend::Messages,
+            crate::ApiBackend::Ollama,
         ] {
             let on_wire = match backend {
                 crate::ApiBackend::Responses => {
@@ -2678,6 +2679,13 @@ mod tests {
                     let mapped = super::messages::build_messages_request(&request());
                     serde_json::to_value(&mapped)
                         .expect("messages request serializes")
+                        .get("prompt_cache_key")
+                        .is_some()
+                }
+                crate::ApiBackend::Ollama => {
+                    let mapped = super::ollama::build_ollama_chat_request(&request());
+                    serde_json::to_value(&mapped)
+                        .expect("ollama request serializes")
                         .get("prompt_cache_key")
                         .is_some()
                 }

@@ -574,6 +574,38 @@ impl ModelsManager {
         self.notify_models_updated();
     }
 
+    /// Update which provider-discovered models are resident in VRAM.
+    ///
+    /// Writes through `provider_models` so a later catalog rebuild keeps the
+    /// answer, and pushes to the client ONLY when a dot actually changed: the
+    /// poll runs every few seconds, and a models-updated push per tick would
+    /// redraw the picker of every connected client for nothing.
+    pub(crate) fn apply_local_residency(&self, residency: &IndexMap<String, bool>) {
+        if residency.is_empty() {
+            return;
+        }
+        let changed = {
+            let mut provider_models = self.inner.provider_models.write();
+            let mut changed = false;
+            for (key, loaded) in residency {
+                if let Some(entry) = provider_models.get_mut(key)
+                    && entry.info.loaded_in_vram != Some(*loaded)
+                {
+                    entry.info.loaded_in_vram = Some(*loaded);
+                    changed = true;
+                }
+            }
+            changed
+        };
+        if !changed {
+            return;
+        }
+        let cfg = self.inner.cfg.read().clone();
+        let prefetched = self.inner.catalog.read().prefetched.clone();
+        self.rebuild(&cfg, prefetched);
+        self.notify_models_updated();
+    }
+
     pub(crate) fn current_reasoning_effort(&self) -> Option<ReasoningEffort> {
         *self.inner.current_reasoning_effort.read()
     }

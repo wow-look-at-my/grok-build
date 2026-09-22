@@ -173,6 +173,64 @@ async fn discover_one_provider(
     entries
 }
 
+/// How long a residency answer is good for. A model loads on its first
+/// request and LM Studio's idle TTL unloads it again, so the dot is stale
+/// within minutes of a catalog build. One localhost request per provider per
+/// tick is cheap; the poll is what makes the dot mean "right now".
+pub(crate) const RESIDENCY_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// Whether any configured provider can report residency at all. Nothing polls
+/// for a session with only remote providers.
+pub(crate) fn has_local_runtime(cfg: &config::Config) -> bool {
+    cfg.model_providers
+        .values()
+        .any(|p| p.autodetect_enabled() && p.dialect().is_local_runtime())
+}
+
+/// Re-read which of every local provider's models are resident, keyed by the
+/// catalog key discovery gave them.
+///
+/// Only residency: the window, the capabilities and the price do not change
+/// while the runtime is up, and re-reading them costs an `/api/show` per
+/// model.
+pub(crate) async fn refresh_local_residency(cfg: &config::Config) -> IndexMap<String, bool> {
+    let mut out = IndexMap::new();
+    for (id, provider) in &cfg.model_providers {
+        let dialect = provider.dialect();
+        if !provider.autodetect_enabled() || !dialect.is_local_runtime() {
+            continue;
+        }
+        let Some(base) = provider
+            .base_url
+            .clone()
+            .or_else(|| provider.api_base_url.clone())
+        else {
+            continue;
+        };
+        let probe = provider_entry(cfg, id, provider);
+        let api_key = probe.own_credential();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        std::thread::spawn(move || {
+            let result =
+                crate::remote::fetch_residency_blocking(dialect, &base, api_key.as_deref());
+            let _ = tx.send(result);
+        });
+        let answer = match tokio::time::timeout(FETCH_TIMEOUT, rx).await {
+            Ok(Ok(Ok(map))) => map,
+            // An unreachable runtime leaves the dots as they were. Reporting
+            // every model cold would claim an unload nothing observed.
+            other => {
+                tracing::debug!(provider = %id, "no residency answer: {other:?}");
+                continue;
+            }
+        };
+        for (slug, loaded) in answer {
+            out.insert(discovered_model_key(id, &slug), loaded);
+        }
+    }
+    out
+}
+
 /// Whether a `[model.<id>]` block of this provider already routes to `slug`.
 ///
 /// The block's own key counts too: `[model.claude-sonnet] model_provider =
@@ -348,6 +406,129 @@ mod tests {
             131_072,
             "nothing is loaded, so the model's own maximum stands in — never the client default"
         );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn residency_is_re_read_without_re_reading_anything_else() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+        let loaded = Arc::new(AtomicBool::new(false));
+        // `/api/show` is the expensive call — one per model — and the poll
+        // must never make it: only residency changes while the runtime is up.
+        let show_calls = Arc::new(AtomicUsize::new(0));
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+        let ps_loaded = Arc::clone(&loaded);
+        let counted = Arc::clone(&show_calls);
+        let app = axum::Router::new()
+            .route(
+                "/api/tags",
+                axum::routing::get(|| async {
+                    axum::Json(serde_json::json!({
+                        "models": [{"name": "m:latest", "model": "m:latest"}]
+                    }))
+                }),
+            )
+            .route(
+                "/api/ps",
+                axum::routing::get(move || {
+                    let loaded = Arc::clone(&ps_loaded);
+                    async move {
+                        let models = if loaded.load(Ordering::SeqCst) {
+                            serde_json::json!([{
+                                "name": "m:latest", "model": "m:latest",
+                                "size_vram": 1024, "context_length": 8192
+                            }])
+                        } else {
+                            serde_json::json!([])
+                        };
+                        axum::Json(serde_json::json!({ "models": models }))
+                    }
+                }),
+            )
+            .route(
+                "/api/show",
+                axum::routing::post(move |_: axum::Json<serde_json::Value>| {
+                    let counted = Arc::clone(&counted);
+                    async move {
+                        counted.fetch_add(1, Ordering::SeqCst);
+                        axum::Json(serde_json::json!({
+                            "capabilities": ["completion"],
+                            "model_info": {
+                                "general.architecture": "llama",
+                                "llama.context_length": 4096,
+                            },
+                        }))
+                    }
+                }),
+            );
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+        let cfg = config_from(&format!(
+            r#"
+            [model_providers.ollama]
+            base_url = "{base}/v1"
+            "#
+        ));
+
+        let discovered = discover_provider_models(&cfg).await;
+        assert_eq!(
+            discovered
+                .get("ollama/m:latest")
+                .unwrap()
+                .info
+                .loaded_in_vram,
+            Some(false)
+        );
+        let show_after_discovery = show_calls.load(Ordering::SeqCst);
+        assert!(show_after_discovery > 0, "discovery reads the window");
+
+        loaded.store(true, Ordering::SeqCst);
+        let residency = refresh_local_residency(&cfg).await;
+        server.abort();
+
+        assert_eq!(
+            residency.get("ollama/m:latest"),
+            Some(&true),
+            "the poll sees the model that just loaded"
+        );
+        assert_eq!(
+            show_calls.load(Ordering::SeqCst),
+            show_after_discovery,
+            "the poll re-reads residency only; /api/show is one request per model"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn an_unreachable_runtime_reports_no_residency_rather_than_cold() {
+        let cfg = config_from(
+            r#"
+            [model_providers.ollama]
+            base_url = "http://127.0.0.1:1/v1"
+            "#,
+        );
+
+        let residency = refresh_local_residency(&cfg).await;
+
+        assert!(
+            residency.is_empty(),
+            "an empty answer leaves the dots alone; reporting cold claims an unload nobody saw"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn only_a_local_provider_is_worth_polling() {
+        assert!(has_local_runtime(&config_from(
+            "[model_providers.ollama]\n"
+        )));
+        assert!(!has_local_runtime(&config_from(
+            r#"
+            [model_providers.gateway]
+            base_url = "https://gateway.example/v1"
+            "#
+        )));
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
