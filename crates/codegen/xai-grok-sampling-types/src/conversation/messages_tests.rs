@@ -254,6 +254,38 @@ fn test_messages_request_cache_breakpoint_marks_an_image_tip() {
     assert!(blocks[0].get("cache_control").is_none(), "{json:#}");
 }
 
+/// The API holds each tool-input parameter until it is whole, so a file body
+/// is minutes with no delta on the wire. The output-rate gate reads that as a
+/// collapse and reissues the request. Every client tool asks for eager input.
+#[test]
+fn every_client_tool_asks_for_eager_input_streaming() {
+    let mut req = ConversationRequest::from_items(vec![ConversationItem::user("write it")])
+        .with_model("messages-compatible-model");
+    req.tools = vec![
+        ToolSpec {
+            name: "write".into(),
+            description: None,
+            parameters: serde_json::json!({"type": "object"}),
+        },
+        ToolSpec {
+            name: "read".into(),
+            description: None,
+            parameters: serde_json::json!({"type": "object"}),
+        },
+    ];
+
+    let json = serde_json::to_value(build_messages_request(&req)).unwrap();
+    let tools = json["tools"].as_array().unwrap();
+    assert_eq!(tools.len(), 2);
+    for tool in tools {
+        assert_eq!(
+            tool["eager_input_streaming"],
+            serde_json::json!(true),
+            "{json:#}"
+        );
+    }
+}
+
 #[test]
 fn test_messages_request_cache_breakpoint_skips_thinking() {
     let req = ConversationRequest::from_items(vec![

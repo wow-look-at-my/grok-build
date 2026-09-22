@@ -164,6 +164,20 @@ pub struct ToolParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     pub input_schema: serde_json::Value,
+    /// Always `true`. Off, the API holds each parameter until it is whole, so
+    /// a file body is minutes of silence that the rate gate reads as a collapse.
+    #[serde(default, skip_deserializing)]
+    pub eager_input_streaming: True,
+}
+
+/// The one value `ToolParam::eager_input_streaming` can hold.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct True;
+
+impl Serialize for True {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_bool(true)
+    }
 }
 
 /// Tool choice (Anthropic Messages API format)
