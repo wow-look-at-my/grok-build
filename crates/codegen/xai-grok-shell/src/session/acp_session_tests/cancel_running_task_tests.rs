@@ -540,6 +540,7 @@ async fn first_turn_memory_injection_disabled_does_not_persist_to_chat_history()
                 doom_loop_recovery: None,
                 output_rate_floor: None,
                 header_injector: None,
+                extra_body: Default::default(),
             })
             .expect("sampling client should build for persistence actor");
             let persistence = crate::session::persistence::new_with_explicit_dir(
@@ -2288,6 +2289,7 @@ async fn cancel_propagates_to_sampler_handle_so_no_further_emission() {
                 doom_loop_recovery: None,
                 output_rate_floor: None,
                 header_injector: None,
+                            extra_body: Default::default(),
             };
             let (sampler_event_tx, _sampler_event_rx) = tokio::sync::mpsc::unbounded_channel::<
                 xai_grok_sampler::SamplingEvent,

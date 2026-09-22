@@ -1841,6 +1841,7 @@ mod reasoning_compaction_regression_tests {
             doom_loop_recovery: None,
             output_rate_floor: None,
             header_injector: None,
+            extra_body: Default::default(),
         }
     }
     #[tokio::test]
