@@ -55,7 +55,7 @@ pub(crate) async fn collect_aux_call(
         };
         on_retry(&err, delay);
         tokio::time::sleep(delay).await;
-        if on_http1 {
+        if on_http1 || true {
             continue;
         }
         on_http1 = true;
