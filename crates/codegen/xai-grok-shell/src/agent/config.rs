@@ -3804,6 +3804,47 @@ pub(crate) fn entry_for_provider_model(
     entry
 }
 
+/// The entry a `[model_providers.<id>]` block resolves to on its own, with no
+/// `[model.<id>]` behind it. The provider id stands in for the model id: it
+/// names no model, so nothing here asks the provider for a listing and nothing
+/// reaches the network.
+pub(crate) fn provider_probe_entry(
+    cfg: &Config,
+    provider_id: &str,
+    provider: &crate::agent::model_providers::ModelProviderConfig,
+) -> ModelEntry {
+    let probe = ConfigModelOverride {
+        model_provider: Some(provider_id.to_owned()),
+        ..Default::default()
+    };
+    entry_for_provider_model(cfg, provider_id, provider_id, provider, &probe)
+}
+
+/// `true` when some configured `[model_providers.<id>]` stands on its own for
+/// authentication -- the same `has_own_credentials` question the catalog is
+/// asked, put to the provider block instead of to a model.
+///
+/// This is what makes a Grok sign-in OPTIONAL for a session pointed at another
+/// endpoint. It reads the PROVIDER blocks rather than the catalog because
+/// autodetection runs off the startup path
+/// (`model_provider_discovery::discover_provider_models`, spawned by
+/// `initialize` and never awaited): at the moment the auth methods are built
+/// the provider's models are not in the catalog yet. A user who declared a
+/// provider and wrote no `[model.<id>]` block of their own was therefore sent
+/// to the login screen for an endpoint that grok.com never sees.
+pub(crate) fn any_provider_has_own_credentials(cfg: &Config) -> bool {
+    first_provider_with_own_credentials(cfg).is_some()
+}
+
+/// The id of the first `[model_providers.<id>]` that stands on its own for
+/// authentication, for a caller that reports WHICH credential it found.
+pub(crate) fn first_provider_with_own_credentials(cfg: &Config) -> Option<&str> {
+    cfg.model_providers
+        .iter()
+        .find(|(id, provider)| provider_probe_entry(cfg, id, provider).has_own_credentials())
+        .map(|(id, _)| id.as_str())
+}
+
 /// Assemble the final model map. Priority (highest wins):
 /// config.toml `[model.*]` > prefetched (remote) > hardcoded defaults.
 pub(crate) fn resolve_model_list(

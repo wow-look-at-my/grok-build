@@ -64,19 +64,37 @@ pub fn has_xai_api_key_env() -> bool {
 /// Presence-only for the first-party env key (treats it as usable). Login
 /// paths that have run the validity probe should call
 /// [`should_advertise_xai_api_key_with_env_ok`] with the probe result instead.
-pub(crate) fn should_advertise_xai_api_key<'a, I>(disable_api_key_auth: bool, models: I) -> bool
+///
+/// `has_provider_credentials` is the same question asked of the
+/// `[model_providers.<id>]` blocks
+/// (`config::any_provider_has_own_credentials`). A declared provider is enough
+/// on its own: its models are autodetected off the startup path, so at
+/// `initialize` time the catalog does not carry them yet, and signing in to
+/// grok.com is not what a session pointed at another endpoint needs.
+pub(crate) fn should_advertise_xai_api_key<'a, I>(
+    disable_api_key_auth: bool,
+    models: I,
+    has_provider_credentials: bool,
+) -> bool
 where
     I: IntoIterator<Item = &'a ModelEntry>,
 {
-    should_advertise_xai_api_key_with_env_ok(disable_api_key_auth, models, true)
+    should_advertise_xai_api_key_with_env_ok(
+        disable_api_key_auth,
+        models,
+        has_provider_credentials,
+        true,
+    )
 }
 
-/// Single advertise policy for `xai.api_key`: kill switch, BYOK, and first-party
-/// env gated by `first_party_env_ok` (probe result, or `true` for presence-only).
+/// Single advertise policy for `xai.api_key`: kill switch, BYOK (a model of
+/// one's own or a configured `[model_providers.<id>]`), and first-party env
+/// gated by `first_party_env_ok` (probe result, or `true` for presence-only).
 /// BYOK still advertises without a probe.
 pub(crate) fn should_advertise_xai_api_key_with_env_ok<'a, I>(
     disable_api_key_auth: bool,
     models: I,
+    has_provider_credentials: bool,
     first_party_env_ok: bool,
 ) -> bool
 where
@@ -85,7 +103,8 @@ where
     if disable_api_key_auth {
         return false;
     }
-    let has_byok = models.into_iter().any(ModelEntry::has_own_credentials);
+    let has_byok =
+        has_provider_credentials || models.into_iter().any(ModelEntry::has_own_credentials);
     has_byok || (has_xai_api_key_env() && first_party_env_ok)
 }
 
@@ -499,6 +518,52 @@ mod tests {
     use agent_client_protocol as acp;
     use serial_test::serial;
 
+    /// A configured `[model_providers.<id>]` is BYOK on its own: with no model
+    /// of its own in the catalog and the first-party env key ruled out, the
+    /// api-key method is still advertised, which is what keeps the grok.com
+    /// sign-in optional. The kill switch stays above it.
+    #[test]
+    fn provider_credentials_advertise_the_api_key_method_by_themselves() {
+        let no_models = std::iter::empty::<&crate::agent::config::ModelEntry>();
+        assert!(should_advertise_xai_api_key_with_env_ok(
+            false, no_models, true, false,
+        ));
+        let no_models = std::iter::empty::<&crate::agent::config::ModelEntry>();
+        assert!(!should_advertise_xai_api_key_with_env_ok(
+            true, no_models, true, false,
+        ));
+        // Nothing configured at all still needs the first-party env key.
+        let no_models = std::iter::empty::<&crate::agent::config::ModelEntry>();
+        assert!(!should_advertise_xai_api_key_with_env_ok(
+            false, no_models, false, false,
+        ));
+    }
+
+    /// The pager reads `auth_methods.first()` to decide whether to open the
+    /// login screen, so the provider signal has to reach that position.
+    #[test]
+    fn a_provider_only_session_is_never_sent_to_the_login_screen() {
+        let built = build_auth_methods(AuthMethodsBuildInputs {
+            has_external_api_key: should_advertise_xai_api_key_with_env_ok(
+                false,
+                std::iter::empty::<&crate::agent::config::ModelEntry>(),
+                true,
+                false,
+            ),
+            has_cached_token: false,
+            has_enterprise_oidc: false,
+            enterprise_oidc_issuer: None,
+            login_label: None,
+            has_auth_provider_command: false,
+            preferred_method: None,
+        });
+        assert_eq!(first_kind(&built.methods), Some(AuthMethodKind::XaiApiKey));
+        assert!(
+            !AuthMethodKind::from_id(built.methods.first().expect("a method is advertised").id())
+                .needs_interactive_login(),
+        );
+    }
+
     /// When API-key credentials are advertiseable, fall through from a dead
     /// `cached_token` to non-interactive `xai.api_key` (not browser OAuth).
     /// Covers the both-advertised case (`has_cached_token` true at initialize
@@ -808,7 +873,11 @@ mod tests {
         // login method. Confirms the predicate isn't trivially true.
         {
             let _unset = EnvGuard::unset(TEST_ENV_VAR);
-            let has_external_api_key = should_advertise_xai_api_key(false, models.values());
+            let has_external_api_key = should_advertise_xai_api_key(
+                false,
+                models.values(),
+                crate::agent::config::any_provider_has_own_credentials(&cfg),
+            );
             assert!(!has_external_api_key);
             let built = build_auth_methods(AuthMethodsBuildInputs {
                 has_external_api_key,
@@ -826,7 +895,11 @@ mod tests {
         // pager's `startup_auth_metadata()` returns `needs_login = false`.
         {
             let _set = EnvGuard::set(TEST_ENV_VAR, "enterprise-secret-token");
-            let has_external_api_key = should_advertise_xai_api_key(false, models.values());
+            let has_external_api_key = should_advertise_xai_api_key(
+                false,
+                models.values(),
+                crate::agent::config::any_provider_has_own_credentials(&cfg),
+            );
             assert!(has_external_api_key);
             let built = build_auth_methods(AuthMethodsBuildInputs {
                 has_external_api_key,
@@ -860,7 +933,11 @@ mod tests {
         let _set = EnvGuard::set(XAI_API_KEY_ENV_VAR, "xai-external-key");
         let cfg = Config::default();
         let models = resolve_model_list(&cfg, None);
-        let has_external_api_key = should_advertise_xai_api_key(false, models.values());
+        let has_external_api_key = should_advertise_xai_api_key(
+            false,
+            models.values(),
+            crate::agent::config::any_provider_has_own_credentials(&cfg),
+        );
         assert!(has_external_api_key);
         let built = build_auth_methods(AuthMethodsBuildInputs {
             has_external_api_key,
@@ -881,10 +958,18 @@ mod tests {
         let models = resolve_model_list(&cfg, None);
 
         // Flag off: today's behavior (advertised first).
-        assert!(should_advertise_xai_api_key(false, models.values()));
+        assert!(should_advertise_xai_api_key(
+            false,
+            models.values(),
+            crate::agent::config::any_provider_has_own_credentials(&cfg)
+        ));
 
         // Flag on: never advertised, regardless of credentials.
-        let has_external_api_key = should_advertise_xai_api_key(true, models.values());
+        let has_external_api_key = should_advertise_xai_api_key(
+            true,
+            models.values(),
+            crate::agent::config::any_provider_has_own_credentials(&cfg),
+        );
         assert!(!has_external_api_key);
         let built = build_auth_methods(AuthMethodsBuildInputs {
             has_external_api_key,
@@ -914,11 +999,20 @@ mod tests {
         let cfg = Config::default();
         let models = resolve_model_list(&cfg, None);
         assert!(
-            should_advertise_xai_api_key(false, models.values()),
+            should_advertise_xai_api_key(
+                false,
+                models.values(),
+                crate::agent::config::any_provider_has_own_credentials(&cfg)
+            ),
             "presence-only helper still sees the env key"
         );
         assert!(
-            !should_advertise_xai_api_key_with_env_ok(false, models.values(), false),
+            !should_advertise_xai_api_key_with_env_ok(
+                false,
+                models.values(),
+                crate::agent::config::any_provider_has_own_credentials(&cfg),
+                false
+            ),
             "probe-unusable env key alone must not advertise"
         );
         let built = build_auth_methods(AuthMethodsBuildInputs {
@@ -937,6 +1031,7 @@ mod tests {
         assert!(should_advertise_xai_api_key_with_env_ok(
             false,
             models.values(),
+            crate::agent::config::any_provider_has_own_credentials(&cfg),
             true
         ));
     }
@@ -963,7 +1058,12 @@ mod tests {
         let cfg = Config::new_from_toml_cfg(&toml).expect("config should parse");
         let models = resolve_model_list(&cfg, None);
         assert!(
-            should_advertise_xai_api_key_with_env_ok(false, models.values(), false),
+            should_advertise_xai_api_key_with_env_ok(
+                false,
+                models.values(),
+                crate::agent::config::any_provider_has_own_credentials(&cfg),
+                false
+            ),
             "BYOK must not depend on the first-party env probe"
         );
     }
@@ -980,7 +1080,11 @@ mod tests {
 
         let cfg = Config::default();
         let models = resolve_model_list(&cfg, None);
-        let has_external_api_key = should_advertise_xai_api_key(false, models.values());
+        let has_external_api_key = should_advertise_xai_api_key(
+            false,
+            models.values(),
+            crate::agent::config::any_provider_has_own_credentials(&cfg),
+        );
         assert!(has_external_api_key);
     }
 

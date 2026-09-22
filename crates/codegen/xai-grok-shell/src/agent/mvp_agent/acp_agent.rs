@@ -306,11 +306,17 @@ impl acp::Agent for MvpAgent {
         }
         let preferred_method_early = self.cfg.borrow().grok_com_config.preferred_method;
         let xai_api_base_url = self.cfg.borrow().endpoints.xai_api_base_url.clone();
-        let has_byok = self
-            .models_manager
-            .models()
-            .values()
-            .any(crate::agent::config::ModelEntry::has_own_credentials);
+        // A declared provider counts even before its models are discovered:
+        // autodetection runs off this path, so the catalog is still without
+        // them here.
+        let has_provider_credentials =
+            crate::agent::config::any_provider_has_own_credentials(&self.cfg.borrow());
+        let has_byok = has_provider_credentials
+            || self
+                .models_manager
+                .models()
+                .values()
+                .any(crate::agent::config::ModelEntry::has_own_credentials);
         let first_party_env_ok = if crate::auth::should_probe_first_party_env_key(
             disable_api_key_auth,
             has_byok,
@@ -329,6 +335,7 @@ impl acp::Agent for MvpAgent {
         let has_external_api_key = auth_method::should_advertise_xai_api_key_with_env_ok(
             disable_api_key_auth,
             self.models_manager.models().values(),
+            has_provider_credentials,
             first_party_env_ok,
         );
         let init_has_current = self.auth_manager.current().is_some();
@@ -652,12 +659,16 @@ impl acp::Agent for MvpAgent {
                         .models()
                         .values()
                         .any(|m| m.has_own_credentials())
+                        && !crate::agent::config::any_provider_has_own_credentials(
+                            &self.cfg.borrow(),
+                        )
                     {
                         emit_login_span(false, "api_key", None, Some("no_credentials"));
                         return Err(
                             acp::Error::auth_required()
                                 .data(
-                                    "Set XAI_API_KEY or add api_key/env_key to config.toml.",
+                                    "Set XAI_API_KEY, or add api_key/env_key to a \
+                                     [model.<id>] or [model_providers.<id>] block in config.toml.",
                                 ),
                         );
                     }
