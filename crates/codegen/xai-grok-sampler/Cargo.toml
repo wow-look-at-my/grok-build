@@ -16,6 +16,7 @@ xai-token-estimation = { workspace = true }
 # External
 async-openai = { workspace = true }
 async-stream = { workspace = true }
+bytes = { workspace = true }
 chrono = { workspace = true, features = ["serde"] }
 eventsource-stream = { workspace = true }
 futures-util = { workspace = true }

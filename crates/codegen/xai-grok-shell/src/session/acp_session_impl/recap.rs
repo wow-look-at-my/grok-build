@@ -3,13 +3,10 @@
 //! Shared cache-aligned request setup lives in [`super::side_call`].
 //! Per-turn dashboard summary lifecycle lives in [`super::turn_summary`].
 
-use super::side_call::{
-    AuxCall, aux_retry_policy, fresh_req_id, log_prompt_cache_hit, should_retry_aux_call,
-};
+use super::side_call::{AuxCall, collect_aux_call, log_prompt_cache_hit};
 use super::*;
 
 use crate::session::SideQuestionError;
-use xai_grok_sampling_types::SamplingError;
 
 impl SessionActor {
     /// Answers a `/btw` side question with one model call over the parent session's context, and saves it to `btw_history.jsonl` under a new
@@ -78,20 +75,16 @@ impl SessionActor {
 
         // conversation_collect is one-shot (no sampler-actor retry); /btw adds
         // its own bounded transient-failure retry (policy + predicate above).
-        use backon::Retryable as _;
         let attempts = std::cell::Cell::new(1u32);
-        let result = (|| sampling_client.conversation_collect(fresh_req_id(&base_request, "btw")))
-            .retry(aux_retry_policy())
-            .when(should_retry_aux_call)
-            .notify(|e: &SamplingError, backoff: std::time::Duration| {
-                attempts.set(attempts.get() + 1);
-                tracing::warn!(
-                    backoff_ms = backoff.as_millis() as u64,
-                    error = %e,
-                    "side question transient failure; retrying"
-                );
-            })
-            .await;
+        let result = collect_aux_call(&sampling_client, &base_request, "btw", |e, backoff| {
+            attempts.set(attempts.get() + 1);
+            tracing::warn!(
+                backoff_ms = backoff.as_millis() as u64,
+                error = %e,
+                "side question transient failure; retrying"
+            );
+        })
+        .await;
 
         match result {
             Ok(response) => {
