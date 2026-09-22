@@ -179,6 +179,14 @@ fn describe(model: &LocalModel) -> Option<String> {
     if !model.supports_tools {
         parts.push("not trained for tool use".to_owned());
     }
+    // The whole point of reading this listing is a true window. When the
+    // runtime would not say — an `/api/show` that failed, and nothing loaded
+    // to ask instead — the entry falls back to the client default, which is
+    // the guess that lets the harness overrun the real window in silence. Say
+    // so on the row rather than let the number pass for an answer.
+    if model.max_context.is_none() && model.loaded_context.is_none() {
+        parts.push("context window unknown".to_owned());
+    }
     (!parts.is_empty()).then(|| parts.join(" · "))
 }
 

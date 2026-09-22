@@ -337,6 +337,7 @@ pub fn test_sampler_config(
             .collect(),
         query_params: Default::default(),
         env_http_headers: Default::default(),
+        extra_body: Default::default(),
         context_window: 256_000,
         client_version: None,
         force_http1: false,

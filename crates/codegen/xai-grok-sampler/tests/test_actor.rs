@@ -81,6 +81,7 @@ fn test_config(base_url: String, model: &str) -> SamplerConfig {
         extra_headers: IndexMap::new(),
         query_params: IndexMap::new(),
         env_http_headers: IndexMap::new(),
+        extra_body: Default::default(),
         context_window: 128_000,
         force_http1: false,
         // Keep retries minimal so tests don't take forever.

@@ -207,7 +207,7 @@ pub(crate) async fn refresh_local_residency(cfg: &config::Config) -> IndexMap<St
         else {
             continue;
         };
-        let probe = provider_entry(cfg, id, provider);
+        let probe = config::provider_probe_entry(cfg, id, provider);
         let api_key = probe.own_credential();
         let (tx, rx) = tokio::sync::oneshot::channel();
         std::thread::spawn(move || {
