@@ -64,19 +64,37 @@ pub fn has_xai_api_key_env() -> bool {
 /// Presence-only for the first-party env key (treats it as usable). Login
 /// paths that have run the validity probe should call
 /// [`should_advertise_xai_api_key_with_env_ok`] with the probe result instead.
-pub(crate) fn should_advertise_xai_api_key<'a, I>(disable_api_key_auth: bool, models: I) -> bool
+///
+/// `has_provider_credentials` is the same question asked of the
+/// `[model_providers.<id>]` blocks
+/// (`config::any_provider_has_own_credentials`). A declared provider is enough
+/// on its own: its models are autodetected off the startup path, so at
+/// `initialize` time the catalog does not carry them yet, and signing in to
+/// grok.com is not what a session pointed at another endpoint needs.
+pub(crate) fn should_advertise_xai_api_key<'a, I>(
+    disable_api_key_auth: bool,
+    models: I,
+    has_provider_credentials: bool,
+) -> bool
 where
     I: IntoIterator<Item = &'a ModelEntry>,
 {
-    should_advertise_xai_api_key_with_env_ok(disable_api_key_auth, models, true)
+    should_advertise_xai_api_key_with_env_ok(
+        disable_api_key_auth,
+        models,
+        has_provider_credentials,
+        true,
+    )
 }
 
-/// Single advertise policy for `xai.api_key`: kill switch, BYOK, and first-party
-/// env gated by `first_party_env_ok` (probe result, or `true` for presence-only).
+/// Single advertise policy for `xai.api_key`: kill switch, BYOK (a model of
+/// one's own or a configured `[model_providers.<id>]`), and first-party env
+/// gated by `first_party_env_ok` (probe result, or `true` for presence-only).
 /// BYOK still advertises without a probe.
 pub(crate) fn should_advertise_xai_api_key_with_env_ok<'a, I>(
     disable_api_key_auth: bool,
     models: I,
+    has_provider_credentials: bool,
     first_party_env_ok: bool,
 ) -> bool
 where
@@ -85,7 +103,8 @@ where
     if disable_api_key_auth {
         return false;
     }
-    let has_byok = models.into_iter().any(ModelEntry::has_own_credentials);
+    let has_byok =
+        has_provider_credentials || models.into_iter().any(ModelEntry::has_own_credentials);
     has_byok || (has_xai_api_key_env() && first_party_env_ok)
 }
 

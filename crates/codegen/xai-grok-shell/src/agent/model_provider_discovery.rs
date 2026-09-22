@@ -57,7 +57,7 @@ async fn discover_one_provider(
     // same merge an inheriting `[model.<id>]` gets. A provider that mints its
     // token with a helper needs that helper run first: the cache is cold at
     // startup, and a cold cache reads as no credential.
-    let probe = provider_entry(cfg, provider_id, provider);
+    let probe = config::provider_probe_entry(cfg, provider_id, provider);
     let api_key = match probe.own_credential() {
         Some(key) => Some(key),
         None => match probe.effective_auth_provider() {
@@ -150,20 +150,6 @@ fn config_model_claims(cfg: &config::Config, provider_id: &str, slug: &str) -> b
         model_override.model_provider.as_deref() == Some(provider_id)
             && model_override.model.as_deref().unwrap_or(key.as_str()) == slug
     })
-}
-
-/// A credential-only stand-in for the provider: every connection and auth field
-/// the provider declares, with no model of its own.
-fn provider_entry(
-    cfg: &config::Config,
-    provider_id: &str,
-    provider: &ModelProviderConfig,
-) -> ModelEntry {
-    let probe = ConfigModelOverride {
-        model_provider: Some(provider_id.to_owned()),
-        ..Default::default()
-    };
-    config::entry_for_provider_model(cfg, provider_id, provider_id, provider, &probe)
 }
 
 /// Fetch and parse a listing off the async path.

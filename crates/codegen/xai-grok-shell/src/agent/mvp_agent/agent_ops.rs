@@ -1437,6 +1437,7 @@ impl MvpAgent {
             auth_method::should_advertise_xai_api_key_with_env_ok(
                 self.cfg.borrow().grok_com_config.api_key_auth_disabled(),
                 self.models_manager.models().values(),
+                crate::agent::config::any_provider_has_own_credentials(&self.cfg.borrow()),
                 self.auth_manager.first_party_env_api_key_ok(),
             ),
             preferred,
