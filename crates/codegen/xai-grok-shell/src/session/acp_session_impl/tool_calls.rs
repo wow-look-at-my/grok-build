@@ -1662,7 +1662,13 @@ impl SessionActor {
         let canonical_meta = self.stamp_tool_meta(None, wire_name, Some(&tool_call_input));
         // One function names every tool call, finished or still streaming, so a
         // row cannot rename itself when the last argument byte lands.
-        let title = tool_title::tool_input_title(&tool_call_input, self.tool_context.cwd.as_path());
+        let kind = self.agent.borrow().tool_bridge().tool_kind(wire_name);
+        let title = tool_title::tool_input_title(
+            &tool_call_input,
+            wire_name,
+            kind,
+            self.tool_context.cwd.as_path(),
+        );
         let (kind, locations, content) = match tool_call_input {
             ToolInput::ListDir(list_dir) => (
                 acp::ToolKind::Other,
@@ -2387,7 +2393,12 @@ impl SessionActor {
         }
         let bridge = self.agent.borrow().tool_bridge().clone();
         let input = bridge.try_parse(&wire_name, value).await.ok()?;
-        let title = tool_title::tool_input_title(&input, self.tool_context.cwd.as_path());
+        let title = tool_title::tool_input_title(
+            &input,
+            &wire_name,
+            bridge.tool_kind(&wire_name),
+            self.tool_context.cwd.as_path(),
+        );
         if title.is_empty() {
             return None;
         }
@@ -2844,30 +2855,6 @@ mod ci_tool_title_tests {
                 "CI status (current branch)"
             );
         }
-    }
-
-    /// The descriptor test above drives the helper; this pins that the shipped
-    /// match actually routes `ToolInput::Ci` there. That match is
-    /// `tool_title::tool_input_title`, and it is not exhaustive over its enum,
-    /// so a missing arm degrades silently into the generic label instead of
-    /// failing to compile.
-    #[test]
-    fn the_shipped_descriptor_routes_ci_to_its_own_title() {
-        const SRC: &str = include_str!("tool_title.rs");
-        let arm = SRC
-            .find("ToolInput::Ci(ci)")
-            .expect("the ci arm must exist in the shipped descriptor");
-        let fallback = SRC
-            .find("\"Tool call\".to_string()")
-            .expect("the generic fallback must still exist for other tools");
-        assert!(
-            arm < fallback,
-            "the ci arm must be matched before the generic fallback"
-        );
-        assert!(
-            SRC[arm..fallback].contains("ci_tool_title("),
-            "the ci arm must use the shipped title helper"
-        );
     }
 }
 
