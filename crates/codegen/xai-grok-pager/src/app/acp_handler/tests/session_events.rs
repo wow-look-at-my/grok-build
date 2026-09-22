@@ -935,6 +935,64 @@
     }
 
     #[test]
+    fn child_output_rate_reaches_the_subagent_view_and_clears_on_finish() {
+        let mut agent = make_agent(Some("root-sess"));
+        let child_sid = "child-sess-rate";
+        agent
+            .subagent_views
+            .insert(child_sid.into(), Box::new(make_agent(Some(child_sid))));
+
+        let update = XaiSessionUpdate::OutputRate {
+            tokens_per_sec: 42.0,
+            window_secs: 10,
+            floor_tokens_per_sec: Some(15.0),
+            slow_for_ms: None,
+        };
+        assert!(handle_child_session_notification(
+            update,
+            child_sid,
+            &mut agent,
+            false
+        ));
+
+        let rate = agent.subagent_views[child_sid]
+            .session
+            .tracker
+            .output_rate()
+            .expect("the subagent view must hold the child's rate");
+        assert_eq!(rate.tokens_per_sec, 42.0);
+        assert_eq!(rate.floor_tokens_per_sec, Some(15.0));
+        assert!(
+            agent.session.tracker.output_rate().is_none(),
+            "a child's rate must not show on the parent"
+        );
+
+        let child_view = agent.subagent_views.get_mut(child_sid).unwrap();
+        crate::app::subagent::finalize_finished_child_view(
+            child_view,
+            std::time::Duration::from_secs(1),
+        );
+        assert!(child_view.session.tracker.output_rate().is_none());
+    }
+
+    #[test]
+    fn child_output_rate_without_view_returns_false() {
+        let mut agent = make_agent(Some("root-sess"));
+        let update = XaiSessionUpdate::OutputRate {
+            tokens_per_sec: 42.0,
+            window_secs: 10,
+            floor_tokens_per_sec: None,
+            slow_for_ms: None,
+        };
+        assert!(!handle_child_session_notification(
+            update,
+            "unknown-child",
+            &mut agent,
+            false
+        ));
+    }
+
+    #[test]
     fn child_unknown_event_returns_false() {
         let mut agent = make_agent(Some("root-sess"));
         let update = XaiSessionUpdate::MemoryFlushStarted;
