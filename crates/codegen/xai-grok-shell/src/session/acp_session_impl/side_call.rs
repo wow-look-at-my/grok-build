@@ -27,6 +27,49 @@ pub(crate) fn should_retry_aux_call(e: &xai_grok_sampling_types::SamplingError) 
     e.is_retryable() && !e.is_rate_limited() && !e.is_retry_vetoed()
 }
 
+/// Run a one-shot auxiliary call under [`aux_retry_policy`]. The first retry
+/// moves to HTTP/1.1, as the main turn's sampler does
+/// (`RetryDecision::RetryWithClientRebuild`). Without that, every retry goes
+/// out on the same bad HTTP/2 connection, and the side call fails while the
+/// main turn recovers.
+pub(crate) async fn collect_aux_call(
+    client: &xai_grok_sampler::SamplingClient,
+    base: &ConversationRequest,
+    label: &str,
+    mut on_retry: impl FnMut(&SamplingError, std::time::Duration),
+) -> Result<xai_grok_sampling_types::ConversationResponse, SamplingError> {
+    use backon::BackoffBuilder as _;
+    let mut client = client.clone();
+    let mut backoff = aux_retry_policy().build();
+    let mut on_http1 = false;
+    loop {
+        let err = match client.conversation_collect(fresh_req_id(base, label)).await {
+            Ok(response) => return Ok(response),
+            Err(err) => err,
+        };
+        if !should_retry_aux_call(&err) {
+            return Err(err);
+        }
+        let Some(delay) = backoff.next() else {
+            return Err(err);
+        };
+        on_retry(&err, delay);
+        tokio::time::sleep(delay).await;
+        if on_http1 {
+            continue;
+        }
+        on_http1 = true;
+        match client.with_http1() {
+            Ok(http1) => client = http1,
+            Err(e) => tracing::warn!(
+                error = %e,
+                call = label,
+                "side call: no HTTP/1.1 client for the retry; the retry stays on HTTP/2"
+            ),
+        }
+    }
+}
+
 /// Clone an auxiliary request and stamp a fresh `req_id`, so retried attempts
 /// never collide in logs. Everything else is byte-identical, which is what
 /// keeps a retry on the same cached prefix.
@@ -215,6 +258,116 @@ mod tests {
             retry_after_secs: None,
             should_retry,
         }
+    }
+
+    /// Serve HTTP/1.1 keep-alive. Every request on the FIRST connection gets a
+    /// 503, like a pooled connection that has gone bad. Any other connection
+    /// gets a one-chunk completion. Returns the base URL and the number of
+    /// requests the first connection took.
+    async fn spawn_bad_first_connection_server()
+    -> (String, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base_url = format!("http://{}/v1", listener.local_addr().unwrap());
+        let on_bad = Arc::new(AtomicUsize::new(0));
+        let on_bad_server = Arc::clone(&on_bad);
+        tokio::spawn(async move {
+            let mut accepted = 0usize;
+            while let Ok((mut sock, _)) = listener.accept().await {
+                accepted += 1;
+                let bad = accepted == 1;
+                let on_bad = Arc::clone(&on_bad_server);
+                tokio::spawn(async move {
+                    let mut buf: Vec<u8> = Vec::new();
+                    loop {
+                        let head_end = loop {
+                            if let Some(i) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+                                break i + 4;
+                            }
+                            let mut chunk = [0u8; 4096];
+                            match sock.read(&mut chunk).await {
+                                Ok(0) | Err(_) => return,
+                                Ok(n) => buf.extend_from_slice(&chunk[..n]),
+                            }
+                        };
+                        let head = String::from_utf8_lossy(&buf[..head_end]).to_ascii_lowercase();
+                        let body_len: usize = head
+                            .lines()
+                            .find_map(|l| l.strip_prefix("content-length:"))
+                            .and_then(|v| v.trim().parse().ok())
+                            .unwrap_or(0);
+                        while buf.len() < head_end + body_len {
+                            let mut chunk = [0u8; 4096];
+                            match sock.read(&mut chunk).await {
+                                Ok(0) | Err(_) => return,
+                                Ok(n) => buf.extend_from_slice(&chunk[..n]),
+                            }
+                        }
+                        buf.drain(..head_end + body_len);
+                        let response = if bad {
+                            on_bad.fetch_add(1, Ordering::SeqCst);
+                            "HTTP/1.1 503 Service Unavailable\r\ncontent-type: application/json\r\ncontent-length: 2\r\n\r\n{}".to_string()
+                        } else {
+                            let chunk = serde_json::json!({
+                                "id": "chatcmpl-test",
+                                "object": "chat.completion.chunk",
+                                "created": 0,
+                                "model": "test-model",
+                                "choices": [{
+                                    "index": 0,
+                                    "delta": { "role": "assistant", "content": "ok" },
+                                    "finish_reason": "stop"
+                                }]
+                            });
+                            let body = format!("data: {chunk}\n\ndata: [DONE]\n\n");
+                            format!(
+                                "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\n\r\n{body}",
+                                body.len()
+                            )
+                        };
+                        if sock.write_all(response.as_bytes()).await.is_err() {
+                            return;
+                        }
+                    }
+                });
+            }
+        });
+        (base_url, on_bad)
+    }
+
+    /// The main turn leaves a bad pooled connection by moving to HTTP/1.1 on
+    /// its first retry. A side call must do the same. If it retries on the
+    /// pooled client, every attempt lands on the bad connection and `/todo`
+    /// fails while the main turn works.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn an_aux_call_leaves_a_bad_pooled_connection_on_its_first_retry() {
+        use std::sync::atomic::Ordering;
+
+        let (base_url, on_bad) = spawn_bad_first_connection_server().await;
+        let client = xai_grok_sampler::SamplingClient::new(xai_grok_sampler::SamplerConfig {
+            api_key: Some("test-key".into()),
+            base_url,
+            model: "test-model".into(),
+            ..Default::default()
+        })
+        .unwrap();
+        let base = ConversationRequest::from_items(vec![ConversationItem::user("hi")]);
+
+        let mut retries = 0usize;
+        let response = collect_aux_call(&client, &base, "test", |_, _| retries += 1)
+            .await
+            .expect("the retry must reach a working connection");
+
+        assert_eq!(response.assistant_text(), "ok");
+        assert_eq!(retries, 1, "one failure, then one retry that succeeds");
+        assert_eq!(
+            on_bad.load(Ordering::SeqCst),
+            1,
+            "the retry must not go back to the bad connection"
+        );
     }
 
     #[test]

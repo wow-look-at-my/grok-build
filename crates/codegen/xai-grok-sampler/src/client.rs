@@ -730,6 +730,15 @@ fn auth_rejected(message: String, sent_bearer: Option<&str>) -> SamplingError {
 // =============================================================================
 
 impl SamplingClient {
+    /// The same client on the shared HTTP/1.1 transport, which never pools.
+    /// A caller uses it after a transport failure, because a bad HTTP/2
+    /// connection fails every request that the pool sends on it.
+    pub fn with_http1(&self) -> Result<Self> {
+        let mut client = self.clone();
+        client.http = crate::shared_http::client_http1().map_err(SamplingError::Http)?;
+        Ok(client)
+    }
+
     /// Construct a sampling client from a [`SamplerConfig`].
     ///
     /// Grabs the process-wide shared `reqwest::Client` (HTTP/2 by
@@ -1098,7 +1107,7 @@ impl SamplingClient {
         let model_metadata = extract_model_metadata(response.headers());
         let retry_after_secs = extract_retry_after(response.headers());
         let should_retry = extract_should_retry(response.headers());
-        let bytes = response.bytes().await?;
+        let bytes = read_body(response, status).await?;
 
         if !status.is_success() {
             if status == reqwest::StatusCode::UNAUTHORIZED {
@@ -1284,7 +1293,7 @@ impl SamplingClient {
                 ));
             }
 
-            let bytes = response.bytes().await?;
+            let bytes = read_body(response, status).await?;
             let message = api_error_message_for_endpoint(status, bytes.as_ref(), &request_url);
             span.record("error", message.as_str());
             tracing::error!(
@@ -1467,7 +1476,7 @@ impl SamplingClient {
         let model_metadata = extract_model_metadata(response.headers());
         let retry_after_secs = extract_retry_after(response.headers());
         let should_retry = extract_should_retry(response.headers());
-        let bytes = response.bytes().await?;
+        let bytes = read_body(response, status).await?;
 
         if !status.is_success() {
             if status == reqwest::StatusCode::UNAUTHORIZED {
@@ -1654,7 +1663,7 @@ impl SamplingClient {
             let model_metadata = extract_model_metadata(response.headers());
             let retry_after_secs = extract_retry_after(response.headers());
             let should_retry = extract_should_retry(response.headers());
-            let bytes = response.bytes().await?;
+            let bytes = read_body(response, status).await?;
             let message = api_error_message_for_endpoint(status, bytes.as_ref(), &request_url);
             span.record("error", message.as_str());
             tracing::error!(
@@ -1822,7 +1831,7 @@ impl SamplingClient {
         let model_metadata = extract_model_metadata(response.headers());
         let retry_after_secs = extract_retry_after(response.headers());
         let should_retry = extract_should_retry(response.headers());
-        let bytes = response.bytes().await?;
+        let bytes = read_body(response, status).await?;
 
         if !status.is_success() {
             if status == reqwest::StatusCode::UNAUTHORIZED {
@@ -1977,7 +1986,7 @@ impl SamplingClient {
             let model_metadata = extract_model_metadata(response.headers());
             let retry_after_secs = extract_retry_after(response.headers());
             let should_retry = extract_should_retry(response.headers());
-            let bytes = response.bytes().await?;
+            let bytes = read_body(response, status).await?;
             let message = api_error_message_for_endpoint(status, bytes.as_ref(), &request_url);
             span.record("error", message.as_str());
             tracing::error!(
@@ -2345,7 +2354,7 @@ impl SamplingClient {
             let model_metadata = extract_model_metadata(response.headers());
             let retry_after_secs = extract_retry_after(response.headers());
             let should_retry = extract_should_retry(response.headers());
-            let bytes = response.bytes().await?;
+            let bytes = read_body(response, status).await?;
             let message = api_error_message_for_endpoint(status, bytes.as_ref(), &request_url);
             tracing::error!(
                 status = %status,
@@ -2522,6 +2531,25 @@ fn parse_ndjson_line<T: serde::de::DeserializeOwned>(line: &[u8]) -> Option<Resu
             }))
         }
     }
+}
+
+/// Read a whole response body. The error that reqwest gives for a body that
+/// stops mid-read carries no status, so this logs the status that the
+/// headers already gave.
+async fn read_body(
+    response: reqwest::Response,
+    status: reqwest::StatusCode,
+) -> Result<bytes::Bytes> {
+    let url = response.url().to_string();
+    response.bytes().await.map_err(|error| {
+        tracing::error!(
+            status = %status,
+            url = %url,
+            %error,
+            "the response body could not be read"
+        );
+        SamplingError::Http(error)
+    })
 }
 
 /// Rebuild `Api` from stream-collected info, preserving status,

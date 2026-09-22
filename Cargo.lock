@@ -13873,6 +13873,7 @@ dependencies = [
  "async-openai",
  "async-stream",
  "axum",
+ "bytes",
  "chrono",
  "eventsource-stream",
  "futures-util",
