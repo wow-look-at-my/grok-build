@@ -10,10 +10,10 @@ on:
 permissions:
   contents: read
 
-# A branch push cancels the run it supersedes. Each master run gets its own group, so none is cancelled or dropped while queued.
+# Every run gets its own group, so a later push never cancels or drops a run in progress.
 concurrency:
-  group: ${{ github.ref == 'refs/heads/master' && format('ci-master-{0}', github.run_id) || format('ci-{0}', github.ref) }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+  group: ci-${{ github.run_id }}
+  cancel-in-progress: false
 
 env:
   CARGO_TERM_COLOR: always
