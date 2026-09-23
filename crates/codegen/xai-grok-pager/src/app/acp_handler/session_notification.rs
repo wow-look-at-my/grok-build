@@ -733,6 +733,32 @@ pub(super) fn handle_session_notification(notif: &acp::ExtNotification, app: &mu
             }
             true
         }
+        XaiSessionUpdate::GoalRoleModelFallback {
+            role,
+            skeptic_idx,
+            requested_model,
+            fallback_model,
+            reason,
+            detail,
+        } => {
+            tracing::warn!(
+                role,
+                ?skeptic_idx,
+                requested_model,
+                reason,
+                "goal role did not run on its configured model"
+            );
+            agent.scrollback.push_block(RenderBlock::session_event(
+                SessionEvent::GoalRoleModelFallback {
+                    role,
+                    skeptic_idx,
+                    requested_model,
+                    fallback_model,
+                    why: detail.unwrap_or(reason),
+                },
+            ));
+            true
+        }
         XaiSessionUpdate::HookAnnotation { message } => {
             if app.appearance.disable_plugins {
                 return false;

@@ -124,9 +124,8 @@ pub(crate) struct ChannelSpawner {
     /// Resolved per-role model+toolset override. Default (inherit) keeps the
     /// historic `::default()` spawn behavior.
     pub(crate) role_override: RoleSpawnOverride,
-    /// Event sink for the spawn-and-retry-once fail-open telemetry; `None`
-    /// in tests / when no event log is wired.
-    pub(crate) events: Option<EventWriter>,
+    /// Where a spawn-and-retry-once fail-open is reported. `Default` in tests.
+    pub(crate) fallback: crate::session::goal_planner::RoleFallbackReporter,
 }
 
 #[async_trait::async_trait]
@@ -143,7 +142,7 @@ impl GoalStrategistSpawner for ChannelSpawner {
             "strategist",
             None,
             &self.role_override,
-            self.events.as_ref(),
+            &self.fallback,
             prompt,
             |model, harness, prompt| self.send_one(id, prompt, model, harness),
         )
@@ -596,7 +595,7 @@ mod tests {
             cwd: None,
             trace_sink: None,
             role_override: RoleSpawnOverride::default(),
-            events: None,
+            fallback: Default::default(),
         };
         let handle = tokio::spawn(async move {
             let _ = spawner
@@ -641,7 +640,7 @@ mod tests {
                 model: Some("cfg-model".into()),
                 agent_type: Some("cursor".into()),
             },
-            events: None,
+            fallback: Default::default(),
         };
         let handle = tokio::spawn(async move {
             let _ = spawner
