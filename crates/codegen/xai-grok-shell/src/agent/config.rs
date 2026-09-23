@@ -6743,7 +6743,7 @@ reasoning_effort = "low"
             "a third-party endpoint must keep its resolved credential"
         );
         let mut first_party = SamplerConfig {
-            base_url: EndpointsConfig::default().resolve_inference_base_url(),
+            base_url: crate::env::PROD_CLI_CHAT_PROXY_BASE_URL.into(),
             ..SamplerConfig::default()
         };
         stamp_session_local_sampler_fields(&mut first_party, &session_cfg, None, None);
@@ -7888,8 +7888,8 @@ reasoning_effort = "low"
         assert_eq!(model.api_key, Some("user-custom-api-key".to_string()));
         assert_eq!(model.info.model, dm);
         assert_eq!(
-            model.info.base_url, "https://cli-chat-proxy.grok.com/v1",
-            "base_url should inherit from default, not be stale"
+            model.info.base_url, "",
+            "base_url inherits the built-in entry's, which is blank with no proxy configured"
         );
     }
     #[test]
@@ -9462,7 +9462,7 @@ reasoning_effort = "low"
         assert_eq!(model.info.base_url, "https://inference.example.com/v1");
     }
     #[test]
-    fn e2e_default_model_with_session_routes_to_proxy() {
+    fn e2e_default_model_with_session_has_no_url_until_one_is_configured() {
         let (_, models) = resolve_models_from_toml("", None);
         let model = models
             .get(crate::models::default_model())
@@ -9470,13 +9470,23 @@ reasoning_effort = "low"
         let sampling = resolve_sampling(model, Some("session-token-123"));
         assert_eq!(sampling.api_key.as_deref(), Some("session-token-123"));
         assert_eq!(
-            sampling.base_url, "https://cli-chat-proxy.grok.com/v1",
-            "session auth should route to cli-chat-proxy, not api.x.ai"
+            sampling.base_url, "",
+            "no proxy is configured, so the built-in model has no URL"
         );
+        let (_, models) = resolve_models_from_toml(
+            r#"
+            [endpoints]
+            cli_chat_proxy_base_url = "https://proxy.corp.example/v1"
+            "#,
+            None,
+        );
+        let model = models.get(crate::models::default_model()).unwrap();
+        let sampling = resolve_sampling(model, Some("session-token-123"));
+        assert_eq!(sampling.base_url, "https://proxy.corp.example/v1");
     }
     #[test]
     #[serial]
-    fn e2e_default_model_with_external_api_key_routes_to_api_xai() {
+    fn e2e_default_model_with_external_api_key_has_no_url_until_one_is_configured() {
         let (_, models) = resolve_models_from_toml("", None);
         let model = models
             .get(crate::models::default_model())
@@ -9485,8 +9495,8 @@ reasoning_effort = "low"
         let sampling = resolve_sampling(model, None);
         assert_eq!(sampling.api_key.as_deref(), Some("xai-external-key"));
         assert_eq!(
-            sampling.base_url, "https://api.x.ai/v1",
-            "external API key should route to api.x.ai via api_base_url"
+            sampling.base_url, "",
+            "no xAI API URL is configured, so an API key reaches nothing"
         );
         unsafe { std::env::remove_var("XAI_API_KEY") };
     }
@@ -9610,7 +9620,7 @@ reasoning_effort = "low"
         assert_eq!(sampling.base_url, "https://inference.example.com/v1");
         let sampling = resolve_sampling(default, Some("session-key"));
         assert_eq!(sampling.api_key.as_deref(), Some("session-key"));
-        assert_eq!(sampling.base_url, "https://cli-chat-proxy.grok.com/v1",);
+        assert_eq!(sampling.base_url, "", "no proxy is configured");
     }
     #[test]
     fn e2e_enterprise_custom_endpoint_skips_xai_defaults() {
@@ -14131,6 +14141,12 @@ default = "grok-4.5"
     #[test]
     #[serial_test::serial(remote_sig_disarm)]
     fn remote_settings_disarm_managed_config_signatures() {
+        unsafe {
+            std::env::set_var(
+                "GROK_CLI_CHAT_PROXY_BASE_URL",
+                crate::env::PROD_CLI_CHAT_PROXY_BASE_URL,
+            );
+        }
         xai_grok_config::signed_policy::apply_remote_managed_config_signature_verification(
             Some(true),
             true,
@@ -14159,6 +14175,9 @@ default = "grok-4.5"
             true,
         );
         assert!(xai_grok_config::signed_policy::verification_active());
+        unsafe {
+            std::env::remove_var("GROK_CLI_CHAT_PROXY_BASE_URL");
+        }
     }
     /// Keyed path: prod proxy origin can disarm; env override cannot.
     #[test]
@@ -14174,7 +14193,10 @@ default = "grok-4.5"
             ..Default::default()
         };
         unsafe {
-            std::env::remove_var("GROK_CLI_CHAT_PROXY_BASE_URL");
+            std::env::set_var(
+                "GROK_CLI_CHAT_PROXY_BASE_URL",
+                crate::env::PROD_CLI_CHAT_PROXY_BASE_URL,
+            );
         }
         apply_remote_settings_side_effects(Some(&settings));
         assert!(
