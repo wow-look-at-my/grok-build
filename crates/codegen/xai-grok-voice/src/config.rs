@@ -133,21 +133,38 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_stt_ws_uses_wss() {
-        assert_eq!(
-            VoiceConfig::default().stt_ws_url().unwrap(),
-            "wss://api.x.ai/v1/stt"
-        );
+    fn the_default_has_no_url_and_connects_nowhere() {
+        assert_eq!(VoiceConfig::default().api_base, "");
+        assert!(matches!(
+            VoiceConfig::default().stt_ws_url(),
+            Err(VoiceError::Config(msg)) if msg.contains("no URL")
+        ));
+    }
+
+    #[test]
+    fn a_host_nobody_allowed_is_refused() {
+        let cfg = VoiceConfig {
+            api_base: "https://api.x.ai".into(),
+            ..VoiceConfig::default()
+        };
+        assert!(matches!(
+            cfg.stt_ws_url(),
+            Err(VoiceError::Config(msg)) if msg.contains("allowed_endpoints")
+        ));
     }
 
     #[test]
     fn scheme_less_and_wss_bases() {
-        for base in ["api.x.ai", "wss://api.x.ai", "HTTPS://api.x.ai"] {
+        for base in [
+            "voice.example.com",
+            "wss://voice.example.com",
+            "HTTPS://voice.example.com",
+        ] {
             let cfg = VoiceConfig {
                 api_base: base.into(),
                 ..VoiceConfig::default()
             };
-            assert_eq!(cfg.stt_ws_url().unwrap(), "wss://api.x.ai/v1/stt");
+            assert_eq!(cfg.stt_ws_url().unwrap(), "wss://voice.example.com/v1/stt");
         }
     }
 
@@ -223,7 +240,7 @@ language = "fr"
     }
 
     #[test]
-    fn whitespace_voice_api_base_without_endpoints_uses_default() {
+    fn whitespace_voice_api_base_without_endpoints_has_no_url() {
         let table: toml::Table = toml::from_str(
             r#"
 [voice]
@@ -232,8 +249,8 @@ api_base = "  "
         )
         .unwrap();
         let cfg = VoiceConfig::from_config_table(&table, None);
-        assert_eq!(cfg.api_base, VoiceConfig::default().api_base);
-        assert_eq!(cfg.stt_ws_url().unwrap(), "wss://api.x.ai/v1/stt");
+        assert_eq!(cfg.api_base, "");
+        assert!(cfg.stt_ws_url().is_err());
     }
 
     #[test]
@@ -271,15 +288,15 @@ xai_api_base_url = "https://config.example.com"
 [endpoints]
 xai_api_base_url = "https://proxy.example.com/xai/v1"
 [voice]
-api_base = "https://api.x.ai"
+api_base = "https://voice.example.com"
 language = "es"
 "#,
         )
         .unwrap();
         let cfg = VoiceConfig::from_config_table(&table, None);
-        assert_eq!(cfg.api_base, "https://api.x.ai");
+        assert_eq!(cfg.api_base, "https://voice.example.com");
         assert_eq!(cfg.language, "es");
-        assert_eq!(cfg.stt_ws_url().unwrap(), "wss://api.x.ai/v1/stt");
+        assert_eq!(cfg.stt_ws_url().unwrap(), "wss://voice.example.com/v1/stt");
     }
 
     #[test]
