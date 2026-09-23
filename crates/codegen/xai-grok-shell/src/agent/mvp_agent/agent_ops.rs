@@ -157,7 +157,9 @@ impl MvpAgent {
         primary: &SamplingConfig,
     ) -> Result<(OaiCompatClient, String), acp::Error> {
         let slug = self.resolve_session_summary_model();
-        let pinned = self.cfg.borrow().session_summary_model.is_some();
+        // Config resolution fills the compiled default in, so only another
+        // model counts as a choice.
+        let pinned = slug != crate::models::default_session_summary_model();
         let session_key = self.auth_manager.current_or_expired().map(|a| a.key.clone());
         let models = self.models_manager.models();
         let endpoints = self.models_manager.endpoints();

@@ -134,8 +134,9 @@ async fn provider_listed_and_configured_models_send_only_to_the_provider() {
         let leaked: Vec<_> = trap.requests().into_iter().filter(is_inference).collect();
         assert!(
             leaked.is_empty(),
-            "model {model:?} sent a prompt to the first-party URL; trap requests:\n{}",
-            trap.request_log_summary()
+            "model {model:?} sent a prompt to the first-party URL; trap requests:\n{}\nleaked bodies:\n{:#?}",
+            trap.request_log_summary(),
+            leaked.iter().map(|e| &e.body).collect::<Vec<_>>()
         );
         for stream in [&result.stdout, &result.stderr] {
             assert!(
