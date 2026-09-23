@@ -135,6 +135,9 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - Entering Orchestrator used to call `set_yolo_mode_inner(app, false)`, so cycling to it silently re-armed the approval prompt while the banner only said "Orchestrator". A subagent inherits `ctx.yolo_mode` from its parent, so that also re-armed it for everything the orchestrator delegates — the exact work nobody is watching.
 - Closing the ring (past the last identity stop) DOES drop yolo before entering Plan. Plan+yolo matches no arm of the `(in_plan, in_auto, in_yolo)` match, so leaving it set sends the next press into the catch-all and lands on Normal instead of Auto.
 - The composer flag row is additive, so an orchestrating yolo session correctly reads `always-approve · orchestrator` (`agent_view/render.rs`).
+- A mode change swaps the system prompt and the tool registry together. The shell never drops that swap. A swap that arrives while a turn runs waits in `ModeAgentState::pending` (`acp_session_impl/session_mode.rs`) and lands at turn end. A refused swap leaves the Explore prompt ("You have NO file editing tools") on a session the user already moved to Plan or Auto.
+- The shell owns the ring's base agent (`mode_agent_target`). A bare `plan`/`default`/`ask` that arrives while a ring identity is active restores the agent that ran before the ring. So a pager that lost its ring state cannot strand the session under Explore.
+- A read-only agent (`permission_mode: Plan`, which covers explore and plan) gets no injected `write` tool. Its prompt says it has no editing tools.
 
 ## `/goal` role-model notes
 

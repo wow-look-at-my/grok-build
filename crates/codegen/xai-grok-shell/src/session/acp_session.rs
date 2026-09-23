@@ -820,6 +820,8 @@ pub(crate) struct SessionActor {
     /// determine whether a model's `agent_type` is compatible with the
     /// current session.
     pub(crate) active_agent_type: parking_lot::Mutex<Option<String>>,
+    /// See [`ModeAgentState`].
+    pub(crate) mode_agent: parking_lot::Mutex<ModeAgentState>,
     /// Live gate shared with the notification bridge (see
     /// `NotificationBridgeConfig::queue_exit_reminder_on_approved_exit`).
     /// Seeded at spawn from the agent definition's harness; refreshed by
