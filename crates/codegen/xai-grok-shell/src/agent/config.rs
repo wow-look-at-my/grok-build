@@ -2644,7 +2644,8 @@ impl Config {
                 .map_or(Policy::DEFAULT_MAX_RETRIES, Policy::clamp_max_retries),
         })
     }
-    /// The output-rate floor for `model_id`, or `None` when nothing gates it.
+    /// The output-rate floor and time-to-first-token limit for `model_id`, or
+    /// `None` when both are off.
     ///
     /// The floor resolves per-model first: `[model.<id>].min_output_tokens_per
     /// _sec` is the endpoint's own number, and it is the only one that can
@@ -2666,6 +2667,11 @@ impl Config {
             .filter(|f| f.is_finite());
         let min_tokens_per_sec =
             per_model.unwrap_or_else(|| f64::from(self.ui.min_output_tokens_per_sec_value()));
+        // Same layering for the time-to-first-token limit. A provider's value
+        // is already folded into the model entry.
+        let ttft_timeout_secs = find_model_by_id(&models, model_id)
+            .and_then(|e| e.info.ttft_timeout_secs)
+            .unwrap_or_else(|| u64::from(self.ui.ttft_timeout_secs_value()));
         let mut ui = self.ui.clone();
         ui.adopt_legacy_output_rate_floor(
             self.output_rate_floor.window_secs,
@@ -2676,6 +2682,7 @@ impl Config {
             window_secs: u64::from(ui.output_rate_window_secs_value()),
             sustained_secs: u64::from(ui.output_rate_sustained_secs_value()),
             max_retries: ui.output_rate_max_retries_value(),
+            ttft_timeout_secs,
         }
         .clamped();
         policy.is_armed().then_some(policy)
@@ -4256,6 +4263,7 @@ fn default_models(endpoints: &EndpointsConfig) -> IndexMap<String, ModelEntryCon
                 laziness_detector: LazinessDetectorPerModelConfig::default(),
                 pricing: xai_grok_sampling_types::ModelPricing::default(),
                 min_output_tokens_per_sec: None,
+                ttft_timeout_secs: None,
                 loaded_in_vram: None,
             };
             (key, config)
@@ -4305,6 +4313,7 @@ impl ModelEntryConfig {
             laziness_detector: LazinessDetectorPerModelConfig::default(),
             pricing: xai_grok_sampling_types::ModelPricing::default(),
             min_output_tokens_per_sec: None,
+            ttft_timeout_secs: None,
             loaded_in_vram: None,
         }
     }
@@ -4453,6 +4462,10 @@ pub struct ModelEntryConfig {
     /// `[output_rate_floor]` value applies when this is absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub min_output_tokens_per_sec: Option<f64>,
+    /// Time-to-first-token limit in seconds for this model. Zero turns it off;
+    /// absent falls through to `[ui].ttft_timeout_secs`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ttft_timeout_secs: Option<u64>,
     /// Whether this model is resident in VRAM, for a listing dialect that
     /// reports residency. `None` where the listing does not say. Runtime
     /// state, so it is never serialized into a persisted catalog.
@@ -4587,6 +4600,7 @@ pub struct ConfigModelOverride {
     pub strict_message_schema: Option<bool>,
     pub pricing: Option<xai_grok_sampling_types::ModelPricing>,
     pub min_output_tokens_per_sec: Option<f64>,
+    pub ttft_timeout_secs: Option<u64>,
     /// Extra top-level fields merged into every request body for this model.
     /// The typed request structs are closed, so a per-deployment setting only
     /// one target understands (LM Studio's `ttl`, Ollama's `keep_alive` and
@@ -4716,6 +4730,9 @@ impl ConfigModelOverride {
         if self.min_output_tokens_per_sec.is_some() {
             entry.info.min_output_tokens_per_sec = self.min_output_tokens_per_sec;
         }
+        if self.ttft_timeout_secs.is_some() {
+            entry.info.ttft_timeout_secs = self.ttft_timeout_secs;
+        }
         if !self.extra_body.is_empty() {
             entry.info.extra_body = toml_map_to_json(&self.extra_body);
         }
@@ -4838,6 +4855,11 @@ pub struct ModelInfo {
     /// session-wide `[ui].min_output_tokens_per_sec`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub min_output_tokens_per_sec: Option<f64>,
+    /// Time-to-first-token limit in seconds; see
+    /// [`Config::resolve_output_rate_floor`]. `None` falls through to
+    /// `[ui].ttft_timeout_secs`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ttft_timeout_secs: Option<u64>,
     /// Extra top-level fields merged into this model's request body.
     /// See [`ConfigModelOverride::extra_body`].
     #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
@@ -4899,6 +4921,7 @@ impl ModelInfo {
             laziness_detector: LazinessDetectorPerModelConfig::default(),
             pricing: xai_grok_sampling_types::ModelPricing::default(),
             min_output_tokens_per_sec: None,
+            ttft_timeout_secs: None,
             extra_body: Default::default(),
             pricing_lookup_enabled: true,
             loaded_in_vram: None,
@@ -4944,6 +4967,7 @@ impl ModelInfo {
             laziness_detector: entry.laziness_detector.clone(),
             pricing: entry.pricing.clone(),
             min_output_tokens_per_sec: entry.min_output_tokens_per_sec,
+            ttft_timeout_secs: entry.ttft_timeout_secs,
             extra_body: Default::default(),
             pricing_lookup_enabled: true,
             loaded_in_vram: entry.loaded_in_vram,
@@ -5788,6 +5812,7 @@ pub(crate) fn resolve_aux_model_sampling_config(
                 laziness_detector: LazinessDetectorPerModelConfig::default(),
                 pricing: xai_grok_sampling_types::ModelPricing::default(),
                 min_output_tokens_per_sec: None,
+                ttft_timeout_secs: None,
                 extra_body: Default::default(),
                 pricing_lookup_enabled: true,
                 loaded_in_vram: None,
@@ -6018,6 +6043,7 @@ fn resolve_hidden_default_web_search_sampling_config(
             laziness_detector: LazinessDetectorPerModelConfig::default(),
             pricing: xai_grok_sampling_types::ModelPricing::default(),
             min_output_tokens_per_sec: None,
+            ttft_timeout_secs: None,
             extra_body: Default::default(),
             pricing_lookup_enabled: true,
             loaded_in_vram: None,
@@ -7269,6 +7295,7 @@ reasoning_effort = "low"
                 laziness_detector: LazinessDetectorPerModelConfig::default(),
                 pricing: xai_grok_sampling_types::ModelPricing::default(),
                 min_output_tokens_per_sec: None,
+                ttft_timeout_secs: None,
                 extra_body: Default::default(),
                 pricing_lookup_enabled: true,
                 loaded_in_vram: None,
@@ -8315,6 +8342,7 @@ reasoning_effort = "low"
             laziness_detector: LazinessDetectorPerModelConfig::default(),
             pricing: xai_grok_sampling_types::ModelPricing::default(),
             min_output_tokens_per_sec: None,
+            ttft_timeout_secs: None,
             loaded_in_vram: None,
         };
         let info = ModelInfo::from_config(&entry);
@@ -8478,6 +8506,7 @@ reasoning_effort = "low"
             laziness_detector: LazinessDetectorPerModelConfig::default(),
             pricing: xai_grok_sampling_types::ModelPricing::default(),
             min_output_tokens_per_sec: None,
+            ttft_timeout_secs: None,
             loaded_in_vram: None,
         };
         let info = ModelInfo::from_config(&entry);
@@ -9005,6 +9034,7 @@ reasoning_effort = "low"
             laziness_detector: LazinessDetectorPerModelConfig::default(),
             pricing: xai_grok_sampling_types::ModelPricing::default(),
             min_output_tokens_per_sec: None,
+            ttft_timeout_secs: None,
             loaded_in_vram: None,
         };
         let info = ModelInfo::from_config(&entry);
@@ -10065,11 +10095,87 @@ reasoning_effort = "low"
                 ..Default::default()
             },
         );
+        let p = model_off
+            .resolve_output_rate_floor("ungated-model")
+            .expect("the first-token limit keeps the policy armed");
         assert!(
-            model_off
-                .resolve_output_rate_floor("ungated-model")
-                .is_none(),
-            "a zero on the model turns the gate off for that model alone"
+            !p.floor_armed(),
+            "a zero on the model turns the rate floor off for that model alone"
+        );
+        let mut all_off = model_off.clone();
+        all_off.ui.ttft_timeout_secs = Some(0);
+        assert!(
+            all_off.resolve_output_rate_floor("ungated-model").is_none(),
+            "with the first-token limit off too, nothing gates the model"
+        );
+    }
+    /// The time-to-first-token limit ships on, takes `[ui]`, then the
+    /// provider, then the model. Zero turns it off and a huge value clamps.
+    #[test]
+    fn resolve_output_rate_floor_layers_the_ttft_limit() {
+        use xai_grok_shared::ui_config::UiConfig;
+        let shipped = Config::default()
+            .resolve_output_rate_floor("any-model")
+            .expect("armed out of the box");
+        assert_eq!(
+            shipped.ttft_timeout_secs,
+            u64::from(UiConfig::TTFT_TIMEOUT_SECS_DEFAULT)
+        );
+
+        let toml_cfg: toml::Value = toml::from_str(
+            r#"
+            [ui]
+            ttft_timeout_secs = 90
+
+            [model_providers.local]
+            base_url = "http://127.0.0.1:1234/v1"
+            api_key = "k"
+            models_autodetect = false
+            ttft_timeout_secs = 60
+
+            [model.from-provider]
+            model = "from-provider"
+            model_provider = "local"
+
+            [model.own-limit]
+            model = "own-limit"
+            model_provider = "local"
+            ttft_timeout_secs = 30
+
+            [model.limit-off]
+            model = "limit-off"
+            model_provider = "local"
+            ttft_timeout_secs = 0
+            "#,
+        )
+        .expect("toml parses");
+        let mut cfg = Config::new_from_toml_cfg(&toml_cfg).expect("config parses");
+        let ttft = |cfg: &Config, id: &str| {
+            cfg.resolve_output_rate_floor(id)
+                .map(|p| p.ttft_timeout_secs)
+        };
+        assert_eq!(ttft(&cfg, "any-model"), Some(90), "[ui] applies");
+        assert_eq!(
+            ttft(&cfg, "from-provider"),
+            Some(60),
+            "the provider wins over [ui]"
+        );
+        assert_eq!(
+            ttft(&cfg, "own-limit"),
+            Some(30),
+            "the model wins over its provider"
+        );
+        assert_eq!(
+            ttft(&cfg, "limit-off"),
+            Some(0),
+            "a zero on the model is off"
+        );
+
+        cfg.ui.ttft_timeout_secs = Some(99_999);
+        assert_eq!(
+            ttft(&cfg, "any-model"),
+            Some(*xai_grok_sampling_types::OutputRateFloorPolicy::TTFT_TIMEOUT_SECS_RANGE.end()),
+            "an out-of-range value clamps"
         );
     }
     /// The retry budget and the window resolve `[ui]` first, then the legacy
@@ -13267,6 +13373,7 @@ default = "grok-4.5"
                 laziness_detector: LazinessDetectorPerModelConfig::default(),
                 pricing: xai_grok_sampling_types::ModelPricing::default(),
                 min_output_tokens_per_sec: None,
+                ttft_timeout_secs: None,
                 auto_compact_threshold_percent: None,
                 system_prompt_label: None,
                 extra_body: Default::default(),
