@@ -5335,9 +5335,11 @@ mod tests {
 
     #[tokio::test]
     async fn verification_stage_skeptic_transport_failure_counts_as_refute() {
-        // Three skeptics: one transport-fails (fail-closed refute),
-        // two return Not Refuted. Aggregate is 1-of-3 refute → Achieved.
+        // Three skeptics: one transport-fails twice (its run and its
+        // retry), so it refutes fail-closed. Two return Not Refuted.
+        // Aggregate is 1-of-3 refute → Achieved.
         let spawner: Arc<dyn GoalClassifierSpawner> = Arc::new(MockSpawner::new([
+            MockResponse::transport_error(),
             MockResponse::transport_error(),
             MockResponse::not_refuted(),
             MockResponse::not_refuted(),
@@ -5364,6 +5366,45 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn verification_stage_retries_a_skeptic_that_gave_no_verdict() {
+        // Skeptic 0 fails, and its retry clears. Only the retry's vote may
+        // count; the failure must never reach the implementer as a gap.
+        let spawner = Arc::new(MockSpawner::new([
+            MockResponse::transport_error(),
+            MockResponse::not_refuted(),
+            MockResponse::not_refuted(),
+        ]));
+        let observed = spawner.clone();
+        let spawner: Arc<dyn GoalClassifierSpawner> = spawner;
+        let (log, emit) = collect_events();
+        let _wsp = tempfile::tempdir().unwrap();
+        let vid = unique_verifier_id();
+        let outcome = run_verification_stage(
+            spawner,
+            stage_inputs("obj", "ok", _wsp.path(), &vid, 1, 2),
+            &emit,
+        )
+        .await
+        .outcome;
+        let GoalClassifierOutcome::Achieved { details_path } = outcome else {
+            panic!("expected Achieved: the retry cleared skeptic 0");
+        };
+        let _ = tokio::fs::remove_file(&details_path).await;
+        assert_eq!(*observed.skeptic_idxs.lock().unwrap(), vec![0, 0, 1]);
+        assert_eq!(
+            observed.resume_froms.lock().unwrap()[1],
+            None,
+            "the retry is a cold spawn",
+        );
+        let log = log.lock().unwrap();
+        assert!(
+            log.iter().any(|t| t.starts_with("skeptic:0:false")),
+            "skeptic 0 must carry the retry's vote: {log:?}",
+        );
+        assert!(!log.iter().any(|t| t.starts_with("skeptic:0:true")));
+    }
+
+    #[tokio::test]
     async fn verification_stage_skeptic_cancelled_counts_as_refute() {
         let spawner: Arc<dyn GoalClassifierSpawner> = Arc::new(MockSpawner::new([
             MockResponse::cancelled(),
@@ -5387,9 +5428,10 @@ mod tests {
 
     #[tokio::test]
     async fn verification_stage_skeptic_malformed_falls_back_to_refute() {
-        // Two skeptics; one returns malformed-token + no JSON; other
-        // returns Refuted. Both refute ⇒ NotAchieved.
+        // Two skeptics; one returns malformed-token + no JSON on its run and
+        // its retry; other returns Refuted. Both refute ⇒ NotAchieved.
         let spawner: Arc<dyn GoalClassifierSpawner> = Arc::new(MockSpawner::new([
+            MockResponse::malformed_token(),
             MockResponse::malformed_token(),
             MockResponse::refuted(),
         ]));
@@ -5415,6 +5457,7 @@ mod tests {
         // crash (non-user failure) must also synthesise a refute vote,
         // with the `fallback_note` distinguishing it from a cancel.
         let spawner: Arc<dyn GoalClassifierSpawner> = Arc::new(MockSpawner::new([
+            MockResponse::runtime_error(),
             MockResponse::runtime_error(),
             MockResponse::not_refuted(),
         ]));
@@ -5447,8 +5490,11 @@ mod tests {
         // `confidence: Unknown`, `evidence: ""`, and the fallback note.
         // Variant-C outcome: skeptic 0 not-refuted, cold skeptic 1
         // refuted → the cold quorum (skeptic 1 only) fails → NotAchieved.
+        // A terminal-only "Refuted" carries no reason, so skeptic 1 is
+        // retried once, and the retry answers the same way.
         let spawner: Arc<dyn GoalClassifierSpawner> = Arc::new(MockSpawner::new([
             MockResponse::terminal_only("Not Refuted"),
+            MockResponse::terminal_only("Refuted"),
             MockResponse::terminal_only("Refuted"),
         ]));
         let (log, emit) = collect_events();
@@ -5784,8 +5830,9 @@ mod tests {
     async fn verification_stage_skeptic0_failure_does_not_short_circuit() {
         // A synthetic refute (transport failure, confidence Unknown) is NOT a
         // high-confidence refute, so it must fan out the full panel rather
-        // than short-circuit. 1-of-3 refute → Achieved.
+        // than short-circuit. Its retry fails too. 1-of-3 refute → Achieved.
         let spawner = Arc::new(MockSpawner::new([
+            MockResponse::transport_error(),
             MockResponse::transport_error(),
             MockResponse::not_refuted(),
             MockResponse::not_refuted(),
@@ -5806,8 +5853,9 @@ mod tests {
             observed
                 .spawn_count
                 .load(std::sync::atomic::Ordering::SeqCst),
-            3,
-            "a skeptic-0 spawn failure must NOT short-circuit the panel",
+            4,
+            "a skeptic-0 spawn failure must NOT short-circuit the panel \
+             (its run, its retry, and both cold skeptics)",
         );
         let GoalClassifierOutcome::Achieved { details_path } = outcome else {
             panic!("expected Achieved (1-of-3 refute minority)");
