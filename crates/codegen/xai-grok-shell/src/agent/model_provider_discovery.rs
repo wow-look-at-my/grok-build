@@ -1021,6 +1021,39 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_block_claims_only_the_provider_on_its_url() {
+        let (base_a, server_a) = start_listing_server(two_model_listing()).await;
+        let (base_b, server_b) = start_listing_server(two_model_listing()).await;
+        let cfg = config_from(&format!(
+            r#"
+            [model_providers.alpha]
+            base_url = "{base_a}/v1"
+
+            [model_providers.beta]
+            base_url = "{base_b}/v1"
+
+            [model.big-on-alpha]
+            model = "big-one"
+            base_url = "{base_a}/v1"
+            "#
+        ));
+
+        let discovered = resolve_discovered_models(&cfg, &discover_provider_models(&cfg).await);
+        server_a.abort();
+        server_b.abort();
+
+        assert!(!discovered.contains_key("alpha/big-one"));
+        assert_eq!(
+            discovered["big-on-alpha"].info.model_provider.as_deref(),
+            Some("alpha")
+        );
+        let beta = discovered
+            .get("beta/big-one")
+            .expect("the other provider serving the same slug keeps its own entry");
+        assert_eq!(beta.info.base_url, format!("{base_b}/v1"));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn a_user_block_is_merged_with_the_listing_and_its_fields_win() {
         let (base, server) = start_ollama_server().await;
         let cfg = config_from(&format!(

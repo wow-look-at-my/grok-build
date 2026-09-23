@@ -60,9 +60,13 @@ impl SlashCommand for ModelCommand {
             return None;
         }
 
-        // Effort phase if input is "<reasoning-model> ", else model phase.
+        // Effort phase if input is "<reasoning-model> ", route phase if it is
+        // "<shared name> ", else model phase.
         if let Some(model_id) = detect_effort_phase(ctx.models, args_query) {
             return Some(build_effort_items(ctx.models, &model_id));
+        }
+        if let Some(group) = detect_route_phase(ctx.models, args_query) {
+            return Some(build_route_items(ctx.models, &group));
         }
         // The opening list is the favorites. A typed query lists every model,
         // so a provider with hundreds of them still answers a search for one
@@ -78,6 +82,9 @@ impl SlashCommand for ModelCommand {
         if let Some(model_id) = detect_effort_phase(ctx.models, args_query) {
             return Some(build_effort_items(ctx.models, &model_id));
         }
+        if let Some(group) = detect_route_phase(ctx.models, args_query) {
+            return Some(build_route_items(ctx.models, &group));
+        }
         Some(build_model_items(ctx.models, false))
     }
 
@@ -91,6 +98,9 @@ impl SlashCommand for ModelCommand {
         // often contain spaces ("Grok 4.5"); if we split on the last token
         // first, a shorter catalog entry ("Grok") would steal the prefix and
         // treat "4.5" as an effort level.
+        if let Some(message) = ambiguous_name(ctx.models, trimmed) {
+            return CommandResult::Error(message);
+        }
         if let Some(id) = ctx.models.resolve_by_name_or_id(trimmed) {
             return CommandResult::Action(Action::SetDefaultModel(id));
         }
@@ -99,6 +109,11 @@ impl SlashCommand for ModelCommand {
         // (not persisted as default). Resolve via the shared gate so a rejected
         // level (e.g. `none` on grok-4.5) surfaces the effort error with the
         // model's offered ids — not "Unknown model: … none".
+        if let Some((prefix, _)) = split_trailing_token(trimmed)
+            && let Some(message) = ambiguous_name(ctx.models, prefix)
+        {
+            return CommandResult::Error(message);
+        }
         if let Some((prefix, token)) = split_trailing_token(trimmed)
             && let Some(id) = resolve_model(ctx.models, prefix)
             && ctx
@@ -145,12 +160,16 @@ fn split_trailing_token(args: &str) -> Option<(&str, &str)> {
 /// Returns the matched model id when `args_query` is `"<reasoning-model> ..."`.
 /// Longest-name-first to disambiguate names that share a prefix.
 fn detect_effort_phase(models: &ModelState, args_query: &str) -> Option<acp::ModelId> {
-    // A model is typed by its name or by its id; a shared name is typed by id.
+    // A model is typed by its id, or by its name when no other model has it. A
+    // shared name leads to the route phase instead.
     let mut candidates: Vec<(&acp::ModelId, &str)> = models
         .available
         .iter()
         .filter(|(_, info)| supports_reasoning_effort(info))
-        .flat_map(|(id, info)| [(id, id.0.as_ref()), (id, info.name.as_str())])
+        .flat_map(|(id, info)| {
+            let name = (!name_is_shared(models, id)).then_some((id, info.name.as_str()));
+            std::iter::once((id, id.0.as_ref())).chain(name)
+        })
         .collect();
     candidates.sort_by_key(|(_, name)| std::cmp::Reverse(name.len()));
 
@@ -204,28 +223,123 @@ fn pick_token(models: &ModelState, id: &acp::ModelId) -> String {
     }
 }
 
-/// The suffix that tells a row apart from the others with its name: where it
-/// routes, or its id when the route does not differ either.
-fn disambiguator(models: &ModelState, id: &acp::ModelId, info: &acp::ModelInfo) -> String {
-    let Some(route) = route_label(info) else {
-        return id.0.to_string();
-    };
-    let route_is_shared = models.available.iter().any(|(other, o)| {
-        other != id
-            && o.name.eq_ignore_ascii_case(&info.name)
-            && route_label(o).as_deref() == Some(route.as_str())
-    });
-    if route_is_shared {
-        id.0.to_string()
+/// Every model whose display name is `name`, in catalog order.
+fn models_named<'a>(models: &'a ModelState, name: &str) -> Vec<&'a acp::ModelId> {
+    models
+        .available
+        .iter()
+        .filter(|(_, info)| info.name.eq_ignore_ascii_case(name))
+        .map(|(id, _)| id)
+        .collect()
+}
+
+/// An error when `query` is a name several models share and no model's id.
+/// The name alone cannot say which route to take.
+fn ambiguous_name(models: &ModelState, query: &str) -> Option<String> {
+    if models
+        .available
+        .keys()
+        .any(|id| id.0.as_ref().eq_ignore_ascii_case(query))
+    {
+        return None;
+    }
+    let group = models_named(models, query);
+    if group.len() < 2 {
+        return None;
+    }
+    let ids: Vec<&str> = group.iter().map(|id| id.0.as_ref()).collect();
+    Some(format!(
+        "Several providers serve '{query}'. Pick one: {}",
+        ids.join(", ")
+    ))
+}
+
+/// The models behind a shared name when `args_query` is `"<shared name> ..."`.
+/// Longest name first, so a name that is a prefix of another does not win.
+fn detect_route_phase<'a>(
+    models: &'a ModelState,
+    args_query: &str,
+) -> Option<Vec<&'a acp::ModelId>> {
+    let mut names: Vec<&str> = models
+        .available
+        .iter()
+        .filter(|(id, _)| name_is_shared(models, id))
+        .map(|(_, info)| info.name.as_str())
+        .collect();
+    names.sort_by_key(|name| std::cmp::Reverse(name.len()));
+    names.into_iter().find_map(|name| {
+        let matches = args_query.len() > name.len()
+            && args_query.is_char_boundary(name.len())
+            && args_query[..name.len()].eq_ignore_ascii_case(name)
+            && args_query[name.len()..].starts_with(char::is_whitespace);
+        matches.then(|| models_named(models, name))
+    })
+}
+
+/// Trailing space on reasoning models: it signals "more input expected" to
+/// the prompt widget, so Enter advances to the effort phase instead of
+/// submitting.
+fn chained_insert(token: &str, info: &acp::ModelInfo) -> String {
+    if supports_reasoning_effort(info) {
+        format!("{token} ")
     } else {
-        route
+        token.to_owned()
     }
 }
 
-/// One row per logical model. Reasoning models get a trailing space in
+/// The row description: the model's own, else where it routes.
+fn row_description(info: &acp::ModelInfo) -> String {
+    match info.description.as_deref() {
+        Some(d) if !d.trim().is_empty() => d.to_owned(),
+        _ => route_label(info)
+            .map(|route| format!("via {route}"))
+            .unwrap_or_default(),
+    }
+}
+
+/// One row per route for the `/model` route phase. A route that differs from
+/// the others only in its id shows its id.
+fn build_route_items(models: &ModelState, group: &[&acp::ModelId]) -> Vec<ArgItem> {
+    let labels: Vec<String> = group
+        .iter()
+        .map(|id| {
+            models
+                .available
+                .get(*id)
+                .and_then(route_label)
+                .unwrap_or_else(|| id.0.to_string())
+        })
+        .collect();
+    let mut items = Vec::with_capacity(group.len());
+    for (idx, id) in group.iter().enumerate() {
+        let Some(info) = models.available.get(*id) else {
+            continue;
+        };
+        let shared_label = labels.iter().filter(|l| **l == labels[idx]).count() > 1;
+        let mut display = if shared_label {
+            id.0.to_string()
+        } else {
+            labels[idx].clone()
+        };
+        if models.current.as_ref() == Some(*id) {
+            display.push_str(" (current)");
+        }
+        items.push(ArgItem {
+            display,
+            match_text: format!("{} {}", labels[idx], id.0),
+            insert_text: chained_insert(id.0.as_ref(), info),
+            description: info.description.clone().unwrap_or_default(),
+            loaded_in_vram: loaded_in_vram_meta(info.meta.as_ref()),
+        });
+    }
+    items
+}
+
+/// One row per model name. Reasoning models get a trailing space in
 /// `insert_text` so the prompt widget chains into the effort sub-menu.
 ///
-/// Two rows with one name show where each routes, and select by id.
+/// A name that several models share is one row. It inserts the name and a
+/// space, which opens the route phase: one row per provider serving it.
 ///
 /// `favorites_only` narrows the list to the models the config marked, plus the
 /// current one — a picker that hides what the session is running reads as a
@@ -235,44 +349,66 @@ fn build_model_items(models: &ModelState, favorites_only: bool) -> Vec<ArgItem> 
     let current_id = models.current.as_ref();
     let narrow = favorites_only && models.available.values().any(is_favorite);
     let mut items: Vec<ArgItem> = Vec::with_capacity(models.available.len());
+    let mut grouped: Vec<String> = Vec::new();
     for (id, info) in &models.available {
+        if name_is_shared(models, id) {
+            let key = info.name.to_lowercase();
+            if grouped.contains(&key) {
+                continue;
+            }
+            let group = models_named(models, &info.name);
+            let infos: Vec<&acp::ModelInfo> = group
+                .iter()
+                .filter_map(|id| models.available.get(*id))
+                .collect();
+            let has_current = group.iter().any(|g| current_id == Some(*g));
+            if narrow && !has_current && !infos.iter().any(|i| is_favorite(i)) {
+                continue;
+            }
+            grouped.push(key);
+            let routes: Vec<String> = group
+                .iter()
+                .zip(&infos)
+                .map(|(id, i)| {
+                    provider_meta(i.meta.as_ref())
+                        .or_else(|| endpoint_meta(i.meta.as_ref()))
+                        .unwrap_or(id.0.as_ref())
+                        .to_owned()
+                })
+                .collect();
+            let loaded = infos
+                .iter()
+                .filter_map(|i| loaded_in_vram_meta(i.meta.as_ref()))
+                .reduce(|a, b| a || b);
+            items.push(ArgItem {
+                display: if has_current {
+                    format!("{} (current)", info.name)
+                } else {
+                    info.name.clone()
+                },
+                match_text: info.name.clone(),
+                insert_text: format!("{} ", info.name),
+                description: format!("{} providers: {}", group.len(), routes.join(", ")),
+                loaded_in_vram: loaded,
+            });
+            continue;
+        }
+
         let is_current = current_id == Some(id);
         if narrow && !is_current && !is_favorite(info) {
             continue;
         }
-        let supports = supports_reasoning_effort(info);
-
-        let mut display = if name_is_shared(models, id) {
-            format!("{} · {}", info.name, disambiguator(models, id, info))
-        } else {
-            info.name.clone()
-        };
+        let mut display = info.name.clone();
         if is_current {
             display.push_str(" (current)");
         }
 
         let token = pick_token(models, id);
-        // Trailing space on reasoning models: signals "more input
-        // expected" to the prompt widget so Enter advances to effort
-        // phase instead of submitting.
-        let insert_text = if supports {
-            format!("{token} ")
-        } else {
-            token.clone()
-        };
-
-        let description = match info.description.as_deref() {
-            Some(d) if !d.trim().is_empty() => d.to_owned(),
-            _ => route_label(info)
-                .map(|route| format!("via {route}"))
-                .unwrap_or_default(),
-        };
-
         items.push(ArgItem {
             display,
+            insert_text: chained_insert(&token, info),
             match_text: token,
-            insert_text,
-            description,
+            description: row_description(info),
             // Only a provider that reports residency answers this, so the dot
             // appears beside local models and nowhere else.
             loaded_in_vram: loaded_in_vram_meta(info.meta.as_ref()),
@@ -424,29 +560,64 @@ mod tests {
     }
 
     #[test]
-    fn rows_that_share_a_name_say_where_each_routes() {
+    fn a_shared_name_is_one_row_that_opens_the_route_phase() {
         let state = state_with_a_shared_name();
         let items = ModelCommand.search_args(&ctx_for(&state), "").unwrap();
         let displays: Vec<&str> = items.iter().map(|i| i.display.as_str()).collect();
+        assert_eq!(displays, vec!["Grok 4.7", "grok-4.7"]);
+        assert_eq!(
+            items[1].insert_text, "grok-4.7 ",
+            "the trailing space chains into the route phase"
+        );
+        assert_eq!(items[1].description, "2 providers: local, relay");
+    }
+
+    #[test]
+    fn the_route_phase_lists_each_provider() {
+        let state = state_with_a_shared_name();
+        let items = ModelCommand
+            .suggest_args(&ctx_for(&state), "grok-4.7 ")
+            .unwrap();
+        let displays: Vec<&str> = items.iter().map(|i| i.display.as_str()).collect();
         assert_eq!(
             displays,
-            vec![
-                "Grok 4.7",
-                "grok-4.7 · local (localhost:18080)",
-                "grok-4.7 · relay (relay.example)",
-            ]
-        );
-        assert_eq!(
-            items[1].description, "via local (localhost:18080)",
-            "a listed model with no description still says what it is"
+            vec!["local (localhost:18080)", "relay (relay.example)"]
         );
     }
 
     #[test]
-    fn each_row_that_shares_a_name_selects_its_own_model() {
+    fn a_shared_name_alone_is_refused_with_the_choices() {
         let state = state_with_a_shared_name();
-        let items = ModelCommand.search_args(&ctx_for(&state), "").unwrap();
-        for (item, expected) in items[1..].iter().zip(["local/grok-4.7", "relay/grok-4.7"]) {
+        let mut ctx = dummy_exec_ctx(&state);
+        match ModelCommand.run(&mut ctx, "grok-4.7") {
+            CommandResult::Error(msg) => {
+                assert!(msg.contains("local/grok-4.7") && msg.contains("relay/grok-4.7"));
+            }
+            other => panic!("expected an ambiguity error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn two_routes_with_the_same_label_show_their_ids() {
+        let mut state = ModelState::default();
+        for (id, info) in [
+            routed_model("a/m", "m", None, "same.host"),
+            routed_model("b/m", "m", None, "same.host"),
+        ] {
+            state.available.insert(id, info);
+        }
+        let items = ModelCommand.suggest_args(&ctx_for(&state), "m ").unwrap();
+        let displays: Vec<&str> = items.iter().map(|i| i.display.as_str()).collect();
+        assert_eq!(displays, vec!["a/m", "b/m"]);
+    }
+
+    #[test]
+    fn each_route_row_selects_its_own_model() {
+        let state = state_with_a_shared_name();
+        let items = ModelCommand
+            .suggest_args(&ctx_for(&state), "grok-4.7 ")
+            .unwrap();
+        for (item, expected) in items.iter().zip(["local/grok-4.7", "relay/grok-4.7"]) {
             assert_eq!(item.insert_text, expected);
             let mut ctx = dummy_exec_ctx(&state);
             match ModelCommand.run(&mut ctx, &item.insert_text) {
@@ -466,8 +637,13 @@ mod tests {
         state.available.insert(a, ainfo);
         state.available.insert(b, binfo);
 
+        let routes = ModelCommand.suggest_args(&ctx_for(&state), "R ").unwrap();
+        assert_eq!(
+            routes[1].insert_text, "relay/r ",
+            "a reasoning route chains on into effort"
+        );
         let items = ModelCommand
-            .suggest_args(&ctx_for(&state), "relay/r ")
+            .suggest_args(&ctx_for(&state), &routes[1].insert_text)
             .unwrap();
         assert_eq!(items[0].insert_text, "relay/r xhigh");
     }
