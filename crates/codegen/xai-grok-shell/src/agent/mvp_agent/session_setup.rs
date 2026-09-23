@@ -228,6 +228,9 @@ impl MvpAgent {
         })?;
         self.seed_client_config_auth_if_available();
         self.spawn_settings_reapply();
+        // The session copies its model's URL now. A model not yet listed would
+        // fall back to another model and keep that model's URL.
+        self.models_manager.wait_for_provider_discovery().await;
         let SessionWorkspace {
             cwd,
             remote_settings,
@@ -1208,6 +1211,8 @@ impl MvpAgent {
     ) {
         let session_id = session_id.clone();
         let persisted_model = summary.current_model_id.clone();
+        // A persisted provider model is absent until its listing lands.
+        self.models_manager.wait_for_provider_discovery().await;
         let models = self.models_manager.models();
         let available = self.models_manager.available();
         self.session_registry.take_unavailable_model(&session_id);

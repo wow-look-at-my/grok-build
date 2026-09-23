@@ -5061,6 +5061,15 @@ impl ModelEntry {
     pub fn info(&self) -> &ModelInfo {
         &self.info
     }
+    /// A URL a request can go to: `base_url`, or `api_base_url` for the
+    /// `XAI_API_KEY` path.
+    pub(crate) fn has_endpoint(&self) -> bool {
+        !self.info.base_url.trim().is_empty()
+            || self
+                .api_base_url
+                .as_deref()
+                .is_some_and(|u| !u.trim().is_empty())
+    }
     pub(crate) fn from_config_entry(entry: &ModelEntryConfig) -> Self {
         Self {
             info: ModelInfo::from_config(entry),

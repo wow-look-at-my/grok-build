@@ -326,6 +326,25 @@ pub(crate) fn apply_favorites(cfg: &config::Config, catalog: &mut IndexMap<Strin
     }
 }
 
+/// A model with no URL cannot answer. The picker never offers it, and the
+/// default never picks it.
+fn unselect_models_without_a_url(catalog: &mut IndexMap<String, ModelEntry>) {
+    let unreachable: Vec<&str> = catalog
+        .iter_mut()
+        .filter(|(_, entry)| !entry.has_endpoint())
+        .map(|(key, entry)| {
+            entry.info.user_selectable = false;
+            key.as_str()
+        })
+        .collect();
+    if !unreachable.is_empty() {
+        tracing::debug!(
+            models = ?unreachable,
+            "these models have no URL and cannot be selected; set their base_url, or the [endpoints] URL they use"
+        );
+    }
+}
+
 /// Single source of truth for the catalog. Applies, in order: `disabled_models`
 pub(crate) fn resolve_model_catalog(
     cfg: &config::Config,
@@ -360,6 +379,7 @@ pub(crate) fn resolve_model_catalog(
             }
         }
     }
+    unselect_models_without_a_url(&mut catalog);
 
     if let Ok(Some(hidden)) = ModelGlobSet::compile(cfg.models.hidden_models.as_ref()) {
         for (key, entry) in catalog.iter_mut() {
@@ -454,6 +474,7 @@ pub(crate) fn merge_additive_catalog(
             }
         }
     }
+    unselect_models_without_a_url(&mut additive);
 
     if let Ok(Some(hidden)) = ModelGlobSet::compile(cfg.models.hidden_models.as_ref()) {
         for (key, entry) in additive.iter_mut() {
