@@ -155,10 +155,6 @@ pub(crate) trait RetryableSpawnError {
     fn is_cancelled(&self) -> bool;
 }
 
-/// Notice reason: a resumed goal keeps the skeptic models it froze at its
-/// first verification, so a model configured since then is not used.
-pub(crate) const GOAL_ROLE_NOTICE_ASSIGNMENT_FROZEN: &str = "assignment_frozen";
-
 /// Notice reason: the planner forks the session conversation to reuse its
 /// prompt cache, so it always runs on the session model.
 pub(crate) const GOAL_ROLE_NOTICE_PLANNER_FORKS_SESSION: &str = "planner_forks_session";

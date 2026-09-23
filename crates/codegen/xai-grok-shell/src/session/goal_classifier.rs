@@ -123,54 +123,32 @@ pub(crate) const GOAL_VERIFIER_SKEPTIC_COUNT: u32 = 3;
 pub(crate) const GOAL_VERIFIER_SKEPTIC_MIN: u32 = 1;
 pub(crate) const GOAL_VERIFIER_SKEPTIC_MAX: u32 = 5;
 
-/// Expand a skeptic `pool` to a per-index assignment of length `n` via
-/// round-robin (index `i` → `pool[i % pool.len()]`), reusing the frozen
-/// `existing` prefix verbatim.
+/// Assign the skeptic `pool` to `n` skeptics round-robin: index `i` gets
+/// `pool[i % pool.len()]`. An empty pool gives an empty assignment, and every
+/// skeptic inherits the session model. `n` is the CLAMPED skeptic count used
+/// at the fan-out site, so the assignment matches the spawned indices.
 ///
-/// Resume stability + monotonic growth: committed indices are never
-/// rewritten, so skeptic-0 always keeps `pool[0]` across resume AND
-/// cold-fallback, and a later `n` bump only appends new indices (continuing
-/// the round-robin, clamped by the caller). An empty `pool` keeps `existing`
-/// unchanged (a frozen assignment survives a remote-cleared pool); empty
-/// `existing` + empty `pool` ⇒ empty (all skeptics inherit the current
-/// model). `n` is the CLAMPED skeptic count — identical to the value used at
-/// the fan-out site — so the assignment never desyncs from the spawned
-/// indices.
-pub(crate) fn expand_skeptic_assignment(
-    existing: &[crate::util::config::GoalRoleModel],
+/// Each verification reads the CURRENT pool. A goal never keeps a model the
+/// user has since moved away from.
+pub(crate) fn assign_skeptic_models(
     pool: &[crate::util::config::GoalRoleModel],
     n: usize,
 ) -> Vec<crate::util::config::GoalRoleModel> {
-    let mut out = existing.to_vec();
-    if pool.is_empty() || out.len() >= n {
-        return out;
-    }
-    for i in out.len()..n {
-        out.push(pool[i % pool.len()].clone());
-    }
-    out
-}
-
-/// Skeptic indices whose frozen model differs from what the current `pool`
-/// gives them: the index, the kept model and the configured model. The assignment wins,
-/// so each one is a configured model the panel does not use. An empty pool
-/// configures nothing, so nothing differs.
-pub(crate) fn skeptics_pinned_away_from_pool(
-    assignment: &[crate::util::config::GoalRoleModel],
-    pool: &[crate::util::config::GoalRoleModel],
-) -> Vec<(u32, String, String)> {
     if pool.is_empty() {
         return Vec::new();
     }
-    assignment
-        .iter()
-        .enumerate()
-        .filter_map(|(i, kept)| {
-            let configured = &pool[i % pool.len()];
-            (kept.model != configured.model)
-                .then(|| (i as u32, kept.model.clone(), configured.model.clone()))
-        })
-        .collect()
+    (0..n).map(|i| pool[i % pool.len()].clone()).collect()
+}
+
+/// Whether skeptic 0 runs on another model than it did last round. Skeptic 0
+/// continues its previous run (`resume_from`), and a run cannot continue on a
+/// model that did not write its history, so a change means a fresh start.
+/// An empty assignment means the session model on both sides.
+pub(crate) fn skeptic0_model_changed(
+    previous: &[crate::util::config::GoalRoleModel],
+    current: &[crate::util::config::GoalRoleModel],
+) -> bool {
+    previous.first().map(|p| p.model.as_str()) != current.first().map(|p| p.model.as_str())
 }
 
 /// Per-skeptic JSON verdict FILE NAME template (rooted under the
@@ -4742,7 +4720,7 @@ mod tests {
         }
     }
 
-    // ── expand_skeptic_assignment (round-robin, resume-stable) ───────
+    // ── assign_skeptic_models (round-robin over the CURRENT pool) ────
 
     fn pair(model: &str) -> crate::util::config::GoalRoleModel {
         crate::util::config::GoalRoleModel {
@@ -4752,57 +4730,42 @@ mod tests {
     }
 
     #[test]
-    fn expand_assignment_round_robin_over_clamped_n() {
-        let pool = vec![pair("a"), pair("b")];
-        // n = 3 over a 2-model pool: 0→a, 1→b, 2→a (i % len).
-        let out = expand_skeptic_assignment(&[], &pool, 3);
+    fn assignment_round_robins_over_clamped_n() {
+        let out = assign_skeptic_models(&[pair("a"), pair("b")], 3);
         let models: Vec<&str> = out.iter().map(|p| p.model.as_str()).collect();
         assert_eq!(models, vec!["a", "b", "a"]);
-        // Skeptic-0 always gets pool[0].
-        assert_eq!(out[0].model, "a");
     }
 
     #[test]
-    fn expand_assignment_empty_pool_inherits_all() {
-        assert!(expand_skeptic_assignment(&[], &[], 3).is_empty());
+    fn empty_pool_inherits_all() {
+        assert!(assign_skeptic_models(&[], 3).is_empty());
+    }
+
+    /// A model changed mid-goal is used at the next verification. The
+    /// previous assignment plays no part.
+    #[test]
+    fn a_changed_pool_takes_effect_at_once() {
+        let before = assign_skeptic_models(&[pair("grok-4.7")], 3);
+        let after = assign_skeptic_models(&[pair("claude-opus")], 3);
+        assert!(after.iter().all(|p| p.model == "claude-opus"), "{after:?}");
+        assert!(skeptic0_model_changed(&before, &after));
     }
 
     #[test]
-    fn expand_assignment_reuses_frozen_prefix_on_resume() {
-        // First panel froze a 3-index assignment from pool [a, b].
-        let frozen = vec![pair("a"), pair("b"), pair("a")];
-        // A later attempt with the SAME n reuses it verbatim (resume stable).
-        let again = expand_skeptic_assignment(&frozen, &[pair("a"), pair("b")], 3);
-        assert_eq!(again, frozen, "resume must reuse the frozen assignment");
-        assert_eq!(again[0].model, "a", "skeptic-0 keeps pool[0] on resume");
-    }
-
-    #[test]
-    fn expand_assignment_grows_without_rewriting_existing_indices() {
-        // n bumped 2 → 4: existing indices preserved, new ones continue the
-        // round-robin (clamped n is the caller's responsibility).
-        let frozen = vec![pair("a"), pair("b")];
-        let grown = expand_skeptic_assignment(&frozen, &[pair("a"), pair("b")], 4);
-        let models: Vec<&str> = grown.iter().map(|p| p.model.as_str()).collect();
-        assert_eq!(models, vec!["a", "b", "a", "b"]);
-        // Existing indices byte-identical.
-        assert_eq!(&grown[..2], &frozen[..]);
-    }
-
-    #[test]
-    fn expand_assignment_never_shrinks_and_keeps_frozen_when_pool_cleared() {
-        let frozen = vec![pair("a"), pair("b"), pair("a")];
-        // Pool cleared remotely mid-goal: keep the frozen assignment (resume
-        // stability beats a newly-empty pool).
-        assert_eq!(
-            expand_skeptic_assignment(&frozen, &[], 5),
-            frozen,
-            "a cleared pool must not wipe a frozen assignment",
+    fn skeptic0_keeps_its_run_while_its_model_holds() {
+        let before = assign_skeptic_models(&[pair("a"), pair("b")], 3);
+        let after = assign_skeptic_models(&[pair("a"), pair("c")], 3);
+        assert!(
+            !skeptic0_model_changed(&before, &after),
+            "only skeptic 0 resumes, so a change to skeptic 1 keeps the run"
         );
-        // Smaller n never truncates committed indices.
-        assert_eq!(
-            expand_skeptic_assignment(&frozen, &[pair("a"), pair("b")], 1),
-            frozen,
+        assert!(
+            !skeptic0_model_changed(&[], &[]),
+            "session model both times"
+        );
+        assert!(
+            skeptic0_model_changed(&before, &[]),
+            "a cleared pool moves skeptic 0 onto the session model"
         );
     }
 

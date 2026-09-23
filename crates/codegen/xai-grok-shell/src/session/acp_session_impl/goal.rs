@@ -79,12 +79,14 @@ pub(crate) fn fail_open_detail(
     use crate::session::events::GoalRoleModelFailOpenReason as Reason;
     match reason {
         Reason::ModelUnknown => format!(
-            "\"{subject}\" is not in this session's model catalog. Check the id, and that its \
-             provider is configured and reachable."
+            "\"{subject}\" is not a model this session knows. Open /model: if it is listed, \
+             set the role to that exact id. If it is not, fix its [model_providers] or [model] \
+             block (base URL, key, server running). Then restart."
         ),
-        Reason::ModelUnauthorized => {
-            format!("\"{subject}\" is in the catalog, but `allowed_models` does not permit it.")
-        }
+        Reason::ModelUnauthorized => format!(
+            "\"{subject}\" is blocked by `[models] allowed_models` in ~/.grok/config.toml. Add \
+             a pattern that matches it, or delete that line, then restart."
+        ),
         Reason::ToolsetUnknown => format!("the agent type \"{subject}\" does not exist."),
         Reason::ToolsetNotAllowed => {
             format!("the agent type \"{subject}\" is not on this session's allow-list.")
@@ -576,6 +578,7 @@ impl SessionActor {
             crate::session::goal_classifier::GOAL_VERIFIER_SKEPTIC_MAX,
         );
         let inherit_tool_names = self.resolve_inherit_role_tool_names().await;
+        let mut skeptic0_model_moved = false;
         let (skeptic_overrides, skeptic_tool_names): (
             Vec<crate::session::goal_planner::RoleSpawnOverride>,
             Vec<crate::session::goal_role_tools::RoleToolNames>,
@@ -585,44 +588,18 @@ impl SessionActor {
                 vec![inherit_tool_names.clone(); n as usize],
             )
         } else {
-            let assignment = {
-                let mut tracker = self.goal_tracker.lock();
-                match tracker.snapshot_mut() {
-                    Some(o) => {
-                        let expanded = crate::session::goal_classifier::expand_skeptic_assignment(
-                            &o.skeptic_model_assignment,
-                            &self.goal_role_models.skeptic_pool,
-                            n as usize,
-                        );
-                        o.skeptic_model_assignment = expanded.clone();
-                        expanded
-                    }
-                    None => Vec::new(),
-                }
-            };
-            let pinned = crate::session::goal_classifier::skeptics_pinned_away_from_pool(
-                &assignment,
+            let assignment = crate::session::goal_classifier::assign_skeptic_models(
                 &self.goal_role_models.skeptic_pool,
+                n as usize,
             );
-            if !pinned.is_empty() {
-                let base = self.goal_role_fallback_reporter().await;
-                for (idx, kept, configured) in pinned {
-                    let reporter = crate::session::goal_planner::RoleFallbackReporter {
-                        fallback_model: Some(kept.clone()),
-                        ..base.clone()
-                    };
-                    reporter.notify(
-                        "skeptic",
-                        Some(idx),
-                        &configured,
-                        crate::session::goal_planner::GOAL_ROLE_NOTICE_ASSIGNMENT_FROZEN,
-                        Some(format!(
-                            "this goal fixed the skeptic's model to \"{kept}\" at its first \
-                             verification, and keeps it for the goal's whole life. Start a new \
-                             /goal to use \"{configured}\"."
-                        )),
-                    );
+            if let Some(o) = self.goal_tracker.lock().snapshot_mut() {
+                if crate::session::goal_classifier::skeptic0_model_changed(
+                    &o.skeptic_model_assignment,
+                    &assignment,
+                ) {
+                    skeptic0_model_moved = true;
                 }
+                o.skeptic_model_assignment = assignment.clone();
             }
             let available_models = self.models_manager.models();
             let mut cache = PanelResolveCache::default();
@@ -685,7 +662,8 @@ impl SessionActor {
             scratch_dir_ready,
             skeptic_count: self.goal_verifier_skeptic_count,
             max_runs,
-            prior_skeptic0_session_id: prior_skeptic0.as_deref(),
+            // A run cannot continue on a model that did not write it.
+            prior_skeptic0_session_id: prior_skeptic0.as_deref().filter(|_| !skeptic0_model_moved),
             prior_gaps: prior_gaps.as_deref(),
             tool_names: &skeptic_tool_names,
             inherit_tool_names: &inherit_tool_names,

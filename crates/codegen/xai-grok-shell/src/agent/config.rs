@@ -3127,7 +3127,7 @@ impl Config {
     }
     /// Skeptic pool; same precedence as [`Self::resolve_goal_planner_model`] but
     /// over a pool. Pool order is preserved for the round-robin expansion in
-    /// `expand_skeptic_assignment`.
+    /// `assign_skeptic_models`.
     pub(crate) fn resolve_goal_skeptic_models(
         &self,
         use_current_only: bool,
