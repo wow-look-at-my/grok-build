@@ -207,6 +207,10 @@ pub enum SamplingError {
         floor_tokens_per_sec: f64,
         window_secs: u64,
     },
+    /// The attempt produced no output within the time-to-first-token limit.
+    /// Retryable on the rate gate's budget, like `OutputRateCollapsed`.
+    #[error("no output after {waited_secs}s (time-to-first-token limit {limit_secs}s)")]
+    FirstTokenTimeout { waited_secs: u64, limit_secs: u64 },
 }
 
 impl SamplingError {
@@ -534,6 +538,7 @@ impl SamplingError {
             SamplingError::MaxTokensTruncation => false,
             SamplingError::DoomLoopDetected { .. } => true,
             SamplingError::OutputRateCollapsed { .. } => true,
+            SamplingError::FirstTokenTimeout { .. } => true,
         }
     }
 

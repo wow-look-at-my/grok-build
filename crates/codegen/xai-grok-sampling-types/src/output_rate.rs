@@ -47,6 +47,11 @@ pub struct OutputRateFloorPolicy {
     /// whatever rate it runs at.
     #[serde(default = "default_max_retries")]
     pub max_retries: u32,
+    /// Reissue an attempt that has produced no output this many seconds
+    /// after the request was sent. Zero disables the check. It shares
+    /// `max_retries` with the floor.
+    #[serde(default)]
+    pub ttft_timeout_secs: u64,
 }
 
 fn default_window_secs() -> u64 {
@@ -68,6 +73,7 @@ impl Default for OutputRateFloorPolicy {
             window_secs: DEFAULT_WINDOW_SECS,
             sustained_secs: DEFAULT_SUSTAINED_SECS,
             max_retries: Self::DEFAULT_MAX_RETRIES,
+            ttft_timeout_secs: 0,
         }
     }
 }
@@ -86,6 +92,8 @@ impl OutputRateFloorPolicy {
     pub const MAX_RETRIES_RANGE: std::ops::RangeInclusive<u32> = 0..=5;
     /// Default resample budget.
     pub const DEFAULT_MAX_RETRIES: u32 = 2;
+    /// Clamp range for `ttft_timeout_secs`. Zero is the off switch.
+    pub const TTFT_TIMEOUT_SECS_RANGE: std::ops::RangeInclusive<u64> = 0..=1800;
 
     /// The policy with every tunable clamped into range.
     pub fn clamped(self) -> Self {
@@ -111,13 +119,34 @@ impl OutputRateFloorPolicy {
                 *Self::MAX_RETRIES_RANGE.start(),
                 *Self::MAX_RETRIES_RANGE.end(),
             ),
+            ttft_timeout_secs: self.ttft_timeout_secs.clamp(
+                *Self::TTFT_TIMEOUT_SECS_RANGE.start(),
+                *Self::TTFT_TIMEOUT_SECS_RANGE.end(),
+            ),
         }
     }
 
-    /// Whether this policy gates anything. A zero or negative floor is the
-    /// off switch.
+    /// Whether this policy gates anything: the rate floor, the
+    /// time-to-first-token limit, or both.
     pub fn is_armed(&self) -> bool {
+        self.floor_armed() || self.ttft_armed()
+    }
+
+    /// Whether the rate floor is set. A zero or negative floor is its off
+    /// switch.
+    pub fn floor_armed(&self) -> bool {
         self.min_tokens_per_sec > 0.0
+    }
+
+    /// Whether the time-to-first-token limit is set.
+    pub fn ttft_armed(&self) -> bool {
+        self.ttft_timeout_secs > 0
+    }
+
+    /// The time-to-first-token limit, when one is set.
+    pub fn ttft_timeout(&self) -> Option<Duration> {
+        self.ttft_armed()
+            .then(|| Duration::from_secs(self.ttft_timeout_secs))
     }
 
     /// The measurement window as a `Duration`.
@@ -338,8 +367,8 @@ impl OutputRateGate {
     /// An absent or unarmed policy still measures — the rate is rendered
     /// whether or not anything gates it — and never breaches.
     pub fn new(policy: Option<OutputRateFloorPolicy>) -> Self {
-        let armed = policy.filter(OutputRateFloorPolicy::is_armed);
-        let window = armed.unwrap_or_default().window();
+        let window = policy.unwrap_or_default().window();
+        let armed = policy.filter(OutputRateFloorPolicy::floor_armed);
         Self {
             meter: OutputRateMeter::new(window),
             policy: armed,
@@ -539,6 +568,7 @@ mod tests {
             window_secs: 10,
             sustained_secs: 10,
             max_retries: 2,
+            ttft_timeout_secs: 0,
         }
     }
 
@@ -821,12 +851,14 @@ mod tests {
             window_secs: 0,
             sustained_secs: 0,
             max_retries: 99,
+            ttft_timeout_secs: 99_999,
         }
         .clamped();
         assert_eq!(clamped.min_tokens_per_sec, 500.0);
         assert_eq!(clamped.window_secs, 2);
         assert_eq!(clamped.sustained_secs, 1);
         assert_eq!(clamped.max_retries, 5);
+        assert_eq!(clamped.ttft_timeout_secs, 1800);
 
         let nan = OutputRateFloorPolicy {
             min_tokens_per_sec: f64::NAN,
@@ -835,5 +867,34 @@ mod tests {
         .clamped();
         assert_eq!(nan.min_tokens_per_sec, 0.0, "NaN disarms rather than trips");
         assert!(!nan.is_armed());
+    }
+
+    /// A time-to-first-token limit arms the policy on its own. The rate half
+    /// stays off: the gate built from it never judges a rate.
+    #[test]
+    fn a_ttft_limit_alone_arms_the_policy_but_not_the_floor() {
+        let policy = OutputRateFloorPolicy {
+            min_tokens_per_sec: 0.0,
+            ttft_timeout_secs: 120,
+            ..Default::default()
+        }
+        .clamped();
+        assert!(policy.is_armed());
+        assert!(policy.ttft_armed());
+        assert!(!policy.floor_armed());
+        assert_eq!(policy.ttft_timeout(), Some(Duration::from_secs(120)));
+
+        let start = Instant::now();
+        let mut gate = OutputRateGate::new(Some(policy));
+        assert_eq!(gate.floor(), None, "no floor to publish or breach");
+        assert!(drive(&mut gate, start, 60 * 4, |_| 1).is_empty());
+    }
+
+    #[test]
+    fn a_zero_ttft_limit_is_off() {
+        let policy = OutputRateFloorPolicy::default();
+        assert!(!policy.ttft_armed());
+        assert_eq!(policy.ttft_timeout(), None);
+        assert!(!policy.is_armed(), "the default policy gates nothing");
     }
 }

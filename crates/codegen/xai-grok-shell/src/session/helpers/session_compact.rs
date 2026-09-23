@@ -87,7 +87,8 @@ fn classify_sampling_error(err: SamplingError) -> CompactFailure {
         | SamplingError::DoomLoopDetected { .. }
         // An engine that collapsed is transient by definition: the next
         // request is the whole remedy.
-        | SamplingError::OutputRateCollapsed { .. } => false,
+        | SamplingError::OutputRateCollapsed { .. }
+        | SamplingError::FirstTokenTimeout { .. } => false,
     };
     if deterministic {
         CompactFailure::Deterministic(acp_err)
