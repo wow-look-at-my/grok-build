@@ -303,12 +303,11 @@ pub(crate) async fn run_request_task(
                     handle_cancellation(&event_tx, &request_id, &mut completion_tx);
                     return request_id;
                 }
-                if let SamplingError::OutputRateCollapsed {
-                    observed_tokens_per_sec,
-                    floor_tokens_per_sec,
-                    window_secs,
-                } = &error
-                {
+                if matches!(
+                    error,
+                    SamplingError::OutputRateCollapsed { .. }
+                        | SamplingError::FirstTokenTimeout { .. }
+                ) {
                     // Duplicate output is exactly what this caller cannot
                     // take, so a collapsed rate is reported rather than
                     // resampled there.
@@ -321,16 +320,35 @@ pub(crate) async fn run_request_task(
                     }
                     let backoff = retry_mod::output_rate_backoff(rate_retry_count + 1);
                     rate_retry_count += 1;
-                    tracing::warn!(
-                        target: crate::sampling_log::TARGET,
-                        observed_tokens_per_sec = observed_tokens_per_sec,
-                        floor_tokens_per_sec = floor_tokens_per_sec,
-                        window_secs = window_secs,
-                        attempt = rate_retry_count,
-                        max_retries = rate_max_retries,
-                        outcome = "reissued",
-                        "output-rate floor: abandoning the collapsed response and reissuing"
-                    );
+                    match &error {
+                        SamplingError::FirstTokenTimeout {
+                            waited_secs,
+                            limit_secs,
+                        } => tracing::warn!(
+                            target: crate::sampling_log::TARGET,
+                            waited_secs = waited_secs,
+                            ttft_timeout_secs = limit_secs,
+                            attempt = rate_retry_count,
+                            max_retries = rate_max_retries,
+                            outcome = "reissued",
+                            "time-to-first-token limit: abandoning the silent attempt and reissuing"
+                        ),
+                        SamplingError::OutputRateCollapsed {
+                            observed_tokens_per_sec,
+                            floor_tokens_per_sec,
+                            window_secs,
+                        } => tracing::warn!(
+                            target: crate::sampling_log::TARGET,
+                            observed_tokens_per_sec = observed_tokens_per_sec,
+                            floor_tokens_per_sec = floor_tokens_per_sec,
+                            window_secs = window_secs,
+                            attempt = rate_retry_count,
+                            max_retries = rate_max_retries,
+                            outcome = "reissued",
+                            "output-rate floor: abandoning the collapsed response and reissuing"
+                        ),
+                        _ => {}
+                    }
                     emit_retrying(
                         &event_tx,
                         &request_id,
@@ -674,11 +692,12 @@ async fn run_one_attempt(
     rate_check: Option<OutputRateFloorPolicy>,
     output_observed: Arc<AtomicBool>,
 ) -> AttemptOutcome {
+    let ttft = FirstTokenDeadline::start(rate_check);
     match client.api_backend() {
         ApiBackend::ChatCompletions => {
-            let (raw, metadata) = match client.conversation_stream(request).await {
+            let (raw, metadata) = match ttft.init(client.conversation_stream(request)).await {
                 Ok(pair) => pair,
-                Err(e) => return AttemptOutcome::InitFailed { error: e },
+                Err(outcome) => return outcome,
             };
             let (teed, captured) = tee_errors(raw);
             let l2 = stream_chat_completions(teed, metadata, request_id.clone(), idle_timeout);
@@ -690,16 +709,19 @@ async fn run_one_attempt(
                 captured,
                 None,
                 rate_check,
+                ttft,
                 output_observed,
             )
             .await
         }
         ApiBackend::Responses => {
-            let (raw, metadata, doom_loop) =
-                match client.conversation_stream_responses(request).await {
-                    Ok(parts) => parts,
-                    Err(e) => return AttemptOutcome::InitFailed { error: e },
-                };
+            let (raw, metadata, doom_loop) = match ttft
+                .init(client.conversation_stream_responses(request))
+                .await
+            {
+                Ok(parts) => parts,
+                Err(outcome) => return outcome,
+            };
             if doom_check.is_none()
                 && let Some(collector) = &doom_loop
             {
@@ -722,14 +744,18 @@ async fn run_one_attempt(
                 captured,
                 doom_check,
                 rate_check,
+                ttft,
                 output_observed,
             )
             .await
         }
         ApiBackend::Messages => {
-            let (raw, metadata) = match client.conversation_stream_messages(request).await {
+            let (raw, metadata) = match ttft
+                .init(client.conversation_stream_messages(request))
+                .await
+            {
                 Ok(pair) => pair,
-                Err(e) => return AttemptOutcome::InitFailed { error: e },
+                Err(outcome) => return outcome,
             };
             let (teed, captured) = tee_errors(raw);
             let l2 = stream_messages(teed, metadata, request_id.clone(), idle_timeout);
@@ -741,14 +767,16 @@ async fn run_one_attempt(
                 captured,
                 None,
                 rate_check,
+                ttft,
                 output_observed,
             )
             .await
         }
         ApiBackend::Ollama => {
-            let (raw, metadata) = match client.conversation_stream_ollama(request).await {
+            let (raw, metadata) = match ttft.init(client.conversation_stream_ollama(request)).await
+            {
                 Ok(pair) => pair,
-                Err(e) => return AttemptOutcome::InitFailed { error: e },
+                Err(outcome) => return outcome,
             };
             let (teed, captured) = tee_errors(raw);
             let l2 = stream_ollama(teed, metadata, request_id.clone(), idle_timeout);
@@ -760,9 +788,67 @@ async fn run_one_attempt(
                 captured,
                 None,
                 rate_check,
+                ttft,
                 output_observed,
             )
             .await
+        }
+    }
+}
+
+/// The time-to-first-token limit for one attempt, measured from the moment
+/// the request is sent. It covers the wait for response headers as well as
+/// the wait for the first chunk after them.
+#[derive(Clone, Copy)]
+struct FirstTokenDeadline {
+    sent_at: tokio::time::Instant,
+    limit: Option<Duration>,
+}
+
+impl FirstTokenDeadline {
+    fn start(rate_check: Option<OutputRateFloorPolicy>) -> Self {
+        Self {
+            sent_at: tokio::time::Instant::now(),
+            limit: rate_check.and_then(|p| p.ttft_timeout()),
+        }
+    }
+
+    /// Await the request's initial response under the limit.
+    async fn init<T>(
+        &self,
+        fut: impl std::future::Future<Output = SamplingResult<T>>,
+    ) -> Result<T, AttemptOutcome> {
+        let result = match self.limit {
+            Some(limit) => match tokio::time::timeout_at(self.sent_at + limit, fut).await {
+                Ok(result) => result,
+                Err(_) => return Err(self.breach(tokio::time::Instant::now())),
+            },
+            None => fut.await,
+        };
+        result.map_err(|error| AttemptOutcome::InitFailed { error })
+    }
+
+    /// Whether the limit has passed at `now` with no output seen.
+    fn expired(&self, now: tokio::time::Instant) -> bool {
+        self.limit
+            .is_some_and(|limit| now.saturating_duration_since(self.sent_at) >= limit)
+    }
+
+    fn breach(&self, now: tokio::time::Instant) -> AttemptOutcome {
+        let waited = now.saturating_duration_since(self.sent_at);
+        let limit_secs = self.limit.map_or(0, |l| l.as_secs());
+        tracing::warn!(
+            target: crate::sampling_log::TARGET,
+            waited_ms = waited.as_millis() as u64,
+            ttft_timeout_secs = limit_secs,
+            event = "first_token_timeout",
+            "no output within the time-to-first-token limit"
+        );
+        AttemptOutcome::Failed {
+            error: SamplingError::FirstTokenTimeout {
+                waited_secs: waited.as_secs(),
+                limit_secs,
+            },
         }
     }
 }
@@ -808,7 +894,8 @@ fn tee_errors<'a, T: Send + 'a>(
 /// one meter covers all three and the gate and the published rate are the same
 /// measurement. `rate_check`, when set, turns a full window under its floor
 /// into a retryable failure; dropping this future drops the L2 stream, which
-/// is what cancels the HTTP request.
+/// is what cancels the HTTP request. `ttft` fails an attempt that has sent no
+/// output by its deadline; the same tick checks it.
 #[allow(clippy::too_many_arguments)]
 async fn drive_l2(
     l2: impl futures_util::Stream<Item = SamplingEvent>,
@@ -818,9 +905,12 @@ async fn drive_l2(
     captured: ErrorCell,
     doom_check: Option<xai_grok_sampling_types::DoomLoopRecoveryPolicy>,
     rate_check: Option<OutputRateFloorPolicy>,
+    ttft: FirstTokenDeadline,
     output_observed: Arc<AtomicBool>,
 ) -> AttemptOutcome {
     let mut l2 = pin!(l2);
+    // Per attempt: `output_observed` spans every attempt of the request.
+    let mut first_output_seen = false;
     // The gate measures whether or not a floor is armed: the rate it
     // publishes is what the client renders, and a session with no floor still
     // wants the number.
@@ -835,6 +925,10 @@ async fn drive_l2(
                 return AttemptOutcome::Cancelled;
             }
             _ = rate_ticker.tick() => {
+                let tokio_now = tokio::time::Instant::now();
+                if !first_output_seen && ttft.expired(tokio_now) {
+                    return ttft.breach(tokio_now);
+                }
                 let now = std::time::Instant::now();
                 // Both slowdown edges are logged, not just the breach: a dip
                 // that recovers on its own is never reissued over and would
@@ -935,6 +1029,7 @@ async fn drive_l2(
                             | SamplingEvent::BackendToolCallCompleted { .. }
                     ) {
                         output_observed.store(true, Ordering::Relaxed);
+                        first_output_seen = true;
                     }
                     // A backend-hosted tool call is the server's time, not the
                     // stream's: the model generates nothing from the start of
@@ -1107,6 +1202,22 @@ fn synthesize_from_info(info: &SamplingErrorInfo) -> SamplingError {
             },
             None => SamplingError::EventStreamError(info.message.clone()),
         },
+        // Checked in this loop too, so only a peer sends one. The numbers
+        // come back out of the rendered message.
+        SamplingErrorKind::FirstTokenTimeout => {
+            let secs: Vec<u64> = info
+                .message
+                .split(|c: char| !c.is_ascii_digit())
+                .filter_map(|n| n.parse().ok())
+                .collect();
+            match secs.as_slice() {
+                [waited_secs, limit_secs] => SamplingError::FirstTokenTimeout {
+                    waited_secs: *waited_secs,
+                    limit_secs: *limit_secs,
+                },
+                _ => SamplingError::EventStreamError(info.message.clone()),
+            }
+        }
     }
 }
 

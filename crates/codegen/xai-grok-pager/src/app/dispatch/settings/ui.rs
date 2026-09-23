@@ -15,8 +15,9 @@ use super::setters::{
     set_screen_mode_inner, set_scroll_lines_inner, set_scroll_mode_inner, set_scroll_speed_inner,
     set_show_thinking_blocks_inner, set_show_tips_inner, set_simple_mode_inner,
     set_stop_gate_ci_failing_inner, set_stop_gate_unfinished_todos_inner, set_theme_inner,
-    set_timeline_inner, set_timestamps, set_timestamps_inner, set_vim_mode_inner,
-    set_voice_capture_mode_inner, set_voice_keybind_enabled_inner, set_voice_stt_language_inner,
+    set_timeline_inner, set_timestamps, set_timestamps_inner, set_ttft_timeout_secs_inner,
+    set_vim_mode_inner, set_voice_capture_mode_inner, set_voice_keybind_enabled_inner,
+    set_voice_stt_language_inner,
 };
 use crate::app::actions::{Action, Effect};
 use crate::app::app_view::{ActiveView, AppView};
@@ -897,6 +898,7 @@ pub(in crate::app::dispatch) fn action_for_reset(
         ("output_rate_max_retries", SettingValue::Int(i)) => {
             Some(Action::SetOutputRateMaxRetries(*i))
         }
+        ("ttft_timeout_secs", SettingValue::Int(i)) => Some(Action::SetTtftTimeoutSecs(*i)),
         // coding_data_sharing: "opt-in" / "opt-out" → bool.
         // Both arms needed (registry default is "opt-out").
         ("coding_data_sharing", SettingValue::Enum("opt-in")) => {
@@ -1165,6 +1167,7 @@ pub(in crate::app::dispatch) fn apply_setting_rollback(
         ("output_rate_max_retries", SettingValue::Int(i)) => {
             set_output_rate_max_retries_inner(app, *i)
         }
+        ("ttft_timeout_secs", SettingValue::Int(i)) => set_ttft_timeout_secs_inner(app, *i),
         // scroll_speed: direct inner call (clamp handled by inner).
         ("scroll_speed", SettingValue::Int(i)) => set_scroll_speed_inner(app, *i as u8),
         // scroll_mode: restore the cache mirror to the canonical value.

@@ -55,6 +55,7 @@ pub struct ModelProviderConfig {
     pub compaction_at_tokens: Option<CompactionAtTokens>,
     pub pricing: Option<xai_grok_sampling_types::ModelPricing>,
     pub min_output_tokens_per_sec: Option<f64>,
+    pub ttft_timeout_secs: Option<u64>,
     /// Ask this provider for its model list. Default on. Turn it off for a
     /// provider whose listing is too large to pick from.
     pub models_autodetect: Option<bool>,
@@ -376,6 +377,7 @@ impl ConfigModelOverride {
             compaction_at_tokens,
             pricing,
             min_output_tokens_per_sec,
+            ttft_timeout_secs,
             // Discovery and favorites describe the provider's LISTING, not a
             // model's connection. A model inherits neither.
             models_autodetect: _,
@@ -419,6 +421,7 @@ impl ConfigModelOverride {
         merged.min_output_tokens_per_sec = merged
             .min_output_tokens_per_sec
             .or(*min_output_tokens_per_sec);
+        merged.ttft_timeout_secs = merged.ttft_timeout_secs.or(*ttft_timeout_secs);
         if merged.reasoning_efforts.is_empty() {
             merged.reasoning_efforts = reasoning_efforts.clone();
         }

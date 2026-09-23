@@ -423,7 +423,7 @@ impl ConfigReloader {
 
 /// Every config value `Config::resolve_output_rate_floor` reads. A change to
 /// any one of them changes some session's policy.
-fn output_rate_floor_inputs(config: &toml::Value) -> [Option<&toml::Value>; 7] {
+fn output_rate_floor_inputs(config: &toml::Value) -> [Option<&toml::Value>; 8] {
     let ui = config.get("ui");
     let ui_key = |key: &str| ui.and_then(|ui| ui.get(key));
     [
@@ -431,6 +431,7 @@ fn output_rate_floor_inputs(config: &toml::Value) -> [Option<&toml::Value>; 7] {
         ui_key("output_rate_sustained_secs"),
         ui_key("output_rate_window_secs"),
         ui_key("output_rate_max_retries"),
+        ui_key("ttft_timeout_secs"),
         config.get("output_rate_floor"),
         config.get("model"),
         config.get("model_providers"),
@@ -958,6 +959,9 @@ fork_secondary_model = "grok-4.5"
             "[ui]\ntheme = \"dark\"\n[output_rate_floor]\nmax_retries = 1",
             "[ui]\ntheme = \"dark\"\n[model.slow]\nmin_output_tokens_per_sec = 3.0",
             "[ui]\ntheme = \"dark\"\n[model_providers.local]\nmin_output_tokens_per_sec = 3.0",
+            "[ui]\ntheme = \"dark\"\nttft_timeout_secs = 30",
+            "[ui]\ntheme = \"dark\"\n[model.slow]\nttft_timeout_secs = 30",
+            "[ui]\ntheme = \"dark\"\n[model_providers.local]\nttft_timeout_secs = 30",
         ] {
             let other: toml::Value = toml::from_str(changed).unwrap();
             assert_ne!(

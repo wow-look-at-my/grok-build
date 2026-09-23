@@ -326,11 +326,15 @@ pub fn classify_error(
         };
     }
 
-    // Output-rate collapses: same shape as the doom-loop arm above. The rate
+    // Output-rate collapses and first-token timeouts: same shape as the
+    // doom-loop arm above. The rate
     // gate intercepts these before classification and runs its own budget;
     // this arm keeps classification total so one arriving by any other path
     // can never be Fatal.
-    if matches!(err, SamplingError::OutputRateCollapsed { .. }) {
+    if matches!(
+        err,
+        SamplingError::OutputRateCollapsed { .. } | SamplingError::FirstTokenTimeout { .. }
+    ) {
         return RetryDecision::Retry {
             backoff: output_rate_backoff(retry_count + 1),
         };
@@ -516,6 +520,15 @@ pub fn format_sampling_error(err: &SamplingError, retry_count: Option<u32>) -> S
                 retry_prefix, observed_tokens_per_sec, window_secs, floor_tokens_per_sec,
             )
         }
+        SamplingError::FirstTokenTimeout {
+            waited_secs,
+            limit_secs,
+        } => {
+            format!(
+                "{}No output after {}s (time-to-first-token limit {}s); reissuing the request.",
+                retry_prefix, waited_secs, limit_secs,
+            )
+        }
     }
 }
 
@@ -594,6 +607,13 @@ pub(crate) fn clone_error(err: &SamplingError) -> SamplingError {
             observed_tokens_per_sec: *observed_tokens_per_sec,
             floor_tokens_per_sec: *floor_tokens_per_sec,
             window_secs: *window_secs,
+        },
+        SamplingError::FirstTokenTimeout {
+            waited_secs,
+            limit_secs,
+        } => SamplingError::FirstTokenTimeout {
+            waited_secs: *waited_secs,
+            limit_secs: *limit_secs,
         },
     }
 }

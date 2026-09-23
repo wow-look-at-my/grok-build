@@ -99,6 +99,12 @@ pub struct UiConfig {
     /// (`[ui].output_rate_max_retries`.)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_rate_max_retries: Option<u32>,
+    /// Reissue a model call that has produced no output this many seconds
+    /// after the request was sent. `None` = 120 seconds, `0` = off. It shares
+    /// the output-rate reissue budget. `[model_providers.<id>]` and
+    /// `[model.<id>]` override it. (`[ui].ttft_timeout_secs`.)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ttft_timeout_secs: Option<u32>,
     /// Theme to use when the OS is in dark mode. Written by the pager's theme persist module.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auto_dark_theme: Option<String>,
@@ -317,6 +323,7 @@ impl Default for UiConfig {
             output_rate_sustained_secs: None,
             output_rate_window_secs: None,
             output_rate_max_retries: None,
+            ttft_timeout_secs: None,
             auto_dark_theme: None,
             auto_light_theme: None,
             scroll_speed: None,
@@ -432,6 +439,20 @@ impl UiConfig {
     pub fn output_rate_max_retries_value(&self) -> u32 {
         self.output_rate_max_retries
             .unwrap_or(Self::OUTPUT_RATE_MAX_RETRIES_DEFAULT)
+    }
+
+    /// Default for [`Self::ttft_timeout_secs`] when unset. A reasoning model
+    /// can prefill for minutes, so this stays well above an ordinary first
+    /// token and under the 300 s stream idle timeout.
+    pub const TTFT_TIMEOUT_SECS_DEFAULT: u32 = 120;
+
+    /// Upper clamp for [`Self::ttft_timeout_secs`].
+    pub const TTFT_TIMEOUT_SECS_MAX: u32 = 1800;
+
+    pub fn ttft_timeout_secs_value(&self) -> u32 {
+        self.ttft_timeout_secs
+            .unwrap_or(Self::TTFT_TIMEOUT_SECS_DEFAULT)
+            .min(Self::TTFT_TIMEOUT_SECS_MAX)
     }
 
     /// Fill the `[ui]` window and retry budget from a legacy

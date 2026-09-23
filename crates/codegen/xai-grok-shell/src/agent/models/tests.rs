@@ -2128,6 +2128,7 @@ fn make_entry_config_with_id(
         laziness_detector: config::LazinessDetectorPerModelConfig::default(),
         pricing: xai_grok_sampling_types::ModelPricing::default(),
         min_output_tokens_per_sec: None,
+        ttft_timeout_secs: None,
         loaded_in_vram: None,
     }
 }

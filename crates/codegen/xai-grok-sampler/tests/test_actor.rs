@@ -1024,6 +1024,7 @@ async fn a_collapsed_stream_is_reissued_and_the_clean_answer_wins() {
         window_secs: 2,
         sustained_secs: 1,
         max_retries: 2,
+        ttft_timeout_secs: 0,
     });
     let handle = SamplerActor::spawn(cfg, RetryPolicy::default(), event_tx);
 
@@ -1180,6 +1181,7 @@ async fn a_hosted_search_gap_is_not_a_collapsed_stream() {
         window_secs: 2,
         sustained_secs: 1,
         max_retries: 2,
+        ttft_timeout_secs: 0,
     });
     let handle = SamplerActor::spawn(cfg, RetryPolicy::default(), event_tx);
 
@@ -1284,6 +1286,7 @@ async fn an_unstreamed_tool_call_is_not_a_collapsed_stream() {
         window_secs: 2,
         sustained_secs: 1,
         max_retries: 2,
+        ttft_timeout_secs: 0,
     });
     let handle = SamplerActor::spawn(cfg, RetryPolicy::default(), event_tx);
 
@@ -1299,6 +1302,155 @@ async fn an_unstreamed_tool_call_is_not_a_collapsed_stream() {
         "writing a tool call must not be read as a collapse and reissued"
     );
     assert_eq!(response.tool_calls().len(), 1);
+}
+
+// ---------------------------------------------------------------------------
+// Time-to-first-token limit
+// ---------------------------------------------------------------------------
+
+/// A policy with only the time-to-first-token limit armed.
+fn ttft_only_policy(limit_secs: u64) -> OutputRateFloorPolicy {
+    OutputRateFloorPolicy {
+        min_tokens_per_sec: 0.0,
+        window_secs: 2,
+        sustained_secs: 1,
+        max_retries: 2,
+        ttft_timeout_secs: limit_secs,
+    }
+}
+
+/// Whether any `Retrying` event on the channel names a first-token timeout.
+fn saw_ttft_retry(event_rx: &mut mpsc::UnboundedReceiver<SamplingEvent>) -> bool {
+    let mut seen = false;
+    while let Ok(event) = event_rx.try_recv() {
+        if let SamplingEvent::Retrying { kind, .. } = event
+            && kind == SamplingErrorKind::FirstTokenTimeout
+        {
+            seen = true;
+        }
+    }
+    seen
+}
+
+/// The first attempt sends its headers and then nothing for three seconds,
+/// against a one-second limit. It is abandoned and the reissue answers.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_silent_stream_is_reissued_after_the_ttft_limit() {
+    let counter = Arc::new(AtomicU32::new(0));
+    let counter_handler = Arc::clone(&counter);
+    let app = Router::new().route(
+        "/v1/chat/completions",
+        post(move || {
+            let counter = Arc::clone(&counter_handler);
+            async move {
+                let attempt = counter.fetch_add(1, Ordering::SeqCst);
+                let text = if attempt == 0 { "late" } else { "clean answer" };
+                let delay = if attempt == 0 { 3000 } else { 0 };
+                let events = vec![text_chunk_event(text, true)];
+                let delayed = stream::iter(events).then(move |event| async move {
+                    tokio::time::sleep(Duration::from_millis(delay)).await;
+                    Ok::<_, std::convert::Infallible>(event)
+                });
+                Sse::new(delayed.boxed())
+            }
+        }),
+    );
+    let server = MockServer::spawn(app).await;
+    let (event_tx, mut event_rx) = mpsc::unbounded_channel();
+    let mut cfg = test_config(server.base_url(), "test-model");
+    cfg.output_rate_floor = Some(ttft_only_policy(1));
+    let handle = SamplerActor::spawn(cfg, RetryPolicy::default(), event_tx);
+
+    let result = handle
+        .submit_and_collect(RequestId::from("req-ttft-body"), user_request("hi"))
+        .await;
+    server.shutdown();
+
+    let (response, _metrics) = result.expect("the reissued request answers");
+    assert_eq!(counter.load(Ordering::SeqCst), 2, "exactly one reissue");
+    assert_eq!(response.assistant_text(), "clean answer");
+    assert!(
+        saw_ttft_retry(&mut event_rx),
+        "the reissue must be attributed to the first-token limit"
+    );
+}
+
+/// The limit also covers the wait for response headers: a server that holds
+/// the whole response back is abandoned the same way.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn withheld_headers_are_reissued_after_the_ttft_limit() {
+    let counter = Arc::new(AtomicU32::new(0));
+    let counter_handler = Arc::clone(&counter);
+    let app = Router::new().route(
+        "/v1/chat/completions",
+        post(move || {
+            let counter = Arc::clone(&counter_handler);
+            async move {
+                let attempt = counter.fetch_add(1, Ordering::SeqCst);
+                if attempt == 0 {
+                    tokio::time::sleep(Duration::from_secs(3)).await;
+                }
+                let events = vec![text_chunk_event("clean answer", true)];
+                Sse::new(
+                    stream::iter(events.into_iter().map(Ok::<_, std::convert::Infallible>)).boxed(),
+                )
+            }
+        }),
+    );
+    let server = MockServer::spawn(app).await;
+    let (event_tx, mut event_rx) = mpsc::unbounded_channel();
+    let mut cfg = test_config(server.base_url(), "test-model");
+    cfg.output_rate_floor = Some(ttft_only_policy(1));
+    let handle = SamplerActor::spawn(cfg, RetryPolicy::default(), event_tx);
+
+    let result = handle
+        .submit_and_collect(RequestId::from("req-ttft-headers"), user_request("hi"))
+        .await;
+    server.shutdown();
+
+    let (response, _metrics) = result.expect("the reissued request answers");
+    assert_eq!(counter.load(Ordering::SeqCst), 2, "exactly one reissue");
+    assert_eq!(response.assistant_text(), "clean answer");
+    assert!(saw_ttft_retry(&mut event_rx));
+}
+
+/// Output inside the limit ends the check: a stream whose first chunk lands
+/// early and whose whole body runs well past the limit is never reissued.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn early_output_is_never_reissued_by_the_ttft_limit() {
+    let counter = Arc::new(AtomicU32::new(0));
+    let counter_handler = Arc::clone(&counter);
+    let app = Router::new().route(
+        "/v1/chat/completions",
+        post(move || {
+            let counter = Arc::clone(&counter_handler);
+            async move {
+                counter.fetch_add(1, Ordering::SeqCst);
+                let mut events: Vec<Event> = (0..6).map(|_| text_chunk_event("x", false)).collect();
+                events.push(text_chunk_event("", true));
+                let paced = stream::iter(events).then(|event| async move {
+                    tokio::time::sleep(Duration::from_millis(400)).await;
+                    Ok::<_, std::convert::Infallible>(event)
+                });
+                Sse::new(paced.boxed())
+            }
+        }),
+    );
+    let server = MockServer::spawn(app).await;
+    let (event_tx, mut event_rx) = mpsc::unbounded_channel();
+    let mut cfg = test_config(server.base_url(), "test-model");
+    cfg.output_rate_floor = Some(ttft_only_policy(1));
+    let handle = SamplerActor::spawn(cfg, RetryPolicy::default(), event_tx);
+
+    let result = handle
+        .submit_and_collect(RequestId::from("req-ttft-early"), user_request("hi"))
+        .await;
+    server.shutdown();
+
+    let (response, _metrics) = result.expect("the stream answers");
+    assert_eq!(counter.load(Ordering::SeqCst), 1, "no reissue");
+    assert_eq!(response.assistant_text(), "xxxxxx");
+    assert!(!saw_ttft_retry(&mut event_rx));
 }
 
 /// One scripted SSE event and how long the mock server waits before it.

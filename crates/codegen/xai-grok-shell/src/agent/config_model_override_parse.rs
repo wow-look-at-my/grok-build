@@ -536,8 +536,32 @@ mod tests {
             "one model's floor does not move another's",
         );
         assert!(
-            cfg.resolve_output_rate_floor("ungated").is_none(),
-            "a zero turns the gate off for that model alone"
+            cfg.resolve_output_rate_floor("ungated")
+                .is_some_and(|p| !p.floor_armed()),
+            "a zero turns the rate floor off for that model alone"
+        );
+    }
+
+    /// `[model.<id>].ttft_timeout_secs` survives the TOML parse.
+    #[test]
+    fn a_per_model_ttft_limit_parses() {
+        let cfg = parse_cfg(
+            r#"
+            [model."slow-prefill"]
+            model = "slow-prefill"
+            ttft_timeout_secs = 600
+            "#,
+        );
+        assert_eq!(
+            cfg.config_models
+                .get("slow-prefill")
+                .and_then(|m| m.ttft_timeout_secs),
+            Some(600),
+        );
+        assert_eq!(
+            cfg.resolve_output_rate_floor("slow-prefill")
+                .map(|p| p.ttft_timeout_secs),
+            Some(600),
         );
     }
 
@@ -772,6 +796,7 @@ mod tests {
             strict_message_schema: Some(false),
             pricing: Some(xai_grok_sampling_types::ModelPricing::default()),
             min_output_tokens_per_sec: None,
+            ttft_timeout_secs: None,
             extra_body: Default::default(),
             pricing_lookup_enabled: None,
         }

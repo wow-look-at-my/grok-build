@@ -210,7 +210,7 @@ Everything except what identifies a single model (`model`, `name`, `description`
 | Headers | `extra_headers`, `env_http_headers` |
 | Sampling | `temperature`, `top_p`, `max_completion_tokens`, `context_window` |
 | Reasoning | `reasoning_effort`, `supports_reasoning_effort`, `reasoning_efforts` |
-| Behavior | `max_retries`, `inference_idle_timeout_secs`, `min_output_tokens_per_sec`, `supports_backend_search`, `use_concise`, `agent_type`, `show_model_fingerprint`, `compactions_remaining`, `compaction_at_tokens` |
+| Behavior | `max_retries`, `inference_idle_timeout_secs`, `min_output_tokens_per_sec`, `ttft_timeout_secs`, `supports_backend_search`, `use_concise`, `agent_type`, `show_model_fingerprint`, `compactions_remaining`, `compaction_at_tokens` |
 | Catalog | `hidden`, `supported_in_api`, `pricing` |
 
 ### How inheritance resolves
