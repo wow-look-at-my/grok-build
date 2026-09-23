@@ -1051,6 +1051,25 @@ pub enum SessionUpdate {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         planning: Option<bool>,
     },
+    /// A `/goal` role could not run on the model the user configured for it.
+    /// The role then runs on the session model. The pager shows this as a
+    /// warning, so a configured model is never replaced in silence.
+    GoalRoleModelFallback {
+        /// `"planner"`, `"strategist"`, `"skeptic"` or `"summarizer"`.
+        role: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        skeptic_idx: Option<u32>,
+        /// The model the user configured for the role.
+        requested_model: String,
+        /// The model the role runs on instead, when the shell knows it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        fallback_model: Option<String>,
+        /// A `GoalRoleModelFailOpenReason` wire string, e.g. `model_unknown`.
+        reason: String,
+        /// The underlying error text, e.g. the failed spawn's own message.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
+    },
     /// A blocking reverse-request (permission / `ask_user_question` /
     /// plan-approval) is now **pending** on the agent, keyed by `tool_call_id`
     /// Fire-and-forget, **never persisted** — it is a request,

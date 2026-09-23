@@ -70,6 +70,37 @@ fn role_tool_names_from(
     }
 }
 
+/// The sentence the user reads for a fail-open. `subject` is the model for
+/// the two model reasons and the agent type for the rest.
+pub(crate) fn fail_open_detail(
+    reason: crate::session::events::GoalRoleModelFailOpenReason,
+    subject: &str,
+) -> String {
+    use crate::session::events::GoalRoleModelFailOpenReason as Reason;
+    match reason {
+        Reason::ModelUnknown => format!(
+            "\"{subject}\" is not a model this session knows. Open /model: if it is listed, \
+             set the role to that exact id. If it is not, fix its [model_providers] or [model] \
+             block (base URL, key, server running). Then restart."
+        ),
+        Reason::ToolsetUnknown => format!("the agent type \"{subject}\" does not exist."),
+        Reason::ToolsetNotAllowed => {
+            format!("the agent type \"{subject}\" is not on this session's allow-list.")
+        }
+        Reason::ToolsetDisabled => format!("the agent type \"{subject}\" is disabled."),
+        Reason::ToolsetUnavailable => {
+            format!("the subagent coordinator could not describe the agent type \"{subject}\".")
+        }
+        Reason::ToolsetIncapable => {
+            format!("the agent type \"{subject}\" lacks the tools this role needs.")
+        }
+        Reason::HarnessFlavorUnsupported => {
+            format!("the harness \"{subject}\" cannot run as a subagent.")
+        }
+        Reason::SpawnFailed => format!("the spawn on \"{subject}\" failed."),
+    }
+}
+
 /// How [`SessionActor::record_verdict_on_orchestration`] updates the
 /// orchestration's `last_classifier_gaps`. A real `NotAchieved` panel result
 /// stamps fresh curated gaps (`Set`), a verdict that resolves them clears
@@ -585,6 +616,7 @@ impl SessionActor {
             crate::session::goal_classifier::GOAL_VERIFIER_SKEPTIC_MAX,
         );
         let inherit_tool_names = self.resolve_inherit_role_tool_names().await;
+        let mut skeptic0_model_moved = false;
         let (skeptic_overrides, skeptic_tool_names): (
             Vec<crate::session::goal_planner::RoleSpawnOverride>,
             Vec<crate::session::goal_role_tools::RoleToolNames>,
@@ -594,21 +626,19 @@ impl SessionActor {
                 vec![inherit_tool_names.clone(); n as usize],
             )
         } else {
-            let assignment = {
-                let mut tracker = self.goal_tracker.lock();
-                match tracker.snapshot_mut() {
-                    Some(o) => {
-                        let expanded = crate::session::goal_classifier::expand_skeptic_assignment(
-                            &o.skeptic_model_assignment,
-                            &self.goal_role_models.skeptic_pool,
-                            n as usize,
-                        );
-                        o.skeptic_model_assignment = expanded.clone();
-                        expanded
-                    }
-                    None => Vec::new(),
+            let assignment = crate::session::goal_classifier::assign_skeptic_models(
+                &self.goal_role_models.skeptic_pool,
+                n as usize,
+            );
+            if let Some(o) = self.goal_tracker.lock().snapshot_mut() {
+                if crate::session::goal_classifier::skeptic0_model_changed(
+                    &o.skeptic_model_assignment,
+                    &assignment,
+                ) {
+                    skeptic0_model_moved = true;
                 }
-            };
+                o.skeptic_model_assignment = assignment.clone();
+            }
             let available_models = self.models_manager.models();
             let mut cache = PanelResolveCache::default();
             let mut overrides = Vec::with_capacity(n as usize);
@@ -648,7 +678,7 @@ impl SessionActor {
                 cwd: Some(self.tool_context.cwd.as_str().to_owned()),
                 trace_sink: Some((self.chat_state_handle.clone(), task_tool_name)),
                 skeptic_overrides,
-                events: Some(self.events.writer()),
+                fallback: self.goal_role_fallback_reporter().await,
             });
 
         let implementer_scratch =
@@ -670,7 +700,8 @@ impl SessionActor {
             scratch_dir_ready,
             skeptic_count: self.goal_verifier_skeptic_count,
             max_runs,
-            prior_skeptic0_session_id: prior_skeptic0.as_deref(),
+            // A run cannot continue on a model that did not write it.
+            prior_skeptic0_session_id: prior_skeptic0.as_deref().filter(|_| !skeptic0_model_moved),
             prior_gaps: prior_gaps.as_deref(),
             tool_names: &skeptic_tool_names,
             inherit_tool_names: &inherit_tool_names,
@@ -734,9 +765,25 @@ impl SessionActor {
         (override_, tool_names, inherit)
     }
 
+    /// Where a goal role reports that it left its configured model: the event
+    /// log, and a warning the pager shows the user.
+    pub(crate) async fn goal_role_fallback_reporter(
+        &self,
+    ) -> crate::session::goal_planner::RoleFallbackReporter {
+        crate::session::goal_planner::RoleFallbackReporter {
+            events: Some(self.events.writer()),
+            notify: Some(self.goal_notify_sender()),
+            fallback_model: self
+                .chat_state_handle
+                .get_sampling_config()
+                .await
+                .map(|c| c.model),
+        }
+    }
+
     /// Apply a `[models]` slot to one role: the model is checked against the
-    /// catalog and the agent type is left alone. An unknown or unauthorized
-    /// model fails open onto the session model, the same as a bad pair.
+    /// catalog and the agent type is left alone. An unknown model fails open
+    /// onto the session model, the same as a bad pair.
     pub(crate) async fn resolve_goal_role_model_only(
         &self,
         role: &'static str,
@@ -747,19 +794,21 @@ impl SessionActor {
         use crate::session::goal_planner::RoleSpawnOverride;
 
         let available_models = self.models_manager.models();
+        let reporter = self.goal_role_fallback_reporter().await;
         let fail_open = |reason: Reason| {
-            self.emit_event(Event::GoalRoleModelFailOpen {
+            reporter.report(
                 role,
                 skeptic_idx,
-                reason: reason.as_const_str(),
-            });
+                model,
+                reason,
+                Some(fail_open_detail(reason, model)),
+            );
             RoleSpawnOverride::default()
         };
-        let Some(entry) = crate::agent::config::find_model_by_id(&available_models, model) else {
+        // No `allowed_models` check: that list governs chat selection and
+        // exempts subagents, and a goal role is a subagent the user configured.
+        if crate::agent::config::find_model_by_id(&available_models, model).is_none() {
             return fail_open(Reason::ModelUnknown);
-        };
-        if !entry.info.user_selectable {
-            return fail_open(Reason::ModelUnauthorized);
         }
         self.emit_event(Event::GoalRoleModelResolved {
             role,
@@ -801,21 +850,19 @@ impl SessionActor {
                 .resolve_goal_role_model_only(role, skeptic_idx, &pair.model)
                 .await;
         }
+        let reporter = self.goal_role_fallback_reporter().await;
         let fail_open = |reason: Reason| {
-            self.emit_event(Event::GoalRoleModelFailOpen {
-                role,
-                skeptic_idx,
-                reason: reason.as_const_str(),
-            });
+            let detail = match reason {
+                Reason::ModelUnknown => fail_open_detail(reason, &pair.model),
+                _ => fail_open_detail(reason, &pair.agent_type),
+            };
+            reporter.report(role, skeptic_idx, &pair.model, reason, Some(detail));
             RoleSpawnOverride::default()
         };
 
-        let Some(entry) = crate::agent::config::find_model_by_id(available_models, &pair.model)
-        else {
+        // No `allowed_models` check, as in `resolve_goal_role_model_only`.
+        if crate::agent::config::find_model_by_id(available_models, &pair.model).is_none() {
             return fail_open(Reason::ModelUnknown);
-        };
-        if !entry.info.user_selectable {
-            return fail_open(Reason::ModelUnauthorized);
         }
         if xai_grok_agent::config::is_strict_harness_agent_type(&pair.agent_type)
             && !crate::agent::subagent::subagent_harness_flavor_is_representable(&pair.agent_type)

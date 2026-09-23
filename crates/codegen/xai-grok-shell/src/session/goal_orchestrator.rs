@@ -12,6 +12,7 @@ use crate::session::persistence::PersistenceMsg;
 // ---------------------------------------------------------------------------
 
 /// Lightweight notification sender for goal progress updates.
+#[derive(Clone)]
 pub(crate) struct GoalNotifySender {
     session_id: agent_client_protocol::SessionId,
     gateway: xai_acp_lib::AcpAgentGatewaySender,

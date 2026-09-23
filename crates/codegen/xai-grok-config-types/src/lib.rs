@@ -1195,7 +1195,7 @@ where
 /// an empty pool, and within an array each malformed entry is dropped
 /// (via [`parse_goal_role_model_tolerant`]) instead of nuking the whole
 /// pool. Survivor order is preserved — the skeptic round-robin assignment
-/// (`expand_skeptic_assignment`) depends on pool order.
+/// (`assign_skeptic_models`) depends on pool order.
 fn deserialize_tolerant_goal_skeptic_models<'de, D>(
     deserializer: D,
 ) -> Result<Vec<GoalRoleModel>, D::Error>

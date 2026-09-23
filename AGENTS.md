@@ -144,6 +144,10 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - Every `/goal` role (planner, strategist, skeptic panel) inherits the session's current model unless something pins it. Precedence is `[goal].use_current_model_only` (kill switch, wins over everything) > a local `[goal]` pin > a remote-pushed pin > inherit.
 - A remote pin applies only with `[goal].follow_remote_role_models` (env `GROK_GOAL_FOLLOW_REMOTE_ROLE_MODELS`), default off. A server-side pin silently replaces the model the user picked. Nothing local reports which model a role ran on.
 - The opt-in itself is local only. A remote-controlled switch for whether to obey remote pins grants back what the default withholds.
+- Every role that leaves its configured model tells the user. `RoleFallbackReporter` (`goal_planner.rs`) writes the `GoalRoleModelFailOpen` event AND sends `XaiSessionUpdate::GoalRoleModelFallback`, which the pager draws as a warning line. The line names the model picked, the model used and why. A spawn failure carries the spawn's own error text. The event alone reached only a dashboard, so a skeptic pinned to an unknown model ran on the session model with nothing on screen.
+- The planner always forks the session model, and still gets the notice (`planner_forks_session`).
+- A goal role's model is NOT checked against `[models] allowed_models`. That list governs chat selection, and its own contract exempts subagents. A goal role is a subagent the user configured. A model missing from the catalog still falls back (`model_unknown`).
+- Every verification assigns the skeptics from the CURRENT pool (`assign_skeptic_models`). A goal never keeps a model the user has moved away from. The first skeptic continues its previous run only while its model holds (`skeptic0_model_changed`). A run cannot continue on a model that did not write it.
 
 ## Goal-plan-to-todos notes
 
