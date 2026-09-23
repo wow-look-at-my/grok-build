@@ -657,15 +657,10 @@ fn a_default_that_names_a_listed_model_takes_effect_when_the_listing_lands() {
         catalog[startup.as_str()].has_endpoint(),
         "startup must fall back to a model with a URL, not {startup}"
     );
-    let mgr = ModelsManagerBuilder::new(
-        None,
-        catalog,
-        acp::ModelId::new(startup),
-        auth_manager,
-        cfg,
-    )
-    .cache(test_cache_manager(tmp.path()))
-    .build();
+    let mgr =
+        ModelsManagerBuilder::new(None, catalog, acp::ModelId::new(startup), auth_manager, cfg)
+            .cache(test_cache_manager(tmp.path()))
+            .build();
 
     let mut discovered = IndexMap::new();
     discovered.insert(
@@ -686,7 +681,8 @@ fn a_default_that_names_a_listed_model_takes_effect_when_the_listing_lands() {
     for (key, entry) in mgr.models() {
         if !entry.has_endpoint() {
             assert!(
-                !mgr.available().contains_key(&acp::ModelId::new(key.as_str())),
+                !mgr.available()
+                    .contains_key(&acp::ModelId::new(key.as_str())),
                 "{key} has no URL and must not be offered"
             );
         }
