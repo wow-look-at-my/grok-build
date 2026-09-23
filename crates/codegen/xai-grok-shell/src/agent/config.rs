@@ -7877,6 +7877,8 @@ reasoning_effort = "low"
         let dm = crate::models::default_model();
         let raw_config: toml::Value = toml::from_str(&format!(
             r#"
+            [endpoints]
+            cli_chat_proxy_base_url = ""
             [model."{dm}"]
             api_key = "user-custom-api-key"
             "#,
@@ -9463,7 +9465,14 @@ reasoning_effort = "low"
     }
     #[test]
     fn e2e_default_model_with_session_has_no_url_until_one_is_configured() {
-        let (_, models) = resolve_models_from_toml("", None);
+        // A blank key overrides GROK_CLI_CHAT_PROXY_BASE_URL, which a parallel test sets.
+        let (_, models) = resolve_models_from_toml(
+            r#"
+            [endpoints]
+            cli_chat_proxy_base_url = ""
+            "#,
+            None,
+        );
         let model = models
             .get(crate::models::default_model())
             .expect("default model should exist");
@@ -9594,6 +9603,8 @@ reasoning_effort = "low"
         let (_, models) = resolve_models_from_toml(
             &format!(
                 r#"
+            [endpoints]
+            cli_chat_proxy_base_url = ""
             [model.acme-grok]
             model = "{dm}"
             base_url = "https://inference.example.com/v1"
