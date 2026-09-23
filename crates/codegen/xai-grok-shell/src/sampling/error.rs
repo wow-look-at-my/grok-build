@@ -116,6 +116,7 @@ pub(crate) fn map_sampling_err_to_acp(err: SamplingError) -> acp::Error {
     match err {
         SamplingError::Auth { message, .. } => acp::Error::auth_required().data(message),
         SamplingError::InvalidConfiguration(msg) => acp::Error::invalid_params().data(msg),
+        SamplingError::EndpointNotAllowed(msg) => acp::Error::invalid_params().data(msg.clone()),
         SamplingError::Http(e) => {
             acp::Error::internal_error().data(format!("HTTP request failed: {e}"))
         }

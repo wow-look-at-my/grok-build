@@ -412,6 +412,7 @@ pub fn format_sampling_error(err: &SamplingError, retry_count: Option<u32>) -> S
                 retry_prefix, msg
             )
         }
+        SamplingError::EndpointNotAllowed(msg) => format!("{retry_prefix}{msg}"),
 
         SamplingError::Http(e) => {
             let mut details = Vec::new();
@@ -553,6 +554,7 @@ pub(crate) fn clone_error(err: &SamplingError) -> SamplingError {
             credential: *credential,
         },
         SamplingError::InvalidConfiguration(msg) => SamplingError::InvalidConfiguration(msg),
+        SamplingError::EndpointNotAllowed(msg) => SamplingError::EndpointNotAllowed(msg.clone()),
         SamplingError::Http(e) => {
             // reqwest::Error is not Clone; preserve the rendered message
             // as an EventStreamError (the closest retryable transport

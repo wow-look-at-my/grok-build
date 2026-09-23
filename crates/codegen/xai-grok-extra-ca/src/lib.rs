@@ -10,6 +10,8 @@
 //! (this crate's adapters) and MCP's 0.13 can each build their own
 //! `Certificate`s.
 
+pub mod endpoint_allowlist;
+
 use std::io::Read;
 use std::sync::OnceLock;
 

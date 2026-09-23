@@ -9,8 +9,6 @@ use serde::Deserialize;
 
 use crate::auth::AuthManager;
 
-const GROK_WEB_URL: &str = "https://grok.com";
-
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Mode {
@@ -96,7 +94,7 @@ impl ChatModelsClient {
                     .ok()
                     .filter(|s| !s.is_empty())
             })
-            .unwrap_or_else(|| GROK_WEB_URL.to_string());
+            .unwrap_or_default();
         Self {
             http: crate::http::shared_client(),
             base_url,

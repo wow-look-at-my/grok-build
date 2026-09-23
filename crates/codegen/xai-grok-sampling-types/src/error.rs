@@ -153,6 +153,9 @@ pub enum SamplingError {
     },
     #[error("invalid client configuration: {0}")]
     InvalidConfiguration(&'static str),
+    /// The URL is not in `[endpoints] allowed_endpoints`, so nothing was sent.
+    #[error("{0}")]
+    EndpointNotAllowed(String),
     #[error("request error: {0}")]
     Http(reqwest::Error),
     #[error("{prefix}{0}", prefix = SERIALIZATION_DISPLAY_PREFIX)]
@@ -528,6 +531,7 @@ impl SamplingError {
         match self {
             SamplingError::Auth { .. } => false,
             SamplingError::InvalidConfiguration(_) => false,
+            SamplingError::EndpointNotAllowed(_) => false,
             SamplingError::Http(err) => is_retryable_reqwest(err),
             SamplingError::Serialization(_) => false,
             SamplingError::Api { status, .. } => is_retryable_api_status(*status),

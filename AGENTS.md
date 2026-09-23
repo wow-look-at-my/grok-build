@@ -431,6 +431,13 @@ Every one of those is the test doing its job. Making them pass there means weake
 
 - `WorkflowHostParams.agent_slots` is a semaphore owned by `WorkflowManager` and shared by every run it launches (`session/workflow/manager.rs`), not one fresh semaphore per run. Up to `WORKFLOW_MAX_ACTIVE_RUNS_PER_SESSION` runs can be active at once, so a per-run semaphore will let total live agent-spawned LLM requests scale with active run count instead of staying under the configured cap (`GROK_WORKFLOW_MAX_CONCURRENT_AGENTS` / `workflow_max_concurrent_agents`) — the knob operators lower to stay under a hard per-host concurrent-request limit.
 
+## Endpoint allowlist notes
+
+- No endpoint is compiled in as a default. The proxy, the xAI API, the grok.com clients, the env crate's hosts, voice and the pricing catalog all resolve to BLANK when unconfigured. A blank URL builds no request.
+- A model request reaches only an endpoint in `[endpoints] allowed_endpoints` or `GROK_ALLOWED_ENDPOINTS` (`xai_grok_extra_ca::endpoint_allowlist`). The check runs where each request is made. Those places are `SamplingClient::new`, the model listings, the local-runtime reads, web search, image and video generation, embeddings, voice, pricing and the updater.
+- A DNS resolver or a connector layer cannot enforce it. Behind a proxy the resolver sees the proxy's host, and reqwest keeps a connector's target URI private.
+- `.cargo/config.toml` sets `GROK_ALLOWED_ENDPOINTS` to loopback so tests reach their mock servers. An installed binary does not get it.
+
 ## `[model_providers.<id>]` notes
 
 - A provider block carries every `[model.<id>]` field except the ones that name one model: `model`, `name`, `description`. `ModelProviderConfig` and `with_provider_defaults` (`agent/model_providers.rs`) destructure the whole struct, so a field added to one is a compile error until the merge handles it.

@@ -93,3 +93,8 @@ AARCH64_UNKNOWN_LINUX_MUSL_JEMALLOC_SYS_WITH_BACKGROUND_THREADS = "0"
 # the whole suite to completion. This is a test-environment tweak only: the
 # shipped binaries' threads are sized independently and are unaffected.
 RUST_MIN_STACK = "16777216"
+
+# A model request reaches only an allowed endpoint. Tests talk to mock servers
+# on this machine and to the reserved test domains, which never resolve. Only
+# processes that cargo starts get this value. An installed binary does not.
+GROK_ALLOWED_ENDPOINTS = "127.0.0.1,localhost,[::1],*.test,*.example,*.invalid,example.com,*.example.com"

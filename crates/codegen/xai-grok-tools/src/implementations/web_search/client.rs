@@ -15,6 +15,16 @@ enum SearchBackend {
     Kagi,
 }
 
+/// Refuse a search request to an endpoint missing from `[endpoints] allowed_endpoints`.
+fn allow_endpoint(url: &str) -> Result<(), xai_tool_runtime::ToolError> {
+    xai_grok_extra_ca::endpoint_allowlist::check(url).map_err(|refusal| {
+        xai_tool_runtime::ToolError::execution(
+            xai_tool_protocol::ToolId::new("web_search").expect("valid"),
+            refusal.to_string(),
+        )
+    })
+}
+
 #[derive(Clone)]
 pub struct WebSearchClient {
     http: reqwest::Client,
@@ -190,6 +200,7 @@ impl WebSearchClient {
                 )
             })?;
         let url = format!("{}/responses", self.base_url.trim_end_matches('/'));
+        allow_endpoint(&url)?;
         let sent_bearer = self.current_bearer().await;
         let mut req = self.http.post(&url).json(&request);
         if let Some(ref key) = sent_bearer {
@@ -288,6 +299,7 @@ impl WebSearchClient {
                 )
             })?;
         let url = format!("{}/responses", self.base_url.trim_end_matches('/'));
+        allow_endpoint(&url)?;
         let sent_bearer = self.current_bearer().await;
         let mut req = self.http.post(&url).json(&request);
         if let Some(ref key) = sent_bearer {
@@ -378,6 +390,7 @@ impl WebSearchClient {
     /// One `GET /search` against Kagi's Search API.
     async fn fetch_kagi(&self, query: &str) -> Result<KagiSearchBody, xai_tool_runtime::ToolError> {
         let url = format!("{}/search", self.base_url.trim_end_matches('/'));
+        allow_endpoint(&url)?;
         let mut params: Vec<(&str, String)> = vec![("q", query.to_string())];
         if let Some(limit) = self.kagi_limit {
             params.push(("limit", limit.to_string()));

@@ -5,7 +5,6 @@ use indexmap::IndexMap;
 use prod_mc_cli_chat_proxy_types::SubagentBundle;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
-const GROK_CODE_BACKEND_URL: &str = "https://code.grok.com";
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 const GROK_CODE_WEB_URL: &str = "https://grok.com";
 /// Build a share URL from a permission ID
@@ -276,6 +275,13 @@ pub enum BackendError {
     },
     #[error("Auth error: {0}")]
     Auth(String),
+    #[error("{0}")]
+    EndpointNotAllowed(String),
+}
+/// Refuse a model request to an endpoint missing from `[endpoints] allowed_endpoints`.
+pub(crate) fn allow_endpoint(url: &str) -> Result<(), BackendError> {
+    xai_grok_extra_ca::endpoint_allowlist::check(url)
+        .map_err(|refusal| BackendError::EndpointNotAllowed(refusal.to_string()))
 }
 pub struct BackendClient {
     reqwest_client: reqwest::Client,
@@ -306,8 +312,7 @@ impl BackendClient {
         Self {
             client: reqwest_middleware::ClientBuilder::new(reqwest_client.clone()).build(),
             reqwest_client,
-            base_url: std::env::var("GROK_CODE_BACKEND_URL")
-                .unwrap_or_else(|_| GROK_CODE_BACKEND_URL.to_string()),
+            base_url: std::env::var("GROK_CODE_BACKEND_URL").unwrap_or_default(),
             auth_manager: None,
         }
     }
@@ -752,8 +757,13 @@ impl ListModelsEndpoint {
                 auth: EndpointAuth::ApiKey,
             }
         } else if fetch_auth == crate::agent::models::ModelFetchAuth::ApiKey {
+            let base = endpoints.xai_api_base_url.trim();
             Self {
-                url: models_list_url_for_base(&endpoints.xai_api_base_url),
+                url: if base.is_empty() {
+                    String::new()
+                } else {
+                    models_list_url_for_base(base)
+                },
                 auth: EndpointAuth::ApiKey,
             }
         } else {
@@ -778,6 +788,7 @@ pub(crate) fn fetch_models_blocking(
     let client = crate::http::shared_startup_blocking_client();
     let source = ListModelsEndpoint::from_endpoints(endpoints, fetch_auth);
     let inference_base_url = endpoints.resolve_inference_base_url();
+    allow_endpoint(&source.url)?;
     tracing::info!("Fetching models from {}", source.url);
     let mut request = client.get(&source.url);
     match source.auth {
@@ -887,6 +898,7 @@ pub(crate) fn fetch_models_for_list_url_blocking(
     // The listing carries no base of its own, so an entry that names none falls
     // back to this. A caller that knows the inference base overwrites it.
     let base_url = url.trim_end_matches("/models").trim_end_matches('/');
+    allow_endpoint(url)?;
     tracing::debug!(models_url = %url, "Fetching models for BYOK/custom API base");
     let mut request = client.get(url);
     if let Some(key) = api_key
@@ -2254,7 +2266,8 @@ mod tests {
         let default = EndpointsConfig::from_config_value(&toml::Value::Table(Default::default()));
         assert_eq!(
             ListModelsEndpoint::from_endpoints(&default, ModelFetchAuth::ApiKey).url,
-            "https://api.x.ai/v1/models"
+            "",
+            "no xAI API URL configured, so no listing URL"
         );
         let custom = EndpointsConfig::from_config_value(
             &toml::from_str(

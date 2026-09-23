@@ -144,7 +144,11 @@ pub(crate) fn resolve(model_id: &str) -> ModelPricing {
     if !configured.model.is_unusable() {
         return configured.model;
     }
-    if model_id.is_empty() || !configured.lookup_enabled || lookup_suppressed(model_id) {
+    if model_id.is_empty()
+        || !configured.lookup_enabled
+        || configured.catalog_url.trim().is_empty()
+        || lookup_suppressed(model_id)
+    {
         return configured.model;
     }
     cached_or_schedule(model_id, &configured.catalog_url).unwrap_or(configured.model)
@@ -250,6 +254,7 @@ pub(crate) fn fetch_pricing_blocking(
         base_url.trim_end_matches('/'),
         model_id.trim_start_matches('/')
     );
+    xai_grok_extra_ca::endpoint_allowlist::check(&url).map_err(|refusal| refusal.to_string())?;
     let client = reqwest::blocking::Client::builder()
         .timeout(FETCH_TIMEOUT)
         .build()

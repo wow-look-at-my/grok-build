@@ -816,6 +816,26 @@ The key ones. See the README for the complete list.
 | Variable | Description |
 |----------|-------------|
 | `GROK_CLI_CHAT_PROXY_BASE_URL` | API proxy base URL. No default: unset, nothing is sent to a proxy |
+| `GROK_XAI_API_BASE_URL` | xAI API base URL. No default |
+| `GROK_ALLOWED_ENDPOINTS` | Comma-separated endpoints a model request may reach, added to `[endpoints] allowed_endpoints` |
+
+### Allowed endpoints
+
+Grok sends a model request only to an endpoint you list. This covers chat and completion calls, model listings, web search, image and video generation, embeddings, voice, the pricing catalog and update checks. The list starts empty, so a fresh config reaches nothing:
+
+```toml
+[endpoints]
+allowed_endpoints = [ "api.example.com", "localhost:11434", "*.corp.example", "https://gateway.example.com/v1", ]
+```
+
+| Entry | Allows |
+|-------|--------|
+| `api.example.com` | Any port and path on this host |
+| `localhost:11434` | This host and port only |
+| `*.corp.example` | Every subdomain of `corp.example` |
+| `https://gateway.example.com/v1` | This scheme, host, port and path prefix |
+
+A refused request is never sent. Its error names the entry to add. Grok has no built-in endpoint: a model, a tool or a service with no URL you configured has no URL at all. The bash tool is not affected: a `curl` it runs goes where you point it.
 
 ### Features
 

@@ -35,7 +35,7 @@ pub struct VoiceConfig {
 impl Default for VoiceConfig {
     fn default() -> Self {
         Self {
-            api_base: "https://api.x.ai".into(),
+            api_base: String::new(),
             stt_ws_path: "/v1/stt".into(),
             language: "en".into(),
             sample_rate: DEFAULT_SAMPLE_RATE,
@@ -48,13 +48,23 @@ impl Default for VoiceConfig {
 }
 
 impl VoiceConfig {
-    /// Streaming STT WebSocket URL. Rejects plaintext `http://` / `ws://`.
+    /// Streaming STT WebSocket URL. Rejects plaintext `http://` / `ws://`, a
+    /// blank base, and a host outside `[endpoints] allowed_endpoints`.
     pub fn stt_ws_url(&self) -> Result<String, VoiceError> {
-        ws_url(&self.api_base, &self.stt_ws_path)
+        if self.api_base.trim().is_empty() {
+            return Err(VoiceError::Config(
+                "voice has no URL: set [voice] api_base or [endpoints] xai_api_base_url".into(),
+            ));
+        }
+        let url = ws_url(&self.api_base, &self.stt_ws_path)?;
+        let https = url.replacen("wss://", "https://", 1);
+        xai_grok_extra_ca::endpoint_allowlist::check(&https)
+            .map_err(|refusal| VoiceError::Config(refusal.to_string()))?;
+        Ok(url)
     }
 
     /// `api_base`: non-empty `[voice].api_base`, else `[endpoints].xai_api_base_url`
-    /// from `root`, else `resolved_endpoints_base`, else `https://api.x.ai`.
+    /// from `root`, else `resolved_endpoints_base`, else blank.
     ///
     /// `resolved_endpoints_base` carries the caller's env / CLI overrides; it
     /// ranks below the raw table so config keeps beating env (shell precedence).

@@ -27,6 +27,8 @@
 //! `warm_async_http_client()` (in `mvp_agent.rs`). Optional extra roots:
 //! `GROK_EXTRA_CA_BUNDLE` via `xai_grok_extra_ca` (see env-var registry).
 
+pub use xai_grok_extra_ca::endpoint_allowlist;
+
 use std::sync::OnceLock;
 
 use xai_grok_workspace::permission::ClientType;

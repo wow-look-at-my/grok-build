@@ -51,7 +51,6 @@ pub(crate) fn default_agent_type() -> String {
     DEFAULT_AGENT_TYPE.to_owned()
 }
 /// Default base URL for the public xAI API.
-pub const XAI_API_BASE_URL_DEFAULT: &str = "https://api.x.ai/v1";
 /// Default base URL for the asset server (profile images, etc.).
 pub const ASSET_SERVER_URL_DEFAULT: &str = "https://assets.grok.com";
 /// One or more environment variable names that may hold a model API key.
@@ -147,13 +146,15 @@ impl std::fmt::Display for EnvKeys {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct EndpointsConfig {
-    /// cli chat proxy base URL. `None` = unset (resolvers apply the default);
-    /// `Some` = explicitly configured. Tracking explicitness (vs comparing to the
-    /// default value) lets an org pin the proxy to the default on purpose.
+    /// cli chat proxy base URL. `None` = unset, and every URL derived from it is blank.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cli_chat_proxy_base_url: Option<String>,
-    /// Base URL for the public xAI API.
+    /// Base URL for the public xAI API. Blank unless configured.
     pub xai_api_base_url: String,
+    /// The only endpoints a model request may reach. Empty allows none.
+    /// `GROK_ALLOWED_ENDPOINTS` adds to it. See `xai_grok_extra_ca::endpoint_allowlist`.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub allowed_endpoints: Vec<String>,
     /// Optional extra access-header value (applied only with the optional
     /// non-production feature, and only for matching first-party hosts).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -297,6 +298,7 @@ impl EndpointsConfig {
         }
         let mut resolved: Self = base.try_into().unwrap_or_default();
         resolved.external_otel_master_switch = external_otel_master_switch;
+        xai_grok_extra_ca::endpoint_allowlist::set_configured(resolved.allowed_endpoints.clone());
         resolved
     }
     /// The cli-chat-proxy base URL through which all auxiliary services (and
@@ -549,8 +551,8 @@ impl Default for EndpointsConfig {
     fn default() -> Self {
         Self {
             cli_chat_proxy_base_url: std::env::var("GROK_CLI_CHAT_PROXY_BASE_URL").ok(),
-            xai_api_base_url: std::env::var("GROK_XAI_API_BASE_URL")
-                .unwrap_or_else(|_| XAI_API_BASE_URL_DEFAULT.to_owned()),
+            xai_api_base_url: std::env::var("GROK_XAI_API_BASE_URL").unwrap_or_default(),
+            allowed_endpoints: Vec::new(),
             alpha_test_key: None,
             models_base_url: env_string("GROK_MODELS_BASE_URL"),
             models_list_url: env_string("GROK_MODELS_LIST_URL"),
@@ -2165,6 +2167,9 @@ impl Config {
         config.model_providers = model_providers;
         config.config_warnings.extend(auth_provider_warnings);
         config.config_warnings.extend(model_provider_warnings);
+        xai_grok_extra_ca::endpoint_allowlist::set_configured(
+            config.endpoints.allowed_endpoints.clone(),
+        );
         unrecognized_keys.sort();
         for key in unrecognized_keys {
             config.config_warnings.push(
@@ -4522,7 +4527,8 @@ pub struct PricingConfig {
     /// prices only the models config prices.
     pub lookup_enabled: bool,
     /// Base URL of the catalog. The per-model document is read from
-    /// `<catalog_url>/v1/models/<model id>`.
+    /// `<catalog_url>/v1/models/<model id>`. Blank by default, and a blank
+    /// catalog is never asked.
     pub catalog_url: String,
 }
 
@@ -4530,13 +4536,10 @@ impl Default for PricingConfig {
     fn default() -> Self {
         Self {
             lookup_enabled: true,
-            catalog_url: DEFAULT_PRICING_CATALOG_URL.to_string(),
+            catalog_url: String::new(),
         }
     }
 }
-
-/// The catalog the cost indicator reads when nothing else prices a model.
-pub const DEFAULT_PRICING_CATALOG_URL: &str = "https://modelinfo.pazer.ai";
 /// True when `cfg` equals the all-disabled default. Derives `PartialEq`
 /// on `f32`, which is fine for the current shape because both `f32`
 /// fields default to `None` — there's no parsed-vs-literal `0.7` float

@@ -753,6 +753,8 @@ impl SamplingClient {
         if config.base_url.trim().is_empty() {
             return Err(SamplingError::InvalidConfiguration(MISSING_BASE_URL));
         }
+        xai_grok_extra_ca::endpoint_allowlist::check(&config.base_url)
+            .map_err(|refusal| SamplingError::EndpointNotAllowed(refusal.to_string()))?;
         let mut headers = HeaderMap::new();
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
         if let Some(ref api_key) = config.api_key {
@@ -2970,6 +2972,25 @@ mod tests {
                 }
                 Err(other) => panic!("wrong error for {blank:?}: {other}"),
                 Ok(_) => panic!("a blank base_url must not build a client"),
+            }
+        }
+    }
+
+    #[test]
+    fn an_endpoint_nobody_allowed_is_refused_before_any_request() {
+        for url in [
+            "https://cli-chat-proxy.grok.com/v1",
+            "https://api.x.ai/v1",
+            "https://api.anthropic.com/v1",
+        ] {
+            let mut cfg = minimal_config();
+            cfg.base_url = url.to_string();
+            match SamplingClient::new(cfg) {
+                Err(SamplingError::EndpointNotAllowed(msg)) => {
+                    assert!(msg.contains("allowed_endpoints"), "{msg}");
+                }
+                Err(other) => panic!("wrong error for {url}: {other}"),
+                Ok(_) => panic!("{url} is in no allowlist and must not build a client"),
             }
         }
     }

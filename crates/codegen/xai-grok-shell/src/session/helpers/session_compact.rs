@@ -58,7 +58,7 @@ impl CompactFailure {
 pub(crate) use xai_grok_sampling_types::is_context_length_error;
 /// Classify an upstream `SamplingError` for the compaction retry loop.
 ///
-/// `Auth`, `InvalidConfiguration`, `Serialization` and
+/// `Auth`, `InvalidConfiguration`, `EndpointNotAllowed`, `Serialization` and
 /// `IdleTimeout` are all deterministic by construction (re-issuing the same
 /// request cannot change the outcome — auth state, config, payload shape,
 /// and stuck-model conditions all persist). 4xx API responses other than
@@ -69,6 +69,7 @@ fn classify_sampling_error(err: SamplingError) -> CompactFailure {
     let deterministic = match &err {
         SamplingError::Auth { .. }
         | SamplingError::InvalidConfiguration(_)
+        | SamplingError::EndpointNotAllowed(_)
         | SamplingError::Serialization(_)
         | SamplingError::IdleTimeout { .. } => true,
         SamplingError::Api {

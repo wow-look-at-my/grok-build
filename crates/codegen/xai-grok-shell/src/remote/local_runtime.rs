@@ -438,6 +438,7 @@ fn get_json<T: serde::de::DeserializeOwned>(
     url: &str,
     api_key: Option<&str>,
 ) -> Result<T, BackendError> {
+    super::client::allow_endpoint(url)?;
     let mut request = client.get(url);
     if let Some(key) = api_key.filter(|k| !k.is_empty()) {
         request = request.header("Authorization", format!("Bearer {key}"));
@@ -451,6 +452,7 @@ fn post_json<T: serde::de::DeserializeOwned>(
     api_key: Option<&str>,
     body: &serde_json::Value,
 ) -> Result<T, BackendError> {
+    super::client::allow_endpoint(url)?;
     let mut request = client.post(url).json(body);
     if let Some(key) = api_key.filter(|k| !k.is_empty()) {
         request = request.header("Authorization", format!("Bearer {key}"));
