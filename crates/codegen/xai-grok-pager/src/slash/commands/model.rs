@@ -60,13 +60,8 @@ impl SlashCommand for ModelCommand {
             return None;
         }
 
-        // Effort phase if input is "<reasoning-model> ", route phase if it is
-        // "<shared name> ", else model phase.
-        if let Some(model_id) = detect_effort_phase(ctx.models, args_query) {
-            return Some(build_effort_items(ctx.models, &model_id));
-        }
-        if let Some(group) = detect_route_phase(ctx.models, args_query) {
-            return Some(build_route_items(ctx.models, &group));
+        if let Some(items) = sub_phase_items(ctx.models, args_query) {
+            return Some(items);
         }
         // The opening list is the favorites. A typed query lists every model,
         // so a provider with hundreds of them still answers a search for one
@@ -79,11 +74,8 @@ impl SlashCommand for ModelCommand {
         if ctx.models.is_empty() {
             return None;
         }
-        if let Some(model_id) = detect_effort_phase(ctx.models, args_query) {
-            return Some(build_effort_items(ctx.models, &model_id));
-        }
-        if let Some(group) = detect_route_phase(ctx.models, args_query) {
-            return Some(build_route_items(ctx.models, &group));
+        if let Some(items) = sub_phase_items(ctx.models, args_query) {
+            return Some(items);
         }
         Some(build_model_items(ctx.models, false))
     }
@@ -157,9 +149,35 @@ fn split_trailing_token(args: &str) -> Option<(&str, &str)> {
     Some((prefix, last))
 }
 
-/// Returns the matched model id when `args_query` is `"<reasoning-model> ..."`.
-/// Longest-name-first to disambiguate names that share a prefix.
-fn detect_effort_phase(models: &ModelState, args_query: &str) -> Option<acp::ModelId> {
+/// Whether `query` is `token`, then whitespace, then anything.
+fn leads_with(query: &str, token: &str) -> bool {
+    query.len() > token.len()
+        && query.is_char_boundary(token.len())
+        && query[..token.len()].eq_ignore_ascii_case(token)
+        && query[token.len()..].starts_with(char::is_whitespace)
+}
+
+/// The effort or route rows `args_query` leads into, if any.
+///
+/// The longer typed token wins. On a tie the route phase wins: a shared name
+/// can equal another model's id, and the group row inserts that name.
+fn sub_phase_items(models: &ModelState, args_query: &str) -> Option<Vec<ArgItem>> {
+    let effort = detect_effort_phase(models, args_query);
+    let route = detect_route_phase(models, args_query);
+    match (effort, route) {
+        (Some((_, effort_len)), Some((group, route_len))) if route_len >= effort_len => {
+            Some(build_route_items(models, &group))
+        }
+        (Some((id, _)), _) => Some(build_effort_items(models, &id)),
+        (None, Some((group, _))) => Some(build_route_items(models, &group)),
+        (None, None) => None,
+    }
+}
+
+/// The model and the matched length when `args_query` is
+/// `"<reasoning-model> ..."`. Longest-name-first to disambiguate names that
+/// share a prefix.
+fn detect_effort_phase(models: &ModelState, args_query: &str) -> Option<(acp::ModelId, usize)> {
     // A model is typed by its id, or by its name when no other model has it. A
     // shared name leads to the route phase instead.
     let mut candidates: Vec<(&acp::ModelId, &str)> = models
@@ -173,16 +191,10 @@ fn detect_effort_phase(models: &ModelState, args_query: &str) -> Option<acp::Mod
         .collect();
     candidates.sort_by_key(|(_, name)| std::cmp::Reverse(name.len()));
 
-    for (id, name) in candidates {
-        if args_query.len() > name.len()
-            && args_query.is_char_boundary(name.len())
-            && args_query[..name.len()].eq_ignore_ascii_case(name)
-            && args_query[name.len()..].starts_with(char::is_whitespace)
-        {
-            return Some(id.clone());
-        }
-    }
-    None
+    candidates
+        .into_iter()
+        .find(|(_, name)| leads_with(args_query, name))
+        .map(|(id, name)| (id.clone(), name.len()))
 }
 
 fn is_favorite(info: &acp::ModelInfo) -> bool {
@@ -254,12 +266,13 @@ fn ambiguous_name(models: &ModelState, query: &str) -> Option<String> {
     ))
 }
 
-/// The models behind a shared name when `args_query` is `"<shared name> ..."`.
-/// Longest name first, so a name that is a prefix of another does not win.
+/// The models behind a shared name, and the name's length, when `args_query`
+/// is `"<shared name> ..."`. Longest name first, so a name that is a prefix of
+/// another does not win.
 fn detect_route_phase<'a>(
     models: &'a ModelState,
     args_query: &str,
-) -> Option<Vec<&'a acp::ModelId>> {
+) -> Option<(Vec<&'a acp::ModelId>, usize)> {
     let mut names: Vec<&str> = models
         .available
         .iter()
@@ -267,13 +280,10 @@ fn detect_route_phase<'a>(
         .map(|(_, info)| info.name.as_str())
         .collect();
     names.sort_by_key(|name| std::cmp::Reverse(name.len()));
-    names.into_iter().find_map(|name| {
-        let matches = args_query.len() > name.len()
-            && args_query.is_char_boundary(name.len())
-            && args_query[..name.len()].eq_ignore_ascii_case(name)
-            && args_query[name.len()..].starts_with(char::is_whitespace);
-        matches.then(|| models_named(models, name))
-    })
+    names
+        .into_iter()
+        .find(|name| leads_with(args_query, name))
+        .map(|name| (models_named(models, name), name.len()))
 }
 
 /// Trailing space on reasoning models: it signals "more input expected" to
@@ -587,13 +597,51 @@ mod tests {
 
     #[test]
     fn a_shared_name_alone_is_refused_with_the_choices() {
+        let mut state = ModelState::default();
+        for (id, info) in [
+            routed_model("local/m", "m", Some("local"), "localhost:18080"),
+            routed_model("relay/m", "m", Some("relay"), "relay.example"),
+        ] {
+            state.available.insert(id, info);
+        }
+        let mut ctx = dummy_exec_ctx(&state);
+        match ModelCommand.run(&mut ctx, "m") {
+            CommandResult::Error(msg) => {
+                assert!(msg.contains("local/m") && msg.contains("relay/m"), "{msg}");
+            }
+            other => panic!("expected an ambiguity error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn the_group_row_opens_routes_even_when_its_name_is_a_reasoning_models_id() {
+        let mut state = ModelState::default();
+        let (bid, binfo) = model_with_reasoning("grok-4.7", "Grok 4.7");
+        state.available.insert(bid, binfo);
+        for (id, info) in [
+            routed_model("local/grok-4.7", "grok-4.7", Some("local"), "l"),
+            routed_model("relay/grok-4.7", "grok-4.7", Some("relay"), "r"),
+        ] {
+            state.available.insert(id, info);
+        }
+        let items = ModelCommand
+            .suggest_args(&ctx_for(&state), "grok-4.7 ")
+            .unwrap();
+        let inserts: Vec<&str> = items.iter().map(|i| i.insert_text.as_str()).collect();
+        assert_eq!(inserts, vec!["local/grok-4.7", "relay/grok-4.7"]);
+    }
+
+    #[test]
+    fn an_id_that_is_also_a_shared_name_selects_the_id() {
+        // The report's catalog: `grok-4.7` is the built-in's id and the
+        // listed copies' shared name. The id is exact, so it wins.
         let state = state_with_a_shared_name();
         let mut ctx = dummy_exec_ctx(&state);
         match ModelCommand.run(&mut ctx, "grok-4.7") {
-            CommandResult::Error(msg) => {
-                assert!(msg.contains("local/grok-4.7") && msg.contains("relay/grok-4.7"));
+            CommandResult::Action(Action::SetDefaultModel(id)) => {
+                assert_eq!(id.0.as_ref(), "grok-4.7");
             }
-            other => panic!("expected an ambiguity error, got {other:?}"),
+            other => panic!("expected the built-in by id, got {other:?}"),
         }
     }
 
