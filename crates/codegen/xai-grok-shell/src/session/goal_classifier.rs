@@ -963,6 +963,19 @@ pub(crate) struct SkepticResult {
     /// the panel-level event can surface slow outliers even though
     /// emissions are batched after `join_all`.
     pub latency_ms: u64,
+    /// The skeptic's run was cancelled. A cancel is never retried.
+    pub cancelled: bool,
+}
+
+impl SkepticResult {
+    /// A refute that carries no reason: the skeptic failed, or it gave only
+    /// a terminal token. The implementer has nothing in it to act on.
+    fn has_no_verdict(&self) -> bool {
+        self.refuted
+            && self.fallback_note.is_some()
+            && self.evidence.trim().is_empty()
+            && self.findings.is_empty()
+    }
 }
 
 /// Substitute the per-skeptic JSON-verdict path placeholders and root
@@ -1132,6 +1145,11 @@ fn render_finding(f: &Finding) -> String {
     sanitize_evidence(&body)
 }
 
+/// Follows a no-verdict bullet. The implementer otherwise reads the
+/// failure as a gap and tries to fix the verifier from inside its answer.
+const NO_VERDICT_ADVICE: &str = "a verifier-side failure, not a gap in your work. \
+     Do not try to fix it. It re-runs when you complete again";
+
 /// Render one refuter as a sanitized bullet. Prefers structured `findings`
 /// (one sub-bullet each), else `evidence`, else the synthetic `fallback_note`,
 /// else a bare no-evidence note. All model text is sanitized.
@@ -1155,7 +1173,7 @@ fn render_refuter_bullet(r: &SkepticResult) -> String {
         format!("{header} {}", sanitize_evidence(evidence))
     } else if let Some(note) = &r.fallback_note {
         format!(
-            "- [skeptic {}] no verdict produced: {}",
+            "- [skeptic {}] no verdict produced: {} — {NO_VERDICT_ADVICE}",
             r.skeptic_idx,
             sanitize_evidence(note),
         )
@@ -1420,6 +1438,10 @@ objection counts only when it is a demonstrable defect in shipped behavior or \
 an unmet gating criterion, never a stylistic or test-construction preference \
 an earlier round implicitly accepted; when every prior gap is fixed and every \
 gating criterion holds, return `Not Refuted`.\n\
+- FINAL_RESPONSE leads with the agent's LATEST message. A `## Earlier summary \
+(round 1, superseded)` section after it is first-round text the agent cannot \
+edit. Judge the latest message. A claim there that the latest message corrects \
+is NOT a gap. Never ask the agent to delete or edit that section.\n\
 - PLAN_CHANGES shows how the agent edited PLAN_FILE this run — a weakened, \
 deleted, or self-serving criterion is itself grounds for `refuted: true`.\n\
 - Cite concrete evidence per assertion (`path:line`, a RUN_LOG entry, or \
@@ -1626,6 +1648,7 @@ fn skeptic_failure(skeptic_idx: u32, note: String, latency_ms: u64) -> SkepticRe
         findings: Vec::new(),
         fallback_note: Some(note),
         latency_ms,
+        cancelled: false,
     }
 }
 
@@ -1669,6 +1692,7 @@ async fn read_skeptic_verdict(
             findings,
             fallback_note: None,
             latency_ms: started.elapsed().as_millis() as u64,
+            cancelled: false,
         };
     }
 
@@ -1683,6 +1707,7 @@ async fn read_skeptic_verdict(
             findings: Vec::new(),
             fallback_note: Some("verdict JSON missing/malformed; used terminal token".into()),
             latency_ms: started.elapsed().as_millis() as u64,
+            cancelled: false,
         },
         None => skeptic_failure(
             skeptic_idx,
@@ -1840,12 +1865,71 @@ async fn run_one_skeptic(
             format!("transport error: {d}"),
             started.elapsed().as_millis() as u64,
         ),
-        Err(SpawnError::Runtime { message, cancelled }) => skeptic_failure(
-            skeptic_idx,
-            format!("runtime error (cancelled={cancelled}): {message}"),
-            started.elapsed().as_millis() as u64,
-        ),
+        Err(SpawnError::Runtime { message, cancelled }) => SkepticResult {
+            cancelled,
+            ..skeptic_failure(
+                skeptic_idx,
+                format!("runtime error (cancelled={cancelled}): {message}"),
+                started.elapsed().as_millis() as u64,
+            )
+        },
     }
+}
+
+/// [`run_one_skeptic`], run a second time on a fresh cold spawn when the
+/// first run gave no verdict. Without the retry, a skeptic that ran out of
+/// budget reaches the implementer as a gap it cannot fix. A second failure
+/// still counts as a refute. Returns the result and the spawn id that
+/// produced it, so skeptic 0's resume chain follows the live session.
+async fn run_skeptic_retrying_no_verdict(
+    spawner: &Arc<dyn GoalClassifierSpawner>,
+    skeptic_idx: u32,
+    inputs: &SkepticInputs<'_>,
+    spawn_id: &str,
+    resume_from: Option<&str>,
+    tool_names: &RoleToolNames,
+    inherit_tool_names: &RoleToolNames,
+) -> (SkepticResult, String) {
+    let first = run_one_skeptic(
+        spawner,
+        skeptic_idx,
+        inputs,
+        spawn_id,
+        resume_from,
+        tool_names,
+        inherit_tool_names,
+    )
+    .await;
+    if !first.has_no_verdict() || first.cancelled {
+        return (first, spawn_id.to_owned());
+    }
+    let first_note = first.fallback_note.clone().unwrap_or_default();
+    tracing::warn!(
+        skeptic_idx,
+        note = %first_note,
+        "skeptic produced no verdict; retrying it once on a cold spawn",
+    );
+    // A stale malformed verdict file must not answer for the retry.
+    let verdict_raw = format_verdict_path(inputs.verifier_id, inputs.attempt, skeptic_idx);
+    let _ = tokio::fs::remove_file(&verdict_raw).await;
+    let retry_id = uuid::Uuid::now_v7().to_string();
+    let mut retry = run_one_skeptic(
+        spawner,
+        skeptic_idx,
+        inputs,
+        &retry_id,
+        None,
+        tool_names,
+        inherit_tool_names,
+    )
+    .await;
+    retry.latency_ms += first.latency_ms;
+    if retry.has_no_verdict()
+        && let Some(note) = retry.fallback_note.as_mut()
+    {
+        *note = format!("{note} (retry also failed; first run: {first_note})");
+    }
+    (retry, retry_id)
 }
 
 /// Shared per-skeptic inputs. Borrowed from the verification-stage
@@ -2222,7 +2306,7 @@ pub(crate) async fn run_verification_stage(
         // preserving `skeptic0_session_id`, and the gatekeeper must still
         // resume in that case.
         let resume_from = inputs.prior_skeptic0_session_id;
-        let first = run_one_skeptic(
+        let (first, skeptic0_id) = run_skeptic_retrying_no_verdict(
             &spawner,
             0,
             &skeptic_inputs,
@@ -2240,7 +2324,7 @@ pub(crate) async fn run_verification_stage(
             // case short-circuited above), so its refute remains binding.
             let cold_ids: Vec<String> = (1..n).map(|_| uuid::Uuid::now_v7().to_string()).collect();
             let rest = (1..n).zip(&cold_ids).map(|(idx, id)| {
-                run_one_skeptic(
+                run_skeptic_retrying_no_verdict(
                     &spawner,
                     idx,
                     &skeptic_inputs,
@@ -2252,13 +2336,18 @@ pub(crate) async fn run_verification_stage(
             });
             let mut all = Vec::with_capacity(n as usize);
             all.push(first);
-            all.extend(futures::future::join_all(rest).await);
+            all.extend(
+                futures::future::join_all(rest)
+                    .await
+                    .into_iter()
+                    .map(|(r, _)| r),
+            );
             (all, high_refute, Some(skeptic0_id))
         }
     } else {
         let cold_ids: Vec<String> = (0..n).map(|_| uuid::Uuid::now_v7().to_string()).collect();
         let spawns = (0..n).zip(&cold_ids).map(|(idx, id)| {
-            run_one_skeptic(
+            run_skeptic_retrying_no_verdict(
                 &spawner,
                 idx,
                 &skeptic_inputs,
@@ -2268,7 +2357,12 @@ pub(crate) async fn run_verification_stage(
                 inputs.inherit_tool_names,
             )
         });
-        (futures::future::join_all(spawns).await, false, None)
+        let results = futures::future::join_all(spawns)
+            .await
+            .into_iter()
+            .map(|(r, _)| r)
+            .collect();
+        (results, false, None)
     };
 
     for r in &results {
@@ -3056,6 +3150,7 @@ mod tests {
             findings: Vec::new(),
             fallback_note: None,
             latency_ms: 0,
+            cancelled: false,
         }
     }
 
@@ -3253,6 +3348,7 @@ mod tests {
             findings: Vec::new(),
             fallback_note: fallback_note.map(str::to_string),
             latency_ms: 0,
+            cancelled: false,
         }
     }
 
@@ -3334,8 +3430,10 @@ mod tests {
         let summary = build_gaps_summary(&results);
         assert_eq!(
             summary,
-            "- [skeptic 0, high] real evidence\n\
-             - [skeptic 1] no verdict produced: channel closed",
+            format!(
+                "- [skeptic 0, high] real evidence\n\
+                 - [skeptic 1] no verdict produced: channel closed — {NO_VERDICT_ADVICE}"
+            ),
         );
     }
 
@@ -5237,9 +5335,11 @@ mod tests {
 
     #[tokio::test]
     async fn verification_stage_skeptic_transport_failure_counts_as_refute() {
-        // Three skeptics: one transport-fails (fail-closed refute),
-        // two return Not Refuted. Aggregate is 1-of-3 refute → Achieved.
+        // Three skeptics: one transport-fails twice (its run and its
+        // retry), so it refutes fail-closed. Two return Not Refuted.
+        // Aggregate is 1-of-3 refute → Achieved.
         let spawner: Arc<dyn GoalClassifierSpawner> = Arc::new(MockSpawner::new([
+            MockResponse::transport_error(),
             MockResponse::transport_error(),
             MockResponse::not_refuted(),
             MockResponse::not_refuted(),
@@ -5266,6 +5366,45 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn verification_stage_retries_a_skeptic_that_gave_no_verdict() {
+        // Skeptic 0 fails, and its retry clears. Only the retry's vote may
+        // count; the failure must never reach the implementer as a gap.
+        let spawner = Arc::new(MockSpawner::new([
+            MockResponse::transport_error(),
+            MockResponse::not_refuted(),
+            MockResponse::not_refuted(),
+        ]));
+        let observed = spawner.clone();
+        let spawner: Arc<dyn GoalClassifierSpawner> = spawner;
+        let (log, emit) = collect_events();
+        let _wsp = tempfile::tempdir().unwrap();
+        let vid = unique_verifier_id();
+        let outcome = run_verification_stage(
+            spawner,
+            stage_inputs("obj", "ok", _wsp.path(), &vid, 1, 2),
+            &emit,
+        )
+        .await
+        .outcome;
+        let GoalClassifierOutcome::Achieved { details_path } = outcome else {
+            panic!("expected Achieved: the retry cleared skeptic 0");
+        };
+        let _ = tokio::fs::remove_file(&details_path).await;
+        assert_eq!(*observed.skeptic_idxs.lock().unwrap(), vec![0, 0, 1]);
+        assert_eq!(
+            observed.resume_froms.lock().unwrap()[1],
+            None,
+            "the retry is a cold spawn",
+        );
+        let log = log.lock().unwrap();
+        assert!(
+            log.iter().any(|t| t.starts_with("skeptic:0:false")),
+            "skeptic 0 must carry the retry's vote: {log:?}",
+        );
+        assert!(!log.iter().any(|t| t.starts_with("skeptic:0:true")));
+    }
+
+    #[tokio::test]
     async fn verification_stage_skeptic_cancelled_counts_as_refute() {
         let spawner: Arc<dyn GoalClassifierSpawner> = Arc::new(MockSpawner::new([
             MockResponse::cancelled(),
@@ -5289,9 +5428,10 @@ mod tests {
 
     #[tokio::test]
     async fn verification_stage_skeptic_malformed_falls_back_to_refute() {
-        // Two skeptics; one returns malformed-token + no JSON; other
-        // returns Refuted. Both refute ⇒ NotAchieved.
+        // Two skeptics; one returns malformed-token + no JSON on its run and
+        // its retry; other returns Refuted. Both refute ⇒ NotAchieved.
         let spawner: Arc<dyn GoalClassifierSpawner> = Arc::new(MockSpawner::new([
+            MockResponse::malformed_token(),
             MockResponse::malformed_token(),
             MockResponse::refuted(),
         ]));
@@ -5317,6 +5457,7 @@ mod tests {
         // crash (non-user failure) must also synthesise a refute vote,
         // with the `fallback_note` distinguishing it from a cancel.
         let spawner: Arc<dyn GoalClassifierSpawner> = Arc::new(MockSpawner::new([
+            MockResponse::runtime_error(),
             MockResponse::runtime_error(),
             MockResponse::not_refuted(),
         ]));
@@ -5349,8 +5490,11 @@ mod tests {
         // `confidence: Unknown`, `evidence: ""`, and the fallback note.
         // Variant-C outcome: skeptic 0 not-refuted, cold skeptic 1
         // refuted → the cold quorum (skeptic 1 only) fails → NotAchieved.
+        // A terminal-only "Refuted" carries no reason, so skeptic 1 is
+        // retried once, and the retry answers the same way.
         let spawner: Arc<dyn GoalClassifierSpawner> = Arc::new(MockSpawner::new([
             MockResponse::terminal_only("Not Refuted"),
+            MockResponse::terminal_only("Refuted"),
             MockResponse::terminal_only("Refuted"),
         ]));
         let (log, emit) = collect_events();
@@ -5686,8 +5830,9 @@ mod tests {
     async fn verification_stage_skeptic0_failure_does_not_short_circuit() {
         // A synthetic refute (transport failure, confidence Unknown) is NOT a
         // high-confidence refute, so it must fan out the full panel rather
-        // than short-circuit. 1-of-3 refute → Achieved.
+        // than short-circuit. Its retry fails too. 1-of-3 refute → Achieved.
         let spawner = Arc::new(MockSpawner::new([
+            MockResponse::transport_error(),
             MockResponse::transport_error(),
             MockResponse::not_refuted(),
             MockResponse::not_refuted(),
@@ -5708,8 +5853,9 @@ mod tests {
             observed
                 .spawn_count
                 .load(std::sync::atomic::Ordering::SeqCst),
-            3,
-            "a skeptic-0 spawn failure must NOT short-circuit the panel",
+            4,
+            "a skeptic-0 spawn failure must NOT short-circuit the panel \
+             (its run, its retry, and both cold skeptics)",
         );
         let GoalClassifierOutcome::Achieved { details_path } = outcome else {
             panic!("expected Achieved (1-of-3 refute minority)");
