@@ -3749,6 +3749,11 @@ fn managed_settings_env_flag(key: &str) -> Option<bool> {
 /// Pin an unresolved provider-backed model to a credential that cannot mint, so
 /// the session bearer never reaches a third party's endpoint.
 fn fail_closed_on_provider_endpoint(entry: &mut ModelEntry, provider_id: &str) {
+    // A blank URL sends nothing, so there is no bearer to hold back. A
+    // fail-closed ref there reads as a credential of the provider's own.
+    if entry.info.base_url.trim().is_empty() && entry.api_base_url.is_none() {
+        return;
+    }
     let session_bearer_unsafe = !crate::util::is_xai_api_bearer_url(&entry.info.base_url)
         || entry
             .api_base_url
