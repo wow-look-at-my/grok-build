@@ -632,6 +632,87 @@ fn a_provider_models_requests_go_to_the_provider_url() {
     }
 }
 
+/// A default that names a listed model is absent at startup. The listing
+/// must move the current model onto it, and a model with no URL must never
+/// be offered.
+#[test]
+fn a_default_that_names_a_listed_model_takes_effect_when_the_listing_lands() {
+    let cfg = config_from_toml(
+        r#"
+            [models]
+            default = "internal/slug-c"
+            [model_providers.internal]
+            base_url = "https://internal.example/v1"
+            api_key = "internal-key"
+            [model.my-model]
+            model = "slug-a"
+            model_provider = "internal"
+            "#,
+    );
+    let tmp = tempfile::TempDir::new().unwrap();
+    let auth_manager = Arc::new(AuthManager::new(tmp.path(), GrokComConfig::default()));
+    let catalog = resolve_model_catalog(&cfg, None);
+    let (startup, _, _) = resolve_default_model(&cfg, &catalog, false);
+    assert!(
+        catalog[startup.as_str()].has_endpoint(),
+        "startup must fall back to a model with a URL, not {startup}"
+    );
+    let mgr = ModelsManagerBuilder::new(
+        None,
+        catalog,
+        acp::ModelId::new(startup),
+        auth_manager,
+        cfg,
+    )
+    .cache(test_cache_manager(tmp.path()))
+    .build();
+
+    let mut discovered = IndexMap::new();
+    discovered.insert(
+        "internal/slug-c".to_owned(),
+        crate::agent::model_provider_discovery::DiscoveredModel {
+            provider_id: "internal".to_owned(),
+            listed: config::ConfigModelOverride {
+                model: Some("slug-c".to_owned()),
+                ..Default::default()
+            },
+            loaded_in_vram: None,
+        },
+    );
+    mgr.set_provider_models(discovered);
+    assert_eq!(mgr.current_model_id().0.as_ref(), "internal/slug-c");
+    assert_eq!(mgr.sampling_config().model, "slug-c");
+
+    for (key, entry) in mgr.models() {
+        if !entry.has_endpoint() {
+            assert!(
+                !mgr.available().contains_key(&acp::ModelId::new(key.as_str())),
+                "{key} has no URL and must not be offered"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_session_waits_for_the_provider_listing() {
+    let mgr = test_manager();
+    // Nothing in flight: no wait.
+    mgr.wait_for_provider_discovery().await;
+
+    let guard = mgr.begin_provider_discovery();
+    let waiter = {
+        let mgr = mgr.clone();
+        tokio::spawn(async move { mgr.wait_for_provider_discovery().await })
+    };
+    tokio::task::yield_now().await;
+    assert!(!waiter.is_finished(), "the wait must hold while listing");
+    drop(guard);
+    tokio::time::timeout(std::time::Duration::from_secs(5), waiter)
+        .await
+        .expect("the wait must end when the listing settles")
+        .unwrap();
+}
+
 #[test]
 fn model_show_model_fingerprint_reads_catalog_flag() {
     let mgr = test_manager();
@@ -1222,8 +1303,11 @@ fn apply_refresh_result_only_updates_etag_on_success() {
 }
 
 fn make_model_entry(model_id: &str) -> ModelEntry {
+    let mut info = config::ModelInfo::fallback(model_id);
+    // A model with no URL is never selectable.
+    info.base_url = "https://test.api/v1".to_owned();
     ModelEntry {
-        info: config::ModelInfo::fallback(model_id),
+        info,
         api_key: None,
         env_key: None,
         auth_provider: None,
