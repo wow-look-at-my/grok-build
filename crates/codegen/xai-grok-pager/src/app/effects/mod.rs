@@ -4336,10 +4336,8 @@ pub(crate) fn execute(
                             let proxy_base = std::env::var(
                                     "GROK_CLI_CHAT_PROXY_BASE_URL",
                                 )
-                                .unwrap_or_else(|_| {
-                                    xai_grok_shell::agent::config::CLI_CHAT_PROXY_BASE_URL_DEFAULT
-                                        .to_owned()
-                                });
+                                .ok()
+                                .filter(|url| !url.trim().is_empty())?;
                             xai_grok_shell::remote::fetch_settings_blocking(
                                     &proxy_base,
                                     &auth,

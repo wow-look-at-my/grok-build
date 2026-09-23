@@ -1204,6 +1204,10 @@ pub async fn install_internal_from_bases(
 ) -> Result<()> {
     let mut last_err: Option<anyhow::Error> = None;
     for (i, base) in bases.iter().enumerate() {
+        if let Err(refusal) = xai_grok_extra_ca::endpoint_allowlist::check(base) {
+            last_err = Some(refusal.into());
+            continue;
+        }
         match download_verified_from_base(target, update_config, base).await {
             Ok(download) => return activate_verified_download(&download).await,
             Err(e) if e.is::<SmokeTestFailure>() => {

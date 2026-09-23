@@ -113,6 +113,9 @@ impl EmbeddingProvider for ApiEmbeddingProvider {
 
         let mut all_embeddings = Vec::with_capacity(texts.len());
 
+        let endpoint = format!("{}/embeddings", self.api_base);
+        xai_grok_http::endpoint_allowlist::check(&endpoint)
+            .map_err(|refusal| refusal.to_string())?;
         // Process in batches to respect API payload limits
         for batch in texts.chunks(self.max_batch_size) {
             let input: Vec<&str> = batch.to_vec();
@@ -137,7 +140,7 @@ impl EmbeddingProvider for ApiEmbeddingProvider {
                 }
 
                 let request = xai_grok_http::shared_client()
-                    .post(format!("{}/embeddings", self.api_base))
+                    .post(&endpoint)
                     .json(&body_json)
                     .header("X-XAI-Token-Auth", "xai-grok-cli")
                     .header("x-grok-client-version", xai_grok_version::version());

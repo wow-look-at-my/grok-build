@@ -150,6 +150,9 @@ struct Inner {
     model_switch_watch: tokio::sync::watch::Sender<u64>,
     /// Progress of the first real-catalog load, watched by bounded waits.
     catalog_progress: tokio::sync::watch::Sender<CatalogProgress>,
+    /// False while the `[model_providers.*]` listings are in flight. A session
+    /// built before they land picks its model from a catalog that lacks them.
+    provider_discovery_settled: tokio::sync::watch::Sender<bool>,
     /// Set once the user explicitly picks a model (`/model`); guards the
     /// first-catalog reselect from clobbering that choice.
     user_selected_model: AtomicBool,
@@ -160,6 +163,13 @@ struct RetryInFlightGuard(Arc<Inner>);
 impl Drop for RetryInFlightGuard {
     fn drop(&mut self) {
         self.0.retry_in_flight.store(false, Ordering::Release);
+    }
+}
+/// Settles the provider discovery on drop, so a panic cannot hold sessions.
+pub(crate) struct ProviderDiscoveryGuard(Arc<Inner>);
+impl Drop for ProviderDiscoveryGuard {
+    fn drop(&mut self) {
+        self.0.provider_discovery_settled.send_replace(true);
     }
 }
 struct RefreshInFlightGuard(Arc<Inner>);
@@ -298,6 +308,7 @@ impl ModelsManagerBuilder {
                 fetches_in_flight: AtomicUsize::new(0),
                 model_switch_watch: tokio::sync::watch::channel(0u64).0,
                 catalog_progress: tokio::sync::watch::channel(CatalogProgress::Pending).0,
+                provider_discovery_settled: tokio::sync::watch::channel(true).0,
                 user_selected_model: AtomicBool::new(false),
             }),
         }
@@ -574,8 +585,27 @@ impl ModelsManager {
         let cfg = self.inner.cfg.read().clone();
         let prefetched = self.inner.catalog.read().prefetched.clone();
         self.rebuild(&cfg, prefetched);
-        self.reselect_current_model_if_missing(&cfg);
+        // The default resolved at startup could not see these models. A
+        // configured default that names one of them fell back to another model.
+        if self.inner.user_selected_model.load(Ordering::Relaxed) {
+            self.reselect_current_model_if_missing(&cfg);
+        } else {
+            self.reselect_default_model(&cfg);
+        }
         self.notify_models_updated();
+    }
+
+    /// Mark the provider listings as in flight, until the returned guard drops.
+    pub(crate) fn begin_provider_discovery(&self) -> ProviderDiscoveryGuard {
+        self.inner.provider_discovery_settled.send_replace(false);
+        ProviderDiscoveryGuard(self.inner.clone())
+    }
+
+    /// Wait until the provider listings are in the catalog. Each listing has
+    /// its own fetch timeout, so this wait ends.
+    pub(crate) async fn wait_for_provider_discovery(&self) {
+        let mut settled = self.inner.provider_discovery_settled.subscribe();
+        let _ = settled.wait_for(|s| *s).await;
     }
 
     /// Update which provider-discovered models are resident in VRAM.
@@ -1121,17 +1151,17 @@ impl ModelsManager {
         let auth_manager = self.inner.auth_manager.as_ref();
         let current_model_id = self.current_model_id();
         let all_models = self.models();
-        let fallback;
-        let current_model = match all_models
-            .get(current_model_id.0.as_ref())
-            .or_else(|| all_models.values().next())
-        {
+        let missing;
+        let current_model = match all_models.get(current_model_id.0.as_ref()) {
             Some(m) => m,
             None => {
-                tracing::warn!("no models available in catalog; defaulting to bundled model");
-                let default_id = crate::models::default_model().to_string();
-                fallback = ModelEntry::fallback(&default_id, &config.endpoints);
-                &fallback
+                // Never swap in another model: its URL is one the user did not pick.
+                tracing::error!(
+                    model = %current_model_id.0,
+                    "the selected model is not in the catalog; no request will be sent"
+                );
+                missing = ModelEntry::unreachable(current_model_id.0.as_ref());
+                &missing
             }
         };
 

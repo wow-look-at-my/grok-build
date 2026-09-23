@@ -16,6 +16,7 @@ thiserror = { workspace = true }
 time = { workspace = true, features = ["serde"] }
 tokio = { workspace = true, features = ["fs", "process", "io-util", "macros", "time"] }
 tracing = { workspace = true }
+xai-grok-extra-ca = { workspace = true }
 xai-grok-shell = { workspace = true }
 xai-grok-tools = { workspace = true }
 xai-grok-version = { workspace = true }

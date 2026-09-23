@@ -27,6 +27,7 @@ use xai_grok_tools::implementations::skills::types::{SkillInfo, SkillScope};
 
 use crate::auth::AuthManager;
 
+/// The first-party host. Only compared against, never used as a default.
 const GROK_WEB_URL: &str = "https://grok.com";
 
 /// Marker stored on SkillInfo.metadata / AvailableCommand._meta so clients
@@ -394,7 +395,7 @@ impl SkillsClient {
                     .ok()
                     .filter(|s| !s.is_empty())
             })
-            .unwrap_or_else(|| GROK_WEB_URL.to_string());
+            .unwrap_or_default();
         Self {
             http: crate::http::shared_client(),
             base_url,

@@ -254,9 +254,16 @@ fn build_stt_ws_url(config: &VoiceConfig) -> Result<Url, VoiceError> {
 mod tests {
     use super::*;
 
+    fn configured() -> VoiceConfig {
+        VoiceConfig {
+            api_base: "https://voice.example.com".into(),
+            ..VoiceConfig::default()
+        }
+    }
+
     #[test]
     fn stt_url_includes_query_params() {
-        let cfg = VoiceConfig::default();
+        let cfg = configured();
         let url = build_stt_ws_url(&cfg).unwrap();
         let q = url.query().unwrap_or_default();
         assert!(q.contains("sample_rate=16000"));
@@ -268,7 +275,7 @@ mod tests {
     fn stt_url_resolves_auto_to_concrete_language() {
         let cfg = VoiceConfig {
             language: "auto".into(),
-            ..VoiceConfig::default()
+            ..configured()
         };
         let url = build_stt_ws_url(&cfg).unwrap();
         let q = url.query().unwrap_or_default();
@@ -295,7 +302,7 @@ mod tests {
     fn stt_url_passes_through_catalog_language() {
         let cfg = VoiceConfig {
             language: "ja".into(),
-            ..VoiceConfig::default()
+            ..configured()
         };
         let url = build_stt_ws_url(&cfg).unwrap();
         assert!(url.query().unwrap_or_default().contains("language=ja"));

@@ -279,8 +279,11 @@ else
 fi
 
 # Fetch managed_config.toml + requirements.toml from server (deployment key only).
-if [ -n "$GROK_DEPLOYMENT_KEY" ]; then
-    PROXY_URL="${GROK_PROXY_URL:-https://cli-chat-proxy.grok.com/v1}"
+if [ -n "$GROK_DEPLOYMENT_KEY" ] && [ -z "$GROK_PROXY_URL" ]; then
+    echo "  Error: GROK_PROXY_URL is not set, so the deployment config was not fetched." >&2
+fi
+if [ -n "$GROK_DEPLOYMENT_KEY" ] && [ -n "$GROK_PROXY_URL" ]; then
+    PROXY_URL="$GROK_PROXY_URL"
     echo "  Fetching deployment config..." >&2
     DEPLOY_RESPONSE=""
     AUTH_HEADER_FILE=$(mktemp 2>/dev/null) || AUTH_HEADER_FILE=""

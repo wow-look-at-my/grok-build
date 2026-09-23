@@ -14412,6 +14412,7 @@ dependencies = [
  "tokio",
  "tracing",
  "wiremock",
+ "xai-grok-extra-ca",
  "xai-grok-shell",
  "xai-grok-tools",
  "xai-grok-version",
@@ -14441,6 +14442,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "url",
+ "xai-grok-extra-ca",
  "xai-tty-utils",
 ]
 

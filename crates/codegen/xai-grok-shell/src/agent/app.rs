@@ -1524,7 +1524,7 @@ mod tests {
         unsafe {
             std::env::set_var(XAI_API_KEY_ENV_VAR, "test-key");
             std::env::remove_var(LEGACY_XAI_API_KEY_ENV_VAR);
-            std::env::remove_var(PROXY_ENV_VAR);
+            std::env::set_var(PROXY_ENV_VAR, crate::env::PROD_CLI_CHAT_PROXY_BASE_URL);
         }
         let session = GrokAuth {
             expires_at: chrono::DateTime::from_timestamp(9_999_999_999, 0),

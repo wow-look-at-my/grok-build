@@ -280,8 +280,11 @@ if (-not (Test-Path $ConfigFile)) {
 
 # --- Fetch deployment config (deployment key only) ---
 
-if ($env:GROK_DEPLOYMENT_KEY) {
-    $ProxyUrl = if ($env:GROK_PROXY_URL) { $env:GROK_PROXY_URL } else { 'https://cli-chat-proxy.grok.com/v1' }
+if ($env:GROK_DEPLOYMENT_KEY -and -not $env:GROK_PROXY_URL) {
+    Write-Host '  Error: GROK_PROXY_URL is not set, so the deployment config was not fetched.' -ForegroundColor Red
+}
+if ($env:GROK_DEPLOYMENT_KEY -and $env:GROK_PROXY_URL) {
+    $ProxyUrl = $env:GROK_PROXY_URL
     Write-Host '  Fetching deployment config...' -ForegroundColor DarkGray
     try {
         $headers = @{ 'Authorization' = "Bearer $($env:GROK_DEPLOYMENT_KEY)" }

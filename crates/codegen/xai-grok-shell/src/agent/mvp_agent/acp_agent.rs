@@ -272,6 +272,8 @@ impl acp::Agent for MvpAgent {
             // reaches the client on its own through the models-updated push.
             let cfg = self.cfg.borrow().clone();
             let models_manager = self.models_manager.clone();
+            // Set before the spawn: a session that starts first waits for it.
+            let discovery_guard = self.models_manager.begin_provider_discovery();
             tokio::task::spawn_local(async move {
                 use crate::agent::model_provider_discovery as discovery;
                 let discovered = discovery::discover_provider_models(&cfg).await;
@@ -280,6 +282,7 @@ impl acp::Agent for MvpAgent {
                     models_manager.set_provider_models(discovered);
                     tracing::info!(count, "autodetected models from configured model providers");
                 }
+                drop(discovery_guard);
                 // A local runtime loads a model on its first request and
                 // unloads it on an idle TTL, so residency painted once at
                 // startup is wrong within minutes. Only the residency is

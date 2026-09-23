@@ -292,7 +292,23 @@ fn apply_mock_url(env: &mut BTreeMap<OsString, OsString>, url: String) {
         env.insert(key.into(), url.clone().into());
     }
     env.insert("XAI_API_KEY".into(), TEST_API_KEY.into());
+    // The binary sends a model request only to an allowed endpoint, so allow the mock's host.
+    let authority = url
+        .split_once("://")
+        .map_or(url.as_str(), |(_, rest)| rest)
+        .split('/')
+        .next()
+        .unwrap_or_default()
+        .to_owned();
+    let allowed = match env.get(OsStr::new(ALLOWED_ENDPOINTS_ENV)) {
+        Some(existing) => format!("{},{authority}", existing.to_string_lossy()),
+        None => authority,
+    };
+    env.insert(ALLOWED_ENDPOINTS_ENV.into(), allowed.into());
 }
+
+/// The binary's endpoint allowlist, which `env_clear` would otherwise drop.
+const ALLOWED_ENDPOINTS_ENV: &str = "GROK_ALLOWED_ENDPOINTS";
 
 fn baseline_env(
     home: &Path,
@@ -318,6 +334,9 @@ fn baseline_env_from_parent(
         }
     }
     apply_hermetic_git_env(&mut env, parent_cwd, parent_env);
+    if let Some(value) = parent_env.get(OsStr::new(ALLOWED_ENDPOINTS_ENV)) {
+        env.insert(ALLOWED_ENDPOINTS_ENV.into(), value.to_owned());
+    }
     #[cfg(unix)]
     env.entry("SHELL".into())
         .or_insert_with(|| OsString::from("/bin/sh"));
@@ -685,6 +704,21 @@ mod tests {
         assert_eq!(
             cmd.get_args().next(),
             Some(OsStr::new("--no-optional-locks"))
+        );
+    }
+
+    #[test]
+    fn the_mock_host_is_an_allowed_endpoint() {
+        let sandbox = TestSandbox::builder()
+            .mock_url("http://127.0.0.1:43123/v1")
+            .build();
+        let allowed = env_value(&sandbox, ALLOWED_ENDPOINTS_ENV).expect("allowlist set");
+        assert!(
+            allowed
+                .to_string_lossy()
+                .split(',')
+                .any(|entry| entry == "127.0.0.1:43123"),
+            "{allowed:?}"
         );
     }
 

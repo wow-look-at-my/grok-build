@@ -326,6 +326,7 @@ warm pass, 2836 entries, -j16, no cache service 12660 ms  4 ms/call  2836 hits  
 - The script builds the workspace to reach the dependencies. It then prunes the workspace artifacts back out. A cold run therefore compiles the workspace twice: once inside the step, once in the build step after the prune. Warm runs pay none of that, and a cold run happens one time per lockfile.
 - This workflow triggers on `push`, so `github.ref` is `refs/heads/<branch>`. A `pull_request` trigger writes to the merge ref instead. Only re-runs of that pull request read such an entry.
 - The scoping is enforced server-side and has no readable implementation. The `@actions/cache` client sends the key, the version and the runtime bearer. It never transmits the ref. The scope rides the `ACTIONS_RUNTIME_TOKEN` claims.
+- The script also builds `xai-grok-pager-bin` on its own. That build resolves a smaller feature set than the workspace test build, so its registry dependencies hash differently. Measured on run 35916436678: left out of the entry, it recompiled registry crates on every warm run.
 - `ci/cache-deps.sh prune` keeps the entry to the registry half. It DESTROYS the workspace artifacts it matches. So it runs after the tests, never before.
 - The prune reads TARGET names beside package names from `cargo metadata`. Cargo stems a test binary with the target's name. No package name is in that stem. A package-only prune therefore leaves every `pty_e2e_smoke-<hash>` in the tar. Those binaries are most of the bytes. `crates/codegen/xai-ci-scripts/tests/cache_deps.rs` pins both halves. It also pins the near miss that a bare prefix match takes wrongly.
 - The parked `ci/pkg-cache.sh` rig is a different technique. Nothing wires it into `ci.yml`. It is a `RUSTC_WRAPPER` that mints ONE cache entry per package. It carries no eviction, no TTL and no cap. `measure-leg.yml` is its harness and no workflow calls that file.
@@ -434,6 +435,13 @@ Every one of those is the test doing its job. Making them pass there means weake
 ## Workflow agent-concurrency notes
 
 - `WorkflowHostParams.agent_slots` is a semaphore owned by `WorkflowManager` and shared by every run it launches (`session/workflow/manager.rs`), not one fresh semaphore per run. Up to `WORKFLOW_MAX_ACTIVE_RUNS_PER_SESSION` runs can be active at once, so a per-run semaphore will let total live agent-spawned LLM requests scale with active run count instead of staying under the configured cap (`GROK_WORKFLOW_MAX_CONCURRENT_AGENTS` / `workflow_max_concurrent_agents`) — the knob operators lower to stay under a hard per-host concurrent-request limit.
+
+## Endpoint allowlist notes
+
+- No endpoint is compiled in as a default. The proxy, the xAI API, the grok.com clients, the env crate's hosts, voice and the pricing catalog all resolve to BLANK when unconfigured. A blank URL builds no request.
+- A model request reaches only an endpoint in `[endpoints] allowed_endpoints` or `GROK_ALLOWED_ENDPOINTS` (`xai_grok_extra_ca::endpoint_allowlist`). The check runs where each request is made. Those places are `SamplingClient::new`, the model listings, the local-runtime reads, web search, image and video generation, embeddings, voice, pricing and the updater.
+- A DNS resolver or a connector layer cannot enforce it. Behind a proxy the resolver sees the proxy's host, and reqwest keeps a connector's target URI private.
+- `.cargo/config.toml` sets `GROK_ALLOWED_ENDPOINTS` to loopback so tests reach their mock servers. An installed binary does not get it.
 
 ## `[model_providers.<id>]` notes
 

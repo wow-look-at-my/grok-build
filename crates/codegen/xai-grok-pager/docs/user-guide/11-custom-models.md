@@ -222,6 +222,7 @@ A model's own value always wins. The provider only fills in what the model left 
 - **Credentials inherit as a set.** Set any of `api_key`, `env_key` or `auth_provider` on a model, and that model inherits none of the provider's. Half a credential from each side is never what you meant.
 - A model naming a provider that does not exist warns and falls back to its own fields. It never sends your Grok sign-in token.
 - **A URL is never invented.** A model you add takes its URL from its own `base_url`, its provider's `base_url`, or `[endpoints] models_base_url`. With none of them, the model has no URL. Grok logs an error at startup and refuses every request to that model. The error tells you to set `base_url`.
+- **A URL must also be allowed.** Grok sends nothing to a host missing from `[endpoints] allowed_endpoints`. See [Allowed endpoints](05-configuration.md#allowed-endpoints).
 
 ### Credential helpers
 

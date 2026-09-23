@@ -8,6 +8,17 @@
 //! The [`register_all()`] function is the single entry-point for wiring up
 //! the standard toolset. It inserts shared resources (`Terminal`,
 //! `AvailableSkills`, `BashParams`) and registers every built-in tool.
+
+/// Refuse a model request to an endpoint missing from `[endpoints] allowed_endpoints`.
+pub(crate) fn allow_endpoint(url: &str, tool: &str) -> Result<(), xai_tool_runtime::ToolError> {
+    xai_grok_extra_ca::endpoint_allowlist::check(url).map_err(|refusal| {
+        xai_tool_runtime::ToolError::execution(
+            xai_tool_protocol::ToolId::new(tool).expect("valid tool id"),
+            refusal.to_string(),
+        )
+    })
+}
+
 pub mod ask_user_question;
 pub mod bash;
 pub mod ci;

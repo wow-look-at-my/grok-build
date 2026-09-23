@@ -8,8 +8,8 @@
 //! Backend environment presets for the Grok CLI crate family: endpoint URL
 //! defaults, environment selection, and env-var test support.
 //!
-//! Public builds expose production endpoints. Values resolve as a `GROK_*`
-//! env-var override when set, else the compiled production default.
+//! The compiled production endpoints identify first-party hosts. They are never
+//! connected to by default: a value resolves to its `GROK_*` env var, else blank.
 /// The endpoint set for one backend environment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GrokBuildEndpoints {
@@ -60,10 +60,10 @@ impl GrokBuildEnvironment {
             GrokBuildEnvironment::Production => PRODUCTION_ENDPOINTS,
         }
     }
-    /// Env-var override when set, else the compiled endpoint.
-    fn resolve(&self, var_suffix: &str, compiled: &'static str) -> String {
-        std::env::var(format!("{}{var_suffix}", self.env_prefix()))
-            .unwrap_or_else(|_| compiled.to_string())
+    /// The env-var override, else blank. A compiled endpoint is for recognising
+    /// that host only: nothing connects to it unless configured.
+    fn resolve(&self, var_suffix: &str, _compiled: &'static str) -> String {
+        std::env::var(format!("{}{var_suffix}", self.env_prefix())).unwrap_or_default()
     }
     pub fn cli_chat_proxy_base_url(&self) -> String {
         self.resolve(
@@ -181,10 +181,32 @@ mod tests {
     /// Guards against conflating the relay and gateway endpoints (a relay
     /// loop mistakenly connecting to `wss://grok.com/ws/gw/`).
     #[test]
-    fn relay_and_gateway_urls_are_distinct() {
-        assert_ne!(
-            GrokBuildEnvironment::Production.relay_ws_url(),
-            GrokBuildEnvironment::Production.gateway_ws_url(),
+    fn relay_and_gateway_endpoints_are_distinct() {
+        assert_ne!(PROD_RELAY_WS_URL, PROD_GATEWAY_WS_URL);
+    }
+    #[test]
+    fn no_endpoint_resolves_to_a_compiled_host() {
+        let env = GrokBuildEnvironment::Production;
+        for (name, value) in [
+            ("ws_origin", env.ws_origin()),
+            ("asset_server_url", env.asset_server_url()),
+            ("relay_ws_url", env.relay_ws_url()),
+            ("gateway_ws_url", env.gateway_ws_url()),
+        ] {
+            assert_eq!(value, "", "{name} must be blank when its env var is unset");
+        }
+    }
+    #[test]
+    fn an_unset_proxy_url_is_blank_never_the_compiled_host() {
+        let _unset = EnvVarGuard::remove("GROK_PRODUCTION_CLI_CHAT_PROXY_BASE_URL");
+        assert_eq!(
+            GrokBuildEnvironment::Production.cli_chat_proxy_base_url(),
+            ""
+        );
+        _unset.set_value("https://proxy.example/v1");
+        assert_eq!(
+            GrokBuildEnvironment::Production.cli_chat_proxy_base_url(),
+            "https://proxy.example/v1"
         );
     }
     #[test]

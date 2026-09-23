@@ -157,6 +157,9 @@ impl MvpAgent {
         primary: &SamplingConfig,
     ) -> Result<(OaiCompatClient, String), acp::Error> {
         let slug = self.resolve_session_summary_model();
+        // Config resolution fills the compiled default in, so only another
+        // model counts as a choice.
+        let pinned = slug != crate::models::default_session_summary_model();
         let session_key = self.auth_manager.current_or_expired().map(|a| a.key.clone());
         let models = self.models_manager.models();
         let endpoints = self.models_manager.endpoints();
@@ -177,7 +180,10 @@ impl MvpAgent {
             alpha_test_key,
             client_version,
         ) {
-            Some(mut cfg) => {
+            // The compiled default lives on the first-party endpoint. A session
+            // on another endpoint titles itself with its own model, or the
+            // title request carries the prompt somewhere the user never chose.
+            Some(mut cfg) if pinned || cfg.base_url == primary.base_url => {
                 crate::agent::config::stamp_session_local_sampler_fields(
                     &mut cfg,
                     primary,
@@ -186,11 +192,12 @@ impl MvpAgent {
                 );
                 cfg
             }
-            None => {
+            None if pinned => {
                 let mut fallback = primary.clone();
                 fallback.model = slug;
                 fallback
             }
+            _ => primary.clone(),
         };
         let model = config.model.clone();
         let client = OaiCompatClient::new(config).map_err(map_sampling_err_to_acp)?;
@@ -2335,7 +2342,11 @@ impl MvpAgent {
             tier_restricted,
         }
     }
-    pub(super) fn prepare_web_search_sampling_config(&self) -> Option<SamplingConfig> {
+    /// `session_base_url` is where the session's own model sends.
+    pub(super) fn prepare_web_search_sampling_config(
+        &self,
+        session_base_url: &str,
+    ) -> Option<SamplingConfig> {
         let model_id = self.cfg.borrow().web_search_model.clone();
         let models = self.models_manager.models();
         let session = self.current_or_buffered_auth();
@@ -2350,6 +2361,16 @@ impl MvpAgent {
             client_version,
             &self.cfg.borrow().endpoints,
         )?;
+        // The compiled default lives on the first-party endpoint. A session on
+        // another endpoint never sends its searches there.
+        if model_id == crate::models::default_web_search_model() && cfg.base_url != session_base_url
+        {
+            tracing::warn!(
+                session_base_url,
+                "web search is off: the default web search model is not on this session's endpoint; set [models] web_search to enable it"
+            );
+            return None;
+        }
         inject_proxy_headers(
             &mut cfg.extra_headers,
             cfg.client_version.as_deref(),
@@ -4456,7 +4477,8 @@ impl MvpAgent {
             .find(|entry| entry.info.model == sampling_config.model)
             .and_then(|entry| entry.info.max_retries);
         let origin_client = self.origin_client_info_from_meta(init.meta.as_ref());
-        let web_search_sampling_config = self.prepare_web_search_sampling_config();
+        let web_search_sampling_config =
+            self.prepare_web_search_sampling_config(&sampling_config.base_url);
         let image_gen_config = self.prepare_image_gen_config();
         let video_gen_config = self.prepare_video_gen_config();
         let app_builder_deployer_config = self.prepare_app_builder_deployer_config();

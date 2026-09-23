@@ -202,6 +202,7 @@ impl ImageGenClient {
         aspect_ratio: &str,
     ) -> Result<Vec<u8>, xai_tool_runtime::ToolError> {
         let url = format!("{}/images/generations", self.base_url.trim_end_matches('/'));
+        crate::implementations::grok_build::allow_endpoint(&url, "image_gen")?;
 
         let payload = serde_json::json!({
             "model": self.model,

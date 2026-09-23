@@ -273,6 +273,7 @@ impl VideoGenClient {
         reference_images: Vec<String>,
     ) -> Result<VideoOutcome, xai_tool_runtime::ToolError> {
         let start_url = format!("{}/videos/generations", self.base_url.trim_end_matches('/'));
+        crate::implementations::grok_build::allow_endpoint(&start_url, "video_gen")?;
 
         let presigned = match &self.zdr_video_output_s3 {
             Some(config) => Some(self.presign_zdr_output_urls(config).await?),

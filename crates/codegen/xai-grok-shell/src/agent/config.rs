@@ -51,10 +51,7 @@ pub const DEFAULT_AGENT_TYPE: &str = "grok-build-plan";
 pub(crate) fn default_agent_type() -> String {
     DEFAULT_AGENT_TYPE.to_owned()
 }
-/// Default base URL for the cli chat proxy.
-pub const CLI_CHAT_PROXY_BASE_URL_DEFAULT: &str = "https://cli-chat-proxy.grok.com/v1";
 /// Default base URL for the public xAI API.
-pub const XAI_API_BASE_URL_DEFAULT: &str = "https://api.x.ai/v1";
 /// Default base URL for the asset server (profile images, etc.).
 pub const ASSET_SERVER_URL_DEFAULT: &str = "https://assets.grok.com";
 /// One or more environment variable names that may hold a model API key.
@@ -150,13 +147,15 @@ impl std::fmt::Display for EnvKeys {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct EndpointsConfig {
-    /// cli chat proxy base URL. `None` = unset (resolvers apply the default);
-    /// `Some` = explicitly configured. Tracking explicitness (vs comparing to the
-    /// default value) lets an org pin the proxy to the default on purpose.
+    /// cli chat proxy base URL. `None` = unset, and every URL derived from it is blank.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cli_chat_proxy_base_url: Option<String>,
-    /// Base URL for the public xAI API.
+    /// Base URL for the public xAI API. Blank unless configured.
     pub xai_api_base_url: String,
+    /// The only endpoints a model request may reach. Empty allows none.
+    /// `GROK_ALLOWED_ENDPOINTS` adds to it. See `xai_grok_extra_ca::endpoint_allowlist`.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub allowed_endpoints: Vec<String>,
     /// Optional extra access-header value (applied only with the optional
     /// non-production feature, and only for matching first-party hosts).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -300,15 +299,24 @@ impl EndpointsConfig {
         }
         let mut resolved: Self = base.try_into().unwrap_or_default();
         resolved.external_otel_master_switch = external_otel_master_switch;
+        xai_grok_extra_ca::endpoint_allowlist::set_configured(resolved.allowed_endpoints.clone());
         resolved
     }
     /// The cli-chat-proxy base URL through which all auxiliary services (and
     /// OAuth/session inference) resolve: explicit `cli_chat_proxy_base_url`, else
-    /// the public default. NEVER falls back to `xai_api_base_url` — that is the
-    /// inference endpoint (API-key auth) only.
+    /// BLANK. There is no compiled default: an unset proxy is never sent to, and
+    /// a blank URL makes every request built on it fail before it leaves.
     pub fn proxy_url(&self) -> String {
-        blank_as_unset(&self.cli_chat_proxy_base_url)
-            .unwrap_or_else(|| CLI_CHAT_PROXY_BASE_URL_DEFAULT.to_owned())
+        blank_as_unset(&self.cli_chat_proxy_base_url).unwrap_or_default()
+    }
+    /// `proxy_url` + `suffix`, or blank when the proxy is unset. A bare suffix
+    /// such as `/traces` is not a URL anyone can reach.
+    fn proxy_join(&self, suffix: &str) -> String {
+        let proxy = self.proxy_url();
+        if proxy.is_empty() {
+            return proxy;
+        }
+        format!("{}{suffix}", proxy.trim_end_matches('/'))
     }
     pub(crate) fn resolve_inference_base_url(&self) -> String {
         self.models_base_url
@@ -329,12 +337,8 @@ impl EndpointsConfig {
     /// else `proxy_url` + `/deployment/config`. Never `xai_api_base_url`, so the
     /// deployment key reaches the proxy, not the inference host.
     pub(crate) fn resolve_managed_config_url(&self) -> String {
-        blank_as_unset(&self.managed_config_url).unwrap_or_else(|| {
-            format!(
-                "{}/deployment/config",
-                self.proxy_url().trim_end_matches('/')
-            )
-        })
+        blank_as_unset(&self.managed_config_url)
+            .unwrap_or_else(|| self.proxy_join("/deployment/config"))
     }
     /// INTERNAL OTLP traces endpoint. Precedence:
     /// 1. `grok_internal_otlp_traces_endpoint` (verbatim)
@@ -362,7 +366,7 @@ impl EndpointsConfig {
             );
             return legacy;
         }
-        format!("{}/traces", self.proxy_url().trim_end_matches('/'))
+        self.proxy_join("/traces")
     }
     /// Legacy (standard-OTEL-var) internal traces endpoint, if any:
     /// `otel_exporter_otlp_traces_endpoint` verbatim, else
@@ -538,6 +542,9 @@ impl EndpointsConfig {
             .models_base_url
             .clone()
             .unwrap_or_else(|| self.proxy_url());
+        if base.trim().is_empty() {
+            return String::new();
+        }
         crate::remote::models_list_url_for_base(&base)
     }
 }
@@ -545,8 +552,8 @@ impl Default for EndpointsConfig {
     fn default() -> Self {
         Self {
             cli_chat_proxy_base_url: std::env::var("GROK_CLI_CHAT_PROXY_BASE_URL").ok(),
-            xai_api_base_url: std::env::var("GROK_XAI_API_BASE_URL")
-                .unwrap_or_else(|_| XAI_API_BASE_URL_DEFAULT.to_owned()),
+            xai_api_base_url: std::env::var("GROK_XAI_API_BASE_URL").unwrap_or_default(),
+            allowed_endpoints: Vec::new(),
             alpha_test_key: None,
             models_base_url: env_string("GROK_MODELS_BASE_URL"),
             models_list_url: env_string("GROK_MODELS_LIST_URL"),
@@ -2161,6 +2168,9 @@ impl Config {
         config.model_providers = model_providers;
         config.config_warnings.extend(auth_provider_warnings);
         config.config_warnings.extend(model_provider_warnings);
+        xai_grok_extra_ca::endpoint_allowlist::set_configured(
+            config.endpoints.allowed_endpoints.clone(),
+        );
         unrecognized_keys.sort();
         for key in unrecognized_keys {
             config.config_warnings.push(
@@ -4518,7 +4528,8 @@ pub struct PricingConfig {
     /// prices only the models config prices.
     pub lookup_enabled: bool,
     /// Base URL of the catalog. The per-model document is read from
-    /// `<catalog_url>/v1/models/<model id>`.
+    /// `<catalog_url>/v1/models/<model id>`. Blank by default, and a blank
+    /// catalog is never asked.
     pub catalog_url: String,
 }
 
@@ -4526,13 +4537,10 @@ impl Default for PricingConfig {
     fn default() -> Self {
         Self {
             lookup_enabled: true,
-            catalog_url: DEFAULT_PRICING_CATALOG_URL.to_string(),
+            catalog_url: String::new(),
         }
     }
 }
-
-/// The catalog the cost indicator reads when nothing else prices a model.
-pub const DEFAULT_PRICING_CATALOG_URL: &str = "https://modelinfo.pazer.ai";
 /// True when `cfg` equals the all-disabled default. Derives `PartialEq`
 /// on `f32`, which is fine for the current shape because both `f32`
 /// fields default to `None` — there's no parsed-vs-literal `0.7` float
@@ -5038,8 +5046,30 @@ impl ModelEntry {
             api_base_url: None,
         }
     }
+    /// An entry for a model the catalog does not hold. It has no URL, so the
+    /// sampler refuses it rather than sending the request anywhere.
+    pub(crate) fn unreachable(slug: &str) -> Self {
+        let mut info = ModelInfo::fallback(slug);
+        info.base_url = String::new();
+        Self {
+            info,
+            api_key: None,
+            env_key: None,
+            auth_provider: None,
+            api_base_url: None,
+        }
+    }
     pub fn info(&self) -> &ModelInfo {
         &self.info
+    }
+    /// A URL a request can go to: `base_url`, or `api_base_url` for the
+    /// `XAI_API_KEY` path.
+    pub(crate) fn has_endpoint(&self) -> bool {
+        !self.info.base_url.trim().is_empty()
+            || self
+                .api_base_url
+                .as_deref()
+                .is_some_and(|u| !u.trim().is_empty())
     }
     pub(crate) fn from_config_entry(entry: &ModelEntryConfig) -> Self {
         Self {
@@ -6744,7 +6774,7 @@ reasoning_effort = "low"
             "a third-party endpoint must keep its resolved credential"
         );
         let mut first_party = SamplerConfig {
-            base_url: EndpointsConfig::default().resolve_inference_base_url(),
+            base_url: crate::env::PROD_CLI_CHAT_PROXY_BASE_URL.into(),
             ..SamplerConfig::default()
         };
         stamp_session_local_sampler_fields(&mut first_party, &session_cfg, None, None);
@@ -7878,6 +7908,8 @@ reasoning_effort = "low"
         let dm = crate::models::default_model();
         let raw_config: toml::Value = toml::from_str(&format!(
             r#"
+            [endpoints]
+            cli_chat_proxy_base_url = ""
             [model."{dm}"]
             api_key = "user-custom-api-key"
             "#,
@@ -7889,8 +7921,8 @@ reasoning_effort = "low"
         assert_eq!(model.api_key, Some("user-custom-api-key".to_string()));
         assert_eq!(model.info.model, dm);
         assert_eq!(
-            model.info.base_url, "https://cli-chat-proxy.grok.com/v1",
-            "base_url should inherit from default, not be stale"
+            model.info.base_url, "",
+            "base_url inherits the built-in entry's, which is blank with no proxy configured"
         );
     }
     #[test]
@@ -9463,21 +9495,38 @@ reasoning_effort = "low"
         assert_eq!(model.info.base_url, "https://inference.example.com/v1");
     }
     #[test]
-    fn e2e_default_model_with_session_routes_to_proxy() {
-        let (_, models) = resolve_models_from_toml("", None);
+    fn e2e_default_model_with_session_has_no_url_until_one_is_configured() {
+        // A blank key overrides GROK_CLI_CHAT_PROXY_BASE_URL, which a parallel test sets.
+        let (_, models) = resolve_models_from_toml(
+            r#"
+            [endpoints]
+            cli_chat_proxy_base_url = ""
+            "#,
+            None,
+        );
         let model = models
             .get(crate::models::default_model())
             .expect("default model should exist");
         let sampling = resolve_sampling(model, Some("session-token-123"));
         assert_eq!(sampling.api_key.as_deref(), Some("session-token-123"));
         assert_eq!(
-            sampling.base_url, "https://cli-chat-proxy.grok.com/v1",
-            "session auth should route to cli-chat-proxy, not api.x.ai"
+            sampling.base_url, "",
+            "no proxy is configured, so the built-in model has no URL"
         );
+        let (_, models) = resolve_models_from_toml(
+            r#"
+            [endpoints]
+            cli_chat_proxy_base_url = "https://proxy.corp.example/v1"
+            "#,
+            None,
+        );
+        let model = models.get(crate::models::default_model()).unwrap();
+        let sampling = resolve_sampling(model, Some("session-token-123"));
+        assert_eq!(sampling.base_url, "https://proxy.corp.example/v1");
     }
     #[test]
     #[serial]
-    fn e2e_default_model_with_external_api_key_routes_to_api_xai() {
+    fn e2e_default_model_with_external_api_key_has_no_url_until_one_is_configured() {
         let (_, models) = resolve_models_from_toml("", None);
         let model = models
             .get(crate::models::default_model())
@@ -9486,8 +9535,8 @@ reasoning_effort = "low"
         let sampling = resolve_sampling(model, None);
         assert_eq!(sampling.api_key.as_deref(), Some("xai-external-key"));
         assert_eq!(
-            sampling.base_url, "https://api.x.ai/v1",
-            "external API key should route to api.x.ai via api_base_url"
+            sampling.base_url, "",
+            "no xAI API URL is configured, so an API key reaches nothing"
         );
         unsafe { std::env::remove_var("XAI_API_KEY") };
     }
@@ -9585,6 +9634,8 @@ reasoning_effort = "low"
         let (_, models) = resolve_models_from_toml(
             &format!(
                 r#"
+            [endpoints]
+            cli_chat_proxy_base_url = ""
             [model.acme-grok]
             model = "{dm}"
             base_url = "https://inference.example.com/v1"
@@ -9611,7 +9662,7 @@ reasoning_effort = "low"
         assert_eq!(sampling.base_url, "https://inference.example.com/v1");
         let sampling = resolve_sampling(default, Some("session-key"));
         assert_eq!(sampling.api_key.as_deref(), Some("session-key"));
-        assert_eq!(sampling.base_url, "https://cli-chat-proxy.grok.com/v1",);
+        assert_eq!(sampling.base_url, "", "no proxy is configured");
     }
     #[test]
     fn e2e_enterprise_custom_endpoint_skips_xai_defaults() {
@@ -9768,12 +9819,12 @@ reasoning_effort = "low"
             unsafe { std::env::remove_var(k) };
         }
     }
-    /// INVARIANT: auxiliary-service resolvers resolve to the cli-chat-proxy, never
-    /// `xai_api_base_url` — overriding ONLY inference keeps every aux endpoint on
-    /// the proxy; explicit per-service overrides win verbatim.
+    /// INVARIANT: an unset proxy resolves every proxy-derived endpoint to BLANK,
+    /// never to a compiled host and never to `xai_api_base_url`. A set proxy is
+    /// what aux endpoints follow, and per-service overrides win verbatim.
     #[test]
     #[serial]
-    fn aux_endpoints_resolve_to_proxy_never_inference() {
+    fn an_unset_proxy_resolves_every_derived_endpoint_blank() {
         unset_endpoint_env_vars();
         let inference = "https://inference.acme-corp.example/xai/v1";
         let cfg = EndpointsConfig {
@@ -9781,21 +9832,26 @@ reasoning_effort = "low"
             cli_chat_proxy_base_url: None,
             ..Default::default()
         };
-        let proxy = CLI_CHAT_PROXY_BASE_URL_DEFAULT;
-        assert_eq!(cfg.proxy_url(), proxy);
-        assert_eq!(cfg.resolve_inference_base_url(), proxy);
-        assert_eq!(cfg.resolve_models_list_url(), format!("{proxy}/models"));
-        assert_eq!(
-            cfg.resolve_managed_config_url(),
-            format!("{proxy}/deployment/config")
-        );
-        assert_eq!(cfg.resolve_feedback_base_url(), proxy);
-        assert_eq!(cfg.resolve_trace_upload_url(), proxy);
-        assert_eq!(
-            cfg.resolve_otlp_traces_endpoint(),
-            format!("{proxy}/traces")
-        );
+        assert_eq!(cfg.proxy_url(), "");
+        assert_eq!(cfg.resolve_inference_base_url(), "");
+        assert_eq!(cfg.resolve_models_list_url(), "");
+        assert_eq!(cfg.resolve_managed_config_url(), "");
+        assert_eq!(cfg.resolve_feedback_base_url(), "");
+        assert_eq!(cfg.resolve_trace_upload_url(), "");
+        assert_eq!(cfg.resolve_otlp_traces_endpoint(), "");
         assert_eq!(cfg.xai_api_base_url, inference);
+        let proxy_only = EndpointsConfig {
+            cli_chat_proxy_base_url: Some("https://proxy.enterprise.example/v1".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(
+            proxy_only.resolve_managed_config_url(),
+            "https://proxy.enterprise.example/v1/deployment/config"
+        );
+        assert_eq!(
+            proxy_only.resolve_feedback_base_url(),
+            "https://proxy.enterprise.example/v1"
+        );
         let overridden = EndpointsConfig {
             cli_chat_proxy_base_url: Some("https://proxy.enterprise.example/v1".to_string()),
             managed_config_url: Some(
@@ -9843,10 +9899,7 @@ reasoning_effort = "low"
         )
         .expect("config should parse");
         assert!(cfg.endpoints.cli_chat_proxy_base_url.is_none());
-        assert_eq!(
-            cfg.endpoints.resolve_managed_config_url(),
-            format!("{CLI_CHAT_PROXY_BASE_URL_DEFAULT}/deployment/config")
-        );
+        assert_eq!(cfg.endpoints.resolve_managed_config_url(), "");
         assert!(
             !cfg.endpoints
                 .resolve_managed_config_url()
@@ -14130,6 +14183,12 @@ default = "grok-4.5"
     #[test]
     #[serial_test::serial(remote_sig_disarm)]
     fn remote_settings_disarm_managed_config_signatures() {
+        unsafe {
+            std::env::set_var(
+                "GROK_CLI_CHAT_PROXY_BASE_URL",
+                crate::env::PROD_CLI_CHAT_PROXY_BASE_URL,
+            );
+        }
         xai_grok_config::signed_policy::apply_remote_managed_config_signature_verification(
             Some(true),
             true,
@@ -14158,6 +14217,9 @@ default = "grok-4.5"
             true,
         );
         assert!(xai_grok_config::signed_policy::verification_active());
+        unsafe {
+            std::env::remove_var("GROK_CLI_CHAT_PROXY_BASE_URL");
+        }
     }
     /// Keyed path: prod proxy origin can disarm; env override cannot.
     #[test]
@@ -14173,7 +14235,10 @@ default = "grok-4.5"
             ..Default::default()
         };
         unsafe {
-            std::env::remove_var("GROK_CLI_CHAT_PROXY_BASE_URL");
+            std::env::set_var(
+                "GROK_CLI_CHAT_PROXY_BASE_URL",
+                crate::env::PROD_CLI_CHAT_PROXY_BASE_URL,
+            );
         }
         apply_remote_settings_side_effects(Some(&settings));
         assert!(
