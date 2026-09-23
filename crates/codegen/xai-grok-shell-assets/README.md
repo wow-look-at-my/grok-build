@@ -1877,7 +1877,7 @@ api_key = "sk-custom"
 > [model.my-custom-model]              # 2. tell Grok how to reach it
 > model = "my-custom-model"
 > api_backend = "responses"            # required — web search uses the Responses API
-> # base_url, api_key, env_key optional — defaults to cli-chat-proxy
+> base_url = "https://api.example.com/v1" # required unless a [model_providers] block or [endpoints] models_base_url supplies it
 > ```
 
 ### Examples

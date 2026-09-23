@@ -220,7 +220,8 @@ A model's own value always wins. The provider only fills in what the model left 
 - **Scalar fields** (`base_url`, `api_backend`, `temperature`, ...) inherit when the model omits the field. An explicit `false` or `0` on the model is a value, not an omission.
 - **Table fields** (`extra_headers`, `query_params`, `env_http_headers`) inherit **per key**. A model that sets one header of its own still gets every other header from the provider. Header names match case-insensitively, so a model's `x-tenant` shadows the provider's `X-Tenant` rather than riding beside it.
 - **Credentials inherit as a set.** Set any of `api_key`, `env_key` or `auth_provider` on a model, and that model inherits none of the provider's. Half a credential from each side is never what you meant.
-- A model naming a provider that does not exist warns and falls back to its own fields.
+- A model naming a provider that does not exist warns and falls back to its own fields. It never sends your Grok sign-in token.
+- **A URL is never invented.** A model you add takes its URL from its own `base_url`, its provider's `base_url`, or `[endpoints] models_base_url`. With none of them, the model has no URL. Grok logs an error at startup and refuses every request to that model. The error tells you to set `base_url`.
 
 ### Credential helpers
 

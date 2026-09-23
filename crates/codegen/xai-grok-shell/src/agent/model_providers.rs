@@ -1140,6 +1140,116 @@ mod tests {
     }
 
     #[test]
+    fn a_model_with_no_url_gets_a_blank_one_not_the_proxy() {
+        let raw_config: toml::Value = toml::from_str(
+            r#"
+            [model.claude]
+            model = "claude-sonnet-4-5"
+            api_backend = "messages"
+            api_key = "sk-ant"
+            "#,
+        )
+        .unwrap();
+        let cfg = Config::new_from_toml_cfg(&raw_config).expect("config should parse");
+        let model = resolve_model_list(&cfg, None)
+            .shift_remove("claude")
+            .expect("model should exist");
+        assert_eq!(model.info.base_url, "");
+        assert_eq!(model.api_base_url, None);
+        assert_eq!(
+            resolve_credentials(&model, Some("session-jwt")).base_url,
+            ""
+        );
+    }
+
+    #[test]
+    fn a_provider_with_no_url_gives_its_models_a_blank_one() {
+        let raw_config: toml::Value = toml::from_str(
+            r#"
+            [model_providers.claude]
+            api_backend = "messages"
+            api_key = "sk-ant"
+            models_autodetect = false
+
+            [model.sonnet]
+            model = "claude-sonnet-4-5"
+            model_provider = "claude"
+            "#,
+        )
+        .unwrap();
+        let cfg = Config::new_from_toml_cfg(&raw_config).expect("config should parse");
+        let model = resolve_model_list(&cfg, None)
+            .shift_remove("sonnet")
+            .expect("model should exist");
+        assert_eq!(model.info.base_url, "");
+    }
+
+    #[test]
+    fn a_provider_url_is_inherited() {
+        let raw_config: toml::Value = toml::from_str(
+            r#"
+            [model_providers.claude]
+            base_url = "https://api.anthropic.com/v1"
+            api_backend = "messages"
+            api_key = "sk-ant"
+            models_autodetect = false
+
+            [model.sonnet]
+            model = "claude-sonnet-4-5"
+            model_provider = "claude"
+            "#,
+        )
+        .unwrap();
+        let cfg = Config::new_from_toml_cfg(&raw_config).expect("config should parse");
+        let model = resolve_model_list(&cfg, None)
+            .shift_remove("sonnet")
+            .expect("model should exist");
+        assert_eq!(model.info.base_url, "https://api.anthropic.com/v1");
+    }
+
+    #[test]
+    fn an_endpoints_models_base_url_is_inherited() {
+        let raw_config: toml::Value = toml::from_str(
+            r#"
+            [endpoints]
+            models_base_url = "https://gateway.example/v1"
+
+            [model.m]
+            model = "m"
+            api_key = "sk"
+            "#,
+        )
+        .unwrap();
+        let cfg = Config::new_from_toml_cfg(&raw_config).expect("config should parse");
+        let model = resolve_model_list(&cfg, None)
+            .shift_remove("m")
+            .expect("model should exist");
+        assert_eq!(model.info.base_url, "https://gateway.example/v1");
+    }
+
+    #[test]
+    fn a_missing_provider_never_carries_the_session_bearer() {
+        let raw_config: toml::Value = toml::from_str(
+            r#"
+            [model.orphan]
+            model = "m"
+            context_window = 200000
+            model_provider = "nowhere"
+            "#,
+        )
+        .unwrap();
+        let cfg = Config::new_from_toml_cfg(&raw_config).expect("config should parse");
+        let model = resolve_model_list(&cfg, None)
+            .shift_remove("orphan")
+            .expect("model should exist");
+        assert_eq!(
+            resolve_credentials(&model, Some("session-jwt")).api_key,
+            None,
+            "a model whose provider is missing must not send the grok session bearer"
+        );
+    }
+
+    #[test]
     fn model_headers_shadow_provider_headers_per_key() {
         let raw_config: toml::Value = toml::from_str(
             r#"
