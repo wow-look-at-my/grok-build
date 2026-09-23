@@ -2189,6 +2189,9 @@ mod managed_gateway_tool_tests {
 #[path = "acp_session_tests/goal/goal_planner_e2e_tests.rs"]
 mod goal_planner_e2e_tests;
 #[cfg(test)]
+#[path = "acp_session_tests/goal/goal_role_model_fallback_tests.rs"]
+mod goal_role_model_fallback_tests;
+#[cfg(test)]
 #[path = "acp_session_tests/harness_slot_side_call_tests.rs"]
 mod harness_slot_side_call_tests;
 #[cfg(test)]

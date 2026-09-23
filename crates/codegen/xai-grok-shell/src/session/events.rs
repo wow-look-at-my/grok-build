@@ -520,7 +520,7 @@ impl GoalSummarizerFailReason {
 // ── GoalRoleModel discriminator vocabulary ────────────────────────────
 //
 // Source of truth for the `reason` field on `Event::GoalRoleModelFailOpen`.
-// Per-role model selection is fail-OPEN by design: a bad/unauthorized
+// Per-role model selection is fail-OPEN by design: an unknown
 // model, an unusable toolset, or a harness whose flavor the subagent system
 // can't represent degrades that role (or skeptic index) to the current model +
 // session harness — the goal is never paused.
@@ -535,10 +535,6 @@ impl GoalSummarizerFailReason {
 /// Fail-open — the configured model id is not in the session's model
 /// catalog (`find_model_by_id` miss).
 pub(crate) const GOAL_ROLE_MODEL_FAIL_OPEN_MODEL_UNKNOWN: &str = "model_unknown";
-
-/// Fail-open — the model is in the catalog but the session's
-/// `allowed_models` does not permit it (`ModelInfo.user_selectable == false`).
-pub(crate) const GOAL_ROLE_MODEL_FAIL_OPEN_MODEL_UNAUTHORIZED: &str = "model_unauthorized";
 
 /// Fail-open — the configured `agent_type` did not resolve
 /// (`describe_subagent_type` ⇒ `Unknown`): either a subagent type, or a `/goal`
@@ -577,7 +573,6 @@ pub(crate) const GOAL_ROLE_MODEL_FAIL_OPEN_HARNESS_FLAVOR_UNSUPPORTED: &str =
 #[allow(clippy::const_is_empty)]
 const _: () = assert!(
     !GOAL_ROLE_MODEL_FAIL_OPEN_MODEL_UNKNOWN.is_empty()
-        && !GOAL_ROLE_MODEL_FAIL_OPEN_MODEL_UNAUTHORIZED.is_empty()
         && !GOAL_ROLE_MODEL_FAIL_OPEN_TOOLSET_UNKNOWN.is_empty()
         && !GOAL_ROLE_MODEL_FAIL_OPEN_TOOLSET_NOT_ALLOWED.is_empty()
         && !GOAL_ROLE_MODEL_FAIL_OPEN_TOOLSET_DISABLED.is_empty()
@@ -594,7 +589,6 @@ const _: () = assert!(
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum GoalRoleModelFailOpenReason {
     ModelUnknown,
-    ModelUnauthorized,
     ToolsetUnknown,
     ToolsetNotAllowed,
     ToolsetDisabled,
@@ -608,7 +602,6 @@ impl GoalRoleModelFailOpenReason {
     pub(crate) fn as_const_str(self) -> &'static str {
         match self {
             Self::ModelUnknown => GOAL_ROLE_MODEL_FAIL_OPEN_MODEL_UNKNOWN,
-            Self::ModelUnauthorized => GOAL_ROLE_MODEL_FAIL_OPEN_MODEL_UNAUTHORIZED,
             Self::ToolsetUnknown => GOAL_ROLE_MODEL_FAIL_OPEN_TOOLSET_UNKNOWN,
             Self::ToolsetNotAllowed => GOAL_ROLE_MODEL_FAIL_OPEN_TOOLSET_NOT_ALLOWED,
             Self::ToolsetDisabled => GOAL_ROLE_MODEL_FAIL_OPEN_TOOLSET_DISABLED,
@@ -631,7 +624,6 @@ impl GoalRoleModelFailOpenReason {
         const fn _assert_exhaustive(r: GoalRoleModelFailOpenReason) {
             match r {
                 GoalRoleModelFailOpenReason::ModelUnknown => (),
-                GoalRoleModelFailOpenReason::ModelUnauthorized => (),
                 GoalRoleModelFailOpenReason::ToolsetUnknown => (),
                 GoalRoleModelFailOpenReason::ToolsetNotAllowed => (),
                 GoalRoleModelFailOpenReason::ToolsetDisabled => (),
@@ -643,7 +635,6 @@ impl GoalRoleModelFailOpenReason {
         }
         &[
             Self::ModelUnknown,
-            Self::ModelUnauthorized,
             Self::ToolsetUnknown,
             Self::ToolsetNotAllowed,
             Self::ToolsetDisabled,
@@ -899,11 +890,6 @@ mod tests {
             GoalRoleModelFailOpenReason::ModelUnknown,
             "model_unknown",
             GOAL_ROLE_MODEL_FAIL_OPEN_MODEL_UNKNOWN,
-        ),
-        (
-            GoalRoleModelFailOpenReason::ModelUnauthorized,
-            "model_unauthorized",
-            GOAL_ROLE_MODEL_FAIL_OPEN_MODEL_UNAUTHORIZED,
         ),
         (
             GoalRoleModelFailOpenReason::ToolsetUnknown,

@@ -83,10 +83,6 @@ pub(crate) fn fail_open_detail(
              set the role to that exact id. If it is not, fix its [model_providers] or [model] \
              block (base URL, key, server running). Then restart."
         ),
-        Reason::ModelUnauthorized => format!(
-            "\"{subject}\" is blocked by `[models] allowed_models` in ~/.grok/config.toml. Add \
-             a pattern that matches it, or delete that line, then restart."
-        ),
         Reason::ToolsetUnknown => format!("the agent type \"{subject}\" does not exist."),
         Reason::ToolsetNotAllowed => {
             format!("the agent type \"{subject}\" is not on this session's allow-list.")
@@ -786,8 +782,8 @@ impl SessionActor {
     }
 
     /// Apply a `[models]` slot to one role: the model is checked against the
-    /// catalog and the agent type is left alone. An unknown or unauthorized
-    /// model fails open onto the session model, the same as a bad pair.
+    /// catalog and the agent type is left alone. An unknown model fails open
+    /// onto the session model, the same as a bad pair.
     pub(crate) async fn resolve_goal_role_model_only(
         &self,
         role: &'static str,
@@ -809,11 +805,10 @@ impl SessionActor {
             );
             RoleSpawnOverride::default()
         };
-        let Some(entry) = crate::agent::config::find_model_by_id(&available_models, model) else {
+        // No `allowed_models` check: that list governs chat selection and
+        // exempts subagents, and a goal role is a subagent the user configured.
+        if crate::agent::config::find_model_by_id(&available_models, model).is_none() {
             return fail_open(Reason::ModelUnknown);
-        };
-        if !entry.info.user_selectable {
-            return fail_open(Reason::ModelUnauthorized);
         }
         self.emit_event(Event::GoalRoleModelResolved {
             role,
@@ -858,21 +853,16 @@ impl SessionActor {
         let reporter = self.goal_role_fallback_reporter().await;
         let fail_open = |reason: Reason| {
             let detail = match reason {
-                Reason::ModelUnknown | Reason::ModelUnauthorized => {
-                    fail_open_detail(reason, &pair.model)
-                }
+                Reason::ModelUnknown => fail_open_detail(reason, &pair.model),
                 _ => fail_open_detail(reason, &pair.agent_type),
             };
             reporter.report(role, skeptic_idx, &pair.model, reason, Some(detail));
             RoleSpawnOverride::default()
         };
 
-        let Some(entry) = crate::agent::config::find_model_by_id(available_models, &pair.model)
-        else {
+        // No `allowed_models` check, as in `resolve_goal_role_model_only`.
+        if crate::agent::config::find_model_by_id(available_models, &pair.model).is_none() {
             return fail_open(Reason::ModelUnknown);
-        };
-        if !entry.info.user_selectable {
-            return fail_open(Reason::ModelUnauthorized);
         }
         if xai_grok_agent::config::is_strict_harness_agent_type(&pair.agent_type)
             && !crate::agent::subagent::subagent_harness_flavor_is_representable(&pair.agent_type)
