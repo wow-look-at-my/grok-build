@@ -614,6 +614,11 @@ pub enum Action {
     /// Set `[ui].output_rate_sustained_secs`: how long the rate must stay
     /// under that floor before the request is reissued.
     SetOutputRateSustainedSecs(i64),
+    /// Set `[ui].output_rate_window_secs`: the window the rate is averaged over.
+    SetOutputRateWindowSecs(i64),
+    /// Set `[ui].output_rate_max_retries`: how many times one model call is
+    /// reissued for slow output. `0` never reissues.
+    SetOutputRateMaxRetries(i64),
     /// Commit the fork-secondary model. Typed `ModelId` payload,
     /// persisted to `[ui].fork_secondary_model`. Rebroadcast via
     /// `ConfigUpdate::Ui` so running agents pick up the change.

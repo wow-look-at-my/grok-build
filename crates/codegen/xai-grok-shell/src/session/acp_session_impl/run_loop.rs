@@ -785,6 +785,9 @@ pub(super) async fn run_session(
                             let report = session.handle_flatten_history().await;
                             let _ = responds_to.send(report);
                         }
+                        SessionCommand::ReloadOutputRateFloor => {
+                            session.handle_reload_output_rate_floor().await;
+                        }
                         SessionCommand::OverrideModelName { model_name, extra_headers, context_window } => {
                             // Update the actor's SamplingConfig model + headers + context window.
                             if let Some(mut cfg) = session.chat_state_handle.get_sampling_config().await {

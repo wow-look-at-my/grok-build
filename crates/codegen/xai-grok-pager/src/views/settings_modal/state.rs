@@ -88,10 +88,10 @@ pub enum SettingsModalMode {
         original_value: SettingValue,
         supports_preview: bool,
     },
-    /// Group sub-sheet: a list of the group's child Bool toggles. `child_idx`
-    /// is the focused child within the group. Space/Enter toggles in place
-    /// (the sheet stays open); Esc returns to Browse. Mirrors `PickingEnum`'s
-    /// open/render/commit flow but for independent toggles.
+    /// Group sub-sheet: a list of the group's children. `child_idx` is the
+    /// focused child. Space/Enter toggles a Bool child in place, and opens
+    /// the editor or picker of any other child, which returns to this sheet.
+    /// Esc returns to Browse.
     PickingGroup {
         key: SettingKey,
         child_idx: usize,
@@ -265,6 +265,9 @@ pub struct SettingsModalState {
     /// returning to Browse. Set by deep-link open (`OpenSettingsFocus`
     /// / `/privacy`); cleared on leave from the picker.
     pub close_on_picker_exit: bool,
+    /// The group sheet and child index that opened the current editor or
+    /// picker. Leaving that editor goes back to the sheet, not to Browse.
+    pub(super) group_return: Option<(SettingKey, usize)>,
 }
 
 impl SettingsModalState {
@@ -304,6 +307,7 @@ impl SettingsModalState {
             expanded_keys: std::collections::HashSet::new(),
             hover_row: None,
             close_on_picker_exit: false,
+            group_return: None,
         }
     }
 
@@ -558,12 +562,34 @@ impl SettingsModalState {
 
     /// Transition to Browse, clearing sub-pane hover/breadcrumb state
     /// to prevent stale hit-rects across mode changes.
+    /// A child editor or picker opened from a group sheet returns to that
+    /// sheet instead.
     pub(crate) fn transition_to_browse(&mut self) {
-        self.state.mode = SettingsMode::Browse;
+        self.state.mode = match self.group_return.take() {
+            Some((key, child_idx)) => SettingsMode::PickingGroup { key, child_idx },
+            None => SettingsMode::Browse,
+        };
         self.hover_row = None;
         self.settings_breadcrumb_rect = None;
         self.breadcrumb_hovered = false;
         self.close_on_picker_exit = false;
+    }
+
+    /// Open the editor or picker of a non-Bool group child. Returns `false`
+    /// when the child has neither, and the sheet stays open.
+    pub(super) fn open_group_child(
+        &mut self,
+        group_key: SettingKey,
+        child_idx: usize,
+        child_key: SettingKey,
+    ) -> bool {
+        let opened = self.try_enter_editing_value_for(child_key)
+            || self.try_enter_picking_enum_for(child_key);
+        if opened {
+            self.group_return = Some((group_key, child_idx));
+            self.hover_row = None;
+        }
+        opened
     }
 
     pub fn focus_filter(&mut self) {
@@ -857,7 +883,16 @@ pub(super) fn compute_filtered(
     if query.is_empty() {
         return (0..rows.len()).collect();
     }
-    let matched_keys: Vec<SettingKey> = registry.search(query).iter().map(|m| m.key).collect();
+    let mut matched_keys: Vec<SettingKey> = registry.search(query).iter().map(|m| m.key).collect();
+    // A child row lives only inside its group's sheet, so a match on it shows the group.
+    for meta in registry.all() {
+        if let SettingKind::Group { children } = &meta.kind
+            && children.iter().any(|c| matched_keys.contains(c))
+            && !matched_keys.contains(&meta.key)
+        {
+            matched_keys.push(meta.key);
+        }
+    }
     let mut result = Vec::new();
     let mut pending_header: Option<usize> = None;
     for (i, row) in rows.iter().enumerate() {
@@ -1117,6 +1152,8 @@ pub(super) fn action_for_int(key: SettingKey, value: i64) -> Option<Action> {
         "scroll_lines" => Some(Action::SetScrollLines(value)),
         "min_output_tokens_per_sec" => Some(Action::SetMinOutputTokensPerSec(value)),
         "output_rate_sustained_secs" => Some(Action::SetOutputRateSustainedSecs(value)),
+        "output_rate_window_secs" => Some(Action::SetOutputRateWindowSecs(value)),
+        "output_rate_max_retries" => Some(Action::SetOutputRateMaxRetries(value)),
         _ => None,
     }
 }

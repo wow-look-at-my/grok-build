@@ -2969,6 +2969,19 @@ pub(crate) fn load_initial_ui_config() -> xai_grok_shell::agent::config::UiConfi
         Some(ui_value) => ui_value.try_into::<UiConfig>().unwrap_or_default(),
         None => UiConfig::default(),
     };
+    // The shell resolves the same fallback, so the modal shows the number in force.
+    if let Some(legacy) = root.get("output_rate_floor") {
+        ui.adopt_legacy_output_rate_floor(
+            legacy
+                .get("window_secs")
+                .and_then(|v| v.as_integer())
+                .and_then(|v| u64::try_from(v).ok()),
+            legacy
+                .get("max_retries")
+                .and_then(|v| v.as_integer())
+                .and_then(|v| u32::try_from(v).ok()),
+        );
+    }
     // The harness model slots live under `[models]`, not `[ui]`, so they are
     // read here rather than deserialized with the rest. A missing `[models]`
     // table leaves every slot on "(no override)".

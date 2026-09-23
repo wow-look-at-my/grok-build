@@ -1299,6 +1299,21 @@ pub async fn run_leader(
                                 );
                             }
                         }
+                        ConfigUpdate::OutputRateFloorChanged => {
+                            info!("Output-rate floor config change detected — reloading active sessions");
+                            let line = internal_reload_request_line(
+                                "config-reload-output-rate-floor",
+                                InternalMethod::ReloadOutputRateFloor,
+                                serde_json::json!({}),
+                            );
+                            let mut tx = acp_tx_for_config.lock().await;
+                            if let Err(e) = tx.write_all(line.as_bytes()).await {
+                                warn!(
+                                    error = %e,
+                                    "failed to inject output-rate floor reload into ACP stream"
+                                );
+                            }
+                        }
                         ConfigUpdate::Memory(mem) => {
                             info!(
                                 enabled = mem.enabled,

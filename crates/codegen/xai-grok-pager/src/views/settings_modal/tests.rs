@@ -74,6 +74,126 @@ fn contextual_hints_group_sub_sheet_flow() {
     assert!(matches!(s.mode(), SettingsModalMode::Browse));
 }
 
+/// The "Slow output" sub-screen owns every rate-floor row. Enter on the max
+/// retries child opens its stepper, the commit dispatches the typed action,
+/// and the modal comes back to the sheet on that same child.
+#[test]
+fn slow_output_sub_screen_edits_max_retries_and_returns_to_the_sheet() {
+    let mut s = make_state();
+    for child in crate::settings::defs::OUTPUT_RATE_FLOOR_CHILDREN {
+        assert!(
+            !s.rows
+                .iter()
+                .any(|r| matches!(r, RowEntry::Setting { key, .. } if key == child)),
+            "{child} must show only inside the Slow output sheet",
+        );
+    }
+    let group_idx = s
+        .rows
+        .iter()
+        .position(|r| matches!(r, RowEntry::Setting { key, .. } if *key == "output_rate_floor"))
+        .expect("Slow output group row present");
+    s.selected = group_idx;
+    let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
+    let down = KeyEvent::new(KeyCode::Down, KeyModifiers::NONE);
+    let up = KeyEvent::new(KeyCode::Up, KeyModifiers::NONE);
+
+    handle_settings_key(&mut s, &enter);
+    let retries_idx = crate::settings::defs::OUTPUT_RATE_FLOOR_CHILDREN
+        .iter()
+        .position(|k| *k == "output_rate_max_retries")
+        .unwrap();
+    for _ in 0..retries_idx {
+        handle_settings_key(&mut s, &down);
+    }
+    assert!(matches!(
+        s.mode(),
+        SettingsModalMode::PickingGroup { key: "output_rate_floor", child_idx } if child_idx == retries_idx
+    ));
+
+    handle_settings_key(&mut s, &enter);
+    assert!(matches!(
+        s.mode(),
+        SettingsModalMode::EditingValue {
+            key: "output_rate_max_retries"
+        }
+    ));
+    assert_eq!(
+        s.editing_buffer(),
+        Some("2"),
+        "the stepper seeds the default"
+    );
+
+    handle_settings_key(&mut s, &up);
+    let out = handle_settings_key(&mut s, &enter);
+    assert!(
+        matches!(
+            out,
+            SettingsKeyOutcome::Action(Action::SetOutputRateMaxRetries(3))
+        ),
+        "commit must dispatch the typed action, got {out:?}",
+    );
+    assert!(
+        matches!(
+            s.mode(),
+            SettingsModalMode::PickingGroup { key: "output_rate_floor", child_idx } if child_idx == retries_idx
+        ),
+        "commit must return to the sheet, got {:?}",
+        s.mode(),
+    );
+
+    // Esc from a child editor also returns to the sheet; Esc there leaves it.
+    handle_settings_key(&mut s, &enter);
+    handle_settings_key(&mut s, &KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    assert!(matches!(s.mode(), SettingsModalMode::PickingGroup { .. }));
+    handle_settings_key(&mut s, &KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    assert!(matches!(s.mode(), SettingsModalMode::Browse));
+}
+
+/// A search for a child's words finds the group that holds it.
+#[test]
+fn search_for_a_group_child_shows_its_group() {
+    let mut s = make_state();
+    s.set_query("max retries");
+    let visible: Vec<SettingKey> = s
+        .filtered_indices()
+        .iter()
+        .filter_map(|&i| match &s.rows[i] {
+            RowEntry::Setting { key, .. } => Some(*key),
+            RowEntry::Header { .. } => None,
+        })
+        .collect();
+    assert!(visible.contains(&"output_rate_floor"), "got {visible:?}");
+}
+
+/// The sheet draws an Int child's number, not a Bool's on/off.
+#[test]
+fn slow_output_sheet_renders_int_values() {
+    let mut ui = UiConfig::default();
+    ui.output_rate_max_retries = Some(4);
+    let mut s = SettingsModalState::new(
+        Arc::new(SettingsRegistry::defaults()),
+        ui,
+        PagerLocalSnapshot::default(),
+    );
+    s.focus_key("output_rate_floor");
+    handle_settings_key(&mut s, &KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    let area = Rect::new(0, 0, 100, 40);
+    let mut buf = Buffer::empty(area);
+    render_settings_modal(&mut buf, area, &mut s, false, None);
+    let lines: Vec<String> = (0..area.height)
+        .map(|y| (0..area.width).map(|x| buf[(x, y)].symbol()).collect())
+        .collect();
+    let row = lines
+        .iter()
+        .find(|l| l.contains("Slow-output max retries"))
+        .unwrap_or_else(|| panic!("max retries row missing:\n{}", lines.join("\n")));
+    let tail = row.split("Slow-output max retries").nth(1).unwrap();
+    let tokens: Vec<&str> = tail.split_whitespace().collect();
+    assert!(tokens.contains(&"4"), "row: {row:?}");
+    assert!(!tokens.contains(&"off"), "row: {row:?}");
+}
+
 /// The permission_mode picker hides the "Auto" choice when the auto feature
 /// gate is off (matching the Shift+Tab cycle, which skips Auto when gated),
 /// and shows it when the gate is on. Other choices are unaffected.
@@ -693,10 +813,8 @@ fn rows_contain_categories_and_settings_through_pr_14() {
         // declares before permission_mode).
         "stop_gate_unfinished_todos",
         "stop_gate_ci_failing",
-        // The output-rate floor and its grace period, registered with the
-        // other agent-behaviour gates.
-        "min_output_tokens_per_sec",
-        "output_rate_sustained_secs",
+        // The "Slow output" group. Its four rows show only inside its sheet.
+        "output_rate_floor",
         "permission_mode",
         // SHELL-owned remember_tool_approvals (Agent category,
         // registered right after permission_mode).

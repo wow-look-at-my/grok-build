@@ -2666,17 +2666,16 @@ impl Config {
             .filter(|f| f.is_finite());
         let min_tokens_per_sec =
             per_model.unwrap_or_else(|| f64::from(self.ui.min_output_tokens_per_sec_value()));
+        let mut ui = self.ui.clone();
+        ui.adopt_legacy_output_rate_floor(
+            self.output_rate_floor.window_secs,
+            self.output_rate_floor.max_retries,
+        );
         let policy = Policy {
             min_tokens_per_sec,
-            window_secs: self
-                .output_rate_floor
-                .window_secs
-                .unwrap_or(xai_grok_sampling_types::output_rate::DEFAULT_WINDOW_SECS),
-            sustained_secs: u64::from(self.ui.output_rate_sustained_secs_value()),
-            max_retries: self
-                .output_rate_floor
-                .max_retries
-                .unwrap_or(Policy::DEFAULT_MAX_RETRIES),
+            window_secs: u64::from(ui.output_rate_window_secs_value()),
+            sustained_secs: u64::from(ui.output_rate_sustained_secs_value()),
+            max_retries: ui.output_rate_max_retries_value(),
         }
         .clamped();
         policy.is_armed().then_some(policy)
@@ -10039,6 +10038,54 @@ reasoning_effort = "low"
                 .resolve_output_rate_floor("ungated-model")
                 .is_none(),
             "a zero on the model turns the gate off for that model alone"
+        );
+    }
+    /// The retry budget and the window resolve `[ui]` first, then the legacy
+    /// `[output_rate_floor]` table, then the policy default.
+    #[test]
+    fn resolve_output_rate_floor_reads_retries_and_window_from_ui_then_legacy() {
+        use xai_grok_sampling_types::OutputRateFloorPolicy as Policy;
+        use xai_grok_shared::ui_config::UiConfig;
+        assert_eq!(
+            UiConfig::OUTPUT_RATE_MAX_RETRIES_DEFAULT,
+            Policy::DEFAULT_MAX_RETRIES
+        );
+        assert_eq!(
+            u64::from(UiConfig::OUTPUT_RATE_WINDOW_SECS_DEFAULT),
+            xai_grok_sampling_types::output_rate::DEFAULT_WINDOW_SECS
+        );
+
+        let mut legacy = Config::default();
+        legacy.output_rate_floor.max_retries = Some(4);
+        legacy.output_rate_floor.window_secs = Some(30);
+        let p = legacy.resolve_output_rate_floor("any-model").unwrap();
+        assert_eq!(p.max_retries, 4, "a legacy table alone still applies");
+        assert_eq!(p.window_secs, 30);
+
+        let mut both = legacy.clone();
+        both.ui.output_rate_max_retries = Some(1);
+        both.ui.output_rate_window_secs = Some(20);
+        let p = both.resolve_output_rate_floor("any-model").unwrap();
+        assert_eq!(p.max_retries, 1, "the settings-modal value wins");
+        assert_eq!(p.window_secs, 20);
+
+        let mut zero = Config::default();
+        zero.ui.output_rate_max_retries = Some(0);
+        assert_eq!(
+            zero.resolve_output_rate_floor("any-model")
+                .unwrap()
+                .max_retries,
+            0,
+            "zero is a valid budget: the call is never reissued"
+        );
+
+        let mut over = Config::default();
+        over.ui.output_rate_max_retries = Some(99);
+        assert_eq!(
+            over.resolve_output_rate_floor("any-model")
+                .unwrap()
+                .max_retries,
+            *Policy::MAX_RETRIES_RANGE.end(),
         );
     }
     /// Gate precedence: env > `[doom_loop_recovery]` > remote settings >

@@ -13,8 +13,10 @@
 //! - `x.ai/internal/reload_project_mcp_servers` config hot-reload, cwd-scoped
 //! - `x.ai/internal/reload_skills`          skills file watcher fan-out
 //! - `x.ai/internal/reload_models`          model list hot-reload from config.toml
-//! - `x.ai/internal/reload_models_cache`    model catalog hot-reload from disk cache
-//! - `x.ai/internal/auth_cleared`           auth hot-clear cleanup
+//! - `x.ai/internal/reload_models_cache` model catalog hot-reload from disk
+//! cache - `x.ai/internal/reload_output_rate_floor` output-rate floor
+//! hot-reload, all sessions
+//!//! - `x.ai/internal/auth_cleared`           auth hot-clear cleanup
 //! - `x.ai/plugins/reload`                  rebuild shared plugin registry
 //! - `x.ai/commands/list`                   list slash commands
 
@@ -68,6 +70,7 @@ async fn handle_internal(
         InternalMethod::ReloadWorkflows => handle_reload_workflows(agent),
         InternalMethod::ReloadModels => handle_reload_models(agent),
         InternalMethod::ReloadModelsCache => handle_reload_models_cache(agent),
+        InternalMethod::ReloadOutputRateFloor => handle_reload_output_rate_floor(agent),
         InternalMethod::AuthCleared => handle_auth_cleared(agent),
         // Arrives as a notification, so it never reaches this request path.
         InternalMethod::EvictSessions => Err(acp::Error::method_not_found()),
@@ -586,6 +589,37 @@ fn cwd_matches(session_cwd: &std::path::Path, target_cwd: &std::path::Path) -> b
 /// `new_with_models()` for user TOML config entries, and swaps the model list
 /// in-place. Prefetched (API) and default models are NOT re-fetched -- only
 /// BYOK entries from config are updated.
+/// Tell every resident session to re-read its output-rate floor.
+fn handle_reload_output_rate_floor(agent: &MvpAgent) -> ExtResult {
+    let session_ids = agent.resident_ids();
+    let mut updated = 0u32;
+    for session_id in &session_ids {
+        let Some(handle) = agent.resident_handle(session_id) else {
+            continue;
+        };
+        if handle
+            .cmd_tx
+            .send(SessionCommand::ReloadOutputRateFloor)
+            .is_ok()
+        {
+            updated += 1;
+        } else {
+            tracing::error!(
+                session_id = %session_id,
+                "output-rate floor reload not delivered: the session's command channel is closed"
+            );
+        }
+    }
+    tracing::info!(
+        updated,
+        total = session_ids.len(),
+        "output-rate floor reload sent to active sessions"
+    );
+    ExtMethodResult::success(serde_json::json!({ "updated": updated }))
+        .to_ext_response()
+        .map_err(|e| acp::Error::internal_error().data(e.to_string()))
+}
+
 fn handle_reload_models(agent: &MvpAgent) -> ExtResult {
     let disk_config = crate::config::load_effective_config()
         .map_err(|e| acp::Error::internal_error().data(e.to_string()))?;

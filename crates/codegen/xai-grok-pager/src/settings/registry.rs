@@ -698,6 +698,12 @@ pub fn current_value_for(
         "output_rate_sustained_secs" => Some(SettingValue::Int(i64::from(
             ui.output_rate_sustained_secs_value(),
         ))),
+        "output_rate_window_secs" => Some(SettingValue::Int(i64::from(
+            ui.output_rate_window_secs_value(),
+        ))),
+        "output_rate_max_retries" => Some(SettingValue::Int(i64::from(
+            ui.output_rate_max_retries_value(),
+        ))),
         // coding_data_sharing: inverts the `_opt_out` bool.
         "coding_data_sharing" => Some(SettingValue::Enum(if pager.coding_data_sharing_opt_out {
             "opt-out"
@@ -995,6 +1001,20 @@ mod tests {
                         *default,
                         i64::from(ui.output_rate_sustained_secs_value()),
                         "output_rate_sustained_secs default drifts from UiConfig::default()",
+                    );
+                }
+                ("output_rate_window_secs", SettingKind::Int { default, .. }) => {
+                    assert_eq!(
+                        *default,
+                        i64::from(ui.output_rate_window_secs_value()),
+                        "output_rate_window_secs default drifts from UiConfig::default()",
+                    );
+                }
+                ("output_rate_max_retries", SettingKind::Int { default, .. }) => {
+                    assert_eq!(
+                        *default,
+                        i64::from(ui.output_rate_max_retries_value()),
+                        "output_rate_max_retries default drifts from UiConfig::default()",
                     );
                 }
                 // coding_data_sharing: no UiConfig field; default pinned

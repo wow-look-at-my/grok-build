@@ -1452,6 +1452,22 @@ pub(crate) async fn persist_setting(
                 .await
                 .map_err(|e| e.to_string())
         }
+        "output_rate_window_secs" => {
+            let SettingValue::Int(i) = value else {
+                return Err(kind_mismatch("output_rate_window_secs", "Int", &value));
+            };
+            xai_grok_shell::util::config::set_output_rate_window_secs(i)
+                .await
+                .map_err(|e| e.to_string())
+        }
+        "output_rate_max_retries" => {
+            let SettingValue::Int(i) = value else {
+                return Err(kind_mismatch("output_rate_max_retries", "Int", &value));
+            };
+            xai_grok_shell::util::config::set_output_rate_max_retries(i)
+                .await
+                .map_err(|e| e.to_string())
+        }
         "show_tips" => {
             let SettingValue::Bool(b) = value else {
                 return Err(kind_mismatch("show_tips", "Bool", &value));

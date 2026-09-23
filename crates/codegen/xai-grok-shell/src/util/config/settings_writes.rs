@@ -265,6 +265,22 @@ pub async fn set_output_rate_sustained_secs(value: i64) -> Result<()> {
     update_config(|cfg| cfg.ui.output_rate_sustained_secs = Some(clamped)).await
 }
 
+/// Persist `[ui].output_rate_window_secs`, clamped to the policy's range.
+pub async fn set_output_rate_window_secs(value: i64) -> Result<()> {
+    use xai_grok_sampling_types::OutputRateFloorPolicy as Policy;
+    let range = Policy::WINDOW_SECS_RANGE;
+    let clamped = value.clamp(*range.start() as i64, *range.end() as i64) as u32;
+    update_config(|cfg| cfg.ui.output_rate_window_secs = Some(clamped)).await
+}
+
+/// Persist `[ui].output_rate_max_retries`, clamped to the policy's range.
+pub async fn set_output_rate_max_retries(value: i64) -> Result<()> {
+    use xai_grok_sampling_types::OutputRateFloorPolicy as Policy;
+    let range = Policy::MAX_RETRIES_RANGE;
+    let clamped = value.clamp(i64::from(*range.start()), i64::from(*range.end())) as u32;
+    update_config(|cfg| cfg.ui.output_rate_max_retries = Some(clamped)).await
+}
+
 /// Persist `[ui].scroll_speed` via `update_config`.
 /// Defensively clamps to `[1, 100]` at the shell boundary.
 pub async fn set_scroll_speed(value: i64) -> Result<()> {

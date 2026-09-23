@@ -74,8 +74,17 @@ pub fn render_settings_modal(
 
             SettingsMode::EditingString { key, .. } | SettingsMode::EditingInt { key, .. } => {
                 if let Some(meta) = state.registry.find(key) {
-                    breadcrumb_owned =
-                        format!("{MODAL_TITLE} {} {}", crate::glyphs::chevron(), meta.label);
+                    let chevron = crate::glyphs::chevron();
+                    breadcrumb_owned = match state
+                        .group_return
+                        .and_then(|(group, _)| state.registry.find(group))
+                    {
+                        Some(group) => format!(
+                            "{MODAL_TITLE} {chevron} {} {chevron} {}",
+                            group.label, meta.label
+                        ),
+                        None => format!("{MODAL_TITLE} {chevron} {}", meta.label),
+                    };
                     &breadcrumb_owned
                 } else {
                     MODAL_TITLE
@@ -1339,10 +1348,17 @@ fn render_picking_group(
             Style::default().fg(theme.text_primary).bg(bg)
         };
 
-        // Value read live from the snapshot (refreshed after each toggle).
-        let on = matches!(state.value_for(child_key), Some(SettingValue::Bool(true)));
-        let value_text = if on { "on" } else { "off" };
-        let value_style = if on {
+        // Value read live from the snapshot (refreshed after each change).
+        let value = state.value_for(child_key);
+        let on = matches!(value, Some(SettingValue::Bool(true)));
+        let value_owned = match &value {
+            Some(v @ (SettingValue::Int(_) | SettingValue::String(_) | SettingValue::Enum(_))) => {
+                value_display(child_meta, v, None)
+            }
+            _ => if on { "on" } else { "off" }.to_string(),
+        };
+        let value_text = value_owned.as_str();
+        let value_style = if on || matches!(value, Some(SettingValue::Int(_))) {
             Style::default().fg(theme.accent_user).bg(bg)
         } else {
             Style::default().fg(theme.gray).bg(bg)
@@ -1387,6 +1403,29 @@ fn render_picking_group(
             buf.set_span(value_x, y, &Span::styled(value_text, value_style), value_w);
         }
         y = y.saturating_add(1);
+    }
+
+    // The focused child's description, under the list after one blank row.
+    let focused_description = children
+        .get(child_idx)
+        .and_then(|k| state.registry.find(k))
+        .map(|m| m.description)
+        .filter(|d| !d.trim().is_empty());
+    if let Some(description) = focused_description {
+        y = y.saturating_add(1);
+        let text_w = area.width.saturating_sub(PICKER_PREFIX_W);
+        for line in wrap_description(description, text_w) {
+            if y >= area_end {
+                break;
+            }
+            buf.set_span(
+                area.x + PICKER_PREFIX_W,
+                y,
+                &Span::styled(line.as_str(), Style::default().fg(theme.gray)),
+                text_w,
+            );
+            y = y.saturating_add(1);
+        }
     }
     rects
 }
@@ -2932,7 +2971,7 @@ pub(super) fn build_shortcuts(state: &SettingsModalState) -> Vec<Shortcut<'stati
                 id: 0,
             },
             Shortcut {
-                label: "Space/Enter toggle",
+                label: "Space/Enter toggle/edit",
                 clickable: false,
                 id: 0,
             },

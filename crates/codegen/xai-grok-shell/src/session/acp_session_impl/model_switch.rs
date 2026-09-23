@@ -2,6 +2,25 @@ use super::*;
 use crate::remote::DEFAULT_CONTEXT_WINDOW;
 use xai_chat_state::conversation_util::replace_or_insert_system_head;
 impl SessionActor {
+    /// Handle [`SessionCommand::ReloadOutputRateFloor`].
+    pub(super) async fn handle_reload_output_rate_floor(&self) {
+        let Some(cfg) = self.chat_state_handle.get_sampling_config().await else {
+            tracing::error!(
+                session_id = %self.session_info.id.0,
+                "output-rate floor reload skipped: the session has no sampling config"
+            );
+            return;
+        };
+        let policy = crate::agent::config::resolve_output_rate_floor_from_disk(&cfg.model);
+        tracing::info!(
+            session_id = %self.session_info.id.0,
+            model = %cfg.model,
+            ?policy,
+            "output-rate floor reloaded from config"
+        );
+        self.output_rate_floor.set(policy);
+    }
+
     pub(super) async fn handle_set_session_model(
         &self,
         sampling_config: xai_grok_sampler::SamplerConfig,

@@ -259,17 +259,10 @@ fn handle_picking_group(state: &mut SettingsModalState, key: &KeyEvent) -> Setti
                     Some(action) => SettingsKeyOutcome::Action(action),
                     None => SettingsKeyOutcome::Unchanged,
                 }
+            } else if state.open_group_child(group_key, child_idx, child_key) {
+                SettingsKeyOutcome::Changed
             } else {
-                // String → EditingString, Enum → PickingEnum, Int → EditingInt.
-                // The child's editor seeds from its current value.
-                if state.try_enter_editing_value_for(child_key)
-                    || state.try_enter_picking_enum_for(child_key)
-                {
-                    state.hover_row = None;
-                    SettingsKeyOutcome::Changed
-                } else {
-                    SettingsKeyOutcome::Unchanged
-                }
+                SettingsKeyOutcome::Unchanged
             }
         }
         KeyCode::Esc => {
@@ -1250,12 +1243,8 @@ fn handle_group_mouse(
             Some(action) => SettingsKeyOutcome::Action(action),
             None => SettingsKeyOutcome::Changed,
         }
-    } else if state.try_enter_editing_value_for(child_key)
-        || state.try_enter_picking_enum_for(child_key)
-    {
-        state.hover_row = None;
-        SettingsKeyOutcome::Changed
     } else {
+        state.open_group_child(group_key, idx, child_key);
         SettingsKeyOutcome::Changed
     }
 }

@@ -52,6 +52,8 @@ const ALL_SETTINGS_EXERCISED: &[&str] = &[
     "max_thoughts_width",
     "min_output_tokens_per_sec",
     "output_rate_sustained_secs",
+    "output_rate_window_secs",
+    "output_rate_max_retries",
     "scroll_speed",
     "scroll_mode",
     "scroll_lines",
@@ -82,6 +84,8 @@ const ALL_SETTINGS_EXERCISED: &[&str] = &[
     "contextual_hints.small_screen",
     "contextual_hints.word_select",
     "contextual_hints.ssh_wrap",
+    // The "Slow output" group; its four Int children are listed above.
+    "output_rate_floor",
 ];
 
 #[test]
@@ -586,6 +590,116 @@ fn mouse_click_on_contextual_hints_group_opens_sub_sheet_and_toggles_child() {
         ),
         "click on the first child must toggle undo off, got {out:?}",
     );
+}
+
+/// The "Slow output" sheet: each Int child opens its stepper on Enter, one Up
+/// step commits the typed action, and the commit returns to the sheet.
+#[test]
+fn enter_on_slow_output_group_edits_every_child() {
+    let mut s = make_state();
+    navigate_to(&mut s, "output_rate_floor");
+    let out = handle_settings_key(&mut s, &press(KeyCode::Enter));
+    assert!(matches!(out, SettingsKeyOutcome::Changed));
+
+    let expect = |key: &str, out: SettingsKeyOutcome| match (key, out) {
+        (
+            "min_output_tokens_per_sec",
+            SettingsKeyOutcome::Action(Action::SetMinOutputTokensPerSec(v)),
+        ) => {
+            assert!(v > 15, "{v}")
+        }
+        (
+            "output_rate_sustained_secs",
+            SettingsKeyOutcome::Action(Action::SetOutputRateSustainedSecs(v)),
+        ) => {
+            assert!(v > 10, "{v}")
+        }
+        (
+            "output_rate_window_secs",
+            SettingsKeyOutcome::Action(Action::SetOutputRateWindowSecs(v)),
+        ) => {
+            assert!(v > 10, "{v}")
+        }
+        (
+            "output_rate_max_retries",
+            SettingsKeyOutcome::Action(Action::SetOutputRateMaxRetries(v)),
+        ) => {
+            assert_eq!(v, 3)
+        }
+        (key, other) => panic!("`{key}` committed {other:?}"),
+    };
+    let children = [
+        "min_output_tokens_per_sec",
+        "output_rate_sustained_secs",
+        "output_rate_window_secs",
+        "output_rate_max_retries",
+    ];
+    for (idx, key) in children.iter().enumerate() {
+        if idx > 0 {
+            let _ = handle_settings_key(&mut s, &press(KeyCode::Char('j')));
+        }
+        let _ = handle_settings_key(&mut s, &press(KeyCode::Enter));
+        assert!(
+            matches!(s.mode(), SettingsModalMode::EditingValue { key: k } if k == *key),
+            "Enter on child {idx} must open `{key}`, got {:?}",
+            s.mode(),
+        );
+        let _ = handle_settings_key(&mut s, &press(KeyCode::Up));
+        expect(key, handle_settings_key(&mut s, &press(KeyCode::Enter)));
+        assert!(
+            matches!(s.mode(), SettingsModalMode::PickingGroup { child_idx, .. } if child_idx == idx),
+            "commit on `{key}` must return to the sheet, got {:?}",
+            s.mode(),
+        );
+    }
+    let _ = handle_settings_key(&mut s, &press(KeyCode::Esc));
+    assert!(matches!(s.mode(), SettingsModalMode::Browse));
+}
+
+/// Mouse parity: clicking the group opens the sheet, and clicking the max
+/// retries child opens its stepper.
+#[test]
+fn mouse_click_on_slow_output_group_opens_a_child_stepper() {
+    let mut s = make_state();
+    synth_rects(&mut s);
+    let group_row = row_idx_for(&s, "output_rate_floor") as u16;
+    let _ = handle_settings_mouse(
+        &mut s,
+        MouseEventKind::Down(crossterm::event::MouseButton::Left),
+        72,
+        group_row,
+    );
+    assert!(matches!(s.mode(), SettingsModalMode::PickingGroup { .. }));
+    s.picker_choice_rects = (0..4)
+        .map(|i| Rect {
+            x: 0,
+            y: i as u16,
+            width: 80,
+            height: 1,
+        })
+        .collect();
+    let out = handle_settings_mouse(
+        &mut s,
+        MouseEventKind::Down(crossterm::event::MouseButton::Left),
+        1,
+        3,
+    );
+    assert!(matches!(out, SettingsKeyOutcome::Changed));
+    assert!(
+        matches!(
+            s.mode(),
+            SettingsModalMode::EditingValue {
+                key: "output_rate_max_retries"
+            }
+        ),
+        "got {:?}",
+        s.mode(),
+    );
+    let _ = handle_settings_key(&mut s, &press(KeyCode::Esc));
+    assert!(matches!(
+        s.mode(),
+        SettingsModalMode::PickingGroup { child_idx: 3, .. }
+    ));
 }
 
 // ---------------------------------------------------------------------------
@@ -1939,17 +2053,20 @@ fn registry_kind_membership_through_pr_14() {
         vec![
             "max_thoughts_width",
             "min_output_tokens_per_sec",
+            "output_rate_max_retries",
             "output_rate_sustained_secs",
+            "output_rate_window_secs",
             "scroll_lines",
             "scroll_speed"
         ],
         "Int kind membership drift (PR 8)",
     );
 
-    let group_keys = by_kind.remove("Group").unwrap_or_default();
+    let mut group_keys = by_kind.remove("Group").unwrap_or_default();
+    group_keys.sort();
     assert_eq!(
         group_keys,
-        vec!["contextual_hints"],
+        vec!["contextual_hints", "output_rate_floor"],
         "Group kind membership drift",
     );
 
@@ -2046,6 +2163,8 @@ fn defaults_round_trip_through_registry() {
             // The rate gate ships armed, well under any healthy rate.
             "min_output_tokens_per_sec" => SettingValue::Int(15),
             "output_rate_sustained_secs" => SettingValue::Int(10),
+            "output_rate_window_secs" => SettingValue::Int(10),
+            "output_rate_max_retries" => SettingValue::Int(2),
             "scroll_speed" => SettingValue::Int(50),
             "scroll_mode" => SettingValue::Enum("auto"),
             "scroll_lines" => SettingValue::Int(3),
