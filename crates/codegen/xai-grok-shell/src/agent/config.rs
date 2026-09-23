@@ -5045,6 +5045,19 @@ impl ModelEntry {
             api_base_url: None,
         }
     }
+    /// An entry for a model the catalog does not hold. It has no URL, so the
+    /// sampler refuses it rather than sending the request anywhere.
+    pub(crate) fn unreachable(slug: &str) -> Self {
+        let mut info = ModelInfo::fallback(slug);
+        info.base_url = String::new();
+        Self {
+            info,
+            api_key: None,
+            env_key: None,
+            auth_provider: None,
+            api_base_url: None,
+        }
+    }
     pub fn info(&self) -> &ModelInfo {
         &self.info
     }

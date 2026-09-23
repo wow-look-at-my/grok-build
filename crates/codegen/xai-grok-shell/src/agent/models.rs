@@ -1121,17 +1121,17 @@ impl ModelsManager {
         let auth_manager = self.inner.auth_manager.as_ref();
         let current_model_id = self.current_model_id();
         let all_models = self.models();
-        let fallback;
-        let current_model = match all_models
-            .get(current_model_id.0.as_ref())
-            .or_else(|| all_models.values().next())
-        {
+        let missing;
+        let current_model = match all_models.get(current_model_id.0.as_ref()) {
             Some(m) => m,
             None => {
-                tracing::warn!("no models available in catalog; defaulting to bundled model");
-                let default_id = crate::models::default_model().to_string();
-                fallback = ModelEntry::fallback(&default_id, &config.endpoints);
-                &fallback
+                // Never swap in another model: its URL is one the user did not pick.
+                tracing::error!(
+                    model = %current_model_id.0,
+                    "the selected model is not in the catalog; no request will be sent"
+                );
+                missing = ModelEntry::unreachable(current_model_id.0.as_ref());
+                &missing
             }
         };
 
