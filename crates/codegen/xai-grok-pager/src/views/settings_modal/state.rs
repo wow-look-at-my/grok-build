@@ -1154,6 +1154,7 @@ pub(super) fn action_for_int(key: SettingKey, value: i64) -> Option<Action> {
         "output_rate_sustained_secs" => Some(Action::SetOutputRateSustainedSecs(value)),
         "output_rate_window_secs" => Some(Action::SetOutputRateWindowSecs(value)),
         "output_rate_max_retries" => Some(Action::SetOutputRateMaxRetries(value)),
+        "ttft_timeout_secs" => Some(Action::SetTtftTimeoutSecs(value)),
         _ => None,
     }
 }

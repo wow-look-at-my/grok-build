@@ -41,6 +41,8 @@ pub(crate) const OUTPUT_RATE_WINDOW_SECS_MIN: i64 = 2;
 pub(crate) const OUTPUT_RATE_WINDOW_SECS_MAX: i64 = 120;
 pub(crate) const OUTPUT_RATE_MAX_RETRIES_MIN: i64 = 0;
 pub(crate) const OUTPUT_RATE_MAX_RETRIES_MAX: i64 = 5;
+pub(crate) const TTFT_TIMEOUT_SECS_MIN: i64 = 0;
+pub(crate) const TTFT_TIMEOUT_SECS_MAX: i64 = 1800;
 
 /// The rows of the "Slow output" sub-screen: how slow output is detected and
 /// what is done about it.
@@ -49,6 +51,7 @@ pub(crate) const OUTPUT_RATE_FLOOR_CHILDREN: &[&str] = &[
     "output_rate_sustained_secs",
     "output_rate_window_secs",
     "output_rate_max_retries",
+    "ttft_timeout_secs",
 ];
 
 // ---------------------------------------------------------------------------
@@ -822,6 +825,30 @@ pub fn default_settings() -> Vec<SettingMeta> {
                 default: i64::from(ui_default.output_rate_max_retries_value()),
                 min: OUTPUT_RATE_MAX_RETRIES_MIN,
                 max: OUTPUT_RATE_MAX_RETRIES_MAX,
+            },
+            restart_required: false,
+            hidden_in_minimal: false,
+        },
+        // SHARED. `[ui].ttft_timeout_secs`, `Option<u32>` widened to `i64`. 0 is
+        // the off state.
+        SettingMeta {
+            key: "ttft_timeout_secs",
+            category: SettingCategory::Agent,
+            owner: SettingOwner::Shared,
+            label: "First-token timeout",
+            description: "Reissue a model call that has produced no output this many seconds \
+                          after the request was sent. It uses the slow-output retries above. \
+                          0 turns it off. A provider or model overrides it with \
+                          `[model_providers.<id>].ttft_timeout_secs` or \
+                          `[model.<id>].ttft_timeout_secs`.",
+            keywords: &[
+                "ttft", "first", "token", "timeout", "prefill", "queue", "slow", "stall",
+                "retry", "reissue",
+            ],
+            kind: SettingKind::Int {
+                default: i64::from(ui_default.ttft_timeout_secs_value()),
+                min: TTFT_TIMEOUT_SECS_MIN,
+                max: TTFT_TIMEOUT_SECS_MAX,
             },
             restart_required: false,
             hidden_in_minimal: false,

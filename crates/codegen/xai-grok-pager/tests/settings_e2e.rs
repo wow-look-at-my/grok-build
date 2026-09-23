@@ -54,6 +54,7 @@ const ALL_SETTINGS_EXERCISED: &[&str] = &[
     "output_rate_sustained_secs",
     "output_rate_window_secs",
     "output_rate_max_retries",
+    "ttft_timeout_secs",
     "scroll_speed",
     "scroll_mode",
     "scroll_lines",
@@ -626,6 +627,9 @@ fn enter_on_slow_output_group_edits_every_child() {
         ) => {
             assert_eq!(v, 3)
         }
+        ("ttft_timeout_secs", SettingsKeyOutcome::Action(Action::SetTtftTimeoutSecs(v))) => {
+            assert!(v > 120, "{v}")
+        }
         (key, other) => panic!("`{key}` committed {other:?}"),
     };
     let children = [
@@ -633,6 +637,7 @@ fn enter_on_slow_output_group_edits_every_child() {
         "output_rate_sustained_secs",
         "output_rate_window_secs",
         "output_rate_max_retries",
+        "ttft_timeout_secs",
     ];
     for (idx, key) in children.iter().enumerate() {
         if idx > 0 {
@@ -2057,7 +2062,8 @@ fn registry_kind_membership_through_pr_14() {
             "output_rate_sustained_secs",
             "output_rate_window_secs",
             "scroll_lines",
-            "scroll_speed"
+            "scroll_speed",
+            "ttft_timeout_secs"
         ],
         "Int kind membership drift (PR 8)",
     );
@@ -2165,6 +2171,7 @@ fn defaults_round_trip_through_registry() {
             "output_rate_sustained_secs" => SettingValue::Int(10),
             "output_rate_window_secs" => SettingValue::Int(10),
             "output_rate_max_retries" => SettingValue::Int(2),
+            "ttft_timeout_secs" => SettingValue::Int(120),
             "scroll_speed" => SettingValue::Int(50),
             "scroll_mode" => SettingValue::Enum("auto"),
             "scroll_lines" => SettingValue::Int(3),

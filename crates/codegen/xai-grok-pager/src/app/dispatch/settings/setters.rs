@@ -2139,7 +2139,8 @@ pub(in crate::app::dispatch) fn set_max_thoughts_width(app: &mut AppView, new: i
 
 // ---------------------------------------------------------------------------
 // min_output_tokens_per_sec, output_rate_sustained_secs, output_rate_window_secs,
-// output_rate_max_retries — the output-rate floor. `Option<u32>` in UiConfig,
+// output_rate_max_retries, ttft_timeout_secs — the output-rate floor and the
+// time-to-first-token limit. `Option<u32>` in UiConfig,
 // `i64` on the registry surface. The config watcher tells every running
 // session to re-read the floor, so a change applies to its next model call.
 // ---------------------------------------------------------------------------
@@ -2292,6 +2293,43 @@ pub(in crate::app::dispatch) fn set_output_rate_max_retries(
     }
     vec![Effect::PersistSetting {
         key: "output_rate_max_retries",
+        value: crate::settings::SettingValue::Int(clamped),
+        rollback_value: crate::settings::SettingValue::Int(prev),
+    }]
+}
+
+fn clamp_ttft_timeout_secs(value: i64) -> i64 {
+    value.clamp(
+        crate::settings::defs::TTFT_TIMEOUT_SECS_MIN,
+        crate::settings::defs::TTFT_TIMEOUT_SECS_MAX,
+    )
+}
+
+pub(super) fn set_ttft_timeout_secs_inner(app: &mut AppView, value: i64) {
+    app.current_ui.ttft_timeout_secs = Some(clamp_ttft_timeout_secs(value) as u32);
+}
+
+pub(in crate::app::dispatch) fn set_ttft_timeout_secs(app: &mut AppView, new: i64) -> Vec<Effect> {
+    let prev = i64::from(app.current_ui.ttft_timeout_secs_value());
+    let clamped = clamp_ttft_timeout_secs(new);
+    if prev == clamped {
+        return vec![];
+    }
+    set_ttft_timeout_secs_inner(app, new);
+    refresh_open_settings_modals(app);
+    tracing::info!(
+        target: "settings",
+        key = "ttft_timeout_secs",
+        value = clamped,
+        "setting changed",
+    );
+    if clamped == 0 {
+        app.show_toast("\u{2713} First-token timeout: off");
+    } else {
+        app.show_toast(&format!("\u{2713} First-token timeout: {clamped}s"));
+    }
+    vec![Effect::PersistSetting {
+        key: "ttft_timeout_secs",
         value: crate::settings::SettingValue::Int(clamped),
         rollback_value: crate::settings::SettingValue::Int(prev),
     }]

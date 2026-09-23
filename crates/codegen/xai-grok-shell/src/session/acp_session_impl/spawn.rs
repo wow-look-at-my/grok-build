@@ -1718,6 +1718,7 @@ pub(crate) async fn spawn_session_actor(
             lock
         },
         active_agent_type: parking_lot::Mutex::new(initial_agent_type),
+        mode_agent: Default::default(),
         queue_exit_reminder_on_approved_exit,
         active_skill: parking_lot::Mutex::new(None),
         current_prompt_mode: current_prompt_mode.clone(),
