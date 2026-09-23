@@ -21,10 +21,7 @@ pub fn set_configured(entries: Vec<String>) {
 
 /// Every entry now in force: config first, then the environment.
 pub fn allowed_endpoints() -> Vec<String> {
-    let mut entries = CONFIGURED
-        .read()
-        .unwrap_or_else(|p| p.into_inner())
-        .clone();
+    let mut entries = CONFIGURED.read().unwrap_or_else(|p| p.into_inner()).clone();
     if let Ok(env) = std::env::var(ENV_GROK_ALLOWED_ENDPOINTS) {
         entries.extend(env.split(',').map(str::to_owned));
     }
@@ -49,10 +46,7 @@ impl std::fmt::Display for EndpointRefusal {
                 "No URL is configured for this request, so nothing was sent. \
                  Set the URL in config.toml."
             ),
-            Self::NoUrl { url } => write!(
-                f,
-                "\"{url}\" is not a valid URL, so nothing was sent."
-            ),
+            Self::NoUrl { url } => write!(f, "\"{url}\" is not a valid URL, so nothing was sent."),
             Self::NotAllowed { origin, .. } => write!(
                 f,
                 "{origin} is not an allowed endpoint, so nothing was sent. \
@@ -82,7 +76,10 @@ pub fn check_against(url: &str, entries: &[String]) -> Result<(), EndpointRefusa
             url: url.to_owned(),
         });
     };
-    if entries.iter().any(|entry| entry_covers(entry.trim(), &target)) {
+    if entries
+        .iter()
+        .any(|entry| entry_covers(entry.trim(), &target))
+    {
         return Ok(());
     }
     let origin = match target.port() {
@@ -177,8 +174,14 @@ mod tests {
     #[test]
     fn a_host_entry_covers_every_port_and_path_on_that_host() {
         let entries = list(&["API.example.com"]);
-        assert_eq!(check_against("https://api.example.com/v1/chat", &entries), Ok(()));
-        assert_eq!(check_against("http://api.example.com:8080", &entries), Ok(()));
+        assert_eq!(
+            check_against("https://api.example.com/v1/chat", &entries),
+            Ok(())
+        );
+        assert_eq!(
+            check_against("http://api.example.com:8080", &entries),
+            Ok(())
+        );
         assert!(check_against("https://evil.example.com/v1", &entries).is_err());
         assert!(check_against("https://api.example.com.evil.test/v1", &entries).is_err());
     }
@@ -186,7 +189,10 @@ mod tests {
     #[test]
     fn a_wildcard_entry_covers_subdomains_only() {
         let entries = list(&["*.example.com"]);
-        assert_eq!(check_against("https://api.example.com/v1", &entries), Ok(()));
+        assert_eq!(
+            check_against("https://api.example.com/v1", &entries),
+            Ok(())
+        );
         assert_eq!(check_against("https://a.b.example.com", &entries), Ok(()));
         assert!(check_against("https://example.com", &entries).is_err());
         assert!(check_against("https://badexample.com", &entries).is_err());
@@ -206,7 +212,10 @@ mod tests {
             check_against("https://gw.example.com/team-a/v1/messages", &entries),
             Ok(())
         );
-        assert_eq!(check_against("https://gw.example.com/team-a", &entries), Ok(()));
+        assert_eq!(
+            check_against("https://gw.example.com/team-a", &entries),
+            Ok(())
+        );
         assert!(check_against("http://gw.example.com/team-a/v1", &entries).is_err());
         assert!(check_against("https://gw.example.com/team-b/v1", &entries).is_err());
         assert!(check_against("https://gw.example.com/team-abc", &entries).is_err());
