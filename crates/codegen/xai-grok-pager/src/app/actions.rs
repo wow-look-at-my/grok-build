@@ -619,6 +619,9 @@ pub enum Action {
     /// Set `[ui].output_rate_max_retries`: how many times one model call is
     /// reissued for slow output. `0` never reissues.
     SetOutputRateMaxRetries(i64),
+    /// Set `[ui].ttft_timeout_secs`: how long a model call may go without
+    /// output before it is reissued. `0` turns the limit off.
+    SetTtftTimeoutSecs(i64),
     /// Commit the fork-secondary model. Typed `ModelId` payload,
     /// persisted to `[ui].fork_secondary_model`. Rebroadcast via
     /// `ConfigUpdate::Ui` so running agents pick up the change.

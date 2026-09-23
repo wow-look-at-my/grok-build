@@ -704,6 +704,7 @@ pub fn current_value_for(
         "output_rate_max_retries" => Some(SettingValue::Int(i64::from(
             ui.output_rate_max_retries_value(),
         ))),
+        "ttft_timeout_secs" => Some(SettingValue::Int(i64::from(ui.ttft_timeout_secs_value()))),
         // coding_data_sharing: inverts the `_opt_out` bool.
         "coding_data_sharing" => Some(SettingValue::Enum(if pager.coding_data_sharing_opt_out {
             "opt-out"
@@ -1015,6 +1016,13 @@ mod tests {
                         *default,
                         i64::from(ui.output_rate_max_retries_value()),
                         "output_rate_max_retries default drifts from UiConfig::default()",
+                    );
+                }
+                ("ttft_timeout_secs", SettingKind::Int { default, .. }) => {
+                    assert_eq!(
+                        *default,
+                        i64::from(ui.ttft_timeout_secs_value()),
+                        "ttft_timeout_secs default drifts from UiConfig::default()",
                     );
                 }
                 // coding_data_sharing: no UiConfig field; default pinned

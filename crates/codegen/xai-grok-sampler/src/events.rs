@@ -236,6 +236,7 @@ pub enum SamplingErrorKind {
     MaxTokensTruncation,
     DoomLoopDetected,
     OutputRateCollapsed,
+    FirstTokenTimeout,
 }
 
 impl SamplingErrorKind {
@@ -256,6 +257,7 @@ impl SamplingErrorKind {
             SamplingErrorKind::MaxTokensTruncation => "max_tokens_truncation",
             SamplingErrorKind::DoomLoopDetected => "doom_loop_detected",
             SamplingErrorKind::OutputRateCollapsed => "output_rate_collapsed",
+            SamplingErrorKind::FirstTokenTimeout => "first_token_timeout",
         }
     }
 }
@@ -302,6 +304,9 @@ impl From<&SamplingError> for SamplingErrorInfo {
             }
             SamplingError::OutputRateCollapsed { .. } => {
                 (SamplingErrorKind::OutputRateCollapsed, None, None, None)
+            }
+            SamplingError::FirstTokenTimeout { .. } => {
+                (SamplingErrorKind::FirstTokenTimeout, None, None, None)
             }
         };
 

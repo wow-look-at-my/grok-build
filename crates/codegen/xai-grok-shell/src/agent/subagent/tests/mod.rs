@@ -1856,7 +1856,7 @@ fn test_model_entry(model_id: &str) -> crate::agent::config::ModelEntry {
             strict_message_schema: false,
             laziness_detector: crate::agent::config::LazinessDetectorPerModelConfig::default(),
             pricing: xai_grok_sampling_types::ModelPricing::default(),
-            min_output_tokens_per_sec: None,
+            min_output_tokens_per_sec: None, ttft_timeout_secs: None,
                     extra_body: Default::default(),
             pricing_lookup_enabled: true,
             loaded_in_vram: None,

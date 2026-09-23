@@ -87,8 +87,8 @@ use super::settings::setters::{
     set_page_flip_on_send, set_prompt_suggestions, set_remember_tool_approvals, set_render_mermaid,
     set_respect_manual_folds, set_screen_mode, set_scroll_lines, set_scroll_mode, set_scroll_speed,
     set_show_thinking_blocks, set_show_tips, set_simple_mode, set_stop_gate_ci_failing,
-    set_stop_gate_unfinished_todos, set_theme, set_timeline, set_timestamps, set_vim_mode,
-    set_voice_capture_mode, set_voice_keybind_enabled, set_voice_stt_language,
+    set_stop_gate_unfinished_todos, set_theme, set_timeline, set_timestamps, set_ttft_timeout_secs,
+    set_vim_mode, set_voice_capture_mode, set_voice_keybind_enabled, set_voice_stt_language,
 };
 use super::settings::ui::{
     dispatch_confirm_reset_setting, dispatch_open_command_palette, dispatch_open_howto_guides,
@@ -1119,6 +1119,7 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
         Action::SetOutputRateSustainedSecs(v) => set_output_rate_sustained_secs(app, v),
         Action::SetOutputRateWindowSecs(v) => set_output_rate_window_secs(app, v),
         Action::SetOutputRateMaxRetries(v) => set_output_rate_max_retries(app, v),
+        Action::SetTtftTimeoutSecs(v) => set_ttft_timeout_secs(app, v),
         Action::SetShowTips(v) => set_show_tips(app, v),
         Action::SetAutoUpdate(v) => set_auto_update(app, v),
         Action::SetDisplayRefreshAutoCadence(v) => set_display_refresh_auto_cadence(app, v),
