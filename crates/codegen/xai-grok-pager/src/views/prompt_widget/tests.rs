@@ -1500,6 +1500,34 @@
     }
 
     #[test]
+    fn sync_acp_commands_keeps_a_dismissed_dropdown_closed() {
+        let mut pw = PromptWidget::new();
+        let models = crate::acp::model_state::ModelState::default();
+        let flush = vec![agent_client_protocol::AvailableCommand::new(
+            "flush".to_string(),
+            "Flush memory".to_string(),
+        )];
+        pw.sync_acp_commands(&flush, None, &models);
+        pw.textarea.insert_str("/flu");
+        pw.refresh_slash(&models);
+        assert!(pw.slash_snapshot().open, "precondition: dropdown open");
+
+        pw.slash_dismiss();
+        pw.sync_acp_commands(&flush, None, &models);
+        assert!(
+            !pw.slash_snapshot().open,
+            "a command resync must not reopen a dropdown the user closed with Esc"
+        );
+
+        pw.textarea.insert_str("s");
+        pw.refresh_slash(&models);
+        assert!(
+            pw.slash_snapshot().open,
+            "the next edit reopens the dropdown as usual"
+        );
+    }
+
+    #[test]
     fn sync_acp_commands_passes_tools_to_registry() {
         // End-to-end: tracker advertises a toolset, sync forwards it,
         // and tool-gated commands like /loop disappear when their
