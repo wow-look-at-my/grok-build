@@ -177,6 +177,7 @@ Some inference engines drop to a crawl in the middle of a response. Grok watches
 | `output_rate_sustained_secs` | `1`–`600` (`10`) | How long the rate must stay under the floor before the call is reissued. |
 | `output_rate_window_secs` | `2`–`120` (`10`) | How many seconds of output the rate is averaged over. |
 | `output_rate_max_retries` | `0`–`5` (`2`) | How many times one call is reissued. After that the response is kept at whatever rate it runs. `0` never reissues. |
+| `ttft_timeout_secs` | `0`–`1800` (`120`) | Time-to-first-token limit. A call with no output this many seconds after it was sent is reissued, on the same retry budget. `0` turns it off. `[model_providers.<id>].ttft_timeout_secs` overrides it for a provider, and `[model.<id>].ttft_timeout_secs` for one model. |
 
 ```toml
 [ui]
@@ -184,6 +185,7 @@ min_output_tokens_per_sec = 15
 output_rate_sustained_secs = 10
 output_rate_window_secs = 10
 output_rate_max_retries = 2
+ttft_timeout_secs = 120
 ```
 
 The older `[output_rate_floor]` table (`window_secs`, `max_retries`) still works. A `[ui]` key wins where both are set.
