@@ -1032,6 +1032,12 @@ pub(crate) fn extract_final_response(items: &[ConversationItem]) -> Option<Strin
 /// still receives the full summary. Mirrors `GOAL_STRATEGIST_RECOMMENDATION_MAX_CHARS`.
 const FIRST_FINAL_RESPONSE_MAX_CHARS: usize = 4096;
 
+/// Heads the round-1 anchor on a re-verification round. The verifier
+/// prompt names this header, so the two must change together.
+pub(crate) const EARLIER_SUMMARY_HEADER: &str = "## Earlier summary (round 1, superseded)\n\
+     This is the agent's first-round text, kept to show the full scope. \
+     The message above replaces it wherever the two disagree.\n";
+
 /// Output of [`compose_verifier_final_response`]. `to_send` is the
 /// `FINAL_RESPONSE` for this round's panel; `to_persist` is `Some` only
 /// on the first round, carrying the (capped) value to freeze as the
@@ -1045,8 +1051,9 @@ pub(crate) struct ComposedFinalResponse {
 ///
 /// `first` is the persisted breadth anchor (`None` on the first round,
 /// where `current` IS the full deliverable: sent, and returned capped to
-/// persist). On re-verification the anchor leads and `current` is appended
-/// under a header only when non-blank.
+/// persist). On re-verification `current` leads, and the anchor follows
+/// under [`EARLIER_SUMMARY_HEADER`]. The implementer cannot edit the
+/// anchor, so a claim it later corrects must never read as its current word.
 pub(crate) fn compose_verifier_final_response(
     first: Option<&str>,
     current: String,
@@ -1072,14 +1079,13 @@ pub(crate) fn compose_verifier_final_response(
             }
         }
         Some(anchor) => {
-            // Skip the note when blank, or when it merely re-surfaces the
-            // anchor (the implementer re-completed without new prose): old
-            // text must not be relabeled as this round's delta.
-            let note = current.trim();
-            let to_send = if note.is_empty() || note == anchor.trim() {
+            // A blank current message, or one that repeats the anchor, has
+            // nothing to supersede it with: send the anchor alone.
+            let latest = current.trim();
+            let to_send = if latest.is_empty() || latest == anchor.trim() {
                 anchor.to_string()
             } else {
-                format!("{anchor}\n\n## Changes this round\n{note}")
+                format!("{latest}\n\n{EARLIER_SUMMARY_HEADER}\n{anchor}")
             };
             ComposedFinalResponse {
                 to_send,
@@ -1501,16 +1507,41 @@ mod tests {
     }
 
     #[test]
-    fn compose_verifier_final_response_reverify_appends_change_note() {
-        // Re-verification: the stored anchor leads (breadth) and the
-        // current message is appended under the round header (recency).
-        let composed =
-            compose_verifier_final_response(Some("FULL round-1 summary"), "fix note".to_string());
-        assert!(composed.to_send.contains("FULL round-1 summary"));
-        assert!(composed.to_send.contains("fix note"));
-        assert!(composed.to_send.contains("## Changes this round"));
+    fn compose_verifier_final_response_reverify_leads_with_latest_message() {
+        // The implementer cannot edit the anchor. So the latest message
+        // must come first, and the anchor must follow under a header that
+        // marks it superseded.
+        let composed = compose_verifier_final_response(
+            Some("round 1: no correction needed"),
+            "corrected: nine hits, two wgets".to_string(),
+        );
+        let latest = composed
+            .to_send
+            .find("corrected: nine hits")
+            .expect("latest message is sent");
+        let header = composed
+            .to_send
+            .find(EARLIER_SUMMARY_HEADER)
+            .expect("anchor carries the superseded header");
+        let anchor = composed
+            .to_send
+            .find("round 1: no correction needed")
+            .expect("anchor is still sent for scope");
+        assert!(latest < header && header < anchor, "{}", composed.to_send);
         // Anchor already stored — re-verification never re-persists.
         assert!(composed.to_persist.is_none());
+    }
+
+    #[test]
+    fn verifier_prompt_names_the_earlier_summary_header() {
+        // The prompt tells skeptics what the header means. A renamed
+        // header leaves that instruction pointing at nothing.
+        let title = EARLIER_SUMMARY_HEADER
+            .lines()
+            .next()
+            .expect("header has a title line");
+        let prompt = include_str!("../templates/goal_verifier_prompt.md");
+        assert!(prompt.contains(title), "prompt must name `{title}`");
     }
 
     #[test]
@@ -1522,7 +1553,6 @@ mod tests {
         for echo in [anchor.to_string(), format!("  {anchor}  ")] {
             let composed = compose_verifier_final_response(Some(anchor), echo);
             assert_eq!(composed.to_send, anchor);
-            assert!(!composed.to_send.contains("## Changes this round"));
             assert!(composed.to_persist.is_none());
         }
     }
@@ -1534,7 +1564,6 @@ mod tests {
         for blank in ["", "   ", "\n\t  \n"] {
             let composed = compose_verifier_final_response(Some("FULL"), blank.to_string());
             assert_eq!(composed.to_send, "FULL");
-            assert!(!composed.to_send.contains("## Changes this round"));
             assert!(composed.to_persist.is_none());
         }
     }
