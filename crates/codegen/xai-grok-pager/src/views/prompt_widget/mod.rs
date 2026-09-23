@@ -521,6 +521,9 @@ pub struct PromptWidget {
     pub(crate) slash_state: crate::slash::SlashState,
     /// Mouse-hovered slash dropdown item index (`None` = no hover).
     pub(crate) slash_hovered: Option<usize>,
+    /// The user closed the dropdown with Esc. A command resync must not open it
+    /// again. The next `refresh_slash` clears this.
+    slash_dismissed: bool,
     /// Last input delta for the flight recorder (read by AgentView after handle_key).
     pub(crate) last_input_delta: crate::input_log::LastInputDelta,
     /// Live preview state for slash commands that support it.
@@ -616,6 +619,7 @@ impl PromptWidget {
             slash_controller: crate::slash::SlashController::with_builtins(cwd.to_path_buf()),
             slash_state: crate::slash::SlashState::default(),
             slash_hovered: None,
+            slash_dismissed: false,
             last_input_delta: crate::input_log::LastInputDelta::default(),
             slash_preview_original: None,
             suggestions: SuggestionController::new(),
@@ -1060,6 +1064,7 @@ impl PromptWidget {
     /// never touches `slash_controller` or `slash_state` directly.
     ///
     pub fn refresh_slash(&mut self, models: &crate::acp::model_state::ModelState) {
+        self.slash_dismissed = false;
         let was_in_args = {
             let snap = self.slash_state.snapshot();
             snap.open && !snap.cursor_in_command && !snap.matches.is_empty()
@@ -1110,6 +1115,9 @@ impl PromptWidget {
         // when the toolset arrived alongside fresh ACP commands.
         let registry = self.slash_controller.registry_mut();
         registry.set_acp_state(commands, tools.cloned());
+        if self.slash_dismissed {
+            return;
+        }
         self.refresh_slash(models);
     }
 
@@ -1188,6 +1196,14 @@ impl PromptWidget {
     /// Close the slash dropdown.
     pub fn slash_close(&mut self) {
         self.slash_state.close();
+    }
+
+    /// Esc on the dropdown: revert any live preview and close it until the
+    /// user edits again.
+    pub fn slash_dismiss(&mut self) {
+        self.slash_cancel_preview();
+        self.slash_state.close();
+        self.slash_dismissed = true;
     }
 
     /// Move the slash dropdown selection (Up = -1, Down = +1), wrapping around.

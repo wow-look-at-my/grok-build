@@ -1346,6 +1346,30 @@ pub(super) fn handle_child_session_notification(
                     .set_reported_session_cost(session_cost_usd_ticks);
             priced || cache_hit_set || total_changed
         }
+        XaiSessionUpdate::OutputRate {
+            tokens_per_sec,
+            window_secs,
+            floor_tokens_per_sec,
+            slow_for_ms,
+        } => {
+            // The subagent view draws the same status row as the parent, from
+            // its own tracker. `finalize_finished_child_view` clears the rate.
+            let Some(child_view) = agent.subagent_views.get_mut(child_sid) else {
+                return false;
+            };
+            if child_view.session.loading_replay {
+                return false;
+            }
+            child_view
+                .session
+                .tracker
+                .set_output_rate(crate::acp::tracker::OutputRate {
+                    tokens_per_sec,
+                    window_secs,
+                    floor_tokens_per_sec,
+                    slow_for: slow_for_ms.map(std::time::Duration::from_millis),
+                })
+        }
         ref update @ (XaiSessionUpdate::MemoryFlushCompleted { .. }
         | XaiSessionUpdate::MemoryDreamCompleted { .. }
         | XaiSessionUpdate::MemorySessionSaved { .. }) => {
