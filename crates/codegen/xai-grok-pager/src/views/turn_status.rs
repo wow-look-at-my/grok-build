@@ -1113,7 +1113,6 @@ mod tests {
         assert_eq!(format_turn_timer(Duration::from_secs(600)), "10m0s");
     }
 
-    #[test]
     fn harness(role: &str) -> Option<GoalHarnessActivity<'_>> {
         Some(GoalHarnessActivity {
             role,
