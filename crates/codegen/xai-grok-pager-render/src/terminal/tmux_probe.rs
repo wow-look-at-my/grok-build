@@ -89,11 +89,21 @@ fn run_tmux_bounded(
         }
     };
 
-    // The leader may be reaped while descendants still exist or hold pipes.
-    // Use a fresh post-exit bound so near-deadline success still drains; the
-    // main process deadline is not extended for hung leaders.
-    let cleanup_deadline = std::time::Instant::now() + POST_EXIT_CLEANUP_GRACE;
-    terminate_owned_group(&group);
+    finish_after_leader_exit(status, &group, stdout, stderr, POST_EXIT_CLEANUP_GRACE)
+}
+
+/// Descendants may still hold the pipes after the leader is reaped. This bound
+/// starts at the leader's exit and never sees the main deadline, so a success
+/// near that deadline still drains.
+fn finish_after_leader_exit(
+    status: std::process::ExitStatus,
+    group: &xai_tty_utils::ProcessGroup,
+    stdout: std::sync::mpsc::Receiver<Result<Vec<u8>, String>>,
+    stderr: std::sync::mpsc::Receiver<Result<Vec<u8>, String>>,
+    cleanup_grace: Duration,
+) -> Result<TmuxCommandOutput, String> {
+    let cleanup_deadline = std::time::Instant::now() + cleanup_grace;
+    terminate_owned_group(group);
     let stdout = recv_pipe_drain(stdout, cleanup_deadline, "stdout")?;
     let stderr = recv_pipe_drain(stderr, cleanup_deadline, "stderr")?;
     Ok(TmuxCommandOutput {
@@ -421,14 +431,9 @@ mod tests {
         );
     }
 
-    /// A leader that exits successfully just under the process deadline must
-    /// still return captured output: post-exit TERM grace + pipe drain use a
-    /// separate bound and must not turn success into a drain timeout.
-    ///
-    /// A background descendant keeps the captured pipes open until process-group
-    /// teardown so the drain cannot finish during the wait loop. That makes the
-    /// post-exit cleanup window load-bearing once the main deadline is nearly
-    /// exhausted.
+    /// A leader that exits successfully must still return captured output when
+    /// a descendant holds the pipes. `finish_after_leader_exit` takes no main
+    /// deadline, so a success near that deadline cannot become a drain timeout.
     #[cfg(unix)]
     #[test]
     #[serial_test::serial(tmux_probe_path)]
@@ -439,16 +444,10 @@ mod tests {
         let bin = temp.path().join("bin");
         std::fs::create_dir_all(&bin).unwrap();
         let tmux = bin.join("tmux");
-        // Burn most of the process budget, then exit successfully while a
-        // descendant still holds the pipes. Remaining main-deadline time is
-        // intentionally below the fixed TERM grace sleep so a shared deadline
-        // would fail the drain; the separate post-exit cleanup grace must keep
-        // this a success. Perl select is used for subsecond precision.
-        let timeout = Duration::from_millis(1500);
+        // Exit successfully while a descendant still holds the pipes.
         std::fs::write(
             &tmux,
             "#!/bin/sh\n\
-             /usr/bin/perl -e 'select(undef, undef, undef, 1.2)'\n\
              ( exec sleep 30 ) &\n\
              printf 'tmux 3.4\\n'\n\
              exit 0\n",
@@ -466,8 +465,20 @@ mod tests {
         unsafe {
             std::env::set_var("PATH", &path);
         }
+        // The leader is waited on with no deadline. The drain then starts after
+        // any main deadline would have passed, so only its own grace bounds it.
+        // That grace is long enough that a slow runner cannot exhaust it.
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            run_tmux_bounded(TmuxCommand::Version, timeout)
+            #[allow(clippy::disallowed_methods)]
+            let mut child = build_tmux_command(TmuxCommand::Version)
+                .spawn()
+                .expect("spawn fake tmux");
+            let mut group = xai_tty_utils::ProcessGroup::new().expect("process group");
+            group.attach_std(&child).expect("attach group");
+            let stdout = spawn_pipe_drain(child.stdout.take().unwrap(), "stdout");
+            let stderr = spawn_pipe_drain(child.stderr.take().unwrap(), "stderr");
+            let status = child.wait().expect("wait for fake tmux");
+            finish_after_leader_exit(status, &group, stdout, stderr, Duration::from_secs(20))
         }));
         match previous_path {
             Some(value) => unsafe {
