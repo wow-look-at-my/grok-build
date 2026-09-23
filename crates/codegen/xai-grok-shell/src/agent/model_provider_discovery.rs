@@ -117,6 +117,7 @@ impl ConfigModelOverride {
             strict_message_schema,
             pricing,
             min_output_tokens_per_sec,
+            ttft_timeout_secs,
             extra_body,
             pricing_lookup_enabled,
         } = self.clone();
@@ -200,6 +201,7 @@ impl ConfigModelOverride {
             strict_message_schema: strict_message_schema.or(base.strict_message_schema),
             pricing: pricing.or_else(|| base.pricing.clone()),
             min_output_tokens_per_sec: min_output_tokens_per_sec.or(base.min_output_tokens_per_sec),
+            ttft_timeout_secs: ttft_timeout_secs.or(base.ttft_timeout_secs),
             extra_body: merged_body,
             pricing_lookup_enabled: pricing_lookup_enabled.or(base.pricing_lookup_enabled),
         }
