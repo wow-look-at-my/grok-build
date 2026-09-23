@@ -1038,6 +1038,39 @@ pub fn loaded_in_vram_meta(
         .and_then(|v| v.as_bool())
 }
 
+/// The `[model_providers.<id>]` a model routes through. The picker shows it
+/// where two rows would otherwise read the same.
+pub const PROVIDER_META_KEY: &str = "provider";
+/// The host and port a model's requests go to.
+pub const ENDPOINT_META_KEY: &str = "endpoint";
+
+fn string_meta<'a>(
+    meta: Option<&'a serde_json::Map<String, serde_json::Value>>,
+    key: &str,
+) -> Option<&'a str> {
+    meta.and_then(|m| m.get(key))
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+}
+
+/// The provider id in this model's ACP meta, if it routes through one.
+pub fn provider_meta(meta: Option<&serde_json::Map<String, serde_json::Value>>) -> Option<&str> {
+    string_meta(meta, PROVIDER_META_KEY)
+}
+
+/// The endpoint host in this model's ACP meta, if the shell sent one.
+pub fn endpoint_meta(meta: Option<&serde_json::Map<String, serde_json::Value>>) -> Option<&str> {
+    string_meta(meta, ENDPOINT_META_KEY)
+}
+
+/// The host and port of `url`, without the scheme or the path.
+pub fn endpoint_host(url: &str) -> Option<String> {
+    let rest = url.trim().split_once("://").map_or(url.trim(), |(_, r)| r);
+    let host = rest.split(['/', '?', '#']).next()?;
+    let host = host.rsplit_once('@').map_or(host, |(_, h)| h);
+    (!host.is_empty()).then(|| host.to_ascii_lowercase())
+}
+
 pub fn supports_reasoning_effort_meta(
     meta: Option<&serde_json::Map<String, serde_json::Value>>,
 ) -> bool {
@@ -1556,6 +1589,19 @@ impl From<crate::messages::MessagesRequest> for MessagesRequestWrapper {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn endpoint_host_keeps_the_host_and_port_only() {
+        assert_eq!(
+            endpoint_host("http://LocalHost:18080/v1/").as_deref(),
+            Some("localhost:18080")
+        );
+        assert_eq!(
+            endpoint_host("https://user:pw@api.x.ai/v1?x=1").as_deref(),
+            Some("api.x.ai")
+        );
+        assert_eq!(endpoint_host("").as_deref(), None);
+    }
 
     #[test]
     fn reasoning_effort_serde_lowercase_round_trip() {
