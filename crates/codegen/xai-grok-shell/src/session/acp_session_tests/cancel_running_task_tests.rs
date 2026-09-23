@@ -230,6 +230,7 @@ async fn persist_ack_waits_for_disk_flush_before_success() {
                 models_manager: Default::default(),
                 display_cwd: std::sync::OnceLock::new(),
                 active_agent_type: parking_lot::Mutex::new(None),
+                mode_agent: Default::default(),
                 queue_exit_reminder_on_approved_exit: Arc::new(std::sync::atomic::AtomicBool::new(
                     false,
                 )),
@@ -724,6 +725,7 @@ async fn first_turn_memory_injection_disabled_does_not_persist_to_chat_history()
                 models_manager: Default::default(),
                 display_cwd: std::sync::OnceLock::new(),
                 active_agent_type: parking_lot::Mutex::new(None),
+                mode_agent: Default::default(),
                 queue_exit_reminder_on_approved_exit: Arc::new(std::sync::atomic::AtomicBool::new(
                     false,
                 )),
@@ -1022,7 +1024,7 @@ async fn cancel_running_task_teardown_clears_running_and_pending_work() {
                 git_head_enabled: false,
                 models_manager: Default::default(),
                 display_cwd: std::sync::OnceLock::new(),
-                active_agent_type: parking_lot::Mutex::new(None),
+                active_agent_type: parking_lot::Mutex::new(None), mode_agent: Default::default(),
                 queue_exit_reminder_on_approved_exit: Arc::new(
                     std::sync::atomic::AtomicBool::new(false),
                 ),
@@ -2468,7 +2470,7 @@ async fn cancel_propagates_to_sampler_handle_so_no_further_emission() {
                 git_head_enabled: false,
                 models_manager: Default::default(),
                 display_cwd: std::sync::OnceLock::new(),
-                active_agent_type: parking_lot::Mutex::new(None),
+                active_agent_type: parking_lot::Mutex::new(None), mode_agent: Default::default(),
                 queue_exit_reminder_on_approved_exit: Arc::new(
                     std::sync::atomic::AtomicBool::new(false),
                 ),
