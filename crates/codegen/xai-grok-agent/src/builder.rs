@@ -776,7 +776,10 @@ impl AgentBuilder {
                 .tools
                 .iter()
                 .any(|tc| tc.id.ends_with(":write") || tc.id.ends_with(":Write"));
-            if self.write_file_enabled && !has_write_tool {
+            // A read-only agent's prompt says it has no file editing tools.
+            // A `write` tool here contradicts that prompt.
+            let read_only = definition.permission_mode == PermissionMode::Plan;
+            if self.write_file_enabled && !has_write_tool && !read_only {
                 tool_config
                     .tools
                     .push((&xai_grok_tools::implementations::opencode::OpenCodeWriteTool).into());
@@ -1955,6 +1958,46 @@ mod tests {
             .await
             .expect("finalize must insert Params for the injected ask_user_question");
         assert_eq!(applied.0.non_interactive, Some(true));
+    }
+    /// The explore and plan prompts say "You have NO file editing tools". The
+    /// injected `write` tool must not appear beside that sentence.
+    #[tokio::test]
+    async fn read_only_agents_get_no_injected_write_tool() {
+        use xai_grok_tools::computer::local::LocalTerminalBackend;
+        use xai_grok_tools::notification::ToolNotificationHandle;
+        async fn names(def: crate::config::AgentDefinition) -> Vec<String> {
+            AgentBuilder::new(
+                std::env::temp_dir(),
+                Arc::new(LocalTerminalBackend::new()),
+                ToolNotificationHandle::noop(),
+            )
+            .from_definition(def)
+            .with_write_file_enabled(true)
+            .build()
+            .await
+            .expect("agent should build")
+            .tool_definitions()
+            .await
+            .iter()
+            .map(|d| d.function.name.clone())
+            .collect()
+        }
+        for def in [
+            crate::config::AgentDefinition::explore(),
+            crate::config::AgentDefinition::plan(),
+        ] {
+            let name = def.name.clone();
+            let tools = names(def).await;
+            assert!(
+                !tools.iter().any(|t| t == "write"),
+                "{name} is read-only but got a write tool: {tools:?}"
+            );
+        }
+        let tools = names(crate::config::AgentDefinition::default_grok_build()).await;
+        assert!(
+            tools.iter().any(|t| t == "write"),
+            "grok-build must keep its write tool: {tools:?}"
+        );
     }
     async fn build_with_tools(tools: Vec<String>, disallowed: Vec<String>) -> crate::agent::Agent {
         use xai_grok_tools::computer::local::LocalTerminalBackend;

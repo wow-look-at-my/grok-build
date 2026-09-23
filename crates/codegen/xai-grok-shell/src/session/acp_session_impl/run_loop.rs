@@ -538,6 +538,9 @@ pub(super) async fn run_session(
                     );
                     let completed_prompt_id = prompt_id.clone();
                     let owned_completion = session.handle_completion(prompt_id, result).await;
+                    // A Shift+Tab to another agent during the turn. The next
+                    // turn must run under that agent's prompt and tools.
+                    session.apply_pending_mode_agent().await;
                     // Drain any monitor events that were routed to the mid-turn buffer
                     // but arrived after the turn ended (race between is_turn_active and buffer push).
                     session.drain_monitor_buffer_to_pending().await;

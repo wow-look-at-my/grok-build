@@ -116,6 +116,8 @@ impl SessionActor {
         self: Arc<Self>,
         completion_tx: mpsc::UnboundedSender<(String, PromptTurnResult)>,
     ) {
+        // A cancelled turn has no completion to apply a pending agent swap.
+        self.apply_pending_mode_agent().await;
         // Fast path under the lock: nothing to promote.
         let may_combine;
         {
