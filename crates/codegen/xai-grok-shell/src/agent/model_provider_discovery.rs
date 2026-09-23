@@ -21,12 +21,195 @@ pub(crate) fn discovered_model_key(provider_id: &str, slug: &str) -> String {
     format!("{provider_id}/{slug}")
 }
 
+/// One model a provider's listing named, before any config is merged into it.
+///
+/// The entry is built at catalog rebuild time from the CURRENT config
+/// (`resolve_discovered_models`). So an edit to a `[model.<id>]` block that
+/// claims this model takes effect on reload, with no second listing request.
+#[derive(Clone, Debug)]
+pub(crate) struct DiscoveredModel {
+    pub(crate) provider_id: String,
+    /// What the listing says, with the provider's own window, backend and
+    /// price switch already placed above the listing's values.
+    pub(crate) listed: ConfigModelOverride,
+    /// Runtime state, not config. The residency poll writes it here.
+    pub(crate) loaded_in_vram: Option<bool>,
+}
+
+impl DiscoveredModel {
+    fn slug(&self) -> &str {
+        self.listed.model.as_deref().unwrap_or_default()
+    }
+}
+
+/// Build the catalog entries for what discovery found.
+///
+/// A `[model.<id>]` block that routes to a listed model is merged with it,
+/// under the block's own key. Every field the block sets wins. The listing
+/// fills only the fields the block left unset, so a block that only renames a
+/// model still gets the window and capabilities the runtime reported.
+pub(crate) fn resolve_discovered_models(
+    cfg: &config::Config,
+    discovered: &IndexMap<String, DiscoveredModel>,
+) -> IndexMap<String, ModelEntry> {
+    let mut entries = IndexMap::with_capacity(discovered.len());
+    for (discovered_key, model) in discovered {
+        let Some(provider) = cfg.model_providers.get(&model.provider_id) else {
+            // A reload removed the provider. Its models go with it.
+            tracing::debug!(
+                provider = %model.provider_id,
+                model = %model.slug(),
+                "provider no longer configured; dropping its discovered model"
+            );
+            continue;
+        };
+        let (key, merged) = match claiming_block(cfg, &model.provider_id, model.slug()) {
+            Some((block_key, block)) => (block_key.clone(), block.laid_over(&model.listed)),
+            None => (discovered_key.clone(), model.listed.clone()),
+        };
+        let mut entry =
+            config::entry_for_provider_model(cfg, &key, &model.provider_id, provider, &merged);
+        entry.info.loaded_in_vram = model.loaded_in_vram;
+        entries.insert(key, entry);
+    }
+    entries
+}
+
+impl ConfigModelOverride {
+    /// `self` over `base`, field by field: every value `self` sets wins, and
+    /// `base` fills the rest. Maps merge per key. Credentials move as one set,
+    /// for the reason `with_provider_defaults` gives.
+    pub(crate) fn laid_over(&self, base: &ConfigModelOverride) -> ConfigModelOverride {
+        let ConfigModelOverride {
+            model,
+            base_url,
+            name,
+            description,
+            api_key,
+            env_key,
+            auth_provider,
+            model_provider,
+            api_base_url,
+            max_completion_tokens,
+            temperature,
+            top_p,
+            api_backend,
+            extra_headers,
+            query_params,
+            env_http_headers,
+            context_window,
+            auto_compact_threshold_percent,
+            system_prompt_label,
+            use_concise,
+            agent_type,
+            inference_idle_timeout_secs,
+            max_retries,
+            hidden,
+            supported_in_api,
+            reasoning_effort,
+            supports_reasoning_effort,
+            reasoning_efforts,
+            supports_backend_search,
+            compactions_remaining,
+            compaction_at_tokens,
+            show_model_fingerprint,
+            stream_tool_calls,
+            strict_message_schema,
+            pricing,
+            min_output_tokens_per_sec,
+            extra_body,
+            pricing_lookup_enabled,
+        } = self.clone();
+
+        let sets_own_auth = api_key.as_deref().is_some_and(|k| !k.trim().is_empty())
+            || env_key
+                .as_ref()
+                .and_then(config::EnvKeys::primary)
+                .is_some()
+            || auth_provider.is_some();
+        let (api_key, env_key, auth_provider) = if sets_own_auth {
+            (api_key, env_key, auth_provider)
+        } else {
+            (
+                base.api_key.clone(),
+                base.env_key.clone(),
+                base.auth_provider.clone(),
+            )
+        };
+
+        let mut merged_headers = extra_headers;
+        crate::agent::model_providers::inherit_headers(&mut merged_headers, &base.extra_headers);
+        let mut merged_env_headers = env_http_headers;
+        crate::agent::model_providers::inherit_headers(
+            &mut merged_env_headers,
+            &base.env_http_headers,
+        );
+        let mut merged_query = query_params;
+        for (k, v) in &base.query_params {
+            merged_query.entry(k.clone()).or_insert_with(|| v.clone());
+        }
+        let mut merged_body = extra_body;
+        for (k, v) in &base.extra_body {
+            merged_body.entry(k.clone()).or_insert_with(|| v.clone());
+        }
+
+        ConfigModelOverride {
+            model: model.or_else(|| base.model.clone()),
+            base_url: base_url.or_else(|| base.base_url.clone()),
+            name: name.or_else(|| base.name.clone()),
+            description: description.or_else(|| base.description.clone()),
+            api_key,
+            env_key,
+            auth_provider,
+            model_provider: model_provider.or_else(|| base.model_provider.clone()),
+            api_base_url: api_base_url.or_else(|| base.api_base_url.clone()),
+            max_completion_tokens: max_completion_tokens.or(base.max_completion_tokens),
+            temperature: temperature.or(base.temperature),
+            top_p: top_p.or(base.top_p),
+            api_backend: api_backend.or_else(|| base.api_backend.clone()),
+            extra_headers: merged_headers,
+            query_params: merged_query,
+            env_http_headers: merged_env_headers,
+            context_window: context_window.or(base.context_window),
+            auto_compact_threshold_percent: auto_compact_threshold_percent
+                .or(base.auto_compact_threshold_percent),
+            system_prompt_label: system_prompt_label.or_else(|| base.system_prompt_label.clone()),
+            use_concise: use_concise.or(base.use_concise),
+            agent_type: agent_type.or_else(|| base.agent_type.clone()),
+            inference_idle_timeout_secs: inference_idle_timeout_secs
+                .or(base.inference_idle_timeout_secs),
+            max_retries: max_retries.or(base.max_retries),
+            hidden: hidden.or(base.hidden),
+            supported_in_api: supported_in_api.or(base.supported_in_api),
+            reasoning_effort: reasoning_effort.or(base.reasoning_effort),
+            supports_reasoning_effort: supports_reasoning_effort.or(base.supports_reasoning_effort),
+            reasoning_efforts: if reasoning_efforts.is_empty() {
+                base.reasoning_efforts.clone()
+            } else {
+                reasoning_efforts
+            },
+            supports_backend_search: supports_backend_search.or(base.supports_backend_search),
+            compactions_remaining: compactions_remaining.or(base.compactions_remaining),
+            compaction_at_tokens: compaction_at_tokens.or(base.compaction_at_tokens),
+            show_model_fingerprint: show_model_fingerprint.or(base.show_model_fingerprint),
+            stream_tool_calls: stream_tool_calls.or(base.stream_tool_calls),
+            strict_message_schema: strict_message_schema.or(base.strict_message_schema),
+            pricing: pricing.or_else(|| base.pricing.clone()),
+            min_output_tokens_per_sec: min_output_tokens_per_sec.or(base.min_output_tokens_per_sec),
+            extra_body: merged_body,
+            pricing_lookup_enabled: pricing_lookup_enabled.or(base.pricing_lookup_enabled),
+        }
+    }
+}
+
 /// Ask every autodetecting provider for its models.
 ///
-/// Returns one additive catalog for all of them. A provider that declares no
-/// endpoint, that cannot be reached, or that answers with an empty listing
-/// contributes nothing and never fails the others.
-pub(crate) async fn discover_provider_models(cfg: &config::Config) -> IndexMap<String, ModelEntry> {
+/// Returns what every listing named, keyed `<provider>/<slug>`. A provider that
+/// declares no endpoint, that cannot be reached, or that answers with an empty
+/// listing contributes nothing and never fails the others.
+pub(crate) async fn discover_provider_models(
+    cfg: &config::Config,
+) -> IndexMap<String, DiscoveredModel> {
     let mut discovered = IndexMap::new();
     for (id, provider) in &cfg.model_providers {
         if !provider.autodetect_enabled() {
@@ -52,7 +235,7 @@ async fn discover_one_provider(
     provider_id: &str,
     provider: &ModelProviderConfig,
     url: &str,
-) -> IndexMap<String, ModelEntry> {
+) -> IndexMap<String, DiscoveredModel> {
     // The credential comes from the provider's own fields, resolved through the
     // same merge an inheriting `[model.<id>]` gets. A provider that mints its
     // token with a helper needs that helper run first: the cache is cold at
@@ -105,17 +288,6 @@ async fn discover_one_provider(
 
     let mut entries = IndexMap::with_capacity(listing.len());
     for listed in listing {
-        if config_model_claims(cfg, provider_id, &listed.model) {
-            // The user wrote their own block for this one. Adding the listing's
-            // copy beside it puts the same model in the picker twice, under two
-            // names, with whatever the block changed on only one of them.
-            tracing::debug!(
-                provider = %provider_id,
-                model = %listed.model,
-                "a [model.*] block already covers this model; keeping that one"
-            );
-            continue;
-        }
         let key = discovered_model_key(provider_id, &listed.model);
         let override_for_listed = ConfigModelOverride {
             model: Some(listed.model.clone()),
@@ -143,17 +315,14 @@ async fn discover_one_provider(
                 .or_else(|| dialect.is_local_runtime().then_some(false)),
             ..Default::default()
         };
-        let mut entry = config::entry_for_provider_model(
-            cfg,
-            &key,
-            provider_id,
-            provider,
-            &override_for_listed,
+        entries.insert(
+            key,
+            DiscoveredModel {
+                provider_id: provider_id.to_owned(),
+                listed: override_for_listed,
+                loaded_in_vram: listed.loaded_in_vram,
+            },
         );
-        // Residency is runtime state, not config, so it is written onto the
-        // finished entry rather than routed through the override merge.
-        entry.info.loaded_in_vram = listed.loaded_in_vram;
-        entries.insert(key.clone(), entry);
     }
     if dialect.is_local_runtime() {
         // A local model charges nothing and is in no catalog, so the price
@@ -161,7 +330,7 @@ async fn discover_one_provider(
         // catalog from config alone and never sees a DISCOVERED model, so the
         // suppression has to be registered here.
         crate::agent::model_pricing::suppress_lookup_for(
-            entries.values().map(|e| e.info.model.clone()),
+            entries.values().map(|m| m.slug().to_owned()),
         );
     }
     tracing::info!(
@@ -231,12 +400,16 @@ pub(crate) async fn refresh_local_residency(cfg: &config::Config) -> IndexMap<St
     out
 }
 
-/// Whether a `[model.<id>]` block of this provider already routes to `slug`.
+/// The `[model.<id>]` block of this provider that routes to `slug`, if any.
 ///
 /// The block's own key counts too: `[model.claude-sonnet] model_provider =
 /// "gateway"` with no `model` field routes to the key.
-fn config_model_claims(cfg: &config::Config, provider_id: &str, slug: &str) -> bool {
-    cfg.config_models.iter().any(|(key, model_override)| {
+fn claiming_block<'a>(
+    cfg: &'a config::Config,
+    provider_id: &str,
+    slug: &str,
+) -> Option<(&'a String, &'a ConfigModelOverride)> {
+    cfg.config_models.iter().find(|(key, model_override)| {
         model_override.model_provider.as_deref() == Some(provider_id)
             && model_override.model.as_deref().unwrap_or(key.as_str()) == slug
     })
@@ -376,7 +549,7 @@ mod tests {
             "#
         ));
 
-        let discovered = discover_provider_models(&cfg).await;
+        let discovered = resolve_discovered_models(&cfg, &discover_provider_models(&cfg).await);
         server.abort();
 
         let loaded = discovered
@@ -473,7 +646,7 @@ mod tests {
             "#
         ));
 
-        let discovered = discover_provider_models(&cfg).await;
+        let discovered = resolve_discovered_models(&cfg, &discover_provider_models(&cfg).await);
         assert_eq!(
             discovered
                 .get("ollama/m:latest")
@@ -586,7 +759,7 @@ mod tests {
             "#
         ));
 
-        let discovered = discover_provider_models(&cfg).await;
+        let discovered = resolve_discovered_models(&cfg, &discover_provider_models(&cfg).await);
         server.abort();
 
         let big = discovered
@@ -627,7 +800,7 @@ mod tests {
             "#
         ));
 
-        let discovered = discover_provider_models(&cfg).await;
+        let discovered = resolve_discovered_models(&cfg, &discover_provider_models(&cfg).await);
         server.abort();
 
         for key in ["gateway/small-one", "gateway/no-window-one"] {
@@ -656,7 +829,7 @@ mod tests {
             "#
         ));
 
-        let discovered = discover_provider_models(&cfg).await;
+        let discovered = resolve_discovered_models(&cfg, &discover_provider_models(&cfg).await);
         server.abort();
 
         assert!(
@@ -679,7 +852,7 @@ mod tests {
             "#
         ));
 
-        let discovered = discover_provider_models(&cfg).await;
+        let discovered = resolve_discovered_models(&cfg, &discover_provider_models(&cfg).await);
         server.abort();
 
         assert!(
@@ -706,7 +879,7 @@ mod tests {
             "#
         ));
 
-        let discovered = discover_provider_models(&cfg).await;
+        let discovered = resolve_discovered_models(&cfg, &discover_provider_models(&cfg).await);
         server.abort();
 
         assert!(
@@ -734,7 +907,7 @@ mod tests {
             "#
         ));
 
-        let discovered = discover_provider_models(&cfg).await;
+        let discovered = resolve_discovered_models(&cfg, &discover_provider_models(&cfg).await);
         server.abort();
 
         assert!(
@@ -742,8 +915,165 @@ mod tests {
             "the user's own block owns that model"
         );
         assert!(
+            discovered.contains_key("my-big-one"),
+            "the merged entry keeps the block's key"
+        );
+        assert!(
             discovered.contains_key("gateway/small-one"),
             "the rest of the listing still arrives"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_user_block_is_merged_with_the_listing_and_its_fields_win() {
+        let (base, server) = start_ollama_server().await;
+        let cfg = config_from(&format!(
+            r#"
+            [model_providers.ollama]
+            base_url = "{base}/v1"
+
+            [model.coder]
+            model = "qwen3-coder:30b"
+            model_provider = "ollama"
+            name = "My Coder"
+            temperature = 0.2
+
+            [model.llama]
+            model = "llama3.2:latest"
+            model_provider = "ollama"
+            context_window = 4096
+            supports_reasoning_effort = false
+            "#
+        ));
+
+        let discovered = discover_provider_models(&cfg).await;
+        server.abort();
+        let resolved = resolve_discovered_models(&cfg, &discovered);
+
+        let coder = resolved
+            .get("coder")
+            .expect("the block's key names the merged entry");
+        assert_eq!(
+            coder.info.name.as_deref(),
+            Some("My Coder"),
+            "the block's name wins"
+        );
+        assert_eq!(
+            coder.info.temperature,
+            Some(0.2),
+            "a field only the block sets is kept"
+        );
+        assert_eq!(
+            coder.info.context_window.get(),
+            32768,
+            "the block set no window, so the runtime's loaded window fills it"
+        );
+        assert!(
+            coder.info.supports_reasoning_effort,
+            "the listing's `thinking` capability fills a field the block left unset"
+        );
+        assert_eq!(
+            coder.info.loaded_in_vram,
+            Some(true),
+            "residency still reaches the entry"
+        );
+        assert!(!coder.info.pricing_lookup_enabled);
+
+        let llama = resolved.get("llama").expect("merged entry");
+        assert_eq!(
+            llama.info.context_window.get(),
+            4096,
+            "the block's window beats the runtime's 131072"
+        );
+        assert!(
+            !llama.info.supports_reasoning_effort,
+            "the block's explicit false beats the listing's true"
+        );
+
+        assert!(!resolved.contains_key("ollama/qwen3-coder:30b"));
+        assert!(!resolved.contains_key("ollama/llama3.2:latest"));
+    }
+
+    /// The merge reads the config it is given, so a reload that edits the
+    /// block changes the entry without a second listing request.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_reloaded_block_is_merged_without_asking_the_provider_again() {
+        let (base, server) = start_listing_server(two_model_listing()).await;
+        let before = config_from(&format!(
+            r#"
+            [model_providers.gateway]
+            base_url = "{base}/v1"
+            "#
+        ));
+        let discovered = discover_provider_models(&before).await;
+        server.abort();
+
+        let after = config_from(&format!(
+            r#"
+            [model_providers.gateway]
+            base_url = "{base}/v1"
+
+            [model.big]
+            model = "big-one"
+            model_provider = "gateway"
+            name = "Big"
+            "#
+        ));
+        let resolved = resolve_discovered_models(&after, &discovered);
+
+        let big = resolved
+            .get("big")
+            .expect("the new block claims the listed model");
+        assert_eq!(big.info.name.as_deref(), Some("Big"));
+        assert_eq!(
+            big.info.context_window.get(),
+            1_000_000,
+            "the listing still supplies the window the block did not write"
+        );
+        assert!(!resolved.contains_key("gateway/big-one"));
+    }
+
+    #[test]
+    fn laid_over_keeps_every_set_field_and_fills_the_rest() {
+        let block = ConfigModelOverride {
+            name: Some("mine".into()),
+            context_window: Some(1000),
+            extra_headers: [("X-Mine".to_owned(), "a".to_owned())]
+                .into_iter()
+                .collect(),
+            ..Default::default()
+        };
+        let listed = ConfigModelOverride {
+            model: Some("slug".into()),
+            name: Some("listed".into()),
+            context_window: Some(2000),
+            supports_reasoning_effort: Some(true),
+            extra_headers: [
+                ("x-mine".to_owned(), "b".to_owned()),
+                ("X-Other".to_owned(), "c".to_owned()),
+            ]
+            .into_iter()
+            .collect(),
+            ..Default::default()
+        };
+
+        let merged = block.laid_over(&listed);
+
+        assert_eq!(merged.name.as_deref(), Some("mine"));
+        assert_eq!(merged.context_window, Some(1000));
+        assert_eq!(merged.model.as_deref(), Some("slug"));
+        assert_eq!(merged.supports_reasoning_effort, Some(true));
+        assert_eq!(
+            merged.extra_headers.get("X-Mine").map(String::as_str),
+            Some("a")
+        );
+        assert!(
+            !merged.extra_headers.contains_key("x-mine"),
+            "a header name is one header whatever its case, and the block's wins"
+        );
+        assert_eq!(
+            merged.extra_headers.get("X-Other").map(String::as_str),
+            Some("c")
         );
     }
 

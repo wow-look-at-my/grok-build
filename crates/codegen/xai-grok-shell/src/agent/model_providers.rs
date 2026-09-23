@@ -185,7 +185,10 @@ pub(crate) fn apply_builtin_preset(id: &str, provider: &mut ModelProviderConfig)
 /// Fill the provider's header defaults into a model's own set. The presence
 /// check is case-insensitive because these lower into an `http::HeaderMap`, so
 /// a provider `X-Foo` must not shadow a model's `x-foo`.
-fn inherit_headers(model: &mut IndexMap<String, String>, provider: &IndexMap<String, String>) {
+pub(crate) fn inherit_headers(
+    model: &mut IndexMap<String, String>,
+    provider: &IndexMap<String, String>,
+) {
     for (name, value) in provider {
         if !model.keys().any(|own| own.eq_ignore_ascii_case(name)) {
             model.insert(name.clone(), value.clone());
