@@ -183,10 +183,14 @@ impl ConfigModelOverride {
             supported_in_api: supported_in_api.or(base.supported_in_api),
             reasoning_effort: reasoning_effort.or(base.reasoning_effort),
             supports_reasoning_effort: supports_reasoning_effort.or(base.supports_reasoning_effort),
-            reasoning_efforts: if reasoning_efforts.is_empty() {
-                base.reasoning_efforts.clone()
-            } else {
+            // A menu turns support on (`derive_reasoning_effort_fields`). So a
+            // block that turns support off must not inherit the base's menu.
+            reasoning_efforts: if !reasoning_efforts.is_empty()
+                || supports_reasoning_effort == Some(false)
+            {
                 reasoning_efforts
+            } else {
+                base.reasoning_efforts.clone()
             },
             supports_backend_search: supports_backend_search.or(base.supports_backend_search),
             compactions_remaining: compactions_remaining.or(base.compactions_remaining),
