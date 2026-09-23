@@ -569,7 +569,7 @@ fn a_provider_models_requests_go_to_the_provider_url() {
     ));
     let tmp = tempfile::TempDir::new().unwrap();
     let auth_manager = Arc::new(AuthManager::new(tmp.path(), GrokComConfig::default()));
-    let catalog = config::resolve_model_catalog(&cfg, None);
+    let catalog = resolve_model_catalog(&cfg, None);
     let mgr = ModelsManagerBuilder::new(
         None,
         catalog,
