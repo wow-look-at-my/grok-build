@@ -353,13 +353,18 @@ impl ModelState {
     /// Resolve a user-supplied name to a `ModelId` via case-insensitive
     /// ASCII match against the catalog.
     pub fn resolve_by_name_or_id(&self, query: &str) -> Option<acp::ModelId> {
-        self.available.iter().find_map(|(id, info)| {
-            if info.name.eq_ignore_ascii_case(query) || id.0.as_ref().eq_ignore_ascii_case(query) {
-                Some(id.clone())
-            } else {
-                None
-            }
-        })
+        // An id is unique and a name is not, so an id match wins. Otherwise a
+        // model whose id is another model's name can never be picked.
+        self.available
+            .keys()
+            .find(|id| id.0.as_ref().eq_ignore_ascii_case(query))
+            .or_else(|| {
+                self.available
+                    .iter()
+                    .find(|(_, info)| info.name.eq_ignore_ascii_case(query))
+                    .map(|(id, _)| id)
+            })
+            .cloned()
     }
 
     /// Look up the display name for a `ModelId` in the catalog.

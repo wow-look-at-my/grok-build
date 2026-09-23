@@ -19,8 +19,9 @@ use std::sync::Arc;
 use xai_grok_agent::prompt::skills::SkillsConfig;
 use xai_grok_sampler::{AuthScheme, SamplerConfig};
 use xai_grok_sampling_types::{
-    CompactionAtTokens, CompactionsRemaining, FAVORITE_META_KEY, LOADED_IN_VRAM_META_KEY,
-    REASONING_EFFORT_META_KEY, REASONING_EFFORTS_META_KEY, ReasoningEffort, ReasoningEffortOption,
+    CompactionAtTokens, CompactionsRemaining, ENDPOINT_META_KEY, FAVORITE_META_KEY,
+    LOADED_IN_VRAM_META_KEY, PROVIDER_META_KEY, REASONING_EFFORT_META_KEY,
+    REASONING_EFFORTS_META_KEY, ReasoningEffort, ReasoningEffortOption, endpoint_host,
     reasoning_effort_meta_value, reasoning_efforts_meta_value,
 };
 use xai_grok_tools::types::compat::{
@@ -6165,13 +6166,21 @@ pub(crate) fn to_acp_model_info(
                 );
                 if key.starts_with(crate::codex_provider::MODEL_ID_PREFIX) {
                     map.insert(
-                        "provider".to_string(),
+                        PROVIDER_META_KEY.to_string(),
                         serde_json::Value::String("codex".to_string()),
                     );
                 } else if let Some(provider) = info.model_provider.as_deref() {
                     map.insert(
-                        "provider".to_string(),
+                        PROVIDER_META_KEY.to_string(),
                         serde_json::Value::String(provider.to_owned()),
+                    );
+                }
+                // The picker tells two rows with one name apart by where they
+                // route.
+                if let Some(host) = endpoint_host(&info.base_url) {
+                    map.insert(
+                        ENDPOINT_META_KEY.to_string(),
+                        serde_json::Value::String(host),
                     );
                 }
                 // The picker opens on the favorites and searches past them, so
