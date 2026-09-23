@@ -2292,10 +2292,10 @@ impl AgentView {
                         .is_some();
                 let is_pending_user_input =
                     !self.permission_queue.is_empty() || self.question_view.is_some();
-                let goal_verifying = self
+                let goal_harness = self
                     .goal_state
                     .as_ref()
-                    .is_some_and(|g| g.verifying_completion);
+                    .and_then(turn_status::GoalHarnessActivity::from_goal);
                 let held_queue = self.held_queue_count();
                 let held_queue_top_sendable = self.held_queue_top_sendable();
                 let turn_output = turn_status::render_turn_status(
@@ -2319,7 +2319,7 @@ impl AgentView {
                         mcp_init_progress: self.mcp_init_progress.as_ref(),
                         is_bash_turn: self.bash_turn,
                         is_pending_user_input,
-                        goal_verifying,
+                        goal_harness,
                         watchers,
                         parked,
                         flat_background: false,
