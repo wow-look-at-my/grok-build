@@ -356,6 +356,10 @@ impl MvpAgent {
         let parent_model_agent_type =
             config::find_model_by_id(&available_models, parent_model_id.0.as_ref())
                 .map(|e| e.info.agent_type.clone());
+        let parent_base_url =
+            config::find_model_by_id(&available_models, parent_model_id.0.as_ref())
+                .map(|e| e.info.base_url.clone())
+                .unwrap_or_default();
         let ask_user_question_enabled = parent_handle
             .as_ref()
             .map(|h| h.ask_user_question_enabled)
@@ -445,7 +449,7 @@ impl MvpAgent {
             terminal,
             session_env,
             memory_config: self.memory_config.clone(),
-            web_search_sampling_config: self.prepare_web_search_sampling_config(),
+            web_search_sampling_config: self.prepare_web_search_sampling_config(&parent_base_url),
             web_fetch_config: self.prepare_web_fetch_config(),
             image_gen_config: self.prepare_image_gen_config(),
             video_gen_config: self.prepare_video_gen_config(),
