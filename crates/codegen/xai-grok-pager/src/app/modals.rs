@@ -19,15 +19,11 @@ use crate::theme::Theme;
 use crate::views::modal::{self, ActiveModal};
 
 impl AgentView {
-    /// `suggest_args` falls back to model rows when the query is not in effort
-    /// phase. Model-phase reasoning rows use a trailing space in `insert_text`;
-    /// effort rows do not. Require a non-empty list with no trailing-space
-    /// rows before treating the picker as effort phase.
-    fn arg_items_look_like_effort_phase(items: &[crate::slash::command::ArgItem]) -> bool {
-        !items.is_empty()
-            && items
-                .iter()
-                .all(|item| !item.insert_text.ends_with(char::is_whitespace))
+    /// `suggest_args` falls back to the model list when `query` opens no
+    /// sub-phase. That list always holds the row that produced `query`, and a
+    /// sub-phase (routes or effort levels) never does.
+    fn arg_items_are_a_sub_phase(items: &[crate::slash::command::ArgItem], query: &str) -> bool {
+        !items.is_empty() && items.iter().all(|item| item.insert_text != query)
     }
 
     /// Step the model ArgPicker from effort phase back to the model list.
@@ -688,7 +684,7 @@ impl AgentView {
                     if let Some(cmd) = self.prompt.slash_controller.registry().get(&command_clone) {
                         let ctx = self.prompt.slash_controller.app_ctx(&self.session.models);
                         if let Some(effort_items) = cmd.suggest_args(&ctx, &next_query)
-                            && Self::arg_items_look_like_effort_phase(&effort_items)
+                            && Self::arg_items_are_a_sub_phase(&effort_items, &next_query)
                         {
                             if let Some(ActiveModal::ArgPicker {
                                 args_query,

@@ -406,19 +406,49 @@ pub(crate) async fn refresh_local_residency(cfg: &config::Config) -> IndexMap<St
     out
 }
 
-/// The `[model.<id>]` block of this provider that routes to `slug`, if any.
+/// The `[model.<id>]` block that routes to `slug` on this provider, if any.
 ///
 /// The block's own key counts too: `[model.claude-sonnet] model_provider =
 /// "gateway"` with no `model` field routes to the key.
+///
+/// A block that names no provider also claims the model when its URL is the
+/// provider's URL. It routes to the same endpoint and slug, so without the
+/// claim the picker shows the same model twice.
 fn claiming_block<'a>(
     cfg: &'a config::Config,
     provider_id: &str,
     slug: &str,
 ) -> Option<(&'a String, &'a ConfigModelOverride)> {
+    let provider = cfg.model_providers.get(provider_id);
     cfg.config_models.iter().find(|(key, model_override)| {
-        model_override.model_provider.as_deref() == Some(provider_id)
-            && model_override.model.as_deref().unwrap_or(key.as_str()) == slug
+        if model_override.model.as_deref().unwrap_or(key.as_str()) != slug {
+            return false;
+        }
+        match model_override.model_provider.as_deref() {
+            Some(named) => named == provider_id,
+            None => provider.is_some_and(|p| same_endpoint(model_override, p)),
+        }
     })
+}
+
+/// Whether a block with no provider points at this provider's endpoint.
+fn same_endpoint(block: &ConfigModelOverride, provider: &ModelProviderConfig) -> bool {
+    let block_urls = [block.base_url.as_deref(), block.api_base_url.as_deref()];
+    let provider_urls = [
+        provider.base_url.as_deref(),
+        provider.api_base_url.as_deref(),
+    ];
+    block_urls.into_iter().flatten().any(|b| {
+        provider_urls
+            .into_iter()
+            .flatten()
+            .any(|p| normalize_url(b) == normalize_url(p))
+    })
+}
+
+/// A URL with its case and trailing slashes removed, for comparison only.
+fn normalize_url(url: &str) -> String {
+    url.trim().trim_end_matches('/').to_ascii_lowercase()
 }
 
 /// Fetch and parse a listing off the async path.
@@ -928,6 +958,99 @@ mod tests {
             discovered.contains_key("gateway/small-one"),
             "the rest of the listing still arrives"
         );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_block_on_the_providers_url_claims_its_model_without_naming_it() {
+        let (base, server) = start_listing_server(two_model_listing()).await;
+        // The block names the provider's URL, with a different case and a
+        // trailing slash, and no `model_provider`.
+        let cfg = config_from(&format!(
+            r#"
+            [model_providers.gateway]
+            base_url = "{base}/v1"
+
+            [model.big-build]
+            model = "big-one"
+            name = "Big Build"
+            base_url = "{upper}/V1/"
+            "#,
+            upper = base.to_uppercase(),
+        ));
+
+        let discovered = resolve_discovered_models(&cfg, &discover_provider_models(&cfg).await);
+        server.abort();
+
+        assert!(
+            !discovered.contains_key("gateway/big-one"),
+            "the block routes to the same endpoint and slug, so it owns the model"
+        );
+        let merged = discovered
+            .get("big-build")
+            .expect("merged under the block's key");
+        assert_eq!(merged.info.name.as_deref(), Some("Big Build"));
+        assert_eq!(
+            merged.info.context_window.get(),
+            1_000_000,
+            "the listing fills the window the block left unset"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_block_on_another_url_does_not_claim_the_model() {
+        let (base, server) = start_listing_server(two_model_listing()).await;
+        let cfg = config_from(&format!(
+            r#"
+            [model_providers.gateway]
+            base_url = "{base}/v1"
+
+            [model.big-elsewhere]
+            model = "big-one"
+            base_url = "https://elsewhere.example/v1"
+            "#
+        ));
+
+        let discovered = resolve_discovered_models(&cfg, &discover_provider_models(&cfg).await);
+        server.abort();
+
+        assert!(
+            discovered.contains_key("gateway/big-one"),
+            "another endpoint is another route, so both stay"
+        );
+        assert!(!discovered.contains_key("big-elsewhere"));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_block_claims_only_the_provider_on_its_url() {
+        let (base_a, server_a) = start_listing_server(two_model_listing()).await;
+        let (base_b, server_b) = start_listing_server(two_model_listing()).await;
+        let cfg = config_from(&format!(
+            r#"
+            [model_providers.alpha]
+            base_url = "{base_a}/v1"
+
+            [model_providers.beta]
+            base_url = "{base_b}/v1"
+
+            [model.big-on-alpha]
+            model = "big-one"
+            base_url = "{base_a}/v1"
+            "#
+        ));
+
+        let discovered = resolve_discovered_models(&cfg, &discover_provider_models(&cfg).await);
+        server_a.abort();
+        server_b.abort();
+
+        assert!(!discovered.contains_key("alpha/big-one"));
+        assert_eq!(
+            discovered["big-on-alpha"].info.model_provider.as_deref(),
+            Some("alpha")
+        );
+        let beta = discovered
+            .get("beta/big-one")
+            .expect("the other provider serving the same slug keeps its own entry");
+        assert_eq!(beta.info.base_url, format!("{base_b}/v1"));
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
