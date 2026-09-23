@@ -213,7 +213,8 @@ pub struct TurnStatusArgs<'a> {
     pub mcp_init_progress: Option<&'a McpInitProgress>,
     pub is_bash_turn: bool,
     pub is_pending_user_input: bool,
-    pub goal_verifying: bool,
+    /// The goal-harness phase that owns the running turn, if any.
+    pub goal_harness: Option<GoalHarnessActivity<'a>>,
     pub watchers: Watchers,
     /// Parked on a sendable wait (`AgentView::renders_parked`).
     pub parked: bool,
@@ -247,7 +248,7 @@ pub fn render_turn_status(
         mcp_init_progress,
         is_bash_turn,
         is_pending_user_input,
-        goal_verifying,
+        goal_harness,
         watchers,
         parked,
         flat_background,
@@ -363,7 +364,7 @@ pub fn render_turn_status(
 
     // ── Compute activity style and label ──
     let (activity_style, label, is_tool) =
-        compute_activity(&theme, state, activity, is_bash_turn, goal_verifying);
+        compute_activity(&theme, state, activity, is_bash_turn, goal_harness);
 
     // Early return for idle (shouldn't happen if should_show is respected, but be safe).
     if matches!(state, AgentState::Idle) {
@@ -676,6 +677,55 @@ pub fn render_turn_status(
     }
 }
 
+/// A goal-harness phase that owns the running turn: its role and the live
+/// counts of the subagent it runs. The counts are the only sign of progress
+/// while the model itself is idle.
+#[derive(Debug, Clone, Copy)]
+pub struct GoalHarnessActivity<'a> {
+    pub role: &'a str,
+    pub tokens: Option<u64>,
+    pub tool_calls: Option<u32>,
+}
+
+impl<'a> GoalHarnessActivity<'a> {
+    /// `None` when no harness phase runs. `verifying_completion` alone still
+    /// counts, for a shell that does not name the role.
+    pub fn from_goal(goal: &'a crate::app::agent::GoalDisplayState) -> Option<Self> {
+        use xai_grok_shell::extensions::notification::GOAL_ROLE_VERIFIER;
+        let role = match goal.current_subagent_role.as_deref() {
+            Some(role) => role,
+            None if goal.verifying_completion => GOAL_ROLE_VERIFIER,
+            None => return None,
+        };
+        Some(Self {
+            role,
+            tokens: goal.live_subagent_tokens.filter(|&t| t > 0),
+            tool_calls: goal.live_tool_call_count.filter(|&n| n > 0),
+        })
+    }
+
+    fn label(self) -> String {
+        use xai_grok_shell::extensions::notification::{
+            GOAL_ROLE_STRATEGIST, GOAL_ROLE_SUMMARIZER, GOAL_ROLE_VERIFIER,
+        };
+        let mut label = match self.role {
+            GOAL_ROLE_VERIFIER => "Verifying".to_string(),
+            GOAL_ROLE_STRATEGIST => "Reviewing strategy".to_string(),
+            GOAL_ROLE_SUMMARIZER => "Summarizing".to_string(),
+            other => format!("Running {other}"),
+        };
+        label.push('…');
+        if let Some(n) = self.tool_calls {
+            let noun = if n == 1 { "tool" } else { "tools" };
+            label.push_str(&format!(" · {n} {noun}"));
+        }
+        if let Some(tokens) = self.tokens {
+            label.push_str(&format!(" · {} tok", format_tokens_short(tokens)));
+        }
+        label
+    }
+}
+
 /// Longest retry reason the status bar carries. The whole failure is in the
 /// session log; this line only has to say which one it was.
 const RETRY_REASON_MAX: usize = 80;
@@ -714,7 +764,7 @@ fn compute_activity(
     state: &AgentState,
     activity: &Option<TurnActivity>,
     is_bash_turn: bool,
-    goal_verifying: bool,
+    goal_harness: Option<GoalHarnessActivity<'_>>,
 ) -> (Style, String, bool) {
     match (state, activity) {
         (AgentState::TurnCancelling | AgentState::CommandCancelling { .. }, _) => (
@@ -722,15 +772,12 @@ fn compute_activity(
             "Cancelling…".to_string(),
             false,
         ),
-        // Goal-mode completion verification runs in-turn after the model
-        // stops streaming. The harness drives the skeptic panel (the model
-        // itself is idle), but the turn's last streaming activity can still
-        // read as `Responding`/`Thinking`; label the whole window
-        // "Verifying…" so the multi-minute panel isn't mislabelled as the
-        // model responding (or a hung "Waiting…").
-        (AgentState::TurnRunning, _) if goal_verifying => (
+        // A goal-harness phase (skeptic panel, strategist, summarizer) runs
+        // in-turn while the model is idle. The turn's last streaming activity
+        // still reads `Responding`/`Thinking`, so the phase label wins.
+        (AgentState::TurnRunning, _) if goal_harness.is_some() => (
             Style::default().fg(theme.text_secondary),
-            "Verifying…".to_string(),
+            goal_harness.map(|g| g.label()).unwrap_or_default(),
             false,
         ),
         (AgentState::TurnRunning, Some(TurnActivity::Thinking)) => (
@@ -1066,37 +1113,71 @@ mod tests {
         assert_eq!(format_turn_timer(Duration::from_secs(600)), "10m0s");
     }
 
+    fn harness(role: &str) -> Option<GoalHarnessActivity<'_>> {
+        Some(GoalHarnessActivity {
+            role,
+            tokens: None,
+            tool_calls: None,
+        })
+    }
+
     #[test]
-    fn activity_label_reads_verifying_while_goal_verifying_overriding_stale_activity() {
+    fn goal_harness_phase_overrides_stale_streaming_activity() {
+        use xai_grok_shell::extensions::notification::{
+            GOAL_ROLE_STRATEGIST, GOAL_ROLE_SUMMARIZER, GOAL_ROLE_VERIFIER,
+        };
         let theme = Theme::current();
-        // Running turn, no streaming activity, goal verifying → "Verifying…".
-        let (_, label, _) = compute_activity(&theme, &AgentState::TurnRunning, &None, false, true);
-        assert_eq!(label, "Verifying…");
-        // Same state without the verifying flag → generic "Waiting…".
-        let (_, label, _) = compute_activity(&theme, &AgentState::TurnRunning, &None, false, false);
-        assert_eq!(label, "Waiting…");
-        // During verification the model is idle but its last streaming
-        // activity (Responding/Thinking) can linger — the flag overrides it
-        // so the panel reads "Verifying…", not "Responding…" (the bug).
+        let label = |activity: Option<TurnActivity>, g| {
+            compute_activity(&theme, &AgentState::TurnRunning, &activity, false, g).1
+        };
+        assert_eq!(label(None, harness(GOAL_ROLE_VERIFIER)), "Verifying…");
+        assert_eq!(label(None, None), "Waiting…");
+        // The model is idle during a harness phase, but its last streaming
+        // activity lingers. Each phase must replace it.
         for activity in [TurnActivity::Responding, TurnActivity::Thinking] {
-            let (_, label, _) = compute_activity(
-                &theme,
-                &AgentState::TurnRunning,
-                &Some(activity),
-                false,
-                true,
-            );
-            assert_eq!(label, "Verifying…");
+            for (role, expected) in [
+                (GOAL_ROLE_VERIFIER, "Verifying…"),
+                (GOAL_ROLE_STRATEGIST, "Reviewing strategy…"),
+                (GOAL_ROLE_SUMMARIZER, "Summarizing…"),
+            ] {
+                assert_eq!(label(Some(activity.clone()), harness(role)), expected);
+            }
         }
-        // Without the flag the streaming label stands.
-        let (_, label, _) = compute_activity(
-            &theme,
-            &AgentState::TurnRunning,
-            &Some(TurnActivity::Responding),
-            false,
-            false,
-        );
-        assert_eq!(label, "Responding…");
+        assert_eq!(label(Some(TurnActivity::Responding), None), "Responding…");
+    }
+
+    #[test]
+    fn goal_harness_label_carries_the_live_subagent_counts() {
+        let g = GoalHarnessActivity {
+            role: "verifier",
+            tokens: Some(45_200),
+            tool_calls: Some(12),
+        };
+        assert_eq!(g.label(), "Verifying… · 12 tools · 45.2k tok");
+        let one = GoalHarnessActivity {
+            tool_calls: Some(1),
+            tokens: None,
+            ..g
+        };
+        assert_eq!(one.label(), "Verifying… · 1 tool");
+    }
+
+    #[test]
+    fn goal_harness_reads_from_the_goal_state() {
+        let mut goal = crate::app::agent::GoalDisplayState::test_stub();
+        assert!(GoalHarnessActivity::from_goal(&goal).is_none());
+        // An older shell sets only the verifying flag.
+        goal.verifying_completion = true;
+        let g = GoalHarnessActivity::from_goal(&goal).expect("verifying counts");
+        assert_eq!(g.role, "verifier");
+        goal.verifying_completion = false;
+        goal.current_subagent_role = Some("strategist".into());
+        goal.live_tool_call_count = Some(3);
+        goal.live_subagent_tokens = Some(0);
+        let g = GoalHarnessActivity::from_goal(&goal).expect("role counts");
+        assert_eq!(g.role, "strategist");
+        assert_eq!(g.tool_calls, Some(3));
+        assert_eq!(g.tokens, None, "a zero count is not shown");
     }
 
     #[test]
@@ -1124,7 +1205,7 @@ mod tests {
                 &AgentState::TurnRunning,
                 &Some(TurnActivity::Waiting(reason.clone())),
                 false,
-                false,
+                None,
             );
             assert_eq!(label, expected, "reason {reason:?}");
             assert!(!is_tool, "waiting is not a tool activity");
@@ -1136,7 +1217,7 @@ mod tests {
         let theme = Theme::current();
         // A bash (non-inference) turn with no activity keeps its own "Running…"
         // label — the view leaves it as `None` rather than Waiting(Model).
-        let (_, label, _) = compute_activity(&theme, &AgentState::TurnRunning, &None, true, false);
+        let (_, label, _) = compute_activity(&theme, &AgentState::TurnRunning, &None, true, None);
         assert_eq!(label, "Running…");
     }
 
@@ -1193,7 +1274,7 @@ mod tests {
                 mcp_init_progress: None,
                 is_bash_turn: false,
                 is_pending_user_input: false,
-                goal_verifying: false,
+                goal_harness: None,
                 watchers: Watchers::default(),
                 parked: false,
                 flat_background: false,
@@ -1353,7 +1434,7 @@ mod tests {
             mcp_init_progress: None,
             is_bash_turn: false,
             is_pending_user_input: false,
-            goal_verifying: false,
+            goal_harness: None,
             watchers,
             parked: false,
             flat_background: false,
