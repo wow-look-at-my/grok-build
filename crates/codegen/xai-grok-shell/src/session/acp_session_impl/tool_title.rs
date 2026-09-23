@@ -6,6 +6,7 @@
 //! rename itself the moment the call completed.
 use super::tool_calls::{ci_tool_title, execute_tool_call_parts};
 use super::*;
+use xai_grok_tools::types::tool::ToolKind;
 /// How much of a call's arguments is kept to read a title out of.
 ///
 /// What names a call sits at the head of its arguments: a path, a command, a
@@ -72,7 +73,32 @@ impl StreamingToolArgs {
 /// what has arrived. A field the model has not written yet is absent from the
 /// parsed input, and the arm falls back the same way it does for a call that
 /// omits it.
-pub(crate) fn tool_input_title(input: &ToolInput, cwd: &std::path::Path) -> String {
+///
+/// The match has no catch-all arm. A new `ToolInput` variant then fails to
+/// compile here until it gets a title, instead of reading as a generic label.
+/// `kind` is the registry's kind for `wire_name`. It names the tools whose
+/// input arrives as `Dynamic`, and it survives a `name_override`.
+pub(crate) fn tool_input_title(
+    input: &ToolInput,
+    wire_name: &str,
+    kind: Option<ToolKind>,
+    cwd: &std::path::Path,
+) -> String {
+    // The pager shows an empty title as the ACP kind, which is "Other" for
+    // most tools. The wire name at least says which tool ran.
+    let title = input_title(input, wire_name, kind, cwd);
+    if title.is_empty() {
+        wire_name.to_string()
+    } else {
+        title
+    }
+}
+fn input_title(
+    input: &ToolInput,
+    wire_name: &str,
+    kind: Option<ToolKind>,
+    cwd: &std::path::Path,
+) -> String {
     match input {
         ToolInput::ListDir(list_dir) => format!("List `{}`", list_dir.target_directory),
         ToolInput::SearchReplace(sr) => format!("Edit `{}`", sr.file_path.as_str()),
@@ -115,7 +141,7 @@ pub(crate) fn tool_input_title(input: &ToolInput, cwd: &std::path::Path) -> Stri
         ToolInput::KillTask(kill_task) => format!("Kill task: {}", kill_task.task_id),
         ToolInput::Skill(skill) => format!("Skill: {}", skill.skill),
         ToolInput::ApplyPatch(_) => "Apply patch".to_string(),
-        ToolInput::Dynamic(_) => "Dynamic tool call".to_string(),
+        ToolInput::Dynamic(args) => dynamic_tool_title(wire_name, kind, args, cwd),
         ToolInput::MemorySearch(ms) => {
             let end = ms
                 .query
@@ -186,12 +212,208 @@ pub(crate) fn tool_input_title(input: &ToolInput, cwd: &std::path::Path) -> Stri
         },
         ToolInput::SchedulerDelete(sd) => format!("Delete scheduled task: {}", sd.id),
         ToolInput::SchedulerList(_) => "List scheduled tasks".to_string(),
-        // The CI tool has its own row: without this arm it fell into the
-        // generic `_` below and every CI query read as "Tool call", which
-        // says nothing about what was asked of CI.
         ToolInput::Ci(ci) => ci_tool_title(ci),
-        #[allow(unreachable_patterns)]
-        _ => "Tool call".to_string(),
+        ToolInput::CopyMove(cm) => {
+            // `copy_file` and `move_file` share one input and one kind.
+            let verb = if wire_name.contains("copy") {
+                "Copy"
+            } else {
+                "Move"
+            };
+            format!("{verb} `{}` → `{}`", cm.source, cm.destination)
+        }
+        ToolInput::CodexListDir(ld) => format!("List `{}`", ld.dir_path),
+        ToolInput::CodexGrepFiles(gf) => gf.pattern.clone(),
+        ToolInput::CodexReadFile(rf) => format!("Read `{}`", rf.file_path),
+        ToolInput::Lsp(lsp) => lsp_tool_title(lsp),
+        ToolInput::SendMessage(sm) => format!("Message {}", sm.to),
+    }
+}
+fn lsp_tool_title(lsp: &xai_grok_tools::implementations::lsp::LspToolInput) -> String {
+    use xai_grok_tools::implementations::lsp::LspOperation;
+    let op = match lsp.operation {
+        LspOperation::GoToDefinition => "Go to definition",
+        LspOperation::FindReferences => "Find references",
+        LspOperation::Hover => "Hover",
+        LspOperation::GoToImplementation => "Go to implementation",
+        LspOperation::DocumentSymbol => "Document symbols",
+        LspOperation::WorkspaceSymbol => "Workspace symbols",
+    };
+    if let Some(query) = lsp.query.as_deref().filter(|q| !q.is_empty()) {
+        return format!("{op}: \"{query}\"");
+    }
+    match (lsp.file_path.as_deref(), lsp.line) {
+        // The input line is 0-indexed. An editor shows it 1-indexed.
+        (Some(path), Some(line)) => format!("{op}: `{path}:{}`", line + 1),
+        (Some(path), None) => format!("{op}: `{path}`"),
+        (None, _) => op.to_string(),
+    }
+}
+/// The title of a tool whose input the bridge hands over as raw JSON.
+///
+/// The opencode harness registers its built-ins this way. So the title comes
+/// from the tool's kind and the argument that kind names. A tool the kinds do
+/// not cover shows its wire name, which is the name the model called it by.
+fn dynamic_tool_title(
+    wire_name: &str,
+    kind: Option<ToolKind>,
+    args: &serde_json::Value,
+    cwd: &std::path::Path,
+) -> String {
+    let field = |keys: &[&str]| {
+        keys.iter()
+            .find_map(|k| args.get(*k).and_then(|v| v.as_str()))
+            .filter(|s| !s.is_empty())
+    };
+    let path = field(&["filePath", "file_path", "path"]);
+    let titled = match kind {
+        Some(ToolKind::Execute) => field(&["command"])
+            .map(|cmd| execute_tool_call_parts(cmd, field(&["description"]), cwd).0),
+        Some(ToolKind::Read) => path.map(|p| format!("Read `{p}`")),
+        Some(ToolKind::Edit) => path.map(|p| format!("Edit `{p}`")),
+        Some(ToolKind::Write) => path.map(|p| format!("Write `{p}`")),
+        Some(ToolKind::Search) => field(&["pattern"]).map(str::to_string),
+        Some(ToolKind::List) => field(&["pattern"]).map(|p| format!("Find `{p}`")),
+        Some(ToolKind::Skill) => field(&["name", "skill"]).map(|s| format!("Skill: {s}")),
+        Some(ToolKind::Plan) => Some("Updating plan".to_string()),
+        _ => None,
+    };
+    titled.unwrap_or_else(|| wire_name.to_string())
+}
+#[cfg(test)]
+mod title_tests {
+    use super::{ToolInput, ToolKind, tool_input_title};
+    use serde_json::json;
+    use std::path::Path;
+    /// Build an input the way the wire does. That keeps the test off each
+    /// input struct's module path and its private defaults.
+    fn input(variant: &str, fields: serde_json::Value) -> ToolInput {
+        let mut obj = fields.as_object().cloned().unwrap_or_default();
+        obj.insert("variant".into(), json!(variant));
+        serde_json::from_value(serde_json::Value::Object(obj))
+            .unwrap_or_else(|e| panic!("{variant} did not parse: {e}"))
+    }
+    fn title(input: &ToolInput, wire: &str, kind: Option<ToolKind>) -> String {
+        tool_input_title(input, wire, kind, Path::new("/proj"))
+    }
+    #[test]
+    fn every_builtin_that_used_to_fall_through_has_its_own_title() {
+        let cases = [
+            (
+                input("CopyMove", json!({"source": "a.rs", "destination": "b.rs"})),
+                "copy_file",
+                "Copy `a.rs` → `b.rs`",
+            ),
+            (
+                input("CopyMove", json!({"source": "a.rs", "destination": "b.rs"})),
+                "move_file",
+                "Move `a.rs` → `b.rs`",
+            ),
+            (
+                input("CodexListDir", json!({"dir_path": "/proj/src"})),
+                "list_dir",
+                "List `/proj/src`",
+            ),
+            (
+                input("CodexGrepFiles", json!({"pattern": "fn main"})),
+                "grep_files",
+                "fn main",
+            ),
+            (
+                input("CodexReadFile", json!({"file_path": "/proj/a.rs"})),
+                "read_file",
+                "Read `/proj/a.rs`",
+            ),
+            (
+                input(
+                    "Lsp",
+                    json!({"operation": "goToDefinition", "file_path": "/proj/a.rs", "line": 9}),
+                ),
+                "lsp",
+                "Go to definition: `/proj/a.rs:10`",
+            ),
+            (
+                input(
+                    "Lsp",
+                    json!({"operation": "workspaceSymbol", "query": "Session"}),
+                ),
+                "lsp",
+                "Workspace symbols: \"Session\"",
+            ),
+            (
+                input("SendMessage", json!({"to": "parent", "message": "done"})),
+                "send_message",
+                "Message parent",
+            ),
+        ];
+        for (input, wire, want) in cases {
+            assert_eq!(title(&input, wire, None), want, "wire name {wire}");
+        }
+    }
+    /// The opencode harness hands its built-ins over as raw JSON. Its tools
+    /// must read like the grok_build ones, not as one generic label.
+    #[test]
+    fn a_dynamic_builtin_is_named_by_its_kind_and_argument() {
+        let bash_title =
+            super::execute_tool_call_parts("cargo test", Some("run tests"), Path::new("/proj")).0;
+        let cases = [
+            (
+                ToolKind::Read,
+                "read",
+                json!({"filePath": "src/a.rs"}),
+                "Read `src/a.rs`",
+            ),
+            (
+                ToolKind::Edit,
+                "edit",
+                json!({"filePath": "src/a.rs", "oldString": "x", "newString": "y"}),
+                "Edit `src/a.rs`",
+            ),
+            (ToolKind::Search, "grep", json!({"pattern": "TODO"}), "TODO"),
+            (
+                ToolKind::List,
+                "glob",
+                json!({"pattern": "**/*.rs"}),
+                "Find `**/*.rs`",
+            ),
+            (
+                ToolKind::Skill,
+                "skill",
+                json!({"name": "deploy"}),
+                "Skill: deploy",
+            ),
+            (
+                ToolKind::Plan,
+                "todowrite",
+                json!({"todos": []}),
+                "Updating plan",
+            ),
+            (
+                ToolKind::Execute,
+                "bash",
+                json!({"command": "cargo test", "description": "run tests"}),
+                bash_title.as_str(),
+            ),
+        ];
+        for (kind, wire, args, want) in cases {
+            let got = title(&ToolInput::Dynamic(args), wire, Some(kind));
+            assert_eq!(got, want, "{wire}");
+        }
+    }
+    /// A tool no kind covers, or a call whose argument has not arrived yet,
+    /// shows the name the model called it by.
+    #[test]
+    fn a_dynamic_tool_without_a_known_argument_shows_its_wire_name() {
+        let empty = ToolInput::Dynamic(json!({}));
+        assert_eq!(title(&empty, "read", Some(ToolKind::Read)), "read");
+        assert_eq!(title(&empty, "frobnicate", None), "frobnicate");
+    }
+    /// An arm that yields nothing would reach the pager as an empty title,
+    /// which it draws as the bare ACP kind.
+    #[test]
+    fn an_empty_title_falls_back_to_the_wire_name() {
+        let grep = input("CodexGrepFiles", json!({"pattern": ""}));
+        assert_eq!(title(&grep, "grep_files", None), "grep_files");
     }
 }
 #[cfg(test)]
