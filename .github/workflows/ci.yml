@@ -105,6 +105,8 @@ jobs:
             # ${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
             export CARGO_BUILD_JOBS=3
             cargo test --locked --workspace --no-run --no-fail-fast
+            # The pager alone resolves other features, so its dependencies hash differently.
+            cargo build --locked -p xai-grok-pager-bin
             ci/cache-deps.sh prune target/debug
 
       # -j3 is the widest -j the runner's 15 GiB holds.
