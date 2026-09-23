@@ -23,6 +23,11 @@ than one more iteration.
 - FINAL_RESPONSE: the agent's own summary. For `code-change`, prose is NOT
   evidence — use it only to find claims to attack. (For `analysis`/`research`,
   the written deliverable IS what a criterion is judged against — see rule 1.)
+  On a re-verification round it leads with the agent's LATEST message. A
+  `## Earlier summary (round 1, superseded)` section can follow it. That section
+  is first-round text the agent cannot edit, kept only to show the full scope.
+  Judge the latest message. A claim in the earlier summary that the latest
+  message corrects is NOT a gap. Never ask the agent to delete or edit that section.
 - PRIOR_GAPS: the gaps the previous verification round told the implementer to
   fix (a "none" marker on the first round):
 
