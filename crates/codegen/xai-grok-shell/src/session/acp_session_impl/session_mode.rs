@@ -21,6 +21,55 @@ pub(super) fn session_mode_id_from_prompt_mode(prompt_mode: PromptMode) -> acp::
     };
     acp::SessionModeId::new(mode.as_id())
 }
+/// The agent-identity half of the session mode.
+///
+/// A session mode is either a permission mode (`default`, `plan`, `ask`) or an
+/// agent name. An agent name swaps the whole agent, and with it the system
+/// prompt and the tool registry.
+#[derive(Debug, Default)]
+pub(crate) struct ModeAgentState {
+    /// The agent that ran before a Shift+Tab ring identity replaced it.
+    ring_base: Option<String>,
+    /// A swap that arrived while a turn ran. The run loop applies it at turn
+    /// end. It is never dropped, because a dropped swap leaves the model under
+    /// the prompt of a mode the user already left.
+    pending: Option<AgentDefinition>,
+}
+fn is_shift_tab_ring_agent(name: &str) -> bool {
+    xai_grok_agent::config::BuiltinAgentName::shift_tab_variants()
+        .iter()
+        .any(|v| AsRef::<str>::as_ref(v) == name)
+}
+/// The agent that a mode change must run, or `None` to keep the current agent.
+///
+/// `active` is the agent the session will run once any pending swap lands.
+/// A permission mode that arrives while a ring identity is active means the
+/// client left the ring. The base agent comes back then, whatever the client
+/// remembers about the ring. A ring identity that the session started with
+/// has no base, so it stays.
+pub(super) fn mode_agent_target(
+    state: &mut ModeAgentState,
+    mode_id: &str,
+    active: Option<&str>,
+) -> Option<String> {
+    let active_is_ring = active.is_some_and(is_shift_tab_ring_agent);
+    if mode_id
+        .parse::<xai_grok_tools::types::SessionMode>()
+        .is_ok()
+    {
+        return if active_is_ring {
+            state.ring_base.take()
+        } else {
+            None
+        };
+    }
+    if !is_shift_tab_ring_agent(mode_id) {
+        state.ring_base = None;
+    } else if !active_is_ring {
+        state.ring_base = Some(active.unwrap_or("grok-build").to_string());
+    }
+    Some(mode_id.to_string())
+}
 /// Pass-through twin: no toolset in this build carries a plan-gated tool.
 pub(super) fn filter_cursor_tools_by_plan_mode(
     defs: Vec<ToolDefinition>,
@@ -44,7 +93,16 @@ impl SessionActor {
         let prompt_mode = prompt_mode_from_session_mode_id(&session_mode_id);
         *self.current_prompt_mode.lock() = prompt_mode;
         let mode = SessionMode::from_id(session_mode_id.0.as_ref());
+        let agent_target = {
+            let active = self.active_agent_type.lock().clone();
+            let mut state = self.mode_agent.lock();
+            let active = state.pending.as_ref().map(|d| d.name.clone()).or(active);
+            mode_agent_target(&mut state, session_mode_id.0.as_ref(), active.as_deref())
+        };
         if mode.is_plan() {
+            if let Some(name) = agent_target {
+                self.switch_mode_agent(&name).await;
+            }
             let entered = self.plan_mode.lock().enter_pending();
             if entered {
                 self.persist_plan_mode_state();
@@ -114,38 +172,73 @@ impl SessionActor {
             )
             .in_scope(|| {});
         }
-        let agent_def = match session_mode_id.0.as_ref() {
+        if let Some(name) = agent_target {
+            self.switch_mode_agent(&name).await;
+        }
+    }
+    /// Run the named agent for the session mode.
+    ///
+    /// A full rebuild: the system prompt and the tool registry change
+    /// together. A prompt swap alone shows one agent's prompt beside another
+    /// agent's tools. While a turn runs, the swap waits for the turn to end.
+    async fn switch_mode_agent(&self, name: &str) {
+        let def = match name {
             "browser_use" => Some(AgentDefinition::browser_use()),
             name => {
-                let cwd = self.tool_context.cwd.as_path();
-                xai_grok_agent::discovery::by_name_in_cwd(name, cwd)
+                xai_grok_agent::discovery::by_name_in_cwd(name, self.tool_context.cwd.as_path())
             }
         };
-        if let Some(def) = agent_def {
+        let Some(def) = def else {
+            return;
+        };
+        let active = self.active_agent_type.lock().clone();
+        if active.as_deref() == Some(def.name.as_str()) {
+            self.mode_agent.lock().pending = None;
+            return;
+        }
+        if self.state.lock().await.running_task.is_some() {
             tracing::info!(
                 session_id = %self.session_info.id.0,
                 agent_name = %def.name,
-                agent_scope = %def.scope,
-                prompt_mode = ?def.prompt_mode,
-                has_completion_req = def.completion_requirement.is_some(),
-                tool_configs = def.tool_config.tools.len(),
-                "Resolved AgentDefinition for session mode: rebuilding agent"
+                "session mode names another agent while a turn runs: swapping at turn end"
             );
-            // A full rebuild (tool registry + prompt), not a prompt-only
-            // swap: the previous prompt-only swap left the tool registry on
-            // whatever the prior agent had, so switching to e.g. `explore`
-            // showed its "no editing tools" prompt while edit/bash tools
-            // were still live in the registry. `zero_turn: false` — this is
-            // a live, mid-session switch, so the zero-turn-only prefix/
-            // reminder conversation surgery must NOT run.
-            if let Err(e) = self.handle_rebuild_agent_for_definition(def, false).await {
-                tracing::warn!(
-                    session_id = %self.session_info.id.0,
-                    mode_id = %session_mode_id.0,
-                    error = ?e,
-                    "handle_session_mode: agent rebuild for mode failed, keeping current agent"
-                );
-            }
+            self.mode_agent.lock().pending = Some(def);
+            return;
+        }
+        self.mode_agent.lock().pending = None;
+        self.rebuild_mode_agent(def).await;
+    }
+    /// Apply a mode-agent swap that arrived while the last turn ran.
+    pub(super) async fn apply_pending_mode_agent(&self) {
+        if self.mode_agent.lock().pending.is_none()
+            || self.state.lock().await.running_task.is_some()
+        {
+            return;
+        }
+        let Some(def) = self.mode_agent.lock().pending.take() else {
+            return;
+        };
+        self.rebuild_mode_agent(def).await;
+    }
+    async fn rebuild_mode_agent(&self, def: AgentDefinition) {
+        tracing::info!(
+            session_id = %self.session_info.id.0,
+            agent_name = %def.name,
+            agent_scope = %def.scope,
+            prompt_mode = ?def.prompt_mode,
+            tool_configs = def.tool_config.tools.len(),
+            "session mode: rebuilding agent"
+        );
+        let name = def.name.clone();
+        // `zero_turn: false`: this is a live switch, so the zero-turn prefix
+        // surgery must not run.
+        if let Err(e) = self.handle_rebuild_agent_for_definition(def, false).await {
+            tracing::error!(
+                session_id = %self.session_info.id.0,
+                agent_name = %name,
+                error = ?e,
+                "session mode: agent rebuild failed; the session keeps the previous agent's prompt and tools"
+            );
         }
     }
     /// Settle the mode a turn runs in, applying the prompt's declaration when
@@ -401,5 +494,79 @@ impl SessionActor {
             .notifications
             .persistence_tx
             .send(PersistenceMsg::PlanModeState(snapshot));
+    }
+}
+#[cfg(test)]
+mod mode_agent_target_tests {
+    use super::{ModeAgentState, mode_agent_target};
+
+    #[test]
+    fn a_permission_mode_after_explore_restores_the_base_agent() {
+        let mut state = ModeAgentState::default();
+        assert_eq!(
+            mode_agent_target(&mut state, "grok-build-orchestrator", Some("grok-build")).as_deref(),
+            Some("grok-build-orchestrator")
+        );
+        assert_eq!(
+            mode_agent_target(&mut state, "explore", Some("grok-build-orchestrator")).as_deref(),
+            Some("explore")
+        );
+        // The client lost its ring state and sends a bare permission mode.
+        assert_eq!(
+            mode_agent_target(&mut state, "plan", Some("explore")).as_deref(),
+            Some("grok-build")
+        );
+        // Nothing is left to restore after that.
+        assert_eq!(
+            mode_agent_target(&mut state, "default", Some("grok-build")),
+            None
+        );
+    }
+
+    #[test]
+    fn every_permission_mode_leaves_the_ring() {
+        for mode in ["default", "plan", "ask"] {
+            let mut state = ModeAgentState::default();
+            mode_agent_target(&mut state, "explore", Some("my-agent"));
+            assert_eq!(
+                mode_agent_target(&mut state, mode, Some("explore")).as_deref(),
+                Some("my-agent"),
+                "{mode} must restore the base agent"
+            );
+        }
+    }
+
+    #[test]
+    fn the_ring_close_names_the_base_and_the_plan_mode_adds_nothing() {
+        let mut state = ModeAgentState::default();
+        mode_agent_target(&mut state, "explore", Some("grok-build"));
+        assert_eq!(
+            mode_agent_target(&mut state, "grok-build", Some("explore")).as_deref(),
+            Some("grok-build")
+        );
+        assert_eq!(
+            mode_agent_target(&mut state, "plan", Some("grok-build")),
+            None
+        );
+    }
+
+    #[test]
+    fn a_session_that_started_as_explore_stays_explore() {
+        let mut state = ModeAgentState::default();
+        assert_eq!(mode_agent_target(&mut state, "plan", Some("explore")), None);
+        assert_eq!(
+            mode_agent_target(&mut state, "default", Some("explore")),
+            None
+        );
+    }
+
+    #[test]
+    fn a_permission_mode_outside_the_ring_keeps_the_agent() {
+        let mut state = ModeAgentState::default();
+        assert_eq!(
+            mode_agent_target(&mut state, "plan", Some("grok-build")),
+            None
+        );
+        assert_eq!(mode_agent_target(&mut state, "default", None), None);
     }
 }
