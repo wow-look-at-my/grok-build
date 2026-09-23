@@ -614,7 +614,10 @@ fn a_provider_models_requests_go_to_the_provider_url() {
         .map(|(key, _)| key)
         .collect();
     for key in ["my-model", "tuned-b", "internal/slug-c", "internal/slug-d"] {
-        assert!(provider_keys.iter().any(|k| k == key), "{key} missing: {provider_keys:?}");
+        assert!(
+            provider_keys.iter().any(|k| k == key),
+            "{key} missing: {provider_keys:?}"
+        );
     }
     for key in &provider_keys {
         mgr.set_current_model_id(acp::ModelId::new(key.as_str()));
