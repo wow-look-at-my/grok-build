@@ -130,7 +130,8 @@ struct Inner {
     /// Models autodetected from each `[model_providers.<id>]` listing. Same
     /// lifecycle argument as `codex_models`: a provider's own catalog does not
     /// follow the xAI fetch/apply cycle that `catalog` guards.
-    provider_models: RwLock<IndexMap<String, ModelEntry>>,
+    provider_models:
+        RwLock<IndexMap<String, crate::agent::model_provider_discovery::DiscoveredModel>>,
     current_model_id: RwLock<acp::ModelId>,
     current_reasoning_effort: RwLock<Option<ReasoningEffort>>,
     // ── Owned context for self-contained refresh ────────────────
@@ -565,7 +566,10 @@ impl ModelsManager {
     /// Replace the models autodetected from the `[model_providers.*]` listings
     /// and notify every connected model selector. The xAI catalog is untouched,
     /// so a provider's listing expands the picker rather than replacing it.
-    pub(crate) fn set_provider_models(&self, models: IndexMap<String, ModelEntry>) {
+    pub(crate) fn set_provider_models(
+        &self,
+        models: IndexMap<String, crate::agent::model_provider_discovery::DiscoveredModel>,
+    ) {
         *self.inner.provider_models.write() = models;
         let cfg = self.inner.cfg.read().clone();
         let prefetched = self.inner.catalog.read().prefetched.clone();
@@ -588,10 +592,10 @@ impl ModelsManager {
             let mut provider_models = self.inner.provider_models.write();
             let mut changed = false;
             for (key, loaded) in residency {
-                if let Some(entry) = provider_models.get_mut(key)
-                    && entry.info.loaded_in_vram != Some(*loaded)
+                if let Some(model) = provider_models.get_mut(key)
+                    && model.loaded_in_vram != Some(*loaded)
                 {
-                    entry.info.loaded_in_vram = Some(*loaded);
+                    model.loaded_in_vram = Some(*loaded);
                     changed = true;
                 }
             }
@@ -758,7 +762,13 @@ impl ModelsManager {
         base: IndexMap<String, ModelEntry>,
     ) -> IndexMap<String, ModelEntry> {
         let with_codex = merge_additive_catalog(cfg, base, &self.inner.codex_models.read());
-        merge_additive_catalog(cfg, with_codex, &self.inner.provider_models.read())
+        // Resolved against THIS config, so a reloaded `[model.<id>]` block that
+        // claims a discovered model is merged with the listing on the spot.
+        let discovered = crate::agent::model_provider_discovery::resolve_discovered_models(
+            cfg,
+            &self.inner.provider_models.read(),
+        );
+        merge_additive_catalog(cfg, with_codex, &discovered)
     }
 
     fn rebuild(&self, cfg: &config::Config, prefetched: Option<IndexMap<String, ModelEntry>>) {
