@@ -760,6 +760,8 @@ impl GoalTracker {
         // in-memory-clone callers bypass that; reset explicitly.
         snapshot.planning_in_flight = false;
         snapshot.verifying_in_flight = false;
+        // No harness subagent survives a restart, so no role is running.
+        snapshot.current_subagent_role = None;
         // Token records anchoring a resumed skeptic-0's marginal accounting
         // are in-memory only; a post-restart resume would re-count its full
         // prior cumulative as fresh spend. Cold-spawn instead.

@@ -549,10 +549,10 @@ fn render_minimal_status(
     }
     let is_pending_user_input =
         !agent.permission_queue.is_empty() || minimal_api::question_view(agent).is_some();
-    let goal_verifying = agent
+    let goal_harness = agent
         .goal_state
         .as_ref()
-        .is_some_and(|g| g.verifying_completion);
+        .and_then(turn_status::GoalHarnessActivity::from_goal);
     turn_status::render_turn_status(
         buf,
         area,
@@ -569,7 +569,7 @@ fn render_minimal_status(
             mcp_init_progress: minimal_api::mcp_init_progress(agent),
             is_bash_turn: agent.bash_turn,
             is_pending_user_input,
-            goal_verifying,
+            goal_harness,
             watchers,
             parked,
             flat_background: true,

@@ -242,6 +242,7 @@ impl SessionActor {
             let _latch = TrackerDropGuard::new(&self.goal_tracker, |tracker| {
                 if let Some(snapshot) = tracker.snapshot_mut() {
                     snapshot.verifying_in_flight = false;
+                    snapshot.current_subagent_role = None;
                 }
             });
             self.run_verification_stage_for_drain(attempt, policy.max_runs)
@@ -421,6 +422,47 @@ impl SessionActor {
                 return;
             };
             o.verifying_in_flight = true;
+            o.current_subagent_role =
+                Some(crate::extensions::notification::GOAL_ROLE_VERIFIER.to_owned());
+            crate::session::goal_orchestrator::build_goal_updated(o, tokens_used, finished_marginal)
+        };
+        self.goal_notify_sender().send_update(update);
+    }
+
+    /// Names the goal-harness role that runs inside the turn, and pushes the
+    /// name to the client. Without it the status bar shows the turn's last
+    /// activity, "Responding…", for the whole run. The guard clears the name
+    /// when a cancel drops the run; [`Self::end_goal_harness_role`] clears it
+    /// and tells the client.
+    pub(super) async fn begin_goal_harness_role(
+        &self,
+        role: &str,
+    ) -> TrackerDropGuard<'_, impl FnOnce(&mut crate::session::goal_tracker::GoalTracker)> {
+        self.publish_goal_harness_role(Some(role)).await;
+        TrackerDropGuard::new(&self.goal_tracker, |t| {
+            if let Some(o) = t.snapshot_mut() {
+                o.current_subagent_role = None;
+            }
+        })
+    }
+
+    pub(super) async fn end_goal_harness_role(&self) {
+        self.publish_goal_harness_role(None).await;
+    }
+
+    async fn publish_goal_harness_role(&self, role: Option<&str>) {
+        if !self.goal_harness_enabled() {
+            return;
+        }
+        let current_tokens = self.chat_state_handle.get_total_tokens().await as i64;
+        let (tokens_used, finished_marginal) = self.goal_tokens(current_tokens);
+        let update = {
+            let mut tracker = self.goal_tracker.lock();
+            tracker.account_elapsed();
+            let Some(o) = tracker.snapshot_mut() else {
+                return;
+            };
+            o.current_subagent_role = role.map(str::to_owned);
             crate::session::goal_orchestrator::build_goal_updated(o, tokens_used, finished_marginal)
         };
         self.goal_notify_sender().send_update(update);
@@ -2015,6 +2057,7 @@ impl SessionActor {
                 let _verifying_latch = TrackerDropGuard::new(&self.goal_tracker, |t| {
                     if let Some(o) = t.snapshot_mut() {
                         o.verifying_in_flight = false;
+                        o.current_subagent_role = None;
                     }
                 });
                 self.run_verification_stage_for_drain(attempt, policy.max_runs)

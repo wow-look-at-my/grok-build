@@ -1707,6 +1707,9 @@ impl SessionActor {
                 fallback: self.goal_role_fallback_reporter().await,
             });
 
+        let _role_guard = self
+            .begin_goal_harness_role(crate::extensions::notification::GOAL_ROLE_STRATEGIST)
+            .await;
         let outcome = crate::session::goal_strategist::run_goal_strategist(
             spawner,
             crate::session::goal_strategist::GoalStrategistInputs {
@@ -1728,6 +1731,7 @@ impl SessionActor {
             &|e| self.events.emit(e),
         )
         .await;
+        self.end_goal_harness_role().await;
 
         // Seal the strategist's synthetic `task` pair into its own harness
         // trace turn (sibling of the planner / skeptic turns). No-op when the
@@ -1820,6 +1824,9 @@ impl SessionActor {
                 model_override: summarizer_model,
             });
 
+        let _role_guard = self
+            .begin_goal_harness_role(crate::extensions::notification::GOAL_ROLE_SUMMARIZER)
+            .await;
         let outcome = crate::session::goal_summarizer::run_goal_summarizer(
             spawner,
             crate::session::goal_summarizer::GoalSummarizerInputs {
@@ -1834,6 +1841,7 @@ impl SessionActor {
             &|e| self.events.emit(e),
         )
         .await;
+        self.end_goal_harness_role().await;
 
         // Seal the summarizer's synthetic `task` pair into its own harness
         // trace turn (sibling of the planner / skeptic / strategist turns).

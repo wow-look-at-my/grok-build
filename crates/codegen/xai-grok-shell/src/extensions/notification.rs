@@ -446,6 +446,13 @@ pub enum AutoCompactCancelReason {
     UserCancelled,
 }
 
+/// `GoalUpdated.current_subagent_role` while the skeptic panel runs.
+pub const GOAL_ROLE_VERIFIER: &str = "verifier";
+/// `GoalUpdated.current_subagent_role` while the stall strategist runs.
+pub const GOAL_ROLE_STRATEGIST: &str = "strategist";
+/// `GoalUpdated.current_subagent_role` while the completion summarizer runs.
+pub const GOAL_ROLE_SUMMARIZER: &str = "summarizer";
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case", tag = "sessionUpdate")]
 pub enum SessionUpdate {
@@ -964,6 +971,8 @@ pub enum SessionUpdate {
         current_deliverable_id: Option<u32>,
         #[serde(skip_serializing_if = "Option::is_none")]
         current_deliverable_title: Option<String>,
+        /// The goal-harness role that runs now: one of the `GOAL_ROLE_*`
+        /// names. The client labels the turn by it.
         #[serde(skip_serializing_if = "Option::is_none")]
         current_subagent_role: Option<String>,
         total_worker_rounds: u32,
