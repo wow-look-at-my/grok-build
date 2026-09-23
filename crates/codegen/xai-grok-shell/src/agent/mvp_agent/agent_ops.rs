@@ -157,6 +157,7 @@ impl MvpAgent {
         primary: &SamplingConfig,
     ) -> Result<(OaiCompatClient, String), acp::Error> {
         let slug = self.resolve_session_summary_model();
+        let pinned = self.cfg.borrow().session_summary_model.is_some();
         let session_key = self.auth_manager.current_or_expired().map(|a| a.key.clone());
         let models = self.models_manager.models();
         let endpoints = self.models_manager.endpoints();
@@ -177,7 +178,10 @@ impl MvpAgent {
             alpha_test_key,
             client_version,
         ) {
-            Some(mut cfg) => {
+            // The compiled default lives on the first-party endpoint. A session
+            // on another endpoint titles itself with its own model, or the
+            // title request carries the prompt somewhere the user never chose.
+            Some(mut cfg) if pinned || cfg.base_url == primary.base_url => {
                 crate::agent::config::stamp_session_local_sampler_fields(
                     &mut cfg,
                     primary,
@@ -186,11 +190,12 @@ impl MvpAgent {
                 );
                 cfg
             }
-            None => {
+            None if pinned => {
                 let mut fallback = primary.clone();
                 fallback.model = slug;
                 fallback
             }
+            _ => primary.clone(),
         };
         let model = config.model.clone();
         let client = OaiCompatClient::new(config).map_err(map_sampling_err_to_acp)?;
