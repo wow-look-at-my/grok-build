@@ -14,8 +14,8 @@
 
 use crate::session::events::{Event, GoalSummarizerFailReason};
 use crate::session::goal_planner::{
-    GOAL_ROLE_AWAIT_BUDGET_EXCEEDED, GOAL_ROLE_SUBAGENT_TYPE, RoleRenderedPrompt,
-    RoleSpawnOverride, SpawnError, spawn_with_fail_open_retry,
+    GOAL_ROLE_AWAIT_BUDGET_EXCEEDED, GOAL_ROLE_SUBAGENT_TYPE, RoleFallbackReporter,
+    RoleRenderedPrompt, RoleSpawnOverride, SpawnError, spawn_with_fail_open_retry,
 };
 use crate::session::goal_role_tools::RoleToolNames;
 use std::path::Path;
@@ -97,9 +97,8 @@ pub(crate) struct ChannelSpawner {
     /// Trace-artifact sink + resolved `task` tool name; `None` disables
     /// recording. See [`crate::session::goal_classifier::record_subagent_trace`].
     pub(crate) trace_sink: Option<(xai_chat_state::ChatStateHandle, String)>,
-    /// Event sink for the spawn-and-retry-once fail-open telemetry; `None` in
-    /// tests / when no event log is wired.
-    pub(crate) events: Option<EventWriter>,
+    /// Where a spawn-and-retry-once fail-open is reported. `Default` in tests.
+    pub(crate) fallback: RoleFallbackReporter,
     /// Model from the `[models] goal_summarizer` slot. `None` inherits the
     /// session model. The toolset is always the parent's, so this carries
     /// no agent type.
@@ -126,7 +125,7 @@ impl GoalSummarizerSpawner for ChannelSpawner {
             "summarizer",
             None,
             &override_,
-            self.events.as_ref(),
+            &self.fallback,
             prompt,
             |model, harness, prompt| self.send_one(id, prompt, model, harness),
         )
@@ -664,7 +663,7 @@ mod tests {
             parent_prompt_id: None,
             cwd: None,
             trace_sink: None,
-            events: None,
+            fallback: Default::default(),
             model_override: None,
         };
         let handle = tokio::spawn(async move {

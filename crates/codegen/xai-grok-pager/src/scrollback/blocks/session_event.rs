@@ -141,6 +141,15 @@ pub enum SessionEvent {
         /// Goal end-to-end elapsed time (`GoalUpdated.elapsed_ms`).
         elapsed: Duration,
     },
+    /// A `/goal` role did not run on the model the user configured for it.
+    GoalRoleModelFallback {
+        role: String,
+        skeptic_idx: Option<u32>,
+        requested_model: String,
+        fallback_model: Option<String>,
+        /// Why, in the user's words; the shell's wire reason when it sent none.
+        why: String,
+    },
     /// A session recap — a short "where was I" summary of the session so far.
     /// Surfaced on demand via `/recap` (`auto = false`) or automatically when
     /// the user returns to the terminal after being away (`auto = true`).
@@ -272,6 +281,22 @@ impl SessionEvent {
                     format_duration(*elapsed)
                 )
             }
+            SessionEvent::GoalRoleModelFallback {
+                role,
+                skeptic_idx,
+                requested_model,
+                fallback_model,
+                why,
+            } => {
+                let who = match skeptic_idx {
+                    Some(idx) => format!("Goal {role} {}", idx + 1),
+                    None => format!("Goal {role}"),
+                };
+                let used = fallback_model
+                    .as_deref()
+                    .map_or_else(|| "the session model".to_string(), |m| format!("\"{m}\""));
+                format!("{who} ran on {used}, not \"{requested_model}\": {why}")
+            }
             SessionEvent::Recap { summary, auto: _ } => {
                 // Always "Recap —" (manual `/recap` and auto return-from-away).
                 format!("Recap \u{2014} {summary}")
@@ -303,6 +328,7 @@ impl SessionEvent {
                 | SessionEvent::RequestFailed { .. }
                 | SessionEvent::RetryFailed { .. }
                 | SessionEvent::TurnFailed { .. }
+                | SessionEvent::GoalRoleModelFallback { .. }
         )
     }
 
@@ -924,6 +950,43 @@ mod tests {
             is_selected: false,
             cwd: None,
         }
+    }
+
+    #[test]
+    fn goal_role_model_fallback_names_both_models_and_why() {
+        let event = SessionEvent::GoalRoleModelFallback {
+            role: "skeptic".into(),
+            skeptic_idx: Some(0),
+            requested_model: "claude-opus".into(),
+            fallback_model: Some("grok-4.7".into()),
+            why: "\"claude-opus\" is not in this session's model catalog.".into(),
+        };
+        assert_eq!(
+            event.message(),
+            "Goal skeptic 1 ran on \"grok-4.7\", not \"claude-opus\": \"claude-opus\" is not \
+             in this session's model catalog."
+        );
+        let block = SessionEventBlock::new(event);
+        assert_eq!(
+            block.accent(&ctx()).map(|a| a.color),
+            Some(Theme::current().warning),
+            "a model the user picked and did not get is a warning, not muted noise"
+        );
+    }
+
+    #[test]
+    fn goal_role_model_fallback_without_a_known_fallback_model() {
+        let event = SessionEvent::GoalRoleModelFallback {
+            role: "strategist".into(),
+            skeptic_idx: None,
+            requested_model: "m".into(),
+            fallback_model: None,
+            why: "spawn_failed".into(),
+        };
+        assert_eq!(
+            event.message(),
+            "Goal strategist ran on the session model, not \"m\": spawn_failed"
+        );
     }
 
     #[test]

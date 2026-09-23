@@ -1553,12 +1553,23 @@ impl SessionActor {
             .clone();
         // Mirror-child forks must use the parent model to reuse its cached prefix.
         let role_override = crate::session::goal_planner::RoleSpawnOverride::default();
-        if !matches!(
-            self.goal_role_models.planner,
-            crate::agent::config::GoalRoleModelChoice::InheritCurrent
-        ) {
-            tracing::info!(
-                "goal planner: configured role model ignored — forced to parent model for verbatim-fork cache reuse"
+        let fallback = self.goal_role_fallback_reporter().await;
+        let configured_planner = match &self.goal_role_models.planner {
+            crate::agent::config::GoalRoleModelChoice::InheritCurrent => None,
+            crate::agent::config::GoalRoleModelChoice::ModelOnly(model) => Some(model.clone()),
+            crate::agent::config::GoalRoleModelChoice::Explicit(pair) => Some(pair.model.clone()),
+        };
+        if let Some(configured) = configured_planner {
+            fallback.notify(
+                "planner",
+                None,
+                &configured,
+                crate::session::goal_planner::GOAL_ROLE_NOTICE_PLANNER_FORKS_SESSION,
+                Some(
+                    "the planner forks this session's conversation to reuse its prompt cache, \
+                     so it always runs on the session model."
+                        .to_string(),
+                ),
             );
         }
         let tool_names = self.resolve_inherit_role_tool_names().await;
@@ -1576,7 +1587,7 @@ impl SessionActor {
                 role_override,
                 cancel_token,
                 subagent_id_slot: Some(planner_subagent_id),
-                events: Some(self.events.writer()),
+                fallback,
             });
 
         let current_tokens = self.chat_state_handle.get_total_tokens().await as i64;
@@ -1693,7 +1704,7 @@ impl SessionActor {
                 cwd: Some(self.tool_context.cwd.as_str().to_owned()),
                 trace_sink: Some((self.chat_state_handle.clone(), task_tool_name)),
                 role_override,
-                events: Some(self.events.writer()),
+                fallback: self.goal_role_fallback_reporter().await,
             });
 
         let _role_guard = self
@@ -1809,7 +1820,7 @@ impl SessionActor {
                 parent_prompt_id,
                 cwd: Some(self.tool_context.cwd.as_str().to_owned()),
                 trace_sink: Some((self.chat_state_handle.clone(), task_tool_name)),
-                events: Some(self.events.writer()),
+                fallback: self.goal_role_fallback_reporter().await,
                 model_override: summarizer_model,
             });
 

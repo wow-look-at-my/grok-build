@@ -544,13 +544,12 @@ pub struct GoalOrchestration {
     /// set for an N == 1 sole-judge panel.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub skeptic0_session_id: Option<String>,
-    /// Resolved skeptic index → `{model, agent_type}` assignment, frozen at
-    /// the first verification panel and reused on every resume so skeptic-0
-    /// (and the cold panel) keep stable models across attempts. Index `i`
-    /// holds `pool[i % pool.len()]`; the vector grows (clamped) but never
-    /// rewrites a committed index. Empty ⇒ all skeptics inherit the current
-    /// model. Persists across snapshot save/restore exactly like
-    /// `skeptic0_session_id`, and is reset on the same terminal transitions.
+    /// Skeptic index → `{model, agent_type}` assignment of the LAST panel.
+    /// Every panel reassigns from the current pool; this copy only tells the
+    /// next panel whether skeptic 0 changed model, and so cannot continue its
+    /// run. Empty ⇒ all skeptics inherited the session model. Persists across
+    /// snapshot save/restore like `skeptic0_session_id`, and is reset on the
+    /// same terminal transitions.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub skeptic_model_assignment: Vec<crate::util::config::GoalRoleModel>,
     /// Normalized gap fingerprint of the previous `NotAchieved`
