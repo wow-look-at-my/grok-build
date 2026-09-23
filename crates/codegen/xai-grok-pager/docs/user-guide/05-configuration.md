@@ -815,7 +815,7 @@ The key ones. See the README for the complete list.
 
 | Variable | Description |
 |----------|-------------|
-| `GROK_CLI_CHAT_PROXY_BASE_URL` | Override API proxy base URL |
+| `GROK_CLI_CHAT_PROXY_BASE_URL` | API proxy base URL. No default: unset, nothing is sent to a proxy |
 
 ### Features
 

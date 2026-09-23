@@ -33,7 +33,7 @@ pub(crate) const CLI_BASE_URLS: &[&str] = &[CLI_BASE_URL_PRIMARY, CLI_BASE_URL_F
 /// about the `GrokBuildEnvironment` enum directly.
 #[derive(Debug, Clone)]
 pub struct UpdateConfig {
-    /// Chat API proxy base URL (versioned `https://cli-chat-proxy.grok.com/v1` endpoint).
+    /// Chat API proxy base URL. Blank when the environment sets none.
     pub proxy_base_url: String,
     /// Auth scope key for `~/.grok/auth.json`.
     pub auth_scope: String,

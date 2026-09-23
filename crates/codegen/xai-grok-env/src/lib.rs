@@ -65,11 +65,10 @@ impl GrokBuildEnvironment {
         std::env::var(format!("{}{var_suffix}", self.env_prefix()))
             .unwrap_or_else(|_| compiled.to_string())
     }
+    /// The env-var override, else blank. The compiled proxy URL is for
+    /// recognising the proxy only: nothing sends to it unless configured.
     pub fn cli_chat_proxy_base_url(&self) -> String {
-        self.resolve(
-            "_CLI_CHAT_PROXY_BASE_URL",
-            self.endpoints().cli_chat_proxy_base_url,
-        )
+        std::env::var(format!("{}_CLI_CHAT_PROXY_BASE_URL", self.env_prefix())).unwrap_or_default()
     }
     pub fn ws_origin(&self) -> String {
         self.resolve("_WS_ORIGIN", self.endpoints().ws_origin)
@@ -185,6 +184,19 @@ mod tests {
         assert_ne!(
             GrokBuildEnvironment::Production.relay_ws_url(),
             GrokBuildEnvironment::Production.gateway_ws_url(),
+        );
+    }
+    #[test]
+    fn an_unset_proxy_url_is_blank_never_the_compiled_host() {
+        let _unset = EnvVarGuard::remove("GROK_PRODUCTION_CLI_CHAT_PROXY_BASE_URL");
+        assert_eq!(
+            GrokBuildEnvironment::Production.cli_chat_proxy_base_url(),
+            ""
+        );
+        _unset.set_value("https://proxy.example/v1");
+        assert_eq!(
+            GrokBuildEnvironment::Production.cli_chat_proxy_base_url(),
+            "https://proxy.example/v1"
         );
     }
     #[test]

@@ -50,8 +50,6 @@ pub const DEFAULT_AGENT_TYPE: &str = "grok-build-plan";
 pub(crate) fn default_agent_type() -> String {
     DEFAULT_AGENT_TYPE.to_owned()
 }
-/// Default base URL for the cli chat proxy.
-pub const CLI_CHAT_PROXY_BASE_URL_DEFAULT: &str = "https://cli-chat-proxy.grok.com/v1";
 /// Default base URL for the public xAI API.
 pub const XAI_API_BASE_URL_DEFAULT: &str = "https://api.x.ai/v1";
 /// Default base URL for the asset server (profile images, etc.).
@@ -303,11 +301,19 @@ impl EndpointsConfig {
     }
     /// The cli-chat-proxy base URL through which all auxiliary services (and
     /// OAuth/session inference) resolve: explicit `cli_chat_proxy_base_url`, else
-    /// the public default. NEVER falls back to `xai_api_base_url` — that is the
-    /// inference endpoint (API-key auth) only.
+    /// BLANK. There is no compiled default: an unset proxy is never sent to, and
+    /// a blank URL makes every request built on it fail before it leaves.
     pub fn proxy_url(&self) -> String {
-        blank_as_unset(&self.cli_chat_proxy_base_url)
-            .unwrap_or_else(|| CLI_CHAT_PROXY_BASE_URL_DEFAULT.to_owned())
+        blank_as_unset(&self.cli_chat_proxy_base_url).unwrap_or_default()
+    }
+    /// `proxy_url` + `suffix`, or blank when the proxy is unset. A bare suffix
+    /// such as `/traces` is not a URL anyone can reach.
+    fn proxy_join(&self, suffix: &str) -> String {
+        let proxy = self.proxy_url();
+        if proxy.is_empty() {
+            return proxy;
+        }
+        format!("{}{suffix}", proxy.trim_end_matches('/'))
     }
     pub(crate) fn resolve_inference_base_url(&self) -> String {
         self.models_base_url
@@ -328,12 +334,8 @@ impl EndpointsConfig {
     /// else `proxy_url` + `/deployment/config`. Never `xai_api_base_url`, so the
     /// deployment key reaches the proxy, not the inference host.
     pub(crate) fn resolve_managed_config_url(&self) -> String {
-        blank_as_unset(&self.managed_config_url).unwrap_or_else(|| {
-            format!(
-                "{}/deployment/config",
-                self.proxy_url().trim_end_matches('/')
-            )
-        })
+        blank_as_unset(&self.managed_config_url)
+            .unwrap_or_else(|| self.proxy_join("/deployment/config"))
     }
     /// INTERNAL OTLP traces endpoint. Precedence:
     /// 1. `grok_internal_otlp_traces_endpoint` (verbatim)
@@ -361,7 +363,7 @@ impl EndpointsConfig {
             );
             return legacy;
         }
-        format!("{}/traces", self.proxy_url().trim_end_matches('/'))
+        self.proxy_join("/traces")
     }
     /// Legacy (standard-OTEL-var) internal traces endpoint, if any:
     /// `otel_exporter_otlp_traces_endpoint` verbatim, else
@@ -537,6 +539,9 @@ impl EndpointsConfig {
             .models_base_url
             .clone()
             .unwrap_or_else(|| self.proxy_url());
+        if base.trim().is_empty() {
+            return String::new();
+        }
         crate::remote::models_list_url_for_base(&base)
     }
 }
@@ -9759,12 +9764,12 @@ reasoning_effort = "low"
             unsafe { std::env::remove_var(k) };
         }
     }
-    /// INVARIANT: auxiliary-service resolvers resolve to the cli-chat-proxy, never
-    /// `xai_api_base_url` — overriding ONLY inference keeps every aux endpoint on
-    /// the proxy; explicit per-service overrides win verbatim.
+    /// INVARIANT: an unset proxy resolves every proxy-derived endpoint to BLANK,
+    /// never to a compiled host and never to `xai_api_base_url`. A set proxy is
+    /// what aux endpoints follow, and per-service overrides win verbatim.
     #[test]
     #[serial]
-    fn aux_endpoints_resolve_to_proxy_never_inference() {
+    fn an_unset_proxy_resolves_every_derived_endpoint_blank() {
         unset_endpoint_env_vars();
         let inference = "https://inference.acme-corp.example/xai/v1";
         let cfg = EndpointsConfig {
@@ -9772,21 +9777,26 @@ reasoning_effort = "low"
             cli_chat_proxy_base_url: None,
             ..Default::default()
         };
-        let proxy = CLI_CHAT_PROXY_BASE_URL_DEFAULT;
-        assert_eq!(cfg.proxy_url(), proxy);
-        assert_eq!(cfg.resolve_inference_base_url(), proxy);
-        assert_eq!(cfg.resolve_models_list_url(), format!("{proxy}/models"));
-        assert_eq!(
-            cfg.resolve_managed_config_url(),
-            format!("{proxy}/deployment/config")
-        );
-        assert_eq!(cfg.resolve_feedback_base_url(), proxy);
-        assert_eq!(cfg.resolve_trace_upload_url(), proxy);
-        assert_eq!(
-            cfg.resolve_otlp_traces_endpoint(),
-            format!("{proxy}/traces")
-        );
+        assert_eq!(cfg.proxy_url(), "");
+        assert_eq!(cfg.resolve_inference_base_url(), "");
+        assert_eq!(cfg.resolve_models_list_url(), "");
+        assert_eq!(cfg.resolve_managed_config_url(), "");
+        assert_eq!(cfg.resolve_feedback_base_url(), "");
+        assert_eq!(cfg.resolve_trace_upload_url(), "");
+        assert_eq!(cfg.resolve_otlp_traces_endpoint(), "");
         assert_eq!(cfg.xai_api_base_url, inference);
+        let proxy_only = EndpointsConfig {
+            cli_chat_proxy_base_url: Some("https://proxy.enterprise.example/v1".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(
+            proxy_only.resolve_managed_config_url(),
+            "https://proxy.enterprise.example/v1/deployment/config"
+        );
+        assert_eq!(
+            proxy_only.resolve_feedback_base_url(),
+            "https://proxy.enterprise.example/v1"
+        );
         let overridden = EndpointsConfig {
             cli_chat_proxy_base_url: Some("https://proxy.enterprise.example/v1".to_string()),
             managed_config_url: Some(
@@ -9834,10 +9844,7 @@ reasoning_effort = "low"
         )
         .expect("config should parse");
         assert!(cfg.endpoints.cli_chat_proxy_base_url.is_none());
-        assert_eq!(
-            cfg.endpoints.resolve_managed_config_url(),
-            format!("{CLI_CHAT_PROXY_BASE_URL_DEFAULT}/deployment/config")
-        );
+        assert_eq!(cfg.endpoints.resolve_managed_config_url(), "");
         assert!(
             !cfg.endpoints
                 .resolve_managed_config_url()
