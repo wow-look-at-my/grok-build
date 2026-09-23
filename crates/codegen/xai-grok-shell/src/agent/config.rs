@@ -3917,7 +3917,23 @@ pub(crate) fn resolve_model_list(
         let effective = with_provider.as_ref().unwrap_or(model_override);
         let mut entry = effective.apply(key, base, &cfg.endpoints);
         if let Some(pid) = model_override.model_provider.as_deref() {
-            fail_closed_on_provider_endpoint(&mut entry, pid);
+            if cfg.model_providers.contains_key(pid) {
+                fail_closed_on_provider_endpoint(&mut entry, pid);
+            } else {
+                // The model asked for an endpoint that does not exist. Never
+                // hand it the session bearer on whatever URL it fell back to.
+                tracing::error!(
+                    model_key = %key,
+                    model_provider = pid,
+                    base_url = %entry.info.base_url,
+                    "model names a [model_providers] block that does not exist; its requests carry no session credential"
+                );
+                if entry.auth_provider.is_none() {
+                    entry.auth_provider = Some(crate::auth::AuthProviderRef::fail_closed(format!(
+                        "model_provider:{pid} (missing, fail-closed)"
+                    )));
+                }
+            }
             entry.info.model_provider = Some(pid.to_owned());
         }
         tracing::debug!(
@@ -4589,7 +4605,23 @@ impl ConfigModelOverride {
         base: Option<ModelEntry>,
         endpoints: &EndpointsConfig,
     ) -> ModelEntry {
+        let is_new_entry = base.is_none();
         let mut entry = base.unwrap_or_else(|| ModelEntry::fallback(key, endpoints));
+        // A model the config adds names its own URL or inherits one from its
+        // provider or `[endpoints] models_base_url`. It never gets the
+        // cli-chat-proxy. A blank URL makes the sampler refuse every request.
+        if is_new_entry
+            && self.base_url.is_none()
+            && self.api_base_url.is_none()
+            && blank_as_unset(&endpoints.models_base_url).is_none()
+        {
+            tracing::error!(
+                model_key = %key,
+                "[model.{key}] has no base_url and inherits none: set base_url in [model.{key}] or on its [model_providers] block"
+            );
+            entry.info.base_url = String::new();
+            entry.api_base_url = None;
+        }
         if let Some(ref v) = self.model {
             entry.info.model = v.clone();
         }

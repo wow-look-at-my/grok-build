@@ -566,6 +566,10 @@ struct ClientDefaults {
     chat_message_profile: xai_grok_sampling_types::ChatMessageProfile,
 }
 
+/// The refusal for a model with no URL. No default URL exists to fall back to.
+pub const MISSING_BASE_URL: &str = "This model has no URL, so no request was sent. \
+     Set base_url in its [model.<id>] block, or on the [model_providers.<id>] block it names.";
+
 /// Endpoint URL builder, resolved once at client construction so each request
 /// only appends its path.
 #[derive(Clone, Debug)]
@@ -746,6 +750,9 @@ impl SamplingClient {
     /// pre-computes the default request headers. This does not perform
     /// any network I/O.
     pub fn new(config: SamplerConfig) -> Result<Self> {
+        if config.base_url.trim().is_empty() {
+            return Err(SamplingError::InvalidConfiguration(MISSING_BASE_URL));
+        }
         let mut headers = HeaderMap::new();
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
         if let Some(ref api_key) = config.api_key {
@@ -2949,6 +2956,22 @@ mod tests {
     fn new_with_minimal_config_succeeds() {
         let client = SamplingClient::new(minimal_config()).expect("client should construct");
         assert_eq!(client.api_backend(), ApiBackend::ChatCompletions);
+    }
+
+    #[test]
+    fn a_blank_base_url_is_refused_before_any_request() {
+        for blank in ["", "   "] {
+            let mut cfg = minimal_config();
+            cfg.base_url = blank.to_string();
+            cfg.api_backend = ApiBackend::Messages;
+            match SamplingClient::new(cfg) {
+                Err(SamplingError::InvalidConfiguration(msg)) => {
+                    assert!(msg.contains("base_url"), "{msg}");
+                }
+                Err(other) => panic!("wrong error for {blank:?}: {other}"),
+                Ok(_) => panic!("a blank base_url must not build a client"),
+            }
+        }
     }
 
     #[test]
