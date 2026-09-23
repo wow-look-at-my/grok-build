@@ -151,6 +151,28 @@ pub(crate) fn expand_skeptic_assignment(
     out
 }
 
+/// Skeptic indices whose frozen model differs from what the current `pool`
+/// gives them: the index, the kept model and the configured model. The assignment wins,
+/// so each one is a configured model the panel does not use. An empty pool
+/// configures nothing, so nothing differs.
+pub(crate) fn skeptics_pinned_away_from_pool(
+    assignment: &[crate::util::config::GoalRoleModel],
+    pool: &[crate::util::config::GoalRoleModel],
+) -> Vec<(u32, String, String)> {
+    if pool.is_empty() {
+        return Vec::new();
+    }
+    assignment
+        .iter()
+        .enumerate()
+        .filter_map(|(i, kept)| {
+            let configured = &pool[i % pool.len()];
+            (kept.model != configured.model)
+                .then(|| (i as u32, kept.model.clone(), configured.model.clone()))
+        })
+        .collect()
+}
+
 /// Per-skeptic JSON verdict FILE NAME template (rooted under the
 /// per-goal scratch root like [`GOAL_CLASSIFIER_DETAILS_PATH_TEMPLATE`]).
 /// The harness reads each skeptic's JSON to drive the aggregation; the
@@ -549,9 +571,8 @@ pub(crate) struct ChannelSpawner {
     /// current model — round-robin expansion + auth/capability fail-open is
     /// resolved parent-side before the spawner is built.
     pub(crate) skeptic_overrides: Vec<RoleSpawnOverride>,
-    /// Event sink for the spawn-and-retry-once fail-open telemetry; `None`
-    /// in tests / when no event log is wired.
-    pub(crate) events: Option<EventWriter>,
+    /// Where a spawn-and-retry-once fail-open is reported. `Default` in tests.
+    pub(crate) fallback: crate::session::goal_planner::RoleFallbackReporter,
 }
 
 #[async_trait::async_trait]
@@ -577,7 +598,7 @@ impl GoalClassifierSpawner for ChannelSpawner {
             "skeptic",
             Some(skeptic_idx),
             override_,
-            self.events.as_ref(),
+            &self.fallback,
             prompt,
             |model, harness, prompt| self.send_one(id, prompt, model, harness, resume_from),
         )
@@ -2524,7 +2545,7 @@ mod tests {
             cwd: None,
             trace_sink: None,
             skeptic_overrides: Vec::new(),
-            events: None,
+            fallback: Default::default(),
         };
         let handle = tokio::spawn(async move {
             let _ = spawner
@@ -2581,7 +2602,7 @@ mod tests {
                 },
                 RoleSpawnOverride::default(),
             ],
-            events: None,
+            fallback: Default::default(),
         };
         let handle = tokio::spawn(async move {
             // Skeptic 0 with a resume id: even on the cold path it carries
@@ -2646,7 +2667,7 @@ mod tests {
             cwd: None,
             trace_sink: None,
             skeptic_overrides: vec![RoleSpawnOverride::default()],
-            events: None,
+            fallback: Default::default(),
         };
         let handle = tokio::spawn(async move {
             let _ = spawner
@@ -6013,7 +6034,7 @@ mod tests {
                 },
                 RoleSpawnOverride::default(),
             ],
-            events: None,
+            fallback: Default::default(),
         });
 
         let (_log, emit) = collect_events();
@@ -6380,7 +6401,7 @@ mod tests {
             cwd: None,
             trace_sink: None,
             skeptic_overrides: Vec::new(),
-            events: None,
+            fallback: Default::default(),
         };
         let spawn_task = tokio::spawn(async move {
             spawner

@@ -155,6 +155,95 @@ pub(crate) trait RetryableSpawnError {
     fn is_cancelled(&self) -> bool;
 }
 
+/// Notice reason: a resumed goal keeps the skeptic models it froze at its
+/// first verification, so a model configured since then is not used.
+pub(crate) const GOAL_ROLE_NOTICE_ASSIGNMENT_FROZEN: &str = "assignment_frozen";
+
+/// Notice reason: the planner forks the session conversation to reuse its
+/// prompt cache, so it always runs on the session model.
+pub(crate) const GOAL_ROLE_NOTICE_PLANNER_FORKS_SESSION: &str = "planner_forks_session";
+
+/// Reports that a `/goal` role left the model the user configured for it.
+///
+/// The event feeds telemetry. The notice reaches the pager, which shows it as
+/// a warning. Without the notice the user sees only that the role ran on the
+/// session model, and never why.
+#[derive(Clone, Default)]
+pub(crate) struct RoleFallbackReporter {
+    pub(crate) events: Option<EventWriter>,
+    pub(crate) notify: Option<crate::session::goal_orchestrator::GoalNotifySender>,
+    /// The session model, which is what a fallback runs on.
+    pub(crate) fallback_model: Option<String>,
+}
+
+impl RoleFallbackReporter {
+    pub(crate) fn report(
+        &self,
+        role: &'static str,
+        skeptic_idx: Option<u32>,
+        requested_model: &str,
+        reason: GoalRoleModelFailOpenReason,
+        detail: Option<String>,
+    ) {
+        if let Some(ev) = &self.events {
+            ev.emit(Event::GoalRoleModelFailOpen {
+                role,
+                skeptic_idx,
+                reason: reason.as_const_str(),
+            });
+        }
+        self.notify(
+            role,
+            skeptic_idx,
+            requested_model,
+            reason.as_const_str(),
+            detail,
+        );
+    }
+
+    /// Send the pager notice alone. For a fallback that has no telemetry
+    /// reason, e.g. the planner that always forks the session model.
+    pub(crate) fn notify(
+        &self,
+        role: &'static str,
+        skeptic_idx: Option<u32>,
+        requested_model: &str,
+        reason: &str,
+        detail: Option<String>,
+    ) {
+        tracing::warn!(
+            role,
+            ?skeptic_idx,
+            requested_model,
+            reason,
+            detail = detail.as_deref().unwrap_or(""),
+            "goal role did not run on its configured model"
+        );
+        if let Some(notify) = &self.notify {
+            notify.send_update(
+                crate::extensions::notification::SessionUpdate::GoalRoleModelFallback {
+                    role: role.to_string(),
+                    skeptic_idx,
+                    requested_model: requested_model.to_string(),
+                    fallback_model: self.fallback_model.clone(),
+                    reason: reason.to_string(),
+                    detail,
+                },
+            );
+        }
+    }
+}
+
+/// What a role asked for, for the fallback notice. A harness-only override
+/// names no model, so the harness stands in for it.
+fn requested_label(override_: &RoleSpawnOverride) -> String {
+    match (&override_.model, &override_.agent_type) {
+        (Some(model), _) => model.clone(),
+        (None, Some(harness)) => format!("harness {harness}"),
+        (None, None) => String::new(),
+    }
+}
+
 impl RetryableSpawnError for SpawnError {
     fn is_cancelled(&self) -> bool {
         matches!(
@@ -192,12 +281,12 @@ pub(crate) async fn spawn_with_fail_open_retry<T, E, F, Fut>(
     role: &'static str,
     skeptic_idx: Option<u32>,
     override_: &RoleSpawnOverride,
-    events: Option<&EventWriter>,
+    fallback: &RoleFallbackReporter,
     prompt: RoleRenderedPrompt,
     mut spawn: F,
 ) -> Result<T, E>
 where
-    E: RetryableSpawnError,
+    E: RetryableSpawnError + std::fmt::Display,
     F: FnMut(Option<String>, Option<String>, String) -> Fut,
     Fut: std::future::Future<Output = Result<T, E>>,
 {
@@ -212,20 +301,17 @@ where
         prompt.primary,
     )
     .await;
-    let should_retry = match &first {
-        Ok(_) => false,
-        Err(e) => !e.is_cancelled(),
+    let error = match first {
+        Err(e) if !e.is_cancelled() => e,
+        other => return other,
     };
-    if !should_retry {
-        return first;
-    }
-    if let Some(ev) = events {
-        ev.emit(Event::GoalRoleModelFailOpen {
-            role,
-            skeptic_idx,
-            reason: GoalRoleModelFailOpenReason::SpawnFailed.as_const_str(),
-        });
-    }
+    fallback.report(
+        role,
+        skeptic_idx,
+        &requested_label(override_),
+        GoalRoleModelFailOpenReason::SpawnFailed,
+        Some(error.to_string()),
+    );
     // Retry on the session harness — use the matching `fallback` render so the
     // prompt names the toolset the retry actually runs on.
     spawn(None, None, prompt.fallback).await
@@ -359,9 +445,8 @@ pub(crate) struct ChannelSpawner {
     /// Now can address the live planner child (the goal tracker owns the cell;
     /// see `GoalTracker::planner_subagent_id`). `None` when nothing needs it.
     pub(crate) subagent_id_slot: Option<std::sync::Arc<std::sync::Mutex<Option<String>>>>,
-    /// Event sink for the spawn-and-retry-once fail-open telemetry; `None`
-    /// in tests / when no event log is wired.
-    pub(crate) events: Option<EventWriter>,
+    /// Where a spawn-and-retry-once fail-open is reported. `Default` in tests.
+    pub(crate) fallback: RoleFallbackReporter,
 }
 
 #[async_trait::async_trait]
@@ -385,7 +470,7 @@ impl GoalPlannerSpawner for ChannelSpawner {
             "planner",
             None,
             &self.role_override,
-            self.events.as_ref(),
+            &self.fallback,
             prompt,
             |model, harness, prompt| self.send_one(id, prompt, model, harness),
         )
@@ -821,7 +906,7 @@ mod tests {
             role_override: RoleSpawnOverride::default(),
             cancel_token: tokio_util::sync::CancellationToken::new(),
             subagent_id_slot: None,
-            events: None,
+            fallback: RoleFallbackReporter::default(),
         };
         let handle = tokio::spawn(async move {
             let _ = spawner
@@ -1551,7 +1636,7 @@ mod tests {
             },
             cancel_token: tokio_util::sync::CancellationToken::new(),
             subagent_id_slot: None,
-            events: None,
+            fallback: RoleFallbackReporter::default(),
         };
         let handle = tokio::spawn(async move {
             let _ = spawner
@@ -1626,7 +1711,7 @@ mod tests {
             "planner",
             None,
             &ov,
-            None,
+            &RoleFallbackReporter::default(),
             role_prompt("PROMPT"),
             |model, harness, prompt| {
                 let c = c.clone();
@@ -1671,7 +1756,7 @@ mod tests {
             "planner",
             None,
             &ov,
-            None,
+            &RoleFallbackReporter::default(),
             RoleRenderedPrompt {
                 primary: "PRIMARY".to_string(),
                 fallback: "FALLBACK".to_string(),
@@ -1707,7 +1792,7 @@ mod tests {
             "planner",
             None,
             &ov,
-            None,
+            &RoleFallbackReporter::default(),
             role_prompt("PROMPT"),
             |model, harness, _prompt| {
                 let c = c.clone();
@@ -1740,7 +1825,7 @@ mod tests {
             "skeptic",
             Some(2),
             &ov,
-            None,
+            &RoleFallbackReporter::default(),
             role_prompt("PROMPT"),
             |_m, _h, _prompt| {
                 let c = c.clone();
@@ -1770,7 +1855,7 @@ mod tests {
             "planner",
             None,
             &ov,
-            None,
+            &RoleFallbackReporter::default(),
             role_prompt("PROMPT"),
             |_m, _h, _prompt| {
                 let c = c.clone();
@@ -1801,6 +1886,117 @@ mod tests {
         );
     }
 
+    /// A reporter wired to a real notify sender, and the persistence channel
+    /// that every notice it sends lands on.
+    fn notice_reporter() -> (
+        RoleFallbackReporter,
+        tokio::sync::mpsc::UnboundedReceiver<crate::session::persistence::PersistenceMsg>,
+    ) {
+        let (gateway_tx, _gateway_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (persist_tx, persist_rx) = tokio::sync::mpsc::unbounded_channel();
+        let notify = crate::session::goal_orchestrator::GoalNotifySender::new(
+            agent_client_protocol::SessionId::new("s"),
+            xai_acp_lib::AcpAgentGatewaySender::new(gateway_tx),
+            persist_tx,
+        );
+        let reporter = RoleFallbackReporter {
+            events: None,
+            notify: Some(notify),
+            fallback_model: Some("grok-4.7".into()),
+        };
+        (reporter, persist_rx)
+    }
+
+    /// Every `GoalRoleModelFallback` notice the channel holds.
+    fn drain_fallback_notices(
+        rx: &mut tokio::sync::mpsc::UnboundedReceiver<crate::session::persistence::PersistenceMsg>,
+    ) -> Vec<crate::extensions::notification::SessionUpdate> {
+        let mut out = Vec::new();
+        while let Ok(msg) = rx.try_recv() {
+            if let crate::session::persistence::PersistenceMsg::Update(
+                crate::session::storage::SessionUpdate::Xai(n),
+            ) = msg
+                && matches!(
+                    n.update,
+                    crate::extensions::notification::SessionUpdate::GoalRoleModelFallback { .. }
+                )
+            {
+                out.push(n.update);
+            }
+        }
+        out
+    }
+
+    /// The user must SEE a fallback, with the spawn's own error text. An
+    /// event in `events.jsonl` alone reaches only a dashboard.
+    #[tokio::test]
+    async fn fail_open_retry_tells_the_user_why() {
+        let ov = RoleSpawnOverride {
+            model: Some("claude-opus".into()),
+            agent_type: None,
+        };
+        let (reporter, mut rx) = notice_reporter();
+        let out: Result<String, SpawnError> = spawn_with_fail_open_retry(
+            "skeptic",
+            Some(0),
+            &ov,
+            &reporter,
+            role_prompt("PROMPT"),
+            |model, _h, _prompt| async move {
+                match model {
+                    Some(_) => Err(SpawnError::Transport("401 bad api key".into())),
+                    None => Ok("ok".to_string()),
+                }
+            },
+        )
+        .await;
+        assert_eq!(out.unwrap(), "ok");
+        let notices = drain_fallback_notices(&mut rx);
+        assert_eq!(notices.len(), 1, "one notice per fallback: {notices:?}");
+        let crate::extensions::notification::SessionUpdate::GoalRoleModelFallback {
+            role,
+            skeptic_idx,
+            requested_model,
+            fallback_model,
+            reason,
+            detail,
+        } = &notices[0]
+        else {
+            unreachable!()
+        };
+        assert_eq!(role, "skeptic");
+        assert_eq!(*skeptic_idx, Some(0));
+        assert_eq!(requested_model, "claude-opus");
+        assert_eq!(fallback_model.as_deref(), Some("grok-4.7"));
+        assert_eq!(reason, "spawn_failed");
+        assert!(
+            detail
+                .as_deref()
+                .is_some_and(|d| d.contains("401 bad api key")),
+            "the spawn's own error must reach the user: {detail:?}"
+        );
+    }
+
+    /// A spawn on the configured model that succeeds is not a fallback.
+    #[tokio::test]
+    async fn a_successful_configured_spawn_sends_no_notice() {
+        let ov = RoleSpawnOverride {
+            model: Some("claude-opus".into()),
+            agent_type: None,
+        };
+        let (reporter, mut rx) = notice_reporter();
+        let _: Result<String, SpawnError> = spawn_with_fail_open_retry(
+            "skeptic",
+            Some(0),
+            &ov,
+            &reporter,
+            role_prompt("PROMPT"),
+            |_m, _h, _prompt| async move { Ok::<_, SpawnError>("ok".to_string()) },
+        )
+        .await;
+        assert!(drain_fallback_notices(&mut rx).is_empty());
+    }
+
     #[tokio::test]
     async fn fail_open_retry_emits_spawn_failed_event() {
         let dir = tempfile::tempdir().unwrap();
@@ -1809,12 +2005,16 @@ mod tests {
             model: Some("m".into()),
             agent_type: Some("t".into()),
         };
+        let reporter = RoleFallbackReporter {
+            events: Some(writer),
+            ..Default::default()
+        };
         // Both attempts fail: wrapper still emits the SpawnFailed reason once.
         let _: Result<String, SpawnError> = spawn_with_fail_open_retry(
             "skeptic",
             Some(1),
             &ov,
-            Some(&writer),
+            &reporter,
             role_prompt("PROMPT"),
             |_m, _h, _prompt| async move { Err::<String, _>(SpawnError::Transport("x".into())) },
         )
@@ -1879,7 +2079,7 @@ mod tests {
             },
             cancel_token: tokio_util::sync::CancellationToken::new(),
             subagent_id_slot: None,
-            events: None,
+            fallback: RoleFallbackReporter::default(),
         });
         let (_log, emit) = collect_events();
         let outcome = run_goal_planner(
@@ -1946,7 +2146,7 @@ mod tests {
             },
             cancel_token: tokio_util::sync::CancellationToken::new(),
             subagent_id_slot: None,
-            events: None,
+            fallback: RoleFallbackReporter::default(),
         });
         let (_log, emit) = collect_events();
         let outcome = run_goal_planner(
