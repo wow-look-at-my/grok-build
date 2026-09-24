@@ -4860,8 +4860,8 @@ fn sending_mid_turn_migrates_stuck_local_rows_to_the_shell() {
     );
 }
 
-/// Migration stops at the first row it cannot re-send losslessly: an image
-/// prompt's images do not fit `Effect::SendPrompt`. Moving the row behind it
+/// Migration stops at the first row it cannot re-send losslessly: a skill
+/// row's wire payload has no place in the queued send. Moving the row behind it
 /// would hoist a newer prompt above an older one in the merged view, so that
 /// row — and everything after it — stays local.
 #[test]
@@ -4872,25 +4872,15 @@ fn migration_stops_at_a_row_it_cannot_carry() {
     {
         let agent = app.agents.get_mut(&id).unwrap();
         agent.session.state = AgentState::TurnRunning;
-        agent.session.enqueue_prompt("with-image".into());
+        agent.session.enqueue_prompt("skill-row".into());
         agent
             .session
             .pending_prompts
             .front_mut()
             .unwrap()
-            .images
-            .push(crate::prompt_images::PastedImage {
-                element_id: xai_ratatui_textarea::ElementId::from_raw(0),
-                display_number: 1,
-                mime_type: "image/png".into(),
-                dimensions: Some((10, 10)),
-                byte_len: 16,
-                encoded_bytes: Some(vec![0u8; 16].into()),
-                source_path: None,
-                staged_temp_path: None,
-                session_image_path: None,
-                preview: crate::prompt_images::PromptImagePreview::default(),
-            });
+            .wire_blocks = Some(vec![acp::ContentBlock::Text(acp::TextContent::new(
+            "<skill/>".to_string(),
+        ))]);
         agent.session.enqueue_prompt("behind-it".into());
     }
 
@@ -4900,7 +4890,7 @@ fn migration_stops_at_a_row_it_cannot_carry() {
         !effects
             .iter()
             .any(|e| matches!(e, Effect::SendPrompt { text, .. } if text != "newest")),
-        "nothing may jump the image row: {effects:?}"
+        "nothing may jump the skill row: {effects:?}"
     );
     let queued: Vec<&str> = app.agents[&id]
         .session
@@ -4910,7 +4900,7 @@ fn migration_stops_at_a_row_it_cannot_carry() {
         .collect();
     assert_eq!(
         queued,
-        vec!["with-image", "behind-it", "newest"],
+        vec!["skill-row", "behind-it", "newest"],
         "order is preserved and the newest prompt stays behind them"
     );
 }
