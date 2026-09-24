@@ -76,6 +76,13 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
   - `set_change_notifier` gives the poller a way to ask for one repaint, and only when the color actually changed.
   - `ci_dot_animating` makes `tick_demand` report Slow while a run is in flight, which is what supplies the frames the pulse animates over.
 
+## Branch-stats notes
+
+- The status bar shows `↑ahead ↓behind +ins -del` after the branch name (`branch_stats.rs`, drawn in `agent_view/render.rs`). A count of zero is not drawn.
+- Ahead/behind is against the branch HEAD was created from. The order is: the reflog's `branch: Created from X`, an upstream that names a DIFFERENT branch, `origin/HEAD`, `origin/main`, `origin/master`, `main`, `master`. The current branch is never its own base, so `master` compares against `origin/master`.
+- The +/- counts are the working tree against HEAD: staged, unstaged, and untracked files git does not ignore.
+- The diff reads the working tree. It runs off-thread behind a 5 s throttle in its own cache, never on the render path.
+
 ## CI pipeline notes: the `gh` host worker, the `ci` tool, and the CI stop gate
 
 - The unsandboxed host worker (`xai-grok-sandbox/src/ci_host.rs`) is the only way anything in a `--sandbox` session reaches `gh`. A jail re-execs the whole binary. A `gh` spawned from inside it reaches neither the host credentials nor the network. The host starts the worker moments before the re-exec and hands it in as an open socketpair fd.
