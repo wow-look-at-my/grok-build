@@ -16,6 +16,7 @@ struct CapturedSpan {
     attributes: BTreeMap<String, String>,
 }
 
+#[derive(Clone, Default)]
 struct SpanCapture(Arc<Mutex<HashMap<u64, CapturedSpan>>>);
 
 struct FieldVisitor<'a>(&'a mut BTreeMap<String, String>);
