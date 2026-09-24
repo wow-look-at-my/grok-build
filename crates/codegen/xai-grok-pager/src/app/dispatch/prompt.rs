@@ -743,6 +743,10 @@ pub(super) fn dispatch_send_prompt_inner(
         //
         // The IDLE case is unchanged (falls through to the local path below,
         // which drains instantly and renders the user block) — preserving the
+        // byte-for-byte idle experience. Skill/editing/non-running cases also
+        // stay local. An image prompt takes the immediate path: the shell
+        // harvests its image blocks into the running turn with the text.
+        //
         // A follow-up chip submission supersedes the current response's
         // suggestions: clear the visible chips here — INSIDE the send/enqueue
         // path, after the `reconnect_pending` and active-agent early-return
@@ -888,6 +892,7 @@ pub(super) fn dispatch_send_prompt_inner(
             drain_prompt_state_to_last_queued(agent);
             agent.prompt.set_text("");
         }
+        // Local queue while a turn is running: tip after
         // this branch so the agent mut-borrow is released first.
         tip_send_now_after_queue = queued_while_running;
     }

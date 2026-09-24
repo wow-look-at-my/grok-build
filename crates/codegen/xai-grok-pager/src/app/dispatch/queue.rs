@@ -38,7 +38,10 @@ fn combine_queued_prompts_enabled() -> bool {
 /// Whether a prompt/command submitted right now should take the
 /// server-authoritative immediate-send path: the **server is busy**
 /// (running a turn or still holding queued prompts), the session exists, the
- — `is_turn_running() || !shared_queue.is_empty()`:** the
+/// local drip-feed queue is empty, and we're not mid-edit / model-switch /
+/// replay. Kind-specific extras are checked by the caller.
+///
+/// **Server-busy — `is_turn_running() || !shared_queue.is_empty()`:** the
 /// immediate-send path is for prompts that must queue server-side rather than
 /// start a turn locally. It is NOT enough to check `is_turn_running()`: in
 /// leader mode there is a turn-end window where this client has processed the
@@ -75,8 +78,8 @@ fn combine_queued_prompts_enabled() -> bool {
 /// drip-feed queue instead reaches the model only once the whole turn ends, so
 /// gating this on leader mode meant single-client sessions never got ASAP
 /// delivery at all. Multi-client ordering is a separate concern the shared
-/// queue also solves; with a single client both queues still merge as
-/// rows then local rows*, so a local row (slash command, scheduled
+/// queue also solves; with one client the two queues still merge as *server
+/// rows first, then local rows*, so a local row (slash command, scheduled
 /// prompt) can never move above them.
 pub(super) fn immediate_server_send_eligible(agent: &AgentView) -> bool {
     let server_busy = agent.session.state.is_turn_running() || !agent.shared_queue.is_empty();
@@ -89,8 +92,12 @@ pub(super) fn immediate_server_send_eligible(agent: &AgentView) -> bool {
 }
 
 /// Whether a local row carries only text and images, and so survives the trip
-/// through [`server_queue_send_effect`] without losing anything the model
-/// sees.
+/// through [`server_queue_send_effect`] without losing anything the model sees.
+///
+/// A skill's wire payload, a cron task's framing and combined display segments
+/// have no place in that effect, so a row holding any of them stays local.
+/// Chip elements do not block: they only style a rewind restore, and the
+/// immediate-send path drops them the same way.
 fn row_is_plain_text(prompt: &crate::app::agent::QueuedPrompt) -> bool {
     prompt.kind == crate::app::agent::QueueEntryKind::Prompt
         && prompt.wire_blocks.is_none()
@@ -101,7 +108,7 @@ fn row_is_plain_text(prompt: &crate::app::agent::QueuedPrompt) -> bool {
 
 /// The effect that puts a prompt on the shell's queue. The shell harvests a
 /// row's image blocks into the running turn with its text, so an image prompt
-/// takes this route too. It must never wait in the local queue for the turn end.
+/// takes this route too, and never waits in the local queue for the turn end.
 pub(super) fn server_queue_send_effect(
     agent_id: AgentId,
     session_id: acp::SessionId,
@@ -152,7 +159,10 @@ fn row_may_be_migrated(prompt: &crate::app::agent::QueuedPrompt) -> bool {
 ///
 /// [`maybe_drain_queue`] only drains local rows once the session is idle, and
 /// [`immediate_server_send_eligible`] only lets a prompt onto the shell's queue
- into the running turn
+/// while the local queue is empty. Together those two rules trap each other: a
+/// single row parked locally during a turn, such as a prompt typed during the
+/// startup race, keeps every later prompt local as well, and a
+/// local row is never harvested into the running turn
 /// (`harvest_queued_prompts_into_interjections` reads the shell's queue). A
 /// session that never idles — one driving a goal — never reaches the recovery
 /// in [`maybe_drain_queue`], so this function is the only rescue: it also runs
