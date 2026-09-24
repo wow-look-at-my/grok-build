@@ -2,7 +2,21 @@
 
 use super::*;
 
-/// Per-role toolset capability requirement for the parent-side gate.
+/// The objective of a goal made from an approved plan-mode plan. The plan's
+/// `# ` headline names the work. The goal planner writes `# Plan: <headline>`,
+/// so that prefix is dropped.
+pub(crate) fn approved_plan_objective(plan: &str) -> String {
+    let headline = plan
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("# "))
+        .map(|h| h.trim().strip_prefix("Plan:").unwrap_or(h).trim())
+        .filter(|h| !h.is_empty());
+    match headline {
+        Some(headline) => format!("Implement the approved plan: {headline}"),
+        None => "Implement the approved plan".to_string(),
+    }
+}
+ capability requirement for the parent-side gate.
 ///
 /// Each role needs a different minimum toolset to do its job; a configured
 /// harness `agent_type` whose role toolset lacks the capability fails open to
@@ -955,6 +969,96 @@ impl SessionActor {
     }
 
     pub(super) async fn setup_goal(&self, objective: &str, token_budget: Option<i64>) -> String {
+        self.create_goal_orchestration(objective, token_budget)
+            .await;
+        self.maybe_run_goal_planner(objective).await;
+        let planner_enabled = self.goal_planner_enabled;
+        self.render_goal_start_reminder(objective, |o| goal_reminder_plan_path(planner_enabled, o))
+            .await
+    }
+
+    /// Turn the plan the user just approved in plan mode into an active goal.
+    ///
+    /// Plan mode is the interactive form of the goal planner. The approved
+    /// plan is published as the goal's plan and its baseline, so the planner
+    /// never runs.
+    /// same as a plan the planner wrote.
+    ///
+    /// Returns the goal-start reminder, or `None` when no goal was made. That
+    /// covers a subagent, a session without the goal harness.
+    /// is already active: approving a plan never replaces a running goal.
+    pub(super) async fn setup_goal_from_approved_plan(&self, plan_content: &str) -> Option<String> {
+        use crate::session::goal_tracker::{GoalPauseReason, GoalStatus};
+        if self.startup_hints.is_subagent || !self.goal_harness_enabled() {
+            return None;
+        }
+        if self.goal_tracker.lock().status() == Some(GoalStatus::Active) {
+            tracing::info!("approved plan: a goal is already active; the plan does not replace it");
+            return None;
+        }
+        let objective = approved_plan_objective(plan_content);
+        let goal_id = self.create_goal_orchestration(&objective, None).await;
+        let (plan_path, baseline_path) = {
+            let tracker = self.goal_tracker.lock();
+            (tracker.plan_path(), tracker.plan_baseline_path())
+        };
+        if let Err(err) = tokio::fs::write(&plan_path, plan_content).await {
+            tracing::error!(
+                error = %err,
+                path = %plan_path.display(),
+                "approved plan: could not write the goal plan"
+            );
+            let _ = self
+                .auto_pause_goal_if_matches_with_message(
+                    &goal_id,
+                    GoalPauseReason::User,
+                    format!(
+                        "Could not save the approved plan to {}: {err}. \
+                         Resume with /goal to plan it again.",
+                        plan_path.display()
+                    ),
+                )
+                .await;
+            return None;
+        }
+        // A missing baseline only costs the verifier its PLAN_CHANGES diff.
+        let baseline = match tokio::fs::write(&baseline_path, plan_content).await {
+            Ok(()) => Some(baseline_path),
+            Err(err) => {
+                tracing::error!(
+                    error = %err,
+                    path = %baseline_path.display(),
+                    "approved plan: could not write the plan baseline; PLAN_CHANGES will render (none)"
+                );
+                None
+            }
+        };
+        {
+            let current_tokens = self.chat_state_handle.get_total_tokens().await as i64;
+            let (tokens_used, finished_marginal) = self.goal_tokens(current_tokens);
+            let mut tracker = self.goal_tracker.lock();
+            let Some(goal) = tracker
+                .snapshot_mut()
+                .filter(|goal| goal.goal_id == goal_id && goal.status == GoalStatus::Active)
+            else {
+                return None;
+            };
+            goal.plan_file = Some(plan_path);
+            goal.plan_baseline_file = baseline;
+            self.goal_notify_sender().emit_goal_updated(
+                &mut tracker,
+                tokens_used,
+                finished_marginal,
+            );
+        }
+        Some(
+            self.render_goal_start_reminder(&objective, |o| o.plan_file.as_deref())
+                .await,
+        )
+    }
+
+    /// Create the goal orchestration and announce it. Returns the new goal id.
+    async fn create_goal_orchestration(&self, objective: &str, token_budget: Option<i64>) -> String {
         let goal_id = uuid::Uuid::new_v4().to_string();
         let created_at = chrono::Utc::now().to_rfc3339();
         let token_baseline = self.chat_state_handle.get_total_tokens().await as i64;
@@ -965,7 +1069,7 @@ impl SessionActor {
         {
             let mut tracker = self.goal_tracker.lock();
             tracker.create_goal(
-                goal_id,
+                goal_id.clone(),
                 objective.to_owned(),
                 token_budget,
                 token_baseline,
@@ -992,17 +1096,25 @@ impl SessionActor {
                 finished_marginal,
             );
         }
+        goal_id
+    }
 
-        self.maybe_run_goal_planner(objective).await;
-
+    /// The `<system-reminder>` that opens a goal's earliest implementing
+    /// turn. `plan_path` picks the plan the reminder names off the orchestration.
+    async fn render_goal_start_reminder(
+        &self,
+        objective: &str,
+        plan_path: impl FnOnce(
+            &crate::session::goal_tracker::GoalOrchestration,
+        ) -> Option<&std::path::Path>,
+    ) -> String {
         let names = self.resolve_goal_tool_names().await;
-        let planner_enabled = self.goal_planner_enabled;
         let body = {
             let tracker = self.goal_tracker.lock();
             let o = tracker
                 .snapshot()
                 .expect("create_goal must populate the orchestration snapshot");
-            let plan_path = goal_reminder_plan_path(planner_enabled, o);
+            let plan_path = plan_path(o);
             let scratch_dir = crate::session::goal_tracker::implementer_scratch_dir(&o.verifier_id);
             let scratch = scratch_dir.to_string_lossy();
             if self.goal_runs_on_workflow_engine() {
