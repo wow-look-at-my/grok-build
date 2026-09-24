@@ -77,8 +77,11 @@ async fn provider_only_config_answers_a_prompt() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore]
-async fn provider_outside_the_allowlist_keeps_the_prompt_and_says_why() {
+async fn a_base_url_in_the_config_is_allowed_without_an_allowlist_entry() {
     let content = ContentController::start().await.expect("start content");
+    content.set_response(format!("{MOCK_RESPONSE_SENTINEL} provider answered."));
+    // Nothing the harness adds covers the mock's host. Only the config's
+    // base_url can allow it.
     let mut harness = spawn_provider_only(
         &content,
         &[EnvOp::set("GROK_ALLOWED_ENDPOINTS", "allowed.invalid")],
@@ -89,20 +92,20 @@ async fn provider_outside_the_allowlist_keeps_the_prompt_and_says_why() {
 
     harness.inject_keys(b"keep this text").expect("type");
     harness.update(Duration::from_secs(3));
-    harness.inject_keys(b"\r").expect("submit");
-    harness.update(Duration::from_secs(5));
     let screen = harness.screen_contents();
     assert!(
         screen.contains("keep this text"),
         "the typed prompt was thrown away:\n{screen}"
     );
-    assert!(
-        screen.contains("allowed_endpoints"),
-        "the screen does not say how to allow the endpoint:\n{screen}"
-    );
-    assert!(
-        !content.requests().iter().any(|e| e.method == "POST"),
-        "a request reached an endpoint that is not allowed"
-    );
+    harness.inject_keys(b"\r").expect("submit");
+    if harness
+        .wait_for_text(MOCK_RESPONSE_SENTINEL, Duration::from_secs(30))
+        .is_err()
+    {
+        panic!(
+            "the provider in base_url was not reached:\n{}",
+            harness.screen_contents()
+        );
+    }
     harness.quit().expect("clean quit");
 }

@@ -220,6 +220,7 @@ fn resolve_dismissable_campaigns() -> Vec<CampaignEntry> {
 /// (base → resolve [override/kill/merge/dismiss] → apply), one `ConfigLayers::load`.
 pub fn load_effective_config() -> std::io::Result<toml::Value> {
     let layers = ConfigLayers::load()?;
+    allow_urls_written_in_config(&layers);
     let dismissed = load_dismissed_ids();
     let remote = cached_remote_campaigns();
     let mut effective = layers.effective_config_base();
@@ -234,7 +235,98 @@ pub fn load_effective_config() -> std::io::Result<toml::Value> {
 /// resolve against a never-seeded cache, so the divergence is named instead
 /// of implied (mirrors `ConfigLayers::effective_config_disk_only`).
 pub fn load_effective_config_disk_only() -> std::io::Result<toml::Value> {
-    Ok(ConfigLayers::load()?.effective_config_disk_only())
+    let layers = ConfigLayers::load()?;
+    allow_urls_written_in_config(&layers);
+    Ok(layers.effective_config_disk_only())
+}
+
+/// A URL the user or their admin wrote in a config file is an endpoint they
+/// chose. Campaigns and remote settings are left out: nobody local wrote them.
+fn allow_urls_written_in_config(layers: &ConfigLayers) {
+    let mut origins = Vec::new();
+    for layer in [&layers.user, &layers.managed, &layers.system_managed] {
+        collect_url_origins(layer, &mut origins);
+    }
+    origins.sort();
+    origins.dedup();
+    xai_grok_extra_ca::endpoint_allowlist::set_config_urls(origins);
+}
+
+/// The origin of every `*url` string value in `value`, at any depth.
+pub(crate) fn collect_url_origins(value: &toml::Value, out: &mut Vec<String>) {
+    match value {
+        toml::Value::Table(table) => {
+            for (key, v) in table {
+                if let toml::Value::String(s) = v
+                    && key.to_ascii_lowercase().ends_with("url")
+                    && let Ok(url) = reqwest::Url::parse(s.trim())
+                    && matches!(url.scheme(), "http" | "https")
+                    && url.host_str().is_some()
+                {
+                    out.push(url.origin().ascii_serialization());
+                } else {
+                    collect_url_origins(v, out);
+                }
+            }
+        }
+        toml::Value::Array(items) => items.iter().for_each(|v| collect_url_origins(v, out)),
+        _ => {}
+    }
+}
+
+#[cfg(test)]
+mod config_url_tests {
+    use super::collect_url_origins;
+
+    #[test]
+    fn every_url_the_config_names_is_collected_as_an_origin() {
+        let cfg: toml::Value = toml::from_str(
+            r#"
+            [model_providers.internal]
+            base_url = "http://10.0.0.5:8080/v1"
+            models_list_url = "https://list.internal/models"
+            [model.x]
+            api_base_url = "https://gw.internal:9443/api/v1"
+            [endpoints]
+            allowed_endpoints = ["ignored.example"]
+            [mcp_servers.m]
+            url = "https://mcp.internal/sse"
+            command = "not-a-url"
+            "#,
+        )
+        .unwrap();
+        let mut out = Vec::new();
+        collect_url_origins(&cfg, &mut out);
+        out.sort();
+        assert_eq!(
+            out,
+            [
+                "http://10.0.0.5:8080",
+                "https://gw.internal:9443",
+                "https://list.internal",
+                "https://mcp.internal",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_collected_origin_passes_the_allowlist_check() {
+        let entries = vec!["http://10.0.0.5:8080".to_owned()];
+        assert!(
+            xai_grok_extra_ca::endpoint_allowlist::check_against(
+                "http://10.0.0.5:8080/v1/chat/completions",
+                &entries
+            )
+            .is_ok()
+        );
+        assert!(
+            xai_grok_extra_ca::endpoint_allowlist::check_against(
+                "https://cli-chat-proxy.grok.com/v1/chat/completions",
+                &entries
+            )
+            .is_err()
+        );
+    }
 }
 
 /// The effective `models.default` while an **active** campaign drives it, plus
