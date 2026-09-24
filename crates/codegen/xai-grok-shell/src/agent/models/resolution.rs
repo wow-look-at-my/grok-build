@@ -338,7 +338,11 @@ fn keep_provider_models_off_the_proxy(
     if proxy.trim().is_empty() {
         return;
     }
-    let models_base = Some(cfg.endpoints.models_base_url.trim())
+    let models_base = cfg
+        .endpoints
+        .models_base_url
+        .as_deref()
+        .map(str::trim)
         .filter(|u| !u.is_empty())
         .map(str::to_owned);
     for (key, entry) in catalog.iter_mut() {
