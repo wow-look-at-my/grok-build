@@ -114,7 +114,7 @@ pub(super) fn server_queue_send_effect(
     session_id: acp::SessionId,
     text: String,
     images: Vec<crate::prompt_images::PastedImage>,
-    cwd: &str,
+    cwd: &std::path::Path,
     prompt_id: String,
     skill_token_ranges: Vec<std::ops::Range<usize>>,
 ) -> Effect {
@@ -129,11 +129,7 @@ pub(super) fn server_queue_send_effect(
     }
     // The builder rewrites the text (placeholder removal), so token ranges
     // are not stamped here. The local image drain does the same.
-    let blocks = crate::prompt_images::build_content_blocks_with_workspace(
-        text,
-        images,
-        Some(std::path::Path::new(cwd)),
-    );
+    let blocks = crate::prompt_images::build_content_blocks_with_workspace(text, images, Some(cwd));
     Effect::SendPromptBlocks {
         agent_id,
         session_id,
