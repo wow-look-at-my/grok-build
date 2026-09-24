@@ -86,6 +86,8 @@ pub struct ThinkingBlock {
     elapsed_time_ms: Option<i64>,
     /// When the thinking block started (local timestamp for live elapsed).
     started_at: Option<std::time::Instant>,
+    /// Short summary shown under the collapsed header.
+    summary: Option<String>,
 }
 impl ThinkingBlock {
     /// Create a new thinking block with complete text.
@@ -94,6 +96,7 @@ impl ThinkingBlock {
             content: MarkdownContent::new(text),
             elapsed_time_ms: None,
             started_at: None,
+            summary: None,
         }
     }
 
@@ -103,6 +106,7 @@ impl ThinkingBlock {
             content: MarkdownContent::streaming(),
             elapsed_time_ms: None,
             started_at: Some(std::time::Instant::now()),
+            summary: None,
         }
     }
 
@@ -121,6 +125,7 @@ impl ThinkingBlock {
             content: MarkdownContent::streaming(),
             elapsed_time_ms: None,
             started_at: None,
+            summary: None,
         }
     }
 
@@ -174,6 +179,17 @@ impl ThinkingBlock {
     /// When set, the collapsed view will show "Thought for Xs".
     pub fn set_elapsed_time_ms(&mut self, time_ms: Option<i64>) {
         self.elapsed_time_ms = time_ms;
+    }
+
+    /// Set the summary. Returns whether it changed.
+    pub fn set_summary(&mut self, summary: String) -> bool {
+        let changed = self.summary.as_deref() != Some(summary.as_str());
+        self.summary = Some(summary);
+        changed
+    }
+
+    pub fn summary(&self) -> Option<&str> {
+        self.summary.as_deref()
     }
 
     /// Set the raw mode, re-rendering if it changed.
@@ -259,9 +275,21 @@ impl ThinkingBlock {
         let line = self.header_line(ctx);
         let line = append_expand_hint(line, ctx);
         let line = crate::render::line_utils::truncate_line(line, ctx.content_width());
-        BlockOutput {
-            lines: vec![BlockLine::separator(line)],
+        let mut lines = vec![BlockLine::separator(line)];
+        if ctx.mode == DisplayMode::Collapsed
+            && !ctx.is_running
+            && let Some(summary) = self.summary.as_deref()
+        {
+            let style = Theme::current().muted();
+            let width = ctx.content_width().max(1);
+            for row in textwrap::wrap(summary, width) {
+                lines.push(BlockLine::styled(Line::from(Span::styled(
+                    row.into_owned(),
+                    style,
+                ))));
+            }
         }
+        BlockOutput { lines }
     }
 
     /// Prepend header + blank line to output, if header config is enabled.
@@ -734,5 +762,28 @@ mod tests {
             let out = empty.output(&hinted(mode, 60));
             assert!(!text_of(&out).contains(EXPAND_HINT), "empty/{mode:?}");
         }
+    }
+
+    #[test]
+    fn a_collapsed_block_shows_its_summary_under_the_header() {
+        let text_of = |out: &BlockOutput| {
+            out.lines
+                .iter()
+                .map(|l| crate::scrollback::types::line_plain_text(&l.content))
+                .collect::<Vec<_>>()
+        };
+        let mut block = ThinkingBlock::new("long reasoning");
+        let plain = text_of(&block.output(&ctx(DisplayMode::Collapsed, 40)));
+        assert_eq!(plain.len(), 1, "no summary, no extra row");
+
+        assert!(block.set_summary("Reads the parser, then fixes the off-by-one in the lexer.".into()));
+        assert!(!block.set_summary("Reads the parser, then fixes the off-by-one in the lexer.".into()));
+        let rows = text_of(&block.output(&ctx(DisplayMode::Collapsed, 30)));
+        assert!(rows.len() > 2, "the summary wraps under the header: {rows:?}");
+        assert!(rows[1..].join(" ").contains("off-by-one in the lexer."));
+        assert!(rows.iter().all(|r| r.width() <= 30), "{rows:?}");
+
+        let expanded = text_of(&block.output(&ctx(DisplayMode::Expanded, 40)));
+        assert!(!expanded.join(" ").contains("off-by-one"), "the full text replaces the summary");
     }
 }
