@@ -54,29 +54,7 @@ pub(crate) fn resolve_context_window_from_provider(
 ) -> Option<std::num::NonZeroU64> {
     use crate::remote::DEFAULT_CONTEXT_WINDOW;
     let default = std::num::NonZeroU64::new(DEFAULT_CONTEXT_WINDOW).expect("non-zero");
-    // Bound the fetch: a BYOK provider that never answers (or a slow /v1/models)
-    // must not stall the resolution that owns the catalog build. The network
-    // call runs on a dedicated OS thread (`reqwest::blocking` builds an inner
-    // tokio runtime that panics if it is created inside an async context), and
-    // we wait for the result with a deadline.
-    const FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
-    let (model, base, key) = (
-        model.to_owned(),
-        api_base_url.to_owned(),
-        api_key.map(str::to_owned),
-    );
-    let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        let _ = tx.send(crate::remote::fetch_models_for_api_base_blocking(
-            &base,
-            key.as_deref(),
-        ));
-    });
-    let listing = rx
-        .recv_timeout(FETCH_TIMEOUT)
-        .ok()
-        .and_then(|res| res.ok())
-        .unwrap_or_default();
+    let listing = provider_listing(api_base_url, api_key);
     let listed = listing
         .iter()
         .find(|entry| entry.model == model || entry.id.as_deref() == Some(&model))?;
@@ -84,7 +62,72 @@ pub(crate) fn resolve_context_window_from_provider(
     (cw != default).then_some(cw)
 }
 
-/// Map a model id (catalog key or routing slug) to its catalog key.
+const LISTING_REUSE: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// The provider's `/v1/models` listing, fetched a single time per [`LISTING_REUSE`].
+fn provider_listing(
+    api_base_url: &str,
+    api_key: Option<&str>,
+) -> Vec<crate::agent::config::ModelEntryConfig> {
+    use std::collections::HashMap;
+    use std::sync::{Arc, LazyLock, Mutex, PoisonError};
+    use std::time::Instant;
+
+    type Listing = Vec<crate::agent::config::ModelEntryConfig>;
+    type Slot = Arc<Mutex<Option<(Instant, Listing)>>>;
+    static SLOTS: LazyLock<Mutex<HashMap<(String, Option<String>), Slot>>> =
+        LazyLock::new(Default::default);
+
+    let slot = SLOTS
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .entry((api_base_url.to_owned(), api_key.map(str::to_owned)))
+        .or_default()
+        .clone();
+    let mut cached = slot.lock().unwrap_or_else(PoisonError::into_inner);
+    if let Some((fetched_at, listing)) = cached.as_ref()
+        && fetched_at.elapsed() < LISTING_REUSE
+    {
+        return listing.clone();
+    }
+    let listing = fetch_provider_listing(api_base_url, api_key);
+    *cached = Some((Instant::now(), listing.clone()));
+    listing
+}
+
+/// Fetch a provider listing on its own OS thread. `reqwest::blocking` builds a
+/// runtime that panics inside an async context. The deadline stops a provider
+/// that never answers from stalling the catalog build.
+fn fetch_provider_listing(
+    api_base_url: &str,
+    api_key: Option<&str>,
+) -> Vec<crate::agent::config::ModelEntryConfig> {
+    const FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+    let (base, key) = (api_base_url.to_owned(), api_key.map(str::to_owned));
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(crate::remote::fetch_models_for_api_base_blocking(
+            &base,
+            key.as_deref(),
+        ));
+    });
+    match rx.recv_timeout(FETCH_TIMEOUT) {
+        Ok(Ok(listing)) => listing,
+        Ok(Err(error)) => {
+            tracing::warn!(%error, api_base_url, "provider model listing failed");
+            Vec::new()
+        }
+        Err(_) => {
+            tracing::warn!(
+                api_base_url,
+                timeout_secs = FETCH_TIMEOUT.as_secs(),
+                "provider model listing gave no answer"
+            );
+            Vec::new()
+        }
+    }
+}
+
 pub(crate) fn resolve_catalog_key(
     models: &IndexMap<String, ModelEntry>,
     id: &acp::ModelId,

@@ -2634,4 +2634,95 @@ mod tests {
         server.abort();
         assert!(resolved.is_none());
     }
+
+    /// A listing server that counts its requests and answers each with `status`.
+    async fn start_counting_listing_server(
+        status: axum::http::StatusCode,
+    ) -> (
+        String,
+        std::sync::Arc<std::sync::atomic::AtomicUsize>,
+        tokio::task::JoinHandle<()>,
+    ) {
+        use axum::routing::get;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let hits = std::sync::Arc::new(AtomicUsize::new(0));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+        let counter = hits.clone();
+        let app = axum::Router::new().route(
+            "/v1/models",
+            get(move || {
+                let counter = counter.clone();
+                async move {
+                    counter.fetch_add(1, Ordering::SeqCst);
+                    let body = serde_json::json!({"data": [
+                        {"id": "vendor/a", "context_length": 400_000},
+                        {"id": "vendor/b", "context_length": 500_000},
+                    ]});
+                    (status, axum::Json(body))
+                }
+            }),
+        );
+        let handle = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        (base, hits, handle)
+    }
+
+    /// Resolve every model in `models` against a single provider, from blocking threads.
+    async fn resolve_all(api_base: &str, models: &[&str]) -> Vec<Option<std::num::NonZeroU64>> {
+        let mut out = Vec::new();
+        for model in models {
+            let (api_base, model) = (api_base.to_owned(), (*model).to_owned());
+            out.push(
+                tokio::task::spawn_blocking(move || {
+                    crate::agent::models::resolve_context_window_from_provider(
+                        &model,
+                        &api_base,
+                        Some("sk-test"),
+                    )
+                })
+                .await
+                .unwrap(),
+            );
+        }
+        out
+    }
+
+    /// A catalog build resolves every model a provider serves.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn one_catalog_build_sends_one_listing_request_per_provider() {
+        use std::sync::atomic::Ordering;
+        let (base, hits, server) = start_counting_listing_server(axum::http::StatusCode::OK).await;
+        let resolved =
+            resolve_all(&format!("{base}/v1"), &["vendor/a", "vendor/b", "vendor/c"]).await;
+        server.abort();
+        assert_eq!(
+            hits.load(Ordering::SeqCst),
+            1,
+            "each model re-fetched the listing"
+        );
+        assert_eq!(resolved[0].map(|w| w.get()), Some(400_000));
+        assert_eq!(resolved[1].map(|w| w.get()), Some(500_000));
+        assert_eq!(resolved[2], None, "an unlisted model keeps the default");
+    }
+
+    /// A rate-limited provider must not be asked again for each model. The
+    /// failed answer is reused for the same window.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_rate_limited_listing_is_not_retried_for_every_model() {
+        use std::sync::atomic::Ordering;
+        let (base, hits, server) =
+            start_counting_listing_server(axum::http::StatusCode::TOO_MANY_REQUESTS).await;
+        let resolved = resolve_all(
+            &format!("{base}/v1"),
+            &["vendor/a", "vendor/b", "vendor/c", "vendor/d"],
+        )
+        .await;
+        server.abort();
+        assert_eq!(
+            hits.load(Ordering::SeqCst),
+            1,
+            "a 429 was answered with a burst"
+        );
+        assert!(resolved.iter().all(Option::is_none));
+    }
 }
