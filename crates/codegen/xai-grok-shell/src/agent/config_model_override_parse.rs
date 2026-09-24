@@ -768,7 +768,8 @@ mod tests {
             env_key: Some(crate::agent::config::EnvKeys::single("ENV_KEY")),
             auth_provider: Some("corp-gateway".into()),
             model_provider: Some("gateway".into()),
-            api_base_url: Some("https://api.example.com".into()),
+            // A parsed model has a single URL, so a set `api_base_url` cannot round-trip.
+            api_base_url: None,
             max_completion_tokens: Some(1024),
             temperature: Some(0.5),
             top_p: Some(0.9),
@@ -841,6 +842,39 @@ mod tests {
         assert_eq!(warnings.len(), 1);
         let reparsed = toml::Value::try_from(models.get("m").unwrap()).unwrap();
         assert_eq!(reparsed, serialized, "round-trip must be lossless");
+    }
+
+    #[test]
+    fn api_base_url_folds_into_base_url_and_warns_when_both_are_set() {
+        let mut entry = toml::map::Map::new();
+        entry.insert(
+            "api_base_url".to_owned(),
+            toml::Value::String("http://localhost:18080/v1".into()),
+        );
+        let (models, warnings) = parse_single_entry(entry);
+        assert_eq!(warnings, Vec::new());
+        let parsed = models.get("m").unwrap();
+        assert_eq!(
+            parsed.base_url.as_deref(),
+            Some("http://localhost:18080/v1")
+        );
+        assert_eq!(parsed.api_base_url, None);
+
+        let mut entry = toml::map::Map::new();
+        entry.insert(
+            "base_url".to_owned(),
+            toml::Value::String("https://a.example".into()),
+        );
+        entry.insert(
+            "api_base_url".to_owned(),
+            toml::Value::String("https://b.example".into()),
+        );
+        let (models, warnings) = parse_single_entry(entry);
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].kind, ConfigWarningKind::DuplicateAlias);
+        let parsed = models.get("m").unwrap();
+        assert_eq!(parsed.base_url.as_deref(), Some("https://a.example"));
+        assert_eq!(parsed.api_base_url, None);
     }
 
     /// `auth_provider` alongside `api_key`/`env_key` warns (static keys
