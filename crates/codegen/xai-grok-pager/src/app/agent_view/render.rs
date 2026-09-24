@@ -1465,6 +1465,24 @@ impl AgentView {
         }
         if let Some(branch) = branch.map(crate::views::location::branch_label) {
             location.push(Span::styled(branch, dim));
+            let stats = crate::branch_stats::branch_stats_lazy(&self.session.cwd);
+            for (kind, text) in stats
+                .as_ref()
+                .map(crate::branch_stats::format_parts)
+                .unwrap_or_default()
+            {
+                let fg = match kind {
+                    crate::branch_stats::StatKind::Ahead
+                    | crate::branch_stats::StatKind::Behind => theme.gray_dim,
+                    crate::branch_stats::StatKind::Insertions => theme.accent_success,
+                    crate::branch_stats::StatKind::Deletions => theme.accent_error,
+                };
+                let text = format!(" {text}");
+                location.push(Span::styled(
+                    text,
+                    Style::default().fg(fg).bg(theme.bg_base),
+                ));
+            }
             location.push(Span::styled(" ", bg));
         }
         let show_worktree_label = self.is_worktree

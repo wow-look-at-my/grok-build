@@ -14,6 +14,7 @@ pub mod actions;
 pub mod agent_runtime;
 pub mod app;
 pub mod best_effort_stderr;
+pub mod branch_stats;
 pub mod ci_status;
 pub mod client_identity;
 pub mod completions_cmd;
