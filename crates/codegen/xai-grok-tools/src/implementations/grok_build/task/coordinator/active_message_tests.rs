@@ -61,6 +61,8 @@ impl ChildControl for TestControl {
     }
 
     fn cancel(&self) {}
+
+    fn interject(&self, _text: &str) {}
 }
 
 pub(in crate::implementations::grok_build::task::coordinator) struct TestRunner;

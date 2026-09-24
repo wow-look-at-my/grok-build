@@ -3156,6 +3156,7 @@ mod tests {
                 ("application/json", EMPTY_CHAT_COMPLETION_JSON)
             }
             (false, ApiBackend::Messages) => ("application/json", EMPTY_MESSAGE_JSON),
+            (false, ApiBackend::Ollama) => unreachable!("capture_request does not cover Ollama"),
         };
         let (tx, rx) = oneshot::channel();
         let tx = Arc::new(std::sync::Mutex::new(Some(tx)));
@@ -3210,6 +3211,7 @@ mod tests {
             (true, ApiBackend::Messages) => {
                 client.conversation_stream_messages(request).await.map(drop)
             }
+            (_, ApiBackend::Ollama) => unreachable!("capture_request does not cover Ollama"),
         };
         sent.unwrap_or_else(|e| panic!("{backend:?} streaming={streaming}: {e}"));
         let captured = rx.await.unwrap();

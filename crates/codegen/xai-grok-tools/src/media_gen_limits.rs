@@ -54,6 +54,8 @@ pub fn max_calls_per_batch(kind: ToolKind, limits: &MediaGenBatchLimits) -> Opti
         | ToolKind::MemoryGet
         | ToolKind::Task
         | ToolKind::ActiveAgentMessage
+        | ToolKind::SendMessage
+        | ToolKind::Ci
         | ToolKind::EnterPlan
         | ToolKind::ExitPlan
         | ToolKind::AskUser

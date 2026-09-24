@@ -73,7 +73,7 @@ impl TelemetryClient {
         subscription_tier: Option<String>,
         http_client: reqwest::Client,
     ) -> Self {
-        if xai_grok_version::IS_DEV_BUILD
+        if !xai_grok_version::is_release_stamped()
             && env_bool(ALLOW_DEV_BUILD_ENV) != Some(true)
             && config.disarm_baked_sinks()
         {
@@ -222,7 +222,7 @@ impl EventEnrichment {
             is_interactive: identity.map(|i| i.interactivity == Interactivity::Interactive),
             is_ci: *IS_CI.get_or_init(is_ci_env),
             release_channel: crate::process_info::release_channel().map(|c| c.into()),
-            dev_build: xai_grok_version::IS_DEV_BUILD,
+            dev_build: !xai_grok_version::is_release_stamped(),
             os: std::env::consts::OS,
             arch: std::env::consts::ARCH,
             cpu_cores: process.cpu_cores,

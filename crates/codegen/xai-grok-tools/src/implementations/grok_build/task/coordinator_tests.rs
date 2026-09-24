@@ -579,6 +579,7 @@ fn harness_with_admission_gate(
     let (advertise_tx, advertise_targets) = mpsc::unbounded_channel();
     let (wake_run_tx, wake_runs) = mpsc::unbounded_channel();
     let (admitted_message_tx, admitted_messages) = mpsc::unbounded_channel();
+    let (interjection_tx, interjections) = mpsc::unbounded_channel();
     let (entered_tx, admission_entered) = mpsc::unbounded_channel();
     let (admission_release, _) = tokio::sync::broadcast::channel(4);
     let gate = AdmissionGate {
@@ -607,6 +608,7 @@ fn harness_with_admission_gate(
                 wake_runs: wake_run_tx,
                 admitted_messages: Some(admitted_message_tx),
                 admission_gate: Some(gate),
+                interjections: interjection_tx,
             },
             config,
         )
@@ -628,6 +630,7 @@ fn harness_with_admission_gate(
             advertise_targets,
             wake_runs,
             admitted_messages,
+            interjections,
             actor,
         },
         admission_entered,
@@ -725,7 +728,7 @@ async fn interject_reaches_the_active_child_named_by_id() {
     let mut harness = harness(false, std::time::Duration::from_secs(60));
     let spawn = tokio::spawn({
         let backend = harness.backend.clone();
-        async move { backend.spawn(request("planner", false)).await }
+        async move { backend.spawn(request("planner", false), None).await }
     });
     // The child is addressable only once its run has reported started.
     let started = harness.started.recv().await.expect("child started");
@@ -779,7 +782,7 @@ async fn interject_before_start_is_delivered_on_start() {
     let mut harness = harness(true, std::time::Duration::from_secs(60));
     let spawn = tokio::spawn({
         let backend = harness.backend.clone();
-        async move { backend.spawn(request("planner", false)).await }
+        async move { backend.spawn(request("planner", false), None).await }
     });
     // The run has the request but has not reported started: the child is pending.
     let pending = harness.requests.recv().await.expect("child pending");
@@ -841,7 +844,7 @@ async fn send_message_reaches_the_caller_s_own_running_child() {
     let mut harness = harness(false, std::time::Duration::from_secs(60));
     let spawn = tokio::spawn({
         let backend = harness.backend.clone();
-        async move { backend.spawn(request("planner", false)).await }
+        async move { backend.spawn(request("planner", false), None).await }
     });
     let started = harness.started.recv().await.expect("child started");
     assert_eq!(started, "planner");
@@ -872,7 +875,7 @@ async fn send_message_refuses_a_child_of_another_session() {
     let mut harness = harness(false, std::time::Duration::from_secs(60));
     let spawn = tokio::spawn({
         let backend = harness.backend.clone();
-        async move { backend.spawn(request("planner", false)).await }
+        async move { backend.spawn(request("planner", false), None).await }
     });
     assert_eq!(
         harness.started.recv().await.expect("child started"),
@@ -912,7 +915,7 @@ async fn send_message_before_start_is_queued_then_delivered() {
     let mut harness = harness(true, std::time::Duration::from_secs(60));
     let spawn = tokio::spawn({
         let backend = harness.backend.clone();
-        async move { backend.spawn(request("planner", false)).await }
+        async move { backend.spawn(request("planner", false), None).await }
     });
     let pending = harness.requests.recv().await.expect("child pending");
     assert_eq!(pending.id, "planner");

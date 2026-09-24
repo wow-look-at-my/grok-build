@@ -50,6 +50,8 @@ impl ChildControl for ToolTestControl {
     }
 
     fn cancel(&self) {}
+
+    fn interject(&self, _text: &str) {}
 }
 
 struct ToolTestRunner {

@@ -1859,8 +1859,8 @@ async fn build_request_fits_the_output_budget_into_the_context_window() {
         stream_tool_calls: None,
         chat_message_profile: Default::default(),
         extra_body: Default::default(),
+        ..Default::default()
     };
-    // Bytes/4: this is a 737_857-token prompt.
     let items = vec![ConversationItem::user("x".repeat(737_857 * 4))];
     let h = TestHarness::with_config(items, config);
 
