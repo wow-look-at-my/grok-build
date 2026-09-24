@@ -1756,7 +1756,9 @@ impl SamplingClient {
                     }
                     Err(e) => {
                         *had_transport_error = true;
-                        Some(Some(Err(SamplingError::EventStreamError(sse_error_text(&e)))))
+                        Some(Some(Err(SamplingError::EventStreamError(sse_error_text(
+                            &e,
+                        )))))
                     }
                 };
                 std::future::ready(item)

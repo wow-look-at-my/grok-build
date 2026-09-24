@@ -748,22 +748,32 @@ fn structured_error_message(bytes: &[u8]) -> Option<String> {
 }
 
 /// Parse an API error body into a short string.
-///
-/// Only structured JSON error envelopes are surfaced. Non-JSON bodies
-/// (HTML edge pages, plain text dumps) return a fixed placeholder — never
-/// the raw bytes. Prefer [`user_facing_api_error_message`] when a status
-/// code is available.
 pub fn parse_error_bytes(bytes: &[u8]) -> String {
     structured_error_message(bytes).unwrap_or_else(|| "upstream error".into())
 }
 
+/// A plain-text error body, trimmed and capped. `None` for an empty body or
+/// markup. A gateway or an inference server often answers in plain text.
+fn plain_text_error_message(bytes: &[u8]) -> Option<String> {
+    let text = std::str::from_utf8(bytes).ok()?.trim();
+    if text.is_empty() || text.starts_with('<') {
+        return None;
+    }
+    Some(truncate_user_error(text))
+}
+
 /// User-facing message for a failed API call.
 ///
-/// Structured JSON error envelopes keep their message. Everything else
-/// (including Cloudflare HTML) maps to a status-based string — no body
-/// content matching.
+/// A structured JSON error envelope keeps its message. A plain-text body is
+/// shown after the status. Markup and an empty body map to a status phrase.
 pub fn user_facing_api_error_message(status: StatusCode, bytes: &[u8]) -> String {
-    structured_error_message(bytes).unwrap_or_else(|| status_user_message(status))
+    if let Some(message) = structured_error_message(bytes) {
+        return message;
+    }
+    match plain_text_error_message(bytes) {
+        Some(text) => format!("HTTP {}: {text}", status.as_u16()),
+        None => status_user_message(status),
+    }
 }
 
 /// As [`user_facing_api_error_message`], naming the endpoint on a 404.
@@ -777,10 +787,14 @@ pub fn api_error_message_for_endpoint(status: StatusCode, bytes: &[u8], endpoint
     let host = reqwest::Url::parse(endpoint)
         .ok()
         .and_then(|url| url.host_str().map(str::to_owned));
-    let message = structured_error_message(bytes).unwrap_or_else(|| match &host {
-        Some(host) => status_user_message_from(status, host),
-        None => status_user_message(status),
-    });
+    let message = match (structured_error_message(bytes), &host) {
+        (Some(message), _) => message,
+        (None, Some(host)) => match plain_text_error_message(bytes) {
+            Some(text) => format!("{host} answered HTTP {}: {text}", status.as_u16()),
+            None => status_user_message_from(status, host),
+        },
+        (None, None) => user_facing_api_error_message(status, bytes),
+    };
     if status == StatusCode::NOT_FOUND {
         format!("{message} No such endpoint: {endpoint}")
     } else {
