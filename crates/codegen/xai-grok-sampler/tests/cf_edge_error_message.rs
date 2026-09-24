@@ -8,7 +8,7 @@ use std::sync::Arc;
 use xai_grok_sampler::{SamplerConfig, SamplingClient};
 use xai_grok_sampling_types::{
     ContentPart, ConversationItem, ConversationRequest, SamplingError, UserItem,
-    status_user_message, user_facing_api_error_message,
+    status_user_message, status_user_message_from, user_facing_api_error_message,
 };
 use xai_grok_test_support::{MockInferenceServer, ScriptedResponse};
 
@@ -68,9 +68,13 @@ async fn stream_524_html_uses_status_copy() {
     let err = stream_err(524, CF_524_HTML).await;
     let s = err.to_string();
     assert!(!s.contains("<!DOCTYPE") && !s.contains("<html"));
-    assert!(s.contains(&status_user_message(
-        reqwest::StatusCode::from_u16(524).unwrap()
-    )));
+    assert!(
+        s.contains(&status_user_message_from(
+            reqwest::StatusCode::from_u16(524).unwrap(),
+            "127.0.0.1"
+        )),
+        "the edge copy names the endpoint that answered: {s}"
+    );
     assert!(s.contains("524"));
 }
 

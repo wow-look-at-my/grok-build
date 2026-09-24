@@ -679,7 +679,7 @@ pub const MAX_USER_ERROR_BODY_CHARS: usize = 280;
 /// Edge proxies (Cloudflare 52x, 502/503/504) return HTML pages; we never
 /// sniff body text — only the HTTP status drives this fallback.
 pub fn status_user_message(status: StatusCode) -> String {
-    status_user_message_from(status, "The server")
+    status_copy(status, "The server", "the server")
 }
 
 /// As [`status_user_message`], naming the service that answered.
@@ -687,13 +687,18 @@ pub fn status_user_message(status: StatusCode) -> String {
 /// Every provider shares this copy. So the name comes from the request, never
 /// from a constant: a fixed name blames a service the request never reached.
 pub fn status_user_message_from(status: StatusCode, service: &str) -> String {
+    status_copy(status, service, service)
+}
+
+/// The status phrase.
+fn status_copy(status: StatusCode, subject: &str, service: &str) -> String {
     match status.as_u16() {
         code @ 502..=504 => format!(
-            "{service} is temporarily unavailable. Please try again in a moment. (HTTP {code})."
+            "{subject} is temporarily unavailable. Please try again in a moment. (HTTP {code})."
         ),
         // Upstream capacity, not an edge failure — see [`SamplingError::is_overloaded`].
         code @ 529 => format!(
-            "{service} is temporarily overloaded. Please try again in a moment. (HTTP {code})."
+            "{subject} is temporarily overloaded. Please try again in a moment. (HTTP {code})."
         ),
         code @ 520..=524 | code @ 530 => format!(
             "Connection to {service} timed out or was interrupted. Please try again. (HTTP {code})."
