@@ -421,7 +421,7 @@ fn next_sleep(inner: &Inner, fail_attempt: u32) -> (Duration, Option<f64>) {
     let snap = inner.snapshot.load();
     let now = Utc::now();
     if fail_attempt == 0 {
-        let unit = rand::rng().random_range(-1.0..=1.0);
+        let unit = rand::random_range(-1.0..=1.0);
         let (at, jitter) =
             compute_success_refresh_at(now, snap.expires_at, snap.observed_ttl, &inner.cfg, unit);
         let sleep = (at - now).to_std().unwrap_or(Duration::ZERO);

@@ -457,7 +457,7 @@ impl ToolCallBlock {
                 ToolCallBlock::Execute(ExecuteToolCallBlock::new(summary))
             }
             "read_file" | "read" => ToolCallBlock::Read(ReadToolCallBlock::new(summary)),
-            "search_replace" | "edit" | "apply_patch" | "strreplace" => {
+            "search_replace" | "edit" | "strreplace" => {
                 ToolCallBlock::Edit(EditToolCallBlock::new(summary, Vec::new()))
             }
             "write" => ToolCallBlock::Edit(

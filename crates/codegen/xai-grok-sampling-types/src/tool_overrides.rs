@@ -130,24 +130,75 @@ impl XSearchOptions {
     }
 
     pub fn to_tool_entry(&self) -> serde_json::Value {
-        #[derive(Serialize)]
-        #[serde(rename_all = "snake_case")]
-        struct XSearchToolEntry<'a> {
-            r#type: &'static str,
-            #[serde(skip_serializing_if = "Option::is_none")]
-            from_date: Option<&'a str>,
-            #[serde(skip_serializing_if = "Option::is_none")]
-            to_date: Option<&'a str>,
-        }
         // Destructure so a new field forces a compile error rather than a dropped wire field.
         let XSearchOptions { date_bound } = self;
         let bound = date_bound.as_ref();
-        serde_json::to_value(XSearchToolEntry {
-            r#type: "x_search",
-            from_date: bound.and_then(SearchDateBound::from_date),
-            to_date: bound.and_then(SearchDateBound::to_date),
-        })
-        .expect("XSearchToolEntry is always serializable")
+        // The object is built directly rather than through `to_value`, so this
+        // has no failure to hide behind an expect.
+        let mut entry = serde_json::Map::new();
+        entry.insert(
+            "type".to_owned(),
+            serde_json::Value::String("x_search".to_owned()),
+        );
+        if let Some(from_date) = bound.and_then(SearchDateBound::from_date) {
+            entry.insert(
+                "from_date".to_owned(),
+                serde_json::Value::String(from_date.to_owned()),
+            );
+        }
+        if let Some(to_date) = bound.and_then(SearchDateBound::to_date) {
+            entry.insert(
+                "to_date".to_owned(),
+                serde_json::Value::String(to_date.to_owned()),
+            );
+        }
+        serde_json::Value::Object(entry)
+    }
+}
+
+/// The entry this builds is spliced into the serialized `tools` array by the
+/// sampler client, so its keys are the wire contract with the provider.
+#[cfg(test)]
+mod x_search_entry_tests {
+    use super::{SearchDateBound, XSearchOptions};
+
+    #[test]
+    fn an_entry_with_no_dates_carries_only_the_type_tag() {
+        assert_eq!(
+            XSearchOptions::default().to_tool_entry(),
+            serde_json::json!({ "type": "x_search" })
+        );
+    }
+
+    #[test]
+    fn an_entry_ships_both_dates_it_was_given() {
+        let bound =
+            SearchDateBound::new(Some("2026-01-01".to_owned()), Some("2026-01-31".to_owned()))
+                .expect("a valid date window");
+        assert_eq!(
+            XSearchOptions {
+                date_bound: Some(bound),
+            }
+            .to_tool_entry(),
+            serde_json::json!({
+                "type": "x_search",
+                "from_date": "2026-01-01",
+                "to_date": "2026-01-31",
+            })
+        );
+    }
+
+    #[test]
+    fn a_one_sided_window_omits_the_date_it_does_not_have() {
+        let bound =
+            SearchDateBound::new(Some("2026-01-01".to_owned()), None).expect("a from-only window");
+        assert_eq!(
+            XSearchOptions {
+                date_bound: Some(bound),
+            }
+            .to_tool_entry(),
+            serde_json::json!({ "type": "x_search", "from_date": "2026-01-01" })
+        );
     }
 }
 

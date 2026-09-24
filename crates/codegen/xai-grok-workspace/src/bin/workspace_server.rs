@@ -1,3 +1,5 @@
+#![allow(clippy::expect_used)] // 1 hit predates the gate
+
 //! Standalone workspace ToolServer for remote sandboxes.
 //!
 //! Reads OIDC credentials from `~/.grok/auth.json`, connects to a

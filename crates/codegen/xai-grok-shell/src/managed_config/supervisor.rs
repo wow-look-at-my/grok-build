@@ -3,9 +3,7 @@
 use xai_grok_login::GrokAuth;
 
 use super::ManagedConfigError;
-use super::response::{
-    ApplyOutcome, ManagedConfigResponse, ManagedConfigSource, verify_signed_envelope,
-};
+use super::response::{ApplyOutcome, ManagedConfigResponse, verify_signed_envelope};
 use super::{policy, store};
 
 #[derive(Clone, Copy)]
@@ -54,13 +52,12 @@ fn retry_backoff(attempt: u32) -> std::time::Duration {
 async fn fetch_managed_config(
     url: &str,
     token: &str,
-    source: ManagedConfigSource,
     max_attempts: u32,
     echo_principal: Option<&str>,
 ) -> Result<ManagedConfigResponse, ManagedConfigError> {
     crate::http::send_with_retry_escaping_pool(
         move |client: reqwest::Client| async move {
-            fetch_managed_config_once(&client, url, token, source, echo_principal).await
+            fetch_managed_config_once(&client, url, token, echo_principal).await
         },
         max_attempts,
         |e: &ManagedConfigError| e.is_retryable(),
@@ -99,7 +96,6 @@ async fn fetch_managed_config_once(
     client: &reqwest::Client,
     url: &str,
     token: &str,
-    source: ManagedConfigSource,
     echo_principal: Option<&str>,
 ) -> Result<ManagedConfigResponse, ManagedConfigError> {
     let mut request = client
@@ -123,7 +119,7 @@ async fn fetch_managed_config_once(
             let status = r.status().as_u16();
             tracing::debug!(status, "managed config fetch failed");
             return Err(if status == 401 || status == 403 {
-                source.auth_rejected_error()
+                ManagedConfigError::TeamAuthRejected
             } else {
                 ManagedConfigError::ServerError { status }
             });
@@ -262,9 +258,7 @@ async fn revalidate_stale_start(auth_manager: std::sync::Arc<xai_grok_login::Aut
         return;
     }
     // An auth.json read error is not "no principal".
-    if store::resolve_deployment_key().is_none()
-        && matches!(store::team_principal_signed_in(), Ok(false))
-    {
+    if matches!(store::team_principal_signed_in(), Ok(false)) {
         return;
     }
     if !crate::config::is_managed_config_stale_for(&store::current_serving_identity_any_expiry()) {
@@ -287,22 +281,16 @@ struct SyncOutcome {
     served: bool,
     skipped: bool,
     staged: bool,
-    source: Option<ManagedConfigSource>,
     signature_rejected: bool,
 }
 
 impl SyncOutcome {
-    fn from_fetch(
-        body: &ManagedConfigResponse,
-        source: ManagedConfigSource,
-        outcome: &ApplyOutcome,
-    ) -> Self {
+    fn from_fetch(body: &ManagedConfigResponse, outcome: &ApplyOutcome) -> Self {
         Self {
             wrote: outcome.wrote(),
             served: body.config_exists(),
             skipped: outcome.skipped(),
             staged: outcome.staged(),
-            source: Some(source),
             signature_rejected: outcome.signature_rejected(),
         }
     }
@@ -320,10 +308,6 @@ async fn sync_bounded(
 }
 
 enum FetchedConfig {
-    DeploymentKey {
-        key: String,
-        body: ManagedConfigResponse,
-    },
     Team {
         auth: Box<GrokAuth>,
         body: ManagedConfigResponse,
@@ -331,7 +315,7 @@ enum FetchedConfig {
     NoPrincipal,
 }
 
-/// Fetch without touching disk: the deployment key first, then a signed-in team.
+/// Fetch for the signed-in team without touching disk.
 async fn fetch_for_principal(
     budget: SyncBudget,
     team_override: Option<GrokAuth>,
@@ -341,37 +325,9 @@ async fn fetch_for_principal(
     let url =
         crate::agent::config::EndpointsConfig::from_effective_config().resolve_managed_config_url();
 
-    let team_auth = team_override.or_else(store::read_active_team_auth);
-
-    if let Some(dk) = store::resolve_deployment_key() {
-        let source = ManagedConfigSource::DeploymentKey;
-        // Echo binds to the deployment this key last synced.
-        let echo_principal =
-            crate::config::managed_deployment_id(&store::deployment_key_fingerprint(&dk));
-        match fetch_managed_config(&url, &dk, source, max_attempts, echo_principal.as_deref()).await
-        {
-            // A rejected key must not starve a valid team sign-in; network/5xx do not fall through.
-            Err(ManagedConfigError::DeploymentKeyRejected) if team_auth.is_some() => {
-                tracing::warn!("deployment key rejected; falling back to the team session token");
-            }
-            Err(e) => return Err(e),
-            // Only a missing row falls through: applying the empty key body would delete team files.
-            Ok(body) if !body.config_exists() && team_auth.is_some() => {
-                tracing::debug!("deployment key has no config; trying the team principal");
-            }
-            Ok(body) => return Ok(FetchedConfig::DeploymentKey { key: dk, body }),
-        }
-    }
-
-    if let Some(auth) = team_auth {
-        let body = fetch_managed_config(
-            &url,
-            &auth.key,
-            ManagedConfigSource::TeamOauth,
-            max_attempts,
-            auth.team_id.as_deref(),
-        )
-        .await?;
+    if let Some(auth) = team_override.or_else(store::read_active_team_auth) {
+        let body =
+            fetch_managed_config(&url, &auth.key, max_attempts, auth.team_id.as_deref()).await?;
         return Ok(FetchedConfig::Team {
             auth: Box::new(auth),
             body,
@@ -386,29 +342,15 @@ async fn sync_with_budget(
     team_override: Option<GrokAuth>,
 ) -> Result<SyncOutcome, ManagedConfigError> {
     match fetch_for_principal(budget, team_override).await? {
-        FetchedConfig::DeploymentKey { key, body } => {
-            let source = ManagedConfigSource::DeploymentKey;
-            let fingerprint = store::deployment_key_fingerprint(&key);
-            let outcome = store::apply_fetched(
-                &body,
-                source,
-                body.deployment_id.as_deref(),
-                Some(&fingerprint),
-                None,
-            )?;
-            Ok(SyncOutcome::from_fetch(&body, source, &outcome))
-        }
         FetchedConfig::Team { auth, body } => {
-            let source = ManagedConfigSource::TeamOauth;
-            let outcome = store::apply_fetched(&body, source, auth.team_id.as_deref(), None, None)?;
-            Ok(SyncOutcome::from_fetch(&body, source, &outcome))
+            let outcome = store::apply_fetched(&body, auth.team_id.as_deref(), None)?;
+            Ok(SyncOutcome::from_fetch(&body, &outcome))
         }
         FetchedConfig::NoPrincipal => Ok(SyncOutcome {
             wrote: false,
             served: false,
             skipped: false,
             staged: false,
-            source: None,
             signature_rejected: false,
         }),
     }
@@ -417,9 +359,7 @@ async fn sync_with_budget(
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ManagedConfigSync {
     Skipped,
-    Updated {
-        is_team: bool,
-    },
+    Updated,
     /// Verified and parked; applies on the next start.
     Staged,
     NoChange,
@@ -453,15 +393,9 @@ pub async fn post_login_sync(authenticated: Option<GrokAuth>) -> ManagedConfigSy
             tracing::info!("post-login managed config sync: staged for the next start");
             ManagedConfigSync::Staged
         }
-        Some(Ok(SyncOutcome {
-            wrote: true,
-            source,
-            ..
-        })) => {
+        Some(Ok(SyncOutcome { wrote: true, .. })) => {
             tracing::info!("post-login managed config sync: updated");
-            ManagedConfigSync::Updated {
-                is_team: source == Some(ManagedConfigSource::TeamOauth),
-            }
+            ManagedConfigSync::Updated
         }
         Some(Ok(_)) => ManagedConfigSync::NoChange,
         Some(Err(e)) => {
@@ -478,21 +412,15 @@ pub async fn post_login_sync(authenticated: Option<GrokAuth>) -> ManagedConfigSy
 /// True when the session-start repair will run; while this holds, no startup
 /// fetch may send an authenticated request.
 pub(crate) fn policy_repair_pending() -> bool {
-    policy_repair_pending_from(
-        store::resolve_deployment_key().is_some(),
-        &store::team_principal_signed_in(),
-    )
+    policy_repair_pending_from(&store::team_principal_signed_in())
 }
 
-fn policy_repair_pending_from(
-    has_deployment_key: bool,
-    signed_in_team: &std::io::Result<bool>,
-) -> bool {
+fn policy_repair_pending_from(signed_in_team: &std::io::Result<bool>) -> bool {
     if !store::is_fetch_enabled() {
         return false;
     }
     // Err reading auth.json is not "no principal"; a read blip must not skip enforcement.
-    if !has_deployment_key && matches!(signed_in_team, Ok(false)) {
+    if matches!(signed_in_team, Ok(false)) {
         return false;
     }
     // Ignore expiry: a usable same-identity cache should not refresh just to re-learn the team id.
@@ -506,16 +434,12 @@ pub async fn ensure_managed_policy_present(
     auth_manager: &std::sync::Arc<xai_grok_login::AuthManager>,
 ) {
     xai_grok_telemetry::startup::enter(xai_grok_telemetry::startup::StartupPhase::ManagedPolicy);
-    let has_deployment_key = store::resolve_deployment_key().is_some();
     let signed_in_team = store::team_principal_signed_in();
-    xai_grok_telemetry::startup::set_auth_mode(policy::auth_mode(
-        has_deployment_key,
-        &signed_in_team,
-    ));
+    xai_grok_telemetry::startup::set_auth_mode(policy::auth_mode(&signed_in_team));
     // A parked refresh applies here, pre-sandbox, before staleness is judged; it gates
     // itself (fetch-disabled or unverifiable discards, missing principal self-refuses).
     store::apply_staged_managed_config();
-    if !policy_repair_pending_from(has_deployment_key, &signed_in_team) {
+    if !policy_repair_pending_from(&signed_in_team) {
         return;
     }
     let team = {
@@ -566,7 +490,7 @@ pub enum SetupOutcome {
     Failed(ManagedConfigError),
 }
 
-/// What the server serves, verbatim — `managed_config` may embed the enforced deployment key.
+/// What the server serves, verbatim, as `grok setup` would write it.
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SetupReport {
@@ -582,7 +506,6 @@ pub struct SetupReport {
 /// Writes nothing: no artifacts, no sidecar, no marker.
 pub async fn fetch_setup_report() -> Result<SetupReport, ManagedConfigError> {
     let (source, body) = match fetch_for_principal(SyncBudget::Standard, None).await? {
-        FetchedConfig::DeploymentKey { body, .. } => (Some("deploymentKey"), body),
         FetchedConfig::Team { body, .. } => (Some("teamOauth"), body),
         FetchedConfig::NoPrincipal => (None, ManagedConfigResponse::default()),
     };

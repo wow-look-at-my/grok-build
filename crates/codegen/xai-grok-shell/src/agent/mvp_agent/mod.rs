@@ -931,9 +931,10 @@ pub(crate) fn agent_name_after_model_switch(
         current_agent_name.to_owned()
     }
 }
-/// Harness compatibility for zero-turn / mid-turn model switching. Two stock (non-strict) agents are interchangeable: they share the default wire format and toolset.
-/// So switching e.g. `grok-build` to `grok-build-plan` doesn't require rebuilding the harness. A rebuild would destroy a client-supplied `_meta.agentProfile`.
-/// Strict harnesses (`codex`, …) are only compatible with themselves. Transitions between strict and stock are never compatible.
+/// Harness compatibility for zero-turn / mid-turn model switching. Stock
+/// (non-strict) agents are interchangeable: they share the default wire
+/// format and toolset. So switching e.g. `grok-build` to `grok-build-plan`
+/// doesn't require rebuilding the harness. A strict harness matches only itself.
 pub(crate) fn harnesses_are_compatible(active: &str, required: &str) -> bool {
     use xai_grok_agent::config::is_strict_harness_agent_type;
     match (
@@ -1996,8 +1997,7 @@ impl MvpAgent {
         };
         use std::sync::atomic::Ordering;
         let am = self.auth_manager.clone();
-        let deployment_key = self.deployment_key();
-        if !has_bundle_credentials(Some(&am), deployment_key.as_deref()) {
+        if !has_bundle_credentials(Some(&am)) {
             return;
         }
         let root = crate::bundle::bundled_root();
@@ -2021,7 +2021,6 @@ impl MvpAgent {
                     &root,
                     &proxy_base_url,
                     Some(&am),
-                    deployment_key.as_deref(),
                     alpha_test_key.as_deref(),
                     force,
                     BUNDLE_SYNC_TTL,

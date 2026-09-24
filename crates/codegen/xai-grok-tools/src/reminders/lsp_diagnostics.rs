@@ -4,9 +4,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::implementations::lsp::{DiskChangeKind, LspBackend};
-use crate::types::output::{
-    ApplyPatchFileResult, ApplyPatchOutput, SearchReplaceOutput, ToolOutput,
-};
+use crate::types::output::{SearchReplaceOutput, ToolOutput};
 use crate::types::resources::SharedResources;
 use crate::types::tool::Reminder;
 
@@ -59,38 +57,6 @@ fn disk_events(tool_output: &ToolOutput) -> Vec<(PathBuf, Option<String>, DiskCh
             let content = std::fs::read_to_string(&edits.absolute_path).ok();
             vec![(edits.absolute_path.clone(), content, kind)]
         }
-        ToolOutput::ApplyPatch(ApplyPatchOutput::Success { files, .. }) => {
-            files.iter().flat_map(apply_patch_events).collect()
-        }
         _ => Vec::new(),
-    }
-}
-
-fn apply_patch_events(
-    file: &ApplyPatchFileResult,
-) -> Vec<(PathBuf, Option<String>, DiskChangeKind)> {
-    match file.action.as_str() {
-        "added" => vec![(
-            file.path.clone(),
-            Some(file.new_text.clone()),
-            DiskChangeKind::Created,
-        )],
-        "deleted" => vec![(file.path.clone(), None, DiskChangeKind::Deleted)],
-        "moved" => {
-            let mut events = vec![(file.path.clone(), None, DiskChangeKind::Deleted)];
-            if let Some(dest) = &file.move_to {
-                events.push((
-                    dest.clone(),
-                    Some(file.new_text.clone()),
-                    DiskChangeKind::Created,
-                ));
-            }
-            events
-        }
-        _ => vec![(
-            file.path.clone(),
-            Some(file.new_text.clone()),
-            DiskChangeKind::Changed,
-        )],
     }
 }

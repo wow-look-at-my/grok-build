@@ -142,6 +142,9 @@ impl SystemAppearanceWatcher {
         let (tx, rx) = watch::channel(initial);
         let interval = POLL_INTERVAL;
 
+        // The handle is not dropped: it is held as `_handle` and aborted in the
+        // watcher's `Drop`, so the poll loop's lifetime is owned by the watcher.
+        #[allow(clippy::disallowed_methods)]
         let handle = tokio::spawn(async move {
             let mut current = initial;
             loop {

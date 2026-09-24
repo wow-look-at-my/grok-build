@@ -280,7 +280,7 @@ fn wedged_child_handle() -> (
         agent_name: "grok-build".to_string(),
         managed_mcp_proxy_base_url: String::new(),
         session_default_agent_profile: None,
-        allowed_subagent_types: None,
+        allowed_subagent_types: Default::default(),
         hook_registry: None,
         workspace_ops: xai_grok_workspace::WorkspaceOps::for_test(),
         terminal_backend: None,
@@ -2060,9 +2060,9 @@ fn summarize_tool_config_uses_name_override_and_strips_namespace() {
     use xai_grok_tools::types::tool::ToolKind;
     let mut read = ToolConfig::from_id("GrokBuild:read_file");
     read.kind = Some(ToolKind::Read);
-    let mut read_dup = ToolConfig::from_id("Codex:read_file");
+    let mut read_dup = ToolConfig::from_id("OpenCode:read");
     read_dup.kind = Some(ToolKind::Read);
-    read_dup.name_override = Some("codex_read".to_string());
+    read_dup.name_override = Some("alt_read".to_string());
     let mut grep = ToolConfig::from_id("OpenCode:grep");
     grep.kind = Some(ToolKind::Search);
     grep.name_override = Some("alt_grep".to_string());

@@ -7,7 +7,6 @@ use xai_grok_telemetry::events::{
     CanonicalToolId, InvocationId, InvocationSource, PathScope, ProductModelId, ReadProfile,
     ToolCallCompleted, ToolContractVersion, ToolOutputLimit, ToolSourceReason, ToolSourceStatus,
 };
-use xai_grok_tools::implementations::codex::CodexReadFileTool;
 use xai_grok_tools::implementations::grok_build::{ReadFileTool, SearchReplaceTool};
 use xai_grok_tools::implementations::grok_build_concise::{
     ReadFileConciseTool, SearchReplaceConciseTool,
@@ -410,14 +409,12 @@ fn path_scope_ids() -> &'static [String] {
     IDS.get_or_init(|| {
         let read_file = ReadFileTool;
         let concise_read = ReadFileConciseTool;
-        let codex_read = CodexReadFileTool;
         let search_replace = SearchReplaceTool;
         let concise = SearchReplaceConciseTool;
         let write = OpenCodeWriteTool;
         let mut ids = vec![
             qualified_id(ToolNamespace::GrokBuild, &read_file.id()),
             qualified_id(ToolNamespace::GrokBuildConcise, &concise_read.id()),
-            qualified_id(ToolNamespace::Codex, &codex_read.id()),
             qualified_id(ToolNamespace::GrokBuild, &search_replace.id()),
             qualified_id(ToolNamespace::GrokBuildConcise, &concise.id()),
             qualified_id(ToolNamespace::OpenCode, &write.id()),
@@ -522,7 +519,6 @@ mod tests {
     use xai_grok_telemetry::events::{
         CanonicalToolId, PathScope, ToolSourceReason, ToolSourceStatus,
     };
-    use xai_grok_tools::implementations::codex::CodexReadFileTool;
     use xai_grok_tools::implementations::grok_build::{GrepTool, ReadFileTool, SearchReplaceTool};
     use xai_grok_tools::implementations::grok_build_concise::{
         ReadFileConciseTool, SearchReplaceConciseTool,
@@ -713,7 +709,6 @@ mod tests {
         let cwd = Path::new("/opt/repo");
         let read_file = registered(ToolNamespace::GrokBuild, &ReadFileTool);
         let concise_read = registered(ToolNamespace::GrokBuildConcise, &ReadFileConciseTool);
-        let codex_read = registered(ToolNamespace::Codex, &CodexReadFileTool);
         let search_replace = registered(ToolNamespace::GrokBuild, &SearchReplaceTool);
         let concise = registered(ToolNamespace::GrokBuildConcise, &SearchReplaceConciseTool);
         let write = registered(ToolNamespace::OpenCode, &OpenCodeWriteTool);
@@ -722,7 +717,6 @@ mod tests {
         let cases = [
             (&read_file, "/tmp/pr.md", Some(PathScope::Tmp)),
             (&concise_read, "/tmp/pr.md", Some(PathScope::Tmp)),
-            (&codex_read, "/tmp/pr.md", Some(PathScope::Tmp)),
             (&search_replace, "/private/tmp/pr.md", Some(PathScope::Tmp)),
             (&concise, "/tmp/pr.md", Some(PathScope::Tmp)),
             (&write, "/tmp-other/x", Some(PathScope::Other)),

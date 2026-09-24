@@ -111,6 +111,18 @@ pub(crate) enum HostDrainOutcome {
     TimedOut,
 }
 
+/// The host for one run: its counters, its roster, its parameters.
+fn host_service(params: WorkflowHostParams) -> Arc<HostService> {
+    Arc::new(HostService {
+        active_agents: AtomicU32::new(0),
+        agent_runs: AtomicU32::new(0),
+        script_telemetry_events: AtomicU32::new(0),
+        scratch_io: tokio::sync::Mutex::new(()),
+        agent_slots: params.agent_slots.clone(),
+        params,
+    })
+}
+
 pub(crate) fn spawn_workflow_host_service(
     params: WorkflowHostParams,
     mut rx: mpsc::UnboundedReceiver<WorkflowHostRequest>,
@@ -120,14 +132,7 @@ pub(crate) fn spawn_workflow_host_service(
 ) {
     let (drained_tx, drained_rx) = oneshot::channel();
     let handle = tokio::spawn(async move {
-        let service = Arc::new(HostService {
-            active_agents: AtomicU32::new(0),
-            agent_runs: AtomicU32::new(0),
-            script_telemetry_events: AtomicU32::new(0),
-            scratch_io: tokio::sync::Mutex::new(()),
-            agent_slots: params.agent_slots.clone(),
-            params,
-        });
+        let service = host_service(params);
         loop {
             let req = tokio::select! {
                 req = rx.recv() => match req {
@@ -180,18 +185,34 @@ struct HostService {
     params: WorkflowHostParams,
 }
 
+/// The run's roster row for one agent, and the totals that round charged to it.
+///
+/// `finish` is called on every path that returns a value. Drop covers the one
+/// path that returns nothing: a round that unwound leaves no caller to record
+/// the row, so the guard records it. Without that, the row keeps the state
+/// "running" for the rest of the run's life -- and a row in that state is the
+/// one the capped roster refuses to evict.
 struct FinishOnce<'a> {
     host: &'a HostService,
     agent_id: String,
     finished: bool,
+    tokens: u64,
+    duration_ms: u64,
 }
 
 impl FinishOnce<'_> {
-    fn finish(&mut self, state: &str, total_tokens: u64, total_duration: u64) {
+    fn charge(&mut self, tokens: u64, duration_ms: u64) {
+        self.tokens = self.tokens.saturating_add(tokens);
+        self.duration_ms = self.duration_ms.saturating_add(duration_ms);
+    }
+
+    fn finish(&mut self, state: &str) {
         debug_assert!(!self.finished, "agent roster row finished twice");
         if std::mem::replace(&mut self.finished, true) {
             return;
         }
+        let total_tokens = self.tokens;
+        let total_duration = self.duration_ms;
         if state == "failed" {
             // The roster is capped and survives resume, so failed rows cannot be counted from it; count here
             self.host
@@ -216,6 +237,41 @@ impl FinishOnce<'_> {
             new_agent_id,
         );
         self.agent_id = new_agent_id.to_string();
+    }
+}
+
+impl Drop for FinishOnce<'_> {
+    fn drop(&mut self) {
+        if !self.finished {
+            self.finish("failed");
+        }
+    }
+}
+
+/// One live agent of a run, for as long as a single spawn round is in flight.
+///
+/// The count feeds the run's live-agent readout and its peak-concurrency
+/// stat, and it is what a reader distinguishes a running run from a stalled
+/// one. A round that unwinds has to hand the count back like any other.
+struct ActiveAgent<'a> {
+    host: &'a HostService,
+}
+
+impl<'a> ActiveAgent<'a> {
+    /// Takes the count and records the peak it produced.
+    fn new(host: &'a HostService) -> Self {
+        let now_running = host.active_agents.fetch_add(1, Ordering::Relaxed) + 1;
+        host.params
+            .stats
+            .peak_concurrent
+            .fetch_max(now_running, Ordering::Relaxed);
+        Self { host }
+    }
+}
+
+impl Drop for ActiveAgent<'_> {
+    fn drop(&mut self) {
+        self.host.active_agents.fetch_sub(1, Ordering::Relaxed);
     }
 }
 
@@ -275,8 +331,21 @@ impl HostService {
             WorkflowHostRequest::SpawnAgent { opts, reply } => {
                 let svc = self.clone();
                 tokio::spawn(async move {
-                    let result = svc.spawn_agent(opts).await;
-                    let _ = reply.send(result);
+                    // The script parks on `reply` for this whole round, so a
+                    // panic has to be sent as the failure it is rather than
+                    // close the channel.
+                    let outcome = xai_grok_tools::util::detached::guarded(
+                        "workflow agent spawn",
+                        svc.spawn_agent(opts),
+                    )
+                    .await;
+                    let _ = reply.send(
+                        outcome
+                            .map_err(|panic| {
+                                HostError::Failed(format!("workflow agent spawn panicked: {panic}"))
+                            })
+                            .flatten(),
+                    );
                 });
             }
             WorkflowHostRequest::Phase { title, replayed } => {
@@ -352,19 +421,49 @@ impl HostService {
             } => {
                 let svc = self.clone();
                 tokio::spawn(async move {
-                    let _ = reply.send(svc.write_scratch_file(&name, &content).await);
+                    let _ = reply.send(
+                        xai_grok_tools::util::detached::guarded(
+                            "workflow scratch write",
+                            svc.write_scratch_file(&name, &content),
+                        )
+                        .await
+                        .map_err(|panic| {
+                            HostError::Failed(format!("workflow scratch write panicked: {panic}"))
+                        })
+                        .flatten(),
+                    );
                 });
             }
             WorkflowHostRequest::ReadScratchFile { name, reply } => {
                 let svc = self.clone();
                 tokio::spawn(async move {
-                    let _ = reply.send(svc.read_scratch_file(&name).await);
+                    let _ = reply.send(
+                        xai_grok_tools::util::detached::guarded(
+                            "workflow scratch read",
+                            svc.read_scratch_file(&name),
+                        )
+                        .await
+                        .map_err(|panic| {
+                            HostError::Failed(format!("workflow scratch read panicked: {panic}"))
+                        })
+                        .flatten(),
+                    );
                 });
             }
             WorkflowHostRequest::GitDiffSince { commit, reply } => {
                 let svc = self.clone();
                 tokio::spawn(async move {
-                    let _ = reply.send(svc.git_diff_since(&commit).await);
+                    let _ = reply.send(
+                        xai_grok_tools::util::detached::guarded(
+                            "workflow git diff",
+                            svc.git_diff_since(&commit),
+                        )
+                        .await
+                        .map_err(|panic| {
+                            HostError::Failed(format!("workflow git diff panicked: {panic}"))
+                        })
+                        .flatten(),
+                    );
                 });
             }
         }
@@ -547,6 +646,8 @@ impl HostService {
             host: self,
             agent_id: id.clone(),
             finished: false,
+            tokens: 0,
+            duration_ms: 0,
         };
         let cancel_token = CancellationToken::new();
 
@@ -585,8 +686,6 @@ impl HostService {
             };
 
         let mut attempts: u32 = 0;
-        let mut total_tokens: u64 = 0;
-        let mut total_duration: u64 = 0;
         let mut resume_child: Option<String> = opts.resume_from.clone();
         let mut next_prompt = prompt;
         let mut fork_context = opts.fork_context;
@@ -595,7 +694,7 @@ impl HostService {
             attempts += 1;
             let run = self.agent_runs.fetch_add(1, Ordering::Relaxed);
             if run >= WORKFLOW_MAX_AGENT_RUNS {
-                row.finish("failed", total_tokens, total_duration);
+                row.finish("failed");
                 return Err(HostError::Failed(format!(
                     "workflow agent-run quota exceeded (maximum {WORKFLOW_MAX_AGENT_RUNS})"
                 )));
@@ -615,11 +714,7 @@ impl HostService {
                 fork_context,
             );
 
-            let now_running = self.active_agents.fetch_add(1, Ordering::Relaxed) + 1;
-            self.params
-                .stats
-                .peak_concurrent
-                .fetch_max(now_running, Ordering::Relaxed);
+            let _active = ActiveAgent::new(self);
             self.tick();
 
             let backend = ChannelBackend::new(self.params.subagent_event_tx.clone());
@@ -629,28 +724,25 @@ impl HostService {
                 result = &mut result_fut => result,
                 _ = self.params.cancel.cancelled() => {
                     cancel_token.cancel();
-                    self.active_agents.fetch_sub(1, Ordering::Relaxed);
-                    row.finish("cancelled", total_tokens, total_duration);
+                    row.finish("cancelled");
                     return Err(HostError::Cancelled);
                 }
             };
-            self.active_agents.fetch_sub(1, Ordering::Relaxed);
 
             let Ok(result) = result else {
-                row.finish("failed", total_tokens, total_duration);
+                row.finish("failed");
                 return Err(HostError::Failed(
                     "subagent coordinator channel closed before completion".into(),
                 ));
             };
-            total_tokens = total_tokens.saturating_add(result.total_tokens_used);
-            total_duration += result.duration_ms;
+            row.charge(result.total_tokens_used, result.duration_ms);
             if self.params.cancel.is_cancelled() {
-                row.finish("cancelled", total_tokens, total_duration);
+                row.finish("cancelled");
                 return Err(HostError::Cancelled);
             }
 
             if result.backgrounded {
-                row.finish("failed", total_tokens, total_duration);
+                row.finish("failed");
                 self.tick();
                 return Err(HostError::Failed(format!(
                     "subagent {child_id} was auto-backgrounded by the await budget; its result \
@@ -706,11 +798,7 @@ impl HostService {
             }
         };
 
-        row.finish(
-            if result.success { "done" } else { "failed" },
-            total_tokens,
-            total_duration,
-        );
+        row.finish(if result.success { "done" } else { "failed" });
         self.tick();
 
         Ok(AgentResult {
@@ -718,8 +806,8 @@ impl HostService {
             success: result.success,
             output,
             cancelled: result.cancelled,
-            tokens_used: total_tokens,
-            duration_ms: total_duration,
+            tokens_used: row.tokens,
+            duration_ms: row.duration_ms,
         })
     }
 
@@ -1403,5 +1491,90 @@ mod tests {
         cancel_b.cancel();
         let _ = tokio::time::timeout(Duration::from_secs(2), handle_a).await;
         let _ = tokio::time::timeout(Duration::from_secs(2), handle_b).await;
+    }
+
+    /// A spawn round that unwinds returns no value, so nothing runs the
+    /// `finish` call or the live-agent decrement that a returning round does.
+    /// Both are the run's only record that the agent existed: a roster row left
+    /// on "running" is the one the capped roster refuses to evict, and a live
+    /// count that never came back reads as an agent still working.
+    #[tokio::test]
+    async fn a_panicking_agent_round_frees_its_live_count_and_fails_its_row() {
+        let run_id = "wf_panicking_round".to_string();
+        let mut tracker = WorkflowTracker::default();
+        tracker.start_run(
+            run_id.clone(),
+            "demo".into(),
+            "objective".into(),
+            vec![],
+            Some(1000),
+            None,
+        );
+        let tracker = Arc::new(parking_lot::Mutex::new(tracker));
+        let (subagent_tx, _subagent_rx) = mpsc::unbounded_channel();
+        let (params, _persist_rx) = test_host_params(
+            &run_id,
+            2,
+            "wf-scratch-panicking-round",
+            tracker.clone(),
+            subagent_tx,
+        );
+        let stats = params.stats.clone();
+        let host = host_service(params);
+
+        let round = xai_grok_tools::util::detached::guarded("test agent round", async {
+            host.params.tracker.lock().agent_started(
+                &run_id,
+                crate::session::workflow::tracker::WorkflowAgentRow {
+                    agent_id: "agent-1".to_string(),
+                    label: "a1".to_string(),
+                    phase: None,
+                    model: None,
+                    state: "running".to_string(),
+                    tokens_used: 0,
+                    duration_ms: 0,
+                },
+            );
+            let _row = FinishOnce {
+                host: &host,
+                agent_id: "agent-1".to_string(),
+                finished: false,
+                tokens: 12,
+                duration_ms: 34,
+            };
+            let _live = ActiveAgent::new(&host);
+            assert_eq!(host.active_agents.load(Ordering::Relaxed), 1);
+            panic!("the agent round died");
+        })
+        .await;
+
+        assert!(
+            round.is_err(),
+            "the round's panic must reach the host as an error"
+        );
+        assert_eq!(
+            host.active_agents.load(Ordering::Relaxed),
+            0,
+            "a round that unwound must hand its live-agent count back"
+        );
+        assert_eq!(
+            stats.peak_concurrent.load(Ordering::Relaxed),
+            1,
+            "the concurrency the round reached is still recorded"
+        );
+        let state = tracker.lock().get(&run_id).expect("the run is tracked");
+        let row = state
+            .agents
+            .iter()
+            .find(|a| a.agent_id == "agent-1")
+            .expect("the roster row is present");
+        assert_eq!(row.state, "failed", "the row must not stay running");
+        assert_eq!(row.tokens_used, 12, "what the round charged is kept");
+        assert_eq!(row.duration_ms, 34);
+        assert_eq!(
+            stats.agents_failed.load(Ordering::Relaxed),
+            1,
+            "a round that died counts as a failed agent"
+        );
     }
 }

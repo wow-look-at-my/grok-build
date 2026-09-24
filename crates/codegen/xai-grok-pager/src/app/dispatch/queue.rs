@@ -45,8 +45,8 @@ fn combine_queued_prompts_enabled() -> bool {
 /// gating this on leader mode meant single-client sessions never got ASAP
 /// delivery at all. Multi-client ordering is a separate concern the shared
 /// queue also solves; with one client the two queues still merge as *server
-/// rows first, then local rows*, so a local row (slash command, image prompt,
-/// scheduled prompt) can never move above them.
+/// rows first, then local rows*, so a local row (slash command, scheduled
+/// prompt) can never move above them.
 pub(super) fn immediate_server_send_eligible(agent: &AgentView) -> bool {
     let wake_running = agent.running_wake_turn.is_some();
     let server_busy =
@@ -59,18 +59,49 @@ pub(super) fn immediate_server_send_eligible(agent: &AgentView) -> bool {
         && !agent.session.loading_replay
 }
 
-/// Whether a local row carries nothing but text, and so can be re-sent as a
-/// plain [`Effect::SendPrompt`] without losing anything.
+/// Whether a local row carries only text and images, and so survives the trip
+/// through [`server_queue_send_effect`] without losing anything the model sees.
 ///
-/// Everything else a row can carry — a skill's wire payload, images,
-/// collapsed chips, combined display segments — has no place
-/// in that effect, so a row holding any of it stays local.
+/// A skill's wire payload and combined display segments have no place in that
+/// effect, so a row holding either stays local. Chip elements do not block:
+/// they only style a rewind restore, and the immediate-send path drops them
+/// the same way.
 fn row_is_plain_text(prompt: &crate::app::agent::QueuedPrompt) -> bool {
     prompt.kind == crate::app::agent::QueueEntryKind::Prompt
         && prompt.wire_blocks.is_none()
-        && prompt.images.is_empty()
         && prompt.combined_texts.is_empty()
-        && prompt.chip_elements.is_empty()
+}
+
+/// The effect that puts a prompt on the shell's queue. The shell harvests a
+/// row's image blocks into the running turn with its text, so an image prompt
+/// takes this route too, and never waits in the local queue for the turn end.
+pub(super) fn server_queue_send_effect(
+    agent_id: AgentId,
+    session_id: acp::SessionId,
+    text: String,
+    images: Vec<crate::prompt_images::PastedImage>,
+    cwd: &std::path::Path,
+    prompt_id: String,
+    skill_token_ranges: Vec<std::ops::Range<usize>>,
+) -> Effect {
+    if images.is_empty() {
+        return Effect::SendPrompt {
+            agent_id,
+            session_id,
+            text,
+            prompt_id,
+            skill_token_ranges,
+        };
+    }
+    // The builder rewrites the text (placeholder removal), so token ranges
+    // are not stamped here. The local image drain does the same.
+    let blocks = crate::prompt_images::build_content_blocks_with_workspace(text, images, Some(cwd));
+    Effect::SendPromptBlocks {
+        agent_id,
+        session_id,
+        blocks,
+        prompt_id,
+    }
 }
 
 /// Whether a local row may be handed to the shell as a plain prompt row.
@@ -91,8 +122,8 @@ fn row_may_be_migrated(prompt: &crate::app::agent::QueuedPrompt) -> bool {
 /// [`maybe_drain_queue`] only drains local rows once the session is idle, and
 /// [`immediate_server_send_eligible`] only lets a prompt onto the shell's queue
 /// while the local queue is empty. Together those two rules trap each other: a
-/// single row parked locally during a turn — an image prompt, a prompt typed
-/// during the startup race — keeps every later prompt local as well, and a
+/// single row parked locally during a turn, such as a prompt typed during the
+/// startup race, keeps every later prompt local as well, and a
 /// local row is never harvested into the running turn
 /// (`harvest_queued_prompts_into_interjections` reads the shell's queue). A
 /// session that never idles — one driving a goal — never reaches the recovery
@@ -128,6 +159,7 @@ pub(crate) fn migrate_local_rows_to_server_queue(app: &mut AppView) -> Vec<Effec
     };
     let session_agent_id = agent.session.id;
     let sid_str = session_id.0.to_string();
+    let cwd = agent.session.cwd.clone();
 
     while app
         .agents
@@ -159,15 +191,17 @@ pub(crate) fn migrate_local_rows_to_server_queue(app: &mut AppView) -> Vec<Effec
         crate::unified_log::info(
             "prompt.migrated_to_server_queue",
             Some(&sid_str),
-            Some(serde_json::json!({ "len": row.text.len() })),
+            Some(serde_json::json!({ "len": row.text.len(), "images": row.images.len() })),
         );
-        effects.push(Effect::SendPrompt {
-            agent_id: session_agent_id,
-            session_id: session_id.clone(),
-            text: row.text,
+        effects.push(server_queue_send_effect(
+            session_agent_id,
+            session_id.clone(),
+            row.text,
+            row.images,
+            &cwd,
             prompt_id,
-            skill_token_ranges: row.skill_token_ranges,
-        });
+            row.skill_token_ranges,
+        ));
     }
     effects
 }

@@ -308,6 +308,9 @@ impl ChildRunner for TestRunner {
                     "queued record must take the resolved type"
                 );
             }
+            if request.prompt == PANICKING_PROMPT {
+                panic!("{} died holding its reporter", request.id);
+            }
             let result = tokio::select! {
                 _ = cancellation.cancelled() => {
                     if wait_after_cancel {
@@ -579,6 +582,7 @@ fn harness_with_admission_gate(
     let (advertise_tx, advertise_targets) = mpsc::unbounded_channel();
     let (wake_run_tx, wake_runs) = mpsc::unbounded_channel();
     let (admitted_message_tx, admitted_messages) = mpsc::unbounded_channel();
+    let (interjection_tx, interjections) = mpsc::unbounded_channel();
     let (entered_tx, admission_entered) = mpsc::unbounded_channel();
     let (admission_release, _) = tokio::sync::broadcast::channel(4);
     let gate = AdmissionGate {
@@ -607,6 +611,7 @@ fn harness_with_admission_gate(
                 wake_runs: wake_run_tx,
                 admitted_messages: Some(admitted_message_tx),
                 admission_gate: Some(gate),
+                interjections: interjection_tx,
             },
             config,
         )
@@ -628,6 +633,7 @@ fn harness_with_admission_gate(
             advertise_targets,
             wake_runs,
             admitted_messages,
+            interjections,
             actor,
         },
         admission_entered,
@@ -725,7 +731,7 @@ async fn interject_reaches_the_active_child_named_by_id() {
     let mut harness = harness(false, std::time::Duration::from_secs(60));
     let spawn = tokio::spawn({
         let backend = harness.backend.clone();
-        async move { backend.spawn(request("planner", false)).await }
+        async move { backend.spawn(request("planner", false), None).await }
     });
     // The child is addressable only once its run has reported started.
     let started = harness.started.recv().await.expect("child started");
@@ -779,7 +785,7 @@ async fn interject_before_start_is_delivered_on_start() {
     let mut harness = harness(true, std::time::Duration::from_secs(60));
     let spawn = tokio::spawn({
         let backend = harness.backend.clone();
-        async move { backend.spawn(request("planner", false)).await }
+        async move { backend.spawn(request("planner", false), None).await }
     });
     // The run has the request but has not reported started: the child is pending.
     let pending = harness.requests.recv().await.expect("child pending");
@@ -841,7 +847,7 @@ async fn send_message_reaches_the_caller_s_own_running_child() {
     let mut harness = harness(false, std::time::Duration::from_secs(60));
     let spawn = tokio::spawn({
         let backend = harness.backend.clone();
-        async move { backend.spawn(request("planner", false)).await }
+        async move { backend.spawn(request("planner", false), None).await }
     });
     let started = harness.started.recv().await.expect("child started");
     assert_eq!(started, "planner");
@@ -872,7 +878,7 @@ async fn send_message_refuses_a_child_of_another_session() {
     let mut harness = harness(false, std::time::Duration::from_secs(60));
     let spawn = tokio::spawn({
         let backend = harness.backend.clone();
-        async move { backend.spawn(request("planner", false)).await }
+        async move { backend.spawn(request("planner", false), None).await }
     });
     assert_eq!(
         harness.started.recv().await.expect("child started"),
@@ -912,7 +918,7 @@ async fn send_message_before_start_is_queued_then_delivered() {
     let mut harness = harness(true, std::time::Duration::from_secs(60));
     let spawn = tokio::spawn({
         let backend = harness.backend.clone();
-        async move { backend.spawn(request("planner", false)).await }
+        async move { backend.spawn(request("planner", false), None).await }
     });
     let pending = harness.requests.recv().await.expect("child pending");
     assert_eq!(pending.id, "planner");
@@ -2078,7 +2084,10 @@ async fn panic_keeps_request_uuid_as_resume_identity() {
         .await
         .unwrap();
     assert!(!result.success);
-    assert_eq!(result.error.as_deref(), Some("Subagent runtime panicked"));
+    assert_eq!(
+        result.error.as_deref(),
+        Some("Subagent runtime panicked: test panic after identity allocation")
+    );
 
     let mut resume = request("identity-resume", false);
     resume.resume_from = Some("identity-panic".to_owned());
@@ -4732,5 +4741,53 @@ async fn workflow_spawns_bypass_the_session_concurrent_limit() {
             .expect("spawn round-trips")
             .success
     );
+    harness.actor.abort();
+}
+
+/// A prompt that makes [`TestRunner`]'s run future unwind.
+const PANICKING_PROMPT: &str = "panic mid-run";
+
+/// A child that dies mid-run has to leave a finished record behind.
+///
+/// The unwinding is caught where the run is pushed, so what the coordinator
+/// still owes whoever holds the task id is an answer naming the failure: a bare
+/// "panicked" cannot be told apart from any other way a child can die, and the
+/// caller is the one that has to decide what to do about it.
+#[tokio::test]
+async fn a_panicking_child_reports_what_it_died_of() {
+    let mut harness = harness(false, std::time::Duration::from_secs(60));
+    let spawn = tokio::spawn({
+        let backend = harness.backend.clone();
+        async move {
+            let mut request = request("dead-child", true);
+            request.prompt = PANICKING_PROMPT.to_owned();
+            backend.spawn(request, None).await
+        }
+    });
+
+    let started = harness.started.recv().await.expect("child started");
+    assert_eq!(started, "dead-child");
+
+    harness
+        .completions
+        .recv()
+        .await
+        .expect("the child that died must be finished, not left running");
+
+    let snapshot = harness
+        .backend
+        .query("dead-child", false, None)
+        .await
+        .expect("the id the caller holds still resolves");
+    let SubagentSnapshotStatus::Failed { error } = &snapshot.status else {
+        panic!("expected a failed record, got {:?}", snapshot.status);
+    };
+    assert!(
+        error.contains("dead-child died holding its reporter"),
+        "the report must carry what the child panicked with, got {error:?}"
+    );
+
+    let _ = harness.finish.send(());
+    let _ = spawn.await;
     harness.actor.abort();
 }

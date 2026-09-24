@@ -595,7 +595,7 @@ pub(crate) fn execute(
                         )
                         .await;
                     if latest_seq.load(std::sync::atomic::Ordering::Acquire) != seq
-                        || !(enabled.claude || enabled.codex || enabled.cursor)
+                        || !(enabled.claude || enabled.cursor)
                     {
                         return TaskResult::ForeignSessionsScanned {
                             entries: Vec::new(),
@@ -1070,19 +1070,16 @@ pub(crate) fn execute(
                         )
                         .ok()?;
                     let proxy_base = cfg.endpoints.proxy_url();
-                    let deployment_key = cfg.endpoints.deployment_key.clone();
                     let alpha_test_key = cfg.endpoints.alpha_test_key.clone();
                     let auth_manager = crate::app::session_startup::pre_acp_auth_manager(
                         &cfg,
                     );
                     let registry = SessionRegistryClient::new(&proxy_base, String::new())
-                        .with_deployment_key(deployment_key.clone())
                         .with_alpha_test_key(alpha_test_key.clone())
                         .with_session_id(session_id.clone())
                         .with_auth(auth_manager.clone());
                     let storage = xai_grok_shell::credential_factory::build_storage_client_for_proxy(
                         &proxy_base,
-                        deployment_key,
                         alpha_test_key,
                         Some(auth_manager.clone()),
                         None,

@@ -1078,6 +1078,8 @@ fn render_file_list(buf: &mut Buffer, area: Rect, state: &mut MemoryModalState, 
         );
     } else {
         let leading;
+        // The focused arm slices on a ratatui `visible_byte_range`, a boundary.
+        #[allow(clippy::string_slice)]
         let visible = if filter_focused {
             state
                 .query()

@@ -666,15 +666,8 @@ mod tests {
         let resolved = resolve_model_list(&cfg, None);
         let max_request_bytes = |key: &str| {
             let model = resolved.get(key).expect("model should exist");
-            sampling_config_for_model(
-                model,
-                resolve_credentials(model, None),
-                None,
-                None,
-                None,
-                None,
-            )
-            .max_request_bytes
+            sampling_config_for_model(model, resolve_credentials(model, None), None, None, None)
+                .max_request_bytes
         };
         assert_eq!(
             NonZeroU64::new(20_000_000),

@@ -1,3 +1,10 @@
+#![allow(clippy::cast_lossless)]
+#![allow(clippy::cast_possible_truncation)]
+#![allow(clippy::cast_possible_wrap)]
+#![allow(clippy::cast_precision_loss)]
+#![allow(clippy::cast_sign_loss)]
+#![allow(clippy::expect_used)]
+#![allow(clippy::unwrap_used)]
 #![allow(
     unused_imports,
     unused_variables,
@@ -8,12 +15,14 @@
 //! xai-grok-pager: Grok Build TUI.
 //!
 //! A clean-room implementation built on the v3 pager rendering engine.
+#![allow(clippy::string_slice)]
 #![deny(clippy::indexing_slicing)]
 pub mod acp;
 pub mod actions;
 pub mod agent_runtime;
 pub mod app;
 pub mod best_effort_stderr;
+pub mod branch_stats;
 pub mod ci_status;
 pub mod client_identity;
 pub mod completions_cmd;

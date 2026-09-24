@@ -1,12 +1,8 @@
 use std::ffi::OsString;
 use std::fs::{File, Metadata};
-use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime};
-
-use rusqlite::{Connection, OpenFlags};
-use xai_sqlite_journal::JournalMode;
+use std::time::SystemTime;
 
 #[cfg(unix)]
 mod unix;
@@ -29,40 +25,6 @@ pub(super) struct OpenedRegularFile {
 pub(super) struct DirectoryVisit {
     pub visited: usize,
     pub complete: bool,
-}
-
-pub(super) struct ReadTransactionSqlite {
-    connection: Connection,
-    #[allow(dead_code)]
-    metadata: Metadata,
-}
-
-impl ReadTransactionSqlite {
-    fn new(connection: Connection, metadata: Metadata) -> Self {
-        Self {
-            connection,
-            metadata,
-        }
-    }
-
-    #[allow(dead_code)]
-    pub fn metadata(&self) -> &Metadata {
-        &self.metadata
-    }
-}
-
-impl Deref for ReadTransactionSqlite {
-    type Target = Connection;
-
-    fn deref(&self) -> &Self::Target {
-        &self.connection
-    }
-}
-
-impl Drop for ReadTransactionSqlite {
-    fn drop(&mut self) {
-        let _ = self.connection.execute_batch("ROLLBACK");
-    }
 }
 
 impl ApprovedRoot {
@@ -248,44 +210,6 @@ impl ApprovedRoot {
             None
         }
     }
-}
-
-pub(super) fn open_sqlite_transaction(
-    root: &ApprovedRoot,
-    path: &Path,
-) -> Option<ReadTransactionSqlite> {
-    open_sqlite_transaction_with_journal_mode(root, path, JournalMode::for_db_path(path))
-}
-
-fn open_sqlite_transaction_with_journal_mode(
-    root: &ApprovedRoot,
-    path: &Path,
-    journal_mode: JournalMode,
-) -> Option<ReadTransactionSqlite> {
-    match journal_mode {
-        JournalMode::Wal => {}
-        JournalMode::Truncate => return None,
-    }
-    let opened = root.open_regular_file(path)?;
-    // Canonical containment and a non-symlink final file are validated above
-    // Only local WAL reaches this direct read-only/query-only open
-    let connection = Connection::open_with_flags(
-        &opened.path,
-        OpenFlags::SQLITE_OPEN_READ_ONLY
-            | OpenFlags::SQLITE_OPEN_NO_MUTEX
-            | OpenFlags::SQLITE_OPEN_NOFOLLOW,
-    )
-    .ok()?;
-    let _ = connection.busy_timeout(Duration::from_millis(50));
-    connection
-        .execute_batch("PRAGMA query_only=ON; BEGIN DEFERRED")
-        .ok()?;
-    connection
-        .query_row("SELECT COUNT(*) FROM sqlite_schema", [], |row| {
-            row.get::<_, i64>(0)
-        })
-        .ok()?;
-    Some(ReadTransactionSqlite::new(connection, opened.metadata))
 }
 
 #[cfg(windows)]

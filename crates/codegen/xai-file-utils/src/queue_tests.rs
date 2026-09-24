@@ -1769,7 +1769,6 @@ impl TraceExportSource for CountingResolver {
             upload_method: UploadMethod::Proxy {
                 proxy_base_url: self.proxy_base_url.clone(),
                 user_token: "test-token".to_string(),
-                deployment_key: None,
                 alpha_test_key: None,
             },
         }
@@ -2079,7 +2078,6 @@ impl TraceExportSource for ParkingResolver {
             upload_method: UploadMethod::Proxy {
                 proxy_base_url: self.proxy_base_url.clone(),
                 user_token: "test-token".to_string(),
-                deployment_key: None,
                 alpha_test_key: None,
             },
         }
@@ -3452,7 +3450,6 @@ async fn inline_fallback_semaphore_bounds_concurrency() {
                 upload_method: UploadMethod::Proxy {
                     proxy_base_url: self.proxy_base_url.clone(),
                     user_token: "t".to_string(),
-                    deployment_key: None,
                     alpha_test_key: None,
                 },
             }

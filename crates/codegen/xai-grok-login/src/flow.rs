@@ -901,7 +901,6 @@ async fn run_cli_login_steps(
     Ok(authenticated)
 }
 /// Result of a logout operation.
-/// Both the CLI subcommand and the ACP `/logout` slash command use it, so the presentation layer formats the outcome without duplicating auth logic.
 pub struct LogoutResult {
     /// `true` if a cached OAuth session was found and cleared.
     pub was_logged_in: bool,

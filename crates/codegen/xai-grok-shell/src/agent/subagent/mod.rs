@@ -963,7 +963,6 @@ fn resolve_model_override_to_config(
         credentials,
         ctx.alpha_test_key.clone(),
         ctx.sampling_config.client_version.clone(),
-        ctx.sampling_config.deployment_id.clone(),
         ctx.sampling_config.user_id.clone(),
     );
     config.bearer_resolver = if !ctx.would_strip_fallback_key(config.api_key.as_deref())

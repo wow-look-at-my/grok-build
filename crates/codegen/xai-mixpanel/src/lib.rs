@@ -52,12 +52,6 @@ impl Mixpanel {
         }
     }
 
-    #[cfg(test)]
-    fn with_base_url(mut self, base_url: impl Into<String>) -> Self {
-        self.base_url = base_url.into();
-        self
-    }
-
     /// Scrub property string values in place, then inject the project
     /// token. Split out from [`Self::track`] so the scrub-then-inject
     /// ordering is testable.

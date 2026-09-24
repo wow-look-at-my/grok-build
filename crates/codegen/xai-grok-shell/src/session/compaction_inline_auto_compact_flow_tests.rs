@@ -202,6 +202,7 @@ async fn create_test_actor(
         models_manager: Default::default(),
         display_cwd: std::sync::OnceLock::new(),
         active_agent_type: parking_lot::Mutex::new(None),
+        allowed_subagent_types: Default::default(),
         queue_exit_reminder_on_approved_exit: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         emit_local_background_tasks: Arc::new(std::sync::atomic::AtomicBool::new(true)),
         active_skill: parking_lot::Mutex::new(None),
@@ -287,6 +288,7 @@ async fn create_test_actor(
         next_title_refresh_idx: std::cell::Cell::new(0),
         turn_summary_enabled: false,
         title_refresh_enabled: false,
+        thinking_summaries_enabled: false,
         session_turn_active: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         streaming_turn_capture: parking_lot::Mutex::new(
             crate::session::acp_session::StreamingTurnCapture::default(),
@@ -895,6 +897,7 @@ async fn family_switch_compacts_lossy_with_new_model() {
                     id: std::sync::Arc::<str>::from("call_xai_minted_id"),
                     name: "run_terminal_command".to_string(),
                     arguments: std::sync::Arc::<str>::from(r#"{"command":"ls"}"#),
+                    vendor: Default::default(),
                 }]),
                 ConversationItem::ToolResult(xai_grok_sampling_types::ToolResultItem {
                     tool_call_id: "call_xai_minted_id".to_string(),
@@ -1064,6 +1067,7 @@ async fn e2e_auto_compact_413_steps_ladder_then_sticky_size_suppress() {
                     id: std::sync::Arc::<str>::from("call_1"),
                     name: "run_terminal_command".to_string(),
                     arguments: std::sync::Arc::<str>::from(r#"{"command":"ls"}"#),
+                    vendor: Default::default(),
                 }]),
                 ConversationItem::ToolResult(xai_grok_sampling_types::ToolResultItem {
                     tool_call_id: "call_1".to_string(),

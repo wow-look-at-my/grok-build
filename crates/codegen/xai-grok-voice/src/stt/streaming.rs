@@ -77,6 +77,10 @@ impl StreamingSttSession {
         let (audio_tx, mut audio_rx) = mpsc::channel::<Vec<u8>>(64);
         let (event_tx, event_rx) = mpsc::channel::<StreamingSttEvent>(64);
 
+        // Both handles are stored on the session (`_writer_task`, `_reader_task`)
+        // and aborted by `teardown`, and each task's death closes the channel its
+        // consumer is reading, so neither panic nor loss goes unreported.
+        #[allow(clippy::disallowed_methods)]
         let writer_task = tokio::spawn(async move {
             while let Some(chunk) = audio_rx.recv().await {
                 if ws_write.send(Message::Binary(chunk.into())).await.is_err() {
@@ -88,6 +92,7 @@ impl StreamingSttSession {
                 .await;
         });
 
+        #[allow(clippy::disallowed_methods)] // handle stored + aborted by teardown
         let reader_task = tokio::spawn(async move {
             loop {
                 match ws_read.next().await {

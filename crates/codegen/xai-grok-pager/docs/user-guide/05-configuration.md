@@ -75,6 +75,12 @@ default_selected_permission = "always_allow_all_sessions" # preselected row on t
 remember_tool_approvals = true         # show per-command "Always allow" options on permission prompts;
                                        # grants are remembered per project (default: true); see 22-permissions-and-safety.md
 show_thinking_blocks = true            # show agent thinking blocks in the TUI (default: true)
+thinking_summaries = true              # under a collapsed thinking block, show a one-or-two-sentence
+                                       # summary of what the model worked out (default: true). Costs one
+                                       # model call per thinking block; the model answering it is
+                                       # [models].thinking_summary. A session reads it when it starts, so
+                                       # a change applies to the next session (/settings > Summarize
+                                       # thinking)
 group_tool_verbs = true                # fold runs of read/search/list tool calls and subagent rows
                                        # — and finished thoughts among them — into one row (default: true)
 collapsed_edit_blocks = false          # show edits as one-line +N/-M diffstat summaries and merge
@@ -220,14 +226,14 @@ Each setting also has an environment-variable override, applied on first load on
 
 #### Slow output
 
-Some inference engines drop to a crawl in the middle of a response. Grok watches the output rate and reissues a model call that stays too slow. Tune it in `/settings` → **Slow output**, or in `[ui]`. A change applies to the next model call of every running session.
+Some inference engines drop to a crawl in the middle of a response. Grok watches the output rate. When a model call stays too slow, Grok starts a backup of that call and keeps the slow one streaming. Whichever gets ahead is the answer, and a slow call that speeds back up cancels its backup. Tune it in `/settings` → **Slow output**, or in `[ui]`. A change applies to the next model call of every running session.
 
 | Key | Values (default) | Behavior |
 |-----|------------------|----------|
 | `min_output_tokens_per_sec` | `0`–`500` (`15`) | The floor. `0` turns detection off. `[model.<id>].min_output_tokens_per_sec` overrides it for one model. |
-| `output_rate_sustained_secs` | `1`–`600` (`10`) | How long the rate must stay under the floor before the call is reissued. |
+| `output_rate_sustained_secs` | `1`–`600` (`10`) | How long the rate must stay under the floor before a backup starts. |
 | `output_rate_window_secs` | `2`–`120` (`10`) | How many seconds of output the rate is averaged over. |
-| `output_rate_max_retries` | `0`–`5` (`2`) | How many times one call is reissued. After that the response is kept at whatever rate it runs. `0` never reissues. |
+| `output_rate_max_retries` | `0`–`5` (`2`) | How many backups one call can start. After that the response is kept at whatever rate it runs. `0` starts none. |
 | `ttft_timeout_secs` | `0`–`1800` (`120`) | Time-to-first-token limit. A call with no output this many seconds after it was sent is reissued, on the same retry budget. `0` turns it off. `[model_providers.<id>].ttft_timeout_secs` overrides it for a provider, and `[model.<id>].ttft_timeout_secs` for one model. |
 
 ```toml
@@ -493,7 +499,7 @@ disabled = ["wip-skill"]              # skill names to keep listed but inactive
 
 ### Harness compatibility
 
-Control vendor compatibility for Cursor, Claude, and Codex. Every cell defaults to `true`. Session cells stay staged and inert until a foreign-session scanner consumes them, and each tool needs both its `sessions` cell and the matching `resume-claude`, `resume-codex`, or `resume-cursor` skill — a missing skill means zero foreign-session filesystem I/O.
+Control vendor compatibility for Cursor and Claude. Every cell defaults to `true`. Session cells stay staged and inert until a foreign-session scanner consumes them. Each tool needs both its `sessions` cell and the matching `resume-claude` or `resume-cursor` skill — a missing skill means zero foreign-session filesystem I/O.
 
 ```toml
 [compat.cursor]
@@ -511,12 +517,7 @@ agents = true     # scan ~/.claude/ and <dir>/.claude/CLAUDE*.md
 mcps = true       # scan ~/.claude.json for MCP servers
 hooks = true      # scan ~/.claude/settings.json for hooks
 sessions = true   # staged; no scanner consumer yet
-
-[compat.codex]
-sessions = true   # staged; no scanner consumer yet
 ```
-
-Codex's `skills`, `rules`, `agents`, `mcps`, and `hooks` cells are reserved and currently inert — they do not enable `.codex` discovery.
 
 For Claude and Cursor, `rules` and `agents` are independent: turning off named instruction files doesn't disable the home or project rules directory, and turning off rules doesn't disable named files. Claude's `agents` cell gates home-level `~/.claude/` named files and project `<dir>/.claude/CLAUDE*.md`; generic top-level `Claude.md`, `CLAUDE.md`, and `CLAUDE.local.md` stay recognized. Project rule paths are scanned at every directory from the repo root down to the current one.
 
@@ -951,7 +952,6 @@ A refused request is never sent. Its error names the entry to add. Grok has no b
 | `GROK_TELEMETRY_MIXPANEL_ENABLED` | Enable/disable Mixpanel specifically |
 | `GROK_EXTERNAL_OTEL` | External OTEL to your collector (see [24-monitoring-usage.md](24-monitoring-usage.md)) |
 | `GROK_FEEDBACK_ENABLED` | Enable/disable feedback system |
-| `GROK_DEPLOYMENT_KEY` | Management API key for enterprise |
 
 ---
 

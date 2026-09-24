@@ -1,3 +1,11 @@
+#![allow(clippy::cast_lossless)] // 5 hits predate the gate
+#![allow(clippy::cast_possible_truncation)] // 2 hits predate the gate
+#![allow(clippy::cast_possible_wrap)] // 4 hits predate the gate
+#![allow(clippy::cast_precision_loss)] // 14 hits predate the gate
+#![allow(clippy::cast_sign_loss)] // 5 hits predate the gate
+#![allow(clippy::expect_used)] // 3 hits predate the gate
+#![allow(clippy::unwrap_used)] // 1 hit predates the gate
+
 //! Streaming markdown renderer for terminal UIs.
 //!
 //! This crate provides incremental/streaming markdown rendering optimized for displaying LLM responses in terminal UIs.

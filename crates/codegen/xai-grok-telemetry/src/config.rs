@@ -122,7 +122,7 @@ where
     })
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
+#[serde(default, try_from = "TelemetryConfigWire")]
 pub struct TelemetryConfig {
     /// Declared for `serde_ignored`. Actual toggle is `[features] telemetry`.
     #[serde(default)]
@@ -140,8 +140,9 @@ pub struct TelemetryConfig {
     pub otel_logs_exporter: Option<String>,
     /// External OTLP base endpoint (`/v1/logs`, `/v1/metrics` appended for HTTP).
     pub otel_endpoint: Option<String>,
-    /// External OTLP transport: `http/protobuf` | `grpc`.
-    #[serde(alias = "otel_transport")]
+    /// External OTLP transport: `http/protobuf` | `grpc`. Read under both
+    /// spellings through [`TelemetryConfig::OTEL_PROTOCOL_KEYS`]; written under
+    /// this one.
     pub otel_protocol: Option<String>,
     pub otel_certificate: Option<String>,
     pub otel_client_certificate: Option<String>,
@@ -171,6 +172,99 @@ pub struct TelemetryConfig {
     pub otel_metrics_client_certificate: Option<String>,
     pub otel_metrics_client_key: Option<String>,
     pub otel_metrics_include_session_id: Option<bool>,
+}
+
+impl TelemetryConfig {
+    /// The keys [`otel_protocol`](Self::otel_protocol) is read under. The
+    /// transport's own name is the canonical one; `otel_transport` is the
+    /// earlier spelling still present in deployed config.
+    pub const OTEL_PROTOCOL_KEYS: xai_tool_types::Aliases =
+        xai_tool_types::Aliases::new("otel_protocol", &["otel_transport"]);
+}
+
+/// `TelemetryConfig` with each transport-key spelling as its own field, so a
+/// table naming both folds under [`TelemetryConfig::OTEL_PROTOCOL_KEYS`]
+/// instead of tripping serde's duplicate-field check. This table can arrive
+/// from a remote campaign patch, which is merged into the same value the config
+/// is read from and is not limited to any field set.
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+struct TelemetryConfigWire {
+    enabled: Option<bool>,
+    events_url: Option<String>,
+    events_api_key: Option<String>,
+    mixpanel_token: Option<String>,
+    mixpanel_enabled: bool,
+    trace_upload: Option<bool>,
+    otel_enabled: Option<bool>,
+    otel_metrics_exporter: Option<String>,
+    otel_logs_exporter: Option<String>,
+    otel_endpoint: Option<String>,
+    otel_protocol: Option<String>,
+    otel_transport: Option<String>,
+    otel_certificate: Option<String>,
+    otel_client_certificate: Option<String>,
+    otel_client_key: Option<String>,
+    otel_log_user_prompts: Option<bool>,
+    otel_log_tool_details: Option<bool>,
+    otel_log_assistant_responses: Option<bool>,
+    otel_log_tool_content: Option<bool>,
+    #[serde(deserialize_with = "deserialize_opt_ms_string")]
+    otel_timeout: Option<String>,
+    #[serde(deserialize_with = "deserialize_opt_ms_string")]
+    otel_metric_export_interval: Option<String>,
+    otel_logs_endpoint: Option<String>,
+    otel_metrics_endpoint: Option<String>,
+    otel_logs_protocol: Option<String>,
+    otel_metrics_protocol: Option<String>,
+    otel_logs_certificate: Option<String>,
+    otel_metrics_certificate: Option<String>,
+    otel_logs_client_certificate: Option<String>,
+    otel_logs_client_key: Option<String>,
+    otel_metrics_client_certificate: Option<String>,
+    otel_metrics_client_key: Option<String>,
+    otel_metrics_include_session_id: Option<bool>,
+}
+
+impl TryFrom<TelemetryConfigWire> for TelemetryConfig {
+    type Error = xai_tool_types::AliasConflict;
+
+    fn try_from(wire: TelemetryConfigWire) -> Result<Self, Self::Error> {
+        Ok(Self {
+            enabled: wire.enabled,
+            events_url: wire.events_url,
+            events_api_key: wire.events_api_key,
+            mixpanel_token: wire.mixpanel_token,
+            mixpanel_enabled: wire.mixpanel_enabled,
+            trace_upload: wire.trace_upload,
+            otel_enabled: wire.otel_enabled,
+            otel_metrics_exporter: wire.otel_metrics_exporter,
+            otel_logs_exporter: wire.otel_logs_exporter,
+            otel_endpoint: wire.otel_endpoint,
+            otel_protocol: TelemetryConfig::OTEL_PROTOCOL_KEYS
+                .fold(vec![wire.otel_protocol, wire.otel_transport])?,
+            otel_certificate: wire.otel_certificate,
+            otel_client_certificate: wire.otel_client_certificate,
+            otel_client_key: wire.otel_client_key,
+            otel_log_user_prompts: wire.otel_log_user_prompts,
+            otel_log_tool_details: wire.otel_log_tool_details,
+            otel_log_assistant_responses: wire.otel_log_assistant_responses,
+            otel_log_tool_content: wire.otel_log_tool_content,
+            otel_timeout: wire.otel_timeout,
+            otel_metric_export_interval: wire.otel_metric_export_interval,
+            otel_logs_endpoint: wire.otel_logs_endpoint,
+            otel_metrics_endpoint: wire.otel_metrics_endpoint,
+            otel_logs_protocol: wire.otel_logs_protocol,
+            otel_metrics_protocol: wire.otel_metrics_protocol,
+            otel_logs_certificate: wire.otel_logs_certificate,
+            otel_metrics_certificate: wire.otel_metrics_certificate,
+            otel_logs_client_certificate: wire.otel_logs_client_certificate,
+            otel_logs_client_key: wire.otel_logs_client_key,
+            otel_metrics_client_certificate: wire.otel_metrics_client_certificate,
+            otel_metrics_client_key: wire.otel_metrics_client_key,
+            otel_metrics_include_session_id: wire.otel_metrics_include_session_id,
+        })
+    }
 }
 fn internal_defaults() -> (Option<String>, Option<String>, Option<String>, bool) {
     (None, None, None, false)
@@ -289,8 +383,8 @@ impl TelemetryConfig {
         })
     }
 }
-/// Derive a stable deployment ID (UUIDv5) from the deployment key.
-pub fn deployment_id_from_key(key: &str) -> String {
+/// Derive a stable ID (UUIDv5) from a secret key, so the key itself never leaves.
+pub fn key_id_from_key(key: &str) -> String {
     uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID, key.as_bytes()).to_string()
 }
 #[cfg(test)]
@@ -361,6 +455,60 @@ mod tests {
         assert_eq!(
             from_str.otel_metric_export_interval.as_deref(),
             Some("60000")
+        );
+    }
+}
+
+#[cfg(test)]
+mod wire_alias_tests {
+    use super::TelemetryConfig;
+
+    fn parse(table: &str) -> Result<TelemetryConfig, serde_json::Error> {
+        serde_json::from_str(&format!("{{{table}}}"))
+    }
+
+    /// A `[telemetry]` table naming the transport under both spellings is one
+    /// setting stated twice. This table can arrive from a remote campaign patch,
+    /// which merges into the same value the whole `Config` is read from, so a
+    /// duplicate-field rejection here would fail the entire config parse.
+    #[test]
+    fn a_table_naming_the_transport_under_both_keys_under_one_value_parses_once() {
+        let cfg = parse(r#""otel_protocol":"grpc","otel_transport":"grpc""#)
+            .expect("one value named under two keys is one value");
+        assert_eq!(cfg.otel_protocol.as_deref(), Some("grpc"));
+    }
+
+    #[test]
+    fn a_table_reading_either_transport_spelling_alone_still_works() {
+        let canonical = parse(r#""otel_protocol":"http/protobuf""#).unwrap();
+        assert_eq!(canonical.otel_protocol.as_deref(), Some("http/protobuf"));
+
+        let legacy = parse(r#""otel_transport":"grpc""#).unwrap();
+        assert_eq!(legacy.otel_protocol.as_deref(), Some("grpc"));
+    }
+
+    /// Two different transports is a genuine conflict about where OTLP goes, so
+    /// it fails and names the field rather than exporting to one of them.
+    #[test]
+    fn a_table_whose_transport_spellings_disagree_is_an_error_naming_the_field() {
+        let err = parse(r#""otel_protocol":"grpc","otel_transport":"http/protobuf""#)
+            .expect_err("a contradicted transport must not resolve silently");
+        let text = err.to_string();
+        assert!(text.contains("otel_protocol"), "{err}");
+        assert!(text.contains("otel_transport"), "{err}");
+    }
+
+    /// The outgoing shape keeps the canonical key, so a config written back to
+    /// disk does not grow the legacy spelling.
+    #[test]
+    fn the_transport_serializes_under_the_canonical_key_only() {
+        let mut cfg = TelemetryConfig::default();
+        cfg.otel_protocol = Some("grpc".to_owned());
+        let json = serde_json::to_value(&cfg).unwrap();
+        assert_eq!(json["otel_protocol"], "grpc");
+        assert!(
+            json.get("otel_transport").is_none(),
+            "the alias key must not appear on the wire: {json}"
         );
     }
 }

@@ -154,11 +154,6 @@ impl SessionRegistryClient {
         }
     }
 
-    pub fn with_deployment_key(mut self, key: Option<String>) -> Self {
-        self.credentials.deployment_key = key;
-        self
-    }
-
     pub fn with_alpha_test_key(mut self, key: Option<String>) -> Self {
         self.credentials.alpha_test_key = key;
         self
@@ -173,11 +168,9 @@ impl SessionRegistryClient {
     pub fn with_auth(mut self, auth_manager: std::sync::Arc<xai_grok_login::AuthManager>) -> Self {
         let provider: std::sync::Arc<dyn xai_grok_auth::AuthCredentialProvider> =
             std::sync::Arc::new(
-                xai_grok_login::credential_provider::ShellAuthCredentialProvider::with_deployment_id_resolver(
+                xai_grok_login::credential_provider::ShellAuthCredentialProvider::new(
                     auth_manager.clone(),
-                    self.credentials.deployment_key.clone(),
                     self.credentials.alpha_test_key.clone(),
-                    std::sync::Arc::new(crate::managed_config::resolve_deployment_id),
                 ),
             );
         self.credentials = self.credentials.with_auth_manager(auth_manager);

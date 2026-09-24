@@ -257,17 +257,11 @@ impl From<&xai_grok_tools::types::ToolInput> for AccessKind {
         match input {
             ToolInput::ReadFile(r) => AccessKind::Read(Some(r.path.clone())),
             ToolInput::ListDir(l) => AccessKind::Read(Some(l.target_directory.clone())),
-            ToolInput::CodexReadFile(r) => AccessKind::Read(Some(r.file_path.clone())),
-            ToolInput::CodexListDir(l) => AccessKind::Read(Some(l.dir_path.clone())),
             ToolInput::MemoryGet(m) => AccessKind::Read(Some(m.path.clone())),
             ToolInput::Lsp(l) => AccessKind::Read(l.file_path.clone()),
             ToolInput::Grep(g) => AccessKind::Grep {
                 path: g.path.clone(),
                 glob: g.glob.clone(),
-            },
-            ToolInput::CodexGrepFiles(g) => AccessKind::Grep {
-                path: g.path.clone(),
-                glob: g.include.clone(),
             },
             ToolInput::TodoWrite(_)
             | ToolInput::TaskOutput(_)
@@ -280,7 +274,9 @@ impl From<&xai_grok_tools::types::ToolInput> for AccessKind {
             | ToolInput::EnterPlanMode(_)
             | ToolInput::ExitPlanMode(_)
             | ToolInput::AskUserQuestion(_)
-            | ToolInput::UpdateGoal(_) => AccessKind::Read(None),
+            | ToolInput::UpdateGoal(_)
+            // `ci` runs only allowlisted read-only `gh` queries.
+            | ToolInput::Ci(_) => AccessKind::Read(None),
             ToolInput::Task(_) => AccessKind::Tool("task".to_owned()),
             ToolInput::SchedulerCreate(_) => AccessKind::Tool("scheduler_create".to_owned()),
             ToolInput::SchedulerDelete(_) => AccessKind::Tool("scheduler_delete".to_owned()),
@@ -292,12 +288,14 @@ impl From<&xai_grok_tools::types::ToolInput> for AccessKind {
             ToolInput::SendSubagentMessage(message) => AccessKind::AgentMessage {
                 subagent_id: message.subagent_id.clone(),
             },
+            ToolInput::SendMessage(message) => AccessKind::AgentMessage {
+                subagent_id: message.to.clone(),
+            },
             ToolInput::SendFeedback(_) => AccessKind::Tool("send_feedback".to_owned()),
             ToolInput::WebSearch(ws) => AccessKind::WebSearch(ws.query.clone()),
             ToolInput::SearchReplace(search_replace) => {
                 AccessKind::Edit(search_replace.file_path.to_string())
             }
-            ToolInput::ApplyPatch(_) => AccessKind::Tool("apply_patch".to_owned()),
             ToolInput::HashlineEdit(he) => AccessKind::Edit(he.file_path.to_string()),
             ToolInput::Write(w) => AccessKind::Edit(w.file_path.clone()),
             ToolInput::CopyMove(c) => AccessKind::Edit(c.destination.clone()),
@@ -834,20 +832,6 @@ mod tests {
             matches!(access, AccessKind::WebSearch(ref q) if q == "rust lang"),
             "WebSearch should produce AccessKind::WebSearch with the query, got {access:?}"
         );
-    }
-    /// The patch text names its files; no grant scope can vouch for them, so a patch prompts every time.
-    #[test]
-    fn apply_patch_maps_to_tool_access() {
-        use xai_grok_tools::implementations::codex::apply_patch::ApplyPatchInput;
-        use xai_grok_tools::types::ToolInput;
-        let input = ToolInput::ApplyPatch(ApplyPatchInput {
-            patch: "*** Begin Patch\n*** Update File: /home/user/.grok/mcp.json\n*** End Patch"
-                .to_owned(),
-        });
-        assert!(matches!(
-            AccessKind::from(&input),
-            AccessKind::Tool(name) if name == "apply_patch"
-        ));
     }
     #[test]
     fn write_tool_maps_to_edit_access() {

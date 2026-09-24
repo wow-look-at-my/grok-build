@@ -306,8 +306,17 @@ impl SharedPluginRegistryHandle {
     }
 
     /// Get the current registry snapshot (cheap Arc clone).
+    ///
+    /// A poison is recovered rather than propagated: the guarded value is one
+    /// `Option<Arc<PluginRegistry>>` swap, and this runs on the path every new
+    /// session takes to get its plugins.
+    /// `parking_lot::RwLock` is the structural fix and is not a dependency here.
+    #[allow(clippy::disallowed_methods)]
     pub fn snapshot(&self) -> Option<std::sync::Arc<PluginRegistry>> {
-        self.inner.read().unwrap().clone()
+        self.inner
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 
     /// Must not refresh or mutate local installs on disk — `commands/list` and reload fan-out also call this.
@@ -405,7 +414,14 @@ impl SharedPluginRegistryHandle {
         config.populate_plugin_lists(&discovered);
         let registry =
             PluginRegistry::from_discovered(discovered, &config.disabled, &config.enabled);
-        *self.inner.write().unwrap() = if registry.is_empty() {
+        // Same recovery as `snapshot`: the section is one assignment of an
+        // `Option<Arc<_>>`, so a poison says nothing about the value written here.
+        #[allow(clippy::disallowed_methods)]
+        let mut current = self
+            .inner
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *current = if registry.is_empty() {
             None
         } else {
             Some(std::sync::Arc::new(registry))

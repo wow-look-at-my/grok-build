@@ -1124,8 +1124,7 @@ pub(super) fn dispatch_send_prompt_submission(
             .slash_controller
             .recognized_token_ranges(&text, &agent.session.models);
 
-        let immediate_server_send =
-            immediate_server_send_eligible(agent) && agent.prompt.images.is_empty();
+        let immediate_server_send = immediate_server_send_eligible(agent);
         tracing::debug!(
             target: "qtrace",
             pid = std::process::id(),
@@ -1146,9 +1145,8 @@ pub(super) fn dispatch_send_prompt_submission(
         let hold_behind_existing_queue = parked_sendable_wait && agent.has_held_user_queue();
         let queued_while_running = agent.session.state.is_turn_running();
 
-        // Images can't use immediate server-send; a park on an empty held wait still does a Send Now
-        if !immediate_server_send
-            && immediate_server_send_eligible(agent)
+        // An image prompt on an empty held wait send-nows.
+        if immediate_server_send
             && !agent.prompt.images.is_empty()
             && parked_sendable_wait
             && !hold_behind_existing_queue
@@ -1182,16 +1180,22 @@ pub(super) fn dispatch_send_prompt_submission(
                 .clone()
                 .expect("session_id is_some checked");
             let agent_id = agent.session.id;
+            let cwd = agent.session.cwd.clone();
             let prompt_id = uuid::Uuid::new_v4().to_string();
             // Self-originated: when this prompt becomes the running turn, the ACP gate must treat its deltas as ours, not another client's
             // Adoption happens via the `running_prompt_id` broadcast and the turn-start shim
             agent.note_self_originated_prompt(&prompt_id);
-            // Plain image-free sends set no send-now cancel expectation: shell queue state and cancelTrigger decide the outcome
+            // Queued sends stay unarmed: shell queue state and cancelTrigger decide disposition.
 
-            if consume_input {
+            // Take the images before `set_text`, which clears them.
+            let images = if consume_input {
                 app.pending_image_notices
                     .extend(agent.unbound_image_placeholder_notice());
-                // Plain prompt: no images to drain
+                agent.prompt.drain_images()
+            } else {
+                Vec::new()
+            };
+            if consume_input {
                 // Clear the textarea and record up-arrow history (same as the local path's history insert)
                 agent.prompt.set_text("");
                 agent.note_draft_consumed();
@@ -1218,13 +1222,15 @@ pub(super) fn dispatch_send_prompt_submission(
             {
                 maybe_show_send_now_tip(app);
             }
-            effects.push(Effect::SendPrompt {
+            effects.push(super::queue::server_queue_send_effect(
                 agent_id,
                 session_id,
                 text,
+                images,
+                &cwd,
                 prompt_id,
                 skill_token_ranges,
-            });
+            ));
             return effects;
         }
 

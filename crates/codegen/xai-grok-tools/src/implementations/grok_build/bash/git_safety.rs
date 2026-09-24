@@ -45,8 +45,8 @@ pub fn bash_command_violation(command: &str, cwd: &Path) -> Option<String> {
 
 fn history_rewrite_violation(words: &[String], cwd: &Path) -> Option<String> {
     let git = git_verb_index(words)?;
-    let verb = words[git].as_str();
-    let rest = &words[git + 1..];
+    let verb = words.get(git)?.as_str();
+    let rest = words.get(git + 1..).unwrap_or(&[]);
     match verb {
         "reset" if flag_present(rest, &["--hard"]) => Some(RESET_HARD_MESSAGE.to_owned()),
         "filter-branch" | "filter-repo" => Some(FILTER_BRANCH_MESSAGE.to_owned()),
@@ -104,10 +104,14 @@ fn untracked_rm_violation(words: &[String], cwd: &Path) -> Option<String> {
         return None;
     };
     // `git rm` is the allowed path.
-    if idx > 0 && is_git_binary(&words[idx - 1]) {
+    if idx
+        .checked_sub(1)
+        .and_then(|prev| words.get(prev))
+        .is_some_and(|w| is_git_binary(w))
+    {
         return None;
     }
-    let operands = rm_operands(&words[idx + 1..]);
+    let operands = rm_operands(words.get(idx + 1..).unwrap_or(&[]));
     if operands.is_empty() {
         return None;
     }
@@ -170,7 +174,8 @@ fn is_git_binary(word: &str) -> bool {
 
 fn git_verb_index(words: &[String]) -> Option<usize> {
     let git = words.iter().position(|w| is_git_binary(w))?;
-    words[git + 1..]
+    words
+        .get(git + 1..)?
         .iter()
         .position(|w| !w.starts_with('-') && w != "-C")
         .map(|i| git + 1 + i)
@@ -260,6 +265,9 @@ fn split_statements(command: &str) -> Vec<&str> {
             0
         };
         if sep_len > 0 {
+            // `i` is a `char_indices` offset of an ASCII separator and `start`
+            // is 0 or such an offset plus the separator's width.
+            #[allow(clippy::string_slice)]
             let stmt = command[start..i].trim();
             if !stmt.is_empty() {
                 out.push(stmt);
@@ -268,6 +276,8 @@ fn split_statements(command: &str) -> Vec<&str> {
             continue;
         }
     }
+    // Same walk: `start` is a separator boundary or 0.
+    #[allow(clippy::string_slice)]
     let stmt = command[start..].trim();
     if !stmt.is_empty() {
         out.push(stmt);
@@ -306,7 +316,10 @@ fn tokenize(stmt: &str) -> Vec<String> {
     while words.first().is_some_and(|w| {
         w.contains('=') && !w.starts_with('-') && !w.starts_with('/') && !w.starts_with('.')
     }) {
-        let name = words[0].split('=').next().unwrap_or("");
+        let name = words
+            .first()
+            .and_then(|w| w.split('=').next())
+            .unwrap_or("");
         if name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') && !name.is_empty() {
             words.remove(0);
         } else {

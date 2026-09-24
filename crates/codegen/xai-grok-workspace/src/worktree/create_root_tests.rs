@@ -11,7 +11,7 @@ use crate::worktree::{
     CreateWorktreeFromWorktreeRequest, CreateWorktreeRequest, CreateWorktreeResponse,
     WorktreeCopyMode, WorktreeNotificationSender, WorktreeStatus, WorktreeType,
     create_worktree_from_worktree_sync, create_worktree_streaming, prepare_worktree_creation,
-    prepare_worktree_from_worktree, repo_slug,
+    prepare_worktree_from_worktree,
 };
 use xai_fast_worktree::NfsStatusView;
 
@@ -172,9 +172,7 @@ fn dest_slug_from_mountpoint_groups_subdirectory_cwd() {
         &create_req("s".into(), cwd, Some(true), Some("probe-wt")),
         &layout.git_root,
     );
-    let expected_base = home
-        .join("worktrees")
-        .join(repo_slug(Path::new("/mnt/grove/acme")));
+    let expected_base = xai_fast_worktree::repo_worktrees_root(&layout.git_root);
     assert!(
         Path::new(&dest).starts_with(&expected_base),
         "dest {dest} must be under {}",
@@ -228,7 +226,7 @@ fn non_grove_still_uses_git_discovery() {
 }
 
 #[test]
-fn dest_slug_from_source_path_is_under_grok_worktrees() {
+fn dest_from_source_path_is_under_the_repos_own_grok_worktrees() {
     let temp = tempfile::TempDir::new().unwrap();
     let source = temp.path().join("org").join("acme-app");
     std::fs::create_dir_all(&source).unwrap();
@@ -241,7 +239,7 @@ fn dest_slug_from_source_path_is_under_grok_worktrees() {
         &create_req("s".into(), &source, Some(true), Some("probe-wt")),
         &layout.git_root,
     );
-    let expected_base = home.join("worktrees").join(repo_slug(&source));
+    let expected_base = xai_fast_worktree::repo_worktrees_root(&layout.git_root);
     assert!(
         Path::new(&dest).starts_with(&expected_base),
         "dest {dest} must be under {}",
@@ -279,10 +277,7 @@ async fn prepare_grove_parent_skips_libgit2_discover() {
     else {
         panic!("expected Creating, got {:?}", result.response.err());
     };
-    let expected = home
-        .join("worktrees")
-        .join(repo_slug(&source))
-        .join("probe-wt");
+    let expected = xai_fast_worktree::repo_worktrees_root(&source).join("probe-wt");
     assert_eq!(PathBuf::from(&worktree_path), expected);
     assert_eq!(
         source_git_root.as_deref(),
@@ -311,10 +306,7 @@ async fn prepare_grove_off_still_discovers_git() {
     let Ok(CreateWorktreeResponse::Creating { worktree_path, .. }) = result.response else {
         panic!("expected Creating");
     };
-    let expected = home
-        .join("worktrees")
-        .join(repo_slug(&repo))
-        .join("probe-wt");
+    let expected = xai_fast_worktree::repo_worktrees_root(&repo).join("probe-wt");
     assert_eq!(PathBuf::from(worktree_path), expected);
 
     write_partialclone_extension(&repo);
@@ -447,7 +439,7 @@ async fn sync_fork_grove_parent_skips_libgit2_on_partialclone() {
     let resp = create_worktree_from_worktree_sync(&req)
         .await
         .expect("sync fork after Grove skip must create, not fail at discover");
-    let expected_base = home.join("worktrees").join(repo_slug(&repo));
+    let expected_base = xai_fast_worktree::repo_worktrees_root(&repo);
     assert!(
         Path::new(&resp.worktree_path).starts_with(&expected_base),
         "dest {} must be under {}",
@@ -555,10 +547,7 @@ async fn fork_prepare_grove_parent_skips_git_dir_gate() {
     else {
         panic!("expected Creating, got {:?}", result.response.err());
     };
-    let expected = home
-        .join("worktrees")
-        .join(repo_slug(&source))
-        .join("probe-wt");
+    let expected = xai_fast_worktree::repo_worktrees_root(&source).join("probe-wt");
     assert_eq!(PathBuf::from(&worktree_path), expected);
     assert_eq!(
         source_git_root.as_deref(),

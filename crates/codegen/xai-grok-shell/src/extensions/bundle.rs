@@ -18,19 +18,17 @@ pub(crate) const BUNDLE_SYNC_TTL: Duration = Duration::from_secs(60 * 60);
 ///
 /// Hoisted to a constant so the user-facing wording stays identical across `sync_bundle`, `sync_bundle_to_root`, and any future call sites.
 pub(crate) const NO_BUNDLE_CREDENTIALS_ERROR: &str =
-    "bundle sync requires either an authenticated cli-chat-proxy session or a deployment key";
+    "bundle sync requires an authenticated cli-chat-proxy session";
 /// Whether the caller has any source of authentication that the cli-chat-proxy `/v1/subagents/bundle` endpoint will accept.
 /// Centralised so the auth gate predicate stays consistent across: `sync_bundle` (user-triggered ACP entrypoint) `sync_bundle_to_root` (defense-in-depth on the public function) `maybe_sync_bundle_to_root` (proactive wrapper, silent skip on miss) `MvpAgent::maybe_sync_bundle_in_background` (post-auth pre-spawn gate)
 /// All four call sites previously inlined the same predicate; a future auth-source addition (e.g., service-account token) only needs to land here.
 #[inline]
 pub(crate) fn has_bundle_credentials(
     auth_manager: Option<&std::sync::Arc<xai_grok_login::AuthManager>>,
-    deployment_key: Option<&str>,
 ) -> bool {
     auth_manager
         .as_ref()
         .is_some_and(|am| am.current_or_expired().is_some())
-        || deployment_key.is_some()
 }
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -94,15 +92,13 @@ pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
     }
 }
 async fn sync_bundle(agent: &MvpAgent, req: BundleSyncRequest) -> anyhow::Result<BundleSyncResult> {
-    let deployment_key = agent.deployment_key();
-    if !has_bundle_credentials(Some(&agent.auth_manager), deployment_key.as_deref()) {
+    if !has_bundle_credentials(Some(&agent.auth_manager)) {
         anyhow::bail!(NO_BUNDLE_CREDENTIALS_ERROR);
     }
     sync_bundle_to_root(
         &bundle::bundled_root(),
         &agent.cli_chat_proxy_base_url(),
         Some(&agent.auth_manager),
-        deployment_key.as_deref(),
         agent.alpha_test_key().as_deref(),
         req.force,
     )
@@ -135,13 +131,12 @@ pub(crate) async fn maybe_sync_bundle_to_root(
     root: &Path,
     proxy_base_url: &str,
     auth_manager: Option<&std::sync::Arc<xai_grok_login::AuthManager>>,
-    deployment_key: Option<&str>,
     alpha_test_key: Option<&str>,
     force: bool,
     ttl: Duration,
 ) -> anyhow::Result<Option<BundleSyncResult>> {
-    if !has_bundle_credentials(auth_manager, deployment_key) {
-        tracing::debug!("proactive bundle sync skipped: no auth and no deployment key");
+    if !has_bundle_credentials(auth_manager) {
+        tracing::debug!("proactive bundle sync skipped: no auth");
         return Ok(None);
     }
     if !force && bundle_cache_is_fresh(root, ttl) {
@@ -151,30 +146,21 @@ pub(crate) async fn maybe_sync_bundle_to_root(
         );
         return Ok(None);
     }
-    sync_bundle_to_root(
-        root,
-        proxy_base_url,
-        auth_manager,
-        deployment_key,
-        alpha_test_key,
-        force,
-    )
-    .await
-    .map(Some)
+    sync_bundle_to_root(root, proxy_base_url, auth_manager, alpha_test_key, force)
+        .await
+        .map(Some)
 }
 pub(crate) async fn sync_bundle_to_root(
     root: &Path,
     proxy_base_url: &str,
     auth_manager: Option<&std::sync::Arc<xai_grok_login::AuthManager>>,
-    deployment_key: Option<&str>,
     alpha_test_key: Option<&str>,
     _force: bool,
 ) -> anyhow::Result<BundleSyncResult> {
-    if !has_bundle_credentials(auth_manager, deployment_key) {
+    if !has_bundle_credentials(auth_manager) {
         anyhow::bail!(NO_BUNDLE_CREDENTIALS_ERROR);
     }
-    let fetched =
-        fetch_bundle(proxy_base_url, auth_manager, deployment_key, alpha_test_key).await?;
+    let fetched = fetch_bundle(proxy_base_url, auth_manager, alpha_test_key).await?;
     match fetched {
         FetchedBundle::Archive(bytes) => {
             let root_owned = root.to_path_buf();
@@ -523,7 +509,7 @@ mod tests {
         )
         .await;
         let am = test_auth_manager();
-        let result = sync_bundle_to_root(&root, &proxy_base_url, Some(&am), None, None, false)
+        let result = sync_bundle_to_root(&root, &proxy_base_url, Some(&am), None, false)
             .await
             .unwrap();
         assert_eq!(result.version, "bundle-v1");
@@ -544,10 +530,10 @@ mod tests {
         let (proxy_base_url, _seen_headers, server) =
             start_bundle_server(StatusCode::OK, serde_json::to_value(&bundle).unwrap()).await;
         let am = test_auth_manager();
-        let normal = sync_bundle_to_root(&root, &proxy_base_url, Some(&am), None, None, false)
+        let normal = sync_bundle_to_root(&root, &proxy_base_url, Some(&am), None, false)
             .await
             .unwrap();
-        let forced = sync_bundle_to_root(&root, &proxy_base_url, Some(&am), None, None, true)
+        let forced = sync_bundle_to_root(&root, &proxy_base_url, Some(&am), None, true)
             .await
             .unwrap();
         assert_eq!(forced, normal);
@@ -563,38 +549,10 @@ mod tests {
         )
         .await;
         let am = test_auth_manager();
-        let error = sync_bundle_to_root(&root, &proxy_base_url, Some(&am), None, None, false)
+        let error = sync_bundle_to_root(&root, &proxy_base_url, Some(&am), None, false)
             .await
             .unwrap_err();
         assert!(error.to_string().contains("401"));
-        server.abort();
-    }
-    #[tokio::test(flavor = "current_thread")]
-    async fn sync_uses_deployment_key_auth_mode() {
-        let tmp = TempDir::new().unwrap();
-        let root = tmp.path().join("bundled");
-        let bundle = sample_bundle();
-        let (proxy_base_url, seen_headers, server) =
-            start_bundle_server(StatusCode::OK, serde_json::to_value(&bundle).unwrap()).await;
-        let am = test_auth_manager();
-        let result = sync_bundle_to_root(
-            &root,
-            &proxy_base_url,
-            Some(&am),
-            Some("deploy-key"),
-            None,
-            false,
-        )
-        .await
-        .unwrap();
-        assert_eq!(result.version, "bundle-v1");
-        let headers = seen_headers.lock().unwrap();
-        let headers = headers.last().unwrap();
-        assert_eq!(headers.authorization.as_deref(), Some("Bearer deploy-key"));
-        assert_eq!(headers.token_auth, None);
-        assert_eq!(headers.user_id, None);
-        assert_eq!(headers.email, None);
-        assert_eq!(headers.alpha_test_key, None);
         server.abort();
     }
     #[test]
@@ -644,7 +602,7 @@ mod tests {
         assert_eq!(status.skills, Vec::<String>::new());
     }
     #[test]
-    fn sync_requires_auth_or_deployment_key() {
+    fn sync_requires_auth() {
         let tmp = TempDir::new().unwrap();
         let root = tmp.path().join("bundled");
         let error = futures::executor::block_on(sync_bundle_to_root(
@@ -652,13 +610,14 @@ mod tests {
             "http://127.0.0.1:1/v1",
             None,
             None,
-            None,
             false,
         ))
         .unwrap_err();
-        assert!(error
-            .to_string()
-            .contains("bundle sync requires either an authenticated cli-chat-proxy session or a deployment key"));
+        assert!(
+            error
+                .to_string()
+                .contains("bundle sync requires an authenticated cli-chat-proxy session")
+        );
     }
     #[test]
     fn status_includes_persona_and_role_details() {
@@ -744,7 +703,6 @@ mod tests {
             &proxy_base_url,
             Some(&test_auth_manager()),
             None,
-            None,
             false,
         )
         .await
@@ -815,7 +773,6 @@ mod tests {
             &proxy_base_url,
             Some(&test_auth_manager()),
             None,
-            None,
             false,
         )
         .await
@@ -841,7 +798,6 @@ mod tests {
             &proxy_base_url,
             Some(&test_auth_manager()),
             None,
-            None,
             false,
         )
         .await
@@ -863,7 +819,7 @@ mod tests {
             .expect("set manifest mtime");
     }
     #[tokio::test(flavor = "current_thread")]
-    async fn maybe_sync_skips_without_auth_or_deployment_key() {
+    async fn maybe_sync_skips_without_auth() {
         let tmp = TempDir::new().unwrap();
         let root = tmp.path().join("bundled");
         let (proxy_base_url, seen_headers, server) = start_bundle_server(
@@ -871,17 +827,10 @@ mod tests {
             serde_json::to_value(sample_bundle()).unwrap(),
         )
         .await;
-        let result = maybe_sync_bundle_to_root(
-            &root,
-            &proxy_base_url,
-            None,
-            None,
-            None,
-            false,
-            BUNDLE_SYNC_TTL,
-        )
-        .await
-        .unwrap();
+        let result =
+            maybe_sync_bundle_to_root(&root, &proxy_base_url, None, None, false, BUNDLE_SYNC_TTL)
+                .await
+                .unwrap();
         assert!(result.is_none(), "expected sync skipped");
         assert!(
             seen_headers.lock().unwrap().is_empty(),
@@ -903,7 +852,6 @@ mod tests {
             &root,
             &proxy_base_url,
             Some(&test_auth_manager()),
-            None,
             None,
             false,
             BUNDLE_SYNC_TTL,
@@ -933,7 +881,6 @@ mod tests {
             &proxy_base_url,
             Some(&test_auth_manager()),
             None,
-            None,
             false,
             BUNDLE_SYNC_TTL,
         )
@@ -959,7 +906,6 @@ mod tests {
             &proxy_base_url,
             Some(&test_auth_manager()),
             None,
-            None,
             true,
             BUNDLE_SYNC_TTL,
         )
@@ -983,7 +929,6 @@ mod tests {
             &root,
             &proxy_base_url,
             Some(&test_auth_manager()),
-            None,
             None,
             false,
             BUNDLE_SYNC_TTL,

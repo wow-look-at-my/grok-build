@@ -487,6 +487,7 @@
             tool_index: 0,
             name: Some("write".into()),
             arguments_delta: None,
+            title: None,
         };
 
         assert!(spawn(&mut app, child, "at1.one", 1));

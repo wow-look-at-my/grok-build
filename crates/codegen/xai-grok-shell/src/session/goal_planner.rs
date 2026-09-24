@@ -318,8 +318,18 @@ pub(crate) enum GoalPlannerOutcome {
     Interrupted,
     FailClosed {
         reason: GoalPlannerFailClosedReason,
+        /// True only for an `Aborted` subagent that a person stopped.
+        user_stopped: bool,
         latency_ms: u64,
     },
+}
+
+/// True for a subagent cancel that the harness caused: max turns, a rewind, or a dequeue.
+/// The texts are the ones `agent::subagent::prompt_turn_result` writes.
+fn is_harness_cancellation(message: &str) -> bool {
+    message.starts_with("max turns")
+        || message == "Subagent turn was rewound"
+        || message == "Subagent turn was removed before it ran"
 }
 
 /// Production uses [`ChannelSpawner`]; tests use `MockSpawner` (defined in the tests module).
@@ -623,7 +633,14 @@ pub(crate) async fn run_goal_planner(
                 cancelled,
                 "goal planner: subagent runtime error; failing closed",
             );
-            return record_fail_closed(reason, inputs.attempt, started, emit_event);
+            let user_stopped = cancelled && !is_harness_cancellation(&message);
+            return record_fail_closed_by(
+                reason,
+                user_stopped,
+                inputs.attempt,
+                started,
+                emit_event,
+            );
         }
     };
 
@@ -665,13 +682,27 @@ fn record_fail_closed(
     started: std::time::Instant,
     emit_event: &dyn Fn(Event),
 ) -> GoalPlannerOutcome {
+    record_fail_closed_by(reason, false, attempt, started, emit_event)
+}
+
+fn record_fail_closed_by(
+    reason: GoalPlannerFailClosedReason,
+    user_stopped: bool,
+    attempt: u32,
+    started: std::time::Instant,
+    emit_event: &dyn Fn(Event),
+) -> GoalPlannerOutcome {
     let latency_ms = started.elapsed().as_millis() as u64;
     emit_event(Event::GoalPlannerFailClosed {
         reason: reason.as_const_str(),
         attempt,
         latency_ms,
     });
-    GoalPlannerOutcome::FailClosed { reason, latency_ms }
+    GoalPlannerOutcome::FailClosed {
+        reason,
+        user_stopped,
+        latency_ms,
+    }
 }
 
 // Tests
@@ -747,16 +778,6 @@ mod tests {
     #[test]
     fn planner_prompt_requires_the_todo_list_and_names_the_real_tool() {
         let template = GOAL_PLANNER_PROMPT_TEMPLATE;
-        assert!(
-            template.contains("## Todo list — REQUIRED"),
-            "the todo-list section must stay in the planner prompt",
-        );
-        assert!(
-            template.contains("one item per `## Task checklist` line"),
-            "the planner must be told to list one todo per checklist line",
-        );
-        assert!(template.contains("{TODO_TOOL}"));
-
         let rendered = RoleToolNames::from_summary(&summary_with(&[
             (ToolKind::Read, "read_file"),
             (ToolKind::Plan, "cursor_todo"),
@@ -770,9 +791,6 @@ mod tests {
         assert_no_tool_placeholders(&rendered);
     }
 
-    /// Pin each load-bearing clause of the named-artifact research mandate so a
-    /// targeted revert fails (the convergence balance: fix under-scoping, never
-    /// reopen over-scoping).
     /// The planner's harness must actually expose the todo tool: the prompt's
     /// instruction to list the plan's work is inert, and the session's list
     /// stays empty, if the toolset the planner runs on has no such tool.
@@ -790,28 +808,6 @@ mod tests {
             "the goal planner's `{GOAL_PLANNER_SUBAGENT_TYPE}` harness must expose a todo \
              tool, or it cannot make the call the session's list is populated from: {ids:?}",
         );
-    }
-
-    #[test]
-    fn planner_prompt_pins_named_artifact_research_mandate() {
-        let t = GOAL_PLANNER_PROMPT_TEMPLATE;
-        // Research a named artifact's defining mechanics, not from memory.
-        assert!(t.contains("DEFINING mechanics"));
-        assert!(t.contains("do NOT plan it from memory alone"));
-        // Domain-agnostic (non-game example) + primary, not error-path behaviors.
-        assert!(t.contains("round-trip of valid input"));
-        assert!(t.contains("error/edge/invalid-input handling"));
-        // The model picks the split, and a core mechanic is never omitted.
-        assert!(t.contains("You decide how to break the defining mechanics into criteria"));
-        assert!(t.contains("Never silently omit a core mechanic"));
-        // Gating-test sentence (distinctive substring, not the bare word).
-        assert!(t.contains("is it still recognizably"));
-        // OBJECTIVE wins; non-core routed to Non-goals.
-        assert!(t.contains("OBJECTIVE's explicit words always win"));
-        assert!(t.contains("list it under `## Non-goals`"));
-        // Gated away from generic archetypes; the web step is optional.
-        assert!(t.contains("is not a named artifact"));
-        assert!(t.contains("note the gap under `## Assumed scope`"));
     }
 
     #[tokio::test]
@@ -1012,7 +1008,7 @@ mod tests {
         let spawner = Arc::new(
             MockSpawner::ok_writes(
                 &plan_file,
-                b"# Plan: foo\n\n## Task checklist\n- [ ] first step\n- [ ] second step\n",
+                b"# Plan: foo\n\n## Task steps\n1. first step\n2. second step\n",
             )
             .with_todos(&["first step", "second step"]),
         );
@@ -1051,7 +1047,7 @@ mod tests {
         let plan_file = tmp_plan_file("planner-no-todos");
         let spawner = Arc::new(MockSpawner::ok_writes(
             &plan_file,
-            b"# Plan: foo\n\n## Task checklist\n- [ ] first step\n",
+            b"# Plan: foo\n\n## Task steps\n1. first step\n",
         ));
         let (_log, emit) = collect_events();
 
@@ -1335,270 +1331,6 @@ mod tests {
         assert!(prompt.contains("implement feature X"));
         assert!(prompt.contains("prior conversation"));
         let _ = std::fs::remove_file(&plan_file);
-    }
-
-    #[test]
-    fn planner_prompt_pins_objective_fidelity_and_environment_evidence_contract() {
-        // The optional risks section and the must-have-fidelity /
-        // capturable-evidence rules are load-bearing for the
-        // planner↔verifier contract; pin them so a template edit can't
-        // silently drop them.
-        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("## Risks / Contradictions"));
-        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("must-have"));
-        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("capturable"));
-    }
-
-    /// Pin the anti-inflation + atomic-criterion rules (the failure mode this
-    /// contract targets: re-inflated scope or a single holistic end-to-end gate).
-    #[test]
-    fn planner_prompt_pins_anti_inflation_and_atomic_criteria() {
-        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("do NOT invent scope"));
-        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("atomic and independently checkable"));
-        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("holistic end-to-end gate"));
-        // A defining mechanic of a named artifact is requested, not "unrequested"
-        // scope, so the carve-out keeps it out of Non-goals.
-        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("it is requested, so it stays here"));
-    }
-
-    /// Pin the static-check fallback and the run-is-the-evidence contract: a
-    /// plan step names a command and what its output shows, never a file to
-    /// save output to.
-    #[test]
-    fn planner_prompt_pins_static_fallback_and_recorded_runs() {
-        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("Static / structural fallback"));
-        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("the verifiers audit"));
-        assert!(
-            GOAL_PLANNER_PROMPT_TEMPLATE.contains("the recorded runs rather than build their own")
-        );
-        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("never require saving output"));
-        assert!(!GOAL_PLANNER_PROMPT_TEMPLATE.contains("captured run output"));
-    }
-
-    /// Pin the outcomes-not-architecture contract: the frozen plan must not
-    /// freeze the module/file layout or exact signatures.
-    #[test]
-    fn planner_prompt_pins_outcomes_not_architecture() {
-        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("OUTCOMES, not architecture"));
-        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("MUST NOT prescribe the module/file layout"));
-        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("exact signatures"));
-    }
-
-    /// A verification step checks what the objective asked for. It never
-    /// widens the work, which is how a check became an unrequested action.
-    #[test]
-    fn planner_prompt_keeps_verification_inside_the_objective() {
-        assert!(
-            GOAL_PLANNER_PROMPT_TEMPLATE
-                .contains("Verification checks the work. It never adds to it"),
-            "a check that acts beyond the objective is new scope, not verification"
-        );
-    }
-
-    /// Pin the gating-vs-best-effort split: a small gating set decides pass/fail
-    /// and best-effort `evidence` steps must not deny completion on their own.
-    #[test]
-    fn planner_prompt_pins_gating_vs_evidence_split() {
-        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("these are the GATING set"));
-        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("must NOT deny completion"));
-    }
-
-    /// Pin the minimal-honest-evidence path for headless-unobservable behavior:
-    /// no mandated capture ritual/oracle, only artifact-exists + shipped units.
-    #[test]
-    fn planner_prompt_pins_minimal_honest_path_for_unobservable_behavior() {
-        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("MINIMAL honest path"));
-        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("verifier will then rightly call theater"));
-    }
-
-    /// Pin the testable-structure guidance (separate logic from I/O so
-    /// tests drive the real shipped code), and that it stays design
-    /// guidance, not an acceptance criterion.
-    #[test]
-    fn planner_prompt_requires_testable_structure_guidance() {
-        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("## Implementation approach"));
-        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("easy to test"));
-        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("NOT an acceptance criterion"));
-    }
-
-    /// Pin the `## Task checklist` contract: the planner emits `- [ ]`
-    /// checkbox steps (code-change only) that `goal_next_step` mines for
-    /// the per-turn nudge, and the checklist is HOW guidance, never part
-    /// of the judged contract.
-    #[test]
-    fn planner_prompt_requires_task_checklist_section() {
-        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("## Task checklist"));
-        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("unchecked box"));
-        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("never part of the judged contract"),);
-        assert!(
-            GOAL_PLANNER_PROMPT_TEMPLATE.contains("as many ordered"),
-            "checklist size must follow the work, not a cap"
-        );
-    }
-
-    /// The model decides how to break up a task. So the prompt carries no
-    /// count, range or cap for any section.
-    #[test]
-    fn planner_prompt_sets_no_count_limit_anywhere() {
-        let t = GOAL_PLANNER_PROMPT_TEMPLATE;
-        let ranges = numeric_ranges(t);
-        assert!(
-            ranges.is_empty(),
-            "the planner prompt states a numeric range: {ranges:?}"
-        );
-        let lower = t.to_lowercase();
-        for phrase in [
-            "cap below",
-            "fit the cap",
-            "a ceiling",
-            "at least one",
-            "at most",
-            "no more than",
-            "up to ",
-            "(aim ",
-            "keep it small",
-            "keep it short",
-            "keep each small",
-        ] {
-            assert!(
-                !lower.contains(phrase),
-                "the planner prompt limits the breakdown with {phrase:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn numeric_ranges_finds_every_spelling() {
-        assert_eq!(
-            numeric_ranges("aim 3-5, or 1–2, or 4 - 6, or 2 to 8; HTTP 200"),
-            ["3-5", "1–2", "4 - 6", "2 to 8"]
-        );
-        assert!(numeric_ranges("status 200 and > 0 pixels").is_empty());
-    }
-
-    /// Every `N-M`, `N–M` or `N to M` in `text`, as it is spelled there.
-    fn numeric_ranges(text: &str) -> Vec<String> {
-        let chars: Vec<char> = text.chars().collect();
-        let digits_end = |mut i: usize| {
-            let start = i;
-            while i < chars.len() && chars[i].is_ascii_digit() {
-                i += 1;
-            }
-            (i > start).then_some(i)
-        };
-        let skip_spaces = |mut i: usize| {
-            while i < chars.len() && chars[i] == ' ' {
-                i += 1;
-            }
-            i
-        };
-        let mut found = Vec::new();
-        let mut i = 0;
-        while i < chars.len() {
-            let fresh = i == 0 || !chars[i - 1].is_ascii_digit();
-            let Some(end) = digits_end(i).filter(|_| fresh) else {
-                i += 1;
-                continue;
-            };
-            let j = skip_spaces(end);
-            let sep = if matches!(chars.get(j), Some('-' | '–')) {
-                Some(j + 1)
-            } else if chars[j..].starts_with(&['t', 'o', ' ']) {
-                Some(j + 2)
-            } else {
-                None
-            };
-            match sep.and_then(|k| digits_end(skip_spaces(k))) {
-                Some(stop) => {
-                    found.push(chars[i..stop].iter().collect());
-                    i = stop;
-                }
-                None => i = end,
-            }
-        }
-        found
-    }
-
-    /// Pin the visual/interactive guidance: gamedev/UI goals must be
-    /// anchored on the static/structural fallback plus unit tests of the
-    /// pure logic (physics, collision, input mapping), with capturable
-    /// extras as `evidence`, never `gating`.
-    #[test]
-    fn planner_prompt_covers_visual_interactive_goals() {
-        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("## Visual / interactive objectives"));
-        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("input mapping"));
-        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("as `evidence`, never as `gating`"));
-        // Browser-load check: scripts must provably load without Node globals.
-        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("NO Node globals"));
-        // Launch check is gating for every runnable deliverable, with the
-        // headless page-load as the browser instance of the general rule.
-        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("## Entry-point launch check"));
-        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("bare specifiers"));
-        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("Server/service"));
-    }
-
-    /// The launch gate must prove the primary observable is CORRECT, not just
-    /// present — keeps a renders-but-wrong deliverable from passing planning.
-    #[test]
-    fn planner_prompt_requires_correct_primary_observable_launch_gate() {
-        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("PRIMARY OBSERVABLE is CORRECT"));
-        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("present and non-empty is INSUFFICIENT"));
-        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("output CONTENT, not just that it ran"));
-        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("the response BODY is sane"));
-        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("assert a real call's RETURN VALUE"));
-        assert!(
-            GOAL_PLANNER_PROMPT_TEMPLATE
-                .contains("drawing dimensions equal the intended/target size")
-        );
-        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("SUBSTANTIALLY filled"));
-        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("NOT a `> 0 pixels` check"));
-        assert!(
-            GOAL_PLANNER_PROMPT_TEMPLATE
-                .contains("a driven input produces the expected visible change")
-        );
-    }
-
-    /// The launch gate must run more than once and route non-determinism by
-    /// cause — an app defect is fixed, a flaky/unobservable environment falls
-    /// back — so a correct app converges and the readback seam stays shut.
-    #[test]
-    fn planner_prompt_requires_repeated_consistent_launch() {
-        assert!(
-            GOAL_PLANNER_PROMPT_TEMPLATE.contains("MORE THAN ONCE and assert CONSISTENT success")
-        );
-        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("cherry-pick a success"));
-        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("APP-side defect to FIX"));
-        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("if the ENVIRONMENT is what's flaky"));
-        assert!(
-            GOAL_PLANNER_PROMPT_TEMPLATE
-                .contains("cannot reliably read back the primary observable")
-        );
-        assert!(
-            GOAL_PLANNER_PROMPT_TEMPLATE
-                .contains("is the app's output, not an unavailable readback")
-        );
-    }
-
-    #[test]
-    fn planner_prompt_requires_shared_verification_plan_section() {
-        // The `## Verification plan` is the shared implementer↔verifier
-        // procedure (the bias-reduction mechanism): pin both that the
-        // section is required and that it is framed as observable
-        // checks rather than free-text "it works".
-        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("## Verification plan"));
-        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("implementer"));
-        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("observations that MUST be"));
-    }
-
-    /// The planner must instruct verification-plan output paths to use the
-    /// literal `{SCRATCH}` placeholder instead of hardcoded `/tmp/...`, so
-    /// the implementer and each skeptic write to distinct private dirs and
-    /// never race on a shared screenshot file.
-    #[test]
-    fn planner_prompt_instructs_scratch_placeholder() {
-        assert!(
-            GOAL_PLANNER_PROMPT_TEMPLATE.contains("{SCRATCH}"),
-            "planner prompt must instruct the `{{SCRATCH}}` placeholder",
-        );
     }
 
     // ── RoleSpawnOverride + spawn-and-retry-once wrapper ─────

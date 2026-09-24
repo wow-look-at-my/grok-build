@@ -1,3 +1,5 @@
+#![allow(clippy::expect_used)] // 5 hits predate the gate
+
 //! HTTP clients for the application.
 //!
 //! Building a `reqwest::Client` is expensive (~95ms: it loads OS TLS roots), so

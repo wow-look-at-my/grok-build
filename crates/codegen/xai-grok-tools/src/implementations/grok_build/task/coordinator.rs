@@ -348,7 +348,7 @@ impl<R: ChildRunner> SubagentCoordinator<R> {
                 Some((id, output)) = self.runs.next(), if !self.runs.is_empty() => {
                     match output {
                         Ok(output) => self.begin_terminalization(&id, output),
-                        Err(_) => self.begin_panicked_terminalization(&id),
+                        Err(panic) => self.begin_panicked_terminalization(&id, &*panic),
                     }
                 }
                 ingress = async {
@@ -1185,7 +1185,11 @@ impl<R: ChildRunner> SubagentCoordinator<R> {
         }
     }
 
-    fn begin_panicked_terminalization(&mut self, id: &str) {
+    /// Fails a child whose run future panicked, naming what the panic carried.
+    /// A bare "panicked" cannot tell a broken runner apart from a broken tool
+    /// call inside it.
+    fn begin_panicked_terminalization(&mut self, id: &str, panic: &(dyn std::any::Any + Send)) {
+        let detail = crate::util::detached::panic_payload(panic);
         let request = self
             .active
             .get(id)
@@ -1194,14 +1198,14 @@ impl<R: ChildRunner> SubagentCoordinator<R> {
         let Some(request) = request else {
             return;
         };
-        tracing::error!(subagent_id = id, "subagent child runner panicked");
+        tracing::error!(subagent_id = id, panic = %detail, "subagent child runner panicked");
         self.begin_terminalization(
             id,
             ChildRunOutput {
                 result: SubagentResult::failed(
                     request.id.clone(),
                     request.id,
-                    "Subagent runtime panicked",
+                    format!("Subagent runtime panicked: {detail}"),
                 ),
                 completion_data: R::CompletionData::default(),
                 snapshot_ref: None,

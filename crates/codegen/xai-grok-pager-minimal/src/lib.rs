@@ -1,3 +1,6 @@
+#![allow(clippy::cast_lossless)] // 1 hit predates the gate
+#![allow(clippy::cast_possible_truncation)] // 14 hits predate the gate
+#![allow(clippy::unwrap_used)] // 1 hit predates the gate
 //! Minimal (scrollback-native) render mode: `grok --minimal`.
 //!
 //! In this mode finalized conversation blocks are printed once into the terminal's *native* scrollback.

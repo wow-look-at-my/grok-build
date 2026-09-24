@@ -945,15 +945,16 @@ mod tests {
         assert!(log.lock().unwrap().iter().any(|t| t == "failed:aborted"));
     }
 
-    /// A strategist edit to plan.md is reverted byte-for-byte: the WHOLE file, including a non-contract `## Task checklist` block.
-    /// The rationale is on `GoalTracker::strategy_path`.
+    /// A strategist edit to plan.md is reverted byte-for-byte — the WHOLE
+    /// file, including a non-contract `## Task steps` block (rationale on
+    /// `GoalTracker::strategy_path`).
     #[tokio::test]
     async fn strategist_edit_to_plan_md_is_reverted() {
         let dir = tmp_dir("plan-guard");
         let plan = dir.join("plan.md");
         let strategy = dir.join("strategy.md");
         const CONTRACT: &[u8] =
-            b"# Plan\n\n## Acceptance criteria\n\n1. ship it\n\n## Verification plan\n\n1. run tests\n\n## Task checklist\n\n- [x] step one\n";
+            b"# Plan\n\n## Acceptance criteria\n\n1. ship it\n\n## Verification plan\n\n1. run tests\n\n## Task steps\n\n1. step one\n";
         std::fs::write(&plan, CONTRACT).unwrap();
         let spawner = Arc::new(
             MockSpawner::ok_writes(&strategy, &plan, b"## Diagnosis\n\nrewrite subsystem\n")
@@ -1163,12 +1164,12 @@ mod tests {
         assert!(prompt.contains("do X"));
         // The session traces dir is substituted in; the strategist reads the traces itself rather than receiving a gaps/diff packet
         assert!(prompt.contains(&*plan.parent().unwrap().to_string_lossy()));
+        assert!(!prompt.contains("VERIFIER GAPS:"));
+        assert!(!prompt.contains("REPO CHANGES"));
     }
 
     use crate::session::goal_role_tools::tests::assert_no_tool_placeholders;
 
-    /// Default/inherit render: the tool placeholders resolve to the literal parent (grok-build) names, with no placeholder left behind.
-    /// Guards against accidental wording drift in the strategist template.
     #[test]
     fn strategist_template_default_render_has_no_placeholders() {
         let rendered = RoleToolNames::inherit_defaults().apply(GOAL_STRATEGIST_PROMPT_TEMPLATE);

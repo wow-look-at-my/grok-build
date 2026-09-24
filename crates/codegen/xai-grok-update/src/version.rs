@@ -68,8 +68,6 @@ pub struct UpdateConfig {
     pub proxy_base_url: String,
     /// Auth scope key for `~/.grok/auth.json`.
     pub auth_scope: String,
-    /// Enterprise deployment key (GROK_DEPLOYMENT_KEY).
-    pub deployment_key: Option<String>,
     /// Optional extra auth material forwarded with requests when present.
     pub alpha_test_key: Option<String>,
     /// Release channel: "stable" or "alpha". Loaded from config.
@@ -83,7 +81,6 @@ impl UpdateConfig {
         Self {
             proxy_base_url: env.cli_chat_proxy_base_url(),
             auth_scope: xai_grok_login::GrokComConfig::default().auth_scope(),
-            deployment_key: None,
             alpha_test_key: None,
             channel: "stable".to_string(),
             npm_registry: None,
@@ -185,7 +182,7 @@ async fn fetch_npm_tag(tag: &str, npm_registry: Option<&str>) -> Result<String> 
         anyhow::bail!("npm view @{} failed: {}", tag, stderr.trim());
     }
 
-    let stdout = String::from_utf8(output.stdout)?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
     let value: Value = serde_json::from_str(stdout.trim())?;
     match value {
         Value::String(version) => Ok(version),
@@ -241,7 +238,7 @@ async fn fetch_gh_release_latest(exclude_pre: bool) -> Result<String> {
         anyhow::bail!("gh release list failed: {}", stderr.trim());
     }
 
-    let tag = String::from_utf8(output.stdout)?.trim().to_string();
+    let tag = String::from_utf8_lossy(&output.stdout).trim().to_string();
     // Tags are formatted as "v0.1.141", strip the leading "v"
     let version = tag.strip_prefix('v').unwrap_or(&tag).to_string();
     if version.is_empty() {

@@ -88,6 +88,19 @@ impl MvpAgent {
         res
     }
 }
+/// True when a text block of `prompt` sets `ENABLE_FIREHOSE_META` to `true`.
+/// `/debug` sets it, so the process that runs the session logs its repro.
+fn prompt_requests_firehose(prompt: &[acp::ContentBlock]) -> bool {
+    prompt.iter().any(|block| match block {
+        acp::ContentBlock::Text(text) => text
+            .meta
+            .as_ref()
+            .and_then(|meta| meta.get(xai_grok_telemetry::debug_log::ENABLE_FIREHOSE_META))
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false),
+        _ => false,
+    })
+}
 #[async_trait::async_trait(?Send)]
 impl acp::Agent for MvpAgent {
     /// The response meta carries `model_state` so the client can display the available models and the default model. SINGLE-CALL INVARIANT: this method is the sole writer of `self.auth_method_id` during initialization.
@@ -307,23 +320,6 @@ impl acp::Agent for MvpAgent {
                 None,
             );
         }
-        match crate::codex_provider::discover_existing_models().await {
-            Ok(Some(models)) => {
-                let count = models.len();
-                self.models_manager.set_codex_models(models);
-                tracing::info!(count, "Codex provider restored from existing sign-in");
-            }
-            Ok(None) => {
-                self.models_manager.clear_codex_models();
-                tracing::debug!("Codex provider is signed out");
-            }
-            Err(error) => {
-                // Codex is an optional additive provider. A missing CLI or
-                // temporarily unavailable app-server must not block Grok/xAI
-                // startup or discard an already-loaded in-memory catalog.
-                tracing::debug!(%error, "Codex provider discovery unavailable");
-            }
-        }
         {
             // Every `[model_providers.<id>]` that autodetects answers with its
             // own models. This runs off the startup path: a provider that
@@ -499,8 +495,7 @@ impl acp::Agent for MvpAgent {
                 preferred_method,
             })
         };
-        let mut auth_methods = built.methods;
-        auth_methods.push(crate::codex_provider::auth_method());
+        let auth_methods = built.methods;
         xai_grok_telemetry::unified_log::info(
             "auth: initialize() built auth_methods for ACP response",
             None,
@@ -668,9 +663,7 @@ impl acp::Agent for MvpAgent {
             None,
             Some(serde_json::json!({"method": arguments.method_id.0.as_ref()})),
         );
-        if arguments.method_id.0.as_ref() != crate::codex_provider::AUTH_METHOD_ID
-            && let Some(preferred) = self.cfg.borrow().grok_com_config.preferred_method
-        {
+        if let Some(preferred) = self.cfg.borrow().grok_com_config.preferred_method {
             let kind = auth_method::AuthMethodKind::from_id(&arguments.method_id);
             let allowed = match preferred {
                 xai_grok_login::PreferredAuthMethod::ApiKey => kind.is_api_key(),
@@ -695,38 +688,6 @@ impl acp::Agent for MvpAgent {
             }
         }
         match arguments.method_id.0.as_ref() {
-            crate::codex_provider::AUTH_METHOD_ID => {
-                let (url_tx, url_rx) = tokio::sync::oneshot::channel();
-                let (code_tx, _code_rx) = tokio::sync::mpsc::channel(1);
-                let (_cancel, _guard) = self.interactive_auth.begin(
-                    Some(crate::auth::single_flight::AttemptChannels::new(
-                        code_tx, url_rx,
-                    )),
-                    None,
-                );
-                let result = crate::codex_provider::login(url_tx).await;
-                let models = result.map_err(|error| {
-                    emit_login_span(
-                        false,
-                        crate::codex_provider::AUTH_METHOD_ID,
-                        None,
-                        Some("login_flow_failed"),
-                    );
-                    let mut err = acp::Error::auth_required();
-                    err.message = error.to_string();
-                    err
-                })?;
-                let count = models.len();
-                self.models_manager.set_codex_models(models);
-                emit_login_span(
-                    true,
-                    crate::codex_provider::AUTH_METHOD_ID,
-                    None,
-                    None,
-                );
-                tracing::info!(count, "Codex provider signed in and models added");
-                Ok(Default::default())
-            }
             auth_method::XAI_API_KEY_METHOD_ID => {
                 if self.cfg.borrow().grok_com_config.api_key_auth_disabled() {
                     emit_login_span(false, "api_key", None, Some("disabled_by_admin"));
@@ -1102,6 +1063,14 @@ impl acp::Agent for MvpAgent {
             );
         }
         let preamble_span = region!("prompt.preamble", Parent::Inherit);
+        if prompt_requests_firehose(&arguments.prompt) {
+            let status = xai_grok_telemetry::debug_log::enable_firehose();
+            tracing::info!(
+                session_id = %arguments.session_id.0,
+                ?status,
+                "prompt asked for the debug firehose"
+            );
+        }
         tracing::debug!(
             target: "sampling_log",
             session_id = %arguments.session_id.0,
@@ -2810,5 +2779,23 @@ mod tool_overrides_capability_tests {
                 "x_thread_fetch": false,
             }),
         );
+    }
+}
+#[cfg(test)]
+mod prompt_requests_firehose_tests {
+    use super::{acp, prompt_requests_firehose};
+    use xai_grok_telemetry::debug_log::ENABLE_FIREHOSE_META;
+    fn text_with_meta(value: serde_json::Value) -> acp::ContentBlock {
+        let mut meta = acp::Meta::new();
+        meta.insert(ENABLE_FIREHOSE_META.into(), value);
+        acp::ContentBlock::Text(acp::TextContent::new("x").meta(Some(meta)))
+    }
+    #[test]
+    fn only_a_true_flag_on_a_text_block_asks_for_the_firehose() {
+        assert!(prompt_requests_firehose(&[text_with_meta(serde_json::Value::Bool(true))]));
+        assert!(!prompt_requests_firehose(&[text_with_meta(serde_json::Value::Bool(false))]));
+        assert!(!prompt_requests_firehose(&[text_with_meta(serde_json::json!("true"))]));
+        assert!(!prompt_requests_firehose(&[acp::ContentBlock::Text(acp::TextContent::new("x"))]));
+        assert!(!prompt_requests_firehose(&[]));
     }
 }

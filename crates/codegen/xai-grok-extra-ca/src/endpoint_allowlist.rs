@@ -9,10 +9,16 @@ use std::sync::RwLock;
 /// Comma-separated entries, added to what the config lists.
 pub const ENV_GROK_ALLOWED_ENDPOINTS: &str = "GROK_ALLOWED_ENDPOINTS";
 
+/// The lists are `static`s that a `const` initialiser gives an empty `Vec`, and
+/// each section is one `Vec` assignment or clone, so a poison can only come from
+/// elsewhere. `into_inner` keeps the allowlist enforcing after that panic: an
+/// allowlist that stops answering would fail every model request closed.
+/// `parking_lot::RwLock` is the structural fix and is not a dependency here.
 static CONFIGURED: RwLock<Vec<String>> = RwLock::new(Vec::new());
 
 /// Replace the entries that came from config. The environment adds to them.
 pub fn set_configured(entries: Vec<String>) {
+    #[allow(clippy::disallowed_methods)]
     let mut guard = CONFIGURED.write().unwrap_or_else(|p| p.into_inner());
     *guard = entries;
 }
@@ -22,20 +28,18 @@ static CONFIG_URLS: RwLock<Vec<String>> = RwLock::new(Vec::new());
 /// Replace the endpoints the user wrote as URLs in their own config, such as a
 /// provider's `base_url`. Writing a URL there is the user choosing it.
 pub fn set_config_urls(entries: Vec<String>) {
+    #[allow(clippy::disallowed_methods)]
     let mut guard = CONFIG_URLS.write().unwrap_or_else(|p| p.into_inner());
     *guard = entries;
 }
 
 /// Every entry now in force: config then the environment.
 pub fn allowed_endpoints() -> Vec<String> {
+    #[allow(clippy::disallowed_methods)]
     let mut entries = CONFIGURED.read().unwrap_or_else(|p| p.into_inner()).clone();
-    entries.extend(
-        CONFIG_URLS
-            .read()
-            .unwrap_or_else(|p| p.into_inner())
-            .iter()
-            .cloned(),
-    );
+    #[allow(clippy::disallowed_methods)]
+    let config_urls = CONFIG_URLS.read().unwrap_or_else(|p| p.into_inner());
+    entries.extend(config_urls.iter().cloned());
     if let Ok(env) = std::env::var(ENV_GROK_ALLOWED_ENDPOINTS) {
         entries.extend(env.split(',').map(str::to_owned));
     }
@@ -129,7 +133,7 @@ fn entry_covers(entry: &str, target: &reqwest::Url) -> bool {
         let suffix = suffix.to_ascii_lowercase();
         return host.len() > suffix.len() + 1
             && host.ends_with(&suffix)
-            && host.as_bytes()[host.len() - suffix.len() - 1] == b'.';
+            && host.as_bytes().get(host.len() - suffix.len() - 1) == Some(&b'.');
     }
     let Ok(allowed) = reqwest::Url::parse(&format!("any://{entry}")) else {
         return false;

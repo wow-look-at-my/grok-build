@@ -59,3 +59,15 @@ playground = ["dep:crossterm", "dep:xai-ratatui-textarea"]
 [[bench]]
 name = "bench"
 harness = false
+
+# Mirrors the denied set in [workspace.lints.clippy]. This package names a tool's lint table itself, so cargo
+# forbids inheriting as well, and the set cannot be inherited.
+[lints.clippy]
+cast_lossless = "allow" # 5 hits predate the gate
+cast_possible_truncation = "allow" # 2 hits predate the gate
+cast_possible_wrap = "allow" # 4 hits predate the gate
+cast_precision_loss = "allow" # 14 hits predate the gate
+cast_sign_loss = "allow" # 5 hits predate the gate
+expect_used = "allow" # 3 hits predate the gate
+string_slice = "deny"
+unwrap_used = "allow" # 1 hit predates the gate

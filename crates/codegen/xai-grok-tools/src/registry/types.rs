@@ -1,8 +1,7 @@
 use crate::{
     computer::types::{AsyncFileSystem, TerminalBackend},
     implementations::{
-        codex, grok_build, grok_build_concise, grok_build_hashline, opencode,
-        skills::types::SkillInfo,
+        grok_build, grok_build_concise, grok_build_hashline, opencode, skills::types::SkillInfo,
     },
     notification::ToolNotificationHandle,
     persistence::ResourcesPersistence,
@@ -680,10 +679,6 @@ impl ToolRegistryBuilder {
         b.register::<grok_build::SchedulerCreateTool>();
         b.register::<grok_build::SchedulerDeleteTool>();
         b.register::<grok_build::SchedulerListTool>();
-        b.register::<codex::apply_patch::ApplyPatchTool>();
-        b.register::<codex::list_dir::CodexListDirTool>();
-        b.register::<codex::grep_files::CodexGrepFilesTool>();
-        b.register::<codex::read_file::CodexReadFileTool>();
         b.register::<opencode::OpenCodeBashTool>();
         b.register::<opencode::OpenCodeReadTool>();
         b.register::<opencode::OpenCodeEditTool>();
@@ -1271,6 +1266,10 @@ impl ToolRegistryBuilder {
                 );
                 (Some(scheduler_cmd_rx), Some(cancel_token))
             };
+        // Installed before the scheduler actor below can hold the shared lock.
+        if !truncation_config.per_tool_max_output_bytes.is_empty() {
+            resources.insert(crate::types::resources::TruncationCfg(truncation_config));
+        }
         let shared_resources = resources.into_shared();
         if let (Some(cmd_rx), Some(cancel_token)) = (scheduler_cmd_rx, &scheduler_cancel_token) {
             let actor = crate::implementations::grok_build::scheduler::actor::SchedulerActor {
@@ -1283,7 +1282,15 @@ impl ToolRegistryBuilder {
                 pending_removal: None,
                 blocked_expiries: Default::default(),
             };
-            tokio::spawn(actor.run());
+            // The scheduler answers the create/list/delete tool calls over
+            // `cmd_rx`, so its death closes that channel; what a dropped
+            // JoinHandle adds to that is nothing anyone can read. Guarded so
+            // the panic itself, and which task it was, is on the record.
+            #[allow(clippy::disallowed_methods)]
+            tokio::spawn(crate::util::detached::fire_and_forget(
+                "scheduler actor",
+                actor.run(),
+            ));
         }
         Ok(FinalizedToolset {
             tools: parking_lot::RwLock::new(tools),
@@ -2315,7 +2322,7 @@ mod tests {
         let config = ToolServerConfig {
             tools: vec![
                 ToolConfig {
-                    id: "Codex:apply_patch".to_string(),
+                    id: "OpenCode:edit".to_string(),
                     params: None,
                     name_override: None,
                     params_name_overrides: None,
@@ -2361,7 +2368,7 @@ mod tests {
             .await;
         let result = result.expect(
             "search_replace must not fail with template rendering error \
-             when codex:apply_patch appears before it in the config",
+             when opencode:edit appears before it in the config",
         );
         assert!(
             result.prompt_text.contains("replace_all"),
@@ -3077,9 +3084,7 @@ mod tests {
             "unknown ids must be absent"
         );
     }
-    /// Regression test: `validate_config` must reject configurations where two tools resolve to the same `client_name`. Without `name_override`,
-    /// the client_name defaults to `entry.id` (e.g. `"read_file"`). If both `GrokBuild:read_file` and `Codex:read_file` are in the config, both
-    /// would get `client_name = "read_file"`, making the second unreachable at dispatch time.
+    /// Regression test: `validate_config` must reject configurations where tools resolve to the same `client_name`.
     #[test]
     fn validate_config_rejects_duplicate_client_name() {
         let builder = ToolRegistryBuilder::new();
@@ -3095,7 +3100,7 @@ mod tests {
                     kind: None,
                 },
                 ToolConfig {
-                    id: "Codex:read_file".to_string(),
+                    id: "GrokBuildConcise:read_file".to_string(),
                     params: None,
                     name_override: None, // both resolve to "read_file"
                     params_name_overrides: None,
@@ -3195,9 +3200,9 @@ mod tests {
                     kind: None,
                 },
                 ToolConfig {
-                    id: "Codex:read_file".to_string(),
+                    id: "GrokBuildConcise:read_file".to_string(),
                     params: None,
-                    name_override: Some("codex_read_file".to_string()), // disambiguated
+                    name_override: Some("concise_read_file".to_string()), // disambiguated
                     params_name_overrides: None,
                     description_override: None,
                     behavior_version: None,
@@ -3234,7 +3239,7 @@ mod tests {
                     kind: None,
                 },
                 ToolConfig {
-                    id: "Codex:read_file".to_string(),
+                    id: "GrokBuildConcise:read_file".to_string(),
                     params: None,
                     name_override: None,
                     params_name_overrides: None,
@@ -3687,7 +3692,7 @@ mod tests {
         [
           {
             "name": "todo_write",
-            "description": "Create and manage a structured task list. The user sees this list live — it is your primary way to show progress.\n\nAdd as many items as the work needs — a small task may be one or two, a large one many more. Do not pad a small job into a fake checklist, and do not crush a large job into a handful of vague items. Skip for trivial single-step work. Check items off as you go; keep roughly one in_progress.\n\nWrites merge by id, so send only the items you are changing. An item you leave out is kept exactly as it was: there is no way to remove one. Work leaves the list by status only — completed when it is done, cancelled when it will not be done. Reword an item by sending its id with new content.",
+            "description": "Create and manage a structured task list. The user sees this list live — it is your primary way to show progress.\n\nAdd as many items as the work needs — a small task may be one or two, a large one many more. Do not pad a small job into a fake checklist, and do not crush a large job into a handful of vague items. Skip for trivial single-step work. Check items off as you go; keep roughly one in_progress.\n\nWrites merge by id, so send only the items you are changing. An item you leave out is kept exactly as it was: there is no way to remove one. Work leaves the list by status only — completed when it is done, cancelled when it will not be done. Reword an item by sending its id with new content.\n\nEvery call returns the whole list with each item's id. Items can appear that you did not write (the user and the goal planner add them), so call with an empty `todos` array to read the current list and its ids before you update them.",
             "parameters": {
               "$schema": "http://json-schema.org/draft-07/schema#",
               "required": [

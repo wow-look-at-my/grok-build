@@ -1,3 +1,10 @@
+#![allow(clippy::cast_lossless)] // 5 hits predate the gate
+#![allow(clippy::cast_possible_truncation)] // 66 hits predate the gate
+#![allow(clippy::cast_possible_wrap)] // 3 hits predate the gate
+#![allow(clippy::cast_precision_loss)] // 1 hit predates the gate
+#![allow(clippy::expect_used)] // 14 hits predate the gate
+#![allow(clippy::string_slice)] // 40 hits predate the gate
+#![allow(clippy::unwrap_used)] // 39 hits predate the gate
 #![allow(
     unused_imports,
     unused_variables,
@@ -6,6 +13,7 @@
     dead_code
 )]
 //! Core workspace library: FS, VCS, permissions, tool config, and subsystem wiring.
+#![allow(clippy::cast_sign_loss)]
 #![deny(clippy::indexing_slicing)]
 pub mod activity;
 pub mod capability;

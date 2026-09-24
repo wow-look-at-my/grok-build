@@ -2547,17 +2547,59 @@ async fn compacted_last_query_without_images_is_unchanged() {
     );
 }
 #[tokio::test]
+async fn compaction_anchors_on_the_newest_interjection() {
+    let conversation = vec![
+        ConversationItem::system("sys"),
+        ConversationItem::user("<user_query>\ndelete\n</user_query>"),
+        ConversationItem::assistant("deleted"),
+        ConversationItem::interjection(
+            "The user sent a message while you were working:\n<user_query>\nnow rename the crate\n</user_query>",
+        ),
+        ConversationItem::assistant("renaming"),
+    ];
+    let ctx = CompactionStateContext::build(&conversation, CompactionInputs::default()).await;
+    assert_eq!(
+        ctx.last_user_query.as_deref(),
+        Some("now rename the crate"),
+        "the anchor must be the newest message the user sent, not the last idle prompt"
+    );
+    assert_eq!(
+        ctx.recent_messages.len(),
+        1,
+        "the verbatim tail must start after the newest user message"
+    );
+    let compacted = build_compacted_history(CompactedHistoryInput {
+        system_message: ConversationItem::system("sys"),
+        user_message_prefix: "<user_info>OS: linux</user_info>".to_string(),
+        agents_md_reminder: None,
+        state_context: &ctx,
+        compaction_summary: "summary".to_string(),
+        system_reminder: None,
+        summary_before_recent: false,
+        transcript_hint: None,
+        summary_count: 1,
+    });
+    let text: Vec<String> = compacted.iter().map(|i| i.text_content()).collect();
+    assert!(
+        text.iter().any(|t| t.contains("now rename the crate")),
+        "compacted history must carry the newest user message: {text:?}"
+    );
+    assert!(
+        !text
+            .iter()
+            .any(|t| t.contains("<user_query>\ndelete\n</user_query>")),
+        "compacted history must not re-inject the stale prompt: {text:?}"
+    );
+}
+#[tokio::test]
 async fn synthetic_image_carrier_is_not_picked_as_last_turn() {
     let mut carrier = ConversationItem::user_meta("Called the read_file tool");
     carrier.add_image("data:image/png;base64,synthetic");
-    let mut interjection = ConversationItem::interjection("also look at this");
-    interjection.add_image("data:image/png;base64,interjected");
     let conversation = vec![
         ConversationItem::system("sys"),
         image_prompt("what is this?", &["data:image/png;base64,human"]),
         ConversationItem::assistant("looking"),
         carrier,
-        interjection,
     ];
     let ctx = CompactionStateContext::build(&conversation, CompactionInputs::default()).await;
     assert_eq!(ctx.last_user_query.as_deref(), Some("what is this?"));

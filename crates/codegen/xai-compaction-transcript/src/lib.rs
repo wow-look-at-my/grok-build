@@ -7,6 +7,7 @@
 //! columns match.
 
 #![deny(clippy::indexing_slicing)]
+#![allow(clippy::unwrap_used)]
 
 use std::sync::OnceLock;
 

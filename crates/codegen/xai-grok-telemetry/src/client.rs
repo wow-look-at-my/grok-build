@@ -5,12 +5,12 @@
 //!
 //! The HTTP client is injected via [`init`]/[`init_if_needed`].
 //! That keeps this crate from depending on shell's `User-Agent` builder, which couples to the `permission` module.
-use crate::config::{TelemetryConfig, TelemetryMode, deployment_id_from_key};
+use crate::config::{TelemetryConfig, TelemetryMode};
 use crate::http::OriginClientInfo;
 use crate::session_ctx::EmitterOrigin;
 use chrono::{Local, SecondsFormat};
 use serde_json::json;
-use std::sync::{Arc, Mutex, Once, OnceLock};
+use std::sync::{Arc, Once, OnceLock};
 use xai_grok_env::env_bool;
 use xai_mixpanel::Mixpanel;
 /// Event property map shared by all telemetry modules.
@@ -38,7 +38,6 @@ pub struct TelemetryClient {
     mixpanel: Option<Arc<Mixpanel>>,
     user_id: Option<String>,
     team_id: Option<String>,
-    deployment_id: Option<String>,
     shell_version: String,
     client_type: Option<String>,
     client_version: Option<String>,
@@ -67,13 +66,12 @@ impl TelemetryClient {
         mode: TelemetryMode,
         user_id: Option<String>,
         team_id: Option<String>,
-        deployment_key: Option<String>,
         origin_client: Option<OriginClientInfo>,
         shell_version: String,
         subscription_tier: Option<String>,
         http_client: reqwest::Client,
     ) -> Self {
-        if xai_grok_version::IS_DEV_BUILD
+        if !xai_grok_version::is_release_stamped()
             && env_bool(ALLOW_DEV_BUILD_ENV) != Some(true)
             && config.disarm_baked_sinks()
         {
@@ -92,9 +90,6 @@ impl TelemetryClient {
         } else {
             None
         };
-        let deployment_id = deployment_key
-            .filter(|s| !s.is_empty())
-            .map(|k| deployment_id_from_key(&k));
         let (client_type, client_version) = match origin_client {
             Some(o) => (Some(o.product), o.version),
             None => (None, None),
@@ -106,7 +101,6 @@ impl TelemetryClient {
             mixpanel,
             user_id,
             team_id,
-            deployment_id,
             shell_version,
             client_type,
             client_version,
@@ -132,22 +126,24 @@ fn normalize_tier(tier: &str) -> String {
     }
     .to_string()
 }
-static TELEMETRY_CLIENT: OnceLock<Mutex<Option<TelemetryClient>>> = OnceLock::new();
+
+static TELEMETRY_CLIENT: OnceLock<parking_lot::Mutex<Option<TelemetryClient>>> = OnceLock::new();
+
 /// Returns `true` when telemetry mode is `Enabled`.
 /// Used by `log_event`; product analytics events only fire in `Enabled` mode.
 pub fn is_enabled() -> bool {
     TELEMETRY_CLIENT
         .get()
-        .and_then(|m| m.lock().ok())
-        .is_some_and(|g| g.as_ref().is_some_and(|c| c.mode.is_enabled()))
+        .is_some_and(|m| m.lock().as_ref().is_some_and(|c| c.mode.is_enabled()))
 }
 /// Returns `true` when telemetry mode is `Enabled` or `SessionMetrics`.
 /// Used by `session_metrics`; lifecycle events fire in both modes.
 pub fn is_session_metrics_enabled() -> bool {
-    TELEMETRY_CLIENT
-        .get()
-        .and_then(|m| m.lock().ok())
-        .is_some_and(|g| g.as_ref().is_some_and(|c| c.mode.session_metrics_enabled()))
+    TELEMETRY_CLIENT.get().is_some_and(|m| {
+        m.lock()
+            .as_ref()
+            .is_some_and(|c| c.mode.session_metrics_enabled())
+    })
 }
 pub struct UserContext {
     pub country: String,
@@ -222,7 +218,7 @@ impl EventEnrichment {
             is_interactive: identity.map(|i| i.interactivity == Interactivity::Interactive),
             is_ci: *IS_CI.get_or_init(is_ci_env),
             release_channel: crate::process_info::release_channel().map(|c| c.into()),
-            dev_build: xai_grok_version::IS_DEV_BUILD,
+            dev_build: !xai_grok_version::is_release_stamped(),
             os: std::env::consts::OS,
             arch: std::env::consts::ARCH,
             cpu_cores: process.cpu_cores,
@@ -277,9 +273,9 @@ pub async fn track(event_name: &str, request_id: &str, ctx: &UserContext, mut me
     let _ = &mut metadata;
     return;
     #[allow(unreachable_code)]
-    let lock = TELEMETRY_CLIENT.get_or_init(|| Mutex::new(None));
+    let lock = TELEMETRY_CLIENT.get_or_init(|| parking_lot::Mutex::new(None));
     let client = {
-        let guard = lock.lock().unwrap_or_else(|err| err.into_inner());
+        let guard = lock.lock();
         match guard.clone() {
             Some(c) => c,
             None => return,
@@ -290,9 +286,6 @@ pub async fn track(event_name: &str, request_id: &str, ctx: &UserContext, mut me
     metadata.insert("agent_id".into(), json!(agent_id));
     if let Some(ref team_id) = client.team_id {
         metadata.insert("team_id".into(), json!(team_id));
-    }
-    if let Some(ref deployment_id) = client.deployment_id {
-        metadata.insert("deployment_id".into(), json!(deployment_id));
     }
     metadata.insert("shell_version".into(), json!(client.shell_version));
     if let Some(ref client_type) = client.client_type {
@@ -370,9 +363,8 @@ pub async fn track(event_name: &str, request_id: &str, ctx: &UserContext, mut me
 /// Resolved mode of the initialized client, `None` when off.
 /// Lets a parent pass its mode to a spawned child that cannot re-resolve remote settings.
 pub fn current_mode() -> Option<TelemetryMode> {
-    let lock = TELEMETRY_CLIENT.get_or_init(|| Mutex::new(None));
-    let guard = lock.lock().unwrap_or_else(|err| err.into_inner());
-    guard.as_ref().map(|c| c.mode)
+    let lock = TELEMETRY_CLIENT.get_or_init(|| parking_lot::Mutex::new(None));
+    lock.lock().as_ref().map(|c| c.mode)
 }
 /// Sync the user's Mixpanel profile once per init. Fire-and-forget. Only runs in [`TelemetryMode::Enabled`].
 /// SessionMetrics mode may emit lifecycle events via [`track`], but must not write Mixpanel people profiles (`engage`).
@@ -380,9 +372,9 @@ pub fn sync_profile() {
     // Telemetry is hard-disabled: never spawn the mixpanel.engage profile sync.
     return;
     #[allow(unreachable_code)]
-    let lock = TELEMETRY_CLIENT.get_or_init(|| Mutex::new(None));
+    let lock = TELEMETRY_CLIENT.get_or_init(|| parking_lot::Mutex::new(None));
     let client = {
-        let guard = lock.lock().unwrap_or_else(|err| err.into_inner());
+        let guard = lock.lock();
         match guard.clone() {
             Some(c) => c,
             None => return,
@@ -407,9 +399,6 @@ pub fn sync_profile() {
         if let Some(ref client_version) = client.client_version {
             props.insert("client_version".into(), json!(client_version));
         }
-        if let Some(ref deployment_id) = client.deployment_id {
-            props.insert("deployment_id".into(), json!(deployment_id));
-        }
         if let Some(ref team_id) = client.team_id {
             props.insert("team_id".into(), json!(team_id));
         }
@@ -427,14 +416,13 @@ pub fn init(
     mode: TelemetryMode,
     user_id: Option<String>,
     team_id: Option<String>,
-    deployment_key: Option<String>,
     origin_client: Option<OriginClientInfo>,
     shell_version: String,
     subscription_tier: Option<String>,
     http_client: reqwest::Client,
 ) {
-    let lock = TELEMETRY_CLIENT.get_or_init(|| Mutex::new(None));
-    let mut guard = lock.lock().unwrap_or_else(|err| err.into_inner());
+    let lock = TELEMETRY_CLIENT.get_or_init(|| parking_lot::Mutex::new(None));
+    let mut guard = lock.lock();
     *guard = if mode.is_disabled() {
         None
     } else {
@@ -443,7 +431,6 @@ pub fn init(
             mode,
             user_id,
             team_id,
-            deployment_key,
             origin_client,
             shell_version,
             subscription_tier,
@@ -460,7 +447,6 @@ pub fn init_if_needed(
     mode: TelemetryMode,
     user_id: Option<String>,
     team_id: Option<String>,
-    deployment_key: Option<String>,
     origin_client: Option<OriginClientInfo>,
     shell_version: String,
     subscription_tier: Option<String>,
@@ -469,15 +455,14 @@ pub fn init_if_needed(
     if mode.is_disabled() {
         return;
     }
-    let lock = TELEMETRY_CLIENT.get_or_init(|| Mutex::new(None));
-    let mut guard = lock.lock().unwrap_or_else(|err| err.into_inner());
+    let lock = TELEMETRY_CLIENT.get_or_init(|| parking_lot::Mutex::new(None));
+    let mut guard = lock.lock();
     if guard.is_none() {
         *guard = Some(TelemetryClient::from_config(
             config,
             mode,
             user_id,
             team_id,
-            deployment_key,
             origin_client,
             shell_version,
             subscription_tier,
@@ -515,8 +500,8 @@ mod tests {
         struct ClearClient;
         impl Drop for ClearClient {
             fn drop(&mut self) {
-                let lock = TELEMETRY_CLIENT.get_or_init(|| Mutex::new(None));
-                *lock.lock().unwrap_or_else(|err| err.into_inner()) = None;
+                let lock = TELEMETRY_CLIENT.get_or_init(|| parking_lot::Mutex::new(None));
+                *lock.lock() = None;
             }
         }
         let _clear = ClearClient;
@@ -531,7 +516,6 @@ mod tests {
             cfg,
             TelemetryMode::SessionMetrics,
             Some("user-1".into()),
-            None,
             None,
             None,
             "0.0.0-test".into(),

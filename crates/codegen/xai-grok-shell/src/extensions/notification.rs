@@ -410,8 +410,14 @@ pub(crate) fn project_result_usage(result: &mut serde_json::Value, usage: &Promp
                 "cacheCreationInputTokens": cache_creation_tokens,
                 "modelCalls": model_calls,
             });
-            if !hide_costs && let Some(ticks) = cost_usd_ticks {
-                entry["costUSD"] = serde_json::json!(ticks_to_usd(ticks));
+            if !hide_costs
+                && let Some(ticks) = cost_usd_ticks
+                && let Some(obj) = entry.as_object_mut()
+            {
+                obj.insert(
+                    "costUSD".to_string(),
+                    serde_json::json!(ticks_to_usd(ticks)),
+                );
             }
             model_usage.insert(name.clone(), entry);
         }
@@ -541,8 +547,13 @@ pub enum SessionUpdate {
         /// How long the compaction took (milliseconds)
         #[serde(skip_serializing_if = "Option::is_none")]
         elapsed_ms: Option<i64>,
-        /// Summary preview (first ~100 chars of summary)
         summary_preview: Option<String>,
+        /// What the compacted history holds, in one line: the summary's size.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        breakdown: Option<String>,
+        /// The Markdown report with every kept item and the summary text.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        report_path: Option<String>,
     },
     /// Auto-compact failed
     AutoCompactFailed {
@@ -724,9 +735,13 @@ pub enum SessionUpdate {
         #[serde(default)]
         prompt_id: Option<String>,
     },
-    /// A compaction checkpoint marker written to `updates.jsonl`. This is **persist-only**: it is never sent to the gateway/UI. It records that a compaction occurred.
-    /// The replay pipeline uses it to reconstruct the model's conversation view when rewinding across the compaction boundary.
-    /// The actual compacted conversation is stored under `compaction_checkpoints/{checkpoint_id}.json` to keep `updates.jsonl` lean.
+    /// A short summary of the thinking in a single model call. Persisted, so a reload keeps it.
+    ThinkingSummary {
+        /// `streamStartMs` of the model call whose thinking this summarizes.
+        stream_start_ms: i64,
+        summary: String,
+    },
+    /// A compaction checkpoint marker written to `updates.jsonl`.
     CompactionCheckpoint(Box<CompactionCheckpointInfo>),
     /// A rewind marker written to `updates.jsonl` when a rewind occurs. This is **persist-only**: it is never sent to the gateway/UI. Because `updates.jsonl` is append-only, rewinding creates a timeline branch.
     /// The marker tells the replay algorithm to discard accumulated state beyond `target_prompt_index` and continue from that point.
@@ -747,6 +762,8 @@ pub enum SessionUpdate {
     },
     /// A subagent session has been spawned. Sent on the PARENT session's notification channel so the client knows this `child_session_id` is a subagent and can route its events.
     /// Emitted BEFORE dispatching `SessionCommand::Prompt` to the child. This prevents a race where child events arrive before the client has the session ID mapping.
+    /// It reads through `SubagentSpawnedShadow`, which folds the `agent_address` spelling.
+    #[serde(deserialize_with = "deserialize_subagent_spawned")]
     SubagentSpawned {
         /// Unique subagent identifier (same as child session ID).
         subagent_id: String,
@@ -786,11 +803,11 @@ pub enum SessionUpdate {
         resumed_from: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         workflow_run_id: Option<String>,
-        /// Live-only opaque child address. Wire key is `agentAddress`; omitted from `updates.jsonl`.
+        /// Live-only opaque child address. Wire key is `agentAddress`;
+        /// omitted from `updates.jsonl`.
         #[serde(
             default,
             rename = "agentAddress",
-            alias = "agent_address",
             skip_serializing_if = "Option::is_none"
         )]
         agent_address: Option<String>,
@@ -1259,6 +1276,95 @@ pub enum SessionUpdate {
     /// All fields from the unrecognized variant are discarded during deserialization.
     #[serde(other)]
     Unknown,
+}
+
+/// The keys `SessionUpdate::SubagentSpawned.agent_address` is read under.
+pub(crate) const AGENT_ADDRESS_KEYS: xai_tool_types::Aliases =
+    xai_tool_types::Aliases::new("agentAddress", &["agent_address"]);
+
+/// `SessionUpdate::SubagentSpawned` as a peer sends it, with each agent-address spelling its own field.
+#[derive(serde::Deserialize)]
+struct SubagentSpawnedShadow {
+    subagent_id: String,
+    #[serde(default)]
+    attempt_id: Option<String>,
+    parent_session_id: String,
+    #[serde(default)]
+    parent_prompt_id: Option<String>,
+    child_session_id: String,
+    subagent_type: String,
+    description: String,
+    #[serde(default)]
+    effective_context_source: Option<String>,
+    #[serde(default)]
+    context_normalized: bool,
+    #[serde(default)]
+    capability_mode: Option<String>,
+    #[serde(default)]
+    persona: Option<String>,
+    #[serde(default)]
+    role: Option<String>,
+    #[serde(default)]
+    model: Option<String>,
+    #[serde(default)]
+    resumed_from: Option<String>,
+    #[serde(default)]
+    workflow_run_id: Option<String>,
+    #[serde(default, rename = "agentAddress")]
+    agent_address: Option<String>,
+    #[serde(default, rename = "agent_address")]
+    agent_address_snake: Option<String>,
+}
+
+/// The `SubagentSpawned` fields in declaration order, which is the shape a
+/// variant-level `deserialize_with` returns.
+type SubagentSpawnedFields = (
+    String,
+    Option<String>,
+    String,
+    Option<String>,
+    String,
+    String,
+    String,
+    Option<String>,
+    bool,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+);
+
+fn deserialize_subagent_spawned<'de, D>(deserializer: D) -> Result<SubagentSpawnedFields, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::Deserialize as _;
+    use serde::de::Error as _;
+    let wire = SubagentSpawnedShadow::deserialize(deserializer)?;
+    let agent_address = AGENT_ADDRESS_KEYS
+        .fold(vec![wire.agent_address, wire.agent_address_snake])
+        .map_err(D::Error::custom)?;
+    Ok((
+        wire.subagent_id,
+        wire.attempt_id,
+        wire.parent_session_id,
+        wire.parent_prompt_id,
+        wire.child_session_id,
+        wire.subagent_type,
+        wire.description,
+        wire.effective_context_source,
+        wire.context_normalized,
+        wire.capability_mode,
+        wire.persona,
+        wire.role,
+        wire.model,
+        wire.resumed_from,
+        wire.workflow_run_id,
+        agent_address,
+    ))
 }
 
 fn default_true() -> bool {
@@ -1908,6 +2014,23 @@ mod tests {
             }
             other => panic!("expected SubagentSpawned, got {other:?}"),
         }
+
+        let spawned = |keys: &str| {
+            serde_json::from_str::<SessionUpdate>(&format!(
+                r#"{{"sessionUpdate":"subagent_spawned","subagent_id":"s","parent_session_id":"p","child_session_id":"c","subagent_type":"explore","description":"d"{keys}}}"#
+            ))
+        };
+        match spawned(r#","agentAddress":"a","agent_address":"a""#)
+            .expect("one address named twice is one address")
+        {
+            SessionUpdate::SubagentSpawned { agent_address, .. } => {
+                assert_eq!(agent_address.as_deref(), Some("a"));
+            }
+            other => panic!("expected SubagentSpawned, got {other:?}"),
+        }
+        let err = spawned(r#","agentAddress":"a","agent_address":"b""#)
+            .expect_err("two different addresses must not resolve silently");
+        assert!(err.to_string().contains("agent_address"), "{err}");
 
         let notification = SessionNotification {
             session_id: acp::SessionId::new("p"),

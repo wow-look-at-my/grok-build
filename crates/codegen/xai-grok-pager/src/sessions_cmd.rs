@@ -34,9 +34,7 @@ enum SessionsCommand {
 }
 
 pub async fn run(args: SessionsArgs, agent_config: &AgentConfig) -> Result<()> {
-    // Best-effort only: never force an interactive public login here. Enterprise deployments may configure only a
-    // deployment_key and a custom xai_api_base_url. Otherwise we still proceed so the SessionRegistryClient can use
-    // the deployment_key when talking to the custom proxy.
+    // Best-effort only: a cached credential is used if one exists, and the command never forces an interactive login.
     let auth = try_ensure_fresh_auth(
         &agent_config.grok_com_config,
         agent_config.endpoints.proxy_url(),
@@ -53,7 +51,6 @@ pub async fn run(args: SessionsArgs, agent_config: &AgentConfig) -> Result<()> {
         agent_config.endpoints.proxy_url(),
         String::new(),
     )
-    .with_deployment_key(agent_config.endpoints.deployment_key.clone())
     .with_alpha_test_key(agent_config.endpoints.alpha_test_key.clone())
     .with_auth(auth_manager.clone());
 

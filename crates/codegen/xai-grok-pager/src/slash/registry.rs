@@ -200,6 +200,15 @@ impl CommandRegistry {
             // typed case survives to `run_with_token` (urgent /TODO).
             found = self.key_to_index.get(&key.to_ascii_lowercase());
         }
+        self.dispatchable(found)
+    }
+
+    /// [`Self::get_for_dispatch`] with an exact-case match only, for tokens found mid-text.
+    pub fn get_for_dispatch_exact_case(&self, key: &str) -> Option<&Arc<dyn SlashCommand>> {
+        self.dispatchable(self.key_to_index.get(key))
+    }
+
+    fn dispatchable(&self, found: Option<&usize>) -> Option<&Arc<dyn SlashCommand>> {
         found
             .and_then(|idx| self.commands.get(*idx))
             .filter(|cmd| !self.hidden.contains(cmd.name()))

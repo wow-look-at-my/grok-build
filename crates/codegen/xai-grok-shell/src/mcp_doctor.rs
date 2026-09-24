@@ -304,9 +304,10 @@ fn resolve_command(command: &str) -> Option<String> {
         .ok()
         .filter(|o| o.status.success())
         .and_then(|o| {
-            String::from_utf8(o.stdout)
-                .ok()
-                .map(|s| s.trim().to_string())
+            // The locator prints the resolved path verbatim, and a path may
+            // hold bytes that are not valid UTF-8. The decode is lossy so a
+            // command that exists still reports as found.
+            Some(String::from_utf8_lossy(&o.stdout).trim().to_string())
         })
 }
 

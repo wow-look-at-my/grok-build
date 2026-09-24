@@ -2929,7 +2929,7 @@ mod tests {
         enum Vector {
             /// File-read tool / list_dir: `evaluate(AccessKind::Read(..))`.
             ReadTool(&'static str),
-            /// write / search_replace / apply_patch: `evaluate(AccessKind::Edit(..))`.
+            /// write / search_replace: `evaluate(AccessKind::Edit(..))`.
             EditTool(&'static str),
             /// Bash command rules: `evaluate(AccessKind::Bash(..))`.
             Bash(&'static str),

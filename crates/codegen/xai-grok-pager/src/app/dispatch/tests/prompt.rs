@@ -1106,7 +1106,7 @@ fn send_prompt_while_running_queues_on_server_when_follow_up_steer() {
 }
 
 #[test]
-fn send_prompt_while_running_with_follow_up_queue_stays_local_when_not_leader() {
+fn send_prompt_while_running_with_follow_up_queue_queues_on_server_when_not_leader() {
     struct ResetFollowUp(crate::appearance::FollowUpBehavior);
     impl Drop for ResetFollowUp {
         fn drop(&mut self) {
@@ -1128,12 +1128,18 @@ fn send_prompt_while_running_with_follow_up_queue_stays_local_when_not_leader() 
             .all(|e| !matches!(e, Effect::SendInterject { .. })),
         "Queue must not interject mid-turn, got {effects:?}"
     );
-    // Non-leader and Queue mode: local drip-feed path (not server-immediate)
-    assert_eq!(agent_ref(&app, id).session.queue_len(), 1);
+    assert!(
+        matches!(
+            effects.as_slice(),
+            [Effect::SendPrompt { text, .. }] if text == "later"
+        ),
+        "Queue should server-queue whatever the leader state, got {effects:?}"
+    );
+    assert_eq!(agent_ref(&app, id).session.queue_len(), 0);
 }
 
-/// With Steer, an older local drip-feed row still blocks server-immediate send.
-/// Newer Enter must not interject or jump the server queue ahead of the older local prompt.
+/// With Steer, an older local row moves to the server queue ahead of the new prompt.
+/// Newer Enter must not interject or jump ahead of the older local prompt.
 #[test]
 fn send_while_running_with_pending_local_and_steer_preserves_fifo() {
     struct ResetFollowUp(crate::appearance::FollowUpBehavior);
@@ -1159,21 +1165,23 @@ fn send_while_running_with_pending_local_and_steer_preserves_fifo() {
     assert!(
         effects
             .iter()
-            .all(|e| !matches!(e, Effect::SendInterject { .. } | Effect::SendPrompt { .. })),
-        "Steer must not bypass empty-local-queue gate, got {effects:?}"
+            .all(|e| !matches!(e, Effect::SendInterject { .. })),
+        "Steer must not interject mid-turn, got {effects:?}"
     );
-    let order: Vec<&str> = agent_ref(&app, id)
-        .session
-        .pending_prompts
+    let order: Vec<&str> = effects
         .iter()
-        .map(|p| p.text.as_str())
+        .filter_map(|e| match e {
+            Effect::SendPrompt { text, .. } => Some(text.as_str()),
+            _ => None,
+        })
         .collect();
     assert_eq!(order, vec!["two", "three"]);
+    assert!(agent_ref(&app, id).session.pending_prompts.is_empty());
 }
 
-/// Images never ride server-immediate; with Steer they still join the local queue (no interject-on-Enter with attachments).
+/// With Steer, an image prompt goes to the server queue with its image. Enter never interjects it.
 #[test]
-fn send_prompt_with_images_while_running_and_steer_stays_local() {
+fn send_prompt_with_images_while_running_and_steer_queues_on_server() {
     struct ResetFollowUp(crate::appearance::FollowUpBehavior);
     impl Drop for ResetFollowUp {
         fn drop(&mut self) {
@@ -1208,12 +1216,14 @@ fn send_prompt_with_images_while_running_and_steer_stays_local() {
 
     let effects = dispatch(Action::SendPrompt("with image".into()), &mut app);
     assert!(
-        effects
-            .iter()
-            .all(|e| !matches!(e, Effect::SendInterject { .. } | Effect::SendPrompt { .. })),
-        "images + Steer must not interject or server-send, got {effects:?}"
+        matches!(
+            effects.as_slice(),
+            [Effect::SendPromptBlocks { blocks, .. }]
+                if blocks.iter().any(|b| matches!(b, acp::ContentBlock::Image(_)))
+        ),
+        "images + Steer must server-queue with the image, got {effects:?}"
     );
-    assert_eq!(agent_ref(&app, id).session.queue_len(), 1);
+    assert_eq!(agent_ref(&app, id).session.queue_len(), 0);
 }
 
 /// Regression (queue reorder race): a plain prompt typed while a turn is
@@ -5073,6 +5083,88 @@ fn image_prompt_during_sendable_wait_routes_to_send_now() {
     );
 }
 
+#[test]
+fn image_prompt_while_running_goes_to_server_queue() {
+    let mut app = test_app_with_agent();
+    let id = AgentId(0);
+    dispatch(Action::SendPrompt("first".into()), &mut app);
+    assert!(app.agents[&id].session.state.is_turn_running());
+
+    let img = crate::prompt_images::from_clipboard_data(&crate::clipboard::ImageData {
+        data: vec![1, 2, 3],
+        mime_type: "image/png".into(),
+    });
+    app.agents
+        .get_mut(&id)
+        .unwrap()
+        .prompt
+        .insert_image(img)
+        .unwrap();
+
+    let effects = dispatch(Action::SendPrompt("look at [Image #1]".into()), &mut app);
+    let prompt_id = match effects.as_slice() {
+        [
+            Effect::SendPromptBlocks {
+                blocks, prompt_id, ..
+            },
+        ] => {
+            assert!(
+                blocks
+                    .iter()
+                    .any(|b| matches!(b, acp::ContentBlock::Image(_))),
+                "the image must ride the queued send, got {blocks:?}"
+            );
+            prompt_id.clone()
+        }
+        other => panic!("expected a server-queue SendPromptBlocks, got {other:?}"),
+    };
+    let agent = &app.agents[&id];
+    assert!(
+        agent.session.pending_prompts.is_empty(),
+        "the image prompt must not wait in the local queue"
+    );
+    assert!(
+        agent.prompt.images.is_empty(),
+        "the send consumes the images"
+    );
+    assert!(
+        agent.shared_queue.iter().any(|e| e.id == prompt_id),
+        "the queue pane shows the server row"
+    );
+    assert!(
+        agent.expect_send_now_cancel.is_none(),
+        "a queued send must not arm a send-now cancel"
+    );
+}
+
+#[test]
+fn stranded_image_row_migrates_to_server_queue() {
+    let mut app = test_app_with_agent();
+    let id = AgentId(0);
+    dispatch(Action::SendPrompt("first".into()), &mut app);
+    let img = crate::prompt_images::from_clipboard_data(&crate::clipboard::ImageData {
+        data: vec![1, 2, 3],
+        mime_type: "image/png".into(),
+    });
+    {
+        let agent = app.agents.get_mut(&id).unwrap();
+        agent.session.enqueue_prompt("see [Image #1]".into());
+        agent.session.pending_prompts.back_mut().unwrap().images = vec![img];
+    }
+
+    let effects = crate::app::dispatch::migrate_local_rows_to_server_queue(&mut app);
+    match effects.as_slice() {
+        [Effect::SendPromptBlocks { blocks, .. }] => assert!(
+            blocks
+                .iter()
+                .any(|b| matches!(b, acp::ContentBlock::Image(_))),
+            "the migrated row keeps its image, got {blocks:?}"
+        ),
+        other => panic!("expected the image row to migrate, got {other:?}"),
+    }
+    assert!(app.agents[&id].session.pending_prompts.is_empty());
+}
+
 /// The local drip-feed drain must hold while a non-running server row exists.
 /// The shell owns the next turn (its `running_prompt_id` broadcast starts it).
 /// Draining locally would promote a bogus local turn that swallows the real turn's deltas.
@@ -6880,8 +6972,8 @@ fn sending_mid_turn_migrates_stuck_local_rows_to_the_shell() {
     );
 }
 
-/// Migration stops at the first row it cannot re-send losslessly: an image
-/// prompt's images do not fit `Effect::SendPrompt`. Moving the row behind it
+/// Migration stops at the first row it cannot re-send losslessly: a skill
+/// row's wire payload has no place in the queued send. Moving the row behind it
 /// would hoist a newer prompt above an older one in the merged view, so that
 /// row — and everything after it — stays local.
 #[test]
@@ -6892,25 +6984,15 @@ fn migration_stops_at_a_row_it_cannot_carry() {
     {
         let agent = app.agents.get_mut(&id).unwrap();
         agent.session.state = AgentState::TurnRunning;
-        agent.session.enqueue_prompt("with-image".into());
+        agent.session.enqueue_prompt("skill-row".into());
         agent
             .session
             .pending_prompts
             .front_mut()
             .unwrap()
-            .images
-            .push(crate::prompt_images::PastedImage {
-                element_id: xai_ratatui_textarea::ElementId::from_raw(0),
-                display_number: 1,
-                mime_type: "image/png".into(),
-                dimensions: Some((10, 10)),
-                byte_len: 16,
-                encoded_bytes: Some(vec![0u8; 16].into()),
-                source_path: None,
-                staged_temp_path: None,
-                session_image_path: None,
-                preview: crate::prompt_images::PromptImagePreview::default(),
-            });
+            .wire_blocks = Some(vec![acp::ContentBlock::Text(acp::TextContent::new(
+            "<skill/>".to_string(),
+        ))]);
         agent.session.enqueue_prompt("behind-it".into());
     }
 
@@ -6920,7 +7002,7 @@ fn migration_stops_at_a_row_it_cannot_carry() {
         !effects
             .iter()
             .any(|e| matches!(e, Effect::SendPrompt { text, .. } if text != "newest")),
-        "nothing may jump the image row: {effects:?}"
+        "nothing may jump the skill row: {effects:?}"
     );
     let queued: Vec<&str> = app.agents[&id]
         .session
@@ -6930,7 +7012,7 @@ fn migration_stops_at_a_row_it_cannot_carry() {
         .collect();
     assert_eq!(
         queued,
-        vec!["with-image", "behind-it", "newest"],
+        vec!["skill-row", "behind-it", "newest"],
         "order is preserved and the newest prompt stays behind them"
     );
 }

@@ -1263,6 +1263,9 @@ fn collapsed_description_spans(
 }
 
 /// Word-wrap an overflowing label into chunks of at most `width` columns.
+// Every offset sliced on here is a `byte_offset_at_width` output, a `char_indices`
+// offset, or one past an ASCII `' '` that `rfind` matched: all char boundaries.
+#[allow(clippy::string_slice)]
 fn wrap_label_chunks(label: &str, width: usize) -> Vec<String> {
     let width = width.max(1);
     let mut out = Vec::new();

@@ -785,13 +785,6 @@ mod tests {
     }
 
     #[test]
-    fn test_by_name_builtin_codex() {
-        let def = by_name("codex");
-        assert!(def.is_some());
-        assert_eq!(def.unwrap().name, "codex");
-    }
-
-    #[test]
     fn test_by_name_unknown_returns_none() {
         let def = by_name("nonexistent-agent-xyz");
         assert!(def.is_none());

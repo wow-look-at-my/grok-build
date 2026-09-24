@@ -594,10 +594,20 @@ impl xai_tool_runtime::Tool for TaskTool {
             .then(|| {
                 tool_cancellation.map(|tool_cancellation| {
                     let child_cancellation = child_cancellation.clone();
-                    tokio::spawn(async move {
-                        tool_cancellation.cancelled().await;
-                        child_cancellation.cancel();
-                    })
+                    // The handle is kept to abort the forwarder once the child
+                    // is no longer foreground, so the only thing that can come
+                    // back from it is a panic. Guarded so that panic names the
+                    // forwarder rather than leaving a child running that nobody
+                    // can cancel any more. The returned handle is kept by the
+                    // caller and aborted, so nothing joins it.
+                    #[allow(clippy::disallowed_methods)]
+                    tokio::spawn(crate::util::detached::fire_and_forget(
+                        "subagent cancellation forwarder",
+                        async move {
+                            tool_cancellation.cancelled().await;
+                            child_cancellation.cancel();
+                        },
+                    ))
                 })
             })
             .flatten();

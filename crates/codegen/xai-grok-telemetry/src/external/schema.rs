@@ -104,8 +104,6 @@ pub enum ExternalKey {
     OrganizationId,
     #[strum(serialize = "team.id")]
     TeamId,
-    #[strum(serialize = "deployment.id")]
-    DeploymentId,
     // Session lifecycle
     Model,
     PermissionMode,
@@ -227,17 +225,17 @@ pub(crate) fn key_policy(key: ExternalKey) -> KeyPolicy {
         // McpServerName/McpToolName ride a safe placeholder by default and are gated at emit time,
         // so their key is safe at export; everything else is a label, count, id, or sanitized value.
         SessionId | TurnNumber | PromptId | EventSequence | UserId | UserEmail | OrganizationId
-        | TeamId | DeploymentId | Model | PermissionMode | McpServerCount | PluginCount
-        | SkillCount | HookCount | MemoryEnabled | IsGitRepo | ClientIdentifier | DurationSecs
-        | TurnCount | ToolCallCount | CompactionCount | PromptLength | ResponseLength
-        | ScreenMode | CommandName | Outcome | DurationMs | ErrorCategory
-        | CancellationCategory | StopReason | InputTokens | OutputTokens | ReasoningTokens
-        | CacheReadTokens | CacheCreationTokens | CostUsdMicros | StatusCode | ToolName
-        | Success | HookRewrote | FileExtension | ToolUseId | Decision | AccessKind | Source
-        | Status | TransportType | ToolCount | ErrorType | McpServerName | McpToolName
-        | FromMode | ToMode | Trigger | SkillSource | InstallKind | PluginScope
-        | CompactionTrigger | CompactionOutcome | TokensBefore | TokensAfter | Phase
-        | SubagentType | AuthMethod | FromModel | ToModel | ErrorCode | Tip | Action => Safe,
+        | TeamId | Model | PermissionMode | McpServerCount | PluginCount | SkillCount
+        | HookCount | MemoryEnabled | IsGitRepo | ClientIdentifier | DurationSecs | TurnCount
+        | ToolCallCount | CompactionCount | PromptLength | ResponseLength | ScreenMode
+        | CommandName | Outcome | DurationMs | ErrorCategory | CancellationCategory
+        | StopReason | InputTokens | OutputTokens | ReasoningTokens | CacheReadTokens
+        | CacheCreationTokens | CostUsdMicros | StatusCode | ToolName | Success | HookRewrote
+        | FileExtension | ToolUseId | Decision | AccessKind | Source | Status | TransportType
+        | ToolCount | ErrorType | McpServerName | McpToolName | FromMode | ToMode | Trigger
+        | SkillSource | InstallKind | PluginScope | CompactionTrigger | CompactionOutcome
+        | TokensBefore | TokensAfter | Phase | SubagentType | AuthMethod | FromModel | ToModel
+        | ErrorCode | Tip | Action => Safe,
     }
 }
 
@@ -417,7 +415,6 @@ pub(crate) const METRIC_ALLOWED_ATTR_KEYS: &[&str] = &[
     "user.email",
     "organization.id",
     "team.id",
-    "deployment.id",
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────

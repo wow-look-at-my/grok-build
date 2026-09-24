@@ -184,7 +184,7 @@ where
     R: AsyncRead + Unpin + Send + 'static,
 {
     let (tx, rx) = mpsc::unbounded_channel();
-    tokio::spawn(async move {
+    let reader = tokio::spawn(async move {
         let mut sent = 0usize;
         let mut chunk = [0u8; READ_CHUNK_SIZE];
         loop {
@@ -204,7 +204,17 @@ where
                 }
                 sent += keep;
             }
-            // Past the cap: keep reading to drain the pipe (never block the child), discarding the excess
+        }
+    });
+    // A panicked reader truncates the capture in silence, so the watcher logs it.
+    tokio::spawn(async move {
+        if let Err(e) = reader.await
+            && e.is_panic()
+        {
+            tracing::error!(
+                task = "hook child pipe reader",
+                "detached work panicked; the capture is truncated"
+            );
         }
     });
     rx

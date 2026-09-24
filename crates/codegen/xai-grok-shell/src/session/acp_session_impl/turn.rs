@@ -720,9 +720,13 @@ impl SessionActor {
                     BuiltinAction::GoalSet {
                         objective,
                         token_budget,
+                        mode,
                     } => {
                         xai_grok_telemetry::session_ctx::log_event(slash_used);
-                        match self.setup_goal(&objective, token_budget).await {
+                        match self
+                            .setup_goal(&objective, token_budget, mode.unwrap_or_default())
+                            .await
+                        {
                             GoalSetupOutcome::Inference { reminder } => {
                                 vec![text_block(reminder)]
                             }
@@ -2647,6 +2651,7 @@ impl SessionActor {
         trace_gcs_config: Option<crate::session::repo_changes::TraceExportConfig>,
         artifact_tracker: Option<&crate::upload::manifest::ArtifactTracker>,
         json_schema: Option<serde_json::Value>,
+        first_round: bool,
         salvage: &mut super::length_salvage::LengthSalvage,
         turn_sampling: &mut TurnSampling,
     ) -> Result<TurnOutcome, acp::Error> {
@@ -2656,6 +2661,7 @@ impl SessionActor {
                 trace_gcs_config,
                 artifact_tracker,
                 json_schema,
+                first_round,
                 salvage,
                 turn_sampling,
             )
@@ -2770,7 +2776,10 @@ impl SessionActor {
             let tool_defs = tool_definitions.clone();
             let manifest_clone = artifact_tracker.cloned();
             let auth_manager = self.auth_manager.clone();
-            tokio::spawn(async move {
+            // Fire-and-forget with the panic reported: nothing waits on this
+            // upload, and the crate's other uploads go through the same
+            // wrapper for that reason.
+            crate::upload::turn::spawn_upload_task("tool definitions", async move {
                 crate::upload::trace::upload_tool_definitions(
                     gcs_cfg,
                     auth_manager,
@@ -3104,11 +3113,6 @@ impl SessionActor {
             request.x_grok_agent_id = Some(xai_grok_telemetry::id::agent_id());
             request.x_grok_transient_retry =
                 (transient_retry_attempts > 0).then(|| transient_retry_attempts.to_string());
-            if request.x_grok_deployment_id.is_none() {
-                request.x_grok_deployment_id = crate::managed_config::resolve_deployment_id(
-                    crate::managed_config::resolve_deployment_key().as_deref(),
-                );
-            }
             if structured_output_native {
                 request.json_schema = json_schema.clone();
             }
@@ -3256,6 +3260,7 @@ impl SessionActor {
                             attempt: transient_retry_attempts,
                             max_retries: display_max,
                             reason: format!("{cause}; retrying request"),
+                            retry_in_ms: Some(delay.as_millis() as u64),
                             error_type: Some(kind.as_ref().to_string()),
                         },
                     ))
@@ -3584,6 +3589,12 @@ impl SessionActor {
                 .and_then(|l| l.totals.cost_usd_ticks);
             let response_completed =
                 self.response_completed_update(&response, response_cost_ticks, session_cost_ticks);
+            let stream_start_ms = self
+                .chat_state_handle
+                .get_notification_meta()
+                .await
+                .and_then(|m| m.stream_start_ms);
+            self.spawn_thinking_summary(&response, stream_start_ms);
             if let Some(mut pt) = prompt_timing.take() {
                 pt.record_stream_latency(latency.time_to_last_byte_ms);
                 pt.record_model_result(
@@ -3647,6 +3658,7 @@ impl SessionActor {
                         attempt: media_gen_resamples,
                         max_retries: MAX_MEDIA_GEN_OVER_CAP_RESAMPLES,
                         reason: "Too many parallel media-gen calls; retrying".to_string(),
+                        retry_in_ms: None,
                         error_type: None,
                     },
                 ))
@@ -4204,6 +4216,7 @@ mod identical_tool_call_run_tests {
             id: "id".into(),
             name: name.to_string(),
             arguments: args.into(),
+            vendor: Default::default(),
         };
         assert_eq!(
             step_signature(&[call("read_file", r#"{"path":"a","limit":10}"#)]),
@@ -4537,6 +4550,7 @@ mod last_sample_span_tests {
                 id: "call-1".into(),
                 name: "bash".to_string(),
                 arguments: "{}".into(),
+                vendor: Default::default(),
             });
         }
         response

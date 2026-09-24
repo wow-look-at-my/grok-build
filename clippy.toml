@@ -1,7 +1,9 @@
-# Clippy config for crates/codegen/**.
+# Clippy config for the whole workspace.
 #
-# NOTE: clippy uses the NEAREST clippy.toml (no merging), so this file must
-# duplicate any settings from the repo-root //clippy.toml.
+# clippy reads the NEAREST clippy.toml and merges nothing, so this file has to
+# stand alone: one file at the repository root reaches every crate in the
+# workspace, and a second one anywhere under `crates/` would silently take over
+# for every crate beneath it.
 
 # TODO: remove after https://github.com/hyperium/tonic/issues/2253 fixed.
 large-error-threshold = 256
@@ -52,4 +54,16 @@ disallowed-methods = [
     { path = "std::process::Command::spawn", reason = "an unenrolled child outlives its session; use xai_tty_utils::ProcessScope::enroll" },
     { path = "tokio::process::Command::spawn", reason = "an unenrolled child outlives its session; use xai_tty_utils::ProcessScope::enroll", allow-invalid = true },
     { path = "portable_pty::SlavePty::spawn_command", reason = "an unenrolled pty child outlives its session; enroll the shell with xai_tty_utils::ProcessScope::enroll_terminal_pid", allow-invalid = true },
+    # A child's bytes are not text. A strict decode answers one undecodable byte by
+    # discarding the whole payload, so the model sees an empty result where the tool
+    # actually printed something. Invalid bytes are information, not an error.
+    { path = "std::string::String::from_utf8", reason = "a child's output, a file, or a socket is bytes; one undecodable byte throws the whole payload away -- use String::from_utf8_lossy, or allow with a reason where invalid bytes ARE the answer (binary detection, or a path that must reopen)" },
+    # std locks poison on a panic while held, so the panic of one request turns every
+    # later acquisition into a panic too. parking_lot's do not poison at all.
+    { path = "std::sync::Mutex::lock", reason = "a panic while held poisons the lock, so the next lock() panics too and one bad tool call ends the session -- use parking_lot::Mutex, whose lock() cannot fail" },
+    { path = "std::sync::RwLock::read", reason = "a panic while held poisons the lock, so every later read() panics -- use parking_lot::RwLock, whose read() cannot fail" },
+    { path = "std::sync::RwLock::write", reason = "a panic while held poisons the lock, so every later write() panics -- use parking_lot::RwLock, whose write() cannot fail" },
+    # A dropped JoinHandle is a dropped failure: the task panicked and the caller
+    # keeps waiting on work that already died.
+    { path = "tokio::spawn", reason = "a dropped JoinHandle loses the task's panic, leaving its callers waiting on work that already died -- await and check the result, or run the future through xai_grok_tools::util::detached::guarded so a panicked task still releases what others wait on" },
 ]

@@ -51,3 +51,33 @@ fn bash_command_gate_distinguishes_ask_provenance() {
     ));
     assert!(policy.evaluate_bash_command_gate("echo hi").is_none());
 }
+
+fn an_undecomposed_script_that_names_a_ruled_command_never_fails_closed() {
+    let policy = CompiledPolicy::new(PermissionConfig::new(vec![
+        parse_permission_rule("Bash(sed:*)", RuleAction::Deny).unwrap(),
+        parse_permission_rule("Bash(git push*)", RuleAction::Ask).unwrap(),
+    ]));
+    for cmd in [
+        "x=$(cat f | sed -n '1,40p')",
+        "for f in *; do sed -n 1p \"$f\"; done",
+        "echo \"$(timeout 5 sed -n 1p f)\"",
+        "(FOO=1 sed -i s/a/b/ f)",
+        "echo `git push origin main`",
+    ] {
+        assert!(
+            matches!(
+                policy.evaluate_bash_command_gate(cmd),
+                Some(GateDecision::Reject(_) | GateDecision::AskRuleMatch)
+            ),
+            "{cmd}: {:?}",
+            policy.evaluate_bash_command_gate(cmd)
+        );
+    }
+    for cmd in ["echo \"$(date)\"", "for f in *; do wc -l \"$f\"; done"] {
+        assert_ne!(
+            Some(GateDecision::AskRuleMatch),
+            policy.evaluate_bash_command_gate(cmd),
+            "{cmd}"
+        );
+    }
+}

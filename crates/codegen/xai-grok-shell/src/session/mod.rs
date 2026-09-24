@@ -510,7 +510,6 @@ pub mod share {
 pub(crate) struct RegistryConfig {
     pub base_url: String,
     pub user_token: String,
-    pub deployment_key: Option<String>,
     pub alpha_test_key: Option<String>,
 }
 pub mod acp_conversion;
@@ -528,7 +527,6 @@ pub mod fork;
 pub(crate) mod fs_watch;
 pub(crate) mod goal_classifier;
 pub(crate) mod goal_evaluator;
-pub(crate) mod goal_next_step;
 pub(crate) mod goal_orchestrator;
 pub(crate) mod goal_planner;
 pub(crate) mod goal_role_tools;

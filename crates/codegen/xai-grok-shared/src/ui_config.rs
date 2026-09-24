@@ -98,8 +98,12 @@ pub struct UiConfig {
     /// How many times one model call is reissued for slow output before the
     /// response is accepted at whatever rate it runs. `None` = 2. A legacy
     /// `[output_rate_floor].max_retries` applies when this is unset.
-    /// (`[ui].output_rate_max_retries`.)
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// (`[ui].output_rate_max_retries`.) `-1` or `"unlimited"` never runs out.
+    #[serde(
+        default,
+        with = "xai_grok_config_types::retry_budget",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub output_rate_max_retries: Option<u32>,
     /// Reissue a model call that has produced no output this many seconds
     /// after the request was sent. `None` = 120 seconds, `0` = off. It shares
@@ -181,8 +185,10 @@ pub struct UiConfig {
     /// `None` means on (client default). Written by the pager's settings modal.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub show_thinking_blocks: Option<bool>,
-    /// Fold runs of consecutive non-destructive tool calls (reads, searches, lists) into one transcript row.
-    /// `None` means on (client default). Written by the pager's settings modal.
+    /// Summarize each thinking block and show the summary under its collapsed header.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking_summaries: Option<bool>,
+    /// Fold runs of consecutive non-destructive tool calls (reads, searches.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub group_tool_verbs: Option<bool>,
     /// Show Edit tool calls as a collapsed one-line `+N/-M` diffstat summary by default (expand for the diff).
@@ -343,6 +349,7 @@ impl Default for UiConfig {
             keep_text_selection: None,
             selection_highlight_duration_ms: None,
             show_thinking_blocks: None,
+            thinking_summaries: None,
             group_tool_verbs: None,
             collapsed_edit_blocks: None,
             prompt_suggestions: None,
@@ -406,6 +413,16 @@ impl UiConfig {
             .unwrap_or(Self::STOP_GATE_CI_FAILING_DEFAULT)
     }
 
+    /// Default for [`Self::thinking_summaries`] when unset. This is the one home
+    /// for it: a session resolves the switch through
+    /// [`Self::thinking_summaries_enabled`], never by reading the table by hand.
+    pub const THINKING_SUMMARIES_DEFAULT: bool = true;
+
+    pub fn thinking_summaries_enabled(&self) -> bool {
+        self.thinking_summaries
+            .unwrap_or(Self::THINKING_SUMMARIES_DEFAULT)
+    }
+
     /// Default for [`Self::min_output_tokens_per_sec`] when unset. Well under
     /// what any endpoint here reaches in health, so an ordinary stream never
     /// approaches it and a collapsed engine is still caught. A zero here ships
@@ -446,13 +463,9 @@ impl UiConfig {
     /// token and under the 300 s stream idle timeout.
     pub const TTFT_TIMEOUT_SECS_DEFAULT: u32 = 120;
 
-    /// Upper clamp for [`Self::ttft_timeout_secs`].
-    pub const TTFT_TIMEOUT_SECS_MAX: u32 = 1800;
-
     pub fn ttft_timeout_secs_value(&self) -> u32 {
         self.ttft_timeout_secs
             .unwrap_or(Self::TTFT_TIMEOUT_SECS_DEFAULT)
-            .min(Self::TTFT_TIMEOUT_SECS_MAX)
     }
 
     /// Fill the `[ui]` window and retry budget from a legacy
@@ -588,6 +601,16 @@ mod tests {
             ..Default::default()
         };
         assert!(!off.stop_gate_ci_failing_enabled());
+    }
+
+    #[test]
+    fn thinking_summaries_defaults_on() {
+        assert!(UiConfig::default().thinking_summaries_enabled());
+        let off = UiConfig {
+            thinking_summaries: Some(false),
+            ..Default::default()
+        };
+        assert!(!off.thinking_summaries_enabled());
     }
 
     #[test]

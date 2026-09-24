@@ -90,7 +90,7 @@ Built-in types still exist as host types. The model-facing spawn schema omits `s
 | Type              | Description                                          |
 | ----------------- | ---------------------------------------------------- |
 | `general-purpose` | Default type. Full-capability agent for any task.    |
-| `explore`         | Research agent. Searches, reads, greps, and runs shell commands, but does not edit files. Use it for codebase investigation. |
+| `explore`         | Research agent. Searches, reads and greps, and can spawn `explore` and `plan` subagents. It does not edit files or run shell commands. Use it for codebase investigation. |
 | `plan`            | Planning agent. Explores the codebase and produces a structured implementation plan; does not edit files. |
 
 Project- or user-defined agents can add new types or shadow these built-ins by name.

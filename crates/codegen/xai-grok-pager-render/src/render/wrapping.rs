@@ -51,8 +51,16 @@ pub fn byte_range_to_row_cols(
         let start = match_range.start.max(wr.start);
         let end = match_range.end.min(wr.end);
         if start < end {
-            // Convert byte offsets within this row to display columns.
+            // Convert byte offsets within this row to display columns. The
+            // rows come from `wrap_byte_ranges_matching`, whose ranges are
+            // `textwrap` boundaries of `text`. `get` keeps that assumption from
+            // turning into a panic if a caller ever hands over a raw range.
             let Some(row_text) = text.get(wr.start..wr.end) else {
+                tracing::debug!(
+                    row,
+                    ?wr,
+                    "highlight: wrap range is not a char-boundary slice; row skipped"
+                );
                 continue;
             };
             let col_start = byte_offset_to_display_col(row_text, start - wr.start);
@@ -391,6 +399,9 @@ where
     joiners.push(None);
 
     // Wrap the remainder using subsequent indent width.
+    // `base` is a `textwrap` range end over `flat`, and `skip_leading_spaces`
+    // counts ASCII spaces (one byte each), so every offset below stays on a
+    // char boundary of `flat`.
     let mut base = first_line_range.end;
     let skip_leading_spaces = match flat.get(base..) {
         Some(rest) => rest.chars().take_while(|c| *c == ' ').count(),

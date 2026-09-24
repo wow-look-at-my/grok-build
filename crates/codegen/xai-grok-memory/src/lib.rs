@@ -1,3 +1,9 @@
+#![allow(clippy::cast_lossless)] // 6 hits predate the gate
+#![allow(clippy::cast_possible_truncation)] // 11 hits predate the gate
+#![allow(clippy::cast_possible_wrap)] // 6 hits predate the gate
+#![allow(clippy::cast_precision_loss)] // 4 hits predate the gate
+#![allow(clippy::cast_sign_loss)] // 6 hits predate the gate
+#![allow(clippy::unwrap_used)] // 2 hits predate the gate
 //! Cross-session memory for Grok.
 //!
 //! Two isolated pipelines. They do not share files, search, flush, or Dream.
@@ -24,6 +30,7 @@
 //! `GROK_MEMORY`, `[memory] enabled`, and `[memory_v2] enabled` all participate.
 //! When disabled, this crate is not initialized by the host.
 
+#![allow(clippy::string_slice)]
 #![deny(clippy::indexing_slicing)]
 
 pub mod archive;

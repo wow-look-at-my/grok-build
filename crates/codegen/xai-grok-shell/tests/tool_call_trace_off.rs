@@ -1,4 +1,4 @@
-//! This binary owns the process-global tracer. Trace export off does not silence product posts.
+//! This binary owns the process-global tracer. With trace export off, no span leaves.
 
 use std::time::Duration;
 
@@ -37,7 +37,13 @@ async fn disabled_trace_export_stays_silent_while_product_posts() {
         &format!("{}/v1/traces", traces.origin()),
     );
     let config = xai_grok_shell::agent::init::build_default_otel_layer_config();
-    xai_grok_shell::auth::credential_provider::wire_otel_deployment_key("test-key".into());
+    // A usable credential, so the silence proves the export switch and not a missing token.
+    let auth_manager = std::sync::Arc::new(xai_grok_login::AuthManager::new(
+        &home,
+        xai_grok_login::GrokComConfig::default(),
+    ));
+    auth_manager.hot_swap(xai_grok_login::GrokAuth::test_default());
+    xai_grok_login::credential_provider::wire_otel_auth_manager(auth_manager);
     let layer = xai_grok_telemetry::otel_layer::build_otel_layer(
         xai_grok_telemetry::otel_layer::OtelClientInfo {
             client_name: "grok-test",
@@ -63,7 +69,6 @@ async fn disabled_trace_export_stays_silent_while_product_posts() {
         None,
         None,
         None,
-        None,
         "test".into(),
         None,
         xai_grok_shell::http::shared_client(),
@@ -82,6 +87,8 @@ async fn disabled_trace_export_stays_silent_while_product_posts() {
     let output = xai_grok_shell::session::grep_output(-1);
     let event =
         xai_grok_shell::session::complete_projected_call(span, INVOCATION, &output, "success");
+    // The product row's metadata is this serialization.
+    let metadata = serde_json::to_value(&event).expect("serialize event");
     xai_grok_telemetry::session_ctx::log_event_now(event).await;
     xai_grok_telemetry::otel_layer::shutdown_otel();
     traces
@@ -90,15 +97,15 @@ async fn disabled_trace_export_stays_silent_while_product_posts() {
         .await
         .expect("disabled export stays silent");
     assert_eq!(traces.recorder().spans(), Vec::new());
-    let rows = product.telemetry_events();
-    let row = rows
-        .iter()
-        .find(|event| {
-            event.get("event_name").and_then(Value::as_str)
-                == Some("grok-shell-tool_call_completed")
-        })
-        .expect("product row");
-    let metadata = row.get("event_metadata").expect("metadata");
+    assert_eq!(
+        Vec::<Value>::new(),
+        product.telemetry_events(),
+        "product events are hard-disabled: no row may post"
+    );
+    assert_eq!(
+        metadata.get("invocation_id").and_then(Value::as_str),
+        Some(INVOCATION)
+    );
     assert_eq!(
         metadata.get("model_id").and_then(Value::as_str),
         Some("grok-4.6")

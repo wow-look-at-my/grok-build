@@ -1,3 +1,9 @@
+#![allow(clippy::cast_lossless)] // 5 hits predate the gate
+#![allow(clippy::cast_possible_truncation)] // 5 hits predate the gate
+#![allow(clippy::cast_possible_wrap)] // 1 hit predates the gate
+#![allow(clippy::cast_precision_loss)] // 5 hits predate the gate
+#![allow(clippy::cast_sign_loss)] // 3 hits predate the gate
+#![allow(clippy::expect_used)] // 1 hit predates the gate
 //! Render [Mermaid](https://mermaid.js.org/) diagram source to a rasterized PNG, behind a swappable [`MermaidEngine`] trait.
 //!
 //! The crate turns Mermaid text into PNG bytes with no Node, no headless browser, and no network.

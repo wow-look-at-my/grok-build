@@ -43,7 +43,6 @@ async fn handle_record(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
         xai_grok_login::credential_provider::ShellAuthCredentialProvider::new(
             agent.auth_manager.clone(),
             None,
-            None,
         ),
     );
     let client = crate::http::with_auth_retry(crate::http::shared_client(), provider);

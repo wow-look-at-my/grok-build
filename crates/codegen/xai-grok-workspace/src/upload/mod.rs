@@ -201,7 +201,6 @@ impl ProxyStorageConfig {
         let method = UploadMethod::Proxy {
             proxy_base_url: api_base_url,
             user_token: "workspace-upload".to_string(),
-            deployment_key: None,
             alpha_test_key: None,
         };
         Self {

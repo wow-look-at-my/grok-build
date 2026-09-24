@@ -1524,7 +1524,7 @@ fn execute_manual_expand_survives_progress_and_completion() {
         "completion must not snap a user-expanded Execute shut"
     );
 }
-/// Multi-file (apply_patch shape: several Diff items) and title-fallback Edits can't be summarized by the one-liner.
+/// Multi-file (several Diff items) and title-fallback Edits can't be summarized by the one-liner.
 /// They materialize Expanded with the summary marked untrusted, config-independent.
 /// Each case isolates one untrusted signal.
 #[test]
@@ -2509,7 +2509,6 @@ fn activity_writing_tool_call_labels_first_party_writing_tools() {
         ("search_replace", "Writing edit…"),
         ("edit", "Writing edit…"),
         ("hashline_edit", "Writing edit…"),
-        ("apply_patch", "Writing edit…"),
         ("run_terminal_command", "Writing command…"),
         ("run_terminal_cmd", "Writing command…"),
         ("bash", "Writing command…"),
@@ -2686,6 +2685,7 @@ fn writing_tool_call_delta_clears_retry_activity() {
         max_retries: 5,
         reason: "overloaded".into(),
         error_type: None,
+        retry_until: None,
     };
     let mut tracker = AcpUpdateTracker::new();
     tracker.set_retry_activity(Some(retrying.clone()));

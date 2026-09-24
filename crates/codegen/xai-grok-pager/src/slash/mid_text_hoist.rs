@@ -43,7 +43,7 @@ pub(crate) fn hoist_mid_text_command(text: &str, registry: &CommandRegistry) -> 
     let (token, command) = scan_inline_slash_tokens(text, 0)
         .into_iter()
         .find_map(|token| {
-            let command = registry.get_for_dispatch(&token.name)?;
+            let command = registry.get_for_dispatch_exact_case(&token.name)?;
             command
                 .can_hoist_from_mid_text()
                 .then_some((token, command))

@@ -112,8 +112,8 @@ pub fn fork_session_params(
             );
         }
     }
-    if include_agents {
-        payload["includeAgents"] = serde_json::Value::Bool(true);
+    if include_agents && let Some(obj) = payload.as_object_mut() {
+        obj.insert("includeAgents".to_string(), serde_json::Value::Bool(true));
     }
     payload
 }
@@ -1163,12 +1163,11 @@ async fn restore_session_from_remote(
     use xai_grok_shell::agent::session_registry_client::SessionRegistryClient;
     use xai_grok_shell::session::restore::{RestoreSessionOpts, restore_session_with_storage};
     use xai_grok_shell::util::grok_home::grok_home;
-    let deployment_key = agent_config.endpoints.deployment_key.clone();
     ensure_authenticated_or_noninteractive(
         &agent_config.grok_com_config,
         agent_config.login_device_flow,
         agent_config.endpoints.proxy_url(),
-        deployment_key.is_some(),
+        false,
         None,
     )
     .await
@@ -1180,12 +1179,10 @@ async fn restore_session_from_remote(
     ));
     let registry_client =
         SessionRegistryClient::new(agent_config.endpoints.proxy_url(), String::new())
-            .with_deployment_key(deployment_key.clone())
             .with_alpha_test_key(agent_config.endpoints.alpha_test_key.clone())
             .with_auth(auth_manager.clone());
     let storage_client = xai_grok_shell::credential_factory::build_storage_client_for_proxy(
         &agent_config.endpoints.proxy_url(),
-        deployment_key,
         agent_config.endpoints.alpha_test_key.clone(),
         Some(auth_manager),
         None,

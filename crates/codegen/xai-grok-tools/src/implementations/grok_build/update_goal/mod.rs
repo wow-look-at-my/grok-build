@@ -127,6 +127,9 @@ pub enum RejectReason {
     /// In-flight short-circuit but the orchestration snapshot
     /// vanished mid-flight.
     InFlightOrchestrationVanished,
+    /// A lite goal's completion check judged the goal not met, or could
+    /// not reach a verdict. `detail` carries the reason.
+    LiteCheckNotMet,
 }
 
 impl RejectReason {
@@ -143,6 +146,7 @@ impl RejectReason {
             Self::OrchestrationVanished => "goal_update_no_orchestration",
             Self::StatusChangedDuringClassifier => "goal_update_status_changed",
             Self::InFlightOrchestrationVanished => "goal_update_in_flight_orchestration_vanished",
+            Self::LiteCheckNotMet => "goal_update_lite_check_not_met",
         }
     }
 }

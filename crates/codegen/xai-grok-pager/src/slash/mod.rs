@@ -808,12 +808,12 @@ impl SlashController {
         }
 
         let args_start = token.range.end;
-        if args_start >= text.len()
-            || !text
+        let first_is_whitespace = args_start < text.len()
+            && text
                 .get(args_start..)
                 .and_then(|s| s.chars().next())
-                .is_some_and(|ch| ch.is_whitespace())
-        {
+                .is_some_and(|ch| ch.is_whitespace());
+        if !first_is_whitespace {
             return snapshot;
         }
 

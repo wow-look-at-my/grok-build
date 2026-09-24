@@ -2425,20 +2425,24 @@ async fn pop_checkout_auto_stash(
     }
 }
 /// Decide whether a `--restore-code` HEAD checkout is safe to run against `supplied_cwd`. `--depth=1` is only added when the repo is already shallow.
-/// That is only acceptable in two situations: 1.
 pub fn restore_code_checkout_allowed(supplied_cwd: &Path, persisted_cwd: Option<&str>) -> bool {
-    let worktrees_dir = xai_grok_tools::util::grok_home::grok_home().join("worktrees");
-    restore_code_checkout_allowed_in(supplied_cwd, persisted_cwd, &worktrees_dir)
+    let mut worktrees_dirs = vec![xai_grok_tools::util::grok_home::grok_home().join("worktrees")];
+    if let Some(repo_root) = xai_fast_worktree::main_root_for_managed_path(supplied_cwd) {
+        worktrees_dirs.push(xai_fast_worktree::repo_worktrees_root(&repo_root));
+    }
+    restore_code_checkout_allowed_in(supplied_cwd, persisted_cwd, &worktrees_dirs)
 }
-/// Pure core of [`restore_code_checkout_allowed`] with the worktrees root
-/// injected so the decision can be unit-tested without touching
-/// `~/.grok`.
+/// Pure core of [`restore_code_checkout_allowed`] with the worktrees roots
+/// injected so the decision can be unit-tested without touching `~/.grok`.
 fn restore_code_checkout_allowed_in(
     supplied_cwd: &Path,
     persisted_cwd: Option<&str>,
-    worktrees_dir: &Path,
+    worktrees_dirs: &[std::path::PathBuf],
 ) -> bool {
-    if supplied_cwd.starts_with(worktrees_dir) {
+    if worktrees_dirs
+        .iter()
+        .any(|dir| supplied_cwd.starts_with(dir))
+    {
         return true;
     }
     persisted_cwd

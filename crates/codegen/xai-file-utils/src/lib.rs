@@ -1,3 +1,9 @@
+#![allow(clippy::cast_lossless)] // 6 hits predate the gate
+#![allow(clippy::cast_possible_truncation)] // 14 hits predate the gate
+#![allow(clippy::cast_possible_wrap)] // 3 hits predate the gate
+#![allow(clippy::cast_precision_loss)] // 10 hits predate the gate
+#![allow(clippy::cast_sign_loss)] // 2 hits predate the gate
+#![allow(clippy::expect_used)] // 2 hits predate the gate
 #![allow(
     unused_imports,
     unused_variables,

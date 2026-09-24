@@ -1,3 +1,5 @@
+#![allow(clippy::cast_possible_truncation)] // 3 hits predate the gate
+
 //! Benchmark for comparing git CLI vs git2 file listing.
 //!
 //! Usage: cargo run --bin bench_file_listing --release -- [path] [cli|git2|git2-index|both]

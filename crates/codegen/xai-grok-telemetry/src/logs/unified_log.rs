@@ -5,7 +5,7 @@
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Seek, Write};
 use std::path::PathBuf;
-use std::sync::{LazyLock, Mutex, OnceLock};
+use std::sync::{LazyLock, OnceLock};
 use std::time::{Duration, Instant};
 
 use chrono::Utc;
@@ -136,7 +136,8 @@ struct LogWriter {
 /// Enough to notice that the path now resolves to a different inode than the one we hold open.
 type FileIdentity = (u64, u64);
 
-static WRITER: LazyLock<Mutex<Option<LogWriter>>> = LazyLock::new(|| Mutex::new(open_writer()));
+static WRITER: LazyLock<parking_lot::Mutex<Option<LogWriter>>> =
+    LazyLock::new(|| parking_lot::Mutex::new(open_writer()));
 
 /// See [`redirect_to_temp_for_tests`].
 static TEST_REDIRECT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -146,9 +147,7 @@ static TEST_REDIRECT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicB
 /// is re-pointed, so an emit that precedes the redirect cannot pin the real path.
 pub fn redirect_to_temp_for_tests() {
     TEST_REDIRECT.store(true, std::sync::atomic::Ordering::Relaxed);
-    if let Ok(mut guard) = WRITER.lock() {
-        *guard = open_writer();
-    }
+    *WRITER.lock() = open_writer();
 }
 
 fn log_path() -> PathBuf {
@@ -279,7 +278,7 @@ impl LogWriter {
 }
 
 fn write_lines(lines: &[u8]) {
-    let Ok(mut guard) = WRITER.lock() else { return };
+    let mut guard = WRITER.lock();
     let writer = match guard.as_mut() {
         Some(w) => w,
         None => return,
@@ -426,10 +425,11 @@ pub fn path() -> PathBuf {
 pub fn snapshot_log() -> Option<Vec<u8>> {
     let path = log_path();
     // Flush pending writes before reading.
-    if let Ok(mut guard) = WRITER.lock()
-        && let Some(ref mut w) = *guard
     {
-        let _ = w.file.flush();
+        let mut guard = WRITER.lock();
+        if let Some(ref mut w) = *guard {
+            let _ = w.file.flush();
+        }
     }
     // Lock released intentionally; snapshot is approximate
     match fs::read(&path) {
@@ -443,10 +443,11 @@ pub fn snapshot_log() -> Option<Vec<u8>> {
 /// or contains no entries for this session.
 pub fn snapshot_session_log(session_id: &str) -> Option<Vec<u8>> {
     let path = log_path();
-    if let Ok(mut guard) = WRITER.lock()
-        && let Some(ref mut w) = *guard
     {
-        let _ = w.file.flush();
+        let mut guard = WRITER.lock();
+        if let Some(ref mut w) = *guard {
+            let _ = w.file.flush();
+        }
     }
     let data = match fs::read(&path) {
         Ok(d) if !d.is_empty() => d,

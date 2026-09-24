@@ -46,6 +46,9 @@ pub async fn run_streaming_probe(opts: VoiceProbeOptions) -> Result<VoiceProbeRe
     let byte_count = Arc::new(AtomicUsize::new(0));
     let byte_count_cb = Arc::clone(&byte_count);
     let (pcm_tx, pcm_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(64);
+    // The handle is awaited below (line: `forward.await`) and its join Result is
+    // reported there, so a forwarder that died is visible in the probe's output.
+    #[allow(clippy::disallowed_methods)]
     let forward = tokio::spawn(async move {
         let mut pcm_rx = pcm_rx;
         while let Some(chunk) = pcm_rx.recv().await {
@@ -62,7 +65,12 @@ pub async fn run_streaming_probe(opts: VoiceProbeOptions) -> Result<VoiceProbeRe
     tracing::info!(secs, "speak now — probe is listening");
     tokio::time::sleep(Duration::from_secs(secs as u64)).await;
     capture.stop();
-    let _ = forward.await;
+    if let Err(err) = forward.await {
+        tracing::error!(
+            %err,
+            "probe pcm forwarder did not finish the capture window"
+        );
+    }
     stt.finish_audio();
 
     let mut stt_log = Vec::new();

@@ -64,6 +64,7 @@ xai-grok-telemetry = { workspace = true }
 xai-grok-tools = { workspace = true }
 xai-grok-version = { workspace = true }
 xai-system-power = { workspace = true }
+xai-tool-types = { workspace = true }
 
 # gRPC stack for the gated login path; compiled out unless the feature is on.
 tonic = { workspace = true, optional = true }

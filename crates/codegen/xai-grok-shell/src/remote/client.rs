@@ -46,7 +46,6 @@ async fn parse_json_response<T: serde::de::DeserializeOwned>(
 async fn add_bundle_fetch_headers(
     builder: reqwest::RequestBuilder,
     auth_manager: Option<&std::sync::Arc<xai_grok_login::AuthManager>>,
-    deployment_key: Option<&str>,
     alpha_test_key: Option<&str>,
     url: &str,
 ) -> reqwest::RequestBuilder {
@@ -57,14 +56,11 @@ async fn add_bundle_fetch_headers(
     let mut credentials = crate::util::grok_auth_credentials::GrokAuthCredentials::new(
         resolved_auth.as_ref().map(|auth| auth.key.clone()),
     );
-    credentials.deployment_key = deployment_key.map(str::to_owned);
     credentials.alpha_test_key = alpha_test_key.map(str::to_owned);
     let mut builder = credentials
         .apply(builder, url)
         .header("x-grok-client-version", xai_grok_version::version());
-    if deployment_key.is_none()
-        && let Some(auth) = &resolved_auth
-    {
+    if let Some(auth) = &resolved_auth {
         builder = builder.header("x-userid", &auth.user_id);
         if let Some(email) = &auth.email {
             builder = builder.header("x-email", email);
@@ -83,11 +79,10 @@ async fn add_bundle_fetch_headers(
 }
 /// Fetch the bundled subagent cache payload from cli-chat-proxy `GET /v1/subagents/bundle`.
 ///
-/// Uses the shell's standard auth for proxy requests: a configured deployment key takes precedence; otherwise the user-session token is used.
+/// Uses the shell's standard auth for proxy requests: the user-session token.
 pub async fn fetch_subagent_bundle(
     cli_chat_proxy_base_url: &str,
     auth_manager: Option<&std::sync::Arc<xai_grok_login::AuthManager>>,
-    deployment_key: Option<&str>,
     alpha_test_key: Option<&str>,
 ) -> Result<SubagentBundle, BackendError> {
     let url = format!("{}/subagents/bundle", cli_chat_proxy_base_url);
@@ -96,7 +91,6 @@ pub async fn fetch_subagent_bundle(
             .get(&url)
             .timeout(std::time::Duration::from_secs(10)),
         auth_manager,
-        deployment_key,
         alpha_test_key,
         &url,
     )
@@ -128,34 +122,25 @@ pub enum FetchedBundle {
 pub async fn fetch_bundle(
     cli_chat_proxy_base_url: &str,
     auth_manager: Option<&std::sync::Arc<xai_grok_login::AuthManager>>,
-    deployment_key: Option<&str>,
     alpha_test_key: Option<&str>,
 ) -> Result<FetchedBundle, BackendError> {
-    fetch_bundle_inner(
-        cli_chat_proxy_base_url,
-        auth_manager,
-        deployment_key,
-        alpha_test_key,
-    )
-    .await
+    fetch_bundle_inner(cli_chat_proxy_base_url, auth_manager, alpha_test_key).await
 }
 async fn fetch_bundle_inner(
     cli_chat_proxy_base_url: &str,
     auth_manager: Option<&std::sync::Arc<xai_grok_login::AuthManager>>,
-    deployment_key: Option<&str>,
     alpha_test_key: Option<&str>,
 ) -> Result<FetchedBundle, BackendError> {
     let archive_url = format!("{}/bundle/archive", cli_chat_proxy_base_url);
     let raw_client = crate::http::shared_client();
     let client: reqwest_middleware::ClientWithMiddleware = if let Some(am) = auth_manager {
-        let provider: std::sync::Arc<dyn xai_grok_auth::AuthCredentialProvider> = std::sync::Arc::new(
-            xai_grok_login::credential_provider::ShellAuthCredentialProvider::with_deployment_id_resolver(
-                am.clone(),
-                deployment_key.map(str::to_owned),
-                alpha_test_key.map(str::to_owned),
-                std::sync::Arc::new(crate::managed_config::resolve_deployment_id),
-            ),
-        );
+        let provider: std::sync::Arc<dyn xai_grok_auth::AuthCredentialProvider> =
+            std::sync::Arc::new(
+                xai_grok_login::credential_provider::ShellAuthCredentialProvider::new(
+                    am.clone(),
+                    alpha_test_key.map(str::to_owned),
+                ),
+            );
         crate::http::with_auth_retry(raw_client, provider)
     } else {
         reqwest_middleware::ClientBuilder::new(raw_client).build()
@@ -168,8 +153,7 @@ async fn fetch_bundle_inner(
             crate::http::CLIENT_MODE_HEADER,
             crate::http::process_client_mode(),
         );
-    if deployment_key.is_none()
-        && let Some(am) = auth_manager
+    if let Some(am) = auth_manager
         && let Some(auth) = am.current()
     {
         request = request.header("x-userid", &auth.user_id);
@@ -193,13 +177,8 @@ async fn fetch_bundle_inner(
         status = %archive_response.status(),
         "archive endpoint unavailable, falling back to legacy JSON"
     );
-    let bundle = fetch_subagent_bundle(
-        cli_chat_proxy_base_url,
-        auth_manager,
-        deployment_key,
-        alpha_test_key,
-    )
-    .await?;
+    let bundle =
+        fetch_subagent_bundle(cli_chat_proxy_base_url, auth_manager, alpha_test_key).await?;
     Ok(FetchedBundle::Legacy(bundle))
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -327,7 +306,6 @@ impl BackendClient {
             std::sync::Arc::new(
                 xai_grok_login::credential_provider::ShellAuthCredentialProvider::new(
                     manager.clone(),
-                    None,
                     None,
                 ),
             );
@@ -763,6 +741,7 @@ pub(crate) fn parse_remote_model_value(
         .or_else(|| meta.and_then(|m| get_u64(m, "totalContextTokens")))
         .or_else(|| get_u64(obj, "context_length"))
         .or_else(|| top_provider.and_then(|tp| get_u64(tp, "context_length")))
+        .or_else(|| get_u64(obj, "max_model_len"))
         .or_else(|| get_u64(obj, "max_input_tokens"))
         .or_else(|| get_u64(obj, "maxInputTokens"))
         .filter(|&v| v > 0)

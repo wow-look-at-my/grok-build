@@ -1,9 +1,10 @@
+//! A complete gRPC mTLS double opt-in must still activate nothing.
 mod otlp_collector;
 
 use std::time::Duration;
 
 use otlp_collector as col;
-use xai_grok_test_support::{OtelRecorder, OtelSignal};
+use xai_grok_test_support::OtelRecorder;
 
 fn write_temp(contents: &str) -> (tempfile::NamedTempFile, String) {
     let file = tempfile::NamedTempFile::new().expect("temp file");
@@ -59,8 +60,8 @@ fn external_stream_grpc_mtls_end_to_end() {
 
     xai_grok_telemetry::external::init(Some(cfg));
     assert!(
-        xai_grok_telemetry::external::is_active(),
-        "mTLS gRPC exporters must build and activate the stream"
+        !xai_grok_telemetry::external::is_active(),
+        "external OTLP stream is hard-disabled in the build baseline (gRPC mTLS)"
     );
 
     xai_grok_telemetry::log_event(xai_grok_telemetry::events::SessionNew {
@@ -89,16 +90,21 @@ fn external_stream_grpc_mtls_end_to_end() {
     });
 
     xai_grok_telemetry::external::flush();
-    col::block_on(recorder.wait_for_signals(Duration::from_secs(10), &[OtelSignal::Logs]))
-        .expect("log records must arrive over mTLS");
-    let names = recorder.event_names();
-    assert!(
-        names.iter().any(|n| n == "grok_code.session_start"),
-        "expected grok_code.session_start in {names:?}"
+
+    // Give any erroneous mTLS exporter time to finish a handshake and phone
+    // home; the metric interval above is 200ms.
+    std::thread::sleep(Duration::from_millis(600));
+    assert_eq!(
+        recorder.log_records().len(),
+        0,
+        "disabled external stream must export no logs over mTLS"
+    );
+    assert_eq!(
+        recorder.metric_points().len(),
+        0,
+        "disabled external stream must export no metrics over mTLS"
     );
 
-    col::block_on(recorder.wait_for_signals(Duration::from_secs(10), &[OtelSignal::Metrics]))
-        .expect("metric exports must arrive over mTLS");
-
     xai_grok_telemetry::external::shutdown();
+    assert!(!xai_grok_telemetry::external::is_active());
 }

@@ -965,7 +965,7 @@ pub async fn run_install_script(
     update_config: &UpdateConfig,
     trigger: CliUpdateTrigger,
 ) -> Result<()> {
-    let _ = (installer, target, update_config);
+    let _ = (installer, target, update_config, trigger);
     anyhow::bail!("auto-update disabled");
     // What's on disk is being replaced, not this (possibly stale) process's version; npm has no trustworthy disk version, so it falls back
     #[allow(unreachable_code)]
@@ -1376,6 +1376,31 @@ enum Codec {
 // A real CLI binary is ~170 MiB; 512 MiB leaves 3x headroom
 const MAX_DECODED_BYTES: u64 = 512 * 1024 * 1024;
 
+/// Decode the compressed file `comp_in` into `bin_out`, capped at `MAX_DECODED_BYTES`.
+fn decode_artifact(
+    comp_in: &std::path::Path,
+    bin_out: &std::path::Path,
+    codec: Codec,
+) -> Result<()> {
+    use std::io::Read as _;
+    let src = std::fs::File::open(comp_in)
+        .with_context(|| format!("open compressed download {}", comp_in.display()))?;
+    let decoder: Box<dyn std::io::Read> = match codec {
+        Codec::Zstd => {
+            Box::new(zstd::stream::read::Decoder::new(src).context("init zstd decoder")?)
+        }
+        Codec::Gzip => Box::new(flate2::read::GzDecoder::new(src)),
+    };
+    let mut out = std::fs::File::create(bin_out)
+        .with_context(|| format!("create decoded binary {}", bin_out.display()))?;
+    let mut capped = decoder.take(MAX_DECODED_BYTES + 1);
+    let written = std::io::copy(&mut capped, &mut out).context("decode")?;
+    if written > MAX_DECODED_BYTES {
+        anyhow::bail!("decoded artifact exceeds the {MAX_DECODED_BYTES}-byte cap");
+    }
+    Ok(())
+}
+
 async fn download_and_decode(
     url: &str,
     dest: &std::path::Path,
@@ -1390,26 +1415,8 @@ async fn download_and_decode(
 
     let bin_tmp = tmp_download_path(dest);
     let (comp_in, bin_out) = (comp_tmp.clone(), bin_tmp.clone());
-    let decoded = tokio::task::spawn_blocking(move || -> Result<()> {
-        use std::io::Read as _;
-        let src = std::fs::File::open(&comp_in)
-            .with_context(|| format!("open compressed download {}", comp_in.display()))?;
-        let decoder: Box<dyn std::io::Read> = match codec {
-            Codec::Zstd => {
-                Box::new(zstd::stream::read::Decoder::new(src).context("init zstd decoder")?)
-            }
-            Codec::Gzip => Box::new(flate2::read::GzDecoder::new(src)),
-        };
-        let mut out = std::fs::File::create(&bin_out)
-            .with_context(|| format!("create decoded binary {}", bin_out.display()))?;
-        let mut capped = decoder.take(MAX_DECODED_BYTES + 1);
-        let written = std::io::copy(&mut capped, &mut out).context("decode")?;
-        if written > MAX_DECODED_BYTES {
-            anyhow::bail!("decoded artifact exceeds the {MAX_DECODED_BYTES}-byte cap");
-        }
-        Ok(())
-    })
-    .await;
+    let decoded =
+        tokio::task::spawn_blocking(move || decode_artifact(&comp_in, &bin_out, codec)).await;
     let _ = tokio::fs::remove_file(&comp_tmp).await;
 
     match decoded {
@@ -2765,7 +2772,7 @@ pub async fn run_update(
     Ok(Some(target_version.to_string()))
 }
 
-/// Refresh managed config post-update (best-effort, staleness-gated), for deployment-key and team principals alike.
+/// Refresh managed config post-update (best-effort, staleness-gated) for a team principal.
 async fn refresh_deployment_config() {
     if !xai_grok_shell::managed_config::has_principal() {
         return;

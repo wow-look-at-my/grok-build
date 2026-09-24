@@ -13,11 +13,29 @@ async fn managed_policy_gate_refusal_reaches_real_terminal() {
         home_path.join("config.toml"),
         // A dead local port makes any incidental fetch fail fast offline (the gate is synchronous anyway)
         "[endpoints]\n\
-         deployment_key = \"KEY-AAA\"\n\
          managed_config_url = \"http://127.0.0.1:1/deployment/config\"\n\
          cli_chat_proxy_base_url = \"http://127.0.0.1:1\"\n",
     )
     .expect("write config.toml");
+    // A signed-in team principal makes this machine managed. The gate reads auth.json from disk only.
+    std::fs::write(
+        home_path.join("auth.json"),
+        r#"{
+  "http://127.0.0.1:1::pty-test-team-client": {
+    "key": "pty-test-team-token",
+    "auth_mode": "oidc",
+    "create_time": "2026-01-01T00:00:00Z",
+    "user_id": "pty-team-user",
+    "email": "pty-team-user@test.invalid",
+    "principal_type": "Team",
+    "team_id": "team-A",
+    "expires_at": "2030-01-01T00:00:00Z",
+    "oidc_issuer": "http://127.0.0.1:1",
+    "oidc_client_id": "pty-test-team-client"
+  }
+}"#,
+    )
+    .expect("write auth.json");
     std::fs::write(
         home_path.join("managed_config.toml"),
         "[cli]\ntheme = \"dark\"\n",
@@ -31,9 +49,9 @@ async fn managed_policy_gate_refusal_reaches_real_terminal() {
     std::fs::write(
         home_path.join("managed_config_cache.json"),
         format!(
-            "{{\"synced_at\":{synced_at},\"principal\":\"deploy-A\",\
+            "{{\"synced_at\":{synced_at},\"principal\":\"team-A\",\
              \"had_managed_config\":true,\"had_requirements\":true,\
-             \"key_fingerprint\":null,\"fail_closed\":true}}"
+             \"fail_closed\":true}}"
         ),
     )
     .expect("write marker");

@@ -66,7 +66,6 @@ async fn external_stream_gates_on_end_to_end() {
         email: Some(OAUTH_EMAIL.into()),
         organization_id: Some("org-acme".into()),
         team_id: Some("team-7".into()),
-        deployment_id: Some("deploy-eu".into()),
     });
 
     assert!(!xai_grok_telemetry::is_enabled());

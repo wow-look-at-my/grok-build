@@ -53,6 +53,10 @@ pub(crate) fn has_event_with(
         v.get("type").and_then(|t| t.as_str()) == Some(ty) && predicate(&v)
     })
 }
+/// The instruction for a goal whose planner seeded nothing: put the steps on
+/// the list. The todo list is the only checklist either way.
+pub(crate) const PLAN_TODOS_TO_ADD_PHRASE: &str =
+    "Put the plan's `## Task steps` on your todo list";
 #[cfg(test)]
 pub(crate) fn noop_observability_bridge() -> xai_computer_hub_sdk::ObservabilityBridge {
     xai_computer_hub_sdk::ObservabilityBridge::new(
@@ -476,6 +480,7 @@ async fn create_test_actor_inner(
         models_manager: Default::default(),
         display_cwd: std::sync::OnceLock::new(),
         active_agent_type: parking_lot::Mutex::new(None),
+        allowed_subagent_types: Default::default(),
         mode_agent: Default::default(),
         queue_exit_reminder_on_approved_exit: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         emit_local_background_tasks: Arc::new(std::sync::atomic::AtomicBool::new(true)),
@@ -563,6 +568,7 @@ async fn create_test_actor_inner(
         next_title_refresh_idx: std::cell::Cell::new(0),
         turn_summary_enabled: false,
         title_refresh_enabled: false,
+        thinking_summaries_enabled: false,
         session_turn_active: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         streaming_turn_capture: parking_lot::Mutex::new(StreamingTurnCapture::default()),
         streaming_tool_titles: parking_lot::Mutex::new(std::collections::HashMap::new()),

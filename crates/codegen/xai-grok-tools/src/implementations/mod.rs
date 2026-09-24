@@ -1,4 +1,3 @@
-pub mod codex;
 pub mod cursor_rules_on_read;
 pub mod editor_infra;
 pub mod grok_build;

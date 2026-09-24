@@ -1,3 +1,7 @@
+#![allow(clippy::cast_possible_truncation)] // 7 hits predate the gate
+#![allow(clippy::expect_used)] // 1 hit predates the gate
+#![allow(clippy::string_slice)] // 3 hits predate the gate
+#![allow(clippy::unwrap_used)] // 2 hits predate the gate
 //! Two responsibilities:
 //!
 //! 1. **Quarantines `rmcp` 2.1 and `reqwest` 0.13.** `rmcp` 2.1 requires
@@ -21,6 +25,7 @@
 //!    - [`mcp_http_client`]: backoff wrapper around the HTTP client handed to rmcp's streamable-HTTP transport.
 //!      It works around rmcp's zero-backoff SSE reconnect loop.
 
+#![allow(clippy::cast_possible_wrap)]
 #![deny(clippy::indexing_slicing)]
 
 pub use rmcp;

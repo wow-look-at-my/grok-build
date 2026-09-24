@@ -112,8 +112,7 @@ fn strip_b64_whitespace(s: &str) -> Cow<'_, str> {
     if !s.bytes().any(|b| b.is_ascii_whitespace()) {
         return Cow::Borrowed(s);
     }
-    let bytes: Vec<u8> = s.bytes().filter(|b| !b.is_ascii_whitespace()).collect();
-    Cow::Owned(String::from_utf8(bytes).expect("ascii by char-class invariant"))
+    Cow::Owned(s.chars().filter(|c| !c.is_ascii_whitespace()).collect())
 }
 
 /// Pre-cap before stripping so a malicious oversize payload doesn't force

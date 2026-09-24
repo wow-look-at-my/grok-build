@@ -1150,6 +1150,35 @@ fn effective_classifier_supports_re_uses_actually_used_model() {
     assert!(!effective_classifier_supports_re(None, "missing", &models));
 }
 #[test]
+fn thinking_off_only_where_the_menu_offers_none() {
+    let option = |value| ReasoningEffortOption {
+        id: format!("{value:?}"),
+        value,
+        label: format!("{value:?}"),
+        description: None,
+        default: false,
+    };
+    let mut can_off = test_model_entry("can-off", "https://x/v1", None, None, None);
+    can_off.info.supports_reasoning_effort = true;
+    can_off.info.reasoning_efforts =
+        vec![option(ReasoningEffort::None), option(ReasoningEffort::High)];
+    let mut effort_only = test_model_entry("effort-only", "https://x/v1", None, None, None);
+    effort_only.info.supports_reasoning_effort = true;
+    effort_only.info.reasoning_efforts = vec![option(ReasoningEffort::High)];
+    let plain = test_model_entry("plain", "https://x/v1", None, None, None);
+    let mut models = IndexMap::new();
+    models.insert("can-off".to_string(), can_off);
+    models.insert("effort-only".to_string(), effort_only);
+    models.insert("plain".to_string(), plain);
+    assert_eq!(
+        thinking_off_effort(&models, "can-off"),
+        Some(ReasoningEffort::None)
+    );
+    assert_eq!(thinking_off_effort(&models, "effort-only"), None);
+    assert_eq!(thinking_off_effort(&models, "plain"), None);
+    assert_eq!(thinking_off_effort(&models, "missing"), None);
+}
+#[test]
 fn sampling_config_uses_model_api_key_over_fallback() {
     let model = test_model_entry(
         "test-model",
@@ -1158,14 +1187,8 @@ fn sampling_config_uses_model_api_key_over_fallback() {
         None,
         None,
     );
-    let sampling_config = sampling_config_for_model(
-        &model,
-        resolve_credentials(&model, None),
-        None,
-        None,
-        None,
-        None,
-    );
+    let sampling_config =
+        sampling_config_for_model(&model, resolve_credentials(&model, None), None, None, None);
     assert_eq!(
         sampling_config.api_key,
         Some("model-specific-key".to_string())
@@ -1183,7 +1206,6 @@ fn sampling_config_uses_fallback_when_no_model_api_key() {
             auth_type: xai_chat_state::AuthType::ApiKey,
             auth_scheme: AuthScheme::Bearer,
         },
-        None,
         None,
         None,
         None,
@@ -1223,14 +1245,8 @@ fn sampling_config_scopes_no_inline_citations_include() {
         let mut model = test_model_entry("test-model", base_url, None, None, None);
         model.info.supports_backend_search = supports_search;
         model.info.api_backend = backend;
-        let config = sampling_config_for_model(
-            &model,
-            resolve_credentials(&model, None),
-            None,
-            None,
-            None,
-            None,
-        );
+        let config =
+            sampling_config_for_model(&model, resolve_credentials(&model, None), None, None, None);
         assert_eq!(
             expected,
             config.extra_response_includes == [NO_INLINE_CITATIONS_RESPONSE_INCLUDE],
@@ -1516,7 +1532,6 @@ fn proxy_messages_models_use_bearer_auth_scheme() {
         None,
         None,
         None,
-        None,
     );
     assert_eq!(config.api_backend, ApiBackend::Messages);
     assert_eq!(config.auth_scheme, AuthScheme::Bearer);
@@ -1627,7 +1642,7 @@ fn x_api_key_auth_scheme_flows_from_config_to_sampler() {
     assert_eq!(creds.auth_scheme, AuthScheme::XApiKey);
     assert_eq!(creds.auth_type, xai_chat_state::AuthType::ApiKey);
     assert_eq!(creds.api_key, Some("sk-ant-test-key".to_string()));
-    let config = sampling_config_for_model(&model, creds, None, None, None, None);
+    let config = sampling_config_for_model(&model, creds, None, None, None);
     assert_eq!(config.auth_scheme, AuthScheme::XApiKey);
     assert_eq!(config.api_backend, ApiBackend::Messages);
     let client = xai_grok_sampler::SamplingClient::new(config).expect("client should build");
@@ -1646,7 +1661,7 @@ fn auth_scheme_defaults_to_bearer_when_not_set_in_config() {
     assert_eq!(model.info.auth_scheme, AuthScheme::Bearer);
     let creds = resolve_credentials(&model, None);
     assert_eq!(creds.auth_scheme, AuthScheme::Bearer);
-    let config = sampling_config_for_model(&model, creds, None, None, None, None);
+    let config = sampling_config_for_model(&model, creds, None, None, None);
     assert_eq!(config.auth_scheme, AuthScheme::Bearer);
     let client = xai_grok_sampler::SamplingClient::new(config).expect("client should build");
     let info = client.auth_info();
@@ -1976,25 +1991,13 @@ fn parses_model_context_window() {
 #[test]
 fn sampling_config_context_window_from_entry_or_default() {
     let model = test_model_entry("any-model", "https://api.x.ai/v1", None, None, None);
-    let config = sampling_config_for_model(
-        &model,
-        resolve_credentials(&model, None),
-        None,
-        None,
-        None,
-        None,
-    );
+    let config =
+        sampling_config_for_model(&model, resolve_credentials(&model, None), None, None, None);
     assert_eq!(config.context_window, 200_000);
     let mut model = test_model_entry("any-model", "https://api.x.ai/v1", None, None, None);
     model.info.context_window = NonZeroU64::new(256_000).unwrap();
-    let config = sampling_config_for_model(
-        &model,
-        resolve_credentials(&model, None),
-        None,
-        None,
-        None,
-        None,
-    );
+    let config =
+        sampling_config_for_model(&model, resolve_credentials(&model, None), None, None, None);
     assert_eq!(config.context_window, 256_000);
 }
 #[test]
@@ -2032,15 +2035,8 @@ fn unset_max_request_bytes_defaults_from_api_backend() {
     let resolved = resolve_model_list(&cfg, None);
     let max_request_bytes = |key: &str| {
         let model = resolved.get(key).expect("model should exist");
-        sampling_config_for_model(
-            model,
-            resolve_credentials(model, None),
-            None,
-            None,
-            None,
-            None,
-        )
-        .max_request_bytes
+        sampling_config_for_model(model, resolve_credentials(model, None), None, None, None)
+            .max_request_bytes
     };
     assert_eq!(
         NonZeroU64::new(20_000_000),
@@ -2186,14 +2182,8 @@ fn model_api_backend_defaults_to_chat_completions() {
 fn sampling_config_uses_model_api_backend() {
     let mut model = test_model_entry("test-model", "https://api.example.com/v1", None, None, None);
     model.info.api_backend = ApiBackend::Responses;
-    let sampling_config = sampling_config_for_model(
-        &model,
-        resolve_credentials(&model, None),
-        None,
-        None,
-        None,
-        None,
-    );
+    let sampling_config =
+        sampling_config_for_model(&model, resolve_credentials(&model, None), None, None, None);
     assert_eq!(sampling_config.api_backend, ApiBackend::Responses);
 }
 #[test]
@@ -2338,14 +2328,14 @@ fn parses_model_with_agent_type() {
             model = "my-agent-model"
             base_url = "https://api.example.com/v1"
             context_window = 200000
-            agent_type = "codex"
+            agent_type = "opencode"
             "#,
     )
     .unwrap();
     let cfg = Config::new_from_toml_cfg(&raw_config).expect("config should parse");
     let resolved = resolve_model_list(&cfg, None);
     let model = resolved.get("my-agent-model").expect("model should exist");
-    assert_eq!(model.info.agent_type, "codex");
+    assert_eq!(model.info.agent_type, "opencode");
 }
 #[test]
 fn model_agent_type_defaults_to_grok_build() {
@@ -2369,11 +2359,11 @@ fn model_info_from_config_propagates_agent_type() {
         model: "test".to_string(),
         base_url: "https://test.api/v1".to_string(),
         context_window: NonZeroU64::new(200_000).unwrap(),
-        agent_type: "codex".to_string(),
+        agent_type: "opencode".to_string(),
         ..Default::default()
     };
     let info = ModelInfo::from_config(&entry);
-    assert_eq!(info.agent_type, "codex");
+    assert_eq!(info.agent_type, "opencode");
 }
 #[test]
 fn acp_model_meta_includes_agent_type_when_present() {
@@ -2381,12 +2371,12 @@ fn acp_model_meta_includes_agent_type_when_present() {
     let mut entry = test_model_entry("test-model", "https://test.api/v1", None, None, None);
     entry.info.name = Some("Test Model".to_string());
     entry.info.context_window = NonZeroU64::new(256_000).unwrap();
-    entry.info.agent_type = "codex".to_string();
+    entry.info.agent_type = "opencode".to_string();
     models.insert("test-model".to_string(), entry);
     let acp_models = to_acp_model_info(&models);
     let acp_model = acp_models.values().next().expect("should have one model");
     let meta = acp_model.meta.as_ref().expect("meta should be present");
-    assert_eq!(meta.get("agentType"), Some(&serde_json::json!("codex")));
+    assert_eq!(meta.get("agentType"), Some(&serde_json::json!("opencode")));
     assert_eq!(
         meta.get("totalContextTokens"),
         Some(&serde_json::json!(256_000))
@@ -3226,7 +3216,7 @@ fn resolve_models_from_toml(
 }
 fn resolve_sampling(model: &ModelEntry, session_key: Option<&str>) -> SamplerConfig {
     let credentials = resolve_credentials(model, session_key);
-    sampling_config_for_model(model, credentials, None, None, None, None)
+    sampling_config_for_model(model, credentials, None, None, None)
 }
 
 /// A Cerebras-slugged entry must resolve — through the real `config.toml`
@@ -3833,7 +3823,7 @@ fn an_unset_proxy_resolves_every_derived_endpoint_blank() {
     );
 }
 /// REGRESSION: the managed-config URL never follows `xai_api_base_url` through the full loader `Config::new_from_toml_cfg`.
-/// That is a distinct construction path from `from_config_value`, so the deployment key never reaches the inference host on either.
+/// That is a distinct construction path from `from_config_value`, so the team token never reaches the inference host on either.
 #[test]
 #[serial]
 fn loader_managed_config_url_never_follows_inference_endpoint() {
@@ -3852,7 +3842,7 @@ fn loader_managed_config_url_never_follows_inference_endpoint() {
         !cfg.endpoints
             .resolve_managed_config_url()
             .contains("inference.acme-corp.example"),
-        "deployment key would be sent to the inference host"
+        "the team token would be sent to the inference host"
     );
 }
 #[test]
@@ -4448,7 +4438,7 @@ fn resolve_output_rate_floor_prefers_the_model_over_the_session() {
     );
 }
 /// The time-to-first-token limit ships on, takes `[ui]`, then the
-/// provider, then the model. Zero turns it off and a huge value clamps.
+/// provider, then the model. Zero turns it off and a large value is kept.
 #[test]
 fn resolve_output_rate_floor_layers_the_ttft_limit() {
     use xai_grok_shared::ui_config::UiConfig;
@@ -4512,8 +4502,8 @@ fn resolve_output_rate_floor_layers_the_ttft_limit() {
     cfg.ui.ttft_timeout_secs = Some(99_999);
     assert_eq!(
         ttft(&cfg, "any-model"),
-        Some(*xai_grok_sampling_types::OutputRateFloorPolicy::TTFT_TIMEOUT_SECS_RANGE.end()),
-        "an out-of-range value clamps"
+        Some(99_999),
+        "a large value is kept"
     );
 }
 /// The retry budget and the window resolve `[ui]` first, then the legacy
@@ -4561,7 +4551,19 @@ fn resolve_output_rate_floor_reads_retries_and_window_from_ui_then_legacy() {
         over.resolve_output_rate_floor("any-model")
             .unwrap()
             .max_retries,
-        *Policy::MAX_RETRIES_RANGE.end(),
+        99,
+        "a large budget is kept"
+    );
+
+    let mut unlimited = Config::default();
+    unlimited.ui.output_rate_max_retries = Some(Policy::UNLIMITED_RETRIES);
+    assert_eq!(
+        unlimited
+            .resolve_output_rate_floor("any-model")
+            .unwrap()
+            .max_retries,
+        Policy::UNLIMITED_RETRIES,
+        "the unlimited budget reaches the policy"
     );
 }
 /// Gate precedence: env > `[doom_loop_recovery]` > remote settings > default(ON).
@@ -4729,10 +4731,10 @@ fn worktree_auto_gc_section_parses_from_toml() {
         Some(&None)
     );
 }
-/// Out-of-range tunables clamp instead of being honored or dropped.
+/// Large tunables are kept. A threshold below its minimum is raised, and an out-of-range window fails closed.
 #[test]
 #[serial]
-fn resolve_doom_loop_recovery_clamps_tunables() {
+fn resolve_doom_loop_recovery_keeps_large_tunables() {
     use crate::util::config::DoomLoopRecoverySettings;
     unsafe { std::env::remove_var("GROK_DOOM_LOOP_RECOVERY") };
     let cfg = Config {
@@ -4745,8 +4747,8 @@ fn resolve_doom_loop_recovery_clamps_tunables() {
         ..Default::default()
     };
     let p = cfg.resolve_doom_loop_recovery().expect("enabled");
-    assert_eq!(p.max_threshold, 64);
-    assert_eq!(p.max_retries, 5);
+    assert_eq!(p.max_threshold, 1_000);
+    assert_eq!(p.max_retries, 99);
     let cfg = Config {
         doom_loop_recovery: DoomLoopRecoverySettings {
             enabled: Some(true),
@@ -6114,16 +6116,16 @@ fn config_warns_on_section_typo() {
     let raw: toml::Value = toml::from_str(
         r#"
             [endpoint]
-            deployment_key = "xai-token-test"
+            alpha_test_key = "xai-token-test"
         "#,
     )
     .unwrap();
     let config = Config::new_from_toml_cfg(&raw).expect("should parse");
-    assert!(config.endpoints.deployment_key.is_none());
+    assert!(config.endpoints.alpha_test_key.is_none());
     let unused = unused_keys_from_toml(
         r#"
             [endpoint]
-            deployment_key = "xai-token-test"
+            alpha_test_key = "xai-token-test"
         "#,
     );
     assert!(unused.iter().any(|k| k == "endpoint"), "got: {unused:?}");
@@ -6211,7 +6213,7 @@ fn config_warns_on_field_typos() {
     let unused = unused_keys_from_toml(
         r#"
             [endpoints]
-            deplomyent_key = "test"
+            alpah_test_key = "test"
             [ui]
             yoloo = true
             [features]
@@ -6219,7 +6221,7 @@ fn config_warns_on_field_typos() {
         "#,
     );
     assert!(
-        unused.iter().any(|k| k == "endpoints.deplomyent_key"),
+        unused.iter().any(|k| k == "endpoints.alpah_test_key"),
         "got: {unused:?}"
     );
     assert!(unused.iter().any(|k| k == "ui.yoloo"), "got: {unused:?}");
@@ -6238,7 +6240,6 @@ fn config_accepts_all_known_sections() {
             [features]
             feedback = true
             [endpoints]
-            deployment_key = "test"
             management_api_key = "mgmt-key"
             gcs_service_account_key = "gcs-key"
             [models]
@@ -6415,26 +6416,6 @@ fn unknown_key_still_warns_next_to_exempt_sections() {
         vec!["ui.yollo".to_string()],
         "exactly the typo'd key must be flagged"
     );
-}
-/// Regression: a deployment key with no OAuth token must resolve to Proxy.
-#[test]
-fn resolve_upload_method_accepts_deployment_key_without_oauth() {
-    use crate::session::repo_changes::UploadMethod;
-    let endpoints = EndpointsConfig {
-        deployment_key: Some("enterprise-key".to_string()),
-        ..Default::default()
-    };
-    match endpoints.resolve_upload_method(None) {
-        Some(UploadMethod::Proxy {
-            deployment_key,
-            user_token,
-            ..
-        }) => {
-            assert_eq!(deployment_key.as_deref(), Some("enterprise-key"));
-            assert_eq!(user_token, "");
-        }
-        other => panic!("expected Proxy upload method, got {other:?}"),
-    }
 }
 #[test]
 fn otlp_traces_endpoint_precedence() {
@@ -7397,7 +7378,6 @@ fn remote_settings_with(key: CompatRemoteKey, value: bool) -> crate::util::confi
         CompatRemoteKey::ClaudeMcps => remote.claude_mcps_enabled = Some(value),
         CompatRemoteKey::ClaudeHooks => remote.claude_hooks_enabled = Some(value),
         CompatRemoteKey::ClaudeSessions => remote.claude_sessions_enabled = Some(value),
-        CompatRemoteKey::CodexSessions => remote.codex_sessions_enabled = Some(value),
     }
     remote
 }
@@ -7417,7 +7397,6 @@ fn resolve_compat_toml_sessions_disable_independently() {
     for (vendor, section) in [
         (CompatVendor::Cursor, "cursor"),
         (CompatVendor::Claude, "claude"),
-        (CompatVendor::Codex, "codex"),
     ] {
         let config = parse_compat(&format!("[compat.{section}]\nsessions = false"));
         assert_session_one_disabled(resolve_compat_config(&config, None), vendor);
@@ -7432,16 +7411,13 @@ fn resolve_raw_compat_sessions_fails_closed_per_vendor() {
 [compat.cursor]
 sessions = "malformed"
 [compat.claude]
-sessions = false
-[compat.codex]
 hooks = "unrelated malformed field"
 "#,
     )
     .unwrap();
     let resolved = resolve_compat_sessions_from_raw(Ok(&raw), None);
     assert!(!resolved.cursor.sessions);
-    assert!(!resolved.claude.sessions);
-    assert!(resolved.codex.sessions);
+    assert!(resolved.claude.sessions);
 }
 #[test]
 #[serial]
@@ -7458,13 +7434,12 @@ sessions = true
     )
     .unwrap();
     let remote = crate::util::config::RemoteSettings {
-        codex_sessions_enabled: Some(false),
+        claude_sessions_enabled: Some(false),
         ..Default::default()
     };
     let resolved = resolve_compat_sessions_from_raw(Ok(&raw), Some(&remote));
     assert!(!resolved.cursor.sessions);
     assert!(resolved.claude.sessions);
-    assert!(!resolved.codex.sessions);
 }
 #[test]
 fn compat_config_cell_is_tolerant_and_fail_closed_per_cell() {
@@ -7497,7 +7472,10 @@ hooks = true
         Ok(Some(true))
     );
     assert_eq!(
-        compat_config_cell(Ok(&raw), cell(CompatVendor::Codex, CompatSurface::Sessions)),
+        compat_config_cell(
+            Ok(&raw),
+            cell(CompatVendor::Claude, CompatSurface::Sessions)
+        ),
         Ok(None)
     );
     assert_eq!(
@@ -7512,17 +7490,15 @@ fn resolve_raw_compat_sessions_load_failure_fails_closed() {
     let resolved = resolve_compat_sessions_from_raw(Err(()), None);
     assert!(!resolved.cursor.sessions);
     assert!(!resolved.claude.sessions);
-    assert!(!resolved.codex.sessions);
 }
 #[test]
 #[serial]
 fn resolve_raw_compat_sessions_load_failure_allows_env_override() {
     let _env = isolate_compat_env();
-    let _codex = EnvGuard::set("GROK_CODEX_SESSIONS_ENABLED", "true");
+    let _claude = EnvGuard::set("GROK_CLAUDE_SESSIONS_ENABLED", "true");
     let resolved = resolve_compat_sessions_from_raw(Err(()), None);
     assert!(!resolved.cursor.sessions);
-    assert!(!resolved.claude.sessions);
-    assert!(resolved.codex.sessions);
+    assert!(resolved.claude.sessions);
 }
 #[test]
 #[serial]
@@ -7536,7 +7512,6 @@ fn resolve_raw_compat_sessions_valid_empty_uses_remote_and_defaults() {
     let resolved = resolve_compat_sessions_from_raw(Ok(&raw), Some(&remote));
     assert!(resolved.cursor.sessions);
     assert!(!resolved.claude.sessions);
-    assert!(resolved.codex.sessions);
 }
 #[test]
 #[serial]
@@ -7572,7 +7547,6 @@ fn resolve_compat_env_sessions_disable_independently() {
     for (vendor, env_var) in [
         (CompatVendor::Cursor, "GROK_CURSOR_SESSIONS_ENABLED"),
         (CompatVendor::Claude, "GROK_CLAUDE_SESSIONS_ENABLED"),
-        (CompatVendor::Codex, "GROK_CODEX_SESSIONS_ENABLED"),
     ] {
         let _disabled = EnvGuard::set(env_var, "false");
         assert_session_one_disabled(
@@ -7583,23 +7557,22 @@ fn resolve_compat_env_sessions_disable_independently() {
 }
 #[test]
 #[serial]
-fn resolve_compat_precedence_and_reserved_codex_hook() {
+fn resolve_compat_precedence_env_over_config_over_remote() {
     let _env = isolate_compat_env();
-    let config = parse_compat("[compat.cursor]\nsessions = false\n[compat.codex]\nhooks = false");
+    let config = parse_compat("[compat.cursor]\nsessions = false\n[compat.claude]\nhooks = false");
     let remote = crate::util::config::RemoteSettings {
         cursor_sessions_enabled: Some(true),
         ..Default::default()
     };
     let resolved = resolve_compat_config(&config, Some(&remote));
     assert!(!resolved.cursor.sessions);
-    assert!(!resolved.codex.hooks);
+    assert!(!resolved.claude.hooks);
     assert!(resolved.cursor.hooks);
-    assert!(resolved.claude.hooks);
     let _session = EnvGuard::set("GROK_CURSOR_SESSIONS_ENABLED", "true");
-    let _hook = EnvGuard::set("GROK_CODEX_HOOKS_ENABLED", "true");
+    let _hook = EnvGuard::set("GROK_CLAUDE_HOOKS_ENABLED", "true");
     let resolved = resolve_compat_config(&config, Some(&remote));
     assert!(resolved.cursor.sessions);
-    assert!(resolved.codex.hooks);
+    assert!(resolved.claude.hooks);
 }
 #[test]
 #[serial]
@@ -7612,7 +7585,6 @@ fn resolve_runtime_fields_compat_asymmetric_sources() {
     let remote = crate::util::config::RemoteSettings {
         cursor_sessions_enabled: Some(true),
         claude_sessions_enabled: Some(true),
-        codex_sessions_enabled: Some(false),
         ..Default::default()
     };
     let mut config = Config::new_from_toml_cfg(&raw).unwrap();
@@ -7631,7 +7603,6 @@ fn resolve_runtime_fields_compat_asymmetric_sources() {
     });
     assert!(!config.compat_resolved.cursor.sessions);
     assert!(!config.compat_resolved.claude.sessions);
-    assert!(!config.compat_resolved.codex.sessions);
 }
 #[test]
 #[serial]
@@ -7952,7 +7923,8 @@ fn is_telemetry_explicitly_disabled_sync_env_signals() {
 }
 #[test]
 #[serial]
-fn resolve_telemetry_mode_disable_env_beats_opt_in_but_not_requirements_pin() {
+fn resolve_telemetry_mode_stays_disabled_under_disable_env_opt_in_and_requirements_pin() {
+    // Telemetry is hard-disabled: no opt-in, env value or requirement pin turns it on.
     let home = tempfile::tempdir().unwrap();
     let _home = EnvGuard::set("GROK_HOME", home.path());
     let _enable = EnvGuard::set("GROK_TELEMETRY_ENABLED", "true");
@@ -7962,13 +7934,13 @@ fn resolve_telemetry_mode_disable_env_beats_opt_in_but_not_requirements_pin() {
     let resolved = cfg.resolve_telemetry_mode();
     assert_eq!(
         (resolved.value, resolved.source),
-        (TelemetryMode::Enabled, ConfigSource::Env)
+        (TelemetryMode::Disabled, ConfigSource::Default)
     );
     let _truthy = EnvGuard::set("DISABLE_TELEMETRY", "1");
     let resolved = cfg.resolve_telemetry_mode();
     assert_eq!(
         (resolved.value, resolved.source),
-        (TelemetryMode::Disabled, ConfigSource::Env)
+        (TelemetryMode::Disabled, ConfigSource::Default)
     );
     assert!(
         is_telemetry_disabled_sync(),
@@ -7981,7 +7953,7 @@ fn resolve_telemetry_mode_disable_env_beats_opt_in_but_not_requirements_pin() {
     let resolved = cfg.resolve_telemetry_mode();
     assert_eq!(
         (resolved.value, resolved.source),
-        (TelemetryMode::Enabled, ConfigSource::Requirement)
+        (TelemetryMode::Disabled, ConfigSource::Default)
     );
 }
 #[test]
@@ -9200,7 +9172,9 @@ fn mcp_recursive_config_watch_feature_flag_used_when_no_higher_layer() {
 #[serial_test::serial(remote_sig_disarm)]
 fn remote_settings_disarm_managed_config_signatures() {
     let prod = crate::env::PROD_CLI_CHAT_PROXY_BASE_URL;
-    let _env = crate::env::EnvVarGuard::remove("GROK_CLI_CHAT_PROXY_BASE_URL");
+    // No proxy is compiled in as a default, so the prod proxy must be configured to be the origin.
+    let env = crate::env::EnvVarGuard::remove("GROK_CLI_CHAT_PROXY_BASE_URL");
+    env.set_value(prod);
     xai_grok_config::signed_policy::apply_remote_managed_config_signature_verification(
         Some(true),
         true,
@@ -9273,15 +9247,8 @@ fn sampling_config_compresses_only_toward_the_advertising_proxy() {
     use xai_grok_sampler::RequestCompression;
     let compression_for = |base_url: &str| {
         let model = test_model_entry("test-model", base_url, None, None, None);
-        sampling_config_for_model(
-            &model,
-            resolve_credentials(&model, None),
-            None,
-            None,
-            None,
-            None,
-        )
-        .request_compression
+        sampling_config_for_model(&model, resolve_credentials(&model, None), None, None, None)
+            .request_compression
     };
     let proxy = crate::env::PROD_CLI_CHAT_PROXY_BASE_URL;
     let env = crate::env::EnvVarGuard::remove("GROK_REQUEST_COMPRESSION");
@@ -9327,7 +9294,9 @@ fn remote_settings_disarm_requires_prod_proxy_when_keys_embedded() {
         managed_config_signature_verification: Some(false),
         ..Default::default()
     };
+    // No proxy is compiled in as a default, so the prod proxy must be configured to be the origin.
     let env = crate::env::EnvVarGuard::remove("GROK_CLI_CHAT_PROXY_BASE_URL");
+    env.set_value(prod);
     apply_remote_settings_side_effects(Some(&settings), prod);
     assert!(
         !xai_grok_config::signed_policy::verification_active(),

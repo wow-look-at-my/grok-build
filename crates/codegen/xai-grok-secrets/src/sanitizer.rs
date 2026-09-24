@@ -28,7 +28,7 @@ static PEM_PRIVATE_KEY_REGEX: LazyLock<Regex> = LazyLock::new(|| {
 });
 static BEARER_TOKEN_REGEX: LazyLock<Regex> =
     LazyLock::new(|| compile(r"(?i)\bBearer\s+[A-Za-z0-9._\-]{16,}\b"));
-/// Bare JWT (`eyJ...header.payload.signature`) with no `Bearer`/`sk-` prefix, the shape used by deployment keys and OIDC tokens.
+/// Bare JWT (`eyJ...header.payload.signature`) with no `Bearer`/`sk-` prefix, the shape used by management keys and OIDC tokens.
 static JWT_REGEX: LazyLock<Regex> =
     LazyLock::new(|| compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b"));
 /// 8-char value floor to avoid false positives on short values.
@@ -365,7 +365,7 @@ mod tests {
             ),
             (
                 fixture(&[
-                    "deployment key eyJhbGciOiJIUzI1NiJ9",
+                    "management key eyJhbGciOiJIUzI1NiJ9",
                     ".eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4f",
                 ]),
                 "bare jwt without prefix",
@@ -449,7 +449,7 @@ mod tests {
     #[test]
     fn redacts_bare_jwt_leaving_no_token() {
         let out = redact_secrets(
-            "deployment key eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4f",
+            "management key eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4f",
         );
         assert!(!out.contains("eyJ"), "bare JWT survived redaction: {out}");
     }

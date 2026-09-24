@@ -1,3 +1,7 @@
+#![allow(clippy::cast_possible_truncation)] // 1 hit predates the gate
+#![allow(clippy::expect_used)] // 5 hits predate the gate
+#![allow(clippy::unwrap_used)] // 6 hits predate the gate
+
 //! Shared test utilities for xAI crates.
 //!
 //! Provides common helpers that are needed by many crates' test suites:

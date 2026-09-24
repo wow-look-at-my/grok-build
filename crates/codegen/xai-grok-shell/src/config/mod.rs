@@ -103,6 +103,7 @@ impl Default for SubagentsConfig {
             sampling_limit: None,
             limit_behavior: None,
             workflow_max_concurrent: None,
+            usage_frequency: None,
             models: std::collections::HashMap::new(),
             toggle: std::collections::HashMap::new(),
             roles: std::collections::HashMap::new(),
@@ -912,10 +913,9 @@ pub use xai_grok_config::{
     claude_managed_settings_probe_path, confirmed_team_switch, confirmed_team_switch_at,
     is_managed_config_hard_stale_for, is_managed_config_stale_for, load_config_file,
     load_from_disk, load_managed_config, load_merged_requirements, load_system_managed_config,
-    load_toml_file, managed_config_identity_changed_at, managed_deployment_id,
-    managed_policy_compromised_for, mark_managed_config_synced, mark_managed_config_synced_at,
-    normalize_identity, requirements_layers, resolved_env_overlay, system_config_dir,
-    user_grok_home,
+    load_toml_file, managed_config_identity_changed_at, managed_policy_compromised_for,
+    mark_managed_config_synced, mark_managed_config_synced_at, normalize_identity,
+    requirements_layers, resolved_env_overlay, system_config_dir, user_grok_home,
 };
 /// Map of "dotted.path" to which config file the value came from.
 pub(crate) fn config_origins(
@@ -1394,12 +1394,6 @@ fn apply_requirements_inner(
         "endpoints",
         "feedback_base_url",
         config.endpoints.feedback_base_url
-    );
-    enforce_str!(
-        "endpoints",
-        "deployment_key",
-        config.endpoints.deployment_key,
-        redacted
     );
     enforce_str!("telemetry", "events_url", config.telemetry.events_url);
     enforce_str!(

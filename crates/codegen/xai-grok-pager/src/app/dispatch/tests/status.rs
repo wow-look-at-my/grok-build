@@ -628,8 +628,9 @@ fn privacy_banner_is_hard_disabled() {
 fn capability_tri_state_gates_banner_row_and_write() {
     use crate::settings::CodingDataSharingLock;
     // Each row starts on the opposite side of `pick` so the pick is a real change.
+    // The banner is hard-disabled in this build, so no row shows it; the lock and the write still follow the capability.
     for (capability, rollout, pick, banner, lock, writes) in [
-        (Some(true), true, true, true, None, true),
+        (Some(true), true, true, false, None, true),
         (
             Some(false),
             true,
@@ -692,11 +693,13 @@ fn personal_account_sees_the_banner_without_a_capability() {
     app.team_name = None;
     app.can_administer_team = None;
 
-    assert!(
-        app.privacy_banner_should_show(),
-        "personal team id is not team context; an unresolved capability must not hide the ask"
+    // The banner is hard-disabled in this build; the Settings choice below is the ask that stays live.
+    assert!(!app.privacy_banner_should_show());
+    assert_eq!(
+        None,
+        app.coding_data_sharing_lock(),
+        "personal team id is not team context; an unresolved capability must not lock the choice"
     );
-    assert_eq!(None, app.coding_data_sharing_lock());
     let effects = dispatch(Action::SetCodingDataSharing { opted_in: true }, &mut app);
     assert!(
         effects
@@ -995,52 +998,52 @@ fn stale_mirror_does_not_coalesce_an_opposite_choice() {
     }
 }
 
-/// Already-out opt-out, from the banner or Settings, still writes: the local "out" may be the unconfirmed fail-safe default.
+/// Already-out opt-out from Settings still writes: the local "out" may be the unconfirmed fail-safe default.
+/// The banner is hard-disabled in this build, so its [Opt out] is inert.
 #[test]
 fn already_out_opt_out_writes_and_acks_on_success() {
-    for from_banner in [true, false] {
-        let action = if from_banner {
-            Action::PrivacyBannerOptOut
-        } else {
-            Action::SetCodingDataSharing { opted_in: false }
-        };
-        let mut app = privacy_banner_ready_app();
+    let mut app = privacy_banner_ready_app();
+    let effects = dispatch(Action::PrivacyBannerOptOut, &mut app);
+    assert!(
+        effects.is_empty(),
+        "[Opt out] on a hidden banner is inert: {effects:?}"
+    );
+    assert!(app.privacy_banner_acked.is_none());
+    assert_eq!(app.coding_data_write_seq, 0);
 
-        let effects = dispatch(action, &mut app);
-        let action = if from_banner { "[Opt out]" } else { "Settings" };
-
-        assert!(
-            matches!(
-                effects.as_slice(),
-                [Effect::SetCodingDataSharing {
-                    opted_in: false,
-                    seq: 1,
-                    ..
-                }]
-            ),
-            "{action}: already-out must still write, and only write: {effects:?}"
-        );
-        assert!(
-            app.privacy_banner_acked.is_none(),
-            "{action}: no ack before the reply"
-        );
-
-        let ack_effects = dispatch(
-            Action::TaskComplete(TaskResult::CodingDataSharingUpdated {
-                agent_id: AgentId(0),
+    let mut app = privacy_banner_ready_app();
+    let effects = dispatch(Action::SetCodingDataSharing { opted_in: false }, &mut app);
+    assert!(
+        matches!(
+            effects.as_slice(),
+            [Effect::SetCodingDataSharing {
                 opted_in: false,
                 seq: 1,
-            }),
-            &mut app,
-        );
-        assert!(
-            ack_effects
-                .iter()
-                .any(|e| matches!(e, Effect::PersistPrivacyBannerAcked { .. })),
-            "{action}: success must persist the ack: {ack_effects:?}"
-        );
-        assert!(!app.privacy_banner_should_show());
-    }
+                ..
+            }]
+        ),
+        "Settings: already-out must still write, and only write: {effects:?}"
+    );
+    assert!(
+        app.privacy_banner_acked.is_none(),
+        "Settings: no ack before the reply"
+    );
+
+    let ack_effects = dispatch(
+        Action::TaskComplete(TaskResult::CodingDataSharingUpdated {
+            agent_id: AgentId(0),
+            opted_in: false,
+            seq: 1,
+        }),
+        &mut app,
+    );
+    assert!(
+        ack_effects
+            .iter()
+            .any(|e| matches!(e, Effect::PersistPrivacyBannerAcked { .. })),
+        "Settings: success must persist the ack: {ack_effects:?}"
+    );
+    assert!(!app.privacy_banner_should_show());
 }
 
 /// A Settings opt-out must not raise the banner mid-write: the optimistic "out" is unconfirmed, and a banner
@@ -1135,39 +1138,6 @@ fn superseded_opt_in_success_is_kept_when_later_opt_out_fails() {
     assert!(app.coding_data_pending_write.is_none());
 }
 
-/// A refused opt-out must not dismiss the banner: the server is still retaining, and the user has to see that.
-#[test]
-fn privacy_banner_opt_out_failure_keeps_banner_and_toasts() {
-    let mut app = privacy_banner_ready_app();
-    let effects = dispatch(Action::PrivacyBannerOptOut, &mut app);
-    assert_eq!(effects.len(), 1, "opt-out must write: {effects:?}");
-
-    let fail_effects = dispatch(
-        Action::TaskComplete(TaskResult::CodingDataSharingFailed {
-            agent_id: AgentId(0),
-            error: "team policy forbids opt-out".into(),
-            seq: app.coding_data_write_seq,
-        }),
-        &mut app,
-    );
-    assert!(fail_effects.is_empty());
-    assert!(app.privacy_banner_acked.is_none());
-    assert!(
-        app.privacy_banner_should_show(),
-        "a refused [Opt out] must leave the banner up"
-    );
-    let toast = app
-        .welcome_toast
-        .as_ref()
-        .map(|(m, _)| m.as_str())
-        .unwrap_or("");
-    assert!(
-        toast.contains("team policy forbids opt-out"),
-        "the refusal must reach the user: {toast}"
-    );
-}
-
-/// Settings opt-out is write 1, the user opts in before it lands, and write 2 answers first.
 /// Covered: write 2 succeeds and the stale write 1 reply (either kind) must not set the mirror or toast; both writes fail and
 /// write 2 must fall back to the opt-in it inherited from write 1, not to write 1's optimistic out.
 /// Not covered: write 2 fails, then write 1 succeeds — the pending write is already gone, so that success is dropped (deferred).
@@ -1328,7 +1298,8 @@ fn settings_opt_in_recommitted_while_inflight_does_not_ack() {
     assert!(app.coding_data_pending_write.is_none());
     assert!(app.privacy_banner_acked.is_none());
     assert!(app.coding_data_retention_opt_out);
-    assert!(app.privacy_banner_should_show());
+    // No ack survived the failure. The banner itself stays off: it is hard-disabled in this build.
+    assert!(!app.privacy_banner_should_show());
 }
 
 /// A Settings pick before the notice is rolled out must not stamp an ack that would hide the banner when the cohort turns on.

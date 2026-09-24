@@ -174,6 +174,7 @@ pub fn extract_skill_display_text(text: &str) -> Option<String> {
     }
 
     // Fallback: derive "/NAME" from <command-name>NAME</command-name>.
+    // As above, both offsets are ASCII `<command-name>` tag boundaries.
     let inner = text.find(name_open)? + name_open.len();
     let end = inner + text.get(inner..)?.find(name_close)?;
     let name = text.get(inner..end)?;
@@ -193,6 +194,8 @@ pub fn extract_skill_display_text(text: &str) -> Option<String> {
 fn extract_command_args(text: &str) -> Option<&str> {
     let open = "<command-args>";
     let close = "</command-args>";
+    // `start` follows an ASCII `<command-args>` open tag and `end` is either an
+    // ASCII `</command-args>` offset or `text.len()`, so both are boundaries.
     let start = text.find(open)? + open.len();
     let end = text
         .get(start..)

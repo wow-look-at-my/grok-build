@@ -1,5 +1,10 @@
+#![allow(clippy::expect_used)] // 1 hit predates the gate
+#![allow(clippy::unwrap_used)] // 1 hit predates the gate
+
 //! Canonical, extensible tool types.
 pub mod definition;
+
+mod alias;
 mod ext;
 mod glob;
 mod grep;
@@ -10,6 +15,9 @@ mod task;
 mod types;
 mod web_search;
 
+pub use alias::{
+    AliasConflict, Aliases, ENUM_VARIANTS, EnumVariantAlias, LOCAL, LocalAlias, WIRED, WireAlias,
+};
 pub use ext::Extensions;
 pub use glob::GlobToolInput;
 pub use grep::{

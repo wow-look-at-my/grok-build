@@ -5,6 +5,7 @@
 //! Every path is sanitized before it is joined onto the cache root.
 
 #![deny(clippy::indexing_slicing)]
+#![allow(clippy::cast_possible_truncation)]
 
 use anyhow::{Context, Result, bail};
 use prod_mc_cli_chat_proxy_types::SubagentBundle;

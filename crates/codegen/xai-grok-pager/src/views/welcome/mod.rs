@@ -627,7 +627,9 @@ pub(super) fn render_version_badge(
     if show_hash && let Some(hash_span) = spans.last() {
         let total_width: usize = spans.iter().map(|s| s.content.width()).sum();
         let hash_width = hash_span.content.width() as u16;
-        let hash_offset: usize = spans[..spans.len().saturating_sub(1)]
+        let hash_offset: usize = spans
+            .get(..spans.len().saturating_sub(1))
+            .unwrap_or(&[])
             .iter()
             .map(|s| s.content.width())
             .sum();
@@ -3142,7 +3144,6 @@ mod tests {
         let trust = TrustState::Done;
         for (tool, label) in [
             (ForeignSessionTool::Claude, "Claude Code"),
-            (ForeignSessionTool::Codex, "Codex"),
             (ForeignSessionTool::Cursor, "Cursor"),
         ] {
             let hint = xai_grok_foreign_sessions::RecentForeignSession {

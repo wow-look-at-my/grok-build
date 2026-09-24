@@ -42,6 +42,13 @@ impl MemoryCommandKind {
     }
 }
 
+/// The shell's account of one compaction: a one-line size breakdown and the path of the full report.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CompactionDetail {
+    pub breakdown: Option<String>,
+    pub report_path: Option<String>,
+}
+
 /// A session-level event with structured data.
 /// Each variant carries the information needed to render a concise, informational message in the scrollback.
 /// These are non-interactive: unselectable, unfoldable, no accent.
@@ -92,6 +99,8 @@ pub enum SessionEvent {
         tokens_after: u64,
         /// How long compaction took (milliseconds).
         elapsed_ms: Option<i64>,
+        /// What the compacted history holds. Empty from older shells.
+        detail: CompactionDetail,
     },
     /// Auto-compaction failed.
     CompactionFailed {
@@ -436,6 +445,7 @@ impl SessionEvent {
                 tokens_before,
                 tokens_after,
                 elapsed_ms,
+                detail,
             } => {
                 let after = format_tokens(*tokens_after);
                 // Older shells don't send tokens_before; keep the legacy format
@@ -448,12 +458,19 @@ impl SessionEvent {
                     }
                     _ => format!("Context compacted → {after} tokens"),
                 };
-                if let Some(ms) = elapsed_ms {
+                let mut out = if let Some(ms) = elapsed_ms {
                     let secs = *ms as f64 / 1000.0;
                     format!("{body} ({secs:.1}s)")
                 } else {
                     body
+                };
+                if let Some(breakdown) = &detail.breakdown {
+                    out.push_str(&format!("\n  {breakdown}"));
                 }
+                if let Some(path) = &detail.report_path {
+                    out.push_str(&format!("\n  Report: {path}"));
+                }
+                out
             }
             SessionEvent::CompactionFailed { error } => {
                 if error.trim().is_empty() {
@@ -1058,6 +1075,7 @@ mod tests {
             tokens_before: Some(48_800),
             tokens_after: 27_100,
             elapsed_ms: Some(21_000),
+            detail: CompactionDetail::default(),
         };
         assert_eq!(
             event.message(),
@@ -1071,8 +1089,28 @@ mod tests {
             tokens_before: None,
             tokens_after: 27_100,
             elapsed_ms: None,
+            detail: CompactionDetail::default(),
         };
         assert_eq!(event.message(), "Context compacted → 27.1k tokens");
+    }
+
+    #[test]
+    fn compaction_completed_shows_breakdown_and_report_path() {
+        let event = SessionEvent::CompactionCompleted {
+            tokens_before: Some(255_800),
+            tokens_after: 231_800,
+            elapsed_ms: Some(24_200),
+            detail: CompactionDetail {
+                breakdown: Some("summary 9.1k · 41 items est. 60.0k".into()),
+                report_path: Some("/s/compaction_reports/abc.md".into()),
+            },
+        };
+        assert_eq!(
+            event.message(),
+            "Context compacted: 255.8k → 231.8k tokens (24.2s)\n  \
+             summary 9.1k · 41 items est. 60.0k\n  \
+             Report: /s/compaction_reports/abc.md"
+        );
     }
 
     #[test]

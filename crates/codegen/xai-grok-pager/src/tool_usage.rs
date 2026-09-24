@@ -21,7 +21,7 @@ pub enum ToolCategory {
     Execute,
     /// File read operations (read_file).
     Read,
-    /// File edits (search_replace, write, apply_patch).
+    /// File edits (search_replace, write).
     Edit,
     /// Search/grep operations (grep, glob).
     Search,

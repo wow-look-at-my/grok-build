@@ -255,17 +255,24 @@ mod linux {
             // Always use tokio::spawn: the cleanup future is Send and Drop
             // can fire after the LocalSet has shut down, making spawn_local
             // unsafe here.
-            tokio::spawn(async move {
-                let kill_path = path.join("cgroup.kill");
-                let _ = tokio::fs::write(&kill_path, "1").await;
-                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-                if let Err(e) = tokio::fs::remove_dir(&path).await {
-                    tracing::debug!(
-                        cgroup = %path.display(),
-                        "Failed to remove cgroup dir on drop (may already be gone): {e}"
-                    );
-                }
-            });
+            //
+            // Guarded because a cleanup that unwinds leaves the cgroup
+            // directory and the children inside it behind, and the caller is in
+            // `Drop` with nothing to hand an error back to.
+            tokio::spawn(crate::util::detached::fire_and_forget(
+                "cgroup cleanup on drop",
+                async move {
+                    let kill_path = path.join("cgroup.kill");
+                    let _ = tokio::fs::write(&kill_path, "1").await;
+                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                    if let Err(e) = tokio::fs::remove_dir(&path).await {
+                        tracing::debug!(
+                            cgroup = %path.display(),
+                            "Failed to remove cgroup dir on drop (may already be gone): {e}"
+                        );
+                    }
+                },
+            ));
         }
     }
 

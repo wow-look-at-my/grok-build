@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used)] // 1 hit predates the gate
+
 //! Shared API definitions for Grok tools: protobuf types, config validation,
 //! and canonical slash-command wording.
 //!

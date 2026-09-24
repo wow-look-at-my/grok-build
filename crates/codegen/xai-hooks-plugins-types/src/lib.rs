@@ -1,3 +1,5 @@
+#![allow(clippy::string_slice)] // 1 hit predates the gate
+
 //! Shared DTO types for hooks/plugins ACP extensions.
 //!
 //! This crate defines the wire format for `x.ai/hooks/*` and `x.ai/plugins/*`

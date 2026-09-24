@@ -1,3 +1,5 @@
+#![allow(clippy::cast_possible_truncation)] // 1 hit predates the gate
+
 //! xAI Computer Hub — transport + registry + resolver core.
 //!
 //! Object-safe abstractions used by every router build: a [`Transport`]

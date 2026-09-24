@@ -501,7 +501,6 @@ pub fn update_telemetry_config(config: &AgentConfig, auth_manager: &AuthManager)
         config.resolve_telemetry_mode().value,
         user_id,
         team_id,
-        config.endpoints.deployment_key.clone(),
         crate::http::origin_client_info_from_env(),
         xai_grok_version::version().to_owned(),
         subscription_tier,
@@ -538,11 +537,8 @@ pub async fn apply_post_login_config(
 ) -> anyhow::Result<()> {
     let outcome = crate::managed_config::post_login_sync(Some(authenticated)).await;
     match outcome {
-        crate::managed_config::ManagedConfigSync::Updated { is_team: true } => {
+        crate::managed_config::ManagedConfigSync::Updated => {
             eprintln!("Applied your team's managed configuration.");
-        }
-        crate::managed_config::ManagedConfigSync::Updated { is_team: false } => {
-            eprintln!("Applied your deployment's managed configuration.");
         }
         crate::managed_config::ManagedConfigSync::Staged => {
             eprintln!(

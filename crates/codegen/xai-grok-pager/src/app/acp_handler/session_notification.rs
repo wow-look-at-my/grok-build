@@ -322,20 +322,19 @@ pub(super) fn handle_session_notification_with_origin(
         } => {
             // A replayed transcript already carries the finished `ToolCall`
             // for every one of these, so replaying the chunks would build a
-            // preview of a call that is already on screen.
-            if meta.is_replay || agent.session.loading_replay {
+            // preview of a call that is already on screen. A delta carries no
+            // prompt id, so while a wake turn runs it cannot be told apart
+            // from the wake turn's own output and is dropped whole.
+            if meta.is_replay || agent.session.loading_replay || agent.running_wake_turn.is_some() {
                 false
             } else {
-                let mut changed = false;
-                if agent.running_wake_turn.is_none() {
-                    let had_activity_before = agent.session.tracker.activity().is_some();
-                    changed = agent
-                        .session
-                        .tracker
-                        .note_tool_call_arguments_delta(name.as_deref(), tool_index);
-                    if !had_activity_before && agent.session.tracker.activity().is_some() {
-                        note_first_turn_activity(agent);
-                    }
+                let had_activity_before = agent.session.tracker.activity().is_some();
+                let changed = agent
+                    .session
+                    .tracker
+                    .note_tool_call_arguments_delta(name.as_deref(), tool_index);
+                if !had_activity_before && agent.session.tracker.activity().is_some() {
+                    note_first_turn_activity(agent);
                 }
                 let previewed = agent.session.tracker.handle_tool_call_delta(
                     tool_call_id.as_deref(),
@@ -1426,7 +1425,13 @@ pub(super) fn handle_session_notification_with_origin(
                     .session
                     .tracker
                     .set_reported_session_cost(session_cost_usd_ticks);
-            priced || cache_hit_set || total_changed
+            // The call that was streaming is over. Whatever it last measured is
+            // not a rate anything is producing now, and carrying it into the
+            // gap before the next call (a client tool, a retry backoff, the
+            // pre-first-token wait) puts a stale number under a row that says
+            // it is waiting.
+            let rate_cleared = agent.session.tracker.clear_output_rate();
+            priced || cache_hit_set || total_changed || rate_cleared
         }
         XaiSessionUpdate::OutputRate {
             tokens_per_sec,
@@ -1490,6 +1495,21 @@ pub(super) fn handle_session_notification_with_origin(
             agent.status_context = Some(*status);
             status_snapshot_applied = true;
             false
+        }
+        XaiSessionUpdate::ThinkingSummary {
+            stream_start_ms,
+            summary,
+        } => {
+            // Written by a side call that starts when its model call ends, so
+            // this arrives after the thinking block it describes has stopped
+            // running, and on a reload it is replayed right behind that block's
+            // own persisted chunks. It finds its block by the call's stream
+            // start, which is why it is not attached to whatever is current.
+            agent.session.tracker.set_thinking_summary(
+                &mut agent.scrollback,
+                stream_start_ms,
+                &summary,
+            )
         }
         _ => {
             tracing::trace!(
@@ -1665,7 +1685,10 @@ pub(super) fn handle_child_session_notification(
                     .session
                     .tracker
                     .set_reported_session_cost(session_cost_usd_ticks);
-            priced || cache_hit_set || total_changed
+            // The child's view draws the same row as the parent's, so it needs
+            // the same end-of-call boundary.
+            let rate_cleared = child_view.session.tracker.clear_output_rate();
+            priced || cache_hit_set || total_changed || rate_cleared
         }
         XaiSessionUpdate::OutputRate {
             tokens_per_sec,
@@ -1885,21 +1908,28 @@ pub(super) fn apply_session_event(
             tokens_before,
             tokens_after,
             elapsed_ms,
+            breakdown,
+            report_path,
             ..
         } => {
             tracing::info!("Auto-compact completed: {tokens_after} tokens after");
             session.set_compaction_activity(None);
             session.compact_held_prompt = None;
+            let detail = crate::scrollback::blocks::CompactionDetail {
+                breakdown: breakdown.clone(),
+                report_path: report_path.clone(),
+            };
             if session.loading_replay || session.state.is_switch_model_compact() {
                 scrollback.push_block(RenderBlock::session_event(
                     SessionEvent::CompactionCompleted {
                         tokens_before: *tokens_before,
                         tokens_after: *tokens_after,
                         elapsed_ms: *elapsed_ms,
+                        detail,
                     },
                 ));
             } else {
-                session.defer_compaction(*tokens_before, *tokens_after, *elapsed_ms);
+                session.defer_compaction(*tokens_before, *tokens_after, *elapsed_ms, detail);
             }
             true
         }
@@ -2001,6 +2031,10 @@ pub(super) fn apply_retry_state(
     scrollback: &mut crate::scrollback::state::ScrollbackState,
     is_api_key_auth: bool,
 ) {
+    // Every retry state means the attempt that was streaming has ended, so the
+    // reading it last reported describes a stream nothing is producing. The
+    // backoff that follows is a wait, not a slow response.
+    session.tracker.clear_output_rate();
     let mut is_credit_limit = false;
     let mut is_reauth = false;
     use xai_grok_shell::extensions::notification::RetryState;
@@ -2152,7 +2186,7 @@ pub(crate) fn detect_plan_mode_change_replayed(
             superseded_seq = superseded.seq,
             "Ignored a mode confirmation a later press superseded"
         );
-        return false;
+        return Some(PlanModeTransition::Unchanged);
     }
     // The shell is reporting where it actually stands, so nothing outstanding
     // is left to attribute.

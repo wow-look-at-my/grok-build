@@ -1587,7 +1587,6 @@ pub(crate) async fn run_shell_child(
         None,
         None,
         None,
-        None,
         false,
         false,
         std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),

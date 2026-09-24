@@ -57,3 +57,6 @@ xai-grok-pager = { path = "../xai-grok-pager", features = ["test-support"] }
 serial_test = { workspace = true }
 
 [features]
+
+[lints]
+workspace = true

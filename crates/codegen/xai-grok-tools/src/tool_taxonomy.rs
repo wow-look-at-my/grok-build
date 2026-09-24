@@ -132,7 +132,6 @@ pub const WRITING_TOOL_WIRE_NAMES: &[(&str, ToolKind)] = &[
     ("search_replace", ToolKind::Edit),
     ("edit", ToolKind::Edit),
     ("hashline_edit", ToolKind::Edit),
-    ("apply_patch", ToolKind::Edit),
     ("run_terminal_command", ToolKind::Execute),
     ("run_terminal_cmd", ToolKind::Execute),
     ("bash", ToolKind::Execute),
@@ -279,7 +278,6 @@ mod tests {
         covered(crate::implementations::opencode::OpenCodeEditTool);
         covered(crate::implementations::opencode::OpenCodeBashTool);
         covered(crate::implementations::opencode::OpenCodeTodoWriteTool);
-        covered(crate::implementations::codex::ApplyPatchTool);
         covered(crate::implementations::grok_build_hashline::HashlineEditTool);
     }
     /// Spellings with no instantiable definition site in this crate
@@ -313,7 +311,6 @@ mod tests {
                 ToolNamespace::GrokBuild => ("grok_build", "GrokBuild"),
                 ToolNamespace::GrokBuildConcise => ("grok_build_concise", "GrokBuildConcise"),
                 ToolNamespace::GrokBuildHashline => ("grok_build_hashline", "GrokBuildHashline"),
-                ToolNamespace::Codex => ("codex", "Codex"),
                 ToolNamespace::OpenCode => ("opencode", "OpenCode"),
                 ToolNamespace::MCP => ("mcp", "MCP"),
             }

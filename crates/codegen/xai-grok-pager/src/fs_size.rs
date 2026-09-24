@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 use std::fs::Metadata;
 use std::path::{Path, PathBuf};
-use xai_fast_worktree::WORKTREE_DEPTH;
+use xai_fast_worktree::is_worktree_dir;
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct WalkIssues {
     pub(crate) unreadable_dirs: u64,
@@ -103,9 +103,70 @@ pub(crate) struct BucketedSizes {
     pub(crate) buckets: HashMap<PathBuf, Measure>,
     pub(crate) issues: WalkIssues,
 }
+/// A grok worktree is a child of a managed root, or a child of that root's
+/// per-repository bucket. Deeper than that a directory is inside a checkout,
+/// which is sized as part of it and never gets a row of its own.
+const BUCKET_DEPTH_RANGE: std::ops::RangeInclusive<usize> = 1..=2;
+
+/// Which checkout a walked file's bytes belong to, over one DFS walk.
+///
+/// Depth-first pre-order visits every parent before its children, so at most one
+/// bucket is open at a time and it is the most recently opened one: anything
+/// deeper than it sits inside that checkout, and a checkout never nests inside
+/// another bucket.
+#[derive(Default)]
+struct BucketWalk {
+    counted: HashMap<PathBuf, BucketSize>,
+    elsewhere: Vec<PathBuf>,
+    open: Option<PathBuf>,
+    open_depth: usize,
+}
+
+impl BucketWalk {
+    /// Called for every directory the walk reaches, in walk order.
+    fn visit_dir(&mut self, path: &Path, depth: usize, off_volume: bool) {
+        if self.open.is_some() && depth > self.open_depth {
+            return;
+        }
+        self.open = None;
+        // The same question the filesystem scan asks, so the rows the report
+        // lists are the rows this walk has bytes for.
+        if !BUCKET_DEPTH_RANGE.contains(&depth) || !is_worktree_dir(path) {
+            return;
+        }
+        let path = path.to_path_buf();
+        if off_volume {
+            self.elsewhere.push(path.clone());
+        } else {
+            self.counted.entry(path.clone()).or_default();
+        }
+        self.open = Some(path);
+        self.open_depth = depth;
+    }
+
+    fn visit_file(&mut self, depth: usize, bytes: u64, modified: Option<i64>) {
+        let Some(bucket) = self.open.as_deref().filter(|_| depth > self.open_depth) else {
+            return;
+        };
+        let bucket = self.counted.entry(bucket.to_path_buf()).or_default();
+        bucket.bytes = bucket.bytes.saturating_add(bytes);
+        bucket.last_modified = bucket.last_modified.max(modified);
+    }
+
+    fn into_buckets(self) -> HashMap<PathBuf, Measure> {
+        self.counted
+            .into_iter()
+            .map(|(path, size)| (path, Measure::Counted(size)))
+            .chain(
+                self.elsewhere
+                    .into_iter()
+                    .map(|path| (path, Measure::Elsewhere)),
+            )
+            .collect()
+    }
+}
 pub(crate) fn physical_buckets(root: &Path, volume: Volume) -> BucketedSizes {
-    let mut counted: HashMap<PathBuf, BucketSize> = HashMap::new();
-    let mut elsewhere: Vec<PathBuf> = Vec::new();
+    let mut buckets = BucketWalk::default();
     let mut total = BucketSize::default();
     let mut issues = WalkIssues::default();
     let entered = walk(
@@ -115,36 +176,17 @@ pub(crate) fn physical_buckets(root: &Path, volume: Volume) -> BucketedSizes {
         None,
         &mut issues,
         |entry| match entry {
-            Visit::Dir(entry) => {
-                if entry.depth() == WORKTREE_DEPTH {
-                    counted.entry(entry.path().to_path_buf()).or_default();
-                }
-            }
-            Visit::Elsewhere(entry) => {
-                if entry.depth() == WORKTREE_DEPTH {
-                    elsewhere.push(entry.path().to_path_buf());
-                }
-            }
+            Visit::Dir(entry) => buckets.visit_dir(entry.path(), entry.depth(), false),
+            Visit::Elsewhere(entry) => buckets.visit_dir(entry.path(), entry.depth(), true),
             Visit::File(entry, meta) => {
-                let depth = entry.depth();
                 let bytes = physical_file_size(meta);
                 total.bytes = total.bytes.saturating_add(bytes);
                 total.last_modified = total.last_modified.max(modified_at(meta));
-                if depth > WORKTREE_DEPTH
-                    && let Some(path) = entry.path().ancestors().nth(depth - WORKTREE_DEPTH)
-                {
-                    let bucket = counted.entry(path.to_path_buf()).or_default();
-                    bucket.bytes = bucket.bytes.saturating_add(bytes);
-                    bucket.last_modified = bucket.last_modified.max(modified_at(meta));
-                }
+                buckets.visit_file(entry.depth(), bytes, modified_at(meta));
             }
         },
     );
-    let buckets = counted
-        .into_iter()
-        .map(|(path, size)| (path, Measure::Counted(size)))
-        .chain(elsewhere.into_iter().map(|path| (path, Measure::Elsewhere)))
-        .collect();
+    let buckets = buckets.into_buckets();
     BucketedSizes {
         total: if entered {
             Measure::Counted(total)

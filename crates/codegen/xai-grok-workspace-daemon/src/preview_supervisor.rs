@@ -255,8 +255,11 @@ fn build_preview_command(cfg: &PreviewArgs) -> io::Result<tokio::process::Comman
                 if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL as libc::c_ulong) == -1 {
                     return Err(io::Error::last_os_error());
                 }
-                // If the WS already exited (PDEATHSIG won't fire), exit before exec rather than orphan
-                if libc::getppid() as u32 != parent_pid {
+                // If the WS already exited (PDEATHSIG won't fire), exit
+                // before exec rather than orphan Compared as `pid_t`s.
+                let parent_matches =
+                    i32::try_from(parent_pid).is_ok_and(|parent| libc::getppid() == parent);
+                if !parent_matches {
                     libc::_exit(0);
                 }
                 // OOM score: when the protect env is on, raise the inherited -900 to -500 (needs no CAP_SYS_RESOURCE)

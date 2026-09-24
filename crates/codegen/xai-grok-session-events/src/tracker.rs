@@ -197,7 +197,7 @@ impl EventTracker {
         self.emit(Event::PermissionResolved {
             tool_name: tool_name.to_string(),
             decision,
-            wait_ms: start.elapsed().as_millis() as u64,
+            wait_ms: u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX),
         });
         self.emit(Event::PhaseChanged {
             phase: crate::types::Phase::ToolExecution,

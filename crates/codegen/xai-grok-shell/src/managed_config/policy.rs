@@ -46,15 +46,13 @@ pub(super) fn managed_policy_gate_decision(
 }
 
 pub(super) fn auth_mode(
-    has_deployment_key: bool,
     signed_in_team: &std::io::Result<bool>,
 ) -> xai_grok_telemetry::startup::AuthMode {
     use xai_grok_telemetry::startup::AuthMode;
-    match (has_deployment_key, signed_in_team) {
-        (true, _) => AuthMode::Deployment,
-        (false, Ok(true)) => AuthMode::Team,
-        (false, Ok(false)) => AuthMode::Personal,
-        (false, Err(_)) => AuthMode::Unknown,
+    match signed_in_team {
+        Ok(true) => AuthMode::Team,
+        Ok(false) => AuthMode::Personal,
+        Err(_) => AuthMode::Unknown,
     }
 }
 

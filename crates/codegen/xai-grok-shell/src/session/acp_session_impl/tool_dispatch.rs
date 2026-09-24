@@ -72,7 +72,7 @@ fn str_arg<'a>(args: &'a serde_json::Value, keys: &[&str]) -> Option<&'a str> {
 }
 
 /// Extract the workspace path that a tool call targets, to serialize concurrent same-file edits inside `execute_tool_calls`.
-/// `file_path`: grok_build (`search_replace`), opencode (`EditTool`, `WriteTool`, `ReadTool`), codex (`read_file`).
+/// `file_path`: grok_build (`search_replace`), opencode (`EditTool`, `WriteTool`, `ReadTool`).
 /// `target_directory` is deliberately omitted: a directory listing isn't an edit and must not share a file lock.
 pub(super) fn lock_path_for_args(args: &serde_json::Value, cwd: &Path) -> Option<String> {
     let input = Path::new(str_arg(args, &["file_path", "path", "target_file"])?);

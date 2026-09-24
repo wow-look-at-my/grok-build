@@ -339,6 +339,12 @@ pub fn render_turn_status(
     // floor it also carries how long it has been there, because "slow right
     // now" and "slow for the last 40 seconds" are different situations and
     // only the second one is about to reissue the request.
+    //
+    // A rate describes a stream in flight, and a row that reports it is waiting
+    // for the model has none. A reading left over from the previous model call
+    // would sit under that label and read as the wait being slow.
+    let output_rate = output_rate
+        .filter(|_| !matches!(activity, Some(TurnActivity::Waiting(WaitingReason::Model))));
     let rate_str = output_rate.map(format_output_rate).unwrap_or_default();
     let rate_width = rate_str.width();
 
@@ -658,9 +664,14 @@ const RETRY_REASON_MAX: usize = 80;
 /// neither.
 fn retry_label(attempt: u32, max_retries: u32, reason: &str, waiting_secs: Option<u64>) -> String {
     let reason = reason.trim();
+    let budget = if max_retries == u32::MAX {
+        "∞".to_string()
+    } else {
+        max_retries.to_string()
+    };
     let mut label = match waiting_secs {
-        Some(secs) if secs > 0 => format!("Retrying in {secs}s ({attempt}/{max_retries})"),
-        _ => format!("Retrying ({attempt}/{max_retries})"),
+        Some(secs) if secs > 0 => format!("Retrying in {secs}s ({attempt}/{budget})"),
+        _ => format!("Retrying ({attempt}/{budget})"),
     };
     if reason.is_empty() {
         label.push('…');
@@ -898,6 +909,42 @@ fn format_tokens_short(tokens: u64) -> String {
     }
 }
 
+/// Render a running turn's row through the real renderer, for tests outside
+/// this module that hold a tracker and an activity rather than a frame.
+#[cfg(test)]
+pub(crate) fn render_running_row(
+    activity: &Option<TurnActivity>,
+    rate: Option<crate::acp::tracker::OutputRate>,
+) -> String {
+    let args = TurnStatusArgs {
+        state: &AgentState::TurnRunning,
+        activity,
+        turn_elapsed: Some(Duration::from_secs(30)),
+        activity_started_at: None,
+        tick: 0,
+        drain_blocked: false,
+        buttons: Some(MouseButtons::default()),
+        has_running_execute: false,
+        total_tokens: None,
+        output_rate: rate,
+        session_starting_since: None,
+        is_bash_turn: false,
+        is_pending_user_input: false,
+        goal_harness: None,
+        watchers: Watchers::default(),
+        parked: false,
+        flat_background: false,
+        held_queue: 0,
+        held_queue_top_sendable: false,
+    };
+    let area = Rect::new(0, 0, 100, 1);
+    let mut buf = Buffer::empty(area);
+    render_turn_status(&mut buf, area, args);
+    (area.x..area.x + area.width)
+        .filter_map(|x| buf.cell((x, area.y)).map(|c| c.symbol().to_string()))
+        .collect::<String>()
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
@@ -939,6 +986,7 @@ mod tests {
     #[test]
     fn a_retry_with_no_reason_still_reads_as_one() {
         assert_eq!(retry_label(3, 5, "   ", Some(4)), "Retrying in 4s (3/5)…");
+        assert_eq!(retry_label(40, u32::MAX, "", None), "Retrying (40/∞)…");
     }
 
     /// Sendable waits = exactly the wait reasons the shell aborts on a queued
@@ -1393,6 +1441,50 @@ mod tests {
             "a slowdown reports how long it has run: {text:?}"
         );
         assert_eq!(fg, Some(theme.accent_error), "under the floor is red");
+    }
+
+    /// A row whose activity is "Waiting for response" has no stream to measure,
+    /// so a reading left over from the call that just ended does not belong on
+    /// it. Least of all one that had gone yellow or red, which reads as the
+    /// wait itself being slow.
+    #[test]
+    fn a_waiting_row_shows_no_output_rate_segment() {
+        let slow = crate::acp::tracker::OutputRate {
+            tokens_per_sec: 3.4,
+            window_secs: 10,
+            floor_tokens_per_sec: Some(10.0),
+            slow_for: Some(Duration::from_secs(41)),
+        };
+        let waiting = Some(TurnActivity::Waiting(WaitingReason::Model));
+        let mut args = idle_args(Watchers::default());
+        args.state = &AgentState::TurnRunning;
+        args.activity = &waiting;
+        args.turn_elapsed = Some(Duration::from_secs(30));
+        args.output_rate = Some(slow);
+
+        let text = render_row_text(args, 100);
+        assert!(
+            text.contains("Waiting for response"),
+            "the row must really be the waiting one: {text:?}"
+        );
+        assert!(
+            !text.contains("tok/s"),
+            "nothing is streaming, so no rate may show: {text:?}"
+        );
+
+        // Same reading, same timer, an activity that is a stream: the segment
+        // comes back, so the guard is the wait and not the number.
+        let responding = Some(TurnActivity::Responding);
+        let mut args = idle_args(Watchers::default());
+        args.state = &AgentState::TurnRunning;
+        args.activity = &responding;
+        args.turn_elapsed = Some(Duration::from_secs(30));
+        args.output_rate = Some(slow);
+        let text = render_row_text(args, 100);
+        assert!(
+            text.contains("3.4 tok/s (slow 41s)"),
+            "a live stream keeps its reading: {text:?}"
+        );
     }
 
     /// With no floor configured there is nothing to be near or under, so the

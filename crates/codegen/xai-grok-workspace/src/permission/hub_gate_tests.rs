@@ -128,6 +128,22 @@ fn daemon_tool_table() -> Vec<(&'static str, Value, Class)> {
             json!({"prompt": "p", "images": ["/tmp/a.png"], "aspect_ratio": "16:9"}),
             Class::Tool,
         ),
+        ("ci", json!({"action": "status"}), Class::Read),
+        (
+            "send_message",
+            json!({"to": "parent", "message": "done"}),
+            Class::AgentMessage,
+        ),
+        (
+            "copy_file",
+            json!({"source": "/tmp/a", "destination": "/tmp/b"}),
+            Class::Write,
+        ),
+        (
+            "move_file",
+            json!({"source": "/tmp/a", "destination": "/tmp/b"}),
+            Class::Write,
+        ),
         ("memory_search", json!({"query": "q"}), Class::Read),
         ("memory_get", json!({"path": "notes.md"}), Class::Read),
         (

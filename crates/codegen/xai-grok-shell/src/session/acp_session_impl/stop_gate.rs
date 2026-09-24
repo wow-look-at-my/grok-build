@@ -214,7 +214,7 @@ impl SessionActor {
         tokio::task::spawn_blocking(move || {
             use xai_grok_tools::implementations::grok_build::ci;
             let branch = ci::current_branch(&cwd)?;
-            let runs = match ci::fetch_runs(&cwd, &branch, 10) {
+            let runs = match ci::fetch_runs(&cwd, &branch, 10, None) {
                 Ok(runs) => runs,
                 Err(error) => {
                     tracing::warn!(branch = %branch, %error, "stop gate: could not read CI, allowing the stop");
@@ -776,7 +776,7 @@ mod todo_stop_gate_tests {
     /// End-to-end over the real evaluator: real todo inputs decide it.
     #[test]
     fn rides_the_real_todo_gate_evaluation() {
-        let pending = vec!["fix-round-1"];
+        let pending = vec![("t1", "fix-round-1")];
         let input = TodoGateInput {
             pending: pending.clone(),
             in_progress_unbacked: Vec::new(),
@@ -792,7 +792,7 @@ mod todo_stop_gate_tests {
         let done = TodoGateInput {
             pending: Vec::new(),
             in_progress_unbacked: Vec::new(),
-            in_progress_backed: vec!["watched-by-bash"],
+            in_progress_backed: vec![("t2", "watched-by-bash")],
             backing_task_count: 1,
         };
         assert!(!todo_stop_gate_blocks(true, 0, &evaluate_todo_gate(&done)));

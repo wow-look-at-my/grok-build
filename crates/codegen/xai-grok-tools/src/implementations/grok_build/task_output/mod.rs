@@ -536,13 +536,24 @@ pub(crate) async fn wait_any_event_driven(
         let id = id.clone();
         let timeout = remaining;
         let done = done.clone();
-        waits.push(
-            tokio::spawn(async move {
-                terminal.wait_for_completion(&id, Some(timeout)).await;
-                done.notify_waiters();
-            })
-            .abort_handle(),
-        );
+        // The handle lives in `waits`, which `AbortWaitsOnDrop` tears down on
+        // every exit path, and the body reports its own panic through `guarded`.
+        #[allow(clippy::disallowed_methods)]
+        let wait = tokio::spawn(async move {
+            // Guarded, because `done` is the only thing this caller can be
+            // woken by: a round that died mid-flight would leave the tool
+            // parked until its deadline on a wait that no longer exists.
+            // The panic is logged against the task and the caller is woken
+            // to re-read the real task state.
+            let round = crate::util::detached::guarded(
+                "task output bash wait",
+                terminal.wait_for_completion(&id, Some(timeout)),
+            )
+            .await;
+            done.notify_waiters();
+            round
+        });
+        waits.push(wait.abort_handle());
     }
 
     for id in subagent_ids {
@@ -551,13 +562,19 @@ pub(crate) async fn wait_any_event_driven(
             let id = id.clone();
             let timeout_ms = remaining.as_millis() as u64;
             let done = done.clone();
-            waits.push(
-                tokio::spawn(async move {
-                    let _ = be.backend().query(&id, true, Some(timeout_ms)).await;
-                    done.notify_waiters();
-                })
-                .abort_handle(),
-            );
+            // As above: `waits` owns the handle and `AbortWaitsOnDrop` drains
+            // it; the body answers its own failure through `guarded`.
+            #[allow(clippy::disallowed_methods)]
+            let wait = tokio::spawn(async move {
+                let round = crate::util::detached::guarded(
+                    "task output subagent wait",
+                    be.backend().query(&id, true, Some(timeout_ms)),
+                )
+                .await;
+                done.notify_waiters();
+                round
+            });
+            waits.push(wait.abort_handle());
         }
     }
 
@@ -585,15 +602,20 @@ pub(crate) async fn wait_all_event_driven(
         return WaitOutcome::DeadlineElapsed;
     }
 
-    let mut handles: Vec<tokio::task::JoinHandle<()>> = Vec::new();
+    let mut handles: Vec<(String, tokio::task::JoinHandle<()>)> = Vec::new();
 
     for id in bash_ids {
         let terminal = terminal.clone();
         let id = id.clone();
         let timeout = remaining;
-        handles.push(tokio::spawn(async move {
+        let label = id.clone();
+        // `join_all` below awaits this handle, and `AbortWaitsOnDrop` aborts it
+        // if this future is cancelled first.
+        #[allow(clippy::disallowed_methods)]
+        let wait = tokio::spawn(async move {
             terminal.wait_for_completion(&id, Some(timeout)).await;
-        }));
+        });
+        handles.push((label, wait));
     }
 
     for id in subagent_ids {
@@ -601,19 +623,48 @@ pub(crate) async fn wait_all_event_driven(
             let be = be.clone();
             let id = id.clone();
             let timeout_ms = remaining.as_millis() as u64;
-            handles.push(tokio::spawn(async move {
+            let label = id.clone();
+            // Awaited by the `join_all` below and aborted by
+            // `AbortWaitsOnDrop` on the cancellation path.
+            #[allow(clippy::disallowed_methods)]
+            let wait = tokio::spawn(async move {
                 let _ = be.backend().query(&id, true, Some(timeout_ms)).await;
-            }));
+            });
+            handles.push((label, wait));
         }
     }
 
     // Tear the helper waits down on every exit path: all complete, deadline,
     // or cancellation of this future (see `AbortWaitsOnDrop`).
-    let _guard = AbortWaitsOnDrop(handles.iter().map(|h| h.abort_handle()).collect());
+    let _guard = AbortWaitsOnDrop(handles.iter().map(|(_, h)| h.abort_handle()).collect());
 
-    let all_fut = futures_util::future::join_all(handles);
+    let all_fut = futures_util::future::join_all(
+        handles
+            .into_iter()
+            .map(|(id, handle)| async move { (id, handle.await) }),
+    );
     let outcome = tokio::select! {
-        _ = all_fut => WaitOutcome::CompletedEarly,
+        rounds = all_fut => {
+            // `CompletedEarly` is the claim that every task finished. A round
+            // that came back with a `JoinError` proved nothing about its task,
+            // so the claim is withheld: the caller re-reads every task anyway,
+            // and the deadline hint is the honest one for a task nobody could
+            // confirm.
+            let unconfirmed: Vec<(&str, String)> = rounds
+                .iter()
+                .filter(|(_, round)| round.is_err())
+                .map(|(id, round)| (id.as_str(), round.as_ref().unwrap_err().to_string()))
+                .collect();
+            if unconfirmed.is_empty() {
+                WaitOutcome::CompletedEarly
+            } else {
+                tracing::error!(
+                    unconfirmed = ?unconfirmed,
+                    "task output completion waits ended without an answer"
+                );
+                WaitOutcome::DeadlineElapsed
+            }
+        }
         _ = tokio::time::sleep_until(deadline) => WaitOutcome::DeadlineElapsed,
     };
     finalize_wait_outcome(outcome, deadline)
@@ -1619,6 +1670,89 @@ mod tests {
         assert!(
             !msg.contains("task-a") && !msg.contains("task-b"),
             "msg: {msg}"
+        );
+    }
+
+    /// A terminal whose completion wait dies instead of answering.
+    struct PanickingWaitTerminal;
+
+    #[async_trait::async_trait]
+    impl TerminalBackend for PanickingWaitTerminal {
+        async fn run(
+            &self,
+            _request: TerminalRunRequest,
+        ) -> Result<TerminalRunResult, crate::computer::types::ComputerError> {
+            unimplemented!()
+        }
+
+        async fn run_background(
+            &self,
+            _request: TerminalRunRequest,
+        ) -> Result<BackgroundHandle, crate::computer::types::ComputerError> {
+            unimplemented!()
+        }
+
+        async fn kill_task(&self, _task_id: &str) -> KillOutcome {
+            unimplemented!()
+        }
+
+        async fn get_task(&self, _task_id: &str) -> Option<TaskSnapshot> {
+            None
+        }
+
+        async fn wait_for_completion(
+            &self,
+            _task_id: &str,
+            _timeout: Option<Duration>,
+        ) -> Option<TaskSnapshot> {
+            panic!("the terminal actor died while waiting for a task")
+        }
+
+        async fn list_tasks(&self) -> Vec<TaskSnapshot> {
+            Vec::new()
+        }
+    }
+
+    /// The caller of a multi-task wait is parked on one `Notify` that only
+    /// these spawned rounds can wake, so a round that died has to wake it
+    /// anyway: otherwise the tool sits out the whole wait budget on a wait that
+    /// no longer exists, with the turn stopped in front of it.
+    #[tokio::test(start_paused = true)]
+    async fn a_panicking_bash_wait_still_releases_the_waiter() {
+        let terminal: Arc<dyn TerminalBackend> = Arc::new(PanickingWaitTerminal);
+        let outcome = wait_any_event_driven(
+            &terminal,
+            &None,
+            &["bg-1".to_string()],
+            &[],
+            tokio::time::Instant::now() + Duration::from_secs(30 * 60),
+        )
+        .await;
+        assert_eq!(
+            outcome,
+            WaitOutcome::CompletedEarly,
+            "a dead wait must wake the caller rather than leave it parked"
+        );
+    }
+
+    /// `CompletedEarly` from the wait-all path claims every task finished. A
+    /// round that died proves nothing, so the claim is withheld and the caller
+    /// is left with the deadline hint rather than an early-return one.
+    #[tokio::test(start_paused = true)]
+    async fn a_panicking_wait_all_round_is_not_reported_as_all_complete() {
+        let terminal: Arc<dyn TerminalBackend> = Arc::new(PanickingWaitTerminal);
+        let outcome = wait_all_event_driven(
+            &terminal,
+            &None,
+            &["bg-1".to_string()],
+            &[],
+            tokio::time::Instant::now() + Duration::from_secs(30 * 60),
+        )
+        .await;
+        assert_eq!(
+            outcome,
+            WaitOutcome::DeadlineElapsed,
+            "a task nobody saw finish must not be reported as completed"
         );
     }
 

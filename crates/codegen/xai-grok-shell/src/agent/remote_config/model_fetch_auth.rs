@@ -13,19 +13,16 @@ use xai_grok_login::{GrokAuth, GrokComConfig};
 pub(crate) enum ModelFetchAuth {
     Session,
     ApiKey,
-    Deployment,
     CustomEndpoint,
 }
 
 impl ModelFetchAuth {
-    /// Precedence: custom_endpoint, then session, then deployment, then API key.
+    /// Precedence: custom_endpoint, then session, then API key.
     pub(crate) fn resolve(endpoints: &config::EndpointsConfig, has_cached_session: bool) -> Self {
         if endpoints.has_custom_endpoint() {
             Self::CustomEndpoint
         } else if has_cached_session {
             Self::Session
-        } else if endpoints.deployment_key.is_some() {
-            Self::Deployment
         } else if crate::agent::auth_method::has_xai_api_key_env() {
             Self::ApiKey
         } else {
@@ -37,7 +34,6 @@ impl ModelFetchAuth {
         match self {
             Self::CustomEndpoint | Self::ApiKey => CacheAuthMethod::ApiKey,
             Self::Session => CacheAuthMethod::Session,
-            Self::Deployment => CacheAuthMethod::Deployment,
         }
     }
 }
@@ -47,7 +43,6 @@ impl ModelFetchAuth {
 pub(crate) enum CacheAuthMethod {
     Session,
     ApiKey,
-    Deployment,
 }
 
 /// The full disk-cache scope for the model catalog, resolved atomically from the
@@ -80,11 +75,6 @@ impl ModelsCacheScope {
                 let key = read_xai_api_key_env().unwrap_or_default();
                 scope_hash(&["models-api-key", key.as_str(), alpha.unwrap_or("")])
             }
-            ModelFetchAuth::Deployment => scope_hash(&[
-                "models-deployment",
-                endpoints.deployment_key.as_deref().unwrap_or(""),
-                alpha.unwrap_or(""),
-            ]),
             // Custom endpoints authenticate with `XAI_API_KEY` or fall back to the session bearer (oai.rs).
             // A BYOK key is stable so it scopes two keys apart; the session bearer rotates, so key the
             // session case on the stable account identity (like the settings cache) to survive refresh.

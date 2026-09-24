@@ -807,7 +807,9 @@ async fn harvest_leaves_rows_that_own_their_turn_queued() {
                 );
 
                 state.pending_inputs.push_back(user_item("edit1", "A"));
-                state.combine_edit_holds.insert("edit1".to_string());
+                state
+                    .edit_holds
+                    .insert("edit1".to_string(), std::time::Instant::now());
 
                 state.pending_inputs.push_back(user_item("plain1", "A"));
             }

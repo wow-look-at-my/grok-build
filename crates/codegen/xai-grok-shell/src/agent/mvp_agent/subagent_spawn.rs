@@ -53,7 +53,8 @@ impl MvpAgent {
                 ps.as_ref()
                     .map(|h| std::path::PathBuf::from(&h.info.cwd))
                     .unwrap_or_default(),
-                ps.as_ref().and_then(|h| h.allowed_subagent_types.clone()),
+                ps.as_ref()
+                    .and_then(|h| h.allowed_subagent_types.lock().clone()),
             )
         };
         let (cli_agent_names, subagent_toggle) = {
@@ -396,7 +397,7 @@ impl MvpAgent {
             parent_model_agent_type,
             allowed_subagent_types: parent_handle
                 .as_ref()
-                .and_then(|h| h.allowed_subagent_types.clone()),
+                .and_then(|h| h.allowed_subagent_types.lock().clone()),
             parent_mcp_configs: parent_handle
                 .as_ref()
                 .map(|h| crate::session::agent_mcp::mcp_servers_for_fork(&h.mcp_servers))

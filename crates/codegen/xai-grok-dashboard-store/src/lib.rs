@@ -26,6 +26,7 @@
 //!   The typed errors ([`StoreError::Unusable`], [`StoreError::NewerSchema`]) leave recovery to the user.
 
 #![deny(clippy::indexing_slicing)]
+#![allow(clippy::cast_possible_wrap)]
 
 use std::path::{Path, PathBuf};
 

@@ -1,30 +1,8 @@
-//! The deployment-config fetch/response contract: the credential source and its errors, response parsing, and envelope picking.
+//! The managed-config fetch/response contract: its errors, response parsing, and envelope picking.
 //! Also holds fetched-envelope verification and the apply outcome the sync orchestration consumes.
 
 use serde::{Deserialize, Serialize};
 use xai_grok_config::signed_policy::now_unix;
-
-/// Which credential a config fetch used; serde: recorded in the staged refresh.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub(super) enum ManagedConfigSource {
-    DeploymentKey,
-    TeamOauth,
-}
-
-impl ManagedConfigSource {
-    pub(super) fn is_team(self) -> bool {
-        matches!(self, Self::TeamOauth)
-    }
-
-    /// The 401/403 error tailored to the credential (don't tell a team user to check `GROK_DEPLOYMENT_KEY`).
-    pub(super) fn auth_rejected_error(self) -> ManagedConfigError {
-        if self.is_team() {
-            ManagedConfigError::TeamAuthRejected
-        } else {
-            ManagedConfigError::DeploymentKeyRejected
-        }
-    }
-}
 
 #[derive(Debug, thiserror::Error)]
 pub enum ManagedConfigError {
@@ -42,10 +20,6 @@ pub enum ManagedConfigError {
         "The connection to the server was interrupted or timed out before completing. This is usually temporary; please try again.\n  ({0})"
     )]
     ConnectionInterrupted(String),
-    #[error(
-        "The deployment key was rejected. Confirm that GROK_DEPLOYMENT_KEY is set correctly and hasn't expired."
-    )]
-    DeploymentKeyRejected,
     #[error(
         "Your team sign-in was rejected. It may have expired or lack access. Run `grok login` to sign in again."
     )]
@@ -79,7 +53,7 @@ impl ManagedConfigError {
 
     /// Auth or eligibility rejection (no access or expired session); retrying cannot fix it.
     pub fn is_auth_rejection(&self) -> bool {
-        matches!(self, Self::TeamAuthRejected | Self::DeploymentKeyRejected)
+        matches!(self, Self::TeamAuthRejected)
     }
 }
 

@@ -203,7 +203,7 @@ async fn pre_tool_use_rewrite_may_not_change_which_tool_runs() {
                 function: crate::sampling::types::ToolCallFunction::new(
                     "use_tool",
                     r#"{"tool_name":"linear__list_issues","tool_input":{}}"#,
-                ),
+                ), vendor: Default::default(),
             };
             let result = prepare_call(&actor, call).await;
             assert!(

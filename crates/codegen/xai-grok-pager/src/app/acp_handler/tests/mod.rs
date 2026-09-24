@@ -1105,6 +1105,7 @@ pub(super) fn xai_turn_completed_notif_with_cost(
             prompt_id: prompt_id.into(),
             stop_reason: "end_turn".into(),
             agent_result: None,
+            error_kind: None,
             usage: Some(PromptUsage {
                 totals: PromptUsageModel {
                     input_tokens: 10,
@@ -1263,6 +1264,31 @@ pub(super) fn send_replay_bash_tool_call(
         }),
         app,
     );
+}
+/// Build a transient `OutputRate` update on the `x.ai/session/update` rail,
+/// the live tokens/sec the shell publishes while a response is streaming.
+/// Built through the typed `SessionNotification` so the wire shape can't drift
+/// from what the dispatch parses.
+pub(super) fn xai_output_rate_notif(
+    session_id: &str,
+    tokens_per_sec: f64,
+    floor_tokens_per_sec: Option<f64>,
+    slow_for_ms: Option<u64>,
+) -> acp::ExtNotification {
+    let payload = SessionNotification {
+        session_id: acp::SessionId::new(session_id),
+        update: XaiSessionUpdate::OutputRate {
+            tokens_per_sec,
+            window_secs: 10,
+            floor_tokens_per_sec,
+            slow_for_ms,
+        },
+        meta: None,
+    };
+    acp::ExtNotification::new(
+        "x.ai/session/update",
+        std::sync::Arc::from(serde_json::value::to_raw_value(&payload).unwrap()),
+    )
 }
 /// Build a durable `TurnCompleted` update on the `x.ai/session/update` rail, optionally stamped `isReplay`.
 /// Built through the typed `SessionNotification` so the wire shape can't drift from what the dispatch parses.
@@ -2522,4 +2548,5 @@ mod background_tasks;
 mod models;
 mod mcp;
 mod git_head;
+mod thinking_summary;
 mod version_mismatch;

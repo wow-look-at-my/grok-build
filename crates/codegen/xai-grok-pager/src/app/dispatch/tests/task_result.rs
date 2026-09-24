@@ -503,7 +503,7 @@ fn foreign_resume_results_require_launch_token_and_canonical_cwd() {
             canonical_cwd: canonical_cwd.clone(),
             launch_token: launch_token + 1,
             hint: Some(foreign_resume_hint(
-                xai_grok_foreign_sessions::ForeignSessionTool::Codex,
+                xai_grok_foreign_sessions::ForeignSessionTool::Cursor,
             )),
         }),
         &mut stale,
@@ -1888,7 +1888,7 @@ fn delete_session_complete_removes_only_matching_source_and_id() {
     use crate::views::modal::ActiveModal;
     let mut app = test_app_with_agent();
     let mut foreign_same_id = make_picker_entry("s1", "/r");
-    foreign_same_id.source = "codex".into();
+    foreign_same_id.source = "cursor".into();
     let mut remote_same_id = make_picker_entry("s1", "/r");
     remote_same_id.source = "remote".into();
     open_session_picker_with(
@@ -1902,7 +1902,7 @@ fn delete_session_complete_removes_only_matching_source_and_id() {
         ],
     );
     let mut welcome_foreign = make_picker_entry("s1", "/r");
-    welcome_foreign.source = "codex".into();
+    welcome_foreign.source = "cursor".into();
     let mut welcome_remote = make_picker_entry("s1", "/r");
     welcome_remote.source = "remote".into();
     app.session_picker_entries = Some(vec![
@@ -1948,7 +1948,7 @@ fn delete_session_complete_removes_only_matching_source_and_id() {
         identities,
         vec![
             ("local", "s0"),
-            ("codex", "s1"),
+            ("cursor", "s1"),
             ("remote", "s1"),
             ("local", "s2"),
         ]
@@ -1964,7 +1964,7 @@ fn delete_session_complete_removes_only_matching_source_and_id() {
         .iter()
         .map(|entry| (entry.source.as_str(), entry.id.as_str()))
         .collect();
-    assert_eq!(welcome_identities, vec![("codex", "s1"), ("remote", "s1")]);
+    assert_eq!(welcome_identities, vec![("cursor", "s1"), ("remote", "s1")]);
 }
 
 #[test]
@@ -1976,7 +1976,7 @@ fn delete_both_session_clears_modal_and_welcome_content_hits() {
     let mut both = make_picker_entry("shared", "/r");
     both.source = "both".into();
     let mut foreign = make_picker_entry("shared", "/r");
-    foreign.source = "codex".into();
+    foreign.source = "cursor".into();
     open_session_picker_with(&mut app, vec![both.clone(), foreign.clone()]);
     let hit = xai_grok_shell::extensions::session_search::SearchSessionHit {
         session_id: "shared".into(),
@@ -2027,7 +2027,7 @@ fn delete_both_session_clears_modal_and_welcome_content_hits() {
             .iter()
             .map(|entry| (entry.source.as_str(), entry.id.as_str()))
             .collect::<Vec<_>>(),
-        vec![("codex", "shared")]
+        vec![("cursor", "shared")]
     );
     assert!(modal_hits.is_empty());
     let modal_map = build_entry_map(
@@ -2053,7 +2053,7 @@ fn delete_both_session_clears_modal_and_welcome_content_hits() {
             .iter()
             .map(|entry| (entry.source.as_str(), entry.id.as_str()))
             .collect::<Vec<_>>(),
-        vec![("codex", "shared")]
+        vec![("cursor", "shared")]
     );
     assert!(welcome_hits.is_empty());
     let welcome_map = build_entry_map(

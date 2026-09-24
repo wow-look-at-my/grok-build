@@ -77,7 +77,6 @@ async fn external_stream_end_to_end() {
         email: Some(OAUTH_EMAIL.into()),
         organization_id: None,
         team_id: None,
-        deployment_id: None,
     });
 
     assert!(!xai_grok_telemetry::is_enabled());

@@ -639,12 +639,12 @@ pub(crate) fn force_reasoning_effort_support(
     }
 }
 
-/// Add a provider-qualified catalog (Codex, or an autodetected
+/// Add a provider-qualified catalog (an autodetected
 /// `[model_providers.<id>]`) to the resolved xAI/custom catalog.
 ///
 /// Provider entries are deliberately kept outside `prefetched`: xAI auth
-/// refreshes and cache reloads may replace that catalog wholesale, while an
-/// independent Codex sign-in or a provider's own listing must remain available.
+/// refreshes and cache reloads may replace that catalog wholesale.
+/// provider's own listing must remain available.
 /// User model filters still apply uniformly to every provider.
 pub(crate) fn merge_additive_catalog(
     cfg: &config::Config,

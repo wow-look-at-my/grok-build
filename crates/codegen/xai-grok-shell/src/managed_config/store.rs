@@ -6,9 +6,7 @@ use super::policy::{
     GateSnapshot, ManagedPolicyRefusal, auth_mode, claim_binds_to, served_principal_of,
     write_failure_is_deny,
 };
-use super::response::{
-    ApplyOutcome, ManagedConfigResponse, ManagedConfigSource, verify_signed_envelope,
-};
+use super::response::{ApplyOutcome, ManagedConfigResponse, verify_signed_envelope};
 
 /// Server-synced policy artifacts; excludes the sync marker.
 pub const MANAGED_ARTIFACT_FILES: [&str; 4] = [
@@ -127,9 +125,7 @@ pub(super) fn team_principal_signed_in() -> std::io::Result<bool> {
 /// Best-effort; a fail_closed opt-in is kept — swapping `auth.json` must not escape policy.
 pub fn clear_orphan() {
     // Env switch only: a served `[features] managed_config = false` must not veto evicting itself.
-    if crate::agent::config::env_bool("GROK_MANAGED_CONFIG") == Some(false)
-        || resolve_deployment_key().is_some()
-    {
+    if crate::agent::config::env_bool("GROK_MANAGED_CONFIG") == Some(false) {
         return;
     }
     match team_principal_signed_in() {
@@ -239,7 +235,7 @@ pub(super) fn gate_snapshot_locked(home: &std::path::Path) -> GateSnapshot {
     }
 }
 
-/// Marker-scoped: key-scoped markers never purge here, and config.toml blips are not switches.
+/// Marker-scoped: a config.toml blip is not a switch.
 fn purge_prior_tenant_locked(home: &std::path::Path) {
     let crate::config::ServingIdentity::Team(team_id) = current_serving_identity_any_expiry()
     else {
@@ -293,7 +289,7 @@ pub(super) fn apply_managed_config(
         match content.filter(|s| !s.is_empty()) {
             Some(content) => {
                 clear_squatting_dir(&path);
-                // 0o600: `managed_config` can embed the enforced deployment key.
+                // 0o600: the served policy is private to this user.
                 match xai_grok_config::fs_atomic::write_atomically(&path, content, Some(0o600)) {
                     Ok(()) => changed = true,
                     Err(e) => {
@@ -325,9 +321,7 @@ pub(super) fn apply_managed_config(
 
 pub(super) fn apply_fetched(
     body: &ManagedConfigResponse,
-    source: ManagedConfigSource,
     new_principal: Option<&str>,
-    new_key_fingerprint: Option<&str>,
     parked_at: Option<u64>,
 ) -> std::io::Result<ApplyOutcome> {
     // Verify before lock/persist: prior trusted policy survives a bad fetch.
@@ -342,15 +336,13 @@ pub(super) fn apply_fetched(
     } else {
         None
     };
-    let signed_deployment_id = verified
-        .as_ref()
-        .and_then(|v| v.payload.deployment_id.clone());
     let home = crate::util::grok_home::grok_home();
     let Some(_lock) = try_lock_managed_config(&home) else {
         tracing::debug!("managed config locked by another process; skipping apply");
         return Ok(ApplyOutcome::Skipped);
     };
-    if !credential_present(source) {
+    // Unreadable `auth.json` keeps, like `clear_orphan`.
+    if !team_principal_signed_in().unwrap_or(true) {
         tracing::info!("credential gone since fetch started; skipping apply");
         return Ok(ApplyOutcome::Skipped);
     }
@@ -360,11 +352,7 @@ pub(super) fn apply_fetched(
     {
         return Ok(ApplyOutcome::StaleStage);
     }
-    let identity_changed = crate::config::managed_config_identity_changed_at(
-        &home,
-        new_principal,
-        new_key_fingerprint,
-    );
+    let identity_changed = crate::config::managed_config_identity_changed_at(&home, new_principal);
     let wrote = match apply_managed_config(&home, body) {
         // A switch's destructive half lands only with its constructive half: the policy
         // files are converged above, so only the prior principal's sidecars go.
@@ -377,7 +365,7 @@ pub(super) fn apply_fetched(
         // Sandbox write-deny (trust-boundary set, H1-3969489): park the verified response
         // for the next boot. Only the deny class stages, never unverified content.
         Err(e) if verified.is_some() && write_failure_is_deny(&e) => {
-            stage_refresh(&home, body, source, new_principal, new_key_fingerprint)?;
+            stage_refresh(&home, body, new_principal)?;
             tracing::info!(
                 error = %e,
                 "policy files write-denied in this process; staged the verified refresh for the next boot"
@@ -405,16 +393,10 @@ pub(super) fn apply_fetched(
     crate::config::mark_managed_config_synced_at(
         &home,
         crate::config::SyncMarker {
-            // DK: prefer verified payload deployment id (signed-empty only has it there).
-            // Team: always the serving team — a deployment-signed envelope must not rebind it.
-            principal: if new_key_fingerprint.is_some() {
-                signed_deployment_id.as_deref().or(new_principal)
-            } else {
-                new_principal
-            },
+            // Always the serving team — a deployment-signed envelope must not rebind it.
+            principal: new_principal,
             had_managed_config: body.has_managed_config(),
             had_requirements: body.has_requirements(),
-            key_fingerprint: new_key_fingerprint,
             fail_closed: body.requirements_fail_closed(),
         },
     );
@@ -431,11 +413,12 @@ pub(super) fn staged_refresh_path(home: &std::path::Path) -> std::path::PathBuf 
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct StagedRefresh {
-    source: ManagedConfigSource,
     principal: Option<String>,
+    /// Only an older build's deployment-key stage sets this. Such a stage is discarded unread.
+    #[serde(default, skip_serializing)]
     key_fingerprint: Option<String>,
     response: ManagedConfigResponse,
-    /// Park time under the apply flock (the marker's clock); 0 = legacy, never applied.
+    /// Park time under the apply flock (the marker's clock). A zero is a legacy stage that never applies.
     #[serde(default)]
     parked_at: u64,
 }
@@ -443,14 +426,11 @@ struct StagedRefresh {
 fn stage_refresh(
     home: &std::path::Path,
     body: &ManagedConfigResponse,
-    source: ManagedConfigSource,
     principal: Option<&str>,
-    key_fingerprint: Option<&str>,
 ) -> std::io::Result<()> {
     let staged = StagedRefresh {
-        source,
         principal: principal.map(str::to_owned),
-        key_fingerprint: key_fingerprint.map(str::to_owned),
+        key_fingerprint: None,
         response: body.clone(),
         parked_at: std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -481,9 +461,7 @@ pub(super) fn apply_staged_managed_config() {
         let _ = std::fs::remove_file(&path);
         return;
     };
-    // A key configured or rotated since the stage re-fetches instead of rebinding.
-    let current_fingerprint = resolve_deployment_key().map(|key| deployment_key_fingerprint(&key));
-    if staged.key_fingerprint != current_fingerprint {
+    if staged.key_fingerprint.is_some() {
         let _ = std::fs::remove_file(&path);
         return;
     }
@@ -496,9 +474,7 @@ pub(super) fn apply_staged_managed_config() {
     }
     match apply_fetched(
         &staged.response,
-        staged.source,
         staged.principal.as_deref(),
-        staged.key_fingerprint.as_deref(),
         Some(staged.parked_at),
     ) {
         // Lock contended: the holder's own sync supersedes; retry next boot.
@@ -550,45 +526,6 @@ fn evict_prior_sidecars(home: &std::path::Path) {
     }
 }
 
-/// Mirrors `clear_orphan`'s fail-safe checks (an unreadable `auth.json` keeps, not drops).
-fn credential_present(source: ManagedConfigSource) -> bool {
-    match source {
-        ManagedConfigSource::DeploymentKey => resolve_deployment_key().is_some(),
-        ManagedConfigSource::TeamOauth => team_principal_signed_in().unwrap_or(true),
-    }
-}
-
-/// The server deployment UUID on a marker fingerprint match, else UUIDv5 of the key.
-pub(crate) fn resolve_deployment_id(deployment_key: Option<&str>) -> Option<String> {
-    let key = deployment_key.filter(|k| !k.is_empty())?;
-    crate::config::managed_deployment_id(&deployment_key_fingerprint(key))
-        .or_else(|| Some(crate::agent::config::deployment_id_from_key(key)))
-}
-
-pub(crate) fn resolve_deployment_key() -> Option<String> {
-    let config_val = crate::config::load_effective_config()
-        .map_err(|e| tracing::warn!("failed to load config files for deployment key: {e}"))
-        .ok()
-        .and_then(|root| {
-            root.get("endpoints")?
-                .get("deployment_key")?
-                .as_str()
-                .map(|s| s.to_owned())
-        });
-    crate::agent::config::resolve_string_flag(
-        None,
-        "GROK_DEPLOYMENT_KEY",
-        config_val.as_deref(),
-        None,
-    )
-    .map(|r| r.value)
-}
-
-/// Deterministic so the same key matches its marker; the raw key is never written to disk.
-pub(super) fn deployment_key_fingerprint(key: &str) -> String {
-    blake3::hash(key.as_bytes()).to_hex().to_string()
-}
-
 /// Overlay-free read: a `GROK_CONFIG` overlay must not suppress a policy-enforcement sync.
 pub fn is_fetch_enabled() -> bool {
     if let Some(v) = crate::agent::config::env_bool("GROK_MANAGED_CONFIG") {
@@ -601,21 +538,16 @@ pub fn is_fetch_enabled() -> bool {
 }
 
 pub fn has_principal() -> bool {
-    resolve_deployment_key().is_some() || read_active_team_auth().is_some()
+    read_active_team_auth().is_some()
 }
 
 /// Ignores expiry so a backdated `auth.json` can't disarm the gate; unreadable = present.
 pub(super) fn managed_principal_present() -> bool {
-    resolve_deployment_key().is_some() || team_principal_signed_in().unwrap_or(true)
+    team_principal_signed_in().unwrap_or(true)
 }
 
 fn serving_identity_from(team_id: Option<String>) -> crate::config::ServingIdentity {
     use crate::config::ServingIdentity;
-    if let Some(key) = resolve_deployment_key() {
-        return ServingIdentity::DeploymentKey {
-            fingerprint: deployment_key_fingerprint(&key),
-        };
-    }
     // Trimmed and blank = unknown, matching the marker write.
     match crate::config::normalize_identity(team_id.as_deref()) {
         Some(team_id) => ServingIdentity::Team(team_id),
@@ -627,7 +559,7 @@ pub fn current_serving_identity() -> crate::config::ServingIdentity {
     serving_identity_from(read_active_team_auth().and_then(|a| a.team_id))
 }
 
-/// Ignores expiry; no deployment-key special case, or envelope binding would be off for team users.
+/// Ignores expiry: the binding must survive the cold-start expired window.
 pub(super) fn active_team_id_any_expiry() -> Option<String> {
     let team = read_team_principal().ok().flatten()?;
     // The id must read the same everywhere it feeds (gate, purge, envelope binding).
@@ -639,8 +571,5 @@ pub(super) fn current_serving_identity_any_expiry() -> crate::config::ServingIde
 }
 
 pub fn classify_auth_mode() -> xai_grok_telemetry::startup::AuthMode {
-    auth_mode(
-        resolve_deployment_key().is_some(),
-        &team_principal_signed_in(),
-    )
+    auth_mode(&team_principal_signed_in())
 }

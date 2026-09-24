@@ -1,5 +1,4 @@
-//! The external stream carries no first party credential: the real exporter, configured from
-//! `exporter_env()` alone, sends no `authorization` header.
+//! The external stream sends no earliest party credential. In this build it sends nothing at all.
 
 use std::time::Duration;
 
@@ -14,14 +13,17 @@ async fn external_stream_carries_no_first_party_credential() {
     let server = MockOtelServer::start().await.unwrap();
     let env = server.exporter_env();
     let mut cfg = ExternalOtelConfig::resolve_with(|name| env.get(name).cloned(), None)
-        .expect("exporter_env resolves to an active external stream");
+        .expect("exporter_env resolves to a double opt-in config");
     cfg.client = ExternalClientInfo {
         service_version: "0.0.0-test".into(),
         client_version: "0.0.0-test".into(),
         app_entrypoint: "cli".into(),
     };
     xai_grok_telemetry::external::init(Some(cfg));
-    assert!(xai_grok_telemetry::external::is_active());
+    assert!(
+        !xai_grok_telemetry::external::is_active(),
+        "external OTLP stream is hard-disabled in the build baseline"
+    );
 
     xai_grok_telemetry::log_event(SessionNew {
         session_id: "sess-collector-1".into(),
@@ -33,16 +35,16 @@ async fn external_stream_carries_no_first_party_credential() {
     tokio::task::spawn_blocking(xai_grok_telemetry::external::flush)
         .await
         .unwrap();
-    server
-        .recorder()
-        .wait_for_events(Duration::from_secs(10), |events| !events.is_empty())
-        .await
-        .unwrap();
+    tokio::time::sleep(Duration::from_millis(600)).await;
     tokio::task::spawn_blocking(xai_grok_telemetry::external::shutdown)
         .await
         .unwrap();
 
     let exports = server.recorder().exports();
+    assert!(
+        exports.is_empty(),
+        "disabled external stream must export nothing"
+    );
     assert_eq!(
         vec![None; exports.len()],
         exports

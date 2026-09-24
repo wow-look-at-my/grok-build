@@ -20,6 +20,7 @@ fn image_gen_call(id: &str) -> ToolCallResponse {
             "image_gen",
             r#"{"prompt":"media-gen-batch-limit test"}"#,
         ),
+        vendor: Default::default(),
     }
 }
 
@@ -31,6 +32,7 @@ fn read_file_call(id: &str) -> ToolCallResponse {
             "read_file",
             r#"{"target_file":"/tmp/media-gen-batch-limit-sibling.txt"}"#,
         ),
+        vendor: Default::default(),
     }
 }
 
@@ -178,6 +180,7 @@ async fn over_cap_report_classifies_modest_vs_egregious() {
                     id: format!("img_{i}").into(),
                     name: "image_gen".into(),
                     arguments: "{}".into(),
+                    vendor: Default::default(),
                 })
                 .collect();
             let report = actor.media_gen_over_cap(&calls);
@@ -196,6 +199,7 @@ async fn over_cap_report_classifies_modest_vs_egregious() {
                     id: format!("spam_{i}").into(),
                     name: "image_gen".into(),
                     arguments: "{}".into(),
+                    vendor: Default::default(),
                 })
                 .collect();
             let spam_report = actor.media_gen_over_cap(&spam);
@@ -207,6 +211,7 @@ async fn over_cap_report_classifies_modest_vs_egregious() {
                     id: format!("ok_{i}").into(),
                     name: "image_gen".into(),
                     arguments: "{}".into(),
+                    vendor: Default::default(),
                 })
                 .collect();
             assert!(actor.media_gen_over_cap(&under).is_empty());

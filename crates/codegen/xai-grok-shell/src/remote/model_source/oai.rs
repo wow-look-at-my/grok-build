@@ -173,9 +173,6 @@ mod tests {
         let session = ListModelsEndpoint::from_endpoints(&cfg, ModelFetchAuth::Session);
         assert_eq!(session.url, "", "no proxy configured, so no listing URL");
         assert_eq!(session.auth, EndpointAuth::Session);
-        let deployment = ListModelsEndpoint::from_endpoints(&cfg, ModelFetchAuth::Deployment);
-        assert_eq!(deployment.url, "");
-        assert_eq!(deployment.auth, EndpointAuth::Session);
         let api = ListModelsEndpoint::from_endpoints(&cfg, ModelFetchAuth::ApiKey);
         assert_eq!(api.url, "https://inference.acme-corp.example/xai/v1/models");
         assert_eq!(api.auth, EndpointAuth::ApiKey);

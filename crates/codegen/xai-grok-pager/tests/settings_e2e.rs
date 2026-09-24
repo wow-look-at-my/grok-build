@@ -63,6 +63,7 @@ const ALL_SETTINGS_EXERCISED: &[&str] = &[
     "auto_update",
     "fork_secondary_model",
     "show_thinking_blocks",
+    "thinking_summaries",
     "prompt_suggestions",
     "group_tool_verbs",
     "collapsed_edit_blocks",
@@ -305,6 +306,12 @@ fn assert_set_bool_action(outcome: SettingsKeyOutcome, key: &str, expected: bool
             assert_eq!(
                 b, expected,
                 "SetShowThinkingBlocks value differs from expected"
+            )
+        }
+        ("thinking_summaries", Action::SetThinkingSummaries(b)) => {
+            assert_eq!(
+                b, expected,
+                "SetThinkingSummaries value differs from expected"
             )
         }
         ("prompt_suggestions", Action::SetPromptSuggestions(b)) => {
@@ -2011,6 +2018,7 @@ fn registry_kind_membership_through_pr_14() {
             "prompt_suggestions",
             "respect_manual_folds",
             "show_thinking_blocks",
+            "thinking_summaries",
             "show_timeline",
             "show_timestamps",
             "page_flip_on_send",
@@ -2236,6 +2244,7 @@ fn defaults_round_trip_through_registry() {
             "auto_update" => SettingValue::Bool(true),
             "fork_secondary_model" => SettingValue::String(String::new()),
             "show_thinking_blocks" => SettingValue::Bool(true),
+            "thinking_summaries" => SettingValue::Bool(true),
             "prompt_suggestions" => SettingValue::Bool(true),
             "group_tool_verbs" => SettingValue::Bool(true),
             "collapsed_edit_blocks" => SettingValue::Bool(false),
@@ -2326,6 +2335,7 @@ fn settings_value_payload_matches_kind() {
             | SettingsKeyOutcome::Action(Action::SetAutoUpdate(_))
             | SettingsKeyOutcome::Action(Action::SetRespectManualFolds(_))
             | SettingsKeyOutcome::Action(Action::SetShowThinkingBlocks(_))
+            | SettingsKeyOutcome::Action(Action::SetThinkingSummaries(_))
             | SettingsKeyOutcome::Action(Action::SetPromptSuggestions(_))
             | SettingsKeyOutcome::Action(Action::SetGroupToolVerbs(_))
             | SettingsKeyOutcome::Action(Action::SetCollapsedEditBlocks(_))
@@ -7454,6 +7464,67 @@ fn show_thinking_blocks_cache_on_dispatches_off() {
     assert_set_bool_action(outcome, "show_thinking_blocks", false);
     // Restore client default (on) for other tests that share the process cache.
     xai_grok_pager::appearance::cache::set_show_thinking_blocks(true);
+}
+
+#[test]
+fn thinking_summaries_space_dispatches_typed_setter() {
+    // The shipped modal key handler, driven on the row by key. `thinking_summaries`
+    // has no process cache, so the value the row reads is the `[ui]` mirror.
+    let mut s = make_state();
+    navigate_to(&mut s, "thinking_summaries");
+    let outcome = handle_settings_key(&mut s, &press(KeyCode::Char(' ')));
+    assert_set_bool_action(outcome, "thinking_summaries", false);
+}
+
+#[test]
+fn thinking_summaries_enter_dispatches_typed_setter() {
+    let mut s = make_state();
+    navigate_to(&mut s, "thinking_summaries");
+    let outcome = handle_settings_key(&mut s, &press(KeyCode::Enter));
+    assert_set_bool_action(outcome, "thinking_summaries", false);
+}
+
+#[test]
+fn thinking_summaries_renders_under_appearance_category_shared_owned_restart_required() {
+    let reg = SettingsRegistry::defaults();
+    let meta = reg
+        .find("thinking_summaries")
+        .expect("thinking_summaries must be registered");
+    assert_eq!(meta.category, SettingCategory::Appearance);
+    // Shared: the pager writes it and the shell resolves it when a session spawns.
+    assert_eq!(meta.owner, SettingOwner::Shared);
+    assert!(
+        meta.restart_required,
+        "a session reads the switch once, so the row must say a restart is needed"
+    );
+    match &meta.kind {
+        SettingKind::Bool { default } => assert!(*default, "default must be true"),
+        other => panic!("expected Bool kind for thinking_summaries, got {other:?}"),
+    }
+    // Sits directly below collapsed_edit_blocks. The four rows above it are
+    // pinned into one adjacency chain by their own order asserts
+    // (show_thinking_blocks / respect_manual_folds / group_tool_verbs /
+    // collapsed_edit_blocks), so a new Appearance row cannot go between them.
+    let keys: Vec<&str> = reg
+        .all()
+        .iter()
+        .filter(|m| m.category == SettingCategory::Appearance)
+        .map(|m| m.key)
+        .collect();
+    let mine = keys
+        .iter()
+        .position(|k| *k == "thinking_summaries")
+        .expect("thinking_summaries in Appearance");
+    let edits = keys
+        .iter()
+        .position(|k| *k == "collapsed_edit_blocks")
+        .expect("collapsed_edit_blocks in Appearance");
+    assert_eq!(
+        mine,
+        edits + 1,
+        "thinking_summaries must sit immediately below collapsed_edit_blocks; \
+         Appearance order: {keys:?}"
+    );
 }
 
 #[test]

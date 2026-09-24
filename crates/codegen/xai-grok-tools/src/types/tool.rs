@@ -33,8 +33,6 @@ pub enum ToolNamespace {
     GrokBuildConcise,
     #[serde(alias = "GrokBuildHashline")]
     GrokBuildHashline,
-    #[serde(alias = "Codex")]
-    Codex,
     #[serde(rename = "opencode", alias = "OpenCode", alias = "open_code")]
     OpenCode,
     #[serde(rename = "mcp", alias = "MCP")]

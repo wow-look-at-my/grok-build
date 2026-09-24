@@ -250,21 +250,13 @@ pub fn unicode_display_width(s: &str) -> usize {
 /// Polyfill for `str::floor_char_boundary` (stable in Rust 1.91+).
 /// Replace with the std method once the workspace toolchain is bumped to 1.91+.
 pub(crate) fn floor_char_boundary(s: &str, index: usize) -> usize {
-    let mut i = index.min(s.len());
-    while i > 0 && !s.is_char_boundary(i) {
-        i -= 1;
-    }
-    i
+    s.floor_char_boundary(index)
 }
 
 /// Polyfill for `str::ceil_char_boundary` (stable in Rust 1.91+).
 /// Replace with the std method once the workspace toolchain is bumped to 1.91+.
 pub(crate) fn ceil_char_boundary(s: &str, index: usize) -> usize {
-    let mut i = index.min(s.len());
-    while i < s.len() && !s.is_char_boundary(i) {
-        i += 1;
-    }
-    i
+    s.ceil_char_boundary(index)
 }
 
 /// Event kind for the render loop.

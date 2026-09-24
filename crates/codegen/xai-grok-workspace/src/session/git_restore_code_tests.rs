@@ -124,45 +124,84 @@ async fn stash_before_destructive_op_detached_head_dirty_returns_ref() {
     let outcome = stash_before_destructive_op(tmp.path(), "test", "sess-detached").await;
     assert!(matches!(outcome, StashOutcome::Stashed(_)));
 }
+/// The managed worktrees roots, as [`restore_code_checkout_allowed`]
+/// builds them for the pure core.
+fn roots(paths: &[&str]) -> Vec<std::path::PathBuf> {
+    paths.iter().map(std::path::PathBuf::from).collect()
+}
 #[test]
 fn restore_code_checkout_allowed_worktree_cwd_is_allowed() {
-    let worktrees = Path::new("/home/u/.grok/worktrees");
+    let worktrees = roots(&["/home/u/.grok/worktrees"]);
     assert!(restore_code_checkout_allowed_in(
         Path::new("/home/u/.grok/worktrees/home-u-repo/2026-05-22-9f2e51ce"),
         Some("/home/u/repo"),
-        worktrees,
+        &worktrees,
+    ));
+}
+/// The old managed location also holds checkouts sitting directly under `worktrees/`.
+#[test]
+fn restore_code_checkout_allowed_unbucketed_legacy_cwd_is_allowed() {
+    let worktrees = roots(&["/home/u/.grok/worktrees"]);
+    assert!(restore_code_checkout_allowed_in(
+        Path::new("/home/u/.grok/worktrees/go-toolchain-dats-sandbox"),
+        Some("/home/u/repos/go-toolchain"),
+        &worktrees,
+    ));
+}
+#[test]
+fn restore_code_checkout_allowed_repo_local_worktree_cwd_is_allowed() {
+    let worktrees = roots(&["/home/u/.grok/worktrees", "/home/u/repo/.grok/worktrees"]);
+    assert!(restore_code_checkout_allowed_in(
+        Path::new("/home/u/repo/.grok/worktrees/2026-05-22-9f2e51ce"),
+        Some("/home/u/repo"),
+        &worktrees,
     ));
 }
 #[test]
 fn restore_code_checkout_allowed_same_cwd_is_allowed() {
-    let worktrees = Path::new("/home/u/.grok/worktrees");
+    let worktrees = roots(&["/home/u/.grok/worktrees"]);
     assert!(restore_code_checkout_allowed_in(
         Path::new("/home/u/repo"),
         Some("/home/u/repo"),
-        worktrees,
+        &worktrees,
     ));
     assert!(restore_code_checkout_allowed_in(
         Path::new("/home/u/repo/"),
         Some("/home/u/repo"),
-        worktrees,
+        &worktrees,
     ));
 }
 #[test]
 fn restore_code_checkout_allowed_source_repo_with_worktree_session_is_refused() {
-    let worktrees = Path::new("/home/u/.grok/worktrees");
+    let worktrees = roots(&["/home/u/.grok/worktrees"]);
     assert!(!restore_code_checkout_allowed_in(
         Path::new("/home/u/repo"),
         Some("/home/u/.grok/worktrees/home-u-repo/2026-05-22-9f2e51ce"),
-        worktrees,
+        &worktrees,
+    ));
+}
+/// A checkout under neither managed root is an ordinary working copy, and the gate refuses to detach its HEAD.
+#[test]
+fn restore_code_checkout_allowed_plain_checkout_of_managed_repo_is_refused() {
+    let worktrees = roots(&["/home/u/repo/.grok/worktrees"]);
+    assert!(!restore_code_checkout_allowed_in(
+        Path::new("/home/u/repo"),
+        Some("/elsewhere/session-cwd"),
+        &worktrees,
+    ));
+    assert!(!restore_code_checkout_allowed_in(
+        Path::new("/home/u/other/.grok/worktrees"),
+        Some("/elsewhere/session-cwd"),
+        &worktrees,
     ));
 }
 #[test]
 fn restore_code_checkout_allowed_missing_persisted_cwd_is_refused() {
-    let worktrees = Path::new("/home/u/.grok/worktrees");
+    let worktrees = roots(&["/home/u/.grok/worktrees"]);
     assert!(!restore_code_checkout_allowed_in(
         Path::new("/home/u/repo"),
         None,
-        worktrees,
+        &worktrees,
     ));
 }
 #[tokio::test]
@@ -1417,7 +1456,22 @@ async fn ensure_binding_forks_conv_branch_off_base_and_is_idempotent() {
             .await
             .unwrap()
     );
-    assert_eq!(Some(main_sha.clone()), res.head_sha);
+    // A fresh branch forks off the base and then commits the seeded `.gitignore`, so HEAD is a single commit past main.
+    let head_sha = git_cli(&work, &["rev-parse", "HEAD"]).await.unwrap();
+    assert_eq!(Some(head_sha), res.head_sha);
+    assert_eq!(
+        main_sha,
+        git_cli(&work, &["rev-parse", "HEAD^"]).await.unwrap()
+    );
+    assert_eq!(
+        ".gitignore",
+        git_cli(
+            &work,
+            &["diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"]
+        )
+        .await
+        .unwrap()
+    );
     std::fs::write(work.join("f.txt"), "x").unwrap();
     git_cli(&work, &["add", "-A"]).await.unwrap();
     git_cli(&work, &["commit", "-m", "conv work"])

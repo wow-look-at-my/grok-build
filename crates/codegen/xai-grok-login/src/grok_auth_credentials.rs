@@ -1,12 +1,9 @@
 use reqwest::RequestBuilder;
 use std::sync::Arc;
-/// Deployment key (enterprise) sends bare `Bearer`, routed to management key auth.
 /// User token (xAI users) sends `Bearer` and `X-XAI-Token-Auth: xai-grok-cli`.
-/// Deployment key takes precedence when both are present.
 #[derive(Clone)]
 pub struct GrokAuthCredentials {
     pub user_token: Option<String>,
-    pub deployment_key: Option<String>,
     pub alpha_test_key: Option<String>,
     auth_manager: Option<Arc<crate::AuthManager>>,
 }
@@ -16,10 +13,6 @@ impl std::fmt::Debug for GrokAuthCredentials {
             .field(
                 "user_token",
                 &self.user_token.as_ref().map(|_| "<redacted>"),
-            )
-            .field(
-                "deployment_key",
-                &self.deployment_key.as_ref().map(|_| "<redacted>"),
             )
             .field(
                 "mode",
@@ -37,7 +30,6 @@ impl GrokAuthCredentials {
     pub fn new(user_token: Option<String>) -> Self {
         Self {
             user_token,
-            deployment_key: None,
             alpha_test_key: None,
             auth_manager: None,
         }
@@ -53,9 +45,7 @@ impl GrokAuthCredentials {
     }
     /// Error hint for 401 responses.
     pub fn auth_error_hint(&self) -> &'static str {
-        if self.deployment_key.is_some() {
-            "Your GROK_DEPLOYMENT_KEY is invalid or expired. Please contact a team admin."
-        } else if self.user_token.is_some() {
+        if self.user_token.is_some() {
             "Your auth token is invalid or expired. Run `grok login` to re-authenticate."
         } else {
             "Not authenticated."
@@ -94,9 +84,7 @@ impl GrokAuthCredentials {
         }
     }
     pub fn apply(&self, builder: RequestBuilder, base_url: &str) -> RequestBuilder {
-        let builder = if let Some(ref key) = self.deployment_key {
-            builder.header("Authorization", format!("Bearer {}", key))
-        } else if let Some(ref token) = self.user_token {
+        let builder = if let Some(ref token) = self.user_token {
             builder
                 .header("Authorization", format!("Bearer {}", token))
                 .header(

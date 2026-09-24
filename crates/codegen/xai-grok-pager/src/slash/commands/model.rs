@@ -130,10 +130,12 @@ fn matched_reasoning_prefix(
 
 /// Whether `query` is `token`, then whitespace, then anything.
 fn leads_with(query: &str, token: &str) -> bool {
-    query.len() > token.len()
-        && query.is_char_boundary(token.len())
-        && query[..token.len()].eq_ignore_ascii_case(token)
-        && query[token.len()..].starts_with(char::is_whitespace)
+    query.len() > token.len() && query.is_char_boundary(token.len()) && {
+        // The `is_char_boundary` clause above runs first and short-circuits,
+        // so `split_at` here cannot land inside a character.
+        let (head, tail) = query.split_at(token.len());
+        head.eq_ignore_ascii_case(token) && tail.starts_with(char::is_whitespace)
+    }
 }
 
 /// The effort or route rows `args_query` leads into, if any.
@@ -304,18 +306,21 @@ fn build_route_items(models: &ModelState, group: &[&acp::ModelId]) -> Vec<ArgIte
         let Some(info) = models.available.get(*id) else {
             continue;
         };
-        let shared_label = labels.iter().filter(|l| **l == labels[idx]).count() > 1;
+        let Some(label) = labels.get(idx) else {
+            continue;
+        };
+        let shared_label = labels.iter().filter(|l| *l == label).count() > 1;
         let mut display = if shared_label {
             id.0.to_string()
         } else {
-            labels[idx].clone()
+            label.clone()
         };
         if models.current.as_ref() == Some(*id) {
             display.push_str(" (current)");
         }
         items.push(ArgItem {
             display,
-            match_text: format!("{} {}", labels[idx], id.0),
+            match_text: format!("{} {}", label, id.0),
             insert_text: chained_insert(id.0.as_ref(), info),
             description: info.description.clone().unwrap_or_default(),
             loaded_in_vram: loaded_in_vram_meta(info.meta.as_ref()),

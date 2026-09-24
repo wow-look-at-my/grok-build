@@ -12,12 +12,18 @@
 
 use std::collections::{HashSet, VecDeque};
 use std::sync::Arc;
-use tokio::sync::{Mutex, oneshot};
+use tokio::sync::oneshot;
 
 /// Shared file operation lock manager stored in tool shared resources.
+///
+/// The state sits behind a `parking_lot` mutex rather than an async one so that
+/// releasing a lock is a plain function call: `Drop` cannot await, and a release
+/// handed to the scheduler would leave the next acquirer waiting on a task
+/// instead of on the lock. The critical sections are bookkeeping only: no
+/// acquire, release, or handoff holds this lock across an await point.
 #[derive(Clone)]
 pub struct FileOperationLockManager {
-    inner: Arc<Mutex<LockInner>>,
+    inner: Arc<parking_lot::Mutex<LockInner>>,
 }
 
 struct LockInner {
@@ -39,7 +45,7 @@ enum QueuedWaiter {
 impl FileOperationLockManager {
     pub fn new() -> Self {
         Self {
-            inner: Arc::new(Mutex::new(LockInner {
+            inner: Arc::new(parking_lot::Mutex::new(LockInner {
                 locked_files: HashSet::new(),
                 exclusive_lock_active: false,
                 wait_queue: VecDeque::new(),
@@ -51,7 +57,7 @@ impl FileOperationLockManager {
     /// An exclusive waiter is ahead in the queue. Returns a guard that releases the lock on drop.
     pub async fn wait_for_lock(&self, path: &str) -> FileOperationLockGuard {
         let rx = {
-            let mut inner = self.inner.lock().await;
+            let mut inner = self.inner.lock();
             let needs_wait = inner.exclusive_lock_active
                 || inner.locked_files.contains(path)
                 || inner.has_exclusive_waiter_ahead();
@@ -84,7 +90,7 @@ impl FileOperationLockManager {
     /// exclusive lock is active. Returns a guard that releases the lock on drop.
     pub async fn wait_for_exclusive_lock(&self) -> FileOperationLockGuard {
         let rx = {
-            let mut inner = self.inner.lock().await;
+            let mut inner = self.inner.lock();
             let needs_wait = inner.exclusive_lock_active || !inner.locked_files.is_empty();
 
             if needs_wait {
@@ -127,21 +133,54 @@ pub struct FileOperationLockGuard {
 
 impl Drop for FileOperationLockGuard {
     fn drop(&mut self) {
-        let manager = self.manager.clone();
         let kind = std::mem::replace(&mut self.kind, LockKind::Exclusive);
-        // Use `spawn` to release asynchronously — `drop` can't be async.
-        tokio::spawn(async move {
-            let mut inner = manager.inner.lock().await;
-            match kind {
-                LockKind::File(path) => {
-                    inner.locked_files.remove(&path);
-                }
-                LockKind::Exclusive => {
-                    inner.exclusive_lock_active = false;
-                }
+        // The release runs here rather than in a task of its own: whoever is
+        // queued behind this guard learns the lock is free from this call
+        // returning, and there is no detached failure for them to outlive.
+        //
+        // The unwind is still caught, because a guard dropped while another
+        // panic is unwinding would otherwise take the process with it. A failed
+        // release is the one state a waiter cannot recover from on its own, so
+        // it is withdrawn again and, if that fails too, said out loud.
+        let released = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.manager.release(&kind);
+        }));
+        let Err(panic) = released else {
+            return;
+        };
+        tracing::error!(
+            panic = %crate::util::detached::panic_payload(&*panic),
+            "file operation lock release panicked; withdrawing the grant again"
+        );
+        if let Err(retry) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.manager.release(&kind);
+        })) {
+            tracing::error!(
+                panic = %crate::util::detached::panic_payload(&*retry),
+                "file operation lock could not be withdrawn; whoever is queued behind it will not be handed the lock"
+            );
+        }
+    }
+}
+
+impl FileOperationLockManager {
+    /// Withdraw this guard's grant and hand the lock to whoever is next.
+    ///
+    /// Withdrawing is idempotent (removing a path nobody holds and clearing a
+    /// flag that is already down are both no-ops) and
+    /// [`LockInner::process_queue`] pops a waiter before granting to it, so
+    /// making the call twice cannot hand one lock to two holders.
+    fn release(&self, kind: &LockKind) {
+        let mut inner = self.inner.lock();
+        match kind {
+            LockKind::File(path) => {
+                inner.locked_files.remove(path);
             }
-            inner.process_queue();
-        });
+            LockKind::Exclusive => {
+                inner.exclusive_lock_active = false;
+            }
+        }
+        inner.process_queue();
     }
 }
 
@@ -199,7 +238,7 @@ mod tests {
     #[tokio::test]
     async fn serializes_same_path() {
         let mgr = FileOperationLockManager::new();
-        let order = Arc::new(Mutex::new(Vec::new()));
+        let order = Arc::new(tokio::sync::Mutex::new(Vec::new()));
 
         let guard1 = mgr.wait_for_lock("a.ts").await;
         let order2 = order.clone();
@@ -243,7 +282,7 @@ mod tests {
     async fn exclusive_blocks_file_locks() {
         let mgr = FileOperationLockManager::new();
         let exclusive = mgr.wait_for_exclusive_lock().await;
-        let acquired = Arc::new(Mutex::new(false));
+        let acquired = Arc::new(tokio::sync::Mutex::new(false));
 
         let mgr2 = mgr.clone();
         let acquired2 = acquired.clone();
@@ -258,5 +297,54 @@ mod tests {
         drop(exclusive);
         handle.await.unwrap();
         assert!(*acquired.lock().await);
+    }
+
+    /// Two writers on one path: the second is parked on what the first's `drop`
+    /// promises, so the handoff has to be part of `drop` itself.
+    ///
+    /// The state is read with `try_lock` and no await in between, because a
+    /// release that runs in a spawned task is only visible once the scheduler
+    /// has found time for it; whoever is waiting has nothing to do but wait for
+    /// that, and nothing keeps it from being lost.
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_release_needs_no_scheduled_task_to_be_visible() {
+        let mgr = FileOperationLockManager::new();
+        let first = mgr.wait_for_lock("a.ts").await;
+
+        let second = {
+            let mgr = mgr.clone();
+            tokio::spawn(async move {
+                let _guard = mgr.wait_for_lock("a.ts").await;
+            })
+        };
+
+        // Let the queued writer register before anyone lets go.
+        for _ in 0..10 {
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(
+            mgr.inner
+                .try_lock()
+                .expect("nothing holds the lock")
+                .wait_queue
+                .len(),
+            1,
+            "the second writer must be waiting in the queue first"
+        );
+
+        drop(first);
+
+        let inner = mgr.inner.try_lock().expect("nothing holds the lock");
+        assert!(
+            inner.wait_queue.is_empty(),
+            "{} waiter(s) were still queued when drop returned",
+            inner.wait_queue.len()
+        );
+        assert!(
+            inner.locked_files.contains("a.ts"),
+            "the queued writer must hold the path, not merely have been promised it"
+        );
+        drop(inner);
+        second.await.expect("the queued writer must finish");
     }
 }

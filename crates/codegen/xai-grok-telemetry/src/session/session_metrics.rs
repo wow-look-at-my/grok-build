@@ -174,7 +174,7 @@ pub enum TraceUploadReason {
     ZdrTeam,
     /// `[telemetry] trace_upload = false` in config.
     FeatureOff,
-    /// No grok.com auth or deployment key.
+    /// No grok.com auth.
     NoCredentials,
     /// Direct-to-bucket S3 upload.
     DirectS3,
@@ -406,7 +406,6 @@ mod tests {
             TraceUploadReason::from_upload_method(&Some(UploadMethod::Proxy {
                 proxy_base_url: String::new(),
                 user_token: String::new(),
-                deployment_key: None,
                 alpha_test_key: None,
             })),
             TraceUploadReason::Proxy

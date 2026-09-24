@@ -2,13 +2,8 @@
 #
 # Grok CLI installer — https://x.ai/cli/install.sh
 #
-# Auth: GROK_DEPLOYMENT_KEY (takes precedence) or ~/.grok/auth.json from `grok login`.
-# Env: GROK_CHANNEL (stable|alpha|enterprise, default: stable), GROK_BIN_DIR, GROK_PROXY_URL
-#
-# Usage:
-#   curl -fsSL https://x.ai/cli/install.sh | bash            # latest stable
-#   curl -fsSL https://x.ai/cli/install.sh | bash -s 0.1.42  # specific version
-#   GROK_DEPLOYMENT_KEY=<key> bash <(curl -fsSL https://x.ai/cli/install.sh)
+# Auth: ~/.grok/auth.json from `grok login`.
+# Env: GROK_CHANNEL (stable|alpha|enterprise, default: stable), GROK_BIN_DIR
 #
 # Windows: run under Git for Windows / MSYS2 Bash (same curl | bash flow); WSL
 # uses the Linux binary.
@@ -132,14 +127,6 @@ fetch_binary() {
     download_file_parallel "$base" "$out"
 }
 
-# JSON field extractor — extract a top-level string value using sed.
-json_get() {
-    local json="$1" field="$2"
-    # Extract value (handling \" inside strings), then unescape JSON sequences.
-    printf '%s' "$json" | sed -n -E 's/.*"'"$field"'"[[:space:]]*:[[:space:]]*"(([^"\\]|\\.)*)".*/\1/p' | head -1 \
-        | sed -e 's/\\"/"/g' -e 's/\\n/\'$'\n''/g' -e 's/\\t/\'$'\t''/g' -e 's/\\\\/\\/g'
-}
-
 # Read a token from ~/.grok/auth.json for the given scope key.
 # Format: {"scope_url": {"key": "token"}, ...}
 read_grok_token() {
@@ -150,24 +137,19 @@ read_grok_token() {
     tr -d '\n' < "$auth_file" | sed -n 's|.*"'"$scope"'"[[:space:]]*:[[:space:]]*{[^}]*"key"[[:space:]]*:[[:space:]]*"\([^"]*\)".*|\1|p' | head -1
 }
 
-# Resolve auth: GROK_DEPLOYMENT_KEY > OIDC token > legacy token
+# Resolve auth: OIDC token > legacy token
 OIDC_SCOPE="https://auth.x.ai::b1a00492-073a-47ea-816f-4c329264a828"
 LEGACY_SCOPE="https://accounts.x.ai/sign-in"
 AUTH_SOURCE=""
 
-if [ -n "$GROK_DEPLOYMENT_KEY" ]; then
-    AUTH_SOURCE="deployment key"
-    echo "Auth: using deployment key." >&2
-else
-    OIDC_TOKEN=$(read_grok_token "$OIDC_SCOPE" 2>/dev/null) || true
-    LEGACY_TOKEN=$(read_grok_token "$LEGACY_SCOPE" 2>/dev/null) || true
-    if [ -n "$OIDC_TOKEN" ]; then
-        AUTH_SOURCE="auth.json (oidc)"
-        echo "Auth: using OIDC token from ~/.grok/auth.json." >&2
-    elif [ -n "$LEGACY_TOKEN" ]; then
-        AUTH_SOURCE="auth.json (legacy)"
-        echo "Auth: using legacy token from ~/.grok/auth.json." >&2
-    fi
+OIDC_TOKEN=$(read_grok_token "$OIDC_SCOPE" 2>/dev/null) || true
+LEGACY_TOKEN=$(read_grok_token "$LEGACY_SCOPE" 2>/dev/null) || true
+if [ -n "$OIDC_TOKEN" ]; then
+    AUTH_SOURCE="auth.json (oidc)"
+    echo "Auth: using OIDC token from ~/.grok/auth.json." >&2
+elif [ -n "$LEGACY_TOKEN" ]; then
+    AUTH_SOURCE="auth.json (legacy)"
+    echo "Auth: using legacy token from ~/.grok/auth.json." >&2
 fi
 
 case "$(uname -s)" in
@@ -347,61 +329,6 @@ elif grep -q '^\[cli\]' "$CONFIG_FILE"; then
     ' "$CONFIG_FILE" > "$tmp" && mv "$tmp" "$CONFIG_FILE"
 else
     printf '\n[cli]\n%b\n' "$CLI_BLOCK" >> "$CONFIG_FILE"
-fi
-
-# Fetch managed_config.toml + requirements.toml from server (deployment key only).
-if [ -n "$GROK_DEPLOYMENT_KEY" ] && [ -z "$GROK_PROXY_URL" ]; then
-    echo "  Error: GROK_PROXY_URL is not set, so the deployment config was not fetched." >&2
-fi
-if [ -n "$GROK_DEPLOYMENT_KEY" ] && [ -n "$GROK_PROXY_URL" ]; then
-    PROXY_URL="$GROK_PROXY_URL"
-    # Refuse cleartext / userinfo / empty-host proxies before attaching the key.
-    proxy_authority="${PROXY_URL#*://}"
-    proxy_authority="${proxy_authority%%[/?#]*}"
-    proxy_ok=
-    case "$PROXY_URL" in
-        [hH][tT][tT][pP][sS]://*)
-            case "$proxy_authority" in
-                ""|*@*) ;;
-                *) proxy_ok=1 ;;
-            esac
-            ;;
-    esac
-    if [ -z "$proxy_ok" ]; then
-        echo "Error: GROK_PROXY_URL must be an https:// URL." >&2
-        exit 1
-    fi
-    echo "  Fetching deployment config..." >&2
-    DEPLOY_RESPONSE=""
-    AUTH_HEADER_FILE=$(mktemp 2>/dev/null) || AUTH_HEADER_FILE=""
-    if [ -n "$AUTH_HEADER_FILE" ]; then
-        chmod 600 "$AUTH_HEADER_FILE" 2>/dev/null || true
-        printf 'Authorization: Bearer %s\n' "$GROK_DEPLOYMENT_KEY" > "$AUTH_HEADER_FILE"
-        DEPLOY_RESPONSE=$(curl -sS -f --proto '=https' \
-            -H "@${AUTH_HEADER_FILE}" \
-            "${PROXY_URL}/deployment/config" 2>/dev/null) || DEPLOY_RESPONSE=""
-        : > "$AUTH_HEADER_FILE" 2>/dev/null || true
-        rm -f "$AUTH_HEADER_FILE"
-    fi
-    if [ -z "$DEPLOY_RESPONSE" ]; then
-        echo "  Warning: failed to fetch deployment config from ${PROXY_URL}/deployment/config" >&2
-    fi
-    if [ -n "$DEPLOY_RESPONSE" ]; then
-        MANAGED_CONFIG=$(json_get "$DEPLOY_RESPONSE" "managed_config")
-        REQUIREMENTS=$(json_get "$DEPLOY_RESPONSE" "requirements")
-        if [ -n "$MANAGED_CONFIG" ] && [ "$MANAGED_CONFIG" != "null" ]; then
-            printf '%s\n' "$MANAGED_CONFIG" > "$HOME/.grok/managed_config.toml"
-            echo "  Managed config applied." >&2
-        else
-            rm -f "$HOME/.grok/managed_config.toml"
-        fi
-        if [ -n "$REQUIREMENTS" ] && [ "$REQUIREMENTS" != "null" ]; then
-            printf '%s\n' "$REQUIREMENTS" > "$HOME/.grok/requirements.toml"
-            echo "  Requirements applied." >&2
-        else
-            rm -f "$HOME/.grok/requirements.toml"
-        fi
-    fi
 fi
 
 if [ "$os" = "windows" ]; then

@@ -1,4 +1,5 @@
 #![deny(clippy::indexing_slicing)]
+#![allow(clippy::expect_used)]
 
 pub mod config;
 pub mod otlp;

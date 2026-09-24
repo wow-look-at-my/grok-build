@@ -652,7 +652,10 @@ fn deferred_card_reopens_when_other_question_closes() {
             }],
             stashed,
         )
-        .with_local_kind(LocalQuestionKind::Fork { directive: None }),
+        .with_local_kind(LocalQuestionKind::Fork {
+            directive: None,
+            include_agents: false,
+        }),
     );
 
     let _ = finalize_turn_from_terminal(&mut agent, "s1", hook_denied_signal(None));

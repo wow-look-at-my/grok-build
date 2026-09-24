@@ -167,7 +167,6 @@ pub enum AuthMode {
     Unknown,
     Personal,
     Team,
-    Deployment,
 }
 impl AuthMode {
     pub fn label(self) -> &'static str {

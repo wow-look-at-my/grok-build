@@ -236,7 +236,12 @@ impl IndexBuilder {
 
                 // Check if the file is supported
                 if registry.is_supported(path) {
-                    files.lock().unwrap().push(path.to_path_buf());
+                    // A walk callback that panics ends the build regardless of
+                    // what the lock does afterwards, and pushing a `PathBuf` is
+                    // the whole critical section.
+                    #[allow(clippy::disallowed_methods)]
+                    let mut found = files.lock().unwrap();
+                    found.push(path.to_path_buf());
                 }
 
                 WalkState::Continue

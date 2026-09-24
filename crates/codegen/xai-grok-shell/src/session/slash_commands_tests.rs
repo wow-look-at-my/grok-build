@@ -2048,6 +2048,7 @@ fn goal_objective_resolves_to_set() {
         BuiltinAction::GoalSet {
             objective,
             token_budget,
+            ..
         } => {
             assert_eq!(objective, "implement auth module");
             assert_eq!(token_budget, None);
@@ -2072,6 +2073,7 @@ fn goal_set_trailing_budget_flag_parses() {
         BuiltinAction::GoalSet {
             objective,
             token_budget,
+            ..
         } => {
             assert_eq!(objective, "implement X");
             assert_eq!(token_budget, Some(500_000));
@@ -2091,6 +2093,7 @@ fn goal_set_budget_accepts_boundary_and_extra_whitespace() {
             BuiltinAction::GoalSet {
                 objective: o,
                 token_budget,
+                ..
             } => {
                 assert_eq!(o, objective);
                 assert_eq!(token_budget, Some(budget), "for {text:?}");
@@ -2120,9 +2123,72 @@ fn goal_set_malformed_budget_stays_in_objective() {
             BuiltinAction::GoalSet {
                 objective,
                 token_budget,
+                ..
             } => {
                 assert_eq!(objective, text, "objective must be preserved verbatim");
                 assert_eq!(token_budget, None, "no budget must be parsed from {text:?}");
+            }
+            other => panic!("expected GoalSet, got {}", other.command_name()),
+        }
+    }
+}
+
+#[test]
+fn goal_set_mode_flag_parses_at_either_end() {
+    use crate::session::goal_tracker::GoalMode;
+    for (text, objective, budget, mode) in [
+        ("--lite fix it", "fix it", None, Some(GoalMode::Lite)),
+        ("fix it --lite", "fix it", None, Some(GoalMode::Lite)),
+        ("--full fix it", "fix it", None, Some(GoalMode::Full)),
+        (
+            "--lite fix it --budget 9",
+            "fix it",
+            Some(9),
+            Some(GoalMode::Lite),
+        ),
+        (
+            "fix it --lite --budget 9",
+            "fix it",
+            Some(9),
+            Some(GoalMode::Lite),
+        ),
+        (
+            "fix it --budget 9 --lite",
+            "fix it",
+            Some(9),
+            Some(GoalMode::Lite),
+        ),
+        ("fix it", "fix it", None, None),
+    ] {
+        match resolve_goal(text) {
+            BuiltinAction::GoalSet {
+                objective: o,
+                token_budget,
+                mode: m,
+            } => {
+                assert_eq!(o, objective, "for {text:?}");
+                assert_eq!(token_budget, budget, "for {text:?}");
+                assert_eq!(m, mode, "for {text:?}");
+            }
+            other => panic!("expected GoalSet, got {}", other.command_name()),
+        }
+    }
+}
+
+#[test]
+fn goal_set_mode_flag_needs_its_own_token_and_an_objective() {
+    for text in [
+        "--lite",
+        "fix the --lite flag",
+        "fix it--lite",
+        "--lighter fix it",
+    ] {
+        match resolve_goal(text) {
+            BuiltinAction::GoalSet {
+                objective, mode, ..
+            } => {
+                assert_eq!(objective, text, "objective must be preserved verbatim");
+                assert_eq!(mode, None, "no mode must be parsed from {text:?}");
             }
             other => panic!("expected GoalSet, got {}", other.command_name()),
         }
@@ -2139,6 +2205,7 @@ fn goal_command_name_is_goal() {
         BuiltinAction::GoalSet {
             objective: "x".into(),
             token_budget: None,
+            mode: None,
         }
         .command_name(),
         "goal"
@@ -2151,6 +2218,7 @@ fn goal_args_provided() {
         BuiltinAction::GoalSet {
             objective: "x".into(),
             token_budget: None,
+            mode: None,
         }
         .args_provided()
     );

@@ -241,9 +241,19 @@ impl SessionActor {
             "session mode: rebuilding agent"
         );
         let name = def.name.clone();
-        // `zero_turn: false`: this is a live switch, so the zero-turn prefix
+        // A mode switch keeps the model, so it keeps the model's label.
+        let label = self
+            .agent
+            .borrow()
+            .prompt_context()
+            .system_prompt_label
+            .clone();
+        // `zero_turn: false`: this is a live switch, so the turn prefix
         // surgery must not run.
-        if let Err(e) = self.handle_rebuild_agent_for_definition(def, false).await {
+        if let Err(e) = self
+            .handle_rebuild_agent_for_definition(def, false, label)
+            .await
+        {
             tracing::error!(
                 session_id = %self.session_info.id.0,
                 agent_name = %name,
@@ -439,6 +449,7 @@ impl SessionActor {
         let extra = serde_json::json!({
             "plan_path": plan_path.display().to_string(),
             "plan_has_content": plan_has_content,
+            "goal_contract": !self.startup_hints.is_subagent && self.goal_harness_enabled(),
         });
         self.agent
             .borrow()

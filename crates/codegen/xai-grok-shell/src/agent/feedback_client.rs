@@ -80,12 +80,6 @@ impl FeedbackClient {
         self
     }
 
-    pub fn with_deployment_key(mut self, key: Option<String>) -> Self {
-        self.credentials.deployment_key = key;
-        self.rebuild_middleware();
-        self
-    }
-
     pub fn with_client(
         http: reqwest::Client,
         base_url: impl Into<String>,
@@ -111,8 +105,7 @@ impl FeedbackClient {
         self
     }
 
-    /// Whether this client can refresh credentials on a 401.
-    /// Requires both an attached `AuthManager` and a `TokenRefresher`; a static deployment-key session returns false.
+    /// Requires both an attached `AuthManager` and a `TokenRefresher`.
     pub(crate) fn has_token_refresher(&self) -> bool {
         self.credentials
             .auth_manager()
@@ -143,18 +136,13 @@ impl FeedbackClient {
     ) -> Arc<dyn xai_grok_auth::AuthCredentialProvider> {
         if let Some(am) = credentials.auth_manager() {
             Arc::new(
-                xai_grok_login::credential_provider::ShellAuthCredentialProvider::with_deployment_id_resolver(
+                xai_grok_login::credential_provider::ShellAuthCredentialProvider::new(
                     am.clone(),
-                    credentials.deployment_key.clone(),
                     credentials.alpha_test_key.clone(),
-                    std::sync::Arc::new(crate::managed_config::resolve_deployment_id),
                 ),
             )
         } else {
-            let wire_bearer = credentials
-                .deployment_key
-                .clone()
-                .or(credentials.user_token.clone());
+            let wire_bearer = credentials.user_token.clone();
             Arc::new(xai_grok_auth::StaticAuthCredentialProvider::new(
                 Box::new(credentials.clone()),
                 wire_bearer,
@@ -220,19 +208,14 @@ impl FeedbackClient {
     }
 
     fn add_common_headers(&self, builder: RequestBuilder) -> RequestBuilder {
-        let builder = builder
+        // User-token auth requires the companion marker header for proxy routing.
+        builder
             .header(CLIENT_VERSION_HEADER, xai_grok_version::version())
             .header(
                 crate::http::CLIENT_MODE_HEADER,
                 crate::http::process_client_mode(),
-            );
-        // User-token auth requires the companion marker header for proxy routing
-        // Deployment keys do not need it
-        if self.credentials.deployment_key.is_none() {
-            builder.header("X-XAI-Token-Auth", "xai-grok-cli")
-        } else {
-            builder
-        }
+            )
+            .header("X-XAI-Token-Auth", "xai-grok-cli")
     }
 
     async fn send_json<T: DeserializeOwned>(
@@ -575,9 +558,6 @@ pub(crate) fn snapshot_to_turn_delta(
 
 #[cfg(test)]
 mod egress_disabled_pins {
-    use prod_mc_cli_chat_proxy_types::feedback_types::{
-        SessionEventRequest, SessionEventType, SessionSignalsUpdate,
-    };
 
     use super::*;
 
@@ -597,20 +577,10 @@ mod egress_disabled_pins {
             &crate::session::signals::SessionSignals::default(),
             ClientType::Tui,
         );
-        let event = SessionEventRequest {
-            event_type: SessionEventType::Error,
-            event_data: None,
-            timestamp: None,
-        };
-
         let results: Vec<(&str, anyhow::Result<()>)> = vec![
             (
                 "signals",
                 client.update_signals("session", &signals).await.map(|_| ()),
-            ),
-            (
-                "events",
-                client.record_event("session", &event).await.map(|_| ()),
             ),
             (
                 "dismiss",

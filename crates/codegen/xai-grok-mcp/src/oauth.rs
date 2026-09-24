@@ -628,6 +628,9 @@ fn start_oauth_callback_server(
 
     let app = Router::new().route("/callback", get(handler.clone()).post(handler));
 
+    // The handle is returned to the caller alongside the receiver, which is where
+    // it is aborted when the flow completes or is cancelled.
+    #[allow(clippy::disallowed_methods)]
     let server = tokio::spawn(async move {
         let _ = axum::serve(listener, app).await;
     });

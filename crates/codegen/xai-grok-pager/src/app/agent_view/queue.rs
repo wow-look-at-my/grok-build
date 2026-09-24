@@ -165,16 +165,21 @@ impl AgentView {
     /// the shell's drain resolves no builtin, so folding it in would deliver the
     /// literal `/cmd args` to the model.
     pub(crate) fn queue_has_interjectable_row(&self) -> bool {
+        // A protected row is never delivered from here: a read-only pane mirrors a queue this view cannot address.
+        let mutation = self.queue.mutation();
         let running = self.session.current_prompt_id.as_deref();
         let server = self.shared_queue.iter().any(|e| {
-            Some(e.id.as_str()) != running && crate::views::queue_pane::wire_row_is_steering_text(e)
+            Some(e.id.as_str()) != running
+                && ServerRowCapabilities::for_pane(&e.kind, mutation).can_send_now()
+                && crate::views::queue_pane::wire_row_is_steering_text(e)
         });
         server
-            || self
-                .session
-                .pending_prompts
-                .iter()
-                .any(|p| p.is_steering_text())
+            || (ServerRowCapabilities::for_local(mutation).can_send_now()
+                && self
+                    .session
+                    .pending_prompts
+                    .iter()
+                    .any(|p| p.is_steering_text()))
     }
 
     /// The turn is parked in a wait the shell aborts as soon as the user sends anything, and the goal loop is inactive.
@@ -1650,15 +1655,32 @@ mod queue_edit_routing_tests {
         agent.session.pending_prompts.clear();
         agent.sync_queue_pane();
         assert!(agent.held_queue_top_sendable());
+        // Mid-turn, the prompt-path send-now interrupts with the whole queue
+        // rather than singling out the top row.
         let outcome = agent.handle_prompt_key_for_test(&force_interject_key());
-        assert!(matches!(
-            outcome,
-            InputOutcome::Action(Action::QueueInterjectShared {
-                ref id,
-                expected_version: 2,
-                new_text: None,
-            }) if id == "p1"
-        ));
+        assert!(
+            matches!(
+                outcome,
+                InputOutcome::Action(Action::InterruptWithQueuedPrompts)
+            ),
+            "{outcome:?}"
+        );
+        // While parked on a sendable wait there is no stream to interrupt, so
+        // the ordinary server top row still takes the single-row send-now.
+        crate::app::agent_view::test_fixtures::simulate_wait_all(&mut agent);
+        assert!(agent.is_parked_on_sendable_wait());
+        let outcome = agent.handle_prompt_key_for_test(&force_interject_key());
+        assert!(
+            matches!(
+                outcome,
+                InputOutcome::Action(Action::QueueInterjectShared {
+                    ref id,
+                    expected_version: 2,
+                    new_text: None,
+                }) if id == "p1"
+            ),
+            "{outcome:?}"
+        );
     }
 
     /// A running agent whose only queued row is a local bash command.

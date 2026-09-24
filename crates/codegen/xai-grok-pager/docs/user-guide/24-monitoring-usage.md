@@ -47,7 +47,7 @@ coding-data sharing). It does not mute `GROK_EXTERNAL_OTEL`.
 
 When the stream is on:
 
-- `user.id`, `session.id`, and org/team/deployment ids always export.
+- `user.id`, `session.id`, and org/team ids always export.
 - `user.email` attaches on logs **and** metrics whenever OAuth/gateway auth
   has a non-empty address. It is identity, not a content gate, and is not
   pinnable except by turning the stream off.
@@ -214,12 +214,11 @@ resolved its configuration, and whether it is exporting or suppressed.
 | `terminal.type` | terminal emulator brand |
 | `grok_code.schema.version` | `v1` |
 
-Identity attributes (`user.id`, and `organization.id` / `team.id` /
-`deployment.id` when known) are attached per metric data point and per event
-once authentication completes. `user.email` is attached on logs **and** metrics
-whenever the session is signed in with OAuth or a gateway account that has a
-non-empty address — it is identity, not a content gate, and is never taken from
-git, an API key, or a deployment key. `prompt.id` (per-prompt UUID) appears on
+Identity attributes (`user.id`, and `organization.id` / `team.id` when known)
+are attached per metric data point and per event once authentication completes.
+`user.email` is attached on logs **and** metrics whenever the session is signed
+in with OAuth or a gateway account that has a non-empty address — it is
+identity, not a content gate, and is never taken from git or an API key. `prompt.id` (per-prompt UUID) appears on
 events only, never metrics.
 
 ## Metrics (meter scope `ai.xai.grok_code`)
@@ -254,7 +253,7 @@ not finished. That is often not the step that took the longest, because a step
 that runs without pausing finishes before the timeout is recorded. The error
 message Grok prints names the longest step instead, so the two can name
 different steps for the same timeout. Use `phase_duration` to compare them.
-`auth_mode` is `personal`, `team`, `deployment`, or `unknown`:
+`auth_mode` is `personal`, `team`, or `unknown`:
 startup cost differs by kind, so split by it before comparing.
 
 `turn.ttft` is the time from turn start to the first token of any channel

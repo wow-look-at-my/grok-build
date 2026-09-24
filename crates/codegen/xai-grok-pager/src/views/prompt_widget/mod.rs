@@ -584,6 +584,9 @@ impl StashedPrompt {
                 return false;
             }
             chip.range = chip.range.start - start..chip.range.end - start;
+            // `chip.range` is a textarea element range rebased onto `text`,
+            // which the textarea keeps on char boundaries.
+            #[allow(clippy::string_slice)]
             if chip.kind == KIND_IMAGE
                 && let Some(number) = text
                     .get(chip.range.clone())
@@ -2490,6 +2493,9 @@ impl PromptWidget {
 
         let mut synced = Vec::with_capacity(live_image_elements.len());
 
+        // `range` is a live image element's range in the textarea buffer, which
+        // the textarea keeps on char boundaries.
+        #[allow(clippy::string_slice)]
         for (id, range) in &live_image_elements {
             // Primary: match by element_id (collision-free, stable for non-undo/redo edits)
             if let Some(mut img) = stored_by_id.remove(id) {
@@ -2860,6 +2866,8 @@ impl PromptWidget {
     }
 
     /// Buffer text of `elem` if it is a paste chip (`KIND_PASTE`).
+    // `elem.range` is a textarea element range, kept on char boundaries.
+    #[allow(clippy::string_slice)]
     fn paste_text(&self, elem: &TextElement) -> Option<&str> {
         (elem.kind == KIND_PASTE)
             .then_some(elem.range.clone())
@@ -3637,6 +3645,9 @@ fn parse_line_range(s: &str) -> Option<std::ops::Range<usize>> {
 /// `@foo/bar.rs:10-12`. Style: `@` and `:` in gray, path in theme.path, numbers in text_primary.
 pub fn file_ref_display(path: &str) -> Line<'static> {
     let theme = Theme::current();
+    // `colon_pos` is a `rfind` offset for an ASCII `:`, so `colon_pos + 1` is a
+    // char boundary too.
+    #[allow(clippy::string_slice)]
     let (file_part, line_part) = if let Some(colon_pos) = path.rfind(':') {
         (
             path.get(..colon_pos).unwrap_or(path),

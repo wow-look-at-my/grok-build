@@ -16,6 +16,8 @@ tracing = { workspace = true }
 xai-grok-announcements = { workspace = true }
 xai-grok-config = { workspace = true }
 xai-grok-mcp = { workspace = true }
+# Wire-alias folding (`Aliases`) for config types a peer's bytes feed.
+xai-tool-types = { workspace = true }
 
 [features]
 default-bazel = []

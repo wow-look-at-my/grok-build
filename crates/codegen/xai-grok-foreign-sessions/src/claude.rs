@@ -407,7 +407,7 @@ fn read_tail(root: &ApprovedRoot, path: &Path, size: u64) -> Option<String> {
     let len = size.min(READ_CHUNK as u64);
     let mut file = root.open_regular_file(path)?.file;
     file.seek(SeekFrom::Start(size.saturating_sub(len))).ok()?;
-    let mut bytes = Vec::with_capacity(len as usize);
+    let mut bytes = Vec::with_capacity(usize::try_from(len).unwrap_or(0));
     file.take(len).read_to_end(&mut bytes).ok()?;
     Some(String::from_utf8_lossy(&bytes).into_owned())
 }

@@ -63,30 +63,39 @@ impl SummaryGenerator {
                 let model = self.config.model.clone();
                 let persistence_tx = self.config.persistence_tx.clone();
 
-                // A background task runs the LLM call so the persistence actor keeps processing messages (updates, flushes)
-                tokio::spawn(async move {
-                    let mut title = match sampling_client {
-                        Some(client) => {
-                            generate_session_summary(content.clone(), client, &model).await
-                        }
-                        None => String::new(),
-                    };
-                    if title.trim().is_empty() {
-                        title =
+                // Spawn title generation as a background task so the
+                // persistence actor can continue processing messages
+                // (updates, flushes) without waiting for the LLM call.
+                tokio::spawn(xai_grok_tools::util::detached::fire_and_forget(
+                    "session title generation",
+                    async move {
+                        let mut title = match sampling_client {
+                            Some(client) => {
+                                generate_session_summary(content.clone(), client, &model).await
+                            }
+                            None => String::new(),
+                        };
+                        if title.trim().is_empty() {
+                            title =
                             crate::session::helpers::session_summary::title_fallback_from_user_text(
                                 &content,
                             );
-                    }
-
-                    // The actor persists the title (only if the session has no title yet) and notifies the client there
-                    // If a manual `/rename` won the race, the actor rejects the generated title, so it never reaches the client
-                    match persistence_tx.upgrade() {
-                        Some(tx) => {
-                            let _ = tx.send(PersistenceMsg::GeneratedTitle(title));
                         }
-                        None => tracing::debug!("session closed before its title was generated"),
-                    }
-                });
+
+                        // Route the result through the persistence channel. The
+                        // actor persists it (only if the session has no title yet)
+                        // and notifies the client there, so a title rejected for
+                        // racing a manual `/rename` never reaches the client.
+                        match persistence_tx.upgrade() {
+                            Some(tx) => {
+                                let _ = tx.send(PersistenceMsg::GeneratedTitle(title));
+                            }
+                            None => {
+                                tracing::debug!("session closed before its title was generated")
+                            }
+                        }
+                    },
+                ));
             }
         }
     }
@@ -250,10 +259,14 @@ mod tests {
     #[test]
     fn reset_returns_generator_to_idle() {
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-        let sampling_client =
-            OaiCompatClient::new(xai_grok_sampler::SamplerConfig::default()).unwrap();
+        // A client needs a URL to build. The discard port answers nothing.
+        let sampling_client = OaiCompatClient::new(xai_grok_sampler::SamplerConfig {
+            base_url: "http://127.0.0.1:9/v1".to_owned(),
+            ..xai_grok_sampler::SamplerConfig::default()
+        })
+        .unwrap();
         let mut generator = SummaryGenerator::new(SummaryConfig {
-            sampling_client,
+            sampling_client: Some(sampling_client),
             model: String::new(),
             persistence_tx: tx.downgrade(),
         });

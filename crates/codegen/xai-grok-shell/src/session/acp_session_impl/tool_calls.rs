@@ -161,9 +161,7 @@ pub(super) enum PlanEditGate {
     /// Grok-toolset edit outside the plan file (plan-file-only rule).
     RejectNonPlanFile,
 }
-/// Compat-toolset `Delete` is not on the markdown carve-out: it maps to `AccessKind::Edit` and is plan-file-only (same as grok edits).
-/// `apply_patch` is `AccessKind::Tool` (its files are named inside the patch text) and is always rejected: it could touch anything.
-/// `enter_plan_mode` / `exit_plan_mode` map to `AccessKind::Read` and are likewise never gated.
+/// `send_feedback` maps to `AccessKind::Tool` when its input parses as `SendFeedback` or `Dynamic`.
 fn access_kind_for_resolved_tool(tool_name: &str, tool_input: &ToolInput) -> AccessKind {
     if tool_name == xai_grok_tools::implementations::grok_build::SEND_FEEDBACK_TOOL_NAME {
         return match tool_input {
@@ -175,6 +173,8 @@ fn access_kind_for_resolved_tool(tool_name: &str, tool_input: &ToolInput) -> Acc
     }
     AccessKind::from(tool_input)
 }
+/// Compat-toolset `Delete` is not on the markdown carve-out: it maps to `AccessKind::Edit` and is plan-file-only (same as grok edits).
+/// `enter_plan_mode` / `exit_plan_mode` map to `AccessKind::Read` and are never gated.
 pub(super) fn plan_mode_edit_gate(
     tracker: &crate::session::plan_mode::PlanModeTracker,
     tool_input: &ToolInput,
@@ -185,9 +185,6 @@ pub(super) fn plan_mode_edit_gate(
     }
     if matches!(tool_input, ToolInput::Task(_)) {
         return PlanEditGate::Allow;
-    }
-    if matches!(tool_input, ToolInput::ApplyPatch(_)) {
-        return PlanEditGate::RejectNonPlanFile;
     }
     match access_kind {
         AccessKind::Edit(path) if !tracker.should_auto_approve_edit(Path::new(path)) => {
@@ -1727,6 +1724,29 @@ impl SessionActor {
                 .await?;
             return Ok(Err(ToolLoop::Continue));
         }
+        if self.goal_tracker.lock().status()
+            == Some(crate::session::goal_tracker::GoalStatus::Active)
+        {
+            let session_dir = crate::session::persistence::session_dir(&self.session_info);
+            if let Some(target) = crate::session::goal_classifier::run_log::goal_bookkeeping_target(
+                &call.function.arguments,
+                &session_dir.to_string_lossy(),
+            ) {
+                tracing::info!(
+                    tool_name = %call.function.name,
+                    target,
+                    "goal: refused a read of session bookkeeping"
+                );
+                let msg = format!(
+                    "Refused: this call touches `{target}`, the session's own record. \
+                     Reading the transcript is the verifier's job. Do not collect, extract \
+                     or summarize evidence. Keep working on the objective."
+                );
+                self.handle_tool_not_executed(&call.id, &tool_call_id, msg)
+                    .await?;
+                return Ok(Err(ToolLoop::Continue));
+            }
+        }
         let tool_call_display = mcp_preparation
             .approval(self, &tool_call_id, &call.function.name, &mut tool_input)
             .await;
@@ -2075,6 +2095,12 @@ impl SessionActor {
                     }
                     PlanApprovalOutcome::Approved => {
                         tracing::info!("[exit_plan_mode] user approved — executing tool");
+                        // The reminder follows the tool result, which keeps the call and its result together.
+                        if let Some(plan) = plan_content.as_deref()
+                            && let Some(reminder) = self.setup_goal_from_approved_plan(plan).await
+                        {
+                            deferred_followups.push(ConversationItem::system_reminder(reminder));
+                        }
                     }
                 },
                 Err(err) => {
@@ -2269,7 +2295,7 @@ impl SessionActor {
             "[exit_plan_mode] re-parking approval after resume"
         );
         let parsed = match self
-            .request_plan_approval(&tool_call_id, Some(plan_content))
+            .request_plan_approval(&tool_call_id, Some(plan_content.clone()))
             .await
         {
             Ok(parsed) => parsed,
@@ -2291,8 +2317,12 @@ impl SessionActor {
             ResumeAction::LeaveAndImplement => {
                 tracing::info!("[exit_plan_mode] resume: user approved plan");
                 self.leave_plan_mode_to_default();
+                let goal_reminder = self
+                    .setup_goal_from_approved_plan(&plan_content)
+                    .await
+                    .unwrap_or_default();
                 self.start_resume_turn(
-                    PLAN_APPROVED_IMPLEMENT_MESSAGE.to_string(),
+                    format!("{goal_reminder}{PLAN_APPROVED_IMPLEMENT_MESSAGE}"),
                     PromptMode::Agent,
                     completion_tx,
                 )
@@ -2434,7 +2464,6 @@ impl SessionActor {
                 );
                 (acp::ToolKind::Other, vec![], vec![])
             }
-            ToolInput::ApplyPatch(_) => (acp::ToolKind::Edit, vec![], vec![]),
             ToolInput::Dynamic(_) => (acp::ToolKind::Other, vec![], vec![]),
             ToolInput::MemorySearch(_) => (acp::ToolKind::Other, vec![], vec![]),
             ToolInput::MemoryGet(_) => (acp::ToolKind::Read, vec![], vec![]),
@@ -3192,11 +3221,19 @@ pub(crate) fn ci_tool_title(
         CiAction::Logs => "logs",
         CiAction::Checks => "checks",
     };
+    let named_repo = ci
+        .repo
+        .as_deref()
+        .filter(|repo| !repo.is_empty())
+        .map(|repo| format!(" in {repo}"));
     match ci.branch.as_deref().filter(|branch| !branch.is_empty()) {
-        Some(branch) => format!("CI {action}: {branch}"),
+        Some(branch) => format!("CI {action}: {branch}{}", named_repo.unwrap_or_default()),
         // No branch named: the tool reads the checked-out one, which is what
         // the session is already showing.
-        None => format!("CI {action} (current branch)"),
+        None => format!(
+            "CI {action} (current branch){}",
+            named_repo.unwrap_or_default()
+        ),
     }
 }
 
@@ -3231,6 +3268,7 @@ mod ci_tool_title_tests {
         CiInput {
             action,
             branch: branch.map(str::to_string),
+            repo: None,
             run_id: None,
             limit: None,
             timeout_secs: None,
@@ -3262,6 +3300,22 @@ mod ci_tool_title_tests {
                 "CI status (current branch)"
             );
         }
+    }
+
+    #[test]
+    fn a_ci_call_about_another_repository_says_which() {
+        // A query that goes to a different repository must not read in the
+        // transcript as a query about the session's own branch.
+        let mut ask = input(CiAction::Status, Some("fix/darwin-version-stamp"));
+        ask.repo = Some("wow-look-at-my/go-toolchain".to_string());
+        assert_eq!(
+            ci_tool_title(&ask),
+            "CI status: fix/darwin-version-stamp in wow-look-at-my/go-toolchain"
+        );
+
+        let mut current = input(CiAction::Runs, None);
+        current.repo = Some("o/r".to_string());
+        assert_eq!(ci_tool_title(&current), "CI runs (current branch) in o/r");
     }
 }
 
@@ -3518,21 +3572,6 @@ mod plan_mode_edit_gate_tests {
         assert_eq!(
             gate(&t, &write("/tmp/gate-session/plan.md")),
             PlanEditGate::Allow
-        );
-    }
-    /// `apply_patch` names its files inside the patch text, never the plan file alone: always rejected in plan mode.
-    #[test]
-    fn apply_patch_rejected_in_plan_mode() {
-        use xai_grok_tools::implementations::codex::apply_patch::ApplyPatchInput;
-        let t = active_tracker();
-        assert_eq!(
-            gate(
-                &t,
-                &ToolInput::ApplyPatch(ApplyPatchInput {
-                    patch: String::new()
-                })
-            ),
-            PlanEditGate::RejectNonPlanFile
         );
     }
     #[test]

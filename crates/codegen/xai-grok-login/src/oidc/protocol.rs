@@ -97,13 +97,55 @@ pub fn is_configured(config: &GrokComConfig) -> bool {
 /// The shell's config doesn't know which principal the user picked, so we peek at the token to find out. Returns `(principal_type, principal_id)` or `None` if the token is not a JWT or the claims can't be extracted.
 pub fn peek_access_token_principal(access_token: &str) -> Option<(String, String, Option<String>)> {
     #[derive(serde::Deserialize)]
+    #[serde(try_from = "MinimalClaimsWire")]
     struct MinimalClaims {
-        #[serde(default, alias = "principalType")]
+        #[serde(default)]
         principal_type: Option<String>,
-        #[serde(default, alias = "principalId")]
+        #[serde(default)]
         principal_id: Option<String>,
         #[serde(default)]
         team_id: Option<String>,
+    }
+
+    impl MinimalClaims {
+        /// The keys `principal_type` is read under. The id token spells it
+        /// snake_case; the access token this peeks at may spell it camelCase.
+        const PRINCIPAL_TYPE_KEYS: xai_tool_types::Aliases =
+            xai_tool_types::Aliases::new("principal_type", &["principalType"]);
+        /// The keys `principal_id` is read under.
+        const PRINCIPAL_ID_KEYS: xai_tool_types::Aliases =
+            xai_tool_types::Aliases::new("principal_id", &["principalId"]);
+    }
+
+    /// `MinimalClaims` as the token spells each principal key, so a token
+    /// naming both folds them instead of tripping serde's duplicate-field
+    /// check, which would read as "not a JWT" to `peek_access_token_principal`.
+    #[derive(serde::Deserialize)]
+    struct MinimalClaimsWire {
+        #[serde(default)]
+        principal_type: Option<String>,
+        #[serde(default, rename = "principalType")]
+        principal_type_camel: Option<String>,
+        #[serde(default)]
+        principal_id: Option<String>,
+        #[serde(default, rename = "principalId")]
+        principal_id_camel: Option<String>,
+        #[serde(default)]
+        team_id: Option<String>,
+    }
+
+    impl TryFrom<MinimalClaimsWire> for MinimalClaims {
+        type Error = xai_tool_types::AliasConflict;
+
+        fn try_from(wire: MinimalClaimsWire) -> Result<Self, Self::Error> {
+            Ok(Self {
+                principal_type: MinimalClaims::PRINCIPAL_TYPE_KEYS
+                    .fold(vec![wire.principal_type, wire.principal_type_camel])?,
+                principal_id: MinimalClaims::PRINCIPAL_ID_KEYS
+                    .fold(vec![wire.principal_id, wire.principal_id_camel])?,
+                team_id: wire.team_id,
+            })
+        }
     }
     let token_data =
         jsonwebtoken::dangerous::insecure_decode::<MinimalClaims>(access_token).ok()?;
@@ -120,9 +162,39 @@ pub fn peek_access_token_principal(access_token: &str) -> Option<(String, String
 /// The server re-validates the signed token anyway. Returns `None` only when no non-empty `principal_id` is present (which `enforce_login_principal` treats as fail-closed).
 pub fn peek_access_token_principal_id(access_token: &str) -> Option<String> {
     #[derive(serde::Deserialize)]
+    #[serde(try_from = "PrincipalIdClaimWire")]
     struct PrincipalIdClaim {
-        #[serde(default, alias = "principalId")]
+        #[serde(default)]
         principal_id: Option<String>,
+    }
+
+    impl PrincipalIdClaim {
+        /// The keys `principal_id` is read under; the same pair
+        /// `MinimalClaims::PRINCIPAL_ID_KEYS` folds. Written out again because
+        /// each of these types is local to its own peek function.
+        const PRINCIPAL_ID_KEYS: xai_tool_types::Aliases =
+            xai_tool_types::Aliases::new("principal_id", &["principalId"]);
+    }
+
+    /// `PrincipalIdClaim` with each spelling as its own field. See
+    /// [`PrincipalIdClaim::PRINCIPAL_ID_KEYS`].
+    #[derive(serde::Deserialize)]
+    struct PrincipalIdClaimWire {
+        #[serde(default)]
+        principal_id: Option<String>,
+        #[serde(default, rename = "principalId")]
+        principal_id_camel: Option<String>,
+    }
+
+    impl TryFrom<PrincipalIdClaimWire> for PrincipalIdClaim {
+        type Error = xai_tool_types::AliasConflict;
+
+        fn try_from(wire: PrincipalIdClaimWire) -> Result<Self, Self::Error> {
+            Ok(Self {
+                principal_id: PrincipalIdClaim::PRINCIPAL_ID_KEYS
+                    .fold(vec![wire.principal_id, wire.principal_id_camel])?,
+            })
+        }
     }
     jsonwebtoken::dangerous::insecure_decode::<PrincipalIdClaim>(access_token)
         .ok()?
@@ -531,6 +603,7 @@ async fn refresh_tokens_once(
     Ok(resp.json().await?)
 }
 #[derive(Debug, Deserialize)]
+#[serde(try_from = "IdTokenClaimsWire")]
 pub(super) struct IdTokenClaims {
     #[serde(default)]
     pub(super) sub: Option<String>,
@@ -542,12 +615,69 @@ pub(super) struct IdTokenClaims {
     pub(super) aud: Option<serde_json::Value>,
     #[serde(default)]
     pub(super) nonce: Option<String>,
-    #[serde(default, alias = "given_name")]
+    #[serde(default)]
     pub(super) first_name: Option<String>,
-    #[serde(default, alias = "family_name")]
+    #[serde(default)]
     pub(super) last_name: Option<String>,
     #[serde(default)]
     pub(super) picture: Option<String>,
+}
+
+impl IdTokenClaims {
+    /// The keys [`first_name`](Self::first_name) is read under. `given_name` is
+    /// the OIDC standard claim; an IdP that also carries this program's own
+    /// spelling says one thing twice.
+    pub(super) const FIRST_NAME_KEYS: xai_tool_types::Aliases =
+        xai_tool_types::Aliases::new("first_name", &["given_name"]);
+    /// The keys [`last_name`](Self::last_name) is read under; `family_name` is
+    /// the OIDC standard claim.
+    pub(super) const LAST_NAME_KEYS: xai_tool_types::Aliases =
+        xai_tool_types::Aliases::new("last_name", &["family_name"]);
+}
+
+/// `IdTokenClaims` with each name-key spelling as its own field, so a token
+/// naming both folds them instead of tripping serde's duplicate-field check.
+#[derive(Debug, Default, Deserialize)]
+struct IdTokenClaimsWire {
+    #[serde(default)]
+    sub: Option<String>,
+    #[serde(default)]
+    email: Option<String>,
+    #[serde(default)]
+    iss: Option<String>,
+    #[serde(default)]
+    aud: Option<serde_json::Value>,
+    #[serde(default)]
+    nonce: Option<String>,
+    #[serde(default)]
+    first_name: Option<String>,
+    #[serde(default, rename = "given_name")]
+    given_name: Option<String>,
+    #[serde(default)]
+    last_name: Option<String>,
+    #[serde(default, rename = "family_name")]
+    family_name: Option<String>,
+    #[serde(default)]
+    picture: Option<String>,
+}
+
+impl TryFrom<IdTokenClaimsWire> for IdTokenClaims {
+    type Error = xai_tool_types::AliasConflict;
+
+    fn try_from(wire: IdTokenClaimsWire) -> Result<Self, Self::Error> {
+        Ok(Self {
+            sub: wire.sub,
+            email: wire.email,
+            iss: wire.iss,
+            aud: wire.aud,
+            nonce: wire.nonce,
+            first_name: IdTokenClaims::FIRST_NAME_KEYS
+                .fold(vec![wire.first_name, wire.given_name])?,
+            last_name: IdTokenClaims::LAST_NAME_KEYS
+                .fold(vec![wire.last_name, wire.family_name])?,
+            picture: wire.picture,
+        })
+    }
 }
 pub(super) fn aud_matches(aud: &serde_json::Value, expected: &str) -> bool {
     match aud {
@@ -1273,5 +1403,112 @@ mod tests {
             !msg.contains("300s"),
             "should not mention raw seconds, got: {msg}"
         );
+    }
+}
+
+#[cfg(test)]
+mod wire_alias_tests {
+    use super::super::test_helpers::ensure_crypto_provider;
+    use super::{IdTokenClaims, peek_access_token_principal, peek_access_token_principal_id};
+
+    /// A token carrying exactly the claims given, signed with a throwaway
+    /// secret. `insecure_decode` reads the body and checks nothing about the
+    /// signature, so the claim names in `claims` are what the reader sees. The
+    /// header names a real algorithm because a `Header` whose `alg` is not one
+    /// of `jsonwebtoken::Algorithm`'s variants fails to parse, and the reader
+    /// gives up before it looks at any claim.
+    fn token_with(claims: &str) -> String {
+        ensure_crypto_provider();
+        let value: serde_json::Value =
+            serde_json::from_str(claims).expect("test claims are a JSON object");
+        jsonwebtoken::encode(
+            &jsonwebtoken::Header::new(jsonwebtoken::Algorithm::HS256),
+            &value,
+            &jsonwebtoken::EncodingKey::from_secret(b"token-shaped-test-material"),
+        )
+        .expect("a claims object encodes")
+    }
+
+    /// An idp that writes both the snake_case and the camelCase principal key —
+    /// which is what a token relayed through a translating gateway looks like —
+    /// must still be readable, not rejected as a duplicate field.
+    #[test]
+    fn a_token_naming_the_principal_under_both_spellings_is_readable() {
+        let token = token_with(
+            r#"{"principal_type":"Team","principalType":"Team","principal_id":"t-1","principalId":"t-1","team_id":"t-1"}"#,
+        );
+        assert_eq!(
+            peek_access_token_principal(&token),
+            Some(("Team".to_owned(), "t-1".to_owned(), Some("t-1".to_owned())))
+        );
+        assert_eq!(
+            peek_access_token_principal_id(&token).as_deref(),
+            Some("t-1"),
+            "the id-only peek folds the same pair"
+        );
+    }
+
+    #[test]
+    fn a_token_reading_the_principal_under_either_spelling_alone_is_readable() {
+        let camel = token_with(r#"{"principalType":"Team","principalId":"t-2"}"#);
+        assert_eq!(
+            peek_access_token_principal(&camel),
+            Some(("Team".to_owned(), "t-2".to_owned(), None))
+        );
+
+        let snake = token_with(r#"{"principal_type":"Team","principal_id":"t-3"}"#);
+        assert_eq!(
+            peek_access_token_principal(&snake),
+            Some(("Team".to_owned(), "t-3".to_owned(), None))
+        );
+    }
+
+    /// A token that contradicts itself about who the principal is must not pick
+    /// an identity in silence: this value gates team pinning.
+    #[test]
+    fn a_token_whose_principal_spellings_disagree_reads_as_no_principal() {
+        let token = token_with(r#"{"principal_id":"a","principalId":"b"}"#);
+        assert_eq!(
+            peek_access_token_principal_id(&token),
+            None,
+            "a contradictory token must not yield an identity"
+        );
+        assert_eq!(peek_access_token_principal(&token), None);
+    }
+
+    #[test]
+    fn id_token_claims_read_the_names_under_the_oidc_spelling_too() {
+        let claims: IdTokenClaims = serde_json::from_str(
+            r#"{"sub":"s","given_name":"Ada","first_name":"Ada","family_name":"L","last_name":"L"}"#,
+        )
+        .expect("one name named twice is one name");
+        assert_eq!(claims.first_name.as_deref(), Some("Ada"));
+        assert_eq!(claims.last_name.as_deref(), Some("L"));
+
+        let claims: IdTokenClaims =
+            serde_json::from_str(r#"{"sub":"s","first_name":"Ada"}"#).unwrap();
+        assert_eq!(claims.first_name.as_deref(), Some("Ada"));
+
+        let err = serde_json::from_str::<IdTokenClaims>(
+            r#"{"sub":"s","given_name":"Ada","first_name":"Grace"}"#,
+        )
+        .expect_err("two first names must not resolve silently");
+        assert!(err.to_string().contains("first_name"), "{err}");
+    }
+
+    /// `IdTokenClaims` is read out of a token and never written back, so there
+    /// is no outgoing key to assert; the canonical spelling is the one the
+    /// struct's own fields name, and `given_name` / `family_name` are accepted
+    /// on input only.
+    #[test]
+    fn id_token_claims_are_read_only_so_the_canonical_field_is_the_one_kept() {
+        let claims: IdTokenClaims =
+            serde_json::from_str(r#"{"sub":"s","given_name":"Ada"}"#).unwrap();
+        assert_eq!(
+            claims.first_name.as_deref(),
+            Some("Ada"),
+            "the OIDC spelling lands in the canonical field"
+        );
+        assert_eq!(claims.sub.as_deref(), Some("s"));
     }
 }

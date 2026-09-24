@@ -108,7 +108,9 @@ pub(super) fn transient_retry_eligible(error: &xai_grok_sampler::SamplingErrorIn
         | SamplingErrorKind::RateLimited
         | SamplingErrorKind::EmptyResponse
         | SamplingErrorKind::MaxTokensTruncation
-        | SamplingErrorKind::DoomLoopDetected => false,
+        | SamplingErrorKind::DoomLoopDetected
+        | SamplingErrorKind::OutputRateCollapsed
+        | SamplingErrorKind::FirstTokenTimeout => false,
     }
 }
 
@@ -298,6 +300,7 @@ fn revoked_sampling_info() -> xai_grok_sampler::SamplingErrorInfo {
         empty_response_context: None,
         doom_loop_triggers: None,
         doom_loop_aborted_at_chunk: None,
+        output_rate: None,
         credential: xai_grok_sampling_types::SentCredential::Unknown,
     }
 }
@@ -680,7 +683,6 @@ impl SessionActor {
                 extra_body: Default::default(),
             });
         let creds = self.chat_state_handle.get_credentials().await;
-        let codex_backend = crate::codex_provider::is_codex_backend(&cfg.base_url);
         let model_facts = self.model_auth_facts(cfg.model.as_str());
         // Gate on the stable session classifier, not `creds.auth_type`; see `crate::agent::auth_method::session_token_auth_gate`
         // `cfg.base_url` keeps an `Unknown` BYOK status refreshable against first-party xAI hosts
@@ -706,11 +708,7 @@ impl SessionActor {
         } else {
             creds.api_key
         };
-        let auth_scheme = if codex_backend {
-            xai_grok_sampler::AuthScheme::Bearer
-        } else {
-            model_facts.auth_scheme
-        };
+        let auth_scheme = model_facts.auth_scheme;
         let mut extra_headers = cfg.extra_headers;
         crate::agent::config::inject_url_derived_headers(
             &mut extra_headers,
@@ -777,33 +775,20 @@ impl SessionActor {
             stream_tool_calls: cfg.stream_tool_calls.unwrap_or(false),
             idle_timeout_secs: None,
             client_identifier: self.client_identifier.clone(),
-            deployment_id: if codex_backend {
-                None
-            } else {
-                crate::managed_config::resolve_deployment_id(
-                    crate::managed_config::resolve_deployment_key().as_deref(),
-                )
-            },
-            user_id: if codex_backend {
-                None
-            } else {
-                self.auth_manager
-                    .as_ref()
-                    .and_then(|am| am.current_or_expired())
-                    .filter(|a| a.is_xai_auth())
-                    .map(|a| a.user_id)
-            },
+            deployment_id: None,
+            user_id: self
+                .auth_manager
+                .as_ref()
+                .and_then(|am| am.current_or_expired())
+                .filter(|a| a.is_xai_auth())
+                .map(|a| a.user_id),
             origin_client: self.origin_client.clone(),
             // Attribute sampler 401s against the bearer sent on the wire.
             // `None` for sessions spawned without an `AuthManager` (BYOK direct, certain test fixtures)
             attribution_callback: self.attribution_callback.clone(),
             // Per-request bearer override is only valid for session-token auth.
             // Explicit API-key/env-key models must keep their configured bearer and must not be overwritten by the interactive session token
-            bearer_resolver: if codex_backend {
-                Some(std::sync::Arc::new(
-                    crate::codex_provider::CodexBearerResolver,
-                ))
-            } else if use_bearer_resolver {
+            bearer_resolver: if use_bearer_resolver {
                 self.auth_manager.as_ref().map(|am| {
                     xai_grok_login::credential_provider::WireValidBearerResolver::shared(am.clone())
                 })
@@ -816,15 +801,7 @@ impl SessionActor {
             // The sampler sends the opt-in header itself when this is set.
             doom_loop_recovery: self.doom_loop_recovery,
             output_rate_floor: self.output_rate_floor.get(),
-            header_injector: if codex_backend {
-                Some(std::sync::Arc::new(
-                    crate::codex_provider::CodexHeaderInjector::new(
-                        self.session_info.id.0.as_ref(),
-                    ),
-                ))
-            } else {
-                Some(std::sync::Arc::new(TraceContextInjector))
-            },
+            header_injector: Some(std::sync::Arc::new(TraceContextInjector)),
         }
     }
 
@@ -985,7 +962,7 @@ impl SessionActor {
     }
 
     /// Resolve a standalone aux-model `SamplerConfig` for `slug` via the shared catalog routing, gathering the session-local auth context once.
-    /// The routing is Tier-1 catalog creds / Tier-2 xAI-proxy via session token / `XAI_API_KEY` / deployment key.
+    /// The routing is Tier-1 catalog creds / Tier-2 xAI-proxy via session token / `XAI_API_KEY`.
     /// Shared by image-describe and the classifier so the gather can't drift.
     pub(super) async fn resolve_aux_sampler_config(
         &self,
@@ -1845,6 +1822,7 @@ impl SessionActor {
                     report.items_after
                 ),
                 retry_in_ms: None,
+                error_type: None,
             },
         ))
         .await;
@@ -2220,6 +2198,7 @@ impl SessionActor {
                     "Too many requests in flight; waiting {} before trying again",
                     human_duration(announced)
                 ),
+                retry_in_ms: Some(backoff.as_millis() as u64),
                 error_type: None,
             },
         ))
@@ -2256,17 +2235,6 @@ impl SessionActor {
     /// Session-token path is best-effort: on success, update credentials and return.
     /// On failure, do not fall through to the JWT/config.toml branch when the session gate was active; that path is for BYOK JWTs only.
     pub(crate) async fn refresh_token_if_expired(&self) {
-        if self
-            .chat_state_handle
-            .get_sampling_config()
-            .await
-            .is_some_and(|cfg| crate::codex_provider::is_codex_backend(&cfg.base_url))
-        {
-            if let Err(error) = crate::codex_provider::refresh_credentials().await {
-                tracing::warn!(%error, "Codex credential refresh failed");
-            }
-            return;
-        }
         if let Some(ref am) = self.auth_manager {
             let creds = self.chat_state_handle.get_credentials().await;
             // Gate on the stable classifier, not `creds.auth_type`; this also heals a transient `ApiKey` flip by writing the refreshed token into `creds.api_key` below
@@ -2655,6 +2623,7 @@ mod stream_drain_tests {
             empty_response_context: None,
             doom_loop_triggers: None,
             doom_loop_aborted_at_chunk: None,
+            output_rate: None,
             credential: xai_grok_sampling_types::SentCredential::Unknown,
         };
         let result = error_after_stream_drain(StreamDrainOutcome::Revoked, original);

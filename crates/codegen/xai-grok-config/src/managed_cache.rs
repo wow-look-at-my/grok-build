@@ -17,16 +17,13 @@ pub const MANAGED_CONFIG_CACHE_FILE: &str = "managed_config_cache.json";
 struct ManagedConfigCache {
     /// Unix seconds of the last successful fetch.
     synced_at: Option<u64>,
-    /// Team id, or the deploy-key path's server `deployment_id` (reported via [`managed_deployment_id`]; identity is `key_fingerprint`).
+    /// The team id this sync served.
     principal: Option<String>,
     /// Artifacts this sync served, so staleness spots a later deletion; `default` false so pre-upgrade markers don't over-claim.
     #[serde(default)]
     had_managed_config: bool,
     #[serde(default)]
     had_requirements: bool,
-    /// Deploy-key fingerprint (never the raw key), the deploy-key identity (see [`ServingIdentity`]); `None` on the team path.
-    #[serde(default)]
-    key_fingerprint: Option<String>,
     /// Served opt-in (`fail_closed = true`); `default` false so a pre-upgrade or un-opted marker never fails closed.
     #[serde(default)]
     fail_closed: bool,
@@ -35,18 +32,15 @@ struct ManagedConfigCache {
     /// As forgeable as the rest of the marker: defeats a passive clock change, not a file edit.
     #[serde(default)]
     rollback_floor: u64,
-    /// Fields written by newer binaries, preserved when this binary rewrites only the floor.
-    /// A full sync rewrites the marker from scratch.
+    /// Keys this binary does not model, such as a retired `key_fingerprint`.
     #[serde(flatten)]
     extra: serde_json::Map<String, serde_json::Value>,
 }
 
-/// What the cache is bound to (one value, so a (team, key) combo can't form).
-/// The deploy-key fingerprint is the only identity verifiable offline (there is no map from key to `deployment_id` without the network).
+/// What the cache is bound to: a team, or no identity.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ServingIdentity {
     Team(String),
-    DeploymentKey { fingerprint: String },
     None,
 }
 
@@ -63,7 +57,6 @@ pub struct SyncMarker<'a> {
     pub principal: Option<&'a str>,
     pub had_managed_config: bool,
     pub had_requirements: bool,
-    pub key_fingerprint: Option<&'a str>,
     pub fail_closed: bool,
 }
 
@@ -74,31 +67,12 @@ pub fn mark_managed_config_synced(marker: SyncMarker<'_>) {
     }
 }
 
-/// Server-side GrokBuildDeployment UUID from the last deploy-key managed-config sync, bound to the key that synced it.
-/// A rotated or removed key therefore never reports the previous deployment's id.
-/// Team-path syncs store a team id and no fingerprint, so they never match.
-pub fn managed_deployment_id(key_fingerprint: &str) -> Option<String> {
-    managed_deployment_id_at(user_grok_home()?.as_path(), key_fingerprint)
-}
-
-fn managed_deployment_id_at(home: &Path, key_fingerprint: &str) -> Option<String> {
-    if key_fingerprint.trim().is_empty() {
-        return None;
-    }
-    let cache = read_managed_config_cache(home)?;
-    if cache.key_fingerprint.as_deref() != Some(key_fingerprint) {
-        return None;
-    }
-    normalize_identity(cache.principal.as_deref())
-}
-
 /// [`mark_managed_config_synced`] for an explicit `home` (apply-lock holder: same dir as lock).
 pub fn mark_managed_config_synced_at(home: &Path, marker: SyncMarker<'_>) {
     let SyncMarker {
         principal,
         had_managed_config,
         had_requirements,
-        key_fingerprint,
         fail_closed,
     } = marker;
     let synced_at = std::time::SystemTime::now()
@@ -112,7 +86,6 @@ pub fn mark_managed_config_synced_at(home: &Path, marker: SyncMarker<'_>) {
         // What THIS sync served (not what is on disk); an identity switch already evicted the prior artifacts
         had_managed_config,
         had_requirements,
-        key_fingerprint: normalize_identity(key_fingerprint),
         fail_closed,
         // Reset (not max): reconnect must clear an inflated floor
         // Residual risk: fetch verify is unclamped and managed_config_url is user-writable
@@ -213,18 +186,13 @@ fn read_managed_config_cache(home: &Path) -> Option<ManagedConfigCache> {
     }
 }
 
-/// Confirmed identity switch vs the marker (both sides of a dimension known and differing).
+/// Confirmed principal switch vs the marker (both sides known and differing).
 /// A missing marker, a blank value, or a pre-upgrade marker never counts.
-pub fn managed_config_identity_changed_at(
-    home: &Path,
-    new_principal: Option<&str>,
-    new_key_fingerprint: Option<&str>,
-) -> bool {
+pub fn managed_config_identity_changed_at(home: &Path, new_principal: Option<&str>) -> bool {
     let Some(cache) = read_managed_config_cache(home) else {
         return false;
     };
     confirmed_switch(cache.principal.as_deref(), new_principal).is_some()
-        || confirmed_switch(cache.key_fingerprint.as_deref(), new_key_fingerprint).is_some()
 }
 
 /// Present non-blank value, else `None` (blank/whitespace is "unknown", not a tenant); the value is returned untrimmed.
@@ -247,7 +215,6 @@ fn confirmed_switch<'a>(recorded: Option<&'a str>, current: Option<&str>) -> Opt
 }
 
 /// Offline tenant-purge detector: a confirmed team switch vs the marker returns the evicted principal.
-/// Key-scoped markers never confirm (key owns the machine's policy, not the team).
 pub fn confirmed_team_switch(new_team_id: &str) -> Option<String> {
     user_grok_home().and_then(|home| confirmed_team_switch_at(&home, new_team_id))
 }
@@ -255,9 +222,6 @@ pub fn confirmed_team_switch(new_team_id: &str) -> Option<String> {
 /// [`confirmed_team_switch`] for an explicit `home` (purge-lock holder: same dir as delete).
 pub fn confirmed_team_switch_at(home: &Path, new_team_id: &str) -> Option<String> {
     let cache = read_managed_config_cache(home)?;
-    if known(cache.key_fingerprint.as_deref()).is_some() {
-        return None;
-    }
     confirmed_switch(cache.principal.as_deref(), Some(new_team_id)).map(str::to_owned)
 }
 
@@ -271,8 +235,7 @@ fn cache_missing_required_artifact(cache: &ManagedConfigCache, home: &Path) -> b
             && !policy_file_has_content(home, crate::loader::MANAGED_CONFIG_FILENAME))
 }
 
-/// Whether the cached principal differs from the team serving now, checking the team dimension only.
-/// Deploy-key identity is verified by fingerprint ([`cache_key_fingerprint_mismatch`]); `None` never fires.
+/// Whether the cached principal differs from the team serving now; `None` never fires.
 /// Trim-aware (same rule as marker write): whitespace alone is not a mismatch.
 fn cache_identity_mismatch(cache: &ManagedConfigCache, identity: &ServingIdentity) -> bool {
     match identity {
@@ -286,38 +249,25 @@ fn cache_identity_mismatch(cache: &ManagedConfigCache, identity: &ServingIdentit
             // One-sided: treat as mismatch (first install or a cleared principal field)
             _ => true,
         },
-        ServingIdentity::DeploymentKey { .. } | ServingIdentity::None => false,
+        ServingIdentity::None => false,
     }
 }
 
-/// Whether the configured deployment key differs from the cache's, by one-way fingerprint (never the raw key), the only identity verifiable offline.
-/// A pre-upgrade marker (no fingerprint) never fires; only a *changed* key does.
-/// Trim-aware; both sides must be known (unlike the team principal path).
-fn cache_key_fingerprint_mismatch(cache: &ManagedConfigCache, identity: &ServingIdentity) -> bool {
-    match identity {
-        ServingIdentity::DeploymentKey { fingerprint } => {
-            confirmed_switch(cache.key_fingerprint.as_deref(), Some(fingerprint.as_str())).is_some()
-        }
-        ServingIdentity::Team(_) | ServingIdentity::None => false,
-    }
-}
-
-/// The team id for the signed-cache check; `None` for a deployment key (bound by the marker's deployment id, not a team) or no identity.
+/// The team id for the signed-cache check; `None` when there is no identity.
 fn serving_team_id(identity: &ServingIdentity) -> Option<&str> {
     match identity {
         ServingIdentity::Team(team_id) => Some(team_id.as_str()),
-        ServingIdentity::DeploymentKey { .. } | ServingIdentity::None => None,
+        ServingIdentity::None => None,
     }
 }
 
-/// Tamper signals for the current identity, split two ways: [`Self::needs_refetch`] (staleness) fires on ANY signal.
-/// [`Self::compromised_for_gate`] (gate) fires only on artifact-missing or key-change.
+/// Tamper signals for the current identity, split ways: [`Self::needs_refetch`] (staleness) fires on ANY signal.
+/// [`Self::compromised_for_gate`] (gate) fires only on artifact-missing.
 /// A pure identity mismatch never compromises the gate: a foreign marker is rebound by the online refetch.
 #[derive(Clone, Copy)]
 struct TamperSignals {
     artifact_missing: bool,
     identity_mismatch: bool,
-    key_fingerprint_mismatch: bool,
 }
 
 impl TamperSignals {
@@ -325,16 +275,15 @@ impl TamperSignals {
         Self {
             artifact_missing: cache_missing_required_artifact(cache, home),
             identity_mismatch: cache_identity_mismatch(cache, identity),
-            key_fingerprint_mismatch: cache_key_fingerprint_mismatch(cache, identity),
         }
     }
 
     fn needs_refetch(self) -> bool {
-        self.artifact_missing || self.identity_mismatch || self.key_fingerprint_mismatch
+        self.artifact_missing || self.identity_mismatch
     }
 
     fn compromised_for_gate(self) -> bool {
-        self.artifact_missing || self.key_fingerprint_mismatch
+        self.artifact_missing
     }
 }
 
@@ -354,7 +303,6 @@ fn cache_unusable_for(cache: &ManagedConfigCache, home: &Path, identity: &Servin
 }
 
 /// The principal the SIGNED cache must be bound to: the live team id, else the marker principal.
-/// On a deployment-key machine the marker principal is the recorded deployment id.
 /// One derivation shared by the gate and both staleness checks, so a foreign-but-authentic cache reads foreign on every sibling path.
 fn expected_signed_principal<'a>(
     cache: Option<&'a ManagedConfigCache>,
@@ -413,15 +361,9 @@ fn managed_policy_compromised_for_at(home: &Path, identity: &ServingIdentity) ->
     let now = effective_now(cache.as_ref());
     let signed_verdict =
         crate::signed_policy::signed_cache_compromised(home, expected_principal, now);
-    // The signature binds a deployment_id, not the local deploy key, so a Trusted verdict can't attest the configured key
-    // Pass the fingerprint mismatch through so it gates on every path
-    let key_fingerprint_mismatch = cache
-        .as_ref()
-        .is_some_and(|c| cache_key_fingerprint_mismatch(c, identity));
     managed_policy_compromised_decision(
         signed_verdict,
         || crate::signed_policy::managed_identity_claim_imposes(home, expected_principal, now),
-        key_fingerprint_mismatch,
         cache.as_ref(),
         home,
         identity,
@@ -434,7 +376,6 @@ fn managed_policy_compromised_for_at(home: &Path, identity: &ServingIdentity) ->
 fn managed_policy_compromised_decision(
     signed_verdict: crate::signed_policy::SignedVerdict,
     claim_imposes: impl FnOnce() -> bool,
-    key_fingerprint_mismatch: bool,
     cache: Option<&ManagedConfigCache>,
     home: &Path,
     identity: &ServingIdentity,
@@ -459,12 +400,10 @@ fn managed_policy_compromised_decision(
             }
             let signals = TamperSignals::evaluate(cache, home, identity);
             let compromised = signals.compromised_for_gate();
-            // Booleans only, never the raw key (the fingerprint is already a one-way hash)
             if compromised {
                 tracing::warn!(
                     artifact_missing = signals.artifact_missing,
                     identity_mismatch = signals.identity_mismatch,
-                    key_fingerprint_mismatch = signals.key_fingerprint_mismatch,
                     "managed policy fail-closed gate: refusing session on tamper evidence"
                 );
             } else if signals.identity_mismatch {
@@ -478,8 +417,7 @@ fn managed_policy_compromised_decision(
     };
     match signed_verdict {
         SignedVerdict::Compromised => true,
-        // Trusted clears the gate except for the deploy-key fingerprint, which the signature can't attest
-        SignedVerdict::Trusted => key_fingerprint_mismatch && marker_compromised(),
+        SignedVerdict::Trusted => false,
         SignedVerdict::NoAuthenticSidecar => {
             let refused = claim_imposes();
             if refused {

@@ -101,7 +101,16 @@ pub(crate) fn copy_parallel(
         .threads(num_workers) // Limit walker parallelism to avoid FD exhaustion
         .filter_entry(|entry| {
             // Always skip .git directory.
-            entry.file_name() != ".git"
+            if entry.file_name() == ".git" {
+                return false;
+            }
+            // Skip the directory holding this repository's grok-managed
+            // checkouts. A new worktree is created inside the source tree, so
+            // walking it would copy sibling worktrees, and the destination
+            // itself, into every new checkout. `.git/info/exclude` would say
+            // the same thing but is deliberately not consulted (above), so the
+            // skip has to live here.
+            !crate::managed_root::is_repo_worktrees_root(&entry.path())
         });
 
     let walker = builder.build_parallel();
@@ -196,7 +205,10 @@ pub(crate) fn copy_parallel(
         let _ = worker.join();
     }
 
-    // Collect issues.
+    // Collect issues. A poisoned accumulator is read anyway: the run reports what
+    // it recorded rather than losing the list to a panic at the summary line.
+    // `parking_lot::Mutex` is the structural fix and is not a dependency here.
+    #[allow(clippy::disallowed_methods)]
     let issues = match Arc::try_unwrap(issues) {
         Ok(mutex) => mutex.into_inner().unwrap_or_default(),
         Err(arc) => arc.lock().unwrap().clone(),

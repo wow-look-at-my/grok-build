@@ -289,6 +289,7 @@ pub mod leader {
 }
 
 #[allow(dead_code)]
+#[cfg(feature = "test-support")]
 pub fn isolated_home() -> tempfile::TempDir {
     xai_grok_shell::agent::remote_config::settings_get::reset_startup_settings_for_tests();
     xai_grok_shell::managed_config::clear_startup_profile_for_tests();

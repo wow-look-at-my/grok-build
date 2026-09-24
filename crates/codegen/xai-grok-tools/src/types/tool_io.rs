@@ -11,10 +11,6 @@
 //! - `ToolOutput` — one variant per built-in tool + `Dynamic(Value)`.
 //!   `From` derive generates `From<TypedOutput>` for each inner type.
 use crate::implementations::BashToolInput;
-use crate::implementations::codex::apply_patch::tool::ApplyPatchInput;
-use crate::implementations::codex::grep_files::tool::CodexGrepFilesInput;
-use crate::implementations::codex::list_dir::tool::CodexListDirInput;
-use crate::implementations::codex::read_file::tool::CodexReadFileInput;
 use crate::implementations::grok_build::ask_user_question::AskUserQuestionInput;
 use crate::implementations::grok_build::copy_move::CopyMoveInput;
 use crate::implementations::grok_build::enter_plan_mode::EnterPlanModeInput;
@@ -75,11 +71,7 @@ pub enum ToolInput {
     ReferenceToVideo(ReferenceToVideoInput),
     WebFetch(WebFetchInput),
     Write(WriteInput),
-    ApplyPatch(ApplyPatchInput),
     HashlineEdit(crate::implementations::grok_build_hashline::edit::types::HashlineEditInput),
-    CodexListDir(CodexListDirInput),
-    CodexGrepFiles(CodexGrepFilesInput),
-    CodexReadFile(CodexReadFileInput),
     MemorySearch(MemorySearchInput),
     MemoryGet(MemoryGetInput),
     SearchTool(SearchToolInput),

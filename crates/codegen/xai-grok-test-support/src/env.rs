@@ -80,7 +80,6 @@ pub unsafe fn isolate_grok_env(home: &Path) {
         for var in [
             "GROK_AUTH",
             "GROK_AUTH_PATH",
-            "GROK_DEPLOYMENT_KEY",
             "GROK_MANAGED_CONFIG",
             "GROK_CONFIG",
             "GROK_CONFIG_PATH",

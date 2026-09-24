@@ -125,6 +125,7 @@ fn failed_info() -> xai_grok_sampler::SamplingErrorInfo {
         doom_loop_triggers: None,
         doom_loop_aborted_at_chunk: None,
         credential: xai_grok_sampling_types::SentCredential::Unknown,
+        output_rate: None,
     }
 }
 

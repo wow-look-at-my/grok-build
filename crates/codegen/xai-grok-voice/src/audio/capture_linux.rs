@@ -15,11 +15,12 @@
 
 use std::io::Read;
 use std::process::{Child, Command, Stdio};
+use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use parking_lot::Mutex;
 use tokio::sync::mpsc as async_mpsc;
 
 use super::pipe::{self, READ_CHUNK};
@@ -369,7 +370,7 @@ pub fn capture_pcm_for_duration(
     let watchdog_child = Arc::clone(&child);
     thread::spawn(move || {
         thread::sleep(duration);
-        let mut child = watchdog_child.lock().expect("watchdog lock poisoned");
+        let mut child = watchdog_child.lock();
         let _ = child.kill();
     });
 
@@ -391,7 +392,7 @@ pub fn capture_pcm_for_duration(
     }
 
     {
-        let mut child = child.lock().expect("child lock poisoned");
+        let mut child = child.lock();
         let _ = child.kill();
         let _ = child.wait();
     }

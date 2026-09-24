@@ -432,11 +432,9 @@ Create, edit, and delete personas. A subagent can apply a persona to shape how i
 ### `/login`
 
 Log in or re-authenticate with your Grok account without leaving the session.
-Pass `codex` to add an independent Codex/ChatGPT sign-in and its models.
 
 ```
 /login
-/login codex
 ```
 
 ### `/logout`

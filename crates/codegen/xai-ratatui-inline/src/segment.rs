@@ -94,7 +94,11 @@ pub fn split_into_line_segments<'a>(input: &'a str, term_width: usize) -> Vec<Li
 
     macro_rules! push_segment {
         ($end:expr, $crlf:expr) => {
-            #[allow(unused_assignments)]
+            // `segment_start` and `$end` are only ever set to the first byte of
+            // a printed char (`index + 1 - ch.len_utf8()`), one past a `\n` or
+            // `\r`, or one past the final byte of an escape sequence. Each is a
+            // char boundary, so the slice cannot split a character.
+            #[allow(unused_assignments, clippy::string_slice)]
             {
                 if let Some(content) = input.get(segment_start..$end) {
                     segments.push(LineSegment {

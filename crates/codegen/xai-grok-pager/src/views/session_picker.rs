@@ -195,7 +195,7 @@ pub(crate) fn loading_spinner_active(
 /// [`Self::Grok`]: native Grok sessions only (local / remote / conversation).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SourceFilter {
-    /// Native Grok sessions only; excludes Claude/Codex/Cursor foreign rows.
+    /// Native Grok sessions only; excludes Claude/Cursor foreign rows.
     #[default]
     Grok,
     /// `grok -p` one-shots only (`session_kind == "headless"`).
@@ -247,7 +247,7 @@ impl SourceFilter {
         }
     }
     /// Returns `true` if a session with the given `source` string and `session_kind` passes the filter.
-    /// Foreign sources (`claude` / `codex` / `cursor`) only pass `External` and `All`. Headless rows
+    /// Foreign sources (`claude` / `cursor`) only pass `External` and `All`. Headless rows
     /// pass only `Headless`; every other page excludes them, mirroring the server-side fetch policy.
     pub fn matches(self, source: &str, session_kind: Option<&str>) -> bool {
         let is_headless = session_kind == Some("headless");
@@ -1241,7 +1241,7 @@ mod tests {
     #[test]
     fn foreign_id_does_not_suppress_native_content_result() {
         let mut foreign = make_entry("shared", "repo");
-        foreign.source = "codex".into();
+        foreign.source = "cursor".into();
         let entries = vec![foreign];
         let hits = vec![make_content_hit("shared")];
         let flat = build_entry_map(
@@ -1314,13 +1314,11 @@ mod tests {
         assert!(SourceFilter::Grok.matches("both", None));
         assert!(SourceFilter::Grok.matches("conversation", None));
         assert!(!SourceFilter::Grok.matches("claude", None));
-        assert!(!SourceFilter::Grok.matches("codex", None));
         assert!(!SourceFilter::Grok.matches("cursor", None));
         assert!(SourceFilter::All.matches("local", None));
         assert!(SourceFilter::All.matches("remote", None));
         assert!(SourceFilter::All.matches("both", None));
         assert!(SourceFilter::All.matches("claude", None));
-        assert!(SourceFilter::All.matches("codex", None));
         assert!(SourceFilter::All.matches("cursor", None));
         assert!(SourceFilter::Local.matches("local", None));
         assert!(SourceFilter::Local.matches("both", None));
@@ -1334,7 +1332,6 @@ mod tests {
         assert!(SourceFilter::Remote.matches("conversation", None));
         assert!(!SourceFilter::Local.matches("conversation", None));
         assert!(SourceFilter::External.matches("claude", None));
-        assert!(SourceFilter::External.matches("codex", None));
         assert!(SourceFilter::External.matches("cursor", None));
         assert!(!SourceFilter::External.matches("local", None));
         assert!(!SourceFilter::External.matches("remote", None));
@@ -1363,7 +1360,7 @@ mod tests {
             entry_with_source("s1", "remote"),
             entry_with_source("s2", "both"),
             entry_with_source("s3", "claude"),
-            entry_with_source("s4", "codex"),
+            entry_with_source("s4", "cursor"),
             entry_with_source("s5", "cursor"),
             entry_with_source("s6", "local"),
         ];
@@ -1415,7 +1412,7 @@ mod tests {
         let entries = vec![
             entry_with_source("s0", "local"),
             entry_with_source("s1", "claude"),
-            entry_with_source("s2", "codex"),
+            entry_with_source("s2", "cursor"),
         ];
         assert!(hidden_external_hint(Some(&entries), SourceFilter::Grok).is_none());
         assert!(hidden_external_hint(Some(&entries), SourceFilter::Local).is_none());
@@ -1460,11 +1457,11 @@ mod tests {
     #[test]
     fn foreign_entry_uses_source_badge_and_has_no_detail_expansion() {
         let mut entry = make_entry("foreign", "repo");
-        entry.source = "codex".into();
+        entry.source = "cursor".into();
         let mut state = PickerState::default();
         state.expanded.insert(0);
         let built = build_session_entry_data(&[entry], &[0], &state, 80);
-        assert_eq!(at(&built, 0).badge, "codex");
+        assert_eq!(at(&built, 0).badge, "cursor");
         assert!(!at(&built, 0).collapsible);
         assert!(!at(&built, 0).is_expanded);
         assert!(at(&built, 0).field_data.is_empty());

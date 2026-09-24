@@ -5,20 +5,17 @@
 //! `/debug why was the context size defaulted to 256k?` injects the question
 //! together with the answers the model would otherwise have to guess at:
 //!
-//! 1. The *real* debug-log target the firehose writes to for this session: the
-//!    per-session `<grok_home>/debug/<session_id>.txt` file when
-//!    `GROK_DEBUG_LOG` is enabled (per-session routing — the exact path
-//!    `xai_grok_telemetry::debug_log`'s routing layer writes to), or the single
-//!    explicit file when `GROK_LOG_FILE` / `GROK_DEBUG_LOG=<path>` is set
-//!    (single-file routing writes only to that file). The file is created if it
-//!    does not exist, so the advertised path is always real and readable.
-//! 2. Whether the firehose is on at all, read from the same environment
-//!    variables (`GROK_DEBUG_LOG` / `GROK_LOG_FILE`) the already-installed
-//!    subscriber resolved at startup.
-//! 3. The rest of the execution context — running binary vs installed binary
-//!    (staleness), version and commit, config layers, model id, context window,
-//!    effort, `GROK_*`/`XAI_*` environment — assembled by
-//!    [`super::debug_context::DebugContext`].
+//! - The debug-log file the firehose writes for this session. `/debug` turns
+//!   the firehose on first (`debug_log::enable_firehose`), in this process and,
+//!   through `ENABLE_FIREHOSE_META` on the prompt block, in the agent process.
+//!   The file is `<grok_home>/debug/<session_id>.txt`, or the one file that
+//!   `GROK_LOG_FILE` / `GROK_DEBUG_LOG=<path>` names. It is created if it does
+//!   not exist.
+//! - Whether the firehose ran since launch or only since this `/debug`.
+//! - The rest of the execution context — running binary vs installed binary
+//!   (staleness), version and commit, config layers, model id, context window,
+//!   effort, `GROK_*`/`XAI_*` environment — assembled by
+//!   [`super::debug_context::DebugContext`].
 //!
 //! Delivery is [`CommandResult::InjectSkill`], the same path skills and `/loop`
 //! use, so the injected prompt reaches the model as the next turn's content.
@@ -36,9 +33,12 @@
 //!   ([`crate::input::scroll_log`]), runtime-constructed to a fresh
 //!   timestamped path.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use agent_client_protocol as acp;
+use xai_grok_telemetry::debug_log::{
+    ENABLE_FIREHOSE_META, FirehoseStatus, enable_firehose, session_log_path,
+};
 
 use super::debug_context::{DebugContext, ModelFacts};
 use crate::app::actions::Action;
@@ -46,115 +46,44 @@ use crate::slash::command::{
     AppCtx, ArgItem, CommandExecCtx, CommandResult, SlashCommand, slash_meta,
 };
 
-/// Filesystem-safe session key for the per-session debug log file name.
+/// The per-session firehose file: `<grok_home>/debug/<session_id>.txt`.
+pub fn debug_log_path(grok_home: &Path, session_id: &str) -> PathBuf {
+    session_log_path(&grok_home.join("debug"), session_id)
+}
+
+/// The file the firehose writes for `session_id`, given where it is routed.
 ///
-/// Mirrors the sanitization `xai_grok_telemetry::debug_log` applies when it
-/// opens `<dir>/<session_id>.txt` for a session span (that crate keeps its
-/// `sanitize_key` private). A normal session id is a UUID and passes through
-/// unchanged; hostile / non-UTF-8-alphabetic values can never escape the debug
-/// directory. Kept as a pure function so the resolver is testable without I/O.
-fn sanitize_session_key(id: &str) -> String {
-    let safe: String = id
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.') {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect();
-    // Map empty / dot-only keys ("", ".", "..", "...") to a constant: those are
-    // filesystem-special, and relying on the `.txt` suffix to neutralize them is
-    // incidental.
-    if safe.is_empty() || safe.bytes().all(|b| b == b'.') {
-        return "_".to_owned();
-    }
-    safe
-}
-
-/// Resolve the concrete per-session firehose log path a `/debug` invocation
-/// must name: `<grok_home>/debug/<session_id>.txt`.
-///
-/// This is the exact target `xai_grok_telemetry::debug_log`'s routing layer
-/// writes to for the session (same dir, same `<session>.txt` naming, same
-/// sanitization) — pure, so it is unit-tested with explicit inputs.
-pub fn debug_log_path(grok_home: &std::path::Path, session_id: &str) -> PathBuf {
-    grok_home
-        .join("debug")
-        .join(format!("{}.txt", sanitize_session_key(session_id)))
-}
-
-/// The on/off resolution of the firehose, mirroring what the already-installed
-/// subscriber used at startup.
-///
-/// [`xai_grok_telemetry::debug_log`] decides the firehose from two env vars:
-/// `GROK_LOG_FILE` (an explicit single file, wins) or `GROK_DEBUG_LOG` (a
-/// truthy bool routes per-session into `~/.grok/debug`, any other value is a
-/// single-file path). The tracing subscriber is initialized once at process
-/// start, so there is no runtime API to re-init it for the already-running
-/// process; this enum is the honest "is the firehose on / where does it go"
-/// answer the command reports and records for the current session.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum DebugLogState {
-    /// Firehose is on and routed **per session**; logs land in `dir` under
-    /// `<session>.txt`. This is the always-on form the model reads from.
-    On { dir: PathBuf },
-    /// Firehose is on but writing to a single explicit file (`GROK_LOG_FILE` /
-    /// `GROK_DEBUG_LOG=<path>`); per-session routing is bypassed.
-    OnSingleFile { path: PathBuf },
-    /// Firehose is off (no `GROK_LOG_FILE` and `GROK_DEBUG_LOG` unset/falsy).
-    Off,
-}
-
-/// Determine the firehose state from the raw env values the subscriber
-/// consulted. `None` means "unset". Mirrors the precedence in
-/// `xai_grok_telemetry::debug_log::resolve_debug_target_inner` so a bare
-/// `/debug` reports the same answer the last startup wrote to disk.
-pub fn debug_log_state(
-    grok_log_file: Option<&std::ffi::OsStr>,
-    grok_debug_log: Option<&std::ffi::OsStr>,
-    debug_dir: &std::path::Path,
-) -> DebugLogState {
-    if let Some(raw) = grok_log_file
-        && !is_blank_os(raw)
-    {
-        return DebugLogState::OnSingleFile { path: os_path(raw) };
-    }
-    match grok_debug_log {
-        None => DebugLogState::Off,
-        Some(raw) => match raw.to_str().map(str::trim) {
-            Some("" | "0" | "false" | "off" | "no") => DebugLogState::Off,
-            Some("1" | "true" | "on" | "yes") => DebugLogState::On {
-                dir: debug_dir.to_path_buf(),
-            },
-            // Any other UTF-8 value, or a non-UTF-8 value, is an explicit path.
-            _ => DebugLogState::OnSingleFile { path: os_path(raw) },
-        },
+/// `Unavailable` still names the per-session file under `default_dir`. An agent
+/// in a separate leader process routes there once the prompt wakes its firehose.
+pub fn log_target(status: &FirehoseStatus, default_dir: &Path, session_id: &str) -> PathBuf {
+    match status {
+        FirehoseStatus::PerSession { dir, .. } => session_log_path(dir, session_id),
+        FirehoseStatus::SingleFile { path } => path.clone(),
+        FirehoseStatus::Unavailable => session_log_path(default_dir, session_id),
     }
 }
 
-fn is_blank_os(v: &std::ffi::OsStr) -> bool {
-    v.to_str().is_some_and(|s| s.trim().is_empty())
-}
-
-fn os_path(v: &std::ffi::OsStr) -> PathBuf {
-    match v.to_str() {
-        Some(s) => PathBuf::from(s.trim()),
-        None => PathBuf::from(v),
-    }
-}
-
-/// One line describing where the firehose writes and whether it is on, for the
-/// `Session log` row of the execution context.
-pub fn log_summary(state: &DebugLogState) -> String {
-    match state {
-        DebugLogState::On { .. } => "firehose ON (GROK_DEBUG_LOG, per-session routing)".to_string(),
-        DebugLogState::OnSingleFile { .. } => {
-            "firehose ON (GROK_LOG_FILE / GROK_DEBUG_LOG=<path>, single-file routing)".to_string()
+/// One line for the `Session log` row: is the firehose on, and since when.
+pub fn log_summary(status: &FirehoseStatus) -> String {
+    match status {
+        FirehoseStatus::PerSession {
+            enabled_at_runtime: true,
+            ..
+        } => "firehose ON since this /debug, per-session routing. Events from before \
+              this /debug were not recorded"
+            .to_string(),
+        FirehoseStatus::PerSession {
+            enabled_at_runtime: false,
+            ..
+        } => "firehose ON since launch (GROK_DEBUG_LOG, per-session routing)".to_string(),
+        FirehoseStatus::SingleFile { .. } => {
+            "firehose ON since launch (GROK_LOG_FILE / GROK_DEBUG_LOG=<path>, single-file \
+             routing)"
+                .to_string()
         }
-        DebugLogState::Off => "firehose OFF (no GROK_DEBUG_LOG / GROK_LOG_FILE): the file exists \
-                               but stays empty until grok is relaunched with GROK_DEBUG_LOG=1"
+        FirehoseStatus::Unavailable => "firehose UNAVAILABLE in the TUI process (no firehose \
+                                        layer installed). The agent process turns its own on \
+                                        when it receives this prompt"
             .to_string(),
     }
 }
@@ -230,24 +159,13 @@ fn inject(ctx: &mut CommandExecCtx, request: &str) -> CommandResult {
                 .to_string(),
         );
     };
-    let home = xai_grok_config::grok_home();
-    let state = debug_log_state(
-        std::env::var_os("GROK_LOG_FILE").as_deref(),
-        std::env::var_os("GROK_DEBUG_LOG").as_deref(),
-        &home.join("debug"),
+    // Turn the firehose on in this process.
+    let status = enable_firehose();
+    let path = log_target(
+        &status,
+        &xai_grok_config::grok_home().join("debug"),
+        session_id.0.as_ref(),
     );
-    // The path the firehose ACTUALLY writes to for this session. Per-session
-    // routing (`On`) writes `<dir>/<session_id>.txt`; a single explicit file
-    // (`GROK_LOG_FILE` / `GROK_DEBUG_LOG=<path>`) writes only to that file,
-    // so the injection must name that file — never a per-session path that
-    // would stay empty. `Off` falls back to provisioning the per-session
-    // file so the model still has a real log.
-    let path = match &state {
-        DebugLogState::OnSingleFile { path } => path.clone(),
-        DebugLogState::On { .. } | DebugLogState::Off => {
-            debug_log_path(&home, session_id.0.as_ref())
-        }
-    };
     // Ensure the log file exists so the advertised path is real and readable
     // by the model's tools, even before the firehose writes to it.
     // Best-effort: if the dir can't be created the injection still proceeds.
@@ -263,14 +181,16 @@ fn inject(ctx: &mut CommandExecCtx, request: &str) -> CommandResult {
     let context = DebugContext::gather(
         session_id.0.as_ref(),
         path,
-        log_summary(&state),
+        log_summary(&status),
         model_facts(ctx),
     );
+    let mut meta = acp::Meta::new();
+    meta.insert(ENABLE_FIREHOSE_META.into(), serde_json::Value::Bool(true));
     CommandResult::InjectSkill {
         display_text,
-        prompt_blocks: vec![acp::ContentBlock::Text(acp::TextContent::new(
-            context.render(request),
-        ))],
+        prompt_blocks: vec![acp::ContentBlock::Text(
+            acp::TextContent::new(context.render(request)).meta(Some(meta)),
+        )],
         display_as_skill: true,
         scheduled_task_preview: None,
     }
@@ -286,7 +206,7 @@ fn model_facts(ctx: &CommandExecCtx) -> ModelFacts {
         reasoning_effort: ctx
             .models
             .reasoning_effort
-            .map(|effort| effort.as_str().to_string()),
+            .map(|effort| effort.as_ref().to_string()),
     }
 }
 
@@ -312,16 +232,6 @@ mod tests {
             screen_mode: crate::app::ScreenMode::Fullscreen,
             current_title: None,
         }
-    }
-
-    /// Serializes the end-to-end `run()` tests that read the real
-    /// `GROK_DEBUG_LOG` / `GROK_LOG_FILE` environment. `run()` reads those via
-    /// `std::env::var_os`, and the single-file test mutates them (edition 2024
-    /// `set_var`/`remove_var` are process-global), so the two must never run
-    /// concurrently or one would observe the other's env while asserting.
-    fn run_env_lock() -> std::sync::MutexGuard<'static, ()> {
-        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-        LOCK.lock().unwrap_or_else(|p| p.into_inner())
     }
 
     /// The whole point of the command is being typeable: it has to be listed on
@@ -418,83 +328,61 @@ mod tests {
     }
 
     #[test]
-    fn debug_log_state_per_session_from_truthy_env() {
-        for v in ["1", "true", "on", "yes"] {
-            let state = debug_log_state(
-                None,
-                Some(std::ffi::OsStr::new(v)),
-                Path::new("/homes/alice/.grok/debug"),
-            );
+    fn log_target_names_the_file_the_firehose_writes() {
+        let default_dir = Path::new("/h/.grok/debug");
+        for enabled_at_runtime in [false, true] {
             assert_eq!(
-                state,
-                DebugLogState::On {
-                    dir: PathBuf::from("/homes/alice/.grok/debug")
+                log_target(
+                    &FirehoseStatus::PerSession {
+                        dir: PathBuf::from("/other/debug"),
+                        enabled_at_runtime,
+                    },
+                    default_dir,
+                    "sid"
+                ),
+                PathBuf::from("/other/debug/sid.txt")
+            );
+        }
+        assert_eq!(
+            log_target(
+                &FirehoseStatus::SingleFile {
+                    path: PathBuf::from("/tmp/fire.log")
                 },
-                "truthy GROK_DEBUG_LOG={v:?} must be per-session firehose on"
-            );
-        }
-    }
-
-    #[test]
-    fn debug_log_state_off_from_unset_or_falsy_env() {
-        assert_eq!(
-            debug_log_state(None, None, Path::new("/debug")),
-            DebugLogState::Off
-        );
-        for v in ["", "0", "false", "off", "no", "  "] {
-            assert_eq!(
-                debug_log_state(None, Some(std::ffi::OsStr::new(v)), Path::new("/debug")),
-                DebugLogState::Off,
-                "GROK_DEBUG_LOG={v:?} must be off"
-            );
-        }
-    }
-
-    #[test]
-    fn debug_log_state_single_file_wins_and_explicit_path() {
-        assert_eq!(
-            debug_log_state(
-                Some(std::ffi::OsStr::new("/tmp/fire.log")),
-                Some(std::ffi::OsStr::new("1")),
-                Path::new("/debug")
+                default_dir,
+                "sid"
             ),
-            DebugLogState::OnSingleFile {
-                path: PathBuf::from("/tmp/fire.log")
-            }
+            PathBuf::from("/tmp/fire.log"),
+            "single-file routing writes only that file"
         );
         assert_eq!(
-            debug_log_state(
-                None,
-                Some(std::ffi::OsStr::new("/tmp/custom.log")),
-                Path::new("/debug")
-            ),
-            DebugLogState::OnSingleFile {
-                path: PathBuf::from("/tmp/custom.log")
-            }
+            log_target(&FirehoseStatus::Unavailable, default_dir, "sid"),
+            PathBuf::from("/h/.grok/debug/sid.txt")
         );
     }
 
-    /// The summary line must let the model tell an empty log from a live one —
-    /// a firehose-off session's file exists but never fills.
+    /// The model must know whether the log covers the time before `/debug`.
     #[test]
-    fn log_summary_distinguishes_on_off_and_single_file() {
+    fn log_summary_says_since_when_the_firehose_ran() {
+        let runtime = log_summary(&FirehoseStatus::PerSession {
+            dir: PathBuf::from("/d"),
+            enabled_at_runtime: true,
+        });
         assert!(
-            log_summary(&DebugLogState::On {
-                dir: PathBuf::from("/d")
-            })
-            .contains("ON"),
+            runtime.contains("ON since this /debug") && runtime.contains("not recorded"),
+            "{runtime}"
         );
+        let launch = log_summary(&FirehoseStatus::PerSession {
+            dir: PathBuf::from("/d"),
+            enabled_at_runtime: false,
+        });
+        assert!(launch.contains("ON since launch"), "{launch}");
         assert!(
-            log_summary(&DebugLogState::OnSingleFile {
+            log_summary(&FirehoseStatus::SingleFile {
                 path: PathBuf::from("/f")
             })
             .contains("single-file"),
         );
-        let off = log_summary(&DebugLogState::Off);
-        assert!(
-            off.contains("OFF") && off.contains("GROK_DEBUG_LOG=1"),
-            "{off}"
-        );
+        assert!(log_summary(&FirehoseStatus::Unavailable).contains("UNAVAILABLE"));
     }
 
     #[test]
@@ -514,15 +402,10 @@ mod tests {
     /// not an "unknown option" error.
     #[test]
     fn debug_with_a_question_injects_it_with_the_execution_context() {
-        let _env = run_env_lock();
         let models = ModelState::default();
         let mut ctx = make_ctx(&models);
         let sid = acp::SessionId::new("debug-question-sess");
         ctx.session_id = Some(&sid);
-        unsafe {
-            std::env::remove_var("GROK_LOG_FILE");
-            std::env::remove_var("GROK_DEBUG_LOG");
-        }
 
         let result = DebugCommand.run(
             &mut ctx,
@@ -578,15 +461,10 @@ mod tests {
     /// so the model debugs whatever the user says next.
     #[test]
     fn debug_bare_and_on_inject_without_a_question() {
-        let _env = run_env_lock();
         let models = ModelState::default();
         let mut ctx = make_ctx(&models);
         let sid = acp::SessionId::new("debug-bare-sess");
         ctx.session_id = Some(&sid);
-        unsafe {
-            std::env::remove_var("GROK_LOG_FILE");
-            std::env::remove_var("GROK_DEBUG_LOG");
-        }
 
         for args in ["", "on"] {
             let result = DebugCommand.run(&mut ctx, args);
@@ -613,54 +491,28 @@ mod tests {
         }
     }
 
-    /// When a single firehose file is configured (`GROK_LOG_FILE` or
-    /// `GROK_DEBUG_LOG=<path>`), the injection must name THAT file — the only
-    /// file the firehose actually writes to — not an empty per-session
-    /// `<debug>/<sid>.txt`.
+    /// The agent can run in a separate leader process.
     #[test]
-    fn debug_with_grok_log_file_injects_single_file_path() {
-        let _env = run_env_lock();
+    fn debug_prompt_block_asks_the_agent_process_for_the_firehose() {
         let models = ModelState::default();
         let mut ctx = make_ctx(&models);
-        let sid = acp::SessionId::new("single-file-sess");
+        let sid = acp::SessionId::new("debug-meta-sess");
         ctx.session_id = Some(&sid);
 
-        // Point the firehose at one explicit file (GROK_LOG_FILE wins).
-        let target = std::env::temp_dir().join("grok-debug-single-file-evidence.log");
-        let _ = std::fs::remove_file(&target);
-        unsafe {
-            std::env::set_var("GROK_LOG_FILE", &target);
-            std::env::remove_var("GROK_DEBUG_LOG");
-        }
-
-        let result = DebugCommand.run(&mut ctx, "");
+        let result = DebugCommand.run(&mut ctx, "why?");
         let CommandResult::InjectSkill { prompt_blocks, .. } = result else {
-            panic!("/debug with GROK_LOG_FILE set must InjectSkill, got {result:?}");
+            panic!("/debug must InjectSkill, got {result:?}");
         };
         let acp::ContentBlock::Text(text) = &prompt_blocks[0] else {
             panic!("expected a text prompt block");
         };
-        let target_str = target.to_str().unwrap();
-        assert!(
-            text.text.contains(target_str),
-            "prompt block must name the single firehose file (not a per-session \
-             path); got: {}",
-            text.text
+        assert_eq!(
+            text.meta
+                .as_ref()
+                .and_then(|meta| meta.get(ENABLE_FIREHOSE_META)),
+            Some(&serde_json::Value::Bool(true)),
+            "the /debug prompt block must carry {ENABLE_FIREHOSE_META}=true: {:?}",
+            text.meta
         );
-        assert!(
-            text.text.contains("single-file"),
-            "the log line must say where the firehose is routed: {}",
-            text.text
-        );
-        // The ensure-step must have provisioned the single file itself.
-        assert!(
-            target.is_file(),
-            "run() must provision the single firehose file: {target:?}"
-        );
-
-        unsafe {
-            std::env::remove_var("GROK_LOG_FILE");
-            std::env::remove_var("GROK_DEBUG_LOG");
-        }
     }
 }

@@ -821,30 +821,38 @@ impl SchedulerActor {
         let resources = self.resources.clone();
         let guard_task_id = task_id.to_string();
         let spawned_id = subagent_id.clone();
-        tokio::spawn(async move {
-            let Ok(result) = result_rx.await else {
-                return;
-            };
-            if result.error.is_none() {
-                return;
-            }
-            tracing::warn!(
-                task_id = %guard_task_id,
-                subagent_id = %spawned_id,
-                error = ?result.error,
-                "Loop iteration spawn failed; clearing chain anchor"
-            );
-            let mut res = resources.lock().await;
-            let state = res.get_or_default::<State<SchedulerState>>();
-            if let Some(task) = state
-                .tasks
-                .iter_mut()
-                .find(|t| t.last_subagent_id.as_deref() == Some(spawned_id.as_str()))
-            {
-                task.last_subagent_id = None;
-                task.iterations_since_fresh = 0;
-            }
-        });
+        // Guarded: clearing the chain anchor is what stops a loop from
+        // resuming the child that just failed, and this is the only place that
+        // clears it. The handle itself has no waiter: the round it watches is
+        // reported to the session by other means.
+        #[allow(clippy::disallowed_methods)]
+        tokio::spawn(crate::util::detached::fire_and_forget(
+            "loop chain anchor guard",
+            async move {
+                let Ok(result) = result_rx.await else {
+                    return;
+                };
+                if result.error.is_none() {
+                    return;
+                }
+                tracing::warn!(
+                    task_id = %guard_task_id,
+                    subagent_id = %spawned_id,
+                    error = ?result.error,
+                    "Loop iteration spawn failed; clearing chain anchor"
+                );
+                let mut res = resources.lock().await;
+                let state = res.get_or_default::<State<SchedulerState>>();
+                if let Some(task) = state
+                    .tasks
+                    .iter_mut()
+                    .find(|t| t.last_subagent_id.as_deref() == Some(spawned_id.as_str()))
+                {
+                    task.last_subagent_id = None;
+                    task.iterations_since_fresh = 0;
+                }
+            },
+        ));
 
         LoopFireOutcome::Spawned(subagent_id)
     }

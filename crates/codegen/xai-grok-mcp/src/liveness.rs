@@ -102,71 +102,128 @@ pub fn spawn_transport_liveness(
     let drop_guard = token.clone().drop_guard();
 
     let server_name_for_task = server_name.clone();
+    let slot_for_task = Arc::clone(&liveness_slot);
+    // The handle parked in `liveness_slot` stands for "a watcher is alive for
+    // this client". A task that unwound is not alive, so it clears the slot the
+    // way every other exit does: `McpClient::arm_liveness_watcher` will not
+    // install a fresh handle over the one already there, so a slot left held by
+    // a dead watcher means that client's transport is never again detected as
+    // closed.
+    #[allow(clippy::disallowed_methods)]
     tokio::spawn(async move {
-        let mut tick = tokio::time::interval(poll_interval);
-        // Skip missed ticks under runtime stall; see fn doc
-        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-        loop {
-            tokio::select! {
-                _ = token.cancelled() => {
-                    // Cancelled by the handle's `DropGuard`
-                    // The caller dropped the handle (e.g. McpClient teardown), so the slot has already been mutated externally.
-                    // Do not race the dropper by clearing the slot here
-                    tracing::trace!(
-                        server = %server_name_for_task,
-                        "transport liveness watcher cancelled by handle drop",
-                    );
-                    return;
-                }
-                _ = tick.tick() => {
-                    match client.liveness_check().await {
-                        LivenessCheck::Healthy => continue,
-                        LivenessCheck::TransportClosed => {
-                            tracing::info!(
-                                server = %server_name_for_task,
-                                "transport liveness watcher detected closed transport",
-                            );
-                            // Clear our own slot before exiting so a subsequent `arm_liveness_watcher` can install a fresh handle
-                            // Its `DropGuard` cancels the very `CancellationToken` this task is `select!`ing on That is benign because we `return` immediately
-                            // But DO NOT add any post-`return` work that re-enters the `select!`; it would race this self-cancel
-                            clear_liveness_slot(&liveness_slot);
-
-                            if on_event
-                                .send(McpClientEvent::TransportClosed {
-                                    server: server_name_for_task.clone(),
-                                    // Bind the event to THIS client instance
-                                    // The dispatcher can then skip evicting a replacement registered under the same name
-                                    client_id: client.client_id(),
-                                })
-                                .is_err()
-                            {
-                                tracing::debug!(
-                                    server = %server_name_for_task,
-                                    "dispatcher receiver dropped; liveness watcher exiting silently",
-                                );
-                            }
-                            return;
-                        }
-                        LivenessCheck::Transient => {
-                            // State moved out of `Ready` (re-handshake started, or the transport was reset externally)
-                            // The watcher detects *transport closure*, not state changes, so exit silently
-                            // The caller re-arms a fresh watcher when the new handshake completes
-                            tracing::debug!(
-                                server = %server_name_for_task,
-                                "transport liveness watcher: state drifted out of Ready, exiting silently",
-                            );
-                            clear_liveness_slot(&liveness_slot);
-                            return;
-                        }
-                    }
-                }
-            }
+        let watched = xai_grok_tools::util::detached::guarded(
+            "mcp transport liveness watcher",
+            watch_transport(
+                server_name_for_task,
+                client,
+                poll_interval,
+                on_event,
+                token,
+                liveness_slot,
+            ),
+        )
+        .await;
+        if let Err(panic) = watched {
+            tracing::error!(
+                panic = %panic,
+                "transport liveness watcher died; clearing its slot so the client can be watched again"
+            );
+            clear_liveness_slot(&slot_for_task);
         }
     });
 
     TransportLivenessHandle {
         server_name,
         _cancel: drop_guard,
+    }
+}
+
+/// Poll one client until its transport reads closed, until its state drifts
+/// out of `Ready`, or until the handle's drop guard cancels `token`.
+async fn watch_transport(
+    server_name: McpServerName,
+    client: Arc<McpClient>,
+    poll_interval: Duration,
+    on_event: UnboundedSender<McpClientEvent>,
+    token: CancellationToken,
+    liveness_slot: SharedLivenessSlot,
+) {
+    let server_name_for_task = server_name;
+    let mut tick = tokio::time::interval(poll_interval);
+    // Skip missed ticks under runtime stall — see fn doc.
+    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    loop {
+        tokio::select! {
+            _ = token.cancelled() => {
+                // Cancelled by the handle's `DropGuard`. The
+                // caller dropped the handle (e.g. McpClient
+                // teardown), so the slot has already been
+                // mutated externally — do not race the dropper
+                // by clearing the slot here.
+                tracing::trace!(
+                    server = %server_name_for_task,
+                    "transport liveness watcher cancelled by handle drop",
+                );
+                return;
+            }
+            _ = tick.tick() => {
+                match client.liveness_check().await {
+                    LivenessCheck::Healthy => continue,
+                    LivenessCheck::TransportClosed => {
+                        tracing::info!(
+                            server = %server_name_for_task,
+                            "transport liveness watcher detected closed transport",
+                        );
+                        // Clear our own slot before exiting so a
+                        // subsequent `arm_liveness_watcher` can
+                        // install a fresh handle.
+                        //
+                        // Self-cancel-by-drop: clearing the slot
+                        // drops the taken `TransportLivenessHandle`,
+                        // whose `DropGuard` cancels the very
+                        // `CancellationToken` this task is
+                        // `select!`ing on. Benign because we
+                        // `return` immediately — but DO NOT add any
+                        // post-`return` work that re-enters the
+                        // `select!`; it would race this self-cancel.
+                        clear_liveness_slot(&liveness_slot);
+
+                        if on_event
+                            .send(McpClientEvent::TransportClosed {
+                                server: server_name_for_task.clone(),
+                                // Bind the event to THIS client
+                                // instance so the dispatcher can
+                                // skip evicting a replacement
+                                // registered under the same name.
+                                client_id: client.client_id(),
+                            })
+                            .is_err()
+                        {
+                            tracing::debug!(
+                                server = %server_name_for_task,
+                                "dispatcher receiver dropped; liveness watcher exiting silently",
+                            );
+                        }
+                        return;
+                    }
+                    LivenessCheck::Transient => {
+                        // State moved out of `Ready` (re-handshake
+                        // started, or the transport was reset
+                        // externally). The watcher detects
+                        // *transport closure*, not state changes,
+                        // so exit silently; the caller re-arms a
+                        // fresh watcher when the new handshake
+                        // completes.
+                        tracing::debug!(
+                            server = %server_name_for_task,
+                            "transport liveness watcher: state drifted out of Ready, exiting silently",
+                        );
+                        clear_liveness_slot(&liveness_slot);
+                        return;
+                    }
+                }
+            }
+        }
     }
 }
 

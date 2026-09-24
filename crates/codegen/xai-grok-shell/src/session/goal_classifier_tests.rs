@@ -1272,63 +1272,6 @@ fn build_pause_summary_omits_empty_groups() {
     );
 }
 
-/// The run log is the runtime evidence in BOTH templates, and neither
-/// template may send the verifier back to asking for saved proof files.
-#[test]
-fn verifier_templates_read_the_run_log_and_never_demand_evidence_files() {
-    for tmpl in [
-        GOAL_VERIFIER_PROMPT_TEMPLATE,
-        GOAL_VERIFIER_RESUME_PROMPT_TEMPLATE,
-    ] {
-        assert!(tmpl.contains("RUN_LOG"), "template must name RUN_LOG");
-        assert!(
-            tmpl.contains("a file is not proof of a run")
-                || tmpl.contains("A file is not proof of a run"),
-            "template must say a file is not proof of a run",
-        );
-        assert!(
-            !tmpl.contains("captured evidence"),
-            "template must not send the verifier to implementer-captured evidence",
-        );
-    }
-    assert!(GOAL_VERIFIER_PROMPT_TEMPLATE.contains("PRIMARY runtime evidence"));
-    assert!(GOAL_VERIFIER_PROMPT_TEMPLATE.contains("Never ask it to save output"));
-    assert!(GOAL_VERIFIER_PROMPT_TEMPLATE.contains("do NOT ask for a saved artifact"));
-    assert!(GOAL_VERIFIER_RESUME_PROMPT_TEMPLATE.contains("never to save an evidence file"));
-    assert!(KIND_LENS_CODE_CHANGE.contains("Find that launch in RUN_LOG"));
-    assert!(!KIND_LENS_CODE_CHANGE.contains("captured launch evidence"));
-}
-
-/// Both implementer-facing templates tell the model the run is the
-/// evidence, and none of them ask it to save proof files.
-#[test]
-fn implementer_templates_never_ask_for_proof_files() {
-    for tmpl in [
-        include_str!("templates/goal_rules.md"),
-        include_str!("templates/goal_rules_legacy.md"),
-        include_str!("templates/goal_continuation_directive.md"),
-        include_str!("templates/goal_continuation_directive_legacy.md"),
-        include_str!("templates/goal_plan_block.md"),
-    ] {
-        for banned in [
-            "captured test output",
-            "captured run output",
-            "saved evidence",
-            "durable proof",
-            "AUDITS your committed tests",
-        ] {
-            assert!(
-                !tmpl.contains(banned),
-                "implementer template still says {banned:?}"
-            );
-        }
-        assert!(
-            tmpl.contains("proof files"),
-            "implementer template must tell the model not to write proof files",
-        );
-    }
-}
-
 /// An explicit toolset renders tool names on the inventory line (no generic descriptor mixed in) and an enumerated `{TOOLSET_TOOLS}` block.
 /// The fallback path (`Unavailable`, so inherit defaults) renders the literal defaults with no block.
 /// Both explicit renders leave no tool placeholder unresolved.

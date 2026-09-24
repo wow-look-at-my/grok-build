@@ -203,7 +203,7 @@ async fn fetch_subagent_bundle_success() {
     let (proxy_base_url, seen_headers, server) =
         start_bundle_server(axum::http::StatusCode::OK, body).await;
     let am = test_auth_manager();
-    let bundle = fetch_subagent_bundle(&proxy_base_url, Some(&am), None, None)
+    let bundle = fetch_subagent_bundle(&proxy_base_url, Some(&am), None)
         .await
         .unwrap();
     assert_eq!(bundle.version, "bundle-v1");
@@ -224,29 +224,6 @@ async fn fetch_subagent_bundle_success() {
     server.abort();
 }
 #[tokio::test(flavor = "current_thread")]
-async fn fetch_subagent_bundle_uses_deployment_key_without_user_headers() {
-    let body = serde_json::json!({
-        "version": "bundle-v1",
-        "personas": {},
-        "roles": {},
-        "agents": {}
-    });
-    let (proxy_base_url, seen_headers, server) =
-        start_bundle_server(axum::http::StatusCode::OK, body).await;
-    let am = test_auth_manager();
-    let bundle = fetch_subagent_bundle(&proxy_base_url, Some(&am), Some("deploy-key"), None)
-        .await
-        .unwrap();
-    assert_eq!(bundle.version, "bundle-v1");
-    let headers = seen_headers.lock().unwrap();
-    let headers = headers.last().unwrap();
-    assert_eq!(headers.authorization.as_deref(), Some("Bearer deploy-key"));
-    assert_eq!(headers.token_auth, None);
-    assert_eq!(headers.user_id, None);
-    assert_eq!(headers.email, None);
-    server.abort();
-}
-#[tokio::test(flavor = "current_thread")]
 async fn fetch_subagent_bundle_http_failure() {
     let (proxy_base_url, _seen_headers, server) = start_bundle_server(
         axum::http::StatusCode::UNAUTHORIZED,
@@ -254,7 +231,7 @@ async fn fetch_subagent_bundle_http_failure() {
     )
     .await;
     let am = test_auth_manager();
-    let error = fetch_subagent_bundle(&proxy_base_url, Some(&am), None, None)
+    let error = fetch_subagent_bundle(&proxy_base_url, Some(&am), None)
         .await
         .unwrap_err();
     assert!(matches!(
@@ -271,7 +248,7 @@ async fn fetch_subagent_bundle_parse_failure() {
     )
     .await;
     let am = test_auth_manager();
-    let error = fetch_subagent_bundle(&proxy_base_url, Some(&am), None, None)
+    let error = fetch_subagent_bundle(&proxy_base_url, Some(&am), None)
         .await
         .unwrap_err();
     assert!(matches!(error, BackendError::Serialization(_)));
@@ -853,7 +830,7 @@ fn list_url_explicit_overrides_derivation() {
         "https://registry.acme.com/api/list-models"
     );
 }
-/// REGRESSION: `grok setup` must send the deployment key to the proxy, never the inference endpoint.
+/// REGRESSION: `grok setup` must send the team token to the proxy, never the inference endpoint.
 #[test]
 #[serial_test::serial]
 fn deployment_config_url_uses_cli_chat_proxy_when_not_overridden() {
@@ -865,18 +842,16 @@ fn deployment_config_url_uses_cli_chat_proxy_when_not_overridden() {
     ] {
         unsafe { std::env::remove_var(k) };
     }
-    unsafe { std::env::set_var("GROK_DEPLOYMENT_KEY", "xai-token-ENTERPRISE") };
     let managed: toml::Value = toml::from_str(
         r#"[endpoints]
-            deployment_key = "xai-token-ENTERPRISE"
             xai_api_base_url = "https://inference.acme-corp.example/xai/v1""#,
     )
     .unwrap();
     let url = EndpointsConfig::from_config_value(&managed).resolve_managed_config_url();
-    assert_eq!(url, "", "no proxy configured, so the key goes nowhere");
+    assert_eq!(url, "", "no proxy configured, so the token goes nowhere");
     assert!(
         !url.contains("acme-corp"),
-        "deployment key would be sent to the inference host: {url}"
+        "the token would be sent to the inference host: {url}"
     );
     let pinned: toml::Value = toml::from_str(
         r#"[endpoints]
@@ -888,7 +863,6 @@ fn deployment_config_url_uses_cli_chat_proxy_when_not_overridden() {
         EndpointsConfig::from_config_value(&pinned).resolve_managed_config_url(),
         "https://proxy.acme-corp.example/v1/deployment/config"
     );
-    unsafe { std::env::remove_var("GROK_DEPLOYMENT_KEY") };
 }
 #[derive(Clone)]
 struct DualBundleServerState {
@@ -932,7 +906,7 @@ async fn fetch_bundle_returns_archive_on_success() {
     })
     .await;
     let am = test_auth_manager();
-    let result = fetch_bundle(&proxy_base_url, Some(&am), None, None)
+    let result = fetch_bundle(&proxy_base_url, Some(&am), None)
         .await
         .unwrap();
     match result {
@@ -956,7 +930,7 @@ async fn fetch_bundle_falls_back_on_archive_404() {
     })
     .await;
     let am = test_auth_manager();
-    let result = fetch_bundle(&proxy_base_url, Some(&am), None, None)
+    let result = fetch_bundle(&proxy_base_url, Some(&am), None)
         .await
         .unwrap();
     match result {
@@ -980,7 +954,7 @@ async fn fetch_bundle_falls_back_on_archive_503() {
     })
     .await;
     let am = test_auth_manager();
-    let result = fetch_bundle(&proxy_base_url, Some(&am), None, None)
+    let result = fetch_bundle(&proxy_base_url, Some(&am), None)
         .await
         .unwrap();
     match &result {
@@ -1032,7 +1006,7 @@ async fn fetch_bundle_propagates_legacy_error_after_fallback() {
     })
     .await;
     let am = test_auth_manager();
-    let error = fetch_bundle(&proxy_base_url, Some(&am), None, None)
+    let error = fetch_bundle(&proxy_base_url, Some(&am), None)
         .await
         .unwrap_err();
     assert!(matches!(
@@ -1126,6 +1100,23 @@ fn parse_openrouter_style_listing_context_length_resolves_context_window() {
     assert_eq!(result.model, "deepseek/deepseek-v4-pro-0813");
     assert_eq!(result.base_url, "https://openrouter.ai/api/v1");
     assert_eq!(result.context_window.get(), 1_000_000);
+}
+#[test]
+fn parse_vllm_listing_max_model_len_resolves_context_window() {
+    // The shape vLLM's `/v1/models` returns. Its window is `max_model_len`.
+    let value = serde_json::json!({
+        "id": "Qwen/Qwen3-32B",
+        "object": "model",
+        "created": 1750000000,
+        "owned_by": "vllm",
+        "root": "Qwen/Qwen3-32B",
+        "parent": null,
+        "max_model_len": 40_960,
+        "permission": []
+    });
+    let result = parse_remote_model_value(&value, "http://localhost:8000/v1").unwrap();
+    assert_eq!(result.model, "Qwen/Qwen3-32B");
+    assert_eq!(result.context_window.get(), 40_960);
 }
 #[test]
 fn parse_openrouter_context_length_only_under_top_provider_resolves() {

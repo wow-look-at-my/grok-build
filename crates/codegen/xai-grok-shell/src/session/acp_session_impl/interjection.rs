@@ -131,7 +131,8 @@ impl SessionActor {
                 );
                 return false;
             };
-            let holds = state.combine_edit_holds.clone();
+            let holds: std::collections::HashSet<String> =
+                state.edit_holds.keys().cloned().collect();
             let dropped = state.sweep_pending_inputs(|item| {
                 item.prompt_mode == running_mode
                     && (include_queued_at_turn_start
@@ -211,7 +212,7 @@ impl SessionActor {
     fn deliverable_mid_turn(item: &InputItem, holds: &std::collections::HashSet<String>) -> bool {
         // Auto-wake, nudges and drains are the system talking to itself; each
         // is written to own a turn.
-        if item.origin.is_synthetic() || item.send_now {
+        if item.input_origin.is_synthetic() || item.send_now {
             return false;
         }
         // A row under composer edit must not vanish from under the editor.

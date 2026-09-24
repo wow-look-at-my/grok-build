@@ -315,6 +315,13 @@ where
     out
 }
 
+/// Cut `original`'s spans to `range`, keeping each span's own styling.
+///
+/// `range` comes from a wrap range and `span_bounds` are the spans' own
+/// offsets over the same flat line, so every endpoint is a char boundary of
+/// the line and their intersections are too; subtracting a span's start from
+/// one of those gives a char boundary of that span's content.
+#[allow(clippy::string_slice)] // range and span bounds are both char-aligned
 fn slice_line_spans<'a>(
     original: &'a Line<'a>,
     span_bounds: &[(Range<usize>, ratatui::style::Style)],

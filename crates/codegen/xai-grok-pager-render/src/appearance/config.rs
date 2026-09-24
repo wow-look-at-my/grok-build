@@ -1799,6 +1799,11 @@ pub fn persist_respect_manual_folds(enabled: bool) -> std::io::Result<()> {
              that startup would never read",
         ));
     }
+    // The lock serialises writes of `pager.toml`; a poison is taken back rather
+    // than failed on, because the file on disk is the state and a saved settings
+    // write must still land after an unrelated panic. `parking_lot::Mutex` is not
+    // a dependency of this crate.
+    #[allow(clippy::disallowed_methods)]
     let _guard = PAGER_TOML_SAVE_LOCK
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());

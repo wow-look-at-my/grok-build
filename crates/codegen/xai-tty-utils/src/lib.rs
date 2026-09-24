@@ -1,3 +1,6 @@
+#![allow(clippy::cast_possible_truncation)] // 1 hit predates the gate
+#![allow(clippy::cast_possible_wrap)] // 2 hits predate the gate
+
 //! Lightweight process-spawning utilities for TTY safety.
 //!
 //! When a TUI/pager/raw-mode terminal owns the parent process's controlling
@@ -341,12 +344,22 @@ fn bind_to_parent_death(
     }
     // SAFETY: prctl(PR_SET_PDEATHSIG, …) only sets the calling process's
     // parent-death signal; it reads/writes no caller memory.
-    if unsafe { libc::prctl(libc::PR_SET_PDEATHSIG, signal as libc::c_ulong) } == -1 {
+    let signal =
+        libc::c_ulong::try_from(signal).map_err(|_| io::Error::from_raw_os_error(libc::EINVAL))?;
+    if unsafe { libc::prctl(libc::PR_SET_PDEATHSIG, signal) } == -1 {
         return Err(io::Error::last_os_error());
     }
-    // Parent already gone (pdeathsig can no longer fire): exit instead of orphaning. A reparented child sees a ppid
-    // different from the pid the spawn site captured. SAFETY: getppid/_exit are async-signal-safe and take no pointers.
-    if unsafe { libc::getppid() } as u32 != parent_pid {
+    // Parent already gone (pdeathsig can no longer fire): exit instead of
+    // orphaning. A reparented child sees a ppid different from the pid the
+    // spawn site captured.
+    //
+    // Compared in the signed domain the kernel uses: `getppid` answers a
+    // `pid_t`, and a parent pid that does not fit one is not this process's
+    // parent, so it exits exactly as a value that failed to compare did.
+    // SAFETY: getppid/_exit are async-signal-safe and take no pointers.
+    let parent_matches =
+        i32::try_from(parent_pid).is_ok_and(|parent| unsafe { libc::getppid() } == parent);
+    if !parent_matches {
         unsafe { libc::_exit(0) };
     }
     Ok(())

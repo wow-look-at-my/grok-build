@@ -342,12 +342,15 @@ pub fn is_synthetic_extracted_query(text: &str) -> bool {
         || is_bootstrap_reminder_text(text)
 }
 /// Classify whether a `ConversationItem` is a real user turn for compaction.
-/// Not real if it is non-`User`, has `synthetic_reason`, or its extracted text is synthetic.
+/// Not real if it is non-`User`, is neither human nor an interjection, or its extracted text is synthetic.
 /// Image-only prompts ARE real — they must anchor the boundary even with no text.
+/// An interjection is real: the user typed it, and it is often the newest thing the user said.
 pub fn is_real_user_turn(item: &ConversationItem) -> bool {
     match item {
         ConversationItem::User(u) => {
-            if !u.synthetic_reason.is_human() {
+            if !(u.synthetic_reason.is_human()
+                || u.synthetic_reason == SyntheticReason::Interjection)
+            {
                 return false;
             }
             let has_images = u

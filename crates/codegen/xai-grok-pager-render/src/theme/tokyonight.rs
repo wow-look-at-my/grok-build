@@ -74,10 +74,11 @@ pub struct Theme {
     pub gray_bright: Color, // Brightest: tool accents, secondary labels
 
     // Semantic colors
-    pub command: Color, // Yellow for shell commands
-    pub path: Color,    // Orange for file paths
-    pub running: Color, // Cyan for running indicator
-    pub warning: Color, // Yellow/amber for warnings
+    pub command: Color,          // Yellow for shell commands
+    pub path: Color,             // Orange for file paths
+    pub running: Color,          // Cyan for running indicator
+    pub thinking_summary: Color, // Dark cyan for the summary on a collapsed thinking row
+    pub warning: Color,          // Yellow/amber for warnings
 
     // Search
     pub fuzzy_accent: Color, // Highlight color for fuzzy search matches
@@ -174,6 +175,7 @@ impl Theme {
             command: YELLOW,
             path: ORANGE,
             running: CYAN,
+            thinking_summary: rgb(42, 161, 179),
             warning: YELLOW,
 
             fuzzy_accent: BLUE,

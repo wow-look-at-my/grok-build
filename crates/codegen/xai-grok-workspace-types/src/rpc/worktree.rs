@@ -188,8 +188,12 @@ pub enum WorktreeCopyMode {
     #[default]
     Dirty,
 }
+/// The keys a request's `grove_worktree` is read under. The container is
+/// camelCase, so `groveWorktree` is the key it writes.
+pub const GROVE_WORKTREE_KEYS: xai_tool_types::Aliases =
+    xai_tool_types::Aliases::new("groveWorktree", &["nfsWorktree", "nfs_worktree"]);
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", try_from = "CreateWorktreeRequestShadow")]
 pub struct CreateWorktreeRequest {
     pub session_id: String,
     pub source_path: String,
@@ -216,8 +220,7 @@ pub struct CreateWorktreeRequest {
     #[serde(default)]
     pub label: Option<String>,
     /// When `Some(true)`, enable the grove worktree arm on the builder; absent or false means copy.
-    /// `nfsWorktree` / `nfs_worktree` are deserialize aliases.
-    #[serde(default, alias = "nfsWorktree", alias = "nfs_worktree")]
+    #[serde(default)]
     pub grove_worktree: Option<bool>,
     /// Gate source from `gate_grove_worktree_layers` (`request` / `env` / `local` / `enable_all` / `remote` / `remote_kill` / `default`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -225,6 +228,59 @@ pub struct CreateWorktreeRequest {
     /// Pinned by prepare so streaming `Created.source_git_root` matches `Creating`.
     #[serde(default, skip)]
     pub resolved_source_git_root: Option<String>,
+}
+/// `CreateWorktreeRequest` as a client sends it, with each grove-worktree spelling its own field.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CreateWorktreeRequestShadow {
+    session_id: String,
+    source_path: String,
+    #[serde(default)]
+    worktree_path: Option<String>,
+    #[serde(default = "default_copy_mode")]
+    copy_mode: WorktreeCopyMode,
+    #[serde(default)]
+    git_ref: Option<String>,
+    #[serde(default)]
+    copy_ignored_in_background: bool,
+    #[serde(default)]
+    ignored_skip_patterns: Vec<String>,
+    #[serde(default)]
+    worktree_type: Option<WorktreeType>,
+    #[serde(default)]
+    label: Option<String>,
+    #[serde(default)]
+    grove_worktree: Option<bool>,
+    #[serde(default, rename = "nfsWorktree")]
+    nfs_worktree_camel: Option<bool>,
+    #[serde(default, rename = "nfs_worktree")]
+    nfs_worktree_snake: Option<bool>,
+    #[serde(default)]
+    grove_gate_source: Option<String>,
+}
+impl TryFrom<CreateWorktreeRequestShadow> for CreateWorktreeRequest {
+    type Error = xai_tool_types::AliasConflict;
+
+    fn try_from(wire: CreateWorktreeRequestShadow) -> Result<Self, Self::Error> {
+        Ok(Self {
+            session_id: wire.session_id,
+            source_path: wire.source_path,
+            worktree_path: wire.worktree_path,
+            copy_mode: wire.copy_mode,
+            git_ref: wire.git_ref,
+            copy_ignored_in_background: wire.copy_ignored_in_background,
+            ignored_skip_patterns: wire.ignored_skip_patterns,
+            worktree_type: wire.worktree_type,
+            label: wire.label,
+            grove_worktree: GROVE_WORKTREE_KEYS.fold(vec![
+                wire.grove_worktree,
+                wire.nfs_worktree_camel,
+                wire.nfs_worktree_snake,
+            ])?,
+            grove_gate_source: wire.grove_gate_source,
+            resolved_source_git_root: None,
+        })
+    }
 }
 impl WorkspaceRpc for CreateWorktreeRequest {
     const METHOD: &'static str = "workspace.create_worktree";
@@ -316,7 +372,10 @@ pub struct CreateWorktreeFromWorktreeResponse {
 /// Wire mirror of `CreateWorktreeFromWorktreeRequest`, dropping runtime-only fields so this crate avoids a `tokio_util` dependency.
 /// Those fields are already absent from the wire; the server re-adds them as `None`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(
+    rename_all = "camelCase",
+    try_from = "CreateWorktreeFromWorktreeRequestWireShadow"
+)]
 pub struct CreateWorktreeFromWorktreeRequestWire {
     pub source_worktree_path: String,
     pub new_session_id: String,
@@ -328,10 +387,56 @@ pub struct CreateWorktreeFromWorktreeRequestWire {
     pub worktree_type: Option<WorktreeType>,
     #[serde(default)]
     pub label: Option<String>,
-    #[serde(default, alias = "nfsWorktree", alias = "nfs_worktree")]
+    /// `nfsWorktree` / `nfs_worktree` fold in through [`GROVE_WORKTREE_KEYS`].
+    #[serde(default)]
     pub grove_worktree: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub grove_gate_source: Option<String>,
+}
+/// `CreateWorktreeFromWorktreeRequestWire` as a client sends it, with each grove-worktree spelling its own field.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CreateWorktreeFromWorktreeRequestWireShadow {
+    source_worktree_path: String,
+    new_session_id: String,
+    #[serde(default = "default_copy_mode")]
+    copy_mode: WorktreeCopyMode,
+    #[serde(default)]
+    git_ref: Option<String>,
+    #[serde(default)]
+    worktree_type: Option<WorktreeType>,
+    #[serde(default)]
+    label: Option<String>,
+    #[serde(default)]
+    grove_worktree: Option<bool>,
+    #[serde(default, rename = "nfsWorktree")]
+    nfs_worktree_camel: Option<bool>,
+    #[serde(default, rename = "nfs_worktree")]
+    nfs_worktree_snake: Option<bool>,
+    #[serde(default)]
+    grove_gate_source: Option<String>,
+}
+impl TryFrom<CreateWorktreeFromWorktreeRequestWireShadow>
+    for CreateWorktreeFromWorktreeRequestWire
+{
+    type Error = xai_tool_types::AliasConflict;
+
+    fn try_from(wire: CreateWorktreeFromWorktreeRequestWireShadow) -> Result<Self, Self::Error> {
+        Ok(Self {
+            source_worktree_path: wire.source_worktree_path,
+            new_session_id: wire.new_session_id,
+            copy_mode: wire.copy_mode,
+            git_ref: wire.git_ref,
+            worktree_type: wire.worktree_type,
+            label: wire.label,
+            grove_worktree: GROVE_WORKTREE_KEYS.fold(vec![
+                wire.grove_worktree,
+                wire.nfs_worktree_camel,
+                wire.nfs_worktree_snake,
+            ])?,
+            grove_gate_source: wire.grove_gate_source,
+        })
+    }
 }
 /// `workspace.worktree_create_from_worktree_sync`: synchronous worktree fork.
 ///
@@ -494,6 +599,41 @@ impl WorkspaceRpc for WorktreeCleanArtifactsReq {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn create_worktree_request_folds_every_grove_worktree_spelling() {
+        let base = r#""sessionId":"s","sourcePath":"/p""#;
+        let parse = |extra: &str| {
+            serde_json::from_str::<CreateWorktreeRequest>(&format!("{{{base}{extra}}}"))
+        };
+        for key in ["groveWorktree", "nfsWorktree", "nfs_worktree"] {
+            let req = parse(&format!(",\"{key}\":true")).unwrap();
+            assert_eq!(req.grove_worktree, Some(true), "{key}");
+        }
+        let req = parse(r#","groveWorktree":true,"nfsWorktree":true,"nfs_worktree":true"#)
+            .expect("one value named three ways is one value");
+        assert_eq!(req.grove_worktree, Some(true));
+        assert_eq!(req.copy_mode, WorktreeCopyMode::Dirty);
+        let err = parse(r#","groveWorktree":true,"nfs_worktree":false"#)
+            .expect_err("two different answers must not resolve silently");
+        assert!(err.to_string().contains("nfs_worktree"), "{err}");
+        let out = serde_json::to_value(parse(r#","nfsWorktree":false"#).unwrap()).unwrap();
+        assert_eq!(out["groveWorktree"], false);
+        assert!(out.get("nfsWorktree").is_none(), "{out}");
+    }
+    #[test]
+    fn create_worktree_from_worktree_wire_folds_every_grove_worktree_spelling() {
+        let base = r#""sourceWorktreePath":"/p","newSessionId":"s""#;
+        let parse = |extra: &str| {
+            serde_json::from_str::<CreateWorktreeFromWorktreeRequestWire>(&format!(
+                "{{{base}{extra}}}"
+            ))
+        };
+        let req = parse(r#","nfs_worktree":true,"groveWorktree":true"#).unwrap();
+        assert_eq!(req.grove_worktree, Some(true));
+        let err = parse(r#","nfsWorktree":true,"groveWorktree":false"#)
+            .expect_err("two different answers must not resolve silently");
+        assert!(err.to_string().contains("nfsWorktree"), "{err}");
+    }
     #[test]
     fn create_worktree_from_worktree_sync_req_keeps_inner_wrapper() {
         let req = CreateWorktreeFromWorktreeSyncReq {

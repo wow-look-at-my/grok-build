@@ -67,6 +67,8 @@ fn fork_subagent_spawned(session_id: &str, subagent_id: &str) -> SessionUpdate {
             model: None,
             resumed_from: None,
             workflow_run_id: None,
+            agent_address: None,
+            attempt_id: None,
         },
         meta: None,
     }))
@@ -89,6 +91,7 @@ fn fork_subagent_finished(session_id: &str, subagent_id: &str) -> SessionUpdate 
             tokens_used: 0,
             output: None,
             will_wake: false,
+            attempt_id: None,
         },
         meta: None,
     }))

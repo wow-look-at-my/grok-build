@@ -3,6 +3,7 @@
 //! Turns edit-tool output into line-tagged [`DiffHunk`]s for the pager to render, and back into unified-diff text.
 //! The input is structured `SearchReplaceEditDetail` records, ACP `ToolCall` payloads, or plain before/after text.
 
+#![allow(clippy::cast_possible_truncation)]
 #![deny(clippy::indexing_slicing)]
 
 use similar::{ChangeTag, TextDiff};

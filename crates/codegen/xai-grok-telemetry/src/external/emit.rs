@@ -52,7 +52,6 @@ fn for_each_identity_attr(
             identity.organization_id.as_deref(),
         ),
         (ExternalKey::TeamId, identity.team_id.as_deref()),
-        (ExternalKey::DeploymentId, identity.deployment_id.as_deref()),
     ] {
         if let Some(v) = value.filter(|v| !v.is_empty()) {
             sink(<&'static str>::from(key), v.to_owned());

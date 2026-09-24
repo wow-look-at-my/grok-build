@@ -5,7 +5,9 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use super::exit_watcher::{poll_for_terminal_exit, release_terminal, watch_for_exit};
+use super::exit_watcher::{
+    poll_for_terminal_exit, release_terminal, watch_for_exit_releasing_task,
+};
 use super::output_recorder::{OutputRecorder, read_log_tail};
 use agent_client_protocol as acp;
 use xai_acp_lib::{AcpAgentGatewaySender as GatewaySender, acp_channel_failure};
@@ -83,6 +85,11 @@ impl TrackedTask {
         self.signal = out.signal;
         self.last_output = out.output;
         self.last_truncated = out.truncated;
+    }
+
+    /// Whether this task has been completed and therefore released.
+    pub(super) fn is_completed(&self) -> bool {
+        self.completed
     }
 
     pub(super) fn to_snapshot(&self, task_id: &str, out: SnapshotOutput) -> TaskSnapshot {
@@ -330,7 +337,7 @@ impl TerminalBackend for AcpTerminalAdapter {
 
         let recorder = OutputRecorder::new(output_file.clone(), request.output_byte_limit);
         recorder.initialize().await;
-        tokio::spawn(watch_for_exit(
+        tokio::spawn(watch_for_exit_releasing_task(
             self.gateway.clone(),
             self.session_id.clone(),
             task_id.clone(),

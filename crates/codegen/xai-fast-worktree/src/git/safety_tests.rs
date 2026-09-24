@@ -103,6 +103,7 @@ fn seed_module_store(root: &Path, at: &Path) {
     let scratch = root.join("module-scratch");
     std::fs::create_dir_all(&scratch).unwrap();
     xai_test_utils::git::git_init_seed(&scratch);
+    crate::test_support::no_background_maintenance(&scratch);
     std::fs::write(scratch.join("file.txt"), "sub\n").unwrap();
     run_git(&scratch, &["add", "."]);
     run_git(&scratch, &["commit", "-m", "submodule seed"]);

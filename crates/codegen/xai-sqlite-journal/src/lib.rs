@@ -1,3 +1,5 @@
+#![allow(clippy::cast_sign_loss)] // 1 hit predates the gate
+
 //! Filesystem-aware SQLite journal-mode selection.
 //!
 //! WAL keeps its wal-index in an mmap'd `-shm` file and relies on coherent
@@ -278,8 +280,11 @@ fn hostname_raw() -> Option<String> {
         return None;
     }
     let len = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
-    buf.get(..len)
-        .and_then(|bytes| String::from_utf8(bytes.to_vec()).ok())
+    // Lossy on purpose: `host_discriminator` maps every undecodable byte to `-`,
+    // so a partly-undecodable name still separates two hosts on a shared volume.
+    // A strict decode would answer `None` and drop the discriminator entirely,
+    // which is the collision this field exists to prevent.
+    Some(String::from_utf8_lossy(buf.get(..len)?).into_owned())
 }
 
 #[cfg(windows)]

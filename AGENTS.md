@@ -23,11 +23,24 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 
 - `cargo fmt --all` before pushing. The `fmt` job in `ci.yml` runs `cargo fmt --all --check` and fails the build on any unformatted file. It is its own job, because rustfmt parses and never compiles. It answers in seconds rather than waiting on the cold build.
 - `cargo check -p <touched-crate>` before pushing.
+- `Lint (workspace)` is `--lib --bins`, so it compiles no `#[cfg(test)]` module, and `Build the dependencies` is `cargo test --locked --workspace --no-run`, which compiles all of them. An import clippy calls unused can still be the one a test needs: removing `std::sync::Mutex` from `xai-grok-telemetry`'s `debug_log.rs` passed the lint and broke the dependency build two steps earlier in the same job. Mirror both commands, not whichever one was red.
 - `cargo test -p <touched-crate>` for the crate you changed.
 - Prefer committing real tests that drive the shipped code (not mocks of the unit under test, not hand-built expected objects).
-- **A web session cannot link the workspace.** `target/` reaches ~16 GB after a `cargo check` of the pager, against a ~12 GB session disk allowance, so `cargo build -p xai-grok-pager-bin` runs the container out of space. Check the crate, run that crate's tests, push, and let CI produce the binary.
+- **A web session cannot link the workspace.** `target/` reaches ~16 GB after a `cargo check` of the pager, against a ~12 GB session disk allowance. So `cargo build -p xai-grok-pager-bin` runs the container out of space. Check the crate, run that crate's tests, push, and let CI produce the binary.
+- **Do not run `cargo test -p xai-grok-shell` in a web session.** Its test binary runs the disk out the same way. Run `cargo check -p xai-grok-shell --tests`, push, and read the shell tests' result from CI's `Build & test`.
 - `protoc` is missing from the image and the `bin/protoc` dotslash shim cannot run either, so any build that reaches `xai-grok-tools-api` dies in its build script. Run `apt-get install -y protobuf-compiler` first.
 - `mold` is missing too, and the repo's cargo config passes `-fuse-ld=mold`. Every build script then fails to link with `collect2: fatal error: cannot find 'ld'`, on `proc-macro2` and `libc` — which reads as a broken C toolchain and is not one. Run `apt-get install -y mold`.
+- **A local clippy run cannot measure the whole denied set, on macOS.** Code behind `#[cfg(target_os = "linux")]` is never compiled here, so clippy never reads it and a lint denied at workspace level reports nothing for it. The parent-death checks in `xai-tty-utils` and `xai-grok-workspace` are that shape (`getppid()` returning a `pid_t`, compared against a captured `u32`), and `clippy::cast_sign_loss` rejected them in CI while `cargo clippy --workspace --lib --bins` exited 0 on the Mac. A per-crate exception count generated on a Mac is therefore a floor, not a total. A HOST clippy run is what that floor comes from - `--target x86_64-unknown-linux-gnu` reads those files and is a complete measurement:
+
+```
+CC_x86_64_unknown_linux_gnu=ci/zig-linux-cc.sh \
+  cargo clippy --locked --workspace --lib --bins --keep-going \
+    --target x86_64-unknown-linux-gnu
+```
+
+Cross-clippy links nothing, but ring and aws-lc compile C in their build scripts and need a compiler for the TARGET. `ci/zig-linux-cc.sh` is `ci/zig-target-cc.sh`'s trick pointed at Linux: zig ships the cross toolchain, and cc-rs's own target flags are dropped because zig spells them differently. Run it through rustup's pinned 1.94.1 (`PATH=/opt/homebrew/opt/rustup/bin:$PATH`): a Homebrew `cargo` is a different rustfmt and a different clippy, and it reported a file clean that CI's Rustfmt job then rejected over import order.
+- `Lint (workspace)` passes `--keep-going` for that reason. A denied lint is a compile error, which stops the crate that hit it and leaves every crate behind it unlinted; on a graph where several crates have Linux-only code, one CI cycle per crate is the alternative.
+- The runner's clippy is not the clippy on a development machine, and the lint tables differ between the two. Where a lint's verdict matters, read CI rather than concluding from a local run.
 
 ## `--sandbox` jail notes
 
@@ -76,6 +89,13 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
   - `set_change_notifier` gives the poller a way to ask for one repaint, and only when the color actually changed.
   - `ci_dot_animating` makes `tick_demand` report Slow while a run is in flight, which is what supplies the frames the pulse animates over.
 
+## Branch-stats notes
+
+- The status bar shows `↑ahead ↓behind +ins -del` after the branch name (`branch_stats.rs`, drawn in `agent_view/render.rs`). A count of zero is not drawn.
+- Ahead/behind is against the branch HEAD was created from. The order is: the reflog's `branch: Created from X`, an upstream that names a DIFFERENT branch, `origin/HEAD`, `origin/main`, `origin/master`, `main`, `master`. The current branch is never its own base, so `master` compares against `origin/master`.
+- The +/- counts are the working tree against HEAD: staged, unstaged, and untracked files git does not ignore.
+- The diff reads the working tree. It runs off-thread behind a 5 s throttle in its own cache, never on the render path.
+
 ## CI pipeline notes: the `gh` host worker, the `ci` tool, and the CI stop gate
 
 - The unsandboxed host worker (`xai-grok-sandbox/src/ci_host.rs`) is the only way anything in a `--sandbox` session reaches `gh`. A jail re-execs the whole binary. A `gh` spawned from inside it reaches neither the host credentials nor the network. The host starts the worker moments before the re-exec and hands it in as an open socketpair fd.
@@ -93,6 +113,12 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - Only RED blocks. Green, no runs, and a run still in flight each allow the stop. A gate on yellow spends the whole continuation budget on a wait for a verdict. And a repository with no workflows then never ends a turn.
 - The gate is off for a subagent. A subagent does not own the branch. Sending one back over a failure its parent pushed has it fixing work it cannot see.
 - The switch is the persisted `[ui].stop_gate_ci_failing` toggle, default ON. The gate reads it before the `gh` call. So a session that turns the gate off spends nothing on it per turn end.
+
+## Compaction report
+
+- Every successful compaction writes `{session_dir}/compaction_reports/<checkpoint id>.md` (`helpers/compaction_report.rs`). It lists every item of the compacted history with its kind, bytes/4 estimate and a preview. It also holds the largest items, the full summary text, and the reseed arithmetic.
+- "Tokens after" is a projection, not a measurement. `replace_conversation` scales the new history's estimate by `tokens_before ÷ estimate_at_last_response` and caps it at `tokens_before`. The report prints each factor. As a result, an inflated scale reads apart from a history that really stayed large.
+- `AutoCompactCompleted` carries a one-line `breakdown` and the `report_path`. The pager draws both under "Context compacted".
 
 ## Compaction-failure reporting and mid-turn `/compact`
 
@@ -128,6 +154,8 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - `/debug <question>` injects the question plus an execution-context snapshot (`slash/commands/debug_context.rs`) through `CommandResult::InjectSkill`. Only `scroll`, `fps` and `log` are reserved. Everything else is free text. So a question must never come back as an "unknown option" error again.
 - Staleness is `current_exe()` versus a canonicalized `$GROK_HOME/bin/grok`. `current_exe()` resolves the symlink at exec time, so after an update the two disagree and the block says the running process is not what is on disk. Both sides must stay canonicalized or every symlinked install reads as stale.
 - `GROK_*`/`XAI_*` values whose NAME looks like a credential are withheld — the prompt leaves the session and lands in the model's transcript.
+- `/debug` turns the firehose on. With no `GROK_DEBUG_LOG`/`GROK_LOG_FILE`, `install_firehose` installs the routing layer DORMANT behind `RuntimeGate`, and `debug_log::enable_firehose` wakes it. Spans pass the gate while it is closed. The routing layer must see a session span when it opens, or that session's later events go to the fallback file.
+- The agent can be a separate leader process, so the pager's switch does not reach it. The `/debug` prompt block carries `ENABLE_FIREHOSE_META`, and the shell's `prompt` handler calls `enable_firehose` on it. Events before the switch are not in the log. The injected context says so.
 
 ## Shift+Tab mode ring notes
 
@@ -138,6 +166,7 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - A mode change swaps the system prompt and the tool registry together. The shell never drops that swap. A swap that arrives while a turn runs waits in `ModeAgentState::pending` (`acp_session_impl/session_mode.rs`) and lands at turn end. A refused swap leaves the Explore prompt ("You have NO file editing tools") on a session the user already moved to Plan or Auto.
 - The shell owns the ring's base agent (`mode_agent_target`). A bare `plan`/`default`/`ask` that arrives while a ring identity is active restores the agent that ran before the ring. So a pager that lost its ring state cannot strand the session under Explore.
 - A read-only agent (`permission_mode: Plan`, which covers explore and plan) gets no injected `write` tool. Its prompt says it has no editing tools.
+- Explore carries the subagent tools, limited to `EXPLORE_SUBAGENT_TYPES` (`explore`, `plan`), so a child cannot write either. The limit rides `AgentDefinition::allowed_subagent_types`. The session writes it into a shared cell on every agent rebuild (`SharedAllowedSubagentTypes`). A value read once at spawn leaves a ring switch into explore unrestricted.
 
 ## `/goal` role-model notes
 
@@ -149,6 +178,12 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - A goal role's model is NOT checked against `[models] allowed_models`. That list governs chat selection, and its own contract exempts subagents. A goal role is a subagent the user configured. A model missing from the catalog still falls back (`model_unknown`).
 - Every verification assigns the skeptics from the CURRENT pool (`assign_skeptic_models`). A goal never keeps a model the user has moved away from. The first skeptic continues its previous run only while its model holds (`skeptic0_model_changed`). A run cannot continue on a model that did not write it.
 
+## Plan approval starts a goal
+
+- Plan mode is the interactive goal planner. Approving the plan calls `setup_goal_from_approved_plan` (`acp_session_impl/plan_goal.rs`). That creates a goal and copies `plan.md` to the goal's plan and baseline. And the planner never runs.
+- A mid-turn approval sends the goal-start reminder as a deferred followup after the `exit_plan_mode` result. A resume approval puts it at the front of the implement turn.
+- An active goal is never replaced, and a subagent or a session without the goal harness gets no goal. The plan-mode reminder asks for the planner's sections. It names the contract only when `goal_contract` is true, since that is the only case where approval makes a goal.
+
 ## Goal-plan-to-todos notes
 
 - The implementing session no longer transcribes the plan into its todo list. The planner lists the plan's work on its OWN todo list, and the harness puts those items on the session's list as the plan is published (`apply_planner_todos` in `acp_session_impl/goal_support.rs`, called from the `Planned` publish branch of `maybe_run_goal_planner`, before the goal-start reminder is rendered).
@@ -157,7 +192,7 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - Once per goal, append-only. `GoalOrchestration::plan_todos_seeded` is claimed under the tracker lock before any I/O, and the append is deduped against the live list by content. Existing items keep their id, text and status; a retry, a resume or a direct re-entry adds nothing.
 - The append goes through the session's own todo path (`append_capture_todos`, `add_only_todo_args_with_prefix` with a `plan-` id prefix), so the persisted state and the client's `Plan` update move exactly as a model-written `todo_write` does. Seeding is best-effort: no append-capable todo tool, or a failed append, logs and returns, and never fails the goal.
 - The child's list is read through the shared workspace handle (`WorkspaceOps::workspace_handle` → the session's `toolset().resources`), so it needs LOCAL mode. A proxied session (the workspace server owns sessions) has no handle here, the read returns empty, and the feature degrades to the main agent keeping its own list. Nothing breaks; nothing is populated either.
-- `Plan: <path>` still renders on every plan-aware reminder — only the manual seed-todos directive is gone, replaced by a statement that the steps are already on the list.
+- `Plan: <path>` still renders on every plan-aware reminder. The plan file carries numbered `## Task steps` and no checkboxes: the todo list, which the user watches, is the only checklist, and the continuation nudge names its first open item by id (`next_step_from_todos`). `render_goal_plan_block` reads `plan_todos_seeded`. Seeded: the block says the steps are on the list. Unseeded: it tells the implementer to put them there. Claiming the steps are on the list when seeding never ran sends the implementer to an empty list.
 - A fail-closed planner publishes no plan, so nothing is seeded. Red/unseeded is the honest state there.
 
 ## The run log is the goal verifier's runtime evidence
@@ -166,12 +201,21 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - Assistant prose and reasoning are left out on purpose. A verifier that reads the implementer's narration inherits its bias. A command line and its output carry none.
 - `GoalOrchestration::start_prompt_index` is the cut. A `User` item's `prompt_index` below it puts the calls that follow outside the goal. A compaction summary inside the goal is reported in the log header. The calls before it are gone from the conversation. So the verifier is told to run a missing plan step itself.
 - Each result keeps its head and its tail, because a test runner puts its verdict at the tail. Arguments are capped too. The whole log is capped and keeps the newest calls. The header states how many older calls it dropped. An absence then reads as an absence.
-- Every implementer-facing template (`goal_rules*.md`, `goal_continuation_directive*.md`, `goal_plan_block.md`, the planner prompt) says the run is the evidence and forbids proof files. `implementer_templates_never_ask_for_proof_files` pins that. The scratch dir stays, for temp scripts and a screenshot a plan step names.
+- Every implementer-facing template (`goal_rules*.md`, `goal_continuation_directive*.md`, `goal_plan_block.md`, the planner prompt) says the run is the evidence and forbids proof files. The scratch dir stays, for a screenshot a plan step names.
+- Gathering evidence is the verifier's job alone. While a goal is active, `prepare_tool_call` refuses any implementer call whose arguments name the session dir or a bookkeeping file (`chat_history.jsonl`, `updates.jsonl`, a run log, verdict or details file), via `run_log::goal_bookkeeping_target`. Implementer prompts never describe how runs are recorded, because that description is what sent the model after its own transcript.
+- Every goal prompt (planner, implementer, verifier, strategist) bans hand-rolled check scripts, harnesses, probes and shims. Checks use the project's existing test runner, build and entry point.
 
 ## Verification does not widen the goal
 
 - A `## Verification plan` step reads back what the goal built. It is not a permit. The implementer read "do X to confirm Y" as an instruction to do X. A planner-invented check then became an action on a system nobody put in scope. Every place that demands verification says so now. Those are the planner prompt's `## Verification plan` contract, `goal_rules.md`'s VERIFY AS YOU GO, `goal_plan_block.md`, and the per-turn continuation directive.
 - The planner is told to prefer reading what the work already produced over operating anything. Files, logs, hashes, build output and source are what it reads. That is the whole mechanism. There is no label grammar and no validator. An earlier attempt added a reach DSL, a keyword list and a reject-and-retry loop to a planner prompt that is already long. That buys rigidity rather than scope discipline.
+
+## Lite `/goal` mode
+
+- `/goal --lite <objective>` (the flag may also be the last token) runs no planner and no skeptic panel. `GoalOrchestration::mode` holds the choice. A snapshot with no `mode` field reads as `Full`.
+- The per-round evaluator (`goal_evaluator.rs`) is the whole check. Its `candidate_complete` ends the goal (`complete_lite_goal`). Any other verdict sends the model back. And the directive carries the evaluator's evidence as the reason. The evaluator prompt changes with the mode, because a lite verdict is final.
+- Every planner entry and plan-path read goes through `goal_planner_on()`, which is false for a lite goal. That includes the load-time reconcile, which otherwise pauses an active goal that has no plan.
+- On the legacy driver, a lite `update_goal(completed: true)` makes one evaluator call and is refused with `LiteCheckNotMet` unless the verdict is `candidate_complete`.
 
 ## `/todo` capture feature notes
 
@@ -205,6 +249,7 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - Every `todo_write` is a merge, and an item the call omits survives with its status untouched. `merge: false` used to clear the list and keep only what the call resent, which is how a status update that forgot the flag erased the user's list.
 - `merge` is still accepted on the wire and ignored, and is `#[schemars(skip)]` now that both values behave the same — advertising it will describe a choice the tool no longer offers.
 - `TodoState` has no `clear` and no remove of any shape. The guarantee lives in the data structure so a later caller cannot reach around it.
+- The list only grows, and every `todo_write` echoes all of it. So `summarize_todo_state` echoes a completed or cancelled item as its first line, cut at `FINISHED_ITEM_ECHO_CHARS`. The state keeps the full text. The post-compaction reminder already collapses finished items to counts.
 - opencode's `todowrite` sends a whole list with no ids, so it merges by ITEM TEXT, not by position. Position is not identity: keying on it let a reordered or shorter list write one row's text over another's, which loses work as surely as a delete.
 
 ## Cost-indicator feature notes
@@ -323,13 +368,14 @@ warm pass, 2836 entries, -j16, no cache service 12660 ms  4 ms/call  2836 hits  
 - The cost of that gate: a branch that changes `Cargo.lock` keys an entry master has never built. It then compiles the dependency tree on every push until it merges. `save-on: any` on the step declines the gate where that matters.
 - One master run writes about 3.9 GB against the repository's 10 GB. Measured: `rustdeps-dev` 1.66 GB, `rustdeps-release` 0.78 GB on linux and 0.69 GB on darwin, the darwin objects bundle 0.70 GB, and the linux binary hand-off 0.08 GB.
 - A scheme bump upstream orphans an entry and reclaims nothing. The old entry holds its full size until LRU eviction or the unused expiry. `cached-run#latest` is a floating tag, so that bump arrives without a change here.
-- The script builds the workspace to reach the dependencies. It then prunes the workspace artifacts back out. A cold run therefore compiles the workspace twice: once inside the step, once in the build step after the prune. Warm runs pay none of that, and a cold run happens one time per lockfile.
+- The script builds the workspace to reach the dependencies. It then moves the workspace artifacts out to a stash under `$RUNNER_TEMP`, and the next step (`Put the workspace artifacts back`) moves them back. So a cold run compiles the workspace one time. A plain delete made the build step compile it a second time, which put a cold `build-release` past its 45-minute limit.
+- `mv` keeps the mtimes, and cargo then reads the restored artifacts as fresh. `cargo_reads_unstashed_workspace_artifacts_as_fresh` drives real cargo through the round trip to prove it.
 - This workflow triggers on `push`, so `github.ref` is `refs/heads/<branch>`. A `pull_request` trigger writes to the merge ref instead. Only re-runs of that pull request read such an entry.
 - The scoping is enforced server-side and has no readable implementation. The `@actions/cache` client sends the key, the version and the runtime bearer. It never transmits the ref. The scope rides the `ACTIONS_RUNTIME_TOKEN` claims.
 - The workspace test build also produces the pager binary, because `xai-grok-pager-bin` has an integration test (`tests/binary_starts.rs`). A separate `cargo build -p xai-grok-pager-bin` resolves a smaller feature set. It then recompiles the workspace and every registry crate whose features differ, which measured 3m51s on run 35916436678. Delete that test and the binary disappears from `target/debug`.
 - A `--target` build writes the TARGET artifacts to `target/<triple>/release` and the HOST ones (build scripts, proc-macros) to `target/release`. The `rustdeps-release` entry once held only the first. Every proc-macro was then missing on restore, so a warm release job rebuilt nearly the whole registry tree (run 35940162613: 23m16s against a 24m52s cold one). A probe crate with `serde` derive shows it: most of its crates recompile from the triple dir alone. And none do once `target/release` is restored too.
 - The key hashes every `Cargo.toml` as well as the lockfile. The dependency set an entry holds also depends on which features and targets the manifests turn on. With the lockfile alone, a script text that matched an older master's hit that older entry. The entry predated the pager binary's test, so the jemalloc crates it pulls in were missing, and every run rebuilt them.
-- `ci/cache-deps.sh prune` keeps the entry to the registry half. It DESTROYS the workspace artifacts it matches. So it runs after the tests, never before.
+- `ci/cache-deps.sh prune` keeps the entry to the registry half. Without a stash dir it DESTROYS the workspace artifacts it matches. As a result, a bare prune runs after the tests, never before.
 - The prune reads TARGET names beside package names from `cargo metadata`. Cargo stems a test binary with the target's name. No package name is in that stem. A package-only prune therefore leaves every `pty_e2e_smoke-<hash>` in the tar. Those binaries are most of the bytes. `crates/codegen/xai-ci-scripts/tests/cache_deps.rs` pins both halves. It also pins the near miss that a bare prefix match takes wrongly.
 - The parked `ci/pkg-cache.sh` rig is a different technique. Nothing wires it into `ci.yml`. It is a `RUSTC_WRAPPER` that mints ONE cache entry per package. It carries no eviction, no TTL and no cap. `measure-leg.yml` is its harness and no workflow calls that file.
 
@@ -407,8 +453,13 @@ Every one of those is the test doing its job. Making them pass there means weake
 - The gate is ticked on a timer (`RATE_TICK`). A tick on an arriving chunk is not enough. A stream that stops dead delivers nothing to record. The tick is what turns that silence into a falling rate.
 - It runs in `drive_l2` (`xai-grok-sampler/src/actor/request_task.rs`), not in a backend transform. Every backend's tokens and tool-call arguments pass through that loop, so one meter covers Chat Completions, Responses and Messages.
 - Tool-call arguments count as generation. A response that collapses while it writes a large edit is the case the floor exists for. A meter that counts only text reads that case as silence.
-- The Messages API holds each tool-input parameter until it is whole before it emits a delta. A file body was then minutes of silence, which the gate read as a collapse. Every client tool in `build_messages_request` carries `eager_input_streaming: true`. The field's type can only serialize as `true`. An opener carrying only an id still pauses the gate, for a backend that streams no arguments at all.
-- A breach answers `SamplingError::OutputRateCollapsed`. The request is reissued on the rate gate's OWN budget (`rate_retry_count`), the way the doom-loop recovery does. A collapsed engine therefore spends none of the transport budget. A spent rate budget disarms the gate, so the attempt completes instead of the turn dying. `retry_only_before_output` still wins: a caller that cannot take duplicate output gets the failure reported instead.
+- The Messages API holds each tool-input parameter until it is whole before it emits a delta. A file body was then minutes of silence, which the gate read as a collapse. Every client tool in `build_messages_request` carries `eager_input_streaming: true`. The field's type can only serialize as `true`.
+- A tool call the provider does not stream is the same state, reached three ways: an opener with no `arguments` field, an opener whose `arguments` is the empty string, and a continuation repeating neither an id nor any bytes. All three hold the gate, so the rule is `ToolCallFragment::writes_no_arguments` on the arguments field alone. Keying it on the id being present - which is what it was - held only the first spelling, so a gateway serving the other two had every tool-calling model call reissued against it. `an_unstreamed_chat_completions_tool_call_is_not_a_collapsed_stream` counts the requests to the mock endpoint, which is the only assertion that shows the reissue.
+- `drive_l2` does not decide this. It forwards every `ToolCallDelta` to `OutputRateGate::tool_call_fragment`, which holds or does not. A fragment carrying arguments falls through and its bytes are recorded, and that record is what closes the hold. So a collapse AFTER an unstreamed call still breaches (`a_collapse_after_an_unstreamed_tool_call_still_breaches`).
+- What no signal in the stream can settle: an upstream that emits nothing at all until the whole call is ready. The quiet span is indistinguishable from a collapse until the call lands, so that leg can still read slow for one sustained duration. Every spelling this holds for is one a provider actually sends.
+- The indicator's lifetime is one model call, not one turn. `AcpUpdateTracker::output_rate` is cleared by `ResponseCompleted` (root agent and subagent view alike) and by every `RetryState`, because a closed attempt and a retry backoff both have no stream. The renderer also drops the segment while the row's own activity is `WaitingReason::Model`, since "Waiting for response" beside a tok/s number reads as the wait being slow. `finish_turn` still clears it as the turn-level backstop; it is no longer the only one.
+- A breach does not cancel the slow response. It keeps streaming, and `drive_l2` starts a hidden BACKUP generation of the same request beside it (`BackupLauncher`, `Backup`). The original recovering above the floor, or finishing, cancels the backup. The backup overtaking in output bytes, finishing, or the original failing makes the backup the answer: the caller gets a `Retrying` (kind `OutputRateCollapsed`). It then gets the backup's buffered stream from its `StreamStarted`, and after that the rest live. Details: `docs/output-rate-backup.md`.
+- Each backup spends one of the rate gate's OWN budget (`rate_retry_count`), apart from the transport budget. A spent budget means a breach keeps the slow response. A backup that fails re-arms the gate (`OutputRateGate::rearm`). `retry_only_before_output` callers get no backup: their breach is reported as `OutputRateCollapsed`. A switch replaces output they already took.
 - The finest granularity available is ONE MODEL CALL. Dropping the L2 stream cancels that HTTP request. Every earlier response and tool call in the turn is already in the conversation, and stays untouched. Nothing resumes a half-written response, because no provider here accepts one back.
 - Both slowdown EDGES are logged, not the breach alone (`output_rate_slowdown_start`, `output_rate_slowdown_end`, `output_rate_breached`). A dip that recovers by itself is never reissued over. Nothing else records the seconds it cost.
 - `SamplingEvent::OutputRate` → `XaiSessionUpdate::OutputRate` → `AcpUpdateTracker::set_output_rate` feeds the indicator. It is transient and never persisted. A rate describes a stream in flight. A replayed one puts a stale number under an idle session. `finish_turn` clears it.
@@ -431,7 +482,7 @@ Every one of those is the test doing its job. Making them pass there means weake
 - `/effort` consults exactly one thing: `meta.supportsReasoningEffort` on the session's ACP catalog entry for the current model (`supports_reasoning_effort_meta`, read by `ModelState::resolve_effort_for_model`). Nothing asks the model, and no request is made. So a wrong refusal is always a catalog-entry fault, never a provider one.
 - The shell writes that key only when `ModelInfo.supports_reasoning_effort` is true (`to_acp_model_info`). It OMITS the key otherwise, rather than writing `false`. Its sources are `[model.<key>].supports_reasoning_effort`, a non-empty `[model.<key>].reasoning_efforts` menu (`derive_reasoning_effort_fields`), the `/v1/models` entry's own flag, and the Messages-backend auto-default.
 - The refusal carries its evidence (`UnsupportedEffortDiagnosis`). That is the model id, whether it is in the catalog at all, and what `reasoning_effort_meta_state` found. The state is one of no meta, key absent, explicitly false, or not a bool with the value quoted. It also reports a `reasoningEfforts` menu that is there anyway. Such a menu is the catalog contradicting itself. The message says so. A one-line "does not support reasoning effort" is unarguable and therefore undebuggable.
-- `[models].force_reasoning_effort_models` is the override. Globs match the catalog key or the model id. It applies to the FINISHED catalog (`force_reasoning_effort_support`, called from `resolve_model_catalog` and from each `merge_codex_catalog`). That is what makes it work where `[model.<key>]` cannot. A `[model.X]` table whose name matches no catalog key ADDS a model instead of overriding one. So a key/id mismatch leaves the real entry unflagged, in silence.
+- `[models].force_reasoning_effort_models` is the override. Globs match the catalog key or the model id. It applies to the FINISHED catalog (`force_reasoning_effort_support`, called from `resolve_model_catalog` and from `merge_additive_catalog`). That is what makes it work where `[model.<key>]` cannot. A `[model.X]` table whose name matches no catalog key ADDS a model instead of overriding one. So a key/id mismatch leaves the real entry unflagged, in silence.
 - A forced model with no menu of its own gets the built-in low..xhigh fallback. That is what any flagged model gets when the server sent no `reasoningEfforts`.
 
 ## Workflow agent-concurrency notes
@@ -459,7 +510,7 @@ Every one of those is the test doing its job. Making them pass there means weake
 
 - `[model_providers.<id>]` declares a base URL, and `model_provider_discovery.rs` asks that base what it serves (`models_autodetect`, default on; `models_list_url` for a listing that lives elsewhere). A discovered model is built through `config::entry_for_provider_model`. That is the SAME merge a `[model.<id>] model_provider = "..."` block gets, fail-closed auth ref included. A second construction path is how a discovered model reaches a third party's endpoint with the session bearer.
 - Keys are `<provider id>/<slug>`. An unqualified key lets one provider's listing overwrite another provider's model of the same name, and overwrite the user's own `[model.<id>]` block.
-- Discovery is additive, like Codex: `ModelsManager::provider_models`, folded on by `with_additive_catalogs`. Every rebuild of the catalog goes through that one method. A merge that some paths skip drops the provider's models on the next config reload.
+- Discovery is additive: `ModelsManager::provider_models`, folded on by `with_additive_catalogs`. Every rebuild of the catalog goes through that one method. A merge that some paths skip drops the provider's models on the next config reload.
 - A `[model.<id>]` block that routes to a listed model is MERGED with it, under the block's key (`resolve_discovered_models`, `ConfigModelOverride::laid_over`). Every field the block sets wins. The listing fills the rest, so a block that only renames a model keeps the runtime's window, capabilities and residency. `provider_models` stores the raw listing (`DiscoveredModel`). The merge runs at each rebuild against the current config. A reloaded block therefore applies without a second listing request.
 - A block with no `model_provider` also claims a listed model when its `base_url` or `api_base_url` is the provider's (case and trailing slash ignored) and its slug matches. It routes to the same place, so leaving both put one model in the picker twice.
 - A block claims per provider. Another provider that serves the same slug on another URL keeps its own entry (`a_block_claims_only_the_provider_on_its_url`).
@@ -476,6 +527,7 @@ Every one of those is the test doing its job. Making them pass there means weake
 
 - Both serve an OpenAI-compatible `/v1`, and that endpoint answers `/v1/models` with an id and nothing else — no window, no capabilities, no residency. A model discovered that way lands on `DEFAULT_CONTEXT_WINDOW` (256k). Ollama's runner is loaded at whatever its VRAM allowed (`OLLAMA_CONTEXT_LENGTH` documents the default as "4k/32k/256k based on VRAM") and **drops the oldest messages in silence** when the prompt overflows. So the harness never compacts and the conversation loses its head with nothing on the wire to say so. Reading each runtime's own listing is what makes the catalog's number true, and it is the whole reason this feature exists.
 - `[model_providers.<id>].models_list_dialect` picks the listing shape (`openai` default, `ollama`, `lmstudio`). `remote/local_runtime.rs` is both local dialects. Ollama needs three calls (`/api/tags` for what is on disk, `/api/ps` for what is resident, `/api/show` per model for the window and capabilities); LM Studio's `/api/v1/models` carries all three in one answer, falling back to `/api/v0/models` for a build older than 0.4.0.
+- vLLM needs no dialect. Its `openai` listing carries the window as `max_model_len`, and `parse_remote_model_value` reads it.
 - `context_window_source` decides which of the two windows reaches the catalog, and defaults to `loaded`. An UNLOADED model has no running window, so it falls back to the maximum — never to the client default, which is the guess this feature exists to remove.
 - `/api/ps` lists CPU-resident runners too. `size_vram > 0` is what separates them, and a dot that claims VRAM for a CPU runner is wrong.
 - The window is read through `general.architecture` (`llama.context_length`, `qwen2.context_length`). A scan for any `*.context_length` also matches a projector's, which describes a different tensor.

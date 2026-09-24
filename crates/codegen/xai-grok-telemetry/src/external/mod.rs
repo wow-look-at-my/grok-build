@@ -46,11 +46,10 @@ static EXTERNAL: OnceLock<Option<Arc<ExternalTelemetry>>> = OnceLock::new();
 pub struct IdentityAttrs {
     pub user_id: Option<String>,
     /// OAuth/gateway email. Identity, not a content gate — attached whenever
-    /// present. Never filled from git, API-key, or deployment-key.
+    /// present. Never filled from git or an API key.
     pub email: Option<String>,
     pub organization_id: Option<String>,
     pub team_id: Option<String>,
-    pub deployment_id: Option<String>,
 }
 
 impl IdentityAttrs {
@@ -63,7 +62,6 @@ impl IdentityAttrs {
             email: None,
             organization_id: snapshot.organization_id.clone(),
             team_id: snapshot.team_id.clone(),
-            deployment_id: snapshot.deployment_id.clone(),
         }
     }
 }

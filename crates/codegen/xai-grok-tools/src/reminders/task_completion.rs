@@ -49,14 +49,14 @@ pub const INLINE_SUBAGENT_OUTPUT_BYTES: usize = 16_000;
 const NEUTRALIZED_TAGS: [&str; 2] = ["system-reminder", "system_reminder"];
 /// Refcounted bash task ids whose wake prompt is queued or in flight; subagent wakes dedupe through [`ReportedTaskCompletions`] instead.
 #[derive(Clone, Debug, Default)]
-pub struct TaskCompletionReservations(pub Arc<std::sync::Mutex<HashMap<String, usize>>>);
+pub struct TaskCompletionReservations(pub Arc<parking_lot::Mutex<HashMap<String, usize>>>);
 impl TaskCompletionReservations {
     pub fn reserve(&self, id: String) {
-        let mut ids = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        let mut ids = self.0.lock();
         *ids.entry(id).or_default() += 1;
     }
     pub fn release(&self, id: &str) {
-        let mut ids = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        let mut ids = self.0.lock();
         if let Some(count) = ids.get_mut(id) {
             if *count > 1 {
                 *count -= 1;
@@ -66,18 +66,10 @@ impl TaskCompletionReservations {
         }
     }
     pub fn contains(&self, id: &str) -> bool {
-        self.0
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .contains_key(id)
+        self.0.lock().contains_key(id)
     }
     pub fn snapshot(&self) -> Vec<String> {
-        self.0
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .keys()
-            .cloned()
-            .collect()
+        self.0.lock().keys().cloned().collect()
     }
 }
 crate::register_resource!(
@@ -669,8 +661,6 @@ pub fn consumed_completion_ids(output: &ToolOutput) -> Vec<&str> {
         | ToolOutput::WebFetch(_)
         | ToolOutput::MCP(_)
         | ToolOutput::Skill(_)
-        | ToolOutput::ApplyPatch(_)
-        | ToolOutput::CodexGrepFiles(_)
         | ToolOutput::SearchTool(_)
         | ToolOutput::EnterPlanMode(_)
         | ToolOutput::ExitPlanMode(_)
@@ -861,6 +851,33 @@ mod tests {
     use crate::implementations::grok_build::task::{completion_summary, terminal_snapshot};
     use crate::implementations::grok_build::task_output::terminal_subagent_result;
     use crate::types::output::TextOutput;
+    /// A reservation made by a caller that panics still reserves nothing.
+    ///
+    /// The guard type is spelled out rather than inferred: `parking_lot`'s
+    /// guard is the one that cannot report a poisoned lock, so the next tool
+    /// call acquires the map and sees the reservation the panicked caller had
+    /// already recorded. A lock that poisoned would make every later tool call
+    /// on the session fail on a map of counters.
+    #[test]
+    fn a_panicking_reserver_leaves_the_map_open_to_the_next_tool_call() {
+        let reservations = TaskCompletionReservations::default();
+        let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let mut held: parking_lot::MutexGuard<'_, HashMap<String, usize>> =
+                reservations.0.lock();
+            held.insert("bg-uuid-42".to_string(), 1);
+            panic!("the tool call died holding the reservations");
+        }));
+        assert!(
+            panicked.is_err(),
+            "the test must actually have panicked while holding the lock"
+        );
+        assert!(
+            reservations.contains("bg-uuid-42"),
+            "the next acquirer gets the map, with what the panicked call had reserved"
+        );
+        reservations.release("bg-uuid-42");
+        assert!(!reservations.contains("bg-uuid-42"));
+    }
     #[test]
     fn consumed_completion_ids_from_text_with_consumed_id() {
         let output = ToolOutput::Text(TextOutput {

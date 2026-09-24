@@ -82,13 +82,28 @@ pub(crate) fn apply_merge(
     Ok(())
 }
 
+/// A finished item's echo is cut to this many characters of its first line.
+const FINISHED_ITEM_ECHO_CHARS: usize = 100;
+
+/// Every write echoes the whole list, and the list never shrinks. So a
+/// finished item echoes only its first line. The state keeps the full text.
 pub(crate) fn summarize_todo_state(state: &TodoState) -> String {
     if state.is_empty() {
         "No tasks currently tracked.".into()
     } else {
         let mut out = String::new();
         for (id, t) in state.todo_items_with_ids() {
-            writeln!(&mut out, "- {} {id}: {}", t.status.tag(), t.content).ok();
+            let finished = matches!(t.status, TodoStatus::Completed | TodoStatus::Cancelled);
+            if finished {
+                let first = t.content.lines().next().unwrap_or("");
+                let mut head: String = first.chars().take(FINISHED_ITEM_ECHO_CHARS).collect();
+                if head.len() < t.content.trim_end().len() {
+                    head.push('…');
+                }
+                writeln!(&mut out, "- {} {id}: {head}", t.status.tag()).ok();
+            } else {
+                writeln!(&mut out, "- {} {id}: {}", t.status.tag(), t.content).ok();
+            }
         }
         out
     }
@@ -321,7 +336,9 @@ impl crate::types::tool_metadata::ToolMetadata for TodoWriteTool {
 
 Add as many items as the work needs — a small task may be one or two, a large one many more. Do not pad a small job into a fake checklist, and do not crush a large job into a handful of vague items. Skip for trivial single-step work. Check items off as you go; keep roughly one in_progress.
 
-Writes merge by id, so send only the items you are changing. An item you leave out is kept exactly as it was: there is no way to remove one. Work leaves the list by status only — completed when it is done, cancelled when it will not be done. Reword an item by sending its id with new content."#
+Writes merge by id, so send only the items you are changing. An item you leave out is kept exactly as it was: there is no way to remove one. Work leaves the list by status only — completed when it is done, cancelled when it will not be done. Reword an item by sending its id with new content.
+
+Every call returns the whole list with each item's id. Items can appear that you did not write (the user and the goal planner add them), so call with an empty `todos` array to read the current list and its ids before you update them."#
     }
 
     fn requires_expr(&self) -> Expr<ToolRequirement> {
@@ -624,6 +641,44 @@ mod tests {
         assert!(output.todos.is_empty());
     }
 
+    /// The description promises an empty call as the read. It must change
+    /// nothing and must return every item with an id the model did not mint.
+    #[tokio::test]
+    async fn an_empty_write_reads_the_list_back_with_ids() {
+        let tool = TodoWriteTool;
+        let shared = Resources::new().into_shared();
+        let seed = TodoWriteInput {
+            merge: true,
+            prepend: false,
+            todos: vec![make_update(
+                "plan-3f9a2c",
+                Some("Write the migration"),
+                Some(TodoStatus::Pending),
+            )],
+        };
+        xai_tool_runtime::Tool::run(&tool, test_ctx(shared.clone()), seed)
+            .await
+            .unwrap();
+
+        let read = TodoWriteInput {
+            merge: true,
+            prepend: false,
+            todos: vec![],
+        };
+        let output = expect_success(
+            xai_tool_runtime::Tool::run(&tool, test_ctx(shared), read)
+                .await
+                .unwrap(),
+        );
+        assert_eq!(
+            output.summary_for_prompt,
+            "- [pending] plan-3f9a2c: Write the migration\n"
+        );
+        assert_eq!(output.todos.len(), 1);
+        let desc = crate::types::tool_metadata::ToolMetadata::description_template(&tool);
+        assert!(desc.contains("empty `todos` array to read"), "{desc}");
+    }
+
     #[tokio::test]
     async fn state_output_includes_snapshot() {
         let tool = TodoWriteTool;
@@ -710,6 +765,38 @@ mod tests {
             );
         }
         state
+    }
+
+    #[test]
+    fn a_finished_item_echoes_only_its_first_line() {
+        let long_open = format!("open task\n{}", "detail ".repeat(40));
+        let long_done = format!("shipped the parser\n{}", "detail ".repeat(40));
+        let state = seed_state(&[
+            ("1", &long_open, TodoStatus::InProgress),
+            ("2", &long_done, TodoStatus::Completed),
+            ("3", "dropped", TodoStatus::Cancelled),
+            ("4", &"x".repeat(300), TodoStatus::Completed),
+        ]);
+        let echo = summarize_todo_state(&state);
+        assert!(
+            echo.contains(&long_open),
+            "an open item keeps its text:\n{echo}"
+        );
+        assert!(
+            echo.contains("- [completed] 2: shipped the parser…\n"),
+            "{echo}"
+        );
+        assert!(!echo.contains(&long_done), "{echo}");
+        assert!(echo.contains("- [cancelled] 3: dropped\n"), "{echo}");
+        assert!(
+            echo.contains(&format!("- [completed] 4: {}…\n", "x".repeat(100))),
+            "{echo}"
+        );
+        assert_eq!(
+            get_item(&state, "2").content,
+            long_done,
+            "the state keeps the full text"
+        );
     }
 
     fn get_item<'a>(state: &'a TodoState, id: &str) -> &'a TodoItem {

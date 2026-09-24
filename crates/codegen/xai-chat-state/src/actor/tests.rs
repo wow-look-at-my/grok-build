@@ -1859,8 +1859,8 @@ async fn build_request_fits_the_output_budget_into_the_context_window() {
         stream_tool_calls: None,
         chat_message_profile: Default::default(),
         extra_body: Default::default(),
+        ..Default::default()
     };
-    // Bytes/4: this is a 737_857-token prompt.
     let items = vec![ConversationItem::user("x".repeat(737_857 * 4))];
     let h = TestHarness::with_config(items, config);
 
@@ -5718,4 +5718,83 @@ async fn restore_snapshot_restores_all_fields() {
     assert_eq!(idx, 1);
     let tokens = h.handle.get_total_tokens().await;
     assert_eq!(tokens, 500);
+}
+
+/// Persistence that unwinds on the first item it is handed.
+struct PanickingPersistence {
+    seen: std::sync::atomic::AtomicUsize,
+}
+
+impl crate::persistence::ChatPersistence for PanickingPersistence {
+    fn persist_message(&mut self, _item: &ConversationItem) {
+        if self.seen.fetch_add(1, std::sync::atomic::Ordering::Relaxed) == 0 {
+            panic!("the persistence round died");
+        }
+    }
+
+    fn persist_working_directory_switch_and_ack(
+        &mut self,
+        _item: &ConversationItem,
+    ) -> tokio::sync::oneshot::Receiver<
+        Result<crate::commands::StrictAppendAck, crate::commands::StrictAppendError>,
+    > {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let _ = tx.send(Ok(crate::commands::StrictAppendAck::Appended));
+        rx
+    }
+
+    fn replace_history(&mut self, _items: &[ConversationItem]) {}
+
+    fn replace_history_for_strip_and_ack(
+        &mut self,
+        _items: &[ConversationItem],
+    ) -> tokio::sync::oneshot::Receiver<std::io::Result<()>> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let _ = tx.send(Ok(()));
+        rx
+    }
+
+    fn flush(&mut self) {}
+}
+
+/// A command whose round panics is reported and the actor keeps serving.
+///
+/// The actor is the sole writer of the session's conversation and the sole
+/// answerer of every handle's ack, so losing it takes the rest of the
+/// session's chat state with it.
+#[tokio::test]
+async fn a_panicking_command_leaves_the_actor_serving_later_commands() {
+    let (event_tx, _events) = mpsc::unbounded_channel::<ChatStateEvent>();
+    let handle = ChatStateActor::spawn(
+        vec![],
+        test_config(),
+        Box::new(PanickingPersistence {
+            seen: std::sync::atomic::AtomicUsize::new(0),
+        }),
+        event_tx,
+        tokio_util::sync::CancellationToken::new(),
+    );
+
+    // The first push unwinds inside the actor's command round. Its own ack is
+    // the dropped half of a oneshot, so the caller sees the round fail.
+    handle.push_user_message(ConversationItem::user("first"));
+
+    // Commands after it are served, which is the whole point of the guard: a
+    // dead actor answers this with None.
+    let acked = tokio::time::timeout(
+        Duration::from_secs(5),
+        handle.push_user_message_and_ack(ConversationItem::user("second")),
+    )
+    .await
+    .expect("the actor must answer a command after a panicked one")
+    .expect("the ack must arrive, not be dropped");
+    assert_eq!(acked, ());
+
+    let len = tokio::time::timeout(Duration::from_secs(5), handle.get_conversation_len())
+        .await
+        .expect("queries keep working after a panicked command");
+    assert!(
+        len >= 1,
+        "the surviving conversation is at least the message after the panic, got {len}"
+    );
 }

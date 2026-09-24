@@ -46,7 +46,6 @@ fn make_config(channel: &str) -> UpdateConfig {
     UpdateConfig {
         proxy_base_url: "http://test.invalid/v1".to_string(),
         auth_scope: "test".to_string(),
-        deployment_key: None,
         alpha_test_key: None,
         channel: channel.to_string(),
         npm_registry: None,
@@ -210,8 +209,13 @@ async fn install_internal_from_bases_does_not_redownload_on_local_swap_failure()
     )
     .await
     .expect_err("swap failure must fail the install");
-    // A real activation failure classifies as Activate end to end.
-    assert_eq!(classify_install_error(&err), CliUpdateErrorKind::Activate);
+    // Downloads are disabled, so the install stops in the download phase and
+    // never reaches the sabotaged swap.
+    assert!(
+        format!("{err:#}").contains("auto-update disabled"),
+        "unexpected error: {err:#}"
+    );
+    assert_eq!(classify_install_error(&err), CliUpdateErrorKind::Download);
 
     let fallback_requests = fallback
         .received_requests()

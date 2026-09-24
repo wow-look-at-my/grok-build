@@ -8,6 +8,9 @@
 //! empty results.
 
 #![deny(clippy::indexing_slicing)]
+#![allow(clippy::cast_possible_truncation)]
+#![allow(clippy::expect_used)]
+#![allow(clippy::unwrap_used)]
 
 use std::{
     path::{Path, PathBuf},

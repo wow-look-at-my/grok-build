@@ -1731,6 +1731,109 @@ trusted = true
     }
 
     #[test]
+    fn workspace_key_collapses_repo_local_grok_worktree_onto_main_checkout() {
+        // Criterion 5: a checkout under the REPOSITORY's own
+        // `.grok/worktrees/` is just as grok-managed as one under the grok home,
+        // so its trust key collapses onto the main checkout root. The dir is a
+        // plain directory, so only the registry can collapse it.
+        let temp = tempfile::TempDir::new().unwrap();
+        let root = dunce::canonicalize(temp.path()).unwrap();
+        let main_repo = root.join("thing");
+        std::fs::create_dir_all(&main_repo).unwrap();
+        git2::Repository::init(&main_repo).unwrap();
+
+        let wt = main_repo.join(".grok").join("worktrees").join("label");
+        std::fs::create_dir_all(&wt).unwrap();
+        let home = root.join("grok-home");
+        let _env = LockedTestEnv::lock().set("GROK_HOME", &home);
+        use xai_fast_worktree::{WorktreeDb, WorktreeKind, WorktreeRecord, WorktreeStatus};
+        WorktreeDb::open(&home)
+            .unwrap()
+            .register(&WorktreeRecord {
+                id: "repo-local".to_string(),
+                path: wt.clone(),
+                source_repo: main_repo.clone(),
+                repo_name: "thing".to_string(),
+                kind: WorktreeKind::Session,
+                creation_mode: "linked".to_string(),
+                git_ref: None,
+                head_commit: None,
+                session_id: None,
+                creator_pid: None,
+                created_at: 100,
+                last_accessed_at: None,
+                status: WorktreeStatus::Alive,
+                metadata: None,
+            })
+            .unwrap();
+
+        let expected = canonicalize_or_owned(&main_repo);
+        assert_eq!(
+            workspace_key(&wt),
+            expected,
+            "a worktree at <repo>/.grok/worktrees/<label> must share the main \
+             checkout's trust key"
+        );
+        let nested = wt.join("crates").join("inner");
+        std::fs::create_dir_all(&nested).unwrap();
+        assert_eq!(
+            workspace_key(&nested),
+            expected,
+            "a nested cwd in a repo-local worktree collapses onto the same root"
+        );
+    }
+
+    #[test]
+    fn workspace_key_does_not_collapse_an_unmanaged_dir_in_a_managed_repo() {
+        // Widening the predicate to the repository-local root must not turn
+        // "somewhere under the repository" into "grok-managed". The registry IS
+        // populated, with a checkout under `<repo>/.grok/worktrees/` pointing at
+        // a different source repo, so a directory beside that root, in a path no
+        // longer managed, must resolve through git topology to its own repo root
+        // rather than through that record.
+        let temp = tempfile::TempDir::new().unwrap();
+        let root = dunce::canonicalize(temp.path()).unwrap();
+        let main_repo = root.join("thing");
+        std::fs::create_dir_all(&main_repo).unwrap();
+        git2::Repository::init(&main_repo).unwrap();
+        let other_source = root.join("other-source");
+        std::fs::create_dir_all(&other_source).unwrap();
+        git2::Repository::init(&other_source).unwrap();
+
+        std::fs::create_dir_all(main_repo.join(".grok").join("worktrees").join("label")).unwrap();
+        let home = root.join("grok-home");
+        let _env = LockedTestEnv::lock().set("GROK_HOME", &home);
+        use xai_fast_worktree::{WorktreeDb, WorktreeKind, WorktreeRecord, WorktreeStatus};
+        WorktreeDb::open(&home)
+            .unwrap()
+            .register(&WorktreeRecord {
+                id: "repo-local".to_string(),
+                path: main_repo.join(".grok").join("worktrees").join("label"),
+                source_repo: other_source.clone(),
+                repo_name: "thing".to_string(),
+                kind: WorktreeKind::Session,
+                creation_mode: "standalone".to_string(),
+                git_ref: None,
+                head_commit: None,
+                session_id: None,
+                creator_pid: None,
+                created_at: 100,
+                last_accessed_at: None,
+                status: WorktreeStatus::Alive,
+                metadata: None,
+            })
+            .unwrap();
+
+        let unmanaged = main_repo.join(".grok").join("worktrees-other").join("dir");
+        std::fs::create_dir_all(&unmanaged).unwrap();
+        assert_eq!(
+            workspace_key(&unmanaged),
+            canonicalize_or_owned(&main_repo),
+            "a directory outside <repo>/.grok/worktrees must keep its own key"
+        );
+    }
+
+    #[test]
     fn workspace_key_ignores_registry_for_cwd_outside_worktrees_dir() {
         // A populated registry must NOT collapse a cwd OUTSIDE `<grok_home>/worktrees` `worktree_record_for_cwd` skips the registry there, so the key falls back to
         // git/cwd Non-vacuous: the registry IS populated with a real git source repo that WOULD be returned for a worktree cwd `outside` is its OWN git repo (under

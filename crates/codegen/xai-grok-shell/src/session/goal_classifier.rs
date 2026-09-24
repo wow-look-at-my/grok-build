@@ -1182,7 +1182,7 @@ fn kind_lens(kind: Option<GoalKind>) -> &'static str {
     }
 }
 
-/// Prompt for skeptic 0 when it is RESUMED across attempts; it already carries its prior transcript and the gaps it flagged.
+/// Prompt for skeptic when it is RESUMED across attempts; it already carries its prior transcript and the gaps it flagged.
 /// It must re-read the changed files (its cached reads are stale after the agent's further edits).
 /// It confirms each prior gap is genuinely fixed in the CURRENT files with no regression and emits the same verdict-file and terminal-token contract.
 const GOAL_VERIFIER_RESUME_PROMPT_TEMPLATE: &str =

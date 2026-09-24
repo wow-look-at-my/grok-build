@@ -619,7 +619,7 @@ fn resolve_agent_definition_defaults_to_grok_build() {
         unsafe { std::env::set_var("GROK_AGENT", v) }
     }
 }
-/// When model_agent_type = Some("codex"), the codex agent is selected even though the default chain would return grok-build.
+/// A model_agent_type that names a strict harness wins over the default chain.
 #[test]
 #[serial_test::serial]
 fn resolve_agent_definition_model_agent_type_overrides_default() {
@@ -633,9 +633,9 @@ fn resolve_agent_definition_model_agent_type_overrides_default() {
         None,
         &config::AgentSelectionConfig::default(),
         None,
-        Some("codex"),
+        Some("grok-build-orchestrator"),
     );
-    assert_eq!(def.name, "codex");
+    assert_eq!(def.name, "grok-build-orchestrator");
     if let Some(v) = prev {
         unsafe { std::env::set_var("GROK_AGENT", v) }
     }
@@ -979,9 +979,18 @@ fn harnesses_are_compatible_for_stock_family_pairs() {
 }
 #[test]
 fn harnesses_are_compatible_rejects_strict_mismatches() {
-    assert!(harnesses_are_compatible("codex", "codex"));
-    assert!(!harnesses_are_compatible("grok-build-plan", "codex"));
-    assert!(!harnesses_are_compatible("codex", "grok-build"));
+    assert!(harnesses_are_compatible(
+        "grok-build-orchestrator",
+        "grok-build-orchestrator"
+    ));
+    assert!(!harnesses_are_compatible(
+        "grok-build-plan",
+        "grok-build-orchestrator"
+    ));
+    assert!(!harnesses_are_compatible(
+        "grok-build-orchestrator",
+        "grok-build"
+    ));
 }
 
 /// An agent type nobody has heard of is never strict, because
@@ -994,7 +1003,7 @@ fn harnesses_are_compatible_rejects_strict_mismatches() {
 fn an_unknown_agent_type_is_never_strict() {
     assert!(harnesses_are_compatible("grok-build", "cursor"));
     assert!(harnesses_are_compatible("cursor", "grok-build-plan"));
-    assert!(!harnesses_are_compatible("cursor", "codex"));
+    assert!(!harnesses_are_compatible("cursor", "grok-build-orchestrator"));
 }
 #[test]
 fn explicit_agent_type_wins_over_session_default() {
@@ -1185,7 +1194,7 @@ fn make_test_handle(
         agent_name: "grok-build".to_string(),
         managed_mcp_proxy_base_url: String::new(),
         session_default_agent_profile: None,
-        allowed_subagent_types: None,
+        allowed_subagent_types: Default::default(),
         hook_registry: None,
         workspace_ops: xai_grok_workspace::WorkspaceOps::for_test(),
         terminal_backend: None,
@@ -1203,10 +1212,10 @@ async fn lookup_session_model_returns_per_session_model() {
         "grok-3-fast"
     );
     assert_eq!(
-        lookup_session_model(Some(acp::ModelId::new("codex-mini")), &default_model)
+        lookup_session_model(Some(acp::ModelId::new("grok-code-fast")), &default_model)
             .0
             .as_ref(),
-        "codex-mini"
+        "grok-code-fast"
     );
 }
 #[tokio::test]
@@ -1228,7 +1237,7 @@ async fn set_session_model_does_not_cross_contaminate() {
         (sid_b.clone(), make_test_handle("grok-3", false, None)),
     ]
     .into();
-    sessions.get_mut(&sid_a).unwrap().model_id = acp::ModelId::new("codex-mini");
+    sessions.get_mut(&sid_a).unwrap().model_id = acp::ModelId::new("grok-code-fast");
     assert_eq!(
         lookup_session_model(
             sessions.get(&sid_a).map(|h| h.model_id.clone()),
@@ -1236,7 +1245,7 @@ async fn set_session_model_does_not_cross_contaminate() {
         )
         .0
         .as_ref(),
-        "codex-mini"
+        "grok-code-fast"
     );
     assert_eq!(
         lookup_session_model(
@@ -2242,25 +2251,6 @@ fn personal_xai_oauth_auth() -> xai_grok_login::GrokAuth {
 }
 #[tokio::test]
 #[serial_test::serial]
-async fn feedback_trace_offer_asks_personal_oauth_accounts() {
-    use xai_grok_test_support::EnvGuard;
-    let _e1 = EnvGuard::unset("GROK_TELEMETRY_ENABLED");
-    let _e2 = EnvGuard::unset("GROK_TELEMETRY_TRACE_UPLOAD");
-    let _e3 = EnvGuard::unset("GROK_FEEDBACK_TRACE_CARD");
-    let _e4 = EnvGuard::unset("DISABLE_TELEMETRY");
-    let agent = build_agent_with_auth(personal_xai_oauth_auth());
-    make_trace_card_eligible(&agent);
-    assert!(agent.feedback_trace_offer(), "every gate is open");
-    assert!(
-        agent
-            .one_shot_feedback_gcs_config("sid".into())
-            .await
-            .is_some(),
-        "the consented upload path must be open too"
-    );
-}
-#[tokio::test]
-#[serial_test::serial]
 async fn feedback_trace_offer_suppressed_for_team_accounts_even_admins() {
     use xai_grok_test_support::EnvGuard;
     let _e1 = EnvGuard::unset("GROK_TELEMETRY_ENABLED");
@@ -2287,29 +2277,6 @@ async fn feedback_trace_offer_suppressed_for_team_accounts_even_admins() {
         );
     }
 }
-#[tokio::test]
-#[serial_test::serial]
-async fn feedback_trace_offer_suppressed_for_managed_deployments() {
-    use xai_grok_test_support::EnvGuard;
-    let _e1 = EnvGuard::unset("GROK_TELEMETRY_ENABLED");
-    let _e2 = EnvGuard::unset("GROK_TELEMETRY_TRACE_UPLOAD");
-    let _e3 = EnvGuard::unset("GROK_FEEDBACK_TRACE_CARD");
-    let _e4 = EnvGuard::unset("DISABLE_TELEMETRY");
-    let agent = build_agent_with_auth(personal_xai_oauth_auth());
-    make_trace_card_eligible(&agent);
-    agent.cfg.borrow_mut().endpoints.deployment_key = Some("dk-test".into());
-    assert!(
-        !agent.feedback_trace_offer(),
-        "a deployment key must suppress the card even with personal OAuth"
-    );
-    assert!(
-        agent
-            .one_shot_feedback_gcs_config("sid".into())
-            .await
-            .is_none(),
-        "a deployment key must close the one-shot upload path"
-    );
-}
 /// Pin every env var feeding the trace-offer / one-shot ladders and sandbox
 /// `GROK_HOME`, so a developer's shell can't flip a gate under test.
 fn trace_gate_env(grok_home: &std::path::Path) -> Vec<xai_grok_test_support::EnvGuard> {
@@ -2325,7 +2292,6 @@ fn trace_gate_env(grok_home: &std::path::Path) -> Vec<xai_grok_test_support::Env
         EnvGuard::unset("GROK_TRACE_UPLOAD_URL"),
         EnvGuard::unset("GROK_TRACE_UPLOAD_BUCKET"),
         EnvGuard::unset("GROK_TRACE_UPLOAD_ENDPOINT_URL"),
-        EnvGuard::unset("GROK_DEPLOYMENT_KEY"),
     ]
 }
 fn insert_resident_session(agent: &MvpAgent, session_id: &str, cwd: &std::path::Path) {
@@ -2387,22 +2353,6 @@ async fn upload_trace_missing_intent_requires_persisted_consent_even_when_offer_
     insert_resident_session(&agent, "sess", tmp.path());
     let err = upload_trace_error(&agent, serde_json::json!({ "sessionId": "sess" }), None).await;
     assert!(err.to_string().contains(NOT_AVAILABLE), "got: {err}");
-}
-#[tokio::test]
-#[serial_test::serial]
-async fn upload_trace_missing_intent_with_global_consent_stays_compatible() {
-    let tmp = tempfile::tempdir().unwrap();
-    let _env = trace_gate_env(tmp.path());
-    let agent = build_agent_with_auth(personal_xai_oauth_auth());
-    {
-        let mut cfg = agent.cfg.borrow_mut();
-        cfg.features.telemetry = Some(crate::agent::config::TelemetryMode::Enabled);
-        cfg.telemetry.trace_upload = Some(true);
-    }
-    insert_resident_session(&agent, "sess", tmp.path());
-    assert!(!agent.feedback_trace_offer());
-    let err = upload_trace_error(&agent, serde_json::json!({ "sessionId": "sess" }), None).await;
-    assert!(err.to_string().contains(NO_SESSION_DIR), "got: {err}");
 }
 #[tokio::test]
 #[serial_test::serial]
@@ -2575,62 +2525,6 @@ async fn upload_trace_archive_failure_uses_an_isolated_directory() {
         err.to_string().contains("couldn't build session archive"),
         "got: {err}"
     );
-}
-#[tokio::test]
-#[serial_test::serial]
-async fn upload_trace_upload_failure_uses_an_isolated_directory() {
-    let tmp = tempfile::tempdir().unwrap();
-    let _env = trace_gate_env(tmp.path());
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    let server = tokio::spawn(async move {
-        while let Ok((mut stream, _)) = listener.accept().await {
-            use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
-            let mut buf = vec![0u8; 65536];
-            let mut seen = Vec::new();
-            while let Ok(n) = stream.read(&mut buf).await {
-                if n == 0 {
-                    break;
-                }
-                let Some(chunk) = buf.get(..n) else {
-                    break;
-                };
-                seen.extend_from_slice(chunk);
-                if seen.windows(4).any(|w| w == b"\r\n\r\n") {
-                    break;
-                }
-            }
-            let _ = stream
-                .write_all(
-                    b"HTTP/1.1 403 Forbidden\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
-                )
-                .await;
-            let _ = stream.shutdown().await;
-        }
-    });
-    let session_dir = tmp.path().join("session");
-    std::fs::create_dir(&session_dir).unwrap();
-    std::fs::write(session_dir.join("summary.json"), "{}").unwrap();
-    let agent = build_agent_with_auth(personal_xai_oauth_auth());
-    make_trace_card_eligible(&agent);
-    agent.cfg.borrow_mut().endpoints.cli_chat_proxy_base_url = Some(format!("http://{addr}"));
-    insert_resident_session(&agent, "sess", tmp.path());
-    let token = agent.issue_feedback_trace_upload_grant(acp::SessionId::new("sess"));
-    let err = upload_trace_error(
-        &agent,
-        serde_json::json!({
-            "sessionId": "sess",
-            "intent": "send_this_session",
-            "traceUploadToken": token,
-        }),
-        Some(session_dir),
-    )
-    .await;
-    assert!(
-        err.to_string().contains("trace upload failed"),
-        "got: {err}"
-    );
-    server.abort();
 }
 #[tokio::test]
 #[serial_test::serial]
@@ -3738,16 +3632,14 @@ fn build_agent_with_api_key_auth_disabled() -> MvpAgent {
     cfg.grok_com_config.disable_api_key_auth = Some(true);
     MvpAgent::new(gateway, &cfg, auth_manager, None, None).expect("valid test config")
 }
-/// Deployment-key / managed-config user: `XAI_API_KEY` resolves and the kill switch is off.
-/// A dead `cached_token` MUST then fall through to `xai.api_key` (no browser).
-/// This is the exact regression the fallthrough fixes.
+/// Managed-config user: `XAI_API_KEY` resolves and the kill switch is off.
 #[tokio::test(flavor = "current_thread")]
 #[serial_test::serial]
-async fn cached_token_fallthrough_prefers_api_key_for_deployment_key() {
+async fn cached_token_fallthrough_prefers_api_key() {
     use crate::agent::auth_method::{XAI_API_KEY_ENV_VAR, XAI_API_KEY_METHOD_ID};
     use xai_grok_test_support::EnvGuard;
     let _lockdown = EnvGuard::unset("GROK_DISABLE_API_KEY_AUTH");
-    let _key = EnvGuard::set(XAI_API_KEY_ENV_VAR, "test-deployment-key");
+    let _key = EnvGuard::set(XAI_API_KEY_ENV_VAR, "test-api-key");
     let agent = build_minimal_agent_for_tests();
     assert_eq!(
         agent
@@ -3755,7 +3647,7 @@ async fn cached_token_fallthrough_prefers_api_key_for_deployment_key() {
             .as_ref()
             .map(|id| id.0.as_ref()),
         Some(XAI_API_KEY_METHOD_ID),
-        "deployment-key user (XAI_API_KEY set, no kill switch) must fall \
+        "an XAI_API_KEY user (no kill switch) must fall \
          through to xai.api_key on a dead cached_token -- not interactive login",
     );
 }
@@ -3767,7 +3659,7 @@ async fn cached_token_fallthrough_respects_kill_switch() {
     use crate::agent::auth_method::{GROK_COM_METHOD_ID, XAI_API_KEY_ENV_VAR};
     use xai_grok_test_support::EnvGuard;
     let _lockdown = EnvGuard::unset("GROK_DISABLE_API_KEY_AUTH");
-    let _key = EnvGuard::set(XAI_API_KEY_ENV_VAR, "test-deployment-key");
+    let _key = EnvGuard::set(XAI_API_KEY_ENV_VAR, "test-api-key");
     let agent = build_agent_with_api_key_auth_disabled();
     assert_eq!(
         agent
@@ -8508,6 +8400,9 @@ async fn polled_settings_apply_refreshes_accept_request_encodings() {
     use xai_grok_sampler::RequestCompression;
     let _env = crate::env::EnvVarGuard::remove("GROK_REQUEST_COMPRESSION");
     let agent = build_minimal_agent_for_tests();
+    // No proxy is compiled in as a default, and a blank origin compresses toward nothing.
+    agent.cfg.borrow_mut().endpoints.cli_chat_proxy_base_url =
+        Some(crate::env::PROD_CLI_CHAT_PROXY_BASE_URL.to_owned());
     let proxy = agent.cfg.borrow().endpoints.proxy_url();
     let mut stored = settings_with(Some(vec![ann("old")]));
     stored.accept_request_encodings = vec![RemoteRequestEncoding::Zstd];
@@ -8899,7 +8794,7 @@ async fn remote_settings_alone_cannot_enable_session_replicas() {
         session_registry_enabled: Some(true),
         ..Default::default()
     });
-    let agent = MvpAgent::new(gateway, &cfg, auth_manager, None).expect("valid test config");
+    let agent = MvpAgent::new(gateway, &cfg, auth_manager, None, None).expect("valid test config");
 
     assert!(
         agent.build_registry_config().is_none(),

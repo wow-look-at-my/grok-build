@@ -44,6 +44,8 @@ impl super::super::coordinator::ChildControl for BackendTestControl {
     }
 
     fn cancel(&self) {}
+
+    fn interject(&self, _text: &str) {}
 }
 
 struct BackendTestRunner;

@@ -820,6 +820,31 @@ mod tests {
         assert_eq!(result, input);
     }
 
+    /// The strip advances byte offsets through text that carries multi-byte
+    /// characters, so the kept head and the resumed tail must stay whole.
+    #[test]
+    fn strip_xml_block_keeps_multibyte_text_around_the_block() {
+        let input = "日本語 <system-reminder>noise</system-reminder> 🚀 kept";
+        let result = strip_xml_block(input, "system-reminder");
+        assert_eq!(result, "日本語  🚀 kept");
+    }
+
+    /// An unclosed tag after multi-byte text is left untouched, including the
+    /// text before the open tag.
+    #[test]
+    fn strip_xml_block_with_multibyte_before_an_unclosed_tag_is_untouched() {
+        let input = "café <system-reminder>unclosed - content 日本";
+        let result = strip_xml_block(input, "system-reminder");
+        assert_eq!(result, input);
+    }
+
+    #[test]
+    fn strip_skill_instructions_counts_multibyte_bytes() {
+        let input = "日本 </command-args> body 🚀 </user_query> tail";
+        let result = strip_skill_instructions(input);
+        assert_eq!(result, "日本 </command-args></user_query> tail");
+    }
+
     // --- strip_skill_instructions tests ---
 
     #[test]

@@ -2314,7 +2314,7 @@ mod tests {
     #[tokio::test]
     async fn a_server_that_failed_to_spawn_is_reported_with_its_reason() {
         let mut state = McpState::new(vec![stdio_config("kagi", "uvx")]);
-        assert!(state.try_start_init());
+        let _claim = state.try_start_init().expect("init can start");
         state.mark_servers_initializing(["kagi".to_string()]);
         state.mark_server_ready("kagi");
         state.finish_init();
@@ -2347,7 +2347,7 @@ mod tests {
     #[tokio::test]
     async fn a_server_with_no_client_is_never_reported_as_starting() {
         let mut state = McpState::new(vec![stdio_config("kagi", "uvx")]);
-        assert!(state.try_start_init());
+        let _claim = state.try_start_init().expect("init can start");
         state.finish_init();
         let mcp_state = Arc::new(TokioMutex::new(state));
         let bridge = Arc::new(crate::tools::bridge::ToolBridge::for_test());
@@ -2370,10 +2370,10 @@ mod tests {
     #[tokio::test]
     async fn a_recorded_failure_is_reported_even_when_init_was_cancelled() {
         let mut state = McpState::new(vec![stdio_config("kagi", "uvx")]);
-        assert!(state.try_start_init());
+        let _claim = state.try_start_init().expect("init can start");
         state.finish_init();
         state.record_init_failure("kagi", false, Some("boom".into()));
-        state.cancel_init();
+        state.cancel_any_init();
         assert!(!state.has_finished_init());
         let mcp_state = Arc::new(TokioMutex::new(state));
         let bridge = Arc::new(crate::tools::bridge::ToolBridge::for_test());
@@ -2408,7 +2408,7 @@ mod tests {
     #[tokio::test]
     async fn a_handshaking_server_still_reports_initializing() {
         let mut state = McpState::new(vec![stdio_config("kagi", "uvx")]);
-        assert!(state.try_start_init());
+        let _claim = state.try_start_init().expect("init can start");
         state.mark_servers_initializing(["kagi".to_string()]);
         state.finish_init();
         let mcp_state = Arc::new(TokioMutex::new(state));

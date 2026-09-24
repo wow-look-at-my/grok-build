@@ -35,6 +35,7 @@ fn sampling_request_header_carries_the_turn_trace_id() {
                         None,
                         None,
                         None,
+                        true,
                         &mut length_salvage::LengthSalvage::new(None),
                         &mut Default::default(),
                     )

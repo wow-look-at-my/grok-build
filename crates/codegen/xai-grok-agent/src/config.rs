@@ -7,7 +7,6 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use strum::{AsRefStr, Display, EnumIter, EnumString, IntoStaticStr};
-use xai_grok_tools::implementations::codex;
 use xai_grok_tools::implementations::grok_build;
 use xai_grok_tools::implementations::grok_build_concise;
 use xai_grok_tools::implementations::memory;
@@ -29,39 +28,48 @@ enum PresetVisibility {
 }
 static TOOLSET_PRESETS: OnceLock<Mutex<HashMap<String, (ToolsetPresetBuilder, PresetVisibility)>>> =
     OnceLock::new();
+/// Every caller of this registry recovers the map from a poison rather than
+/// panicking on one: the sections here are `HashMap` insert / get / iter, so a
+/// poison can only arrive from unrelated code, and panicking on one would turn
+/// that into a process that can no longer resolve any toolset preset.
+/// `parking_lot::Mutex` is the structural fix and is not a dependency here.
 fn toolset_preset_registry()
 -> &'static Mutex<HashMap<String, (ToolsetPresetBuilder, PresetVisibility)>> {
     TOOLSET_PRESETS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 /// Register an out-of-tree **public** (product) toolset preset by name. See [`TOOLSET_PRESETS`].
+#[allow(clippy::disallowed_methods)] // Recovers the map; see toolset_preset_registry.
 pub fn register_toolset_preset(name: &str, builder: ToolsetPresetBuilder) {
     toolset_preset_registry()
         .lock()
-        .expect("toolset preset registry poisoned")
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
         .insert(name.to_string(), (builder, PresetVisibility::Public));
 }
 /// Register an out-of-tree **internal** toolset preset by name; the shell / orchestrator spawn path resolves it via [`toolset_for_preset`].
 /// See [`TOOLSET_PRESETS`].
+#[allow(clippy::disallowed_methods)] // Recovers the map; see toolset_preset_registry.
 pub fn register_internal_toolset_preset(name: &str, builder: ToolsetPresetBuilder) {
     toolset_preset_registry()
         .lock()
-        .expect("toolset preset registry poisoned")
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
         .insert(name.to_string(), (builder, PresetVisibility::Internal));
 }
 /// Look up an externally-registered toolset preset by (already-normalized) name.
 /// Resolves BOTH public and internal presets.
+#[allow(clippy::disallowed_methods)] // Recovers the map; see toolset_preset_registry.
 fn registered_toolset_preset(name: &str) -> Option<ToolServerConfig> {
     toolset_preset_registry()
         .lock()
-        .expect("toolset preset registry poisoned")
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
         .get(name)
         .map(|(f, _)| f())
 }
 /// Names of externally-registered **public** presets only (internal presets are intentionally excluded from enumeration).
+#[allow(clippy::disallowed_methods)] // Recovers the map; see toolset_preset_registry.
 fn registered_public_toolset_preset_names() -> Vec<String> {
     toolset_preset_registry()
         .lock()
-        .expect("toolset preset registry poisoned")
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
         .iter()
         .filter(|(_, (_, visibility))| *visibility == PresetVisibility::Public)
         .map(|(name, _)| name.clone())
@@ -204,7 +212,6 @@ fn native_toolset_presets() -> Vec<(&'static str, ToolServerConfig)> {
         ("grok-build", workspace_grok_build_toolset()),
         ("grok-build-concise", grok_build_concise_toolset()),
         ("grok-build-plan", grok_build_plan_toolset()),
-        ("codex", codex_toolset()),
         ("explore", explore_toolset()),
         ("plan", plan_toolset()),
         ("grok-computer", grok_computer_toolset()),
@@ -352,33 +359,17 @@ pub fn grok_build_hashline_toolset(
         behavior_preset: None,
     }
 }
-fn codex_toolset() -> ToolServerConfig {
-    ToolServerConfig {
-        tools: vec![
-            bash_tool_config(),
-            (&codex::CodexReadFileTool).into(),
-            (&codex::ApplyPatchTool).into(),
-            (&codex::CodexListDirTool).into(),
-            (&codex::CodexGrepFilesTool).into(),
-            kill_task_tool_config(),
-            (&grok_build::TodoWriteTool).into(),
-            task_output_tool_config(),
-            (&search_tool::SearchTool).into(),
-            (&use_tool::UseTool).into(),
-        ],
-        behavior_preset: None,
-    }
-}
 /// Read-only toolset for the **explore** subagent.
 ///
 /// Genuinely read-only over the workspace: `read_file` (Read), `list_dir`
 /// (Glob), `grep` (Grep).
 /// `run_terminal_command` (Bash) is intentionally omitted so exploration cannot
 /// mutate the workspace — the read-only guarantee is enforced by the toolset,
-/// not merely by the prompt. With no `BashTool`, the background-task helpers
-/// (`KillTaskTool`/`TaskOutputTool`) are unnecessary and also omitted.
+/// not merely by the prompt.
 /// `send_message` mutates nothing here, and without it an explorer cannot
 /// answer the session that spawned it until its whole run ends.
+/// The subagent tools are here so explore mode can fan a search out.
+/// [`EXPLORE_SUBAGENT_TYPES`] keeps every child read-only.
 fn explore_toolset() -> ToolServerConfig {
     ToolServerConfig {
         tools: vec![
@@ -386,10 +377,16 @@ fn explore_toolset() -> ToolServerConfig {
             (&grok_build::ListDirTool).into(),
             (&grok_build::GrepTool).into(),
             (&grok_build::SendMessageTool).into(),
+            task_tool_config(),
+            task_output_tool_config(),
+            wait_tasks_tool_config(),
+            kill_task_tool_config(),
         ],
         behavior_preset: None,
     }
 }
+/// The subagent types explore may spawn. Both are read-only, so explore stays read-only through its children.
+pub const EXPLORE_SUBAGENT_TYPES: &[&str] = &["explore", "plan"];
 /// Plan-mode toolset: read-only inspection tools, no shell, no file-editing.
 ///
 /// Enforces read-only at the toolset: the agent may inspect the repo and keep a todo list but cannot mutate the workspace.
@@ -695,7 +692,6 @@ pub enum BuiltinAgentName {
     GrokBuildPlan,
     GrokBuildPlanNoSubagents,
     GrokBuildAskUser,
-    Codex,
     Opencode,
     GeneralPurpose,
     Explore,
@@ -721,7 +717,6 @@ impl BuiltinAgentName {
             Self::GrokBuildPlan => AgentDefinition::grok_build_plan(),
             Self::GrokBuildPlanNoSubagents => AgentDefinition::grok_build_plan_no_subagents(),
             Self::GrokBuildAskUser => AgentDefinition::grok_build_ask_user(),
-            Self::Codex => AgentDefinition::codex(),
             Self::Opencode => AgentDefinition::opencode(),
             Self::GeneralPurpose => AgentDefinition::general_purpose(),
             Self::Explore => AgentDefinition::explore(),
@@ -1547,13 +1542,6 @@ impl AgentDefinition {
             )
         }
     }
-    pub fn codex() -> Self {
-        Self {
-            tool_config: codex_toolset(),
-            system_prompt: TemplateOverride::Codex,
-            ..Self::base(BuiltinAgentName::Codex, "Codex toolset and prompt")
-        }
-    }
     pub fn opencode() -> Self {
         Self {
             tool_config: opencode_toolset(),
@@ -1582,6 +1570,12 @@ impl AgentDefinition {
             permission_mode: PermissionMode::Plan,
             prompt_body: Some(subagent_prompts::EXPLORE_PROMPT.to_string()),
             inherit_skills: false,
+            allowed_subagent_types: Some(
+                EXPLORE_SUBAGENT_TYPES
+                    .iter()
+                    .map(|t| (*t).to_string())
+                    .collect(),
+            ),
             ..Self::base(BuiltinAgentName::Explore, "")
         }
     }
@@ -1679,6 +1673,30 @@ mod tests {
             Some(xai_grok_tools::types::tool::ToolKind::Execute)
         );
     }
+    /// The registry is read on every preset resolution, so what the lock does
+    /// after a caller panicked while holding it decides whether one bad
+    /// registration ends preset resolution for the rest of the process.
+    #[test]
+    fn a_poisoned_preset_registry_still_answers() {
+        let poisoner = std::thread::spawn(|| {
+            let _held = toolset_preset_registry().lock();
+            panic!("panic while the preset registry is held");
+        });
+        assert!(
+            poisoner.join().is_err(),
+            "the poisoner must die while holding the registry"
+        );
+
+        assert!(
+            registered_toolset_preset("a-name-nobody-registered").is_none(),
+            "a lookup after the poison must answer, not panic"
+        );
+        let names = registered_public_toolset_preset_names();
+        assert!(
+            !names.iter().any(|n| n == "a-name-nobody-registered"),
+            "enumeration must read the same map the lookup did"
+        );
+    }
     /// Native presets only.
     #[test]
     fn toolset_for_preset_resolves_known_names() {
@@ -1687,7 +1705,6 @@ mod tests {
             "grok_build",
             "grok-build-concise",
             "grok-build-plan",
-            "codex",
             "explore",
             "plan",
             "grok-computer",
@@ -1705,8 +1722,21 @@ mod tests {
         let gb = toolset_for_preset("grok-build").unwrap();
         let plan = toolset_for_preset("plan").unwrap();
         let explore = toolset_for_preset("explore").unwrap();
-        assert!(explore.tools.len() < plan.tools.len());
+        assert!(explore.tools.len() < gb.tools.len());
         assert!(plan.tools.len() < gb.tools.len());
+        assert_ne!(explore.tools.len(), plan.tools.len());
+    }
+    #[test]
+    fn explore_can_spawn_only_read_only_subagents() {
+        let ids: Vec<String> = explore_toolset().tools.into_iter().map(|t| t.id).collect();
+        for tool in [task_tool_config(), wait_tasks_tool_config()] {
+            assert!(ids.contains(&tool.id), "explore lacks {}", tool.id);
+        }
+        assert!(!ids.contains(&bash_tool_config().id));
+        assert_eq!(
+            AgentDefinition::explore().allowed_subagent_types,
+            Some(vec!["explore".to_string(), "plan".to_string()])
+        );
     }
     fn feedback_tool_id() -> String {
         ToolConfig::from(&grok_build::SendFeedbackTool).id
@@ -1747,7 +1777,6 @@ mod tests {
                 | BuiltinAgentName::GrokBuildPlan
                 | BuiltinAgentName::GrokBuildPlanNoSubagents
                 | BuiltinAgentName::GrokBuildAskUser
-                | BuiltinAgentName::Codex
                 | BuiltinAgentName::Opencode
                 | BuiltinAgentName::GeneralPurpose
                 | BuiltinAgentName::Explore
@@ -1897,7 +1926,7 @@ mod tests {
     /// Exhaustive match, so adding a new `BuiltinAgentName` won't compile until classified.
     fn expected_strict_harness(name: BuiltinAgentName) -> bool {
         match name {
-            BuiltinAgentName::Codex | BuiltinAgentName::GrokBuildOrchestrator => true,
+            BuiltinAgentName::GrokBuildOrchestrator => true,
             BuiltinAgentName::GrokBuild
             | BuiltinAgentName::GrokBuildConcise
             | BuiltinAgentName::GrokBuildPlan
@@ -1927,7 +1956,7 @@ mod tests {
     }
     #[test]
     fn is_strict_harness_agent_type_classifies_by_name() {
-        for strict in ["codex", "grok-build-orchestrator"] {
+        for strict in ["grok-build-orchestrator"] {
             assert!(
                 is_strict_harness_agent_type(strict),
                 "{strict} should be strict"
@@ -2584,7 +2613,6 @@ description: Test default tool config
             ("grok-build", BuiltinAgentName::GrokBuild),
             ("grok-build-concise", BuiltinAgentName::GrokBuildConcise),
             ("grok-build-ask-user", BuiltinAgentName::GrokBuildAskUser),
-            ("codex", BuiltinAgentName::Codex),
             ("opencode", BuiltinAgentName::Opencode),
             ("general-purpose", BuiltinAgentName::GeneralPurpose),
             ("explore", BuiltinAgentName::Explore),
@@ -2699,7 +2727,6 @@ description: Test default tool config
     fn carries_discipline_false_for_every_template_and_audience() {
         for tpl in [
             crate::prompt::context::TemplateOverride::None,
-            crate::prompt::context::TemplateOverride::Codex,
             crate::prompt::context::TemplateOverride::Custom("fake".to_string()),
         ] {
             let def = def_with_template(tpl.clone());

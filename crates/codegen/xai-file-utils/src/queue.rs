@@ -91,19 +91,15 @@ impl ResolvedStorageConfig {
     }
     /// Bearer this resolved config puts on the wire — `snapshot()` mirrors
     /// `HttpAuth::apply` for provider-backed configs; the static fallback
-    /// mirrors `GrokAuthCredentials::apply` precedence (deployment key wins).
+    /// is the inline user token.
     fn wire_bearer(&self) -> Option<String> {
         if let Some(ref creds) = self.credentials {
             return creds.snapshot().token;
         }
         match self.config.upload_method() {
-            UploadMethod::Proxy {
-                user_token,
-                deployment_key,
-                ..
-            } => deployment_key
-                .clone()
-                .or_else(|| (!user_token.is_empty()).then(|| user_token.clone())),
+            UploadMethod::Proxy { user_token, .. } => {
+                (!user_token.is_empty()).then(|| user_token.clone())
+            }
             _ => None,
         }
     }

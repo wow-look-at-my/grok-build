@@ -6,33 +6,9 @@ release builds embed prebuilt third-party tool binaries listed under
 [Bundled tool binaries](#bundled-tool-binaries). The original license terms
 are reproduced below, as required by those licenses.
 
-Ported files have been modified from their originals (translated between
-languages, adapted to this crate's `Tool` trait and runtime, and extended);
-this file constitutes the prominent notice of those changes required by
-Apache License 2.0 §4(b).
+Ported files have been modified from their originals (translated between languages, adapted to this crate's `Tool` trait and runtime, and extended).
 
 ## Ported source code
-
-### openai/codex
-
-The tool implementations under `src/implementations/codex/` (`apply_patch`,
-`grep_files`, `list_dir`, `read_file`) are ported from the
-[openai/codex](https://github.com/openai/codex) project
-(`codex-rs/core/src/tools/handlers/`).
-
-Copyright 2025 OpenAI
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
 
 ### sst/opencode
 

@@ -113,6 +113,27 @@ where
     })
 }
 
+/// The same leniency over `Option<Vec<String>>`, for a shadow struct that must
+/// tell a key the sender omitted from a key it sent as `null` or `[]` before
+/// folding one field's spellings together. An omitted key yields `None`.
+/// present `null` yields `Some(Vec::new())`, which is what the list form of the
+/// same key means.
+pub fn deserialize_lenient_string_list_opt<'de, D>(
+    deserializer: D,
+) -> Result<Option<Vec<String>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    lenient_string_list_from_json(&value)
+        .map(Some)
+        .ok_or_else(|| {
+            serde::de::Error::custom(format!(
+                "expected a list of string ids (or a single string), got {value}"
+            ))
+        })
+}
+
 const F64_EXACT_INTEGER_LIMIT: f64 = 9_007_199_254_740_992.0;
 
 fn parse_lenient_whole_f64(f: f64) -> Result<i64, String> {
@@ -130,7 +151,9 @@ fn parse_lenient_whole_f64(f: f64) -> Result<i64, String> {
             "number {f} exceeds f64 integer precision (whole floats above {F64_EXACT_INTEGER_LIMIT} may be inaccurate)"
         ));
     }
-    Ok(f as i64)
+    #[allow(clippy::cast_possible_truncation)]
+    let whole = f as i64;
+    Ok(whole)
 }
 
 /// Parse a JSON number or numeric string into a `u64`.

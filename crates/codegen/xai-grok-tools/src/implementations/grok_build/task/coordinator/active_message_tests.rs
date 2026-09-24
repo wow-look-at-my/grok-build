@@ -61,6 +61,8 @@ impl ChildControl for TestControl {
     }
 
     fn cancel(&self) {}
+
+    fn interject(&self, _text: &str) {}
 }
 
 pub(in crate::implementations::grok_build::task::coordinator) struct TestRunner;
@@ -899,7 +901,10 @@ async fn runner_panic_parks_until_uncertain_admission_terminalizes_failed() {
     let result = recv_with_timeout(&mut completions).await;
     assert!(!result.success);
     assert!(result.cancelled);
-    assert_eq!(Some("Subagent runtime panicked"), result.error.as_deref());
+    assert_eq!(
+        Some("Subagent runtime panicked: runner panic after promotion"),
+        result.error.as_deref()
+    );
     let spawned_result = await_with_timeout(&mut spawn).await.unwrap().unwrap();
     assert!(!spawned_result.success);
     assert!(spawned_result.cancelled);

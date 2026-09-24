@@ -24,7 +24,6 @@ pub use agent::{
 pub use chat_models_client::{
     ChatModelsClient, ChatModelsError, ListModesResponse, Mode, ModeAvailability,
 };
-pub(crate) use client::DEFAULT_CONTEXT_WINDOW;
 pub use client::{
     BackendClient, BackendError, FetchModelsResult, FetchedBundle, SettingsFetch, fetch_bundle,
     fetch_settings_blocking, fetch_subagent_bundle, share_url,

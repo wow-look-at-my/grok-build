@@ -1006,6 +1006,8 @@ fn stream_replay_forwards_xai_updates_in_file_order() {
             tokens_after: 100,
             elapsed_ms: Some(5),
             summary_preview: None,
+            breakdown: None,
+            report_path: None,
         },
     );
     let msg = acp_envelope(
@@ -1073,6 +1075,7 @@ fn xai_only_transcript_forwards_but_stays_empty() {
             max_retries: 3,
             reason: "overloaded".into(),
             error_type: None,
+            retry_in_ms: None,
         },
     ));
     std::fs::write(dir.join(UPDATES_FILE), format!("{retry}\n")).unwrap();
@@ -1119,6 +1122,8 @@ fn replay_would_emit_requires_an_emitting_acp_line() {
             tokens_after: 100,
             elapsed_ms: Some(5),
             summary_preview: None,
+            breakdown: None,
+            report_path: None,
         },
     );
     assert!(

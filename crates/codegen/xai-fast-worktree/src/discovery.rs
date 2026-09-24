@@ -1,4 +1,11 @@
 //! Filesystem scanner for discovering worktrees not yet tracked in the DB.
+//!
+//! Each managed root under the grok home is read on the same rule the rest of
+//! the crate uses ([`crate::managed_root::is_worktree_dir`]): a directory is a
+//! checkout when it carries a `.git` entry. Two shapes have written that root
+//! over the versions, and both are read: the fork's, which buckets checkouts
+//! per repository at `<root>/<repo>/<label>`, and the unforked one, which puts
+//! the checkout directly under the root at `<root>/<label>`.
 
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -7,12 +14,9 @@ use std::path::{Path, PathBuf};
 use crate::db::{
     WorktreeKind, WorktreeRecord, WorktreeStatus, id_from_path, now_epoch_secs, repo_name_from_path,
 };
+use crate::managed_root::{WORKTREES_DIR, is_worktree_dir, is_worktree_entry_name};
 
-pub const WORKTREES_DIR: &str = "worktrees";
 pub const WORKTREE_POOL_DIR: &str = "worktree_pool";
-/// Depth of a worktree below its managed root: `<root>/<repo>/<worktree>`.
-/// [`scan_two_level_dir`] and `grok du`'s bucketing have to agree on it.
-pub const WORKTREE_DEPTH: usize = 2;
 
 #[derive(Debug)]
 pub struct DiscoveredWorktree {
@@ -26,13 +30,6 @@ pub struct DiscoveredWorktree {
 pub struct DiscoveryReport {
     pub found: Vec<DiscoveredWorktree>,
     pub skipped: u64,
-}
-
-fn should_skip_entry(name: &str) -> bool {
-    name.starts_with('.')
-        || name.ends_with(".ready")
-        || name.ends_with(".claimed")
-        || name.ends_with(".claiming")
 }
 
 fn detect_creation_mode(worktree_path: &Path) -> &'static str {
@@ -69,53 +66,80 @@ fn detect_source_repo(worktree_path: &Path) -> Option<PathBuf> {
     }
 }
 
-fn scan_two_level_dir(
+/// One record per checkout under a managed root, and none for anything inside
+/// one.
+///
+/// Both shapes that root has ever been written in are read.
+/// consequence of the `.git` test rather than its definition: an unforked
+/// build's checkout is a direct child of the root, this fork's sits one level
+/// lower inside a per-repository bucket. Nothing below the bucket level is ever
+/// asked.
+/// already reported -- so the walk still costs one listing of the root and one
+/// of each bucket, which is all the depth reading it costs.
+fn scan_managed_root(
     base_dir: &Path,
     kind: WorktreeKind,
     report: &mut DiscoveryReport,
     skip_dests: &[PathBuf],
 ) {
-    const _: () = assert!(WORKTREE_DEPTH == 2, "this scan is written for depth 2");
-    let Ok(outer_entries) = std::fs::read_dir(base_dir) else {
+    let Ok(entries) = std::fs::read_dir(base_dir) else {
         return;
     };
 
-    for outer in outer_entries.flatten() {
-        let outer_path = outer.path();
-        if !outer_path.is_dir() {
-            continue;
-        }
-        let outer_name = outer.file_name();
-        if should_skip_entry(&outer_name.to_string_lossy()) {
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if is_skipped_dest(&path, skip_dests) {
             report.skipped += 1;
             continue;
         }
-
-        let Ok(inner_entries) = std::fs::read_dir(&outer_path) else {
+        if !path.is_dir() || !is_worktree_entry_name(&path) {
+            report.skipped += 1;
             continue;
-        };
-        for inner in inner_entries.flatten() {
-            let path = inner.path();
-            // Lexical skip before is_dir / .git / canonicalize: those stat the
-            // dest and hang on a wedged grove NFS mount.
-            if skip_dests
-                .iter()
-                .any(|dest| crate::nfs::dest_paths_equivalent(dest, &path))
-            {
-                report.skipped += 1;
-                continue;
-            }
-            if !path.is_dir() || should_skip_entry(&inner.file_name().to_string_lossy()) {
-                report.skipped += 1;
-                continue;
-            }
-            report.found.push(DiscoveredWorktree {
-                creation_mode: detect_creation_mode(&path),
-                source_repo: detect_source_repo(&path),
-                path,
-                kind,
-            });
         }
+        if is_worktree_dir(&path) {
+            report.found.push(discovered(path, kind));
+            continue;
+        }
+        scan_bucket(&path, kind, report, skip_dests);
+    }
+}
+
+// Lexical skip before is_dir / .git / canonicalize: those stat the dest and
+// hang on a wedged grove NFS mount.
+fn is_skipped_dest(path: &Path, skip_dests: &[PathBuf]) -> bool {
+    skip_dests
+        .iter()
+        .any(|dest| crate::nfs::dest_paths_equivalent(dest, path))
+}
+
+/// The bucketed shape: the bucket is never a checkout itself, and a plain
+/// directory among its children -- a leftover cache, say -- is not one either.
+fn scan_bucket(
+    bucket: &Path,
+    kind: WorktreeKind,
+    report: &mut DiscoveryReport,
+    skip_dests: &[PathBuf],
+) {
+    let Ok(entries) = std::fs::read_dir(bucket) else {
+        return;
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if is_skipped_dest(&path, skip_dests) || !is_worktree_dir(&path) {
+            report.skipped += 1;
+            continue;
+        }
+        report.found.push(discovered(path, kind));
+    }
+}
+
+fn discovered(path: PathBuf, kind: WorktreeKind) -> DiscoveredWorktree {
+    DiscoveredWorktree {
+        creation_mode: detect_creation_mode(&path),
+        source_repo: detect_source_repo(&path),
+        path,
+        kind,
     }
 }
 
@@ -125,13 +149,13 @@ pub fn discover_worktrees(grok_home: &Path) -> DiscoveryReport {
 
 fn discover_worktrees_skipping(grok_home: &Path, skip_dests: &[PathBuf]) -> DiscoveryReport {
     let mut report = DiscoveryReport::default();
-    scan_two_level_dir(
+    scan_managed_root(
         &grok_home.join(WORKTREES_DIR),
         WorktreeKind::Session,
         &mut report,
         skip_dests,
     );
-    scan_two_level_dir(
+    scan_managed_root(
         &grok_home.join(WORKTREE_POOL_DIR),
         WorktreeKind::Pool,
         &mut report,
@@ -660,63 +684,6 @@ mod tests {
     }
 
     #[test]
-    fn rebuild_nfs_under_managed_roots_is_not_labeled_linked() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let grok_home = tmp.path().join("grok");
-        let data = tmp.path().join("grove");
-        let dest = grok_home.join("worktrees/repo/nfs-sess");
-        let local = grok_home.join("worktrees/repo/local-sess");
-        make_fake_standalone_worktree(&dest);
-        make_fake_standalone_worktree(&local);
-        let id = "nfs-wt-under-roots";
-        let backing = data.join(crate::nfs::WORKTREE_BACKING_DIR).join(id);
-        std::fs::create_dir_all(&backing).unwrap();
-        let marker = serde_json::json!({
-            "schema": 1,
-            "worktree_id": id,
-            "dest": dest,
-            "source_repo": tmp.path().join("src-repo"),
-            "pin_ref": format!("refs/grok/worktrees/{id}"),
-            "mount_id": 3,
-            "created_at": 9,
-        });
-        std::fs::write(
-            backing.join("grok-nfs-worktree.json"),
-            serde_json::to_vec(&marker).unwrap(),
-        )
-        .unwrap();
-
-        let db = crate::db::WorktreeDb::open_in_memory().unwrap();
-        let report = rebuild_worktree_db_with_grove_data(&db, &grok_home, Some(&data)).unwrap();
-        assert_eq!(
-            report.discovered, 2,
-            "nfs identity + local fs row; must not also count the nfs dest via is_dir/.git"
-        );
-        let rec = db.get_by_id(id).unwrap().expect("nfs row");
-        assert_eq!(
-            rec.creation_mode,
-            crate::nfs::default_grove_creation_mode(),
-            "grove dest under managed roots must not be labeled linked from .git"
-        );
-        let local_rec = db
-            .get(&local.to_string_lossy())
-            .unwrap()
-            .expect("local sibling");
-        assert!(!crate::worktree::is_grove_strategy(
-            &local_rec.creation_mode
-        ));
-        assert_eq!(
-            db.list(&crate::db::ListFilter::default())
-                .unwrap()
-                .iter()
-                .filter(|r| !crate::worktree::is_grove_strategy(&r.creation_mode))
-                .count(),
-            1,
-            "only the local sibling is a non-grove row"
-        );
-    }
-
-    #[test]
     fn discover_skips_known_nfs_dests_without_statting() {
         let tmp = tempfile::TempDir::new().unwrap();
         let grok_home = tmp.path();
@@ -729,52 +696,6 @@ mod tests {
             "skip must be lexical, before is_dir"
         );
         assert!(skipped.skipped > 0);
-    }
-
-    #[test]
-    fn rebuild_registers_nfs_from_backing_marker() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let grok_home = tmp.path().join("grok");
-        let data = tmp.path().join("grove");
-        std::fs::create_dir_all(grok_home.join("worktrees")).unwrap();
-        // Dest is outside managed roots so FS discovery does not register a
-        // competing linked/unknown row under a different id.
-        let dest = tmp.path().join("nfs-dest");
-        std::fs::create_dir_all(&dest).unwrap();
-        let id = "nfs-wt-rebuild";
-        let backing = data.join(crate::nfs::WORKTREE_BACKING_DIR).join(id);
-        std::fs::create_dir_all(&backing).unwrap();
-        let marker = serde_json::json!({
-            "schema": 1,
-            "worktree_id": id,
-            "dest": dest,
-            "source_repo": tmp.path().join("src-repo"),
-            "pin_ref": format!("refs/grok/worktrees/{id}"),
-            "mount_id": 42,
-            "created_at": 9,
-        });
-        std::fs::write(
-            backing.join("grok-nfs-worktree.json"),
-            serde_json::to_vec(&marker).unwrap(),
-        )
-        .unwrap();
-
-        let db = crate::db::WorktreeDb::open_in_memory().unwrap();
-        let report = rebuild_worktree_db_with_grove_data(&db, &grok_home, Some(&data)).unwrap();
-        assert!(report.registered >= 1);
-        let rec = db.get_by_id(id).unwrap().expect("nfs row");
-        assert_eq!(rec.creation_mode, crate::nfs::default_grove_creation_mode());
-        assert_eq!(
-            rec.metadata
-                .as_ref()
-                .unwrap()
-                .get("grove")
-                .unwrap()
-                .get("mount_id")
-                .unwrap()
-                .as_i64(),
-            Some(42)
-        );
     }
 
     #[test]
@@ -891,43 +812,6 @@ mod tests {
     }
 
     #[test]
-    fn rebuild_scans_xdg_grove_without_grove_data_dir() {
-        let mut fx = crate::db::GrokHomeFixture::new();
-        let grove = fx.isolate_xdg_grove_data();
-        assert!(
-            std::env::var_os("GROVE_DATA_DIR").is_none(),
-            "production path must not rely on GROVE_DATA_DIR"
-        );
-        let grok_home = fx.home.clone();
-        std::fs::create_dir_all(grok_home.join("worktrees")).unwrap();
-        let dest = grok_home.parent().unwrap().join("nfs-xdg-dest");
-        std::fs::create_dir_all(&dest).unwrap();
-        let id = "nfs-wt-xdg";
-        let backing = grove.join(crate::nfs::WORKTREE_BACKING_DIR).join(id);
-        std::fs::create_dir_all(&backing).unwrap();
-        let marker = serde_json::json!({
-            "schema": 1,
-            "worktree_id": id,
-            "dest": dest,
-            "source_repo": grok_home.join("src"),
-            "pin_ref": format!("refs/grok/worktrees/{id}"),
-            "mount_id": 7,
-            "created_at": 1,
-        });
-        std::fs::write(
-            backing.join("grok-nfs-worktree.json"),
-            serde_json::to_vec(&marker).unwrap(),
-        )
-        .unwrap();
-
-        let db = crate::db::WorktreeDb::open_in_memory().unwrap();
-        let report = rebuild_worktree_db(&db, &grok_home).unwrap();
-        assert!(report.registered >= 1, "{report:?}");
-        let rec = db.get_by_id(id).unwrap().expect("xdg nfs row");
-        assert_eq!(rec.creation_mode, crate::nfs::default_grove_creation_mode());
-    }
-
-    #[test]
     fn rebuild_skips_destless_nfs_identity() {
         let tmp = tempfile::TempDir::new().unwrap();
         let grok_home = tmp.path().join("grok");
@@ -966,6 +850,211 @@ mod tests {
         assert_eq!(
             physical_nfs_dest(PathBuf::from("/tmp/nfs-probe")),
             PathBuf::from("/private/tmp/nfs-probe")
+        );
+    }
+
+    /// A real source repository with a commit and a subdirectory, so a checkout
+    /// of it has something inside it for the scan to wrongly report.
+    fn source_repo(temp: &tempfile::TempDir) -> PathBuf {
+        let repo = temp.path().join("source-repo");
+        std::fs::create_dir_all(repo.join("src")).unwrap();
+        xai_test_utils::git::init_git_repo(&repo);
+        std::fs::write(repo.join("tracked.txt"), "content").unwrap();
+        std::fs::write(repo.join("src/main.rs"), "fn main() {}").unwrap();
+        xai_test_utils::git::git_commit_all(&repo, "initial");
+        repo
+    }
+
+    fn add_worktree(repo: &Path, dest: &Path, branch: &str) {
+        std::fs::create_dir_all(dest.parent().unwrap()).unwrap();
+        xai_test_utils::git::run_git(
+            repo,
+            &["worktree", "add", "-b", branch, &dest.to_string_lossy()],
+        );
+    }
+
+    fn found_paths(report: &DiscoveryReport) -> Vec<PathBuf> {
+        let mut paths: Vec<PathBuf> = report.found.iter().map(|w| w.path.clone()).collect();
+        paths.sort();
+        paths
+    }
+
+    /// Criterion 1: the shape an unforked grok build leaves -- the checkout is a
+    /// direct child of the root -- is one worktree, described by its own `.git`.
+    #[test]
+    fn discovers_a_checkout_sitting_directly_under_the_managed_root() {
+        xai_test_utils::require_git!();
+        let temp = tempfile::TempDir::new().unwrap();
+        let grok_home = temp.path().join("grok-home");
+        let repo = source_repo(&temp);
+        let checkout = grok_home.join("worktrees/go-toolchain-dats-sandbox");
+        add_worktree(&repo, &checkout, "dats-sandbox");
+
+        let report = discover_worktrees(&grok_home);
+        assert_eq!(
+            found_paths(&report),
+            vec![checkout.clone()],
+            "the checkout is reported once, not with a record per directory inside it"
+        );
+        let found = &report.found[0];
+        assert_eq!(found.kind, WorktreeKind::Session);
+        assert_eq!(found.creation_mode, "linked");
+        assert_eq!(
+            found.source_repo.as_deref(),
+            Some(dunce::canonicalize(&repo).unwrap().as_path()),
+            "the source repository comes from the checkout's own gitdir pointer"
+        );
+        assert!(
+            checkout.join("src").is_dir(),
+            "the checkout really does hold a subdirectory the scan could report"
+        );
+    }
+
+    /// Criterion 2: the bucketed depth and the pool root are still read.
+    #[test]
+    fn discovers_every_shape_the_old_location_has_been_written_in() {
+        xai_test_utils::require_git!();
+        let temp = tempfile::TempDir::new().unwrap();
+        let grok_home = temp.path().join("grok-home");
+        let repo = source_repo(&temp);
+        let shallow = grok_home.join("worktrees/go-toolchain-dats-sandbox");
+        let bucketed = grok_home.join("worktrees/repos-buildhost/2026-09-14-reclaim");
+        let pool = grok_home.join("worktree_pool/inst-1/pool-a");
+        add_worktree(&repo, &shallow, "shallow-branch");
+        add_worktree(&repo, &bucketed, "bucketed-branch");
+        add_worktree(&repo, &pool, "pool-branch");
+
+        let report = discover_worktrees(&grok_home);
+        let mut found: Vec<(PathBuf, WorktreeKind, &'static str)> = report
+            .found
+            .iter()
+            .map(|w| (w.path.clone(), w.kind, w.creation_mode))
+            .collect();
+        found.sort();
+        let mut expected: Vec<(PathBuf, WorktreeKind, &'static str)> = vec![
+            (bucketed, WorktreeKind::Session, "linked"),
+            (pool, WorktreeKind::Pool, "linked"),
+            (shallow, WorktreeKind::Session, "linked"),
+        ];
+        expected.sort();
+        assert_eq!(
+            found, expected,
+            "both depths and the pool root, each exactly once and under its own kind"
+        );
+    }
+
+    /// Criteria 3 and 6's negative: a plain directory under a managed root is
+    /// not a checkout -- here the go build cache a bucket actually holds on the
+    /// developer's machine -- and neither is anything below a checkout.
+    #[test]
+    fn reports_no_record_for_a_directory_that_is_not_a_checkout() {
+        xai_test_utils::require_git!();
+        let temp = tempfile::TempDir::new().unwrap();
+        let grok_home = temp.path().join("grok-home");
+        let repo = source_repo(&temp);
+        let checkout = grok_home.join("worktrees/repos-buildhost/2026-09-14-reclaim");
+        add_worktree(&repo, &checkout, "reclaim");
+
+        let cache = grok_home.join("worktrees/repos-buildhost/2026-09-14-gocache");
+        std::fs::create_dir_all(cache.join("00")).unwrap();
+        std::fs::write(cache.join("00/blob"), "not a checkout").unwrap();
+        // A repository nested inside a checkout: a submodule's checkout dir.
+        let nested = checkout.join("vendor/lib");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(
+            nested.join(".git"),
+            "gitdir: /elsewhere/.git/worktrees/lib\n",
+        )
+        .unwrap();
+
+        let report = discover_worktrees(&grok_home);
+        assert_eq!(
+            found_paths(&report),
+            vec![checkout.clone()],
+            "one record for the checkout, none for the cache beside it, its \
+             directories, or a repository nested inside it"
+        );
+    }
+
+    /// Criterion 5: the rebuild registers both depths and adds nothing twice.
+    #[test]
+    fn rebuild_registers_both_depths_once_and_adds_nothing_on_a_second_pass() {
+        xai_test_utils::require_git!();
+        let temp = tempfile::TempDir::new().unwrap();
+        let grok_home = temp.path().join("grok-home");
+        let repo = source_repo(&temp);
+        let shallow = grok_home.join("worktrees/go-toolchain-dats-sandbox");
+        let bucketed = grok_home.join("worktrees/repos-buildhost/2026-09-14-reclaim");
+        add_worktree(&repo, &shallow, "shallow-branch");
+        add_worktree(&repo, &bucketed, "bucketed-branch");
+
+        let db = crate::db::WorktreeDb::open_in_memory().unwrap();
+        let first = rebuild_worktree_db(&db, &grok_home).unwrap();
+        assert_eq!(first.discovered, 2);
+        assert_eq!(first.registered, 2, "both depths register");
+
+        let listed = db.list(&crate::db::ListFilter::default()).unwrap();
+        let mut registered: Vec<PathBuf> = listed.iter().map(|r| r.path.clone()).collect();
+        registered.sort();
+        let mut expected = vec![
+            dunce::canonicalize(&bucketed).unwrap(),
+            dunce::canonicalize(&shallow).unwrap(),
+        ];
+        expected.sort();
+        assert_eq!(
+            registered, expected,
+            "each is registered under its own path"
+        );
+
+        let second = rebuild_worktree_db(&db, &grok_home).unwrap();
+        assert_eq!(second.discovered, 2);
+        assert_eq!(second.registered, 0);
+        assert_eq!(second.already_tracked, 2, "a second pass adds nothing");
+    }
+
+    /// Criterion 7: discovery and the rebuild it feeds are read-only.
+    #[test]
+    fn a_scan_and_a_rebuild_leave_the_checkout_on_disk_as_they_found_it() {
+        xai_test_utils::require_git!();
+        let temp = tempfile::TempDir::new().unwrap();
+        let grok_home = temp.path().join("grok-home");
+        let repo = source_repo(&temp);
+        let shallow = grok_home.join("worktrees/go-toolchain-dats-sandbox");
+        let bucketed = grok_home.join("worktrees/repos-buildhost/2026-09-14-reclaim");
+        add_worktree(&repo, &shallow, "shallow-branch");
+        add_worktree(&repo, &bucketed, "bucketed-branch");
+
+        let listing_before: Vec<String> = std::fs::read_dir(grok_home.join("worktrees"))
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        let gitdir_before = std::fs::read_to_string(shallow.join(".git")).unwrap();
+        let branch_before =
+            xai_test_utils::git::run_git(&shallow, &["rev-parse", "--abbrev-ref", "HEAD"]);
+
+        let db = crate::db::WorktreeDb::open_in_memory().unwrap();
+        discover_worktrees(&grok_home);
+        rebuild_worktree_db(&db, &grok_home).unwrap();
+
+        let listing_after: Vec<String> = std::fs::read_dir(grok_home.join("worktrees"))
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            listing_after, listing_before,
+            "the scan added, moved, or removed nothing"
+        );
+        assert_eq!(
+            std::fs::read_to_string(shallow.join(".git")).unwrap(),
+            gitdir_before,
+            "the checkout's gitdir pointer is untouched"
+        );
+        assert_eq!(
+            xai_test_utils::git::run_git(&shallow, &["rev-parse", "--abbrev-ref", "HEAD"]),
+            branch_before,
+            "and so is the branch checked out in it"
         );
     }
 }

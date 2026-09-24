@@ -6,12 +6,6 @@ use super::*;
 /// Compile-time constant for v1; remote tunability is a deferred follow-up.
 pub(super) const GOAL_CONTINUATION_BACKOFF_THRESHOLD: u32 = 3;
 
-/// Upper bound on planner attempts per `maybe_run_goal_planner` call. A plan
-/// attempt now runs once — Send Now steers the live planner instead of
-/// replanning, and a cancel is terminal — so this is the backstop that keeps
-/// any future retry path from spinning the loop.
-pub(super) const GOAL_PLANNER_MAX_ATTEMPTS: u32 = 5;
-
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct GoalClassifierPolicy {
     pub enabled: bool,
@@ -207,21 +201,48 @@ pub(super) fn render_goal_task_discipline(names: &GoalToolNames) -> String {
     GOAL_TASK_DISCIPLINE_TEMPLATE.replace("{TODO_TOOL}", &names.todo)
 }
 
-/// Render the plan-aware reminder block.
-/// `Plan: <abs path>` renders on its own column-0 line.
-/// It is a pointer the model and any downstream consumer (debug log scraper, support tooling) can extract reliably, so keep the format stable.
-pub(super) fn render_goal_plan_block(plan_path: &std::path::Path, names: &GoalToolNames) -> String {
+/// Render the plan-aware reminder block. `Plan: <abs path>` renders
+/// on its own column-0 line — a single line-delimited pointer the
+/// model and any downstream consumer (debug log scraper, support
+/// tooling) can extract reliably, so keep the format stable.
+///
+/// The todo list is the only checklist; the plan file carries no boxes.
+/// `plan_todos_seeded` says whether the planner's steps are already on it, or
+/// whether the implementer must put them there.
+pub(super) fn render_goal_plan_block(
+    plan_path: &std::path::Path,
+    names: &GoalToolNames,
+    plan_todos_seeded: bool,
+) -> String {
     debug_assert!(
         !plan_path.as_os_str().is_empty(),
         "render_goal_plan_block requires a non-empty plan_path; an \
          empty path renders a dangling `Plan:` line that the model \
          cannot follow",
     );
-    // Column-0 single-line `Plan: <abs>` contract; see the fn docs
+    let checklist = if plan_todos_seeded {
+        GOAL_PLAN_CHECKLIST_ON_TODOS
+    } else {
+        GOAL_PLAN_CHECKLIST_IN_PLAN
+    };
+    // Column-0 single-line `Plan: <abs>` contract — see fn docs.
     GOAL_PLAN_BLOCK_TEMPLATE
+        .replace("{CHECKLIST_BULLET}", checklist)
         .replace("{PLAN_PATH}", &plan_path.display().to_string())
         .replace("{TODO_TOOL}", &names.todo)
 }
+
+const GOAL_PLAN_CHECKLIST_ON_TODOS: &str = "\
+- The plan's steps are ALREADY on your todo list — the goal planner added one
+  item per step, in order, with ids that start with `plan-`. That list is your
+  checklist: work the items in order and keep each status current through
+  `{TODO_TOOL}`. Call `{TODO_TOOL}` with an empty `todos` array to read the
+  ids. The next-step nudge reads the list.";
+
+const GOAL_PLAN_CHECKLIST_IN_PLAN: &str = "\
+- Put the plan's `## Task steps` on your todo list through `{TODO_TOOL}`, one
+  item per step, in order, and keep each status current. That list is your
+  only checklist: the user watches it, and the next-step nudge reads it.";
 
 /// Plan path for the goal-mode reminder, or `None` on the legacy path.
 /// `Some` only when the planner is enabled (`GROK_GOAL_PLANNER`) and a plan exists.
@@ -275,12 +296,13 @@ pub(super) fn render_goal_rules(
     block_recap: &str,
     goal_state: &str,
     plan_path: Option<&std::path::Path>,
+    plan_todos_seeded: bool,
     scratch_dir: &str,
     scratch_ready: bool,
 ) -> String {
     let discipline = render_goal_task_discipline(names);
     let plan_block = match plan_path {
-        Some(path) => render_goal_plan_block(path, names),
+        Some(path) => render_goal_plan_block(path, names, plan_todos_seeded),
         None => String::new(),
     };
     GOAL_RULES_TEMPLATE
@@ -311,12 +333,13 @@ pub(super) fn render_goal_rules_legacy(
     block_recap: &str,
     goal_state: &str,
     plan_path: Option<&std::path::Path>,
+    plan_todos_seeded: bool,
     scratch_dir: &str,
     scratch_ready: bool,
 ) -> String {
     let discipline = render_goal_task_discipline(names);
     let plan_block = match plan_path {
-        Some(path) => render_goal_plan_block(path, names),
+        Some(path) => render_goal_plan_block(path, names, plan_todos_seeded),
         None => String::new(),
     };
     GOAL_RULES_TEMPLATE_LEGACY
@@ -618,21 +641,37 @@ pub(super) fn render_verifier_gaps_block_legacy(gaps: &str, goal_tool: &str) -> 
     )
 }
 
-/// `char` cap on the model-authored next-step line mined from the plan.
-/// One checklist item never legitimately needs more, while a single plan line can run to the reader's 8 KiB cap.
-/// Applied BEFORE tag neutralization, which may add a zero-width break per broken tag (plus the `…` cap suffix).
+/// `char` cap on the model-authored todo text inlined as the next step.
+/// Applied BEFORE tag neutralization, which may add a zero-width break per
+/// broken tag (plus the `…` cap suffix).
 pub(super) const GOAL_NEXT_STEP_MAX_CHARS: usize = 400;
 
-/// The plan item is model-authored: it is `char`-capped to [`GOAL_NEXT_STEP_MAX_CHARS`].
-/// Reminder-frame tags are then zero-width-broken so the item cannot close the `<system-reminder>` frame it is inlined into.
-/// A `NotAchieved` verdict's findings render separately via [`render_verifier_gaps_block`] (persisted in `last_classifier_gaps`).
-pub(super) fn resolve_goal_next_step(plan_path: Option<&Path>) -> Option<String> {
+/// The next step for the continuation nudge. The todo list is the only
+/// checklist, so the nudge reads it: the first `in_progress` item, else the
+/// first `pending` one. It names the id, so the model can update the item
+/// without a read first.
+///
+/// The item text is capped and its reminder-frame tags are broken, so it
+/// cannot close the `<system-reminder>` it is inlined into. Verifier gaps are
+/// NOT consulted here: [`render_verifier_gaps_block`] carries them.
+pub(super) fn next_step_from_todos<'a>(
+    todos: impl IntoIterator<Item = (&'a str, &'a str, crate::tools::todo::TodoStatus)>,
+    todo_tool: &str,
+) -> String {
     use crate::session::goal_classifier::{cap_chars, neutralize_reminder_tags};
-    use crate::session::goal_next_step::first_unchecked_plan_item;
-
-    plan_path
-        .and_then(first_unchecked_plan_item)
-        .map(|item| neutralize_reminder_tags(cap_chars(&item, GOAL_NEXT_STEP_MAX_CHARS)))
+    use crate::tools::todo::TodoStatus;
+    let todos: Vec<_> = todos.into_iter().collect();
+    let first = |want: TodoStatus| todos.iter().find(|(_, _, status)| *status == want);
+    match first(TodoStatus::InProgress).or_else(|| first(TodoStatus::Pending)) {
+        Some((id, content, _)) => format!(
+            "`{id}`: {}",
+            neutralize_reminder_tags(cap_chars(content, GOAL_NEXT_STEP_MAX_CHARS))
+        ),
+        None => format!(
+            "Your `{todo_tool}` list has no open item. Put the plan's remaining steps \
+             on it, and add an item for each acceptance criterion that does not hold yet."
+        ),
+    }
 }
 
 pub(super) fn format_blocked_chat_notification(reason: &str, detail: Option<&str>) -> String {
@@ -1154,7 +1193,7 @@ impl SessionActor {
         {
             return;
         }
-        if !self.goal_planner_enabled || !self.goal_harness_enabled() {
+        if !self.goal_planner_on() || !self.goal_harness_enabled() {
             return;
         }
         let needs_pause = {
@@ -1198,39 +1237,18 @@ impl SessionActor {
         let _planner_state = GoalPlannerStateGuard {
             tracker: &self.goal_tracker,
         };
-        // A user Stop latches this session's Task spawns closed until a turn
-        // reopens them, and the planner runs off a slash command, not a turn.
-        // Without this, `/goal resume` after a Stop is rejected before a
-        // subagent is ever created — a fail-closed at latency 0 that repeats
-        // for every message the session has left.
-        self.open_subagent_spawn_admission();
-        let mut attempt = 0u32;
-        loop {
-            // Exhausting the retry cap pauses the goal with the canonical message (like any other planner failure)
-            // The goal is never left Active with no plan
-            if attempt >= GOAL_PLANNER_MAX_ATTEMPTS {
-                tracing::debug!(
-                    "goal planner: reached max attempts ({GOAL_PLANNER_MAX_ATTEMPTS}); \
-                     pausing goal"
-                );
-                if let Some(goal_id) = run_goal_id.as_deref() {
-                    let _ = self
-                        .auto_pause_goal_if_matches_with_message(
-                            goal_id,
-                            crate::session::goal_tracker::GoalPauseReason::Planner,
-                            planner_failure_pause_message(),
-                        )
-                        .await;
-                }
-                break;
-            }
-            attempt += 1;
+        // One planner attempt per call. Send Now steers the live planner rather
+        // than starting a second one, and a cancel is terminal, so nothing here
+        // loops; the block is a label so every early exit still reaches the
+        // catch-all latch reset below.
+        'planner_attempt: {
+            let attempt = 1u32;
 
             let (goal_id, plan_file, attempt_file, outcome) = match self
                 .run_goal_planner_attempt(&objective, run_goal_id.as_deref(), attempt)
                 .await
             {
-                PlannerAttemptStep::Stop => break,
+                PlannerAttemptStep::Stop => break 'planner_attempt,
                 PlannerAttemptStep::Ran {
                     goal_id,
                     plan_file,
@@ -1257,7 +1275,7 @@ impl SessionActor {
                         .snapshot()
                         .is_some_and(|goal| same_active_goal(goal) && goal.plan_file.is_none());
                     if !can_publish {
-                        break;
+                        break 'planner_attempt;
                     }
                     // The subagent produced a plan and we are committing to
                     // publish it. `run_goal_planner_attempt` already took the
@@ -1282,7 +1300,7 @@ impl SessionActor {
                                 )
                                 .await;
                         }
-                        break;
+                        break 'planner_attempt;
                     }
                     // Record `plan_file`, then snapshot the planner's ORIGINAL plan as the immutable baseline the verifier diffs later edits against
                     // Capture once: this runs only when no plan exists yet, and the `is_none()` guard keeps a restart / re-entry from overwriting it
@@ -1294,7 +1312,7 @@ impl SessionActor {
                             .snapshot_mut()
                             .filter(|goal| same_active_goal(goal) && goal.plan_file.is_none())
                         else {
-                            break;
+                            break 'planner_attempt;
                         };
                         let need_baseline = goal.plan_baseline_file.is_none();
                         goal.plan_file = Some(plan_file);
@@ -1316,7 +1334,7 @@ impl SessionActor {
                                     "goal planner: could not stage plan baseline path; \
                                      PLAN_CHANGES will render (none)"
                                 );
-                                break;
+                                break 'planner_attempt;
                             }
                         };
                         match tokio::fs::copy(&src, &tmp).await {
@@ -1355,10 +1373,15 @@ impl SessionActor {
                         )
                         .await;
                 }
-                crate::session::goal_planner::GoalPlannerOutcome::FailClosed { reason, .. } => {
-                    // An aborted planner is a pause the user asked for, and says so.
-                    let aborted =
-                        reason == crate::session::events::GoalPlannerFailClosedReason::Aborted;
+                crate::session::goal_planner::GoalPlannerOutcome::FailClosed {
+                    reason,
+                    user_stopped,
+                    ..
+                } => {
+                    // A planner a person stopped is a pause the user asked for, and says so.
+                    // A harness cancel (max turns, rewind, dequeue) is a planner failure.
+                    let aborted = user_stopped
+                        && reason == crate::session::events::GoalPlannerFailClosedReason::Aborted;
                     // History reads "Planning failed" + "Paused: planner", not a bare pause.
                     if !aborted {
                         let mut tracker = self.goal_tracker.lock();
@@ -1387,7 +1410,7 @@ impl SessionActor {
                         .await;
                 }
             }
-            break;
+            break 'planner_attempt;
         }
 
         // Catch-all latch reset for every exit path that did NOT already clear
@@ -1568,17 +1591,9 @@ impl SessionActor {
             tracing::debug!("goal planner: no subagent coordinator channel; skipping");
             return PlannerAttemptStep::Stop;
         };
-        // A previous user Stop (`ESC`/Ctrl-C with cancel_subagents) latches this
-        // session in the coordinator's `spawn_blocked_sessions` until an
-        // `OpenSpawnAdmission` is sent, and the only send site (turn start) runs
-        // AFTER the goal slash-command dispatch — so a `/goal` set or resume
-        // issued after a Stop would have every planner spawn rejected instantly
-        // and the goal paused with "Planning failed"; the resume path's
-        // early return then skips the next turn start, wedging the session
-        // until restart. Setting/resuming a goal IS explicit user re-engagement,
-        // so opening admission here (before we actually spawn) is the same
-        // intent as the next turn's reopen, and heals both the paused-goal
-        // resume and a fresh-goal-created-after-Stop.
+        // A user Stop latches this session's Task spawns closed until a turn
+        // reopens them. The planner can run outside a turn, so it reopens them
+        // itself. Without that, every planner spawn after a Stop is rejected.
         self.open_subagent_spawn_admission();
         let (goal_id, plan_file, attempt_plan_file) = {
             let tracker = self.goal_tracker.lock();
@@ -2061,12 +2076,73 @@ mod verification_scope_tests {
     /// anything the objective did not ask for.
     #[test]
     fn the_plan_block_keeps_verification_inside_the_objective() {
-        let block = render_goal_plan_block(std::path::Path::new("/tmp/plan.md"), &names());
+        for seeded in [true, false] {
+            let block =
+                render_goal_plan_block(std::path::Path::new("/tmp/plan.md"), &names(), seeded);
+            assert!(
+                block.contains("Checking is not doing"),
+                "running the verification plan must not widen the work: {block}"
+            );
+            assert!(!block.contains("{PLAN_PATH}"), "{block}");
+            assert!(!block.contains("{CHECKLIST_BULLET}"), "{block}");
+            assert!(!block.contains("{TODO_TOOL}"), "{block}");
+        }
+    }
+
+    /// The todo list is the only checklist. A seeded goal is told its steps are
+    /// on it. An unseeded goal is told to put them there, and is never told
+    /// they are already on a list that does not hold them. Neither is asked
+    /// to tick a box in the plan file.
+    #[test]
+    fn the_plan_block_keeps_the_checklist_on_the_todo_list() {
+        let path = std::path::Path::new("/tmp/plan.md");
+        let seeded = render_goal_plan_block(path, &names(), true);
+        assert!(seeded.contains("ALREADY on your todo list"), "{seeded}");
+
+        let unseeded = render_goal_plan_block(path, &names(), false);
         assert!(
-            block.contains("Checking is not doing"),
-            "running the verification plan must not widen the work: {block}"
+            !unseeded.contains("ALREADY on your todo list"),
+            "{unseeded}"
         );
-        assert!(!block.contains("{PLAN_PATH}"), "{block}");
+        assert!(
+            unseeded.contains("Put the plan's `## Task steps`"),
+            "{unseeded}"
+        );
+
+        for block in [seeded, unseeded] {
+            assert!(!block.contains("- [ ]"), "{block}");
+            assert!(!block.contains("- [x]"), "{block}");
+        }
+    }
+
+    #[test]
+    fn the_todo_next_step_names_the_item_by_id() {
+        use crate::tools::todo::TodoStatus;
+        let todos = [
+            ("plan-a", "done already", TodoStatus::Completed),
+            ("plan-b", "write the parser", TodoStatus::Pending),
+            ("plan-c", "fix the build", TodoStatus::InProgress),
+        ];
+        assert_eq!(
+            next_step_from_todos(todos, "todo_write"),
+            "`plan-c`: fix the build",
+            "in_progress wins over an earlier pending item"
+        );
+        let only_pending = [
+            ("plan-a", "done already", TodoStatus::Cancelled),
+            ("plan-b", "write the parser", TodoStatus::Pending),
+        ];
+        assert_eq!(
+            next_step_from_todos(only_pending, "todo_write"),
+            "`plan-b`: write the parser"
+        );
+        let closed = next_step_from_todos(
+            [("plan-a", "done already", TodoStatus::Completed)],
+            "todo_write",
+        );
+        assert!(closed.contains("no open item"), "{closed}");
+        let empty = next_step_from_todos([], "todo_write");
+        assert!(empty.contains("Put the plan's remaining steps"), "{empty}");
     }
 }
 

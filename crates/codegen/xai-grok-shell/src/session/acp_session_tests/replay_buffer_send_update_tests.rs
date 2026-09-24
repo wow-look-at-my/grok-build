@@ -214,6 +214,7 @@ pub(super) async fn make_replay_send_update_fixture() -> ReplaySendUpdateFixture
         models_manager: Default::default(),
         display_cwd: std::sync::OnceLock::new(),
         active_agent_type: parking_lot::Mutex::new(None),
+        allowed_subagent_types: Default::default(),
         mode_agent: Default::default(),
         queue_exit_reminder_on_approved_exit: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         emit_local_background_tasks: Arc::new(std::sync::atomic::AtomicBool::new(true)),
@@ -301,6 +302,7 @@ pub(super) async fn make_replay_send_update_fixture() -> ReplaySendUpdateFixture
         next_title_refresh_idx: std::cell::Cell::new(0),
         turn_summary_enabled: false,
         title_refresh_enabled: false,
+        thinking_summaries_enabled: false,
         session_turn_active: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         streaming_turn_capture: parking_lot::Mutex::new(StreamingTurnCapture::default()),
         streaming_tool_titles: parking_lot::Mutex::new(std::collections::HashMap::new()),
@@ -548,6 +550,7 @@ async fn a_streaming_tool_call_is_named_from_the_arguments_so_far() {
             let fixture = read_file_streaming_fixture().await;
             let actor = Arc::new(fixture.actor);
             let req = RequestId::random();
+            own_request(&actor, &req);
             actor
                 .handle_sampling_event(SamplingEvent::StreamStarted {
                     request_id: req.clone(),
@@ -592,9 +595,11 @@ async fn a_streaming_tool_call_is_named_from_the_arguments_so_far() {
             );
             // A new stream reuses index 0, so the abandoned attempt's arguments
             // have to be gone by the time it opens.
+            let retry = RequestId::random();
+            own_request(&actor, &retry);
             actor
                 .handle_sampling_event(SamplingEvent::StreamStarted {
-                    request_id: RequestId::random(),
+                    request_id: retry,
                     timestamp_ms: 1,
                 })
                 .await;
@@ -613,6 +618,7 @@ async fn an_unreadable_streaming_call_is_left_unnamed() {
             let fixture = read_file_streaming_fixture().await;
             let actor = Arc::new(fixture.actor);
             let req = RequestId::random();
+            own_request(&actor, &req);
             actor
                 .handle_sampling_event(SamplingEvent::StreamStarted {
                     request_id: req.clone(),
@@ -645,6 +651,14 @@ async fn read_file_streaming_fixture() -> ReplaySendUpdateFixture {
     *fixture.actor.agent.borrow_mut() =
         test_agent_with_tools(vec![ToolConfig::for_tool::<ReadFileTool>()]).await;
     fixture
+}
+/// The actor drops sampler events for a request no turn owns.
+fn own_request(actor: &SessionActor, request_id: &xai_grok_sampler::RequestId) {
+    let (tx, _rx) = tokio::sync::oneshot::channel();
+    actor.turn_stream_drained.lock().insert(
+        request_id.clone(),
+        crate::session::acp_session::StreamOwnership::with_waiter(Some(tx)),
+    );
 }
 /// The title the actor has resolved for the call at `tool_index`, if any.
 fn streaming_title(actor: &SessionActor, tool_index: u32) -> Option<String> {

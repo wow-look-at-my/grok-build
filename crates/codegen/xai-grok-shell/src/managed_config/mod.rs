@@ -14,7 +14,6 @@ pub use store::MANAGED_ARTIFACT_FILES;
 pub use store::{
     classify_auth_mode, clear_orphan, current_serving_identity, has_principal, is_fetch_enabled,
 };
-pub(crate) use store::{resolve_deployment_id, resolve_deployment_key};
 pub(crate) use supervisor::policy_repair_pending;
 #[doc(hidden)]
 pub use supervisor::{ManagedConfigRefresher, spawn_refresh_supervisor, take_refresh_supervisor};

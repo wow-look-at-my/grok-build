@@ -187,10 +187,56 @@ pub(crate) fn execute_create_worktree(plan: WorktreePlan) -> Result<CreateWorktr
     span.record("size_class", size_class);
     crate::metrics::record_grove_wt_create(result.resolved_strategy, start.elapsed());
     record_main_repo_marker(&source, &result.worktree_path);
+    keep_managed_worktrees_out_of_status(&source, &result.worktree_path);
     Ok(result)
 }
+
+/// Keeps the repository's own `git status` blind to its managed worktrees dir.
+///
+/// The destination is a descendant of the working tree it was created in, so
+/// without this the main checkout reports `.grok/` as untracked for as long as
+/// any worktree exists. The entry belongs in the repository's exclude data:
+/// where one clone happens to park its checkouts is not a property of the
+/// project, so the tracked `.gitignore` stays untouched.
+///
+/// Two questions are asked, of two different sources. The destination's shape
+/// names the directory whose status is at stake; git names the repository that
+/// directory actually belongs to. `<grok home>/worktrees` matches the same shape
+/// with the home directory as its "main checkout", and a checkout parked there
+/// is nothing the home directory should be told to ignore -- so it is written to
+/// only when it is the source's own repository.
+fn keep_managed_worktrees_out_of_status(source: &Path, worktree_path: &Path) {
+    let Some(owner) = crate::managed_root::main_root_for_managed_path(worktree_path) else {
+        return;
+    };
+    let Ok(repo) = gix::discover(source) else {
+        return;
+    };
+    let Some(main_root) = repo.common_dir().parent() else {
+        return;
+    };
+    // The two can reach one directory by different routes: git resolves a macOS
+    // temporary directory to `/private/var/...` where the caller still holds
+    // `/var/...`. Compared unresolved, the two look like different repositories
+    // and no exclusion is ever registered.
+    let (Ok(owner), Ok(main_root)) = (dunce::canonicalize(owner), dunce::canonicalize(main_root))
+    else {
+        return;
+    };
+    if owner != main_root {
+        return;
+    }
+    if let Err(e) = crate::managed_root::exclude_managed_worktrees_dir(&main_root) {
+        tracing::warn!(
+            error = %e,
+            main_root = %main_root.display(),
+            "failed to register the managed worktrees exclusion"
+        );
+    }
+}
+
 /// Record the source root for standalone copies (`.git` is a directory and
-/// points nowhere). Linked worktrees resolve via `--git-common-dir`. Leave an
+/// points nowhere). Linked worktrees resolve via `--git-common-dir`.
 /// existing marker: it already names the ultimate main repo.
 fn record_main_repo_marker(source: &Path, worktree: &Path) {
     let git_dir = worktree.join(".git");
@@ -227,11 +273,16 @@ fn arm_failed(arm: crate::worktree::WorktreeArm, err: &anyhow::Error) -> crate::
 }
 #[cfg(any(target_os = "linux", target_os = "macos", windows))]
 fn grove_arm(
-    _plan: &WorktreePlan,
-    _arm: WorktreeArm,
-    _skipped: &mut Vec<ArmSkip>,
+    plan: &WorktreePlan,
+    arm: WorktreeArm,
+    skipped: &mut Vec<ArmSkip>,
     _grove_lost_to_daemon: &mut bool,
 ) -> Result<Option<CreateWorktreeResult>> {
+    // This build has no Grove client. A caller that asked for Grove must
+    // learn why it got a fallback, so the arm records its skip.
+    if plan.nfs.as_ref().is_some_and(|opts| opts.enabled) {
+        skipped.push(ArmSkip::new(arm, "Grove is not available in this build"));
+    }
     Ok(None)
 }
 /// Dispatch worktree creation to the strategy implied by the creation mode.
@@ -1240,6 +1291,78 @@ mod tests {
         assert!(!line.contains('\n'));
         assert!(line.chars().count() < 260, "{}", line.chars().count());
     }
+
+    /// The repository containing the checkout is the one whose status must stay
+    /// clean, and it is the only one written to.
+    #[test]
+    fn exclusion_is_registered_in_the_repository_that_contains_the_checkout() {
+        xai_test_utils::require_git!();
+        let temp = TempDir::new().unwrap();
+        let base = dunce::canonicalize(temp.path()).unwrap();
+        let repo = base.join("repo");
+        std::fs::create_dir(&repo).unwrap();
+        xai_test_utils::git::init_git_repo(&repo);
+
+        keep_managed_worktrees_out_of_status(&repo, &repo.join(".grok/worktrees/label"));
+
+        let exclude = std::fs::read_to_string(repo.join(".git/info/exclude")).unwrap();
+        assert!(
+            exclude
+                .lines()
+                .any(|l| l == crate::managed_root::WORKTREES_EXCLUDE_LINE),
+            "the containing repository must carry the exclusion: {exclude:?}"
+        );
+    }
+
+    /// The check holds when the caller reaches the repository through a
+    /// symlink, which is how a macOS temporary directory is seen.
+    #[cfg(unix)]
+    #[test]
+    fn exclusion_is_registered_when_the_caller_reaches_the_repo_through_a_symlink() {
+        xai_test_utils::require_git!();
+        let temp = TempDir::new().unwrap();
+        let real = dunce::canonicalize(temp.path()).unwrap().join("real");
+        std::fs::create_dir(&real).unwrap();
+        let linked = real.parent().unwrap().join("linked");
+        std::os::unix::fs::symlink(&real, &linked).unwrap();
+
+        let repo = linked.join("repo");
+        std::fs::create_dir(&repo).unwrap();
+        xai_test_utils::git::init_git_repo(&repo);
+
+        keep_managed_worktrees_out_of_status(&repo, &repo.join(".grok/worktrees/label"));
+
+        let exclude = std::fs::read_to_string(real.join("repo/.git/info/exclude")).unwrap();
+        assert!(
+            exclude
+                .lines()
+                .any(|l| l == crate::managed_root::WORKTREES_EXCLUDE_LINE),
+            "a symlinked path to the containing repository still registers it: {exclude:?}"
+        );
+    }
+
+    /// ...and the legacy `<grok home>/worktrees` layout must not be treated as
+    /// one. Its shape is `<home>/.grok/worktrees/<repo>/<label>`, so reading the
+    /// owner off the path alone would register the exclusion in the user's home
+    /// directory -- a repo of its own when dotfiles are versioned.
+    #[test]
+    fn exclusion_skips_the_legacy_grok_home_layout() {
+        xai_test_utils::require_git!();
+        let temp = TempDir::new().unwrap();
+        let base = dunce::canonicalize(temp.path()).unwrap();
+        let repo = base.join("repo");
+        std::fs::create_dir(&repo).unwrap();
+        xai_test_utils::git::init_git_repo(&repo);
+        let legacy_checkout = base.join(".grok/worktrees/myrepo/label");
+
+        keep_managed_worktrees_out_of_status(&repo, &legacy_checkout);
+
+        assert!(
+            !base.join(".git/info/exclude").exists(),
+            "the directory holding the grok home is not the checkout's repository"
+        );
+    }
+
     #[cfg(target_os = "linux")]
     #[test]
     fn test_finalize_or_reclaim_snapshot_ok_skips_reclaim() {

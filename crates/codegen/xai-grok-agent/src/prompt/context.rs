@@ -5,7 +5,7 @@
 //! This struct does NOT own a render engine; it provides placeholders and discovered sections.
 use crate::config::PromptMode;
 use crate::prompt::agents_md::{self, AgentConfigFile};
-use crate::prompt::template::{apply_patch_template, base_template, subagent_template};
+use crate::prompt::template::{base_template, subagent_template};
 use serde::de;
 use serde::{Deserialize, Serialize};
 /// Selects which base template to use for `Extend` mode rendering.
@@ -17,13 +17,12 @@ pub enum TemplateOverride {
     /// Use the standard base template (or subagent template based on audience).
     #[default]
     None,
-    /// Use the apply-patch profile prompt template (decrypted on demand).
-    Codex,
     /// A caller-provided custom template string.
     Custom(String),
 }
-/// Backward-compatible deserialization: accepts the new tagged format (`"none"`, `"codex"`, `{"custom": "..."}`).
+/// Backward-compatible deserialization: accepts the new tagged format (`"none"`, `{"custom": "..."}`).
 /// It also accepts the legacy format where `system_prompt` was `Option<String>` (a raw template string).
+/// `"codex"` names a removed template. It is an error, never a custom template with that literal text.
 impl<'de> Deserialize<'de> for TemplateOverride {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -33,12 +32,14 @@ impl<'de> Deserialize<'de> for TemplateOverride {
         impl<'de> de::Visitor<'de> for Visitor {
             type Value = TemplateOverride;
             fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-                f.write_str(r#""none", "codex", "cursor", {"custom": "..."}, or a template string"#)
+                f.write_str(r#""none", {"custom": "..."}, or a template string"#)
             }
             fn visit_str<E: de::Error>(self, v: &str) -> Result<TemplateOverride, E> {
                 match v {
                     "none" => Ok(TemplateOverride::None),
-                    "codex" => Ok(TemplateOverride::Codex),
+                    "codex" => Err(E::custom(
+                        "the `codex` system prompt template was removed; use \"none\" or {\"custom\": \"...\"}",
+                    )),
                     other => Ok(TemplateOverride::Custom(other.to_owned())),
                 }
             }
@@ -280,10 +281,6 @@ impl PromptContext {
                 let decrypted;
                 let base = match &self.system_prompt {
                     TemplateOverride::Custom(template) => template.as_str(),
-                    TemplateOverride::Codex => {
-                        decrypted = apply_patch_template();
-                        &decrypted
-                    }
                     TemplateOverride::None => {
                         decrypted = if self.audience == PromptAudience::Subagent {
                             subagent_template()
@@ -415,8 +412,8 @@ mod tests {
     fn test_template_override_deserialize_new_format() {
         let v: TemplateOverride = serde_json::from_str(r#""none""#).unwrap();
         assert_eq!(v, TemplateOverride::None);
-        let v: TemplateOverride = serde_json::from_str(r#""codex""#).unwrap();
-        assert_eq!(v, TemplateOverride::Codex);
+        let err = serde_json::from_str::<TemplateOverride>(r#""codex""#).unwrap_err();
+        assert!(err.to_string().contains("was removed"), "{err}");
         let v: TemplateOverride = serde_json::from_str(r#"{"custom": "my template"}"#).unwrap();
         assert_eq!(v, TemplateOverride::Custom("my template".to_string()));
     }
@@ -432,7 +429,6 @@ mod tests {
     fn test_template_override_round_trip() {
         for original in [
             TemplateOverride::None,
-            TemplateOverride::Codex,
             TemplateOverride::Custom("my custom prompt".to_string()),
         ] {
             let json = serde_json::to_string(&original).unwrap();

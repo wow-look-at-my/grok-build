@@ -428,7 +428,7 @@ impl SessionActor {
             let own_key = self.chat_state_handle.get_credentials().await.api_key;
             let refreshed = match own_key {
                 Some(ref key) if !key.trim().is_empty() => {
-                    crate::agent::models::resolve_context_window_from_provider(
+                    crate::agent::remote_config::resolve_context_window_from_provider(
                         current_model,
                         base_url,
                         Some(key),
@@ -479,11 +479,7 @@ impl SessionActor {
         };
         let _ = am.auth().await;
         let provider: Arc<dyn xai_grok_auth::AuthCredentialProvider> = Arc::new(
-            xai_grok_login::credential_provider::ShellAuthCredentialProvider::new(
-                am.clone(),
-                None,
-                None,
-            ),
+            xai_grok_login::credential_provider::ShellAuthCredentialProvider::new(am.clone(), None),
         );
         let middleware_client =
             crate::http::with_auth_retry(crate::http::shared_client(), provider);

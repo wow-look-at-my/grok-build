@@ -96,6 +96,8 @@ pub use types::{TodoGateDecision, TodoGateReason};
 mod goal;
 #[path = "acp_session_impl/named_workflow_args.rs"]
 mod named_workflow_args;
+#[path = "acp_session_impl/plan_goal.rs"]
+mod plan_goal;
 #[path = "acp_session_impl/turn.rs"]
 mod turn;
 #[path = "acp_session_impl/workflow.rs"]
@@ -258,6 +260,8 @@ mod todo_capture;
 pub use todo_capture::{TodoCaptureError, TodoCaptureOutcome};
 #[path = "acp_session_impl/status_line.rs"]
 pub(crate) mod status_line;
+#[path = "acp_session_impl/thinking_summary.rs"]
+mod thinking_summary;
 #[path = "acp_session_impl/title_refresh.rs"]
 mod title_refresh;
 #[path = "acp_session_impl/turn_end.rs"]
@@ -939,6 +943,8 @@ pub(crate) struct SessionActor {
     /// Initialized from the `AgentDefinition` at spawn, updated when the session mode changes via `handle_session_mode()`.
     /// Used by the model-switch guard to determine whether a model's `agent_type` is compatible with the current session.
     pub(crate) active_agent_type: parking_lot::Mutex<Option<String>>,
+    /// Shared with the `SessionHandle`, which the subagent coordinator reads.
+    pub(crate) allowed_subagent_types: crate::session::handle::SharedAllowedSubagentTypes,
     /// See [`ModeAgentState`].
     pub(crate) mode_agent: parking_lot::Mutex<ModeAgentState>,
     /// Live gate shared with the notification bridge (see `NotificationBridgeConfig::queue_exit_reminder_on_approved_exit`).
@@ -1156,6 +1162,8 @@ pub(crate) struct SessionActor {
     /// Advanced when an attempt completes (success *or* failure, with catch-up past skipped checkpoints), and persisted to the watermark.
     /// Once it reaches the end the title is frozen.
     pub(crate) next_title_refresh_idx: std::cell::Cell<usize>,
+    /// `[ui].thinking_summaries` (`UiConfig::thinking_summaries_enabled`), resolved a single time at spawn.
+    pub(crate) thinking_summaries_enabled: bool,
     /// True while THIS session has a prompt turn in flight (RAII-guarded in `handle_prompt`).
     /// `tool_context.is_turn_active` is the agent-wide coordinator flag shared by all sessions, so it is unusable for per-session decisions.
     /// `Arc` so it can be re-checked inside the chat-state actor's `RepairHistory` handler.
@@ -1759,7 +1767,10 @@ mod permission_auto_mode_tests;
 #[cfg(test)]
 #[path = "acp_session_tests/permission_prompt_notification_tests.rs"]
 mod permission_prompt_notification_tests;
-/// Tests that a resume re-parks the parked `exit_plan_mode` approval.
+#[cfg(test)]
+#[path = "acp_session_tests/plan_approval_goal_tests.rs"]
+mod plan_approval_goal_tests;
+/// Resume re-park of the parked `exit_plan_mode` approval.
 #[cfg(test)]
 #[path = "acp_session_tests/plan_approval_resume_tests.rs"]
 mod plan_approval_resume_tests;
@@ -2334,6 +2345,9 @@ mod managed_gateway_tool_tests {
 #[path = "acp_session_tests/goal/goal_compaction_reseed_tests.rs"]
 mod goal_compaction_reseed_tests;
 #[cfg(test)]
+#[path = "acp_session_tests/goal/goal_lite_mode_tests.rs"]
+mod goal_lite_mode_tests;
+#[cfg(test)]
 #[path = "acp_session_tests/goal/goal_planner_e2e_tests.rs"]
 mod goal_planner_e2e_tests;
 #[cfg(test)]
@@ -2351,3 +2365,6 @@ mod recap_display_only_tests;
 #[cfg(test)]
 #[path = "acp_session_tests/reminder_policy_tests.rs"]
 mod reminder_policy_tests;
+#[cfg(test)]
+#[path = "acp_session_tests/thinking_summary_tests.rs"]
+mod thinking_summary_tests;

@@ -434,9 +434,12 @@ impl SessionActor {
             return;
         }
         let generation = self.mcp_state.lock().await.current_generation();
-        let timed_out = tokio::time::timeout(MCP_INIT_WAIT_BOUND, self.wait_for_mcp_initialized())
-            .await
-            .is_err();
+        let timed_out = tokio::time::timeout(
+            MCP_INIT_WAIT_BOUND,
+            self.wait_for_mcp_initialized_unbounded(),
+        )
+        .await
+        .is_err();
         if timed_out {
             self.mcp_startup_waits.mark_full_wait_timed_out(generation);
             tracing::warn!(

@@ -167,12 +167,35 @@ impl OverflowHandler {
     }
 }
 
+/// First whole `f64` above the largest `usize` any supported target has: 2^64,
+/// one past `usize::MAX` on the 64-bit targets this builds for.
+const USIZE_CEILING: f64 = 18_446_744_073_709_551_616.0;
+
 pub(super) fn inline_budget(
     context_window_tokens: u64,
     max_markdown_length: usize,
 ) -> InlineBudget {
-    let context_budget = (truncate::estimate_chars(context_window_tokens) as f64
-        * WEB_FETCH_CONTEXT_PERCENT) as usize;
+    // The window's share is taken at f64 precision, which is exact below 2^53
+    // chars; every real context window is far under that.
+    #[allow(clippy::cast_precision_loss)]
+    let share =
+        (truncate::estimate_chars(context_window_tokens) as f64) * WEB_FETCH_CONTEXT_PERCENT;
+    // A share at or above the ceiling states no byte count the `usize` preview
+    // field can hold. It is reported rather than narrowed silently, and the
+    // preview then takes the cap the artifact limit already imposes.
+    let context_budget = if share.is_finite() && share < USIZE_CEILING {
+        #[allow(clippy::cast_possible_truncation)]
+        let budget = share as usize;
+        budget
+    } else {
+        tracing::error!(
+            context_window_tokens,
+            share,
+            max_markdown_length,
+            "web fetch inline budget has no representable byte count; capping the preview at the artifact limit"
+        );
+        max_markdown_length
+    };
     InlineBudget {
         preview_bytes: context_budget.min(max_markdown_length),
         output_bytes: max_markdown_length,
@@ -717,6 +740,17 @@ mod tests {
         assert!(second.content.contains("SecondRead"));
         assert!(!second.content.contains("FirstRead"));
         assert_eq!(tokio::fs::read_to_string(second_path).await.unwrap(), full);
+    }
+
+    /// A context window whose share has no byte count for the `usize` preview
+    /// field is capped at the artifact limit rather than narrowed into a wrong
+    /// number, and a window inside the range keeps its computed share.
+    #[test]
+    fn a_window_with_no_byte_count_caps_the_preview_at_the_artifact_limit() {
+        let budget = inline_budget(u64::MAX, 100_000);
+        assert_eq!(budget.preview_bytes, 100_000);
+        assert_eq!(budget.output_bytes, 100_000);
+        assert_eq!(inline_budget(1_000, 10_000_000).preview_bytes, 120);
     }
 
     #[tokio::test]

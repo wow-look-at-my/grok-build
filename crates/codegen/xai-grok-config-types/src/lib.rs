@@ -1,3 +1,4 @@
+#![allow(clippy::cast_lossless)] // 1 hit predates the gate
 #![allow(
     unused_imports,
     unused_variables,
@@ -18,18 +19,50 @@ mod permission;
 pub use permission::*;
 mod auth_provider;
 pub use auth_provider::*;
+pub mod retry_budget;
 use serde::{Deserialize, Serialize};
 use xai_grok_announcements::RemoteAnnouncement;
 pub use xai_grok_config::DisplayRefreshSettings;
 use xai_grok_config::deserialize::optional_bool as de_opt_bool_tolerant;
 /// A remote `campaigns[]` entry: an `id` gate plus a flattened patch that can set any config key.
 /// It is the JSON sibling of a `[[campaigns]]` TOML override.
+/// `campaign_id` folds through [`CampaignOverride::ID_KEYS`], so an entry naming both keys still parses.
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(try_from = "CampaignOverrideWire")]
 pub struct CampaignOverride {
-    #[serde(default, alias = "campaign_id")]
     pub id: Option<String>,
     #[serde(flatten, default)]
     pub patch: serde_json::Map<String, serde_json::Value>,
+}
+
+impl CampaignOverride {
+    /// The keys [`id`](Self::id) is read under. The first is what this type
+    /// writes; `campaign_id` is the TOML sibling's spelling.
+    pub const ID_KEYS: xai_tool_types::Aliases =
+        xai_tool_types::Aliases::new("id", &["campaign_id"]);
+}
+
+/// `CampaignOverride` as it arrives, with each id spelling its own field so the
+/// flattened patch keeps everything else.
+#[derive(Debug, Default, Deserialize)]
+struct CampaignOverrideWire {
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default, rename = "campaign_id")]
+    campaign_id: Option<String>,
+    #[serde(flatten, default)]
+    patch: serde_json::Map<String, serde_json::Value>,
+}
+
+impl TryFrom<CampaignOverrideWire> for CampaignOverride {
+    type Error = xai_tool_types::AliasConflict;
+
+    fn try_from(wire: CampaignOverrideWire) -> Result<Self, Self::Error> {
+        Ok(Self {
+            id: CampaignOverride::ID_KEYS.fold(vec![wire.id, wire.campaign_id])?,
+            patch: wire.patch,
+        })
+    }
 }
 /// Doom-loop recovery settings: one struct serves both the local `[doom_loop_recovery]` TOML table and the remote `doom_loop_recovery` JSON object.
 /// Every field is `Option` with a per-field default, so a partial object parses and unknown future keys are ignored.
@@ -42,13 +75,13 @@ pub struct DoomLoopRecoverySettings {
     /// `Some(false)` is a kill-switch; absent uses the client default (on).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enabled: Option<bool>,
-    /// Highest `tail_repetition` threshold considered confident (clamped to 2..=64); absent uses the client default (64).
-    /// The server emits every fired threshold, and the client filters the returned trigger labels with this.
-    /// It is never sent as a request parameter.
+    /// Highest `tail_repetition` threshold considered confident. A CLIENT-side
+    /// filter over the trigger labels the server returns. The server emits
+    /// every fired threshold, and this is never sent as a request parameter.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_threshold: Option<u32>,
-    /// Resample budget per turn (clamped to 0..=5); absent uses the client default (2).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Resample budget per turn. `-1` or `"unlimited"` never runs out.
+    #[serde(with = "retry_budget", skip_serializing_if = "Option::is_none")]
     pub max_retries: Option<u32>,
     /// Detector window sent as the value of `x-grok-doom-loop-check` (honored in 512..=4096, otherwise 4096; absent uses the client default, 1024).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -79,13 +112,11 @@ pub struct LongReasoningReminderSettings {
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct OutputRateFloorSettings {
-    /// Trailing window the rate is measured over (clamped to 2..=120).
-    /// Absent ⇒ client default (10).
+    /// Trailing window the rate is measured over, in seconds.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub window_secs: Option<u64>,
-    /// Reissue budget per model call (clamped to 0..=5). Absent ⇒ client
-    /// default (2).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Reissue budget per model call. `-1` or `"unlimited"` never runs out.
+    #[serde(with = "retry_budget", skip_serializing_if = "Option::is_none")]
     pub max_retries: Option<u32>,
 }
 
@@ -317,7 +348,12 @@ pub struct ConsentGate {
 /// - Missing fields from old servers are ignored
 /// - New fields added in the future don't break existing clients
 /// - Callers can distinguish "server said false" from "server didn't say"
+///
+/// `remote = "Self"` makes the derives inherent functions. The trait impls
+/// below call them, and `Deserialize` folds `nfs_worktree` first.
+/// trait method, never the inherent `RemoteSettings::deserialize`.
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(remote = "Self")]
 pub struct RemoteSettings {
     /// When `Some(true)`, the server recommends enabling leader mode.
     /// It is the fallback when the user hasn't set `[cli] use_leader` locally.
@@ -507,8 +543,6 @@ pub struct RemoteSettings {
     pub cursor_sessions_enabled: Option<bool>,
     #[serde(default)]
     pub claude_sessions_enabled: Option<bool>,
-    #[serde(default)]
-    pub codex_sessions_enabled: Option<bool>,
     /// When `Some(true)`, enable goal mode remotely.
     /// When `Some(false)`, force-disable it (kill-switch).
     /// Absent uses the client default (enabled).
@@ -710,8 +744,9 @@ pub struct RemoteSettings {
     #[serde(default)]
     pub worktree_type: Option<String>,
     /// Grove-projected worktree strategy (`true` means grove-fuse or grove-nfs, `false` means copy).
-    /// `Some(false)` is the remote kill switch. `nfs_worktree` is a deserialize alias.
-    #[serde(default, alias = "nfs_worktree")]
+    /// `Some(false)` is the remote kill switch. `nfs_worktree` folds in through
+    /// [`RemoteSettings::GROVE_WORKTREE_KEYS`].
+    #[serde(default)]
     pub grove_worktree: Option<bool>,
     /// Server-recommended default for `restore_code` in worktree resume.
     /// It applies only when the client omits `restoreCode`.
@@ -956,6 +991,34 @@ pub enum RemoteRequestEncoding {
     Unknown,
 }
 impl RemoteSettings {
+    /// The keys [`grove_worktree`](Self::grove_worktree) is read under.
+    pub const GROVE_WORKTREE_KEYS: xai_tool_types::Aliases =
+        xai_tool_types::Aliases::new("grove_worktree", &["nfs_worktree"]);
+}
+impl<'de> Deserialize<'de> for RemoteSettings {
+    /// Buffers the object, folds the grove-worktree spellings into the
+    /// canonical key, and hands the rest to the derived reader.
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        use serde::de::Error as _;
+        let mut map = serde_json::Map::<String, serde_json::Value>::deserialize(deserializer)?;
+        // A null says nothing, the same as an absent key.
+        let mut take = |key: &str| map.remove(key).filter(|v| !v.is_null());
+        let values = Self::GROVE_WORKTREE_KEYS.keys().map(&mut take).collect();
+        if let Some(value) = Self::GROVE_WORKTREE_KEYS
+            .fold(values)
+            .map_err(D::Error::custom)?
+        {
+            map.insert(Self::GROVE_WORKTREE_KEYS.canonical.to_owned(), value);
+        }
+        RemoteSettings::deserialize(serde_json::Value::Object(map)).map_err(D::Error::custom)
+    }
+}
+impl Serialize for RemoteSettings {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        RemoteSettings::serialize(self, serializer)
+    }
+}
+impl RemoteSettings {
     /// Denylist check for an optional imagine tool.
     /// Returns `true` when the server sent `imagine_tools_disabled` and it contains `tool` (force-off).
     /// Otherwise `false`, deferring to the tool's own default.
@@ -1087,12 +1150,89 @@ pub struct GoalRoleModel {
     /// The main session's env/ACP/strict-harness precedence chain plays no part.
     /// It is not a subagent type: the role always spawns `general-purpose`, so the harness only re-flavors that toolset.
     /// An `agent_type` that doesn't resolve, or whose role toolset can't satisfy the role, fails open to the session model and harness before commit.
-    /// One that resolves to a strict harness whose flavor the subagent system can't represent (e.g. `codex`) fails open the same way.
+    /// One that resolves to a strict harness whose flavor the subagent system can't represent fails open the same way.
     pub agent_type: String,
 }
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A `campaigns[]` entry from the settings service may name its gate under
+    /// either key. A bare `#[serde(alias)]` made an entry that named both a
+    /// `duplicate field` error, which costs the whole campaign patch.
+    #[test]
+    fn a_remote_campaign_names_its_id_under_either_key() {
+        let canonical: CampaignOverride = serde_json::from_str(r#"{"id":"c1","a":1}"#).unwrap();
+        let legacy: CampaignOverride =
+            serde_json::from_str(r#"{"campaign_id":"c1","a":1}"#).unwrap();
+        assert_eq!(canonical.id.as_deref(), Some("c1"));
+        assert_eq!(canonical, legacy);
+    }
+
+    #[test]
+    fn a_remote_campaign_naming_id_both_ways_under_one_value_parses_once() {
+        let both: CampaignOverride =
+            serde_json::from_str(r#"{"id":"c1","campaign_id":"c1","a":1}"#)
+                .expect("one id named twice is one id");
+        assert_eq!(both.id.as_deref(), Some("c1"));
+        assert_eq!(
+            both.patch.get("a").cloned(),
+            Some(serde_json::Value::from(1)),
+            "the flattened patch must keep the keys that are not the id"
+        );
+    }
+
+    /// Two different ids in one entry decide which campaign applies, so neither
+    /// key may win in silence.
+    #[test]
+    fn a_remote_campaign_whose_id_spellings_disagree_is_an_error_naming_the_field() {
+        let err = serde_json::from_str::<CampaignOverride>(r#"{"id":"a","campaign_id":"b"}"#)
+            .expect_err("conflicting campaign ids must not resolve silently");
+        let message = err.to_string();
+        assert!(message.contains("id"), "{message}");
+        assert!(message.contains("campaign_id"), "{message}");
+    }
+
+    /// The patch is what a campaign carries, so `campaign_id` must not be left
+    /// behind in it as just another key.
+    #[test]
+    fn a_remote_campaign_writes_the_canonical_id_and_never_the_alias() {
+        let json = serde_json::to_value(CampaignOverride {
+            id: Some("c1".into()),
+            patch: serde_json::Map::from_iter([("a".into(), serde_json::Value::from(1))]),
+        })
+        .unwrap();
+        assert_eq!(json["id"], "c1");
+        assert!(json.get("campaign_id").is_none(), "{json}");
+    }
+
+    #[test]
+    fn remote_grove_worktree_reads_either_key_and_both_when_they_agree() {
+        let parse = |json: &str| serde_json::from_str::<RemoteSettings>(json);
+        assert_eq!(
+            parse(r#"{"nfs_worktree":false}"#).unwrap().grove_worktree,
+            Some(false)
+        );
+        assert_eq!(
+            parse(r#"{"grove_worktree":true,"nfs_worktree":true}"#)
+                .expect("one value named twice is one value")
+                .grove_worktree,
+            Some(true)
+        );
+        assert_eq!(
+            parse(r#"{"grove_worktree":null,"nfs_worktree":false}"#)
+                .unwrap()
+                .grove_worktree,
+            Some(false)
+        );
+        let err = parse(r#"{"grove_worktree":true,"nfs_worktree":false}"#)
+            .expect_err("two different answers must not resolve silently");
+        assert!(err.to_string().contains("nfs_worktree"), "{err}");
+        let out = serde_json::to_value(parse(r#"{"nfs_worktree":true}"#).unwrap()).unwrap();
+        assert_eq!(out["grove_worktree"], true);
+        assert!(out.get("nfs_worktree").is_none(), "{out}");
+    }
+
     #[test]
     fn worktree_auto_gc_partial_object_and_round_trip() {
         let json = r#"{"worktree_auto_gc":{"enabled":false}}"#;
@@ -1242,27 +1382,19 @@ mod tests {
             (
                 settings.cursor_sessions_enabled,
                 settings.claude_sessions_enabled,
-                settings.codex_sessions_enabled,
             )
         };
         let json = r#"{
             "cursor_sessions_enabled": true,
-            "claude_sessions_enabled": false,
-            "codex_sessions_enabled": true
+            "claude_sessions_enabled": false
         }"#;
         let settings: RemoteSettings = serde_json::from_str(json).unwrap();
-        assert_eq!(
-            session_flags(&settings),
-            (Some(true), Some(false), Some(true))
-        );
+        assert_eq!(session_flags(&settings), (Some(true), Some(false)));
         let serialized = serde_json::to_string(&settings).unwrap();
         let round_trip: RemoteSettings = serde_json::from_str(&serialized).unwrap();
-        assert_eq!(
-            session_flags(&round_trip),
-            (Some(true), Some(false), Some(true))
-        );
+        assert_eq!(session_flags(&round_trip), (Some(true), Some(false)));
         let absent: RemoteSettings = serde_json::from_str("{}").unwrap();
-        assert_eq!(session_flags(&absent), (None, None, None));
+        assert_eq!(session_flags(&absent), (None, None));
     }
     #[test]
     fn remote_settings_image_description_model_round_trip() {

@@ -212,6 +212,7 @@ fn call(arguments: Value) -> crate::sampling::types::ToolCallResponse {
         id: "fixture-call".to_owned(),
         kind: "function".to_owned(),
         function: crate::sampling::types::ToolCallFunction::new("use_tool", arguments.to_string()),
+        vendor: Default::default(),
     }
 }
 

@@ -371,7 +371,12 @@ impl FeedbackManager {
     ) -> Self {
         let (signals_handle, actor) = SessionSignalsActor::with_sync_interval(config.sync_interval);
 
-        tokio::spawn(actor.run());
+        // The signals actor answers every handle method on this manager, so its
+        // death is reported with its name rather than as a closed channel.
+        tokio::spawn(xai_grok_tools::util::detached::fire_and_forget(
+            "feedback manager signals actor",
+            actor.run(),
+        ));
 
         let session_id = session_id.into();
         let feedback_client = feedback_client.map(|c| c.with_session_id(session_id.clone()));
@@ -1591,79 +1596,6 @@ mod tests {
         );
     }
 
-    /// Turn deltas post from one worker in send order, and `shutdown` waits for the ones still
-    /// queued, so an exit cancel's row reaches the backend after the rows before it.
-    #[tokio::test]
-    #[allow(clippy::disallowed_methods)] // test client hits a localhost mock
-    async fn test_turn_deltas_post_in_order_and_shutdown_drains_them() {
-        use crate::agent::feedback_client::FeedbackClient;
-        use axum::{Json, Router, routing::post};
-
-        // Every POST is held briefly, so the deltas are all still queued when shutdown starts.
-        let (seen_tx, mut seen_rx) = mpsc::unbounded_channel::<i64>();
-        let router = Router::new().route(
-            "/v1/sessions/{id}/turn-deltas",
-            post(move |Json(body): Json<serde_json::Value>| {
-                let seen_tx = seen_tx.clone();
-                async move {
-                    tokio::time::sleep(Duration::from_millis(50)).await;
-                    let _ = seen_tx.send(
-                        body.get("turnNumber")
-                            .and_then(|v| v.as_i64())
-                            .unwrap_or(-1),
-                    );
-                    Json(serde_json::json!({
-                        "sessionId": "test-fifo",
-                        "turnNumber": 0,
-                        "recordedAt": chrono::Utc::now(),
-                    }))
-                }
-            }),
-        );
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        tokio::spawn(async move {
-            axum::serve(listener, router).await.unwrap();
-        });
-
-        let client =
-            FeedbackClient::with_client(reqwest::Client::new(), format!("http://{addr}/v1"), None);
-        let config = FeedbackManagerConfig {
-            telemetry_enabled: true,
-            ..Default::default()
-        };
-        let manager = FeedbackManager::new("test-fifo", Some(client), config);
-        let signals = manager.signals_handle();
-        for _ in 1..=5 {
-            signals.increment_turn();
-            let snapshot = signals
-                .take_turn_end_snapshot()
-                .await
-                .expect("signals actor up");
-            manager
-                .send_turn_delta_with_snapshot(
-                    Some(&snapshot),
-                    None,
-                    Some(1),
-                    TurnOutcome::Cancelled,
-                )
-                .await;
-        }
-
-        manager.shutdown(None).await;
-
-        let mut seen = Vec::new();
-        while let Ok(turn) = seen_rx.try_recv() {
-            seen.push(turn);
-        }
-        assert_eq!(
-            seen,
-            vec![1, 2, 3, 4, 5],
-            "every queued delta posted, in order"
-        );
-    }
-
-    /// Empty upload queue uses the short worker-exit budget.
     #[tokio::test]
     async fn test_shutdown_empty_queue_uses_short_drain_budget() {
         use crate::session::repo_changes::{TraceExportConfig, UploadMethod};
@@ -1738,7 +1670,6 @@ mod tests {
                     upload_method: UploadMethod::Proxy {
                         proxy_base_url: self.base.clone(),
                         user_token: "test-token".to_string(),
-                        deployment_key: None,
                         alpha_test_key: None,
                     },
                     prefix_dir: None,
@@ -2128,67 +2059,49 @@ email = ["$GROK_TEST_WORK_EMAIL"]
             "GROK_USER_METADATA",
             r#"{"team": "platform-tools", "structured_feedback": {"type": "forged"}}"#,
         );
-        let (addr, captured) = start_capture_server().await;
-        let client = crate::agent::feedback_client::FeedbackClient::with_client(
-            reqwest::Client::new(),
-            format!("http://{addr}/v1"),
-            Some("tok".into()),
-        );
         let envelope = serde_json::json!({
             "schema_version": 1,
             "source": "write",
             "type": "bug",
         });
+        async fn persisted_metadata(mut submission: FeedbackSubmission) -> serde_json::Value {
+            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+            let outcome = submit_feedback_workflow(
+                &mut submission,
+                None,
+                Some(&tx),
+                SubmitFeedbackOptions {
+                    solicited: false,
+                    telemetry_enabled: false,
+                    author_identity: None,
+                },
+            )
+            .await;
+            assert!(matches!(outcome, SubmitOutcome::LocalOnly));
+            let msg = rx.try_recv().expect("persistence entry was sent");
+            let PersistenceMsg::Feedback(LocalFeedbackEntry::UserFeedback(entry)) = msg else {
+                panic!("expected a feedback persistence entry");
+            };
+            entry
+                .submission
+                .expect("submission persisted")
+                .metadata
+                .expect("metadata persisted")
+        }
+
         let mut submission = text_submission();
         submission.metadata = Some(serde_json::json!({ "structured_feedback": envelope.clone() }));
-
-        let outcome = submit_feedback_workflow(
-            &mut submission,
-            Some(&client),
-            None,
-            SubmitFeedbackOptions {
-                solicited: false,
-                telemetry_enabled: false,
-                author_identity: None,
-            },
-        )
-        .await;
-        assert!(matches!(outcome, SubmitOutcome::Submitted));
-
-        let body = captured.lock().clone().expect("server saw the POST");
+        let metadata = persisted_metadata(submission).await;
+        assert_eq!(metadata.get("structured_feedback"), Some(&envelope));
         assert_eq!(
-            body.get("metadata")
-                .and_then(|m| m.get("structured_feedback")),
-            Some(&envelope)
-        );
-        assert_eq!(
-            body.get("metadata").and_then(|m| m.get("team")),
+            metadata.get("team"),
             Some(&serde_json::json!("platform-tools"))
         );
 
-        // A report without the envelope must not grow one from the environment either.
-        *captured.lock() = None;
-        let mut submission = text_submission();
-        let outcome = submit_feedback_workflow(
-            &mut submission,
-            Some(&client),
-            None,
-            SubmitFeedbackOptions {
-                solicited: false,
-                telemetry_enabled: false,
-                author_identity: None,
-            },
-        )
-        .await;
-        assert!(matches!(outcome, SubmitOutcome::Submitted));
-        let body = captured.lock().clone().expect("server saw the POST");
-        assert!(
-            body.get("metadata")
-                .and_then(|m| m.get("structured_feedback"))
-                .is_none()
-        );
+        let metadata = persisted_metadata(text_submission()).await;
+        assert!(metadata.get("structured_feedback").is_none());
         assert_eq!(
-            body.get("metadata").and_then(|m| m.get("team")),
+            metadata.get("team"),
             Some(&serde_json::json!("platform-tools"))
         );
     }

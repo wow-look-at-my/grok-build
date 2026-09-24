@@ -1244,7 +1244,11 @@ mod tests {
             MAX_HOST_CALLS - 1
         );
         let outcome = run_workflow(params(&script, journal, tx));
-        drop(host);
+        // The host records its flag *after* the reply lands, so the engine's
+        // own wait does not order that write. Joining the host thread is what
+        // makes the read below see a finished callback rather than a racing one.
+        host.join()
+            .expect("the mock host exits once the engine drops its sender");
         match outcome {
             WorkflowOutcome::Failed { error } => {
                 assert!(error.contains("maximum of"), "got: {error}");
@@ -1280,7 +1284,10 @@ mod tests {
             parallel([#{ prompt: "first" }, #{ prompt: "second" }]);
         "#;
         let outcome = run_workflow(params(script, Journal::new(Some(journal_path.clone())), tx));
-        drop(host);
+        // Ordered as above: the flag is written after the reply lands, so only
+        // joining the host thread puts the write before the read.
+        host.join()
+            .expect("the mock host exits once the engine drops its sender");
         assert!(matches!(outcome, WorkflowOutcome::BudgetExceeded { .. }));
         assert!(second_reply_observed.load(std::sync::atomic::Ordering::SeqCst));
 

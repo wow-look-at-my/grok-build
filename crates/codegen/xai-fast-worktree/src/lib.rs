@@ -1,3 +1,9 @@
+#![allow(clippy::cast_lossless)]
+#![allow(clippy::cast_possible_truncation)]
+#![allow(clippy::cast_possible_wrap)]
+#![allow(clippy::cast_sign_loss)]
+#![allow(clippy::string_slice)]
+#![allow(clippy::unwrap_used)]
 #![allow(
     unused_imports,
     unused_variables,
@@ -28,6 +34,7 @@ pub mod db;
 pub mod discovery;
 mod git;
 mod grove_api;
+pub mod managed_root;
 mod metrics;
 #[cfg(target_os = "linux")]
 pub(crate) mod mount_info;
@@ -69,9 +76,9 @@ pub use db::{
 };
 #[cfg(feature = "metadata")]
 pub use discovery::{
-    RebuildReport, WORKTREE_DEPTH, WORKTREE_POOL_DIR, WORKTREES_DIR, discover_worktrees,
-    managed_worktree_roots, path_under_managed_worktree_roots, path_under_worktree_roots,
-    rebuild_worktree_db, rebuild_worktree_db_with_grove_data,
+    RebuildReport, WORKTREE_POOL_DIR, discover_worktrees, managed_worktree_roots,
+    path_under_managed_worktree_roots, path_under_worktree_roots, rebuild_worktree_db,
+    rebuild_worktree_db_with_grove_data,
 };
 pub use git::checkout::{
     rehydrate_worktree_from_ref, snapshot_worktree_to_ref, transfer_snapshot_to_repo,
@@ -79,6 +86,11 @@ pub use git::checkout::{
 pub use git::{
     KeepReason, Reclaim, reclaimable_after_snapshot, remove_stale_worktree_registration,
     remove_stale_worktree_registrations_under,
+};
+pub use managed_root::{
+    REPO_DOT_DIR, WORKTREES_DIR, WORKTREES_EXCLUDE_LINE, enclosing_repo_worktrees_root,
+    exclude_managed_worktrees_dir, is_repo_worktrees_root, is_worktree_dir, is_worktree_entry_name,
+    main_root_for_managed_path, managed_worktrees_boundary, repo_worktrees_root,
 };
 pub use metrics::{
     DisposeMethod, grove_wt_create_count, grove_wt_create_last_duration_ns, record_grove_wt_create,

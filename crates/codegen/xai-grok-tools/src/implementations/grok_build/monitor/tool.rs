@@ -133,7 +133,7 @@ impl xai_tool_runtime::Tool for MonitorTool {
                 auto_background_on_timeout: false,
                 foreground_block_budget: None,
                 kind: crate::computer::types::TaskKind::Monitor,
-                owner_session_id,
+                owner_session_id: owner_session_id.clone(),
                 description: Some(description.clone()).filter(|d| !d.trim().is_empty()),
             })
             .await
@@ -183,18 +183,27 @@ impl xai_tool_runtime::Tool for MonitorTool {
         .await;
 
         let pipeline_kill_name = kill_tool_name.clone();
-        tokio::spawn(async move {
-            run_monitor_pipeline(
-                &pipeline_task_id,
-                &pipeline_description,
-                pipeline_terminal,
-                &pipeline_notif,
-                &pipeline_output_file,
-                pipeline_kill_name,
-                0, // fresh pipeline — read from start
-            )
-            .await;
-        });
+        let pipeline_owner = owner_session_id.clone();
+        // Guarded: the tool has already told the caller "you will be notified on
+        // each event", so a pipeline that dies mid-run is a promise silently
+        // broken. The log names the pipeline so the gap is attributable.
+        #[allow(clippy::disallowed_methods)]
+        tokio::spawn(crate::util::detached::fire_and_forget(
+            "monitor pipeline",
+            async move {
+                supervise_monitor_pipeline(
+                    &pipeline_task_id,
+                    &pipeline_description,
+                    pipeline_terminal,
+                    &pipeline_notif,
+                    &pipeline_output_file,
+                    pipeline_kill_name,
+                    pipeline_owner,
+                    0, // fresh pipeline — read from start
+                )
+                .await;
+            },
+        ));
 
         let kill_tool_display =
             kill_tool_name.unwrap_or_else(|| "kill_command_or_subagent".to_string());
@@ -227,10 +236,70 @@ impl xai_tool_runtime::Tool for MonitorTool {
     }
 }
 
-/// Background pipeline: polls the task output and feeds lines through the processing pipeline (line processor -> rate limiter -> XML wrap ->
-/// notification). `pub(crate)` so `reparent_notifications` can re-spawn the pipeline on the parent's runtime when a subagent exits and its
-/// monitors are reparented. With a `Weak` the pipeline stops once the session drops its backend, letting `shutdown_all()` reap the process.
-pub(crate) async fn run_monitor_pipeline(
+/// Run [`run_monitor_pipeline`] where its death is an event rather than a silence.
+///
+/// Every spawned site drops the handle: the monitor tool has already answered
+/// by the time the pipeline starts, so no caller is left to await it. The
+/// reader of a monitor is waiting on the `MonitorEvent` notifications this
+/// pipeline alone produces, and a task that died mid-round stops producing
+/// them without otherwise saying so. The panic therefore arrives as one more
+/// event naming what the pipeline could not survive.
+///
+/// `owner_session_id` is the session the events route to, the same one the
+/// live rounds read off the task snapshot.
+pub(crate) async fn supervise_monitor_pipeline(
+    task_id: &str,
+    description: &str,
+    terminal: std::sync::Weak<dyn crate::computer::types::TerminalBackend>,
+    notification_handle: &ToolNotificationHandle,
+    output_file: &std::path::Path,
+    kill_tool_name: Option<String>,
+    owner_session_id: Option<String>,
+    start_offset: u64,
+) {
+    let round = crate::util::detached::guarded(
+        "monitor event pipeline",
+        run_monitor_pipeline(
+            task_id,
+            description,
+            terminal,
+            notification_handle,
+            output_file,
+            kill_tool_name,
+            start_offset,
+        ),
+    )
+    .await;
+    let Err(panic) = round else {
+        return;
+    };
+    tracing::error!(
+        task_id,
+        panic = %panic,
+        "monitor event pipeline stopped; its task is still running and now streams no events"
+    );
+    let text = format!("monitor event pipeline stopped: {panic}");
+    notification_handle.send_monitor_event(MonitorEvent {
+        task_id: task_id.to_string(),
+        description: description.to_string(),
+        event_text: event::wrap_monitor_event(description, &text, task_id),
+        raw_text: text,
+        owner_session_id,
+    });
+}
+
+/// Background pipeline: polls the task output and feeds lines through
+/// the processing pipeline (line processor -> rate limiter -> XML wrap -> notification).
+///
+/// [`supervise_monitor_pipeline`] is what every spawned site calls.
+///
+/// Holds the backend as a [`Weak`](std::sync::Weak), never a strong `Arc`: a
+/// persistent monitor loops for the session's whole lifetime, so a strong ref
+/// would pin the terminal actor (and its process) and leak it across sessions
+/// on shared-runtime hosts (hosts that build one backend per session on a
+/// shared runtime). With a `Weak` the pipeline stops once the session drops
+/// its backend, letting `shutdown_all()` reap the process.
+async fn run_monitor_pipeline(
     task_id: &str,
     description: &str,
     terminal: std::sync::Weak<dyn crate::computer::types::TerminalBackend>,
@@ -620,5 +689,109 @@ mod tests {
         );
 
         backend.kill_task(&task_id).await;
+    }
+
+    /// A monitor's reader hears about the watch through this pipeline and
+    /// nothing else: the tool answered with a task id before the pipeline ever
+    /// ran, so a pipeline that dies has no caller left to report to and the
+    /// reader is left waiting on events that will not come. The death therefore
+    /// has to arrive as an event of its own.
+    #[tokio::test]
+    async fn a_panicking_pipeline_reports_its_death_as_an_event() {
+        struct DyingTerminal;
+
+        #[async_trait::async_trait]
+        impl TerminalBackend for DyingTerminal {
+            async fn run(
+                &self,
+                _request: TerminalRunRequest,
+            ) -> Result<
+                crate::computer::types::TerminalRunResult,
+                crate::computer::types::ComputerError,
+            > {
+                unreachable!("this pipeline never runs a command")
+            }
+
+            async fn run_background(
+                &self,
+                _request: TerminalRunRequest,
+            ) -> Result<
+                crate::computer::types::BackgroundHandle,
+                crate::computer::types::ComputerError,
+            > {
+                unreachable!("this pipeline never starts a command")
+            }
+
+            async fn get_task(
+                &self,
+                _task_id: &str,
+            ) -> Option<crate::computer::types::TaskSnapshot> {
+                panic!("the terminal actor died while answering the pipeline")
+            }
+
+            async fn kill_task(&self, _task_id: &str) -> crate::computer::types::KillOutcome {
+                unreachable!("this pipeline kills nothing")
+            }
+
+            async fn wait_for_completion(
+                &self,
+                _task_id: &str,
+                _timeout: Option<Duration>,
+            ) -> Option<crate::computer::types::TaskSnapshot> {
+                unreachable!("this pipeline polls the task instead of waiting on it")
+            }
+
+            async fn list_tasks(&self) -> Vec<crate::computer::types::TaskSnapshot> {
+                Vec::new()
+            }
+        }
+
+        let backend: Arc<dyn TerminalBackend> = Arc::new(DyingTerminal);
+        let (notification_handle, mut notifications) = ToolNotificationHandle::channel();
+        let tmp = tempfile::tempdir().unwrap();
+        let output_file = tmp.path().join("monitor.log");
+
+        let round = tokio::time::timeout(
+            Duration::from_secs(5),
+            supervise_monitor_pipeline(
+                "monitor-task",
+                "watch the build",
+                Arc::downgrade(&backend),
+                &notification_handle,
+                &output_file,
+                None,
+                Some("session-A".to_string()),
+                0,
+            ),
+        )
+        .await;
+        assert!(
+            round.is_ok(),
+            "the supervisor must finish rather than unwind with the pipeline"
+        );
+
+        let delivered = tokio::time::timeout(Duration::from_secs(5), notifications.recv())
+            .await
+            .expect("a dead pipeline must speak up rather than leave its reader waiting")
+            .expect("the notification half must still be open");
+        let crate::notification::types::ToolNotification::MonitorEvent(event) = delivered else {
+            panic!("the pipeline's death must arrive as a monitor event");
+        };
+        assert_eq!(event.task_id, "monitor-task");
+        assert_eq!(
+            event.owner_session_id.as_deref(),
+            Some("session-A"),
+            "the failure event has to route to the session that started the watch"
+        );
+        assert!(
+            event.raw_text.contains("the terminal actor died"),
+            "the event must say what the pipeline died of, got {:?}",
+            event.raw_text
+        );
+        assert!(
+            event.event_text.contains("<monitor-event"),
+            "the model-facing text is wrapped like every other event, got {:?}",
+            event.event_text
+        );
     }
 }

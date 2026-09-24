@@ -46,6 +46,7 @@ use std::sync::OnceLock;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::process::Command;
 use xai_grok_sampling_types::ConversationItem;
+use xai_grok_tools::util::truncate_bytes;
 
 use crate::util::subprocess::git_bin;
 

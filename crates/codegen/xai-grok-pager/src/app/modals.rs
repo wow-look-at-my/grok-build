@@ -2671,7 +2671,7 @@ mod session_picker_delete_tests {
             for width in [80, 120] {
                 let mut agent = make_agent();
                 let mut session = entry("external-session");
-                session.source = "codex".to_owned();
+                session.source = "cursor".to_owned();
                 open_picker(&mut agent, vec![session]);
                 if let Some(ActiveModal::SessionPicker { source_filter, .. }) =
                     agent.active_modal.as_mut()
@@ -2861,8 +2861,8 @@ mod session_picker_delete_tests {
     #[test]
     fn foreign_row_refuses_delete_detail_and_worktree_actions() {
         let mut agent = make_agent();
-        let mut foreign = entry("codex-session");
-        foreign.source = "codex".into();
+        let mut foreign = entry("cursor-session");
+        foreign.source = "cursor".into();
         open_picker(&mut agent, vec![foreign]);
         // Pin All: the refusals only fire when the foreign row is focusable.
         if let Some(ActiveModal::SessionPicker { source_filter, .. }) = agent.active_modal.as_mut()

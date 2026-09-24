@@ -781,13 +781,23 @@ impl LocalTerminalActor {
         }
 
         let snapshot = static_shell.snapshot.clone();
-        tokio::spawn(async move {
-            if let Err(e) =
-                super::static_shell::write_snapshot_to_pipe(&snapshot, prep.state_in_write).await
-            {
-                tracing::debug!("failed to write static shell snapshot to pipe: {e}");
-            }
-        });
+        // The write end of the snapshot pipe is owned by this task alone, so a
+        // failure to drain it has to be reported: the child blocks on fd 3
+        // either way and the caller cannot tell a slow write from a dead task.
+        // `fire_and_forget` is that report: it logs the panic under the task's
+        // own name, so the dropped handle has nothing left to lose.
+        #[allow(clippy::disallowed_methods)]
+        tokio::spawn(crate::util::detached::fire_and_forget(
+            "static shell snapshot writer",
+            async move {
+                if let Err(e) =
+                    super::static_shell::write_snapshot_to_pipe(&snapshot, prep.state_in_write)
+                        .await
+                {
+                    tracing::debug!("failed to write static shell snapshot to pipe: {e}");
+                }
+            },
+        ));
 
         Ok(SpawnResult {
             child,
@@ -902,13 +912,21 @@ impl LocalTerminalActor {
         }
 
         let snapshot = shell_state.snapshot.clone();
-        tokio::spawn(async move {
-            if let Err(e) =
-                shell_state::write_snapshot_to_pipe(&snapshot, prep.state_in_write).await
-            {
-                tracing::debug!("failed to write shell snapshot to pipe: {e}");
-            }
-        });
+        // The child blocks reading fd 3 until this drains, so the task failing
+        // is not something the caller can see from the pipe: it has to say so.
+        // `fire_and_forget` logs a panic under the task's own name, so the
+        // dropped handle has nothing left to lose.
+        #[allow(clippy::disallowed_methods)]
+        tokio::spawn(crate::util::detached::fire_and_forget(
+            "persistent shell snapshot writer",
+            async move {
+                if let Err(e) =
+                    shell_state::write_snapshot_to_pipe(&snapshot, prep.state_in_write).await
+                {
+                    tracing::debug!("failed to write shell snapshot to pipe: {e}");
+                }
+            },
+        ));
 
         let dump_handle =
             tokio::spawn(
@@ -1602,7 +1620,13 @@ impl LocalTerminalActor {
                             tracing::debug!("failed to read shell state dump: {e}");
                         }
                         Err(e) => {
-                            tracing::debug!("shell state dump task panicked: {e}");
+                            // The dump is how the session learns the shell's new
+                            // cwd and environment, so losing it is not a detail.
+                            tracing::warn!(
+                                task = "shell state dump reader",
+                                error = %e,
+                                "shell state dump task did not finish"
+                            );
                         }
                     }
                 }
@@ -2278,18 +2302,29 @@ impl LocalTerminalActor {
                     let start_offset = std::fs::metadata(&pipeline_output_file)
                         .map(|m| m.len())
                         .unwrap_or(0);
-                    tokio::spawn(async move {
-                        crate::implementations::grok_build::monitor::tool::run_monitor_pipeline(
-                            &pipeline_task_id,
-                            &pipeline_description,
-                            pipeline_terminal,
-                            &pipeline_notif,
-                            &pipeline_output_file,
-                            Some("kill_command_or_subagent".to_string()),
-                            start_offset,
-                        )
-                        .await;
-                    });
+                    let pipeline_owner = Some(new_owner_session_id.to_string());
+                    // Guarded: this is the only thing emitting this monitor's
+                    // events after the hand-off, so a round that died mid-flight
+                    // would leave the subscriber waiting on a notification that
+                    // never comes. The log names the pipeline so the gap is
+                    // attributable without a backtrace.
+                    #[allow(clippy::disallowed_methods)]
+                    tokio::spawn(crate::util::detached::fire_and_forget(
+                        "reparented monitor pipeline",
+                        async move {
+                            crate::implementations::grok_build::monitor::tool::supervise_monitor_pipeline(
+                                &pipeline_task_id,
+                                &pipeline_description,
+                                pipeline_terminal,
+                                &pipeline_notif,
+                                &pipeline_output_file,
+                                Some("kill_command_or_subagent".to_string()),
+                                pipeline_owner,
+                                start_offset,
+                            )
+                            .await;
+                        },
+                    ));
                 }
             }
         }
@@ -2505,9 +2540,19 @@ impl LocalTerminalBackend {
             actor.run().await;
         };
 
+        // The actor answers every command the handle sends, so its death is the
+        // death of the terminal for this session. Guarded so the unwind is
+        // attributed to the actor rather than leaving later sends to report an
+        // unexplained closed channel.
+        let actor_fut = crate::util::detached::fire_and_forget("local terminal actor", actor_fut);
+
         if use_spawn_local {
             tokio::task::spawn_local(actor_fut);
         } else {
+            // `actor_fut` is already wrapped in `fire_and_forget`, which logs the
+            // panic under the actor's own name; the dropped handle adds nothing to
+            // lose.
+            #[allow(clippy::disallowed_methods)]
             tokio::spawn(actor_fut);
         }
 

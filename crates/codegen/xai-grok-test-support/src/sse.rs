@@ -44,8 +44,8 @@ pub fn messages_api_script_with_cost(
     cost_usd_ticks: Option<i64>,
 ) -> Vec<SseEvent> {
     let mut delta_usage = json!({"output_tokens":5,"input_tokens":10});
-    if let Some(ticks) = cost_usd_ticks {
-        delta_usage["cost_in_usd_ticks"] = json!(ticks);
+    if let (Some(ticks), Some(usage)) = (cost_usd_ticks, delta_usage.as_object_mut()) {
+        usage.insert("cost_in_usd_ticks".to_string(), json!(ticks));
     }
     vec![
         SseEvent::data(

@@ -82,7 +82,9 @@ impl ConfigModelOverride {
     pub(crate) fn laid_over(&self, base: &ConfigModelOverride) -> ConfigModelOverride {
         let ConfigModelOverride {
             model,
+            model_family,
             base_url,
+            mtls_cert_dir,
             name,
             description,
             api_key,
@@ -98,12 +100,15 @@ impl ConfigModelOverride {
             query_params,
             env_http_headers,
             context_window,
+            max_request_bytes,
             auto_compact_threshold_percent,
             system_prompt_label,
             use_concise,
             agent_type,
             inference_idle_timeout_secs,
             max_retries,
+            rate_limit_retry_threshold,
+            subagent_rate_limit_max_attempts,
             hidden,
             supported_in_api,
             reasoning_effort,
@@ -120,6 +125,7 @@ impl ConfigModelOverride {
             ttft_timeout_secs,
             extra_body,
             pricing_lookup_enabled,
+            reasoning_summary,
         } = self.clone();
 
         let sets_own_auth = api_key.as_deref().is_some_and(|k| !k.trim().is_empty())
@@ -156,7 +162,9 @@ impl ConfigModelOverride {
 
         ConfigModelOverride {
             model: model.or_else(|| base.model.clone()),
+            model_family: model_family.or_else(|| base.model_family.clone()),
             base_url: base_url.or_else(|| base.base_url.clone()),
+            mtls_cert_dir: mtls_cert_dir.or_else(|| base.mtls_cert_dir.clone()),
             name: name.or_else(|| base.name.clone()),
             description: description.or_else(|| base.description.clone()),
             api_key,
@@ -172,6 +180,7 @@ impl ConfigModelOverride {
             query_params: merged_query,
             env_http_headers: merged_env_headers,
             context_window: context_window.or(base.context_window),
+            max_request_bytes: max_request_bytes.or(base.max_request_bytes),
             auto_compact_threshold_percent: auto_compact_threshold_percent
                 .or(base.auto_compact_threshold_percent),
             system_prompt_label: system_prompt_label.or_else(|| base.system_prompt_label.clone()),
@@ -180,6 +189,10 @@ impl ConfigModelOverride {
             inference_idle_timeout_secs: inference_idle_timeout_secs
                 .or(base.inference_idle_timeout_secs),
             max_retries: max_retries.or(base.max_retries),
+            rate_limit_retry_threshold: rate_limit_retry_threshold
+                .or(base.rate_limit_retry_threshold),
+            subagent_rate_limit_max_attempts: subagent_rate_limit_max_attempts
+                .or(base.subagent_rate_limit_max_attempts),
             hidden: hidden.or(base.hidden),
             supported_in_api: supported_in_api.or(base.supported_in_api),
             reasoning_effort: reasoning_effort.or(base.reasoning_effort),
@@ -204,6 +217,7 @@ impl ConfigModelOverride {
             ttft_timeout_secs: ttft_timeout_secs.or(base.ttft_timeout_secs),
             extra_body: merged_body,
             pricing_lookup_enabled: pricing_lookup_enabled.or(base.pricing_lookup_enabled),
+            reasoning_summary: reasoning_summary.or(base.reasoning_summary),
         }
     }
 }

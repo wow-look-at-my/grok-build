@@ -2,6 +2,11 @@
 //!
 //! `xai-grok-shell` re-exports this crate as `xai_grok_shell::terminal`.
 
+#![allow(clippy::cast_possible_truncation)]
+#![allow(clippy::cast_possible_wrap)]
+#![allow(clippy::cast_precision_loss)]
+#![allow(clippy::expect_used)]
+#![allow(clippy::unwrap_used)]
 #![deny(clippy::indexing_slicing)]
 
 use std::sync::Arc;

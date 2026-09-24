@@ -1351,7 +1351,6 @@ pub(crate) async fn run(
     );
     app.foreign_session_compat = xai_grok_foreign_sessions::EnabledForeignSessionSources {
         claude: compat.claude.sessions,
-        codex: compat.codex.sessions,
         cursor: compat.cursor.sessions,
     };
     if let Some(ref raw) = effective_config {

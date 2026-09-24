@@ -11,6 +11,9 @@
 //! The crate never reads the session store directly: a caller supplies a [`SessionSource`] and a [`ContentExtractor`].
 //! That keeps the `updates.jsonl` wire format owned by the store instead of duplicated here.
 
+#![allow(clippy::cast_possible_truncation)]
+#![allow(clippy::cast_possible_wrap)]
+#![allow(clippy::expect_used)]
 #![deny(clippy::indexing_slicing)]
 
 mod bootstrap;

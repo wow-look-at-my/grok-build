@@ -4,14 +4,13 @@
 # Standalone installer for the enterprise channel. Intentionally a full copy of
 # the install logic so changes to the stable installer cannot break enterprise.
 #
-# Auth: GROK_DEPLOYMENT_KEY env var (takes precedence) or ~/.grok/auth.json from `grok login`.
-# Env: GROK_BIN_DIR, GROK_PROXY_URL
+# Auth: ~/.grok/auth.json from `grok login`.
+# Env: GROK_BIN_DIR
 #
 # Usage:
 #   irm https://x.ai/cli/enterprise-install.ps1 | iex                                       # latest enterprise
 #   & ([scriptblock]::Create((irm https://x.ai/cli/enterprise-install.ps1))) -Version 0.1.42 # specific version
 #   $env:GROK_VERSION="0.1.42"; irm https://x.ai/cli/enterprise-install.ps1 | iex           # specific version (alt)
-#   $env:GROK_DEPLOYMENT_KEY="<key>"; irm https://x.ai/cli/enterprise-install.ps1 | iex
 #
 
 param(
@@ -272,19 +271,14 @@ $OidcScope = 'https://auth.x.ai::b1a00492-073a-47ea-816f-4c329264a828'
 $LegacyScope = 'https://accounts.x.ai/sign-in'
 $AuthSource = ''
 
-if ($env:GROK_DEPLOYMENT_KEY) {
-    $AuthSource = 'deployment key'
-    Write-Host 'Auth: using deployment key.' -ForegroundColor DarkGray
-} else {
-    $oidcToken = Read-GrokToken $OidcScope
-    $legacyToken = Read-GrokToken $LegacyScope
-    if ($oidcToken) {
-        $AuthSource = 'auth.json (oidc)'
-        Write-Host 'Auth: using OIDC token from ~/.grok/auth.json.' -ForegroundColor DarkGray
-    } elseif ($legacyToken) {
-        $AuthSource = 'auth.json (legacy)'
-        Write-Host 'Auth: using legacy token from ~/.grok/auth.json.' -ForegroundColor DarkGray
-    }
+$oidcToken = Read-GrokToken $OidcScope
+$legacyToken = Read-GrokToken $LegacyScope
+if ($oidcToken) {
+    $AuthSource = 'auth.json (oidc)'
+    Write-Host 'Auth: using OIDC token from ~/.grok/auth.json.' -ForegroundColor DarkGray
+} elseif ($legacyToken) {
+    $AuthSource = 'auth.json (legacy)'
+    Write-Host 'Auth: using legacy token from ~/.grok/auth.json.' -ForegroundColor DarkGray
 }
 
 # --- Detect architecture ---
@@ -424,57 +418,6 @@ if (-not (Test-Path $ConfigFile)) {
     [System.IO.File]::WriteAllLines($ConfigFile, [string[]]$output.ToArray(), [System.Text.Encoding]::UTF8)
 } else {
     Add-Content -Path $ConfigFile -Value "`r`n[cli]`r`n$($cliLines -join "`r`n")`r`n"
-}
-
-# --- Fetch deployment config (deployment key only) ---
-
-if ($env:GROK_DEPLOYMENT_KEY -and -not $env:GROK_PROXY_URL) {
-    Write-Host '  Error: GROK_PROXY_URL is not set, so the deployment config was not fetched.' -ForegroundColor Red
-}
-if ($env:GROK_DEPLOYMENT_KEY -and $env:GROK_PROXY_URL) {
-    $ProxyUrl = $env:GROK_PROXY_URL
-    # Refuse cleartext / userinfo / empty-host proxies before attaching the key.
-    try {
-        $proxyUri = [Uri]$ProxyUrl
-    } catch {
-        Write-Error "GROK_PROXY_URL must be an https:// URL."
-        exit 1
-    }
-    if (-not $proxyUri.IsAbsoluteUri -or $proxyUri.Scheme -ne 'https' -or -not $proxyUri.Host -or $proxyUri.UserInfo) {
-        Write-Error "GROK_PROXY_URL must be an https:// URL."
-        exit 1
-    }
-    Write-Host '  Fetching deployment config...' -ForegroundColor DarkGray
-    try {
-        $headers = @{ 'Authorization' = "Bearer $($env:GROK_DEPLOYMENT_KEY)" }
-        # IRM follows redirects and would resend the Bearer token.
-        $deployResponse = Invoke-RestMethod -Uri "$ProxyUrl/deployment/config" -Headers $headers -UseBasicParsing -MaximumRedirection 0
-    } catch {
-        Write-Host "  Warning: failed to fetch deployment config from $ProxyUrl/deployment/config" -ForegroundColor Yellow
-        $deployResponse = $null
-    }
-
-    if ($deployResponse) {
-        $managedConfig = $deployResponse.managed_config
-        $requirements = $deployResponse.requirements
-
-        $managedConfigPath = Join-Path $GrokDir 'managed_config.toml'
-        $requirementsPath = Join-Path $GrokDir 'requirements.toml'
-
-        if ($managedConfig -and $managedConfig -ne 'null') {
-            [System.IO.File]::WriteAllText($managedConfigPath, $managedConfig, [System.Text.Encoding]::UTF8)
-            Write-Host '  Managed config applied.' -ForegroundColor DarkGray
-        } else {
-            if (Test-Path $managedConfigPath) { Remove-Item $managedConfigPath -Force }
-        }
-
-        if ($requirements -and $requirements -ne 'null') {
-            [System.IO.File]::WriteAllText($requirementsPath, $requirements, [System.Text.Encoding]::UTF8)
-            Write-Host '  Requirements applied.' -ForegroundColor DarkGray
-        } else {
-            if (Test-Path $requirementsPath) { Remove-Item $requirementsPath -Force }
-        }
-    }
 }
 
 Write-Host "Grok $resolvedVersion installed to $BinDir\grok.exe" -ForegroundColor Green

@@ -46,7 +46,6 @@
         "grok_build",
         "grok_build_concise",
         "grok_build_hashline",
-        "codex",
         "opencode",
         "mcp"
       ]

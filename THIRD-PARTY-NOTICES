@@ -16655,28 +16655,6 @@ ships at crates/codegen/xai-grok-tools/THIRD_PARTY_NOTICES.md.
 
 
 --------------------------------------------------------------------------------
-openai/codex
---------------------------------------------------------------------------------
-Source:  https://github.com/openai/codex
-License: Apache-2.0
-Upstream paths: codex-rs/core/src/tools/handlers/ (and apply-patch crate)
-
-Copyright notice:
-  Copyright 2025 OpenAI
-
-License text: see Part II — Apache-2.0
-
-Additional requirements / notices:
-  Tool implementations under:
-    crates/codegen/xai-grok-tools/src/implementations/codex/
-  Modules: apply_patch, grep_files, list_dir, read_file.
-  These are derived/portions of openai/codex tool handlers, adapted to this
-  crate's Tool trait and runtime. Apache-2.0 §4 requires retention of
-  copyright, patent, trademark, and attribution notices, a copy of the
-  license, and a notice of changes (this entry).
-
-
---------------------------------------------------------------------------------
 sst/opencode
 --------------------------------------------------------------------------------
 Source:  https://github.com/sst/opencode

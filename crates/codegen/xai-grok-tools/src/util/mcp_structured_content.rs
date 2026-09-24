@@ -27,7 +27,7 @@ pub fn render_structured_content<'a>(
 
 fn document_at(text: &str, open: char) -> Option<Value> {
     let start = text.find(open)?;
-    Value::deserialize(&mut serde_json::Deserializer::from_str(&text[start..])).ok()
+    Value::deserialize(&mut serde_json::Deserializer::from_str(text.get(start..)?)).ok()
 }
 
 #[cfg(test)]

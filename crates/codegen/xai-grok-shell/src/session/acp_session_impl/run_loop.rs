@@ -39,7 +39,7 @@ enum InFlightStream {
 /// no turn running it becomes its own prompt turn, so it cannot strand.
 async fn deliver_interjection(
     session: &Arc<SessionActor>,
-    completion_tx: &mpsc::UnboundedSender<(String, PromptTurnResult)>,
+    completion_tx: &mpsc::UnboundedSender<super::turn_task::TurnCompletionMsg>,
     text: String,
     id: Option<String>,
     images: Vec<acp::ImageContent>,

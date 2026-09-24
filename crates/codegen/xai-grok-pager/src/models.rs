@@ -23,13 +23,7 @@ pub async fn list_available_models(agent_config: &AgentConfig) -> Result<()> {
         pager_client_version(),
     )
     .await?;
-    let has_codex = state
-        .available_models
-        .iter()
-        .any(|model| model.model_id.0.starts_with("codex/"));
-    for line in auth_status_lines(primary_auth, has_codex) {
-        println!("{line}");
-    }
+    println!("{}", auth_status_line(primary_auth));
     println!();
 
     println!("Default model: {}", state.current_model_id.0);
@@ -46,48 +40,11 @@ pub async fn list_available_models(agent_config: &AgentConfig) -> Result<()> {
     Ok(())
 }
 
-fn auth_status_lines(primary: AuthStatus, has_codex: bool) -> Vec<String> {
-    let mut lines = Vec::new();
+fn auth_status_line(primary: AuthStatus) -> String {
     match primary {
-        AuthStatus::ApiKey => lines.push("You are using XAI_API_KEY.".to_string()),
-        AuthStatus::LoggedIn(host) => lines.push(format!("You are logged in with {host}.")),
-        AuthStatus::ModelCredentials(model) => {
-            lines.push(format!("Model '{model}' is using its own API key."));
-        }
-        AuthStatus::DeploymentKey => {
-            lines.push("You are authenticated via deployment key.".to_string());
-        }
-        AuthStatus::NotAuthenticated if !has_codex => {
-            lines.push("You are not authenticated.".to_string());
-        }
-        AuthStatus::NotAuthenticated => {}
-    }
-    if has_codex {
-        lines.push("You are logged in with Codex (ChatGPT).".to_string());
-    }
-    lines
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn codex_only_status_is_not_reported_as_unauthenticated() {
-        assert_eq!(
-            auth_status_lines(AuthStatus::NotAuthenticated, true),
-            vec!["You are logged in with Codex (ChatGPT)."]
-        );
-    }
-
-    #[test]
-    fn multiple_provider_statuses_are_both_reported() {
-        assert_eq!(
-            auth_status_lines(AuthStatus::LoggedIn("grok.com".to_string()), true),
-            vec![
-                "You are logged in with grok.com.",
-                "You are logged in with Codex (ChatGPT).",
-            ]
-        );
+        AuthStatus::ApiKey => "You are using XAI_API_KEY.".to_string(),
+        AuthStatus::LoggedIn(host) => format!("You are logged in with {host}."),
+        AuthStatus::ModelCredentials(model) => format!("Model '{model}' is using its own API key."),
+        AuthStatus::NotAuthenticated => "You are not authenticated.".to_string(),
     }
 }

@@ -1,3 +1,4 @@
+#![allow(clippy::expect_used)] // 1 hit predates the gate
 #![deny(clippy::indexing_slicing)]
 
 mod channel;

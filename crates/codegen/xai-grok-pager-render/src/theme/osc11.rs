@@ -184,7 +184,13 @@ fn unix_read_with_timeout(timeout: Duration) -> Option<String> {
     if !ends_with_osc_terminator(&buf) {
         return None;
     }
-    String::from_utf8(buf).ok()
+    // A reply that is not UTF-8 is not the terminal's OSC 11 answer at all (it is
+    // some other byte on the wire), and `None` is the caller's "no idea what the
+    // background is" state. Lossy would turn that stray bytes-into-a-color-name
+    // claim, which is the one thing this function must not do.
+    #[allow(clippy::disallowed_methods)]
+    let decoded = String::from_utf8(buf).ok();
+    decoded
 }
 
 /// True when the buffer ends with BEL or ST (`ESC \`).

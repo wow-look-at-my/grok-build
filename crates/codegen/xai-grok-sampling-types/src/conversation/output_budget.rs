@@ -93,19 +93,31 @@ impl ConversationRequest {
     /// Returns `None` when the request already fits, when the window is
     /// unknown (`0`), or when the request names no output budget — the
     /// sampler's own default is applied before this runs, so `None` there
-    /// means nothing bounds the output at all.
+    /// means nothing bounds the output at all. A fitted budget outside the
+    /// `u32` the request field carries is logged and left unapplied: the
+    /// request keeps what it asked for rather than a count this arithmetic did
+    /// not produce.
     pub fn fit_output_budget(
         &mut self,
         prompt_tokens: u64,
         context_window: u64,
     ) -> Option<OutputBudgetClamp> {
         let requested = self.max_output_tokens?;
-        let applied = xai_token_estimation::fit_output_tokens(
+        let fitted = xai_token_estimation::fit_output_tokens(
             u64::from(requested),
             prompt_tokens,
             context_window,
         );
-        let applied = u32::try_from(applied).unwrap_or(u32::MAX);
+        let Ok(applied) = u32::try_from(fitted) else {
+            tracing::error!(
+                fitted,
+                requested,
+                prompt_tokens,
+                context_window,
+                "fitted output budget is out of range for the request's u32 field; leaving the budget as asked"
+            );
+            return None;
+        };
         if applied >= requested {
             return None;
         }

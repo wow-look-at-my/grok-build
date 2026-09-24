@@ -256,7 +256,6 @@ pub(crate) async fn spawn_session_actor(
     feedback_proxy_url: Option<String>,
     feedback_user_token: Option<String>,
     feedback_alpha_test_key: Option<String>,
-    deployment_key: Option<String>,
     client_terminal_capable: bool,
     client_fs_capable: bool,
     gateway_enabled: std::sync::Arc<std::sync::atomic::AtomicBool>,
@@ -1476,8 +1475,7 @@ pub(crate) async fn spawn_session_actor(
     let feedback_client = feedback_proxy_url.map(|base_url| {
         let mut client =
             crate::agent::feedback_client::FeedbackClient::new(base_url, feedback_user_token)
-                .with_alpha_test_key(feedback_alpha_test_key)
-                .with_deployment_key(deployment_key);
+                .with_alpha_test_key(feedback_alpha_test_key);
         if let Some(am) = auth_manager.as_ref() {
             client = client.with_auth_manager(am.clone());
         }
@@ -1580,7 +1578,10 @@ pub(crate) async fn spawn_session_actor(
         .as_deref()
         .unwrap_or(crate::agent::config::DEFAULT_AGENT_TYPE)
         .to_owned();
-    let allowed_subagent_types_for_handle = agent.definition().allowed_subagent_types.clone();
+    let allowed_subagent_types_for_handle: crate::session::handle::SharedAllowedSubagentTypes =
+        std::sync::Arc::new(parking_lot::Mutex::new(
+            agent.definition().allowed_subagent_types.clone(),
+        ));
     let mut hook_discovery_errors: Vec<xai_grok_hooks::error::HookError> = Vec::new();
     let hooks_discovery = spawn_step!("hooks_discovery");
     let built_hook_registry: Option<Arc<xai_grok_hooks::discovery::HookRegistry>> =
@@ -1998,6 +1999,7 @@ pub(crate) async fn spawn_session_actor(
             lock
         },
         active_agent_type: parking_lot::Mutex::new(initial_agent_type),
+        allowed_subagent_types: allowed_subagent_types_for_handle.clone(),
         mode_agent: Default::default(),
         queue_exit_reminder_on_approved_exit,
         emit_local_background_tasks: emit_local_background_tasks.clone(),
@@ -2100,6 +2102,7 @@ pub(crate) async fn spawn_session_actor(
         title_refresh_task: std::cell::RefCell::new(None),
         title_refresh_generation: std::cell::Cell::new(0),
         next_title_refresh_idx: std::cell::Cell::new(initial_title_refresh_idx),
+        thinking_summaries_enabled: effective_config.ui.thinking_summaries_enabled(),
         session_turn_active: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         streaming_turn_capture: parking_lot::Mutex::new(StreamingTurnCapture::default()),
         streaming_tool_titles: parking_lot::Mutex::new(std::collections::HashMap::new()),
@@ -2604,7 +2607,6 @@ pub(crate) async fn spawn_session_on_thread(
     feedback_proxy_url: Option<String>,
     feedback_user_token: Option<String>,
     feedback_alpha_test_key: Option<String>,
-    deployment_key: Option<String>,
     client_terminal_capable: bool,
     client_fs_capable: bool,
     gateway_enabled: std::sync::Arc<std::sync::atomic::AtomicBool>,
@@ -2820,7 +2822,6 @@ pub(crate) async fn spawn_session_on_thread(
                     feedback_proxy_url,
                     feedback_user_token,
                     feedback_alpha_test_key,
-                    deployment_key,
                     client_terminal_capable,
                     client_fs_capable,
                     gateway_enabled,

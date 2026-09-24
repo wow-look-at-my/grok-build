@@ -294,7 +294,12 @@ impl<'a, 'b> ParsedMarkdown<'a, 'b> {
                     slot.copy_from_slice(t.to.as_bytes());
                 }
             }
-            Some(String::from_utf8(bytes).expect("force transforms preserve UTF-8"))
+            // Every byte in `bytes` came from `self.text` or from a transform's
+            // own `String`, so undecodable bytes here can only mean a broken
+            // splice. The panic names that; lossy would hide it in the output.
+            #[allow(clippy::disallowed_methods)]
+            let rendered = String::from_utf8(bytes).expect("force transforms preserve UTF-8");
+            Some(rendered)
         } else {
             None
         };
@@ -310,6 +315,11 @@ impl<'a, 'b> ParsedMarkdown<'a, 'b> {
         let mut mermaid_replace: Option<usize> = None;
         let mut current = (0..0, Style::new());
 
+        /// Flush the pending styled run `crange` and start a new one at `range`.
+        ///
+        /// Both ranges are pulldown-cmark source ranges over `text`, so their
+        /// ends name char boundaries and the slice below cannot split a char.
+        #[allow(clippy::string_slice)] // `crange` is a source range over `text`
         fn push(
             out: &mut String,
             current: &mut (Range<usize>, Style),
@@ -1093,12 +1103,16 @@ impl<'a, 'b> ParsedMarkdown<'a, 'b> {
             // The checkpoint is at the start of the NEXT block, so the frozen content must not include anything at or after cp_byte
             // line_source_map[i] is the source line at which output line i was created; source_line_at_cp is the source line containing cp_byte
 
+            // Counted over bytes for the same reason as `count_newlines_in_range`:
+            // `cp_byte` is a checkpoint offset that can land mid-character, and
+            // '\n' (0x0A) never appears inside a multi-byte sequence.
             let source_line_at_cp = self
                 .text
+                .as_bytes()
                 .get(..cp_byte.min(self.text.len()))
-                .unwrap_or("")
-                .bytes()
-                .filter(|&b| b == b'\n')
+                .unwrap_or_default()
+                .iter()
+                .filter(|&&b| b == b'\n')
                 .count();
 
             // When the checkpoint is at or past the end of the text, ALL output lines are frozen (the checkpointed block consumed the entire input)

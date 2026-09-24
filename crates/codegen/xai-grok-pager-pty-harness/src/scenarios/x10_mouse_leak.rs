@@ -59,7 +59,9 @@ pub async fn assert_x10_leak_defenses() -> Result<()> {
     harness
         .wait_for_text("xyz", Duration::from_secs(10))
         .context("sentinel text visible in composer")?;
-    if !harness.contains_text("abcxyz") || harness.contains_text(&LEAKED_RAMP[..3]) {
+    if !harness.contains_text("abcxyz")
+        || harness.contains_text(LEAKED_RAMP.get(..3).unwrap_or(LEAKED_RAMP))
+    {
         let composer_row = harness
             .screen_contents()
             .lines()

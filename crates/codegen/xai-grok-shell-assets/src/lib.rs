@@ -1,3 +1,6 @@
+#![allow(clippy::cast_possible_truncation)] // 2 hits predate the gate
+#![allow(clippy::unwrap_used)] // 3 hits predate the gate
+
 //! Asset extraction and bundle management for the grok shell family.
 //!
 //! Extracted from `xai-grok-shell` into a separate crate so the shell crate's

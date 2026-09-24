@@ -200,6 +200,7 @@ async fn create_test_actor(
         models_manager: Default::default(),
         display_cwd: std::sync::OnceLock::new(),
         active_agent_type: parking_lot::Mutex::new(None),
+        allowed_subagent_types: Default::default(),
         mode_agent: Default::default(),
         queue_exit_reminder_on_approved_exit: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         emit_local_background_tasks: Arc::new(std::sync::atomic::AtomicBool::new(true)),
@@ -284,6 +285,7 @@ async fn create_test_actor(
         next_title_refresh_idx: std::cell::Cell::new(0),
         turn_summary_enabled: false,
         title_refresh_enabled: false,
+        thinking_summaries_enabled: false,
         session_turn_active: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         streaming_turn_capture: parking_lot::Mutex::new(StreamingTurnCapture::default()),
         streaming_tool_titles: parking_lot::Mutex::new(std::collections::HashMap::new()),
@@ -649,6 +651,7 @@ async fn create_test_actor_with_memory(
         models_manager: Default::default(),
         display_cwd: std::sync::OnceLock::new(),
         active_agent_type: parking_lot::Mutex::new(None),
+        allowed_subagent_types: Default::default(),
         mode_agent: Default::default(),
         queue_exit_reminder_on_approved_exit: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         emit_local_background_tasks: Arc::new(std::sync::atomic::AtomicBool::new(true)),
@@ -736,6 +739,7 @@ async fn create_test_actor_with_memory(
         next_title_refresh_idx: std::cell::Cell::new(0),
         turn_summary_enabled: false,
         title_refresh_enabled: false,
+        thinking_summaries_enabled: false,
         session_turn_active: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         streaming_turn_capture: parking_lot::Mutex::new(StreamingTurnCapture::default()),
         streaming_tool_titles: parking_lot::Mutex::new(std::collections::HashMap::new()),
@@ -1055,7 +1059,15 @@ async fn second_consecutive_overflow_reduces_instead_of_compacting_again() {
                 .context_overflow_recovery
                 .set(ContextOverflowRecovery::Compacted);
             let err = api_error_with_context_window(200_000);
-            let result = actor.handle_sampling_failure(err).await;
+            let result = actor
+                .handle_sampling_failure(
+                    err,
+                    0,
+                    transient_state(0, true),
+                    false,
+                    TurnParkState::Fresh,
+                )
+                .await;
             assert!(
                 matches!(result, Ok(SamplerFailureRecovery::ReduceAndResubmit)),
                 "expected ReduceAndResubmit (not another CompactAndResubmit), got {result:?}"
@@ -1090,7 +1102,15 @@ async fn third_consecutive_overflow_gives_up_instead_of_looping() {
                 .context_overflow_recovery
                 .set(ContextOverflowRecovery::Reduced);
             let err = api_error_with_context_window(200_000);
-            let result = actor.handle_sampling_failure(err).await;
+            let result = actor
+                .handle_sampling_failure(
+                    err,
+                    0,
+                    transient_state(0, true),
+                    false,
+                    TurnParkState::Fresh,
+                )
+                .await;
             assert!(
                 result.is_err(),
                 "third consecutive overflow must be terminal, not another retry: {result:?}"

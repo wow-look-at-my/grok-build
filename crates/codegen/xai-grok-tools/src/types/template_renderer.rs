@@ -210,7 +210,8 @@ pub fn unresolved_template_markers(defs: &[ToolDefinition]) -> Vec<(String, Stri
     for def in defs {
         let mut check = |text: &str| {
             if let Some(start) = first_template_marker(text) {
-                let snippet = truncate_str(&text[start..], MARKER_SNIPPET_BYTES).to_owned();
+                let snippet =
+                    truncate_str(text.get(start..).unwrap_or(""), MARKER_SNIPPET_BYTES).to_owned();
                 offenders.push((def.function.name.clone(), snippet));
             }
         };

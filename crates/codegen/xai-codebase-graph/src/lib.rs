@@ -1,3 +1,9 @@
+#![allow(clippy::cast_possible_truncation)] // 30 hits predate the gate
+#![allow(clippy::cast_possible_wrap)] // 4 hits predate the gate
+#![allow(clippy::cast_precision_loss)] // 1 hit predates the gate
+#![allow(clippy::expect_used)] // 17 hits predate the gate
+#![allow(clippy::unwrap_used)] // 4 hits predate the gate
+
 //! # xai-codebase-graph
 //!
 //! High-performance code graph generation using tree-sitter queries.

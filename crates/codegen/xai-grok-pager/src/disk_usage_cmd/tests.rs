@@ -27,6 +27,15 @@ fn render_report(report: &DiskUsageReport, now: i64) -> String {
 fn measured(path: &Path) -> Option<u64> {
     physical_dir_size(path, Volume::of(path)).measure.bytes()
 }
+/// Make `dir` read as a git worktree checkout: a `.git` gitfile, the entry a
+/// linked worktree writes.
+fn mark_as_checkout(dir: &Path, name: &str) {
+    std::fs::write(
+        dir.join(".git"),
+        format!("gitdir: /repo/.git/worktrees/{name}\n"),
+    )
+    .unwrap();
+}
 fn modified(path: &Path) -> Option<i64> {
     physical_dir_size(path, Volume::of(path))
         .measure
@@ -82,6 +91,18 @@ fn collect_report_joins_registry_and_flags_untracked() {
     std::fs::create_dir_all(&tracked).unwrap();
     std::fs::create_dir_all(&untracked).unwrap();
     std::fs::create_dir_all(&external).unwrap();
+    // The two under `worktrees/` are checkouts, which is what makes them
+    // reportable at all; the bucket above them is not one.
+    std::fs::write(
+        tracked.join(".git"),
+        "gitdir: /repo/.git/worktrees/wt-tracked\n",
+    )
+    .unwrap();
+    std::fs::write(
+        untracked.join(".git"),
+        "gitdir: /repo/.git/worktrees/wt-untracked\n",
+    )
+    .unwrap();
     std::fs::write(tracked.join("big.bin"), vec![b'x'; 65536]).unwrap();
     std::fs::write(untracked.join("small.bin"), vec![b'x'; 4096]).unwrap();
     std::fs::write(external.join("huge.bin"), vec![b'x'; 131_072]).unwrap();
@@ -140,6 +161,132 @@ fn collect_report_joins_registry_and_flags_untracked() {
 }
 #[cfg(unix)]
 #[test]
+fn one_sized_row_per_checkout_at_either_old_location_depth() {
+    // `grok du` must agree with the scan it lists alongside: one row per
+    // checkout, whether the unforked shape put it directly under `worktrees/`
+    // or the fork's shape put it inside a bucket, sized from its own tree, and
+    // never a row for a directory living inside one.
+    let tmp = tempfile::TempDir::new().unwrap();
+    let base = dunce::canonicalize(tmp.path()).unwrap();
+    let home = base.join("grok-home");
+    let root = home.join("worktrees");
+
+    let depth_one = root.join("go-toolchain-dats-sandbox");
+    let bucket = root.join("repos-buildhost");
+    let depth_two = bucket.join("2026-09-14-reclaim");
+    // A directory in the bucket that was never a checkout -- on the real
+    // machine this is a 208 MB go build cache beside two real checkouts.
+    let leftover = bucket.join("2026-09-14-gocache");
+    for dir in [
+        &depth_one,
+        &depth_one.join("src"),
+        &depth_one.join("docs"),
+        &depth_two,
+        &leftover.join("00"),
+    ] {
+        std::fs::create_dir_all(dir).unwrap();
+    }
+    mark_as_checkout(&depth_one, "sandbox");
+    mark_as_checkout(&depth_two, "reclaim");
+    // Children of the depth-1 checkout, and files in the leftover directory.
+    for (dir, bytes) in [
+        (&depth_one, 65536usize),
+        (&depth_one.join("src"), 32768),
+        (&depth_one.join("docs"), 8192),
+        (&depth_two, 16384),
+        (&leftover, 4096),
+        (&leftover.join("00"), 2048),
+    ] {
+        std::fs::write(dir.join("payload.bin"), vec![b'x'; bytes]).unwrap();
+    }
+
+    let db = WorktreeDb::open(&home).unwrap();
+    db.register(&make_record("depth-one", &depth_one, "sandbox"))
+        .unwrap();
+
+    let report = collect_report(&home).unwrap();
+    let mut paths: Vec<&str> = report
+        .worktrees
+        .iter()
+        .map(|row| row.path.as_str())
+        .collect();
+    paths.sort_unstable();
+    assert_eq!(
+        paths,
+        [
+            depth_one.to_string_lossy().as_ref(),
+            depth_two.to_string_lossy().as_ref()
+        ],
+        "one row per checkout, and none for a directory inside one or for a \
+         plain directory in a bucket"
+    );
+    assert_eq!(
+        report.worktrees_outside_managed_roots, 0,
+        "an old-location checkout is not outside the managed dirs"
+    );
+    for row in &report.worktrees {
+        let path = Path::new(&row.path);
+        assert_eq!(
+            row.bytes,
+            measured(path),
+            "the bucketed size must equal a direct walk of the checkout"
+        );
+    }
+    let worktrees_dir = report
+        .top_level_dirs
+        .iter()
+        .find(|d| d.name == WORKTREES_DIR)
+        .expect("the worktrees row");
+    assert_eq!(
+        worktrees_dir.bytes,
+        measured(&root),
+        "bucketing must not lose the bytes of anything it did not put in a row"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn repo_local_worktree_is_sized_not_written_off() {
+    // A checkout made inside its own repository is grok-managed, so it gets a
+    // sized row. Reading only `<grok home>/worktrees` here would count every
+    // worktree created since the layout moved as "outside the managed dirs" and
+    // show none of them.
+    let tmp = tempfile::TempDir::new().unwrap();
+    let base = dunce::canonicalize(tmp.path()).unwrap();
+    let home = base.join("grok-home");
+    let repo = base.join("thing");
+    let wt = repo.join(".grok").join("worktrees").join("my-feature");
+    std::fs::create_dir_all(&wt).unwrap();
+    std::fs::write(wt.join("big.bin"), vec![b'x'; 65536]).unwrap();
+
+    let db = WorktreeDb::open(&home).unwrap();
+    db.register(&make_record("repo-local", &wt, "my-feature"))
+        .unwrap();
+
+    let report = collect_report(&home).unwrap();
+    assert_eq!(
+        report.worktrees_outside_managed_roots, 0,
+        "a worktree under <repo>/.grok/worktrees is not outside the managed dirs"
+    );
+    assert_eq!(
+        report.worktrees,
+        vec![WorktreeUsage {
+            last_modified_at: modified(&wt),
+            path: wt.to_string_lossy().into_owned(),
+            ..tracked_row(
+                measured(&wt).unwrap(),
+                TrackedRow {
+                    label: Some("my-feature".into()),
+                    ..record("repo-local", 0)
+                },
+            )
+        }],
+        "the repo-local worktree must appear with its size"
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn record_registered_via_symlinked_home_joins_as_one_row() {
     let tmp = tempfile::TempDir::new().unwrap();
     let base = dunce::canonicalize(tmp.path()).unwrap();
@@ -173,6 +320,7 @@ fn duplicate_discovered_dirs_size_once() {
     let home = dunce::canonicalize(tmp.path()).unwrap().join("grok-home");
     let wt = home.join("worktrees/xai/wt-a");
     std::fs::create_dir_all(&wt).unwrap();
+    mark_as_checkout(&wt, "wt-a");
     std::fs::write(wt.join("f.bin"), vec![b'x'; 4096]).unwrap();
     std::os::unix::fs::symlink(&wt, home.join("worktrees/xai/wt-alias")).unwrap();
     let report = collect_report(&home).unwrap();
@@ -194,6 +342,10 @@ fn escape_symlink_is_counted_not_sized() {
     std::fs::create_dir_all(home.join("worktrees/xai")).unwrap();
     let external = base.join("external");
     std::fs::create_dir_all(&external).unwrap();
+    // A checkout reached through a symlink that leaves the managed roots: it is
+    // a worktree as far as detection is concerned, so it is discovered, and it
+    // is the canonicalized escape that keeps it from being sized.
+    mark_as_checkout(&external, "escape");
     std::fs::write(external.join("huge.bin"), vec![b'x'; 65536]).unwrap();
     std::os::unix::fs::symlink(&external, home.join("worktrees/xai/escape")).unwrap();
     let report = collect_report(&home).unwrap();
@@ -256,6 +408,7 @@ fn registry_absent_reports_untracked_rows() {
     let home = dunce::canonicalize(tmp.path()).unwrap().join("grok-home");
     let wt = home.join("worktrees/xai/wt-a");
     std::fs::create_dir_all(&wt).unwrap();
+    mark_as_checkout(&wt, "wt-a");
     std::fs::write(wt.join("f.bin"), vec![b'x'; 4096]).unwrap();
     let dir_names = |path: &Path| -> Vec<String> {
         let mut names: Vec<String> = std::fs::read_dir(path)
@@ -280,6 +433,7 @@ fn corrupt_registry_degrades_to_untracked_rows() {
     let home = dunce::canonicalize(tmp.path()).unwrap().join("grok-home");
     let wt = home.join("worktrees/xai/wt-a");
     std::fs::create_dir_all(&wt).unwrap();
+    mark_as_checkout(&wt, "wt-a");
     std::fs::write(wt.join("f.bin"), vec![b'x'; 4096]).unwrap();
     std::fs::write(
         WorktreeDb::resolve_db_path(&home),

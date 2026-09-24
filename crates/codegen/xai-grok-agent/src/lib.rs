@@ -1,7 +1,12 @@
+#![allow(clippy::cast_possible_truncation)] // 3 hits predate the gate
+#![allow(clippy::expect_used)] // 9 hits predate the gate
+#![allow(clippy::unwrap_used)] // 5 hits predate the gate
+
 //! Agent builder, definition parsing, and system prompt assembly.
 //!
 //! An `Agent` bundles tools, system prompt, system-reminder policy, compaction policy, and model configuration into one object any host can consume.
 
+#![allow(clippy::cast_possible_wrap)]
 #![deny(clippy::indexing_slicing)]
 
 pub mod agent;

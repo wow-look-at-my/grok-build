@@ -1,3 +1,6 @@
+#![allow(clippy::expect_used)] // 2 hits predate the gate
+#![allow(clippy::unwrap_used)] // 1 hit predates the gate
+
 //! CLI tool for code graph navigation.
 //!
 //! Provides go-to-definition and go-to-references functionality.

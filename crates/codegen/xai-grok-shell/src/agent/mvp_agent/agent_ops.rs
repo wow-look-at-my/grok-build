@@ -212,8 +212,7 @@ impl MvpAgent {
         Ok((client, model))
     }
     fn has_proxy_credentials(&self) -> bool {
-        self.cfg.borrow().endpoints.deployment_key.is_some()
-            || self.auth_manager.current_or_expired().is_some_and(|a| a.is_xai_auth())
+        self.auth_manager.current_or_expired().is_some_and(|a| a.is_xai_auth())
     }
     /// `true` for session-based ACP auth methods.
     fn is_session_based_auth(&self) -> bool {
@@ -658,12 +657,9 @@ impl MvpAgent {
             );
         }
     }
-    /// Returns `(base_url, user_token, optional_extra_access_key, deployment_key)`.
+    /// Returns `(base_url, user_token, optional_extra_access_key)`.
     /// Used by both [`feedback_client`] and session spawning.
-    #[allow(clippy::type_complexity)]
-    fn feedback_credentials(
-        &self,
-    ) -> Option<(String, Option<String>, Option<String>, Option<String>)> {
+    fn feedback_credentials(&self) -> Option<(String, Option<String>, Option<String>)> {
         if !self.has_proxy_credentials() {
             return None;
         }
@@ -675,8 +671,7 @@ impl MvpAgent {
         let cfg = self.cfg.borrow();
         let base_url = cfg.endpoints.resolve_feedback_base_url();
         let alpha_test_key = cfg.endpoints.alpha_test_key.clone();
-        let deployment_key = cfg.endpoints.deployment_key.clone();
-        Some((base_url, user_token, alpha_test_key, deployment_key))
+        Some((base_url, user_token, alpha_test_key))
     }
     pub(super) fn ensure_telemetry_client(&self) {
         xai_grok_login::credential_provider::sync_external_otel_identity();
@@ -708,7 +703,6 @@ impl MvpAgent {
                 mode,
                 user_id,
                 team_id,
-                cfg.endpoints.deployment_key.clone(),
                 self.origin_client_info_from_meta(None),
                 xai_grok_version::version().to_owned(),
                 subscription_tier,
@@ -717,12 +711,10 @@ impl MvpAgent {
         }
     }
     pub(crate) fn feedback_client(&self) -> Option<FeedbackClient> {
-        let (base_url, user_token, alpha_test_key, deployment_key) = self
-            .feedback_credentials()?;
+        let (base_url, user_token, alpha_test_key) = self.feedback_credentials()?;
         Some(
             FeedbackClient::new(base_url, user_token)
                 .with_alpha_test_key(alpha_test_key)
-                .with_deployment_key(deployment_key)
                 .with_auth_manager(self.auth_manager.clone()),
         )
     }
@@ -748,7 +740,6 @@ impl MvpAgent {
         Some(crate::session::RegistryConfig {
             base_url: cfg.endpoints.proxy_url(),
             user_token: key,
-            deployment_key: cfg.endpoints.deployment_key.clone(),
             alpha_test_key: cfg.endpoints.alpha_test_key.clone(),
         })
     }
@@ -762,7 +753,6 @@ impl MvpAgent {
                     cfg.base_url,
                     cfg.user_token,
                 )
-                .with_deployment_key(cfg.deployment_key)
                 .with_alpha_test_key(cfg.alpha_test_key)
                 .with_auth(self.auth_manager.clone()),
         )
@@ -1569,9 +1559,6 @@ impl MvpAgent {
             )
             .await
     }
-    pub(crate) fn deployment_key(&self) -> Option<String> {
-        self.cfg.borrow().endpoints.deployment_key.clone()
-    }
     /// Apply settings side effects and push `x.ai/settings/update` to clients.
     /// Shared tail for every settings-arrival site.
     pub(super) fn on_remote_settings_changed(&self) {
@@ -1775,7 +1762,6 @@ impl MvpAgent {
             telemetry_mode,
             grok_user_id,
             grok_team_id,
-            deployment_key,
             subscription_tier,
         ) = {
             let cfg = self.cfg.borrow();
@@ -1792,7 +1778,6 @@ impl MvpAgent {
             let grok_user_id = is_xai.then(|| user_id.clone());
             let grok_team_id = is_xai.then(|| team_id.clone()).flatten();
             let telemetry_config = cfg.telemetry.clone();
-            let deployment_key = cfg.endpoints.deployment_key.clone();
             let subscription_tier_display = cfg
                 .remote_settings
                 .as_ref()
@@ -1802,7 +1787,6 @@ impl MvpAgent {
                 telemetry_mode.value,
                 grok_user_id,
                 grok_team_id,
-                deployment_key,
                 subscription_tier_display,
             )
         };
@@ -1815,7 +1799,6 @@ impl MvpAgent {
             telemetry_mode,
             grok_user_id,
             grok_team_id,
-            deployment_key,
             self.origin_client_info_from_meta(None),
             xai_grok_version::version().to_owned(),
             subscription_tier,
@@ -2200,9 +2183,6 @@ impl MvpAgent {
         let cfg = self.cfg.borrow();
         let alpha_test_key = cfg.endpoints.alpha_test_key.clone();
         let client_version = cfg.client_version.clone();
-        let deployment_id = crate::managed_config::resolve_deployment_id(
-            cfg.endpoints.deployment_key.as_deref(),
-        );
         drop(cfg);
         let user_id = self
             .auth_manager
@@ -2224,7 +2204,6 @@ impl MvpAgent {
             credentials,
             alpha_test_key,
             client_version,
-            deployment_id,
             user_id,
         );
         config.origin_client = origin_client;
@@ -2604,9 +2583,6 @@ impl MvpAgent {
         xai_grok_login::credential_provider::wire_otel_auth_manager(
             instance.auth_manager.clone(),
         );
-        if let Some(ref dk) = instance.cfg.borrow().endpoints.deployment_key {
-            xai_grok_login::credential_provider::wire_otel_deployment_key(dk.clone());
-        }
         instance
     }
     /// Client disconnect: keep working sessions resident, idle-unload the rest (never destroy).
@@ -3213,14 +3189,11 @@ impl MvpAgent {
             return None;
         }
         let cfg = self.cfg.borrow();
-        let auth_token = if cfg.endpoints.deployment_key.is_none() {
-            self.auth_manager
-                .current_or_expired()
-                .filter(|auth| auth.is_xai_auth())
-                .map(|auth| auth.key)
-        } else {
-            None
-        };
+        let auth_token = self
+            .auth_manager
+            .current_or_expired()
+            .filter(|auth| auth.is_xai_auth())
+            .map(|auth| auth.key);
         cfg.endpoints.resolve_upload_method(auth_token)
     }
     pub(super) fn diagnostic_upload_config(
@@ -3232,7 +3205,6 @@ impl MvpAgent {
             return None;
         }
         let proxy_base_url = cfg.endpoints.resolve_trace_upload_url();
-        let deployment_key = cfg.endpoints.deployment_key.clone();
         let alpha_test_key = cfg.endpoints.alpha_test_key.clone();
         let auth_manager = self.auth_manager.clone();
         let trace_upload_live = self.trace_upload_live.clone();
@@ -3243,7 +3215,6 @@ impl MvpAgent {
                 user_id: String|
             {
                 let proxy_base_url = proxy_base_url.clone();
-                let deployment_key = deployment_key.clone();
                 let alpha_test_key = alpha_test_key.clone();
                 let auth_manager = auth_manager.clone();
                 let trace_upload_live = trace_upload_live.clone();
@@ -3259,7 +3230,6 @@ impl MvpAgent {
                     let upload_method = crate::session::repo_changes::UploadMethod::Proxy {
                         proxy_base_url,
                         user_token: auth_token,
-                        deployment_key,
                         alpha_test_key,
                     };
                     crate::upload::gcs::upload_to_auth_diagnostics(
@@ -3293,32 +3263,25 @@ impl MvpAgent {
         {
             self.refresh_remote_settings(&auth).await;
         }
-        let (direct_method, has_deployment_key, endpoints) = {
+        let (direct_method, endpoints) = {
             let cfg = self.cfg.borrow();
             if !cfg.is_trace_upload_enabled() {
                 return (None, TraceUploadReason::FeatureOff);
             }
-            (
-                cfg.endpoints.resolve_direct_upload_method(),
-                cfg.endpoints.deployment_key.is_some(),
-                cfg.endpoints.clone(),
-            )
+            (cfg.endpoints.resolve_direct_upload_method(), cfg.endpoints.clone())
         };
         let service_account_key = crate::util::config::load_gcs_service_account_key_sync();
         let method = if let Some(method) = direct_method {
             Some(method)
         } else {
-            let auth_token = if has_deployment_key {
-                None
-            } else {
-                self.auth_manager
-                        .auth()
-                        .await
-                        .ok()
-                        .filter(|auth| auth.is_xai_auth())
-                        .map(|auth| auth.key)
-            };
-            if auth_token.is_some() || has_deployment_key {
+            let auth_token = self
+                .auth_manager
+                .auth()
+                .await
+                .ok()
+                .filter(|auth| auth.is_xai_auth())
+                .map(|auth| auth.key);
+            if auth_token.is_some() {
                 endpoints.resolve_upload_method(auth_token)
             } else if service_account_key.is_some() {
                 Some(crate::session::repo_changes::UploadMethod::Direct {
@@ -3666,8 +3629,7 @@ impl MvpAgent {
         if Self::has_custom_trace_destination(&cfg) {
             return false;
         }
-        cfg.endpoints.deployment_key.is_none()
-            && self.auth_manager.current_or_expired().is_some_and(|a| a.is_xai_auth())
+        self.auth_manager.current_or_expired().is_some_and(|a| a.is_xai_auth())
     }
     /// Trace upload being off as *policy* (an MDM/requirements pin or a telemetry-disabled posture) must suppress the card. It must not invite the user to override the policy.
     /// The accepted consent persists at the config tier, which those postures cannot outrank. Trace upload being off via the remote `trace_upload_enabled` default is different: that is the card's audience.
@@ -3683,7 +3645,7 @@ impl MvpAgent {
     }
     /// Upload method for a user-consented feedback trace archive. Blocks ZDR and custom destinations. Deliberately ignores the live `trace_upload` flag and the cached coding-data opt-out.
     /// The consent just granted may not have reached either cache yet. Fails closed on unknown privacy state.
-    /// With no credential (and no deployment key) the ZDR / team predicates can't be evaluated, so nothing may leave the machine.
+    /// With no credential the ZDR / team predicates can't be evaluated, so nothing may leave the machine.
     pub(crate) async fn one_shot_feedback_gcs_config(
         &self,
         gcs_prefix: String,
@@ -3697,9 +3659,6 @@ impl MvpAgent {
         }
         {
             let cfg = self.cfg.borrow();
-            if cfg.endpoints.deployment_key.is_some() {
-                return None;
-            }
             if !Self::trace_upload_posture_allows_offer(&cfg) {
                 return None;
             }
@@ -3966,8 +3925,8 @@ impl MvpAgent {
             auth_manager: self.auth_manager.clone(),
         })
     }
-    /// Resolve the agent definition for a session. Priority (highest to lowest): Model `agent_type` if it names a strict harness (codex, …). `acp_agent_profile` from ACP `_meta.agentProfile` (remote clients).
-    /// `agent_profile_path` from CLI `--agent-profile`. `agent_config` from config.toml `[agent]`. `GROK_AGENT` env var. Built-in default agent. `GROK_AGENT` and an explicit `[agent] name` bypass step 1.
+    /// Resolve the agent definition for a session. Priority (highest to lowest): Model `agent_type` if it names a strict harness. `acp_agent_profile` from ACP `_meta.agentProfile` (remote clients).
+    /// `agent_profile_path` from CLI `--agent-profile`. `agent_config` from config.toml `[agent]`. `GROK_AGENT` env var. Built-in default agent. `GROK_AGENT` and an explicit `[agent] name` bypass the strict-harness step.
     /// Strict-harness classification is structural; see [`xai_grok_agent::config::is_strict_harness_agent_type`]. Harness inheritance for a profile that pins its own model is applied by the caller via [`inherited_harness_template`], not here.
     pub fn resolve_agent_definition(
         cwd: &std::path::Path,
@@ -4492,16 +4451,12 @@ impl MvpAgent {
         let auto_update = self.cfg.borrow().cli.auto_update;
         let client_type = *self.client_type.borrow();
         let buffering_settings = self.buffering_settings.borrow().clone();
-        let (
-            feedback_proxy_url,
-            feedback_user_token,
-            feedback_alpha_test_key,
-            deployment_key,
-        ) = if let Some((url, token, alpha, deploy)) = self.feedback_credentials() {
-            (Some(url), token, alpha, deploy)
-        } else {
-            (None, None, None, None)
-        };
+        let (feedback_proxy_url, feedback_user_token, feedback_alpha_test_key) =
+            if let Some((url, token, alpha)) = self.feedback_credentials() {
+                (Some(url), token, alpha)
+            } else {
+                (None, None, None)
+            };
         tracing::info!(
             session_id = %session_info.id.0,
             feedback_url = ?feedback_proxy_url,
@@ -4964,7 +4919,6 @@ impl MvpAgent {
                     feedback_proxy_url,
                     feedback_user_token,
                     feedback_alpha_test_key,
-                    deployment_key,
                     client_terminal,
                     client_fs_read && client_fs_write,
                     gateway_enabled,

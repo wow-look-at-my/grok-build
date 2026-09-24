@@ -1,3 +1,9 @@
+#![allow(clippy::cast_possible_truncation)] // 13 hits predate the gate
+#![allow(clippy::cast_possible_wrap)] // 4 hits predate the gate
+#![allow(clippy::cast_precision_loss)] // 12 hits predate the gate
+#![allow(clippy::cast_sign_loss)] // 2 hits predate the gate
+#![allow(clippy::expect_used)] // 15 hits predate the gate
+
 //! Unified PTY harness for xai-grok-pager.
 //!
 //! The same layered API serves three consumers:

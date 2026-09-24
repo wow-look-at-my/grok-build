@@ -106,7 +106,9 @@ fn open_tool_loop_lost_its_thinking(req: &ConversationRequest, plan: &ThinkingRe
     }
     let Some(open) = open else { return false };
 
-    req.items[..open]
+    req.items
+        .get(..open)
+        .unwrap_or(&[])
         .iter()
         .enumerate()
         .rev()

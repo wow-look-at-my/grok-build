@@ -256,6 +256,7 @@ mod imp {
         }
         let uptime = std::fs::read_to_string("/proc/uptime").ok()?;
         let boot_secs: f64 = uptime.split_whitespace().next()?.parse().ok()?;
+        #[allow(clippy::cast_precision_loss)]
         let age_secs = boot_secs - start_ticks as f64 / ticks_per_sec as f64;
         std::time::SystemTime::now()
             .checked_sub(std::time::Duration::try_from_secs_f64(age_secs).ok()?)
