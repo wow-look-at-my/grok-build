@@ -662,6 +662,28 @@ fn session_failed_keeps_agent_clears_loading_and_toasts() {
         Some("Session creation failed: No space left on device"),
     );
 }
+/// Typing on the welcome screen starts a session, and the text moves onto
+/// that session. When the session fails, the text must come back.
+#[test]
+fn session_failed_orphan_gives_the_typed_text_back_to_the_welcome_prompt() {
+    let mut app = test_app_with_agent();
+    let id = AgentId(0);
+    {
+        let a = app.agents.get_mut(&id).unwrap();
+        a.session.session_id = None;
+        a.session.forked_from = None;
+        a.prompt.set_text("keep this text");
+    }
+    dispatch(
+        Action::TaskComplete(TaskResult::SessionFailed {
+            agent_id: id,
+            error: "endpoint refused".to_string(),
+        }),
+        &mut app,
+    );
+    assert!(matches!(app.active_view, ActiveView::Welcome));
+    assert_eq!(app.welcome_prompt.text(), "keep this text");
+}
 #[test]
 fn session_failed_orphan_returns_to_welcome_with_warning() {
     let mut app = test_app_with_agent();

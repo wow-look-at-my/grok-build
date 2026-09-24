@@ -1299,6 +1299,16 @@ pub(in crate::app::dispatch) fn handle_session_failed(
     if is_orphan {
         let failed_was_active = matches!(app.active_view, ActiveView::Agent(id) if id == agent_id);
         let fallback = app.agents.keys().copied().find(|id| *id != agent_id);
+        // What the user typed lives on the failed agent. Removing the agent
+        // must not throw it away.
+        let draft = app
+            .agents
+            .get(&agent_id)
+            .map(|a| match a.prompt.text() {
+                text if !text.trim().is_empty() => text.to_owned(),
+                _ => a.pending_first_prompt.clone().unwrap_or_default(),
+            })
+            .unwrap_or_default();
         remove_agent_and_cleanup(app, agent_id);
         if let Some(target) = fallback {
             if failed_was_active {
@@ -1320,6 +1330,9 @@ pub(in crate::app::dispatch) fn handle_session_failed(
             app.session_picker_content_loading = false;
             restore_dashboard_attach_after_orphan_remove(app, agent_id, None);
             push_session_create_failure_warning(app, &msg);
+            if !draft.is_empty() && app.welcome_prompt.text().is_empty() {
+                app.welcome_prompt.set_text(&draft);
+            }
         }
     } else if let Some(agent) = app.agents.get_mut(&agent_id) {
         agent.pending_extensions_fetch = false;

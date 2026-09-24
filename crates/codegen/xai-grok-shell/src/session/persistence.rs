@@ -2672,7 +2672,7 @@ const WORKTREE_TOUCH_INTERVAL: std::time::Duration = std::time::Duration::from_s
 pub(crate) async fn new(
     info: &Info,
     model_id: acp::ModelId,
-    sampling_client: OaiCompatClient,
+    sampling_client: Option<OaiCompatClient>,
     storage_mode: StorageMode,
     auth_manager: Option<Arc<crate::auth::AuthManager>>,
     relay_sync: Option<crate::relay::RelaySync>,
@@ -2777,7 +2777,7 @@ pub(crate) async fn new_with_explicit_dir(
             relay_sync: None,
             summary: crate::session::summary::SummaryGenerator::new(
                 crate::session::summary::SummaryConfig {
-                    sampling_client,
+                    sampling_client: Some(sampling_client),
                     model: session_summary_model,
                     persistence_tx: summary_tx,
                 },
@@ -2841,7 +2841,7 @@ async fn pull_on_miss(
 #[expect(dead_code, reason = "wired when session restore flow calls load")]
 pub(crate) async fn load(
     info: &Info,
-    sampling_client: OaiCompatClient,
+    sampling_client: Option<OaiCompatClient>,
     storage_mode: StorageMode,
     auth_manager: Option<Arc<crate::auth::AuthManager>>,
     backend: Option<&crate::remote::BackendClient>,
@@ -2919,7 +2919,7 @@ pub(crate) async fn load(
 /// Use this for memory-efficient session loading when replaying updates.
 pub(crate) async fn load_light(
     info: &Info,
-    sampling_client: OaiCompatClient,
+    sampling_client: Option<OaiCompatClient>,
     storage_mode: StorageMode,
     auth_manager: Option<Arc<crate::auth::AuthManager>>,
     backend: Option<&crate::remote::BackendClient>,

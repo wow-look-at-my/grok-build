@@ -287,7 +287,7 @@ fn parse_model_override_table(
 
     // Unknown-field warnings come from whichever parse produces the returned
     // entry, so both paths report them identically.
-    let (entry, mut warnings) = match deserialize_with_unknown_fields(table.clone()) {
+    let (mut entry, mut warnings) = match deserialize_with_unknown_fields(table.clone()) {
         Ok((entry, unknown)) => {
             warnings.extend(unknown_field_warnings(model_key, unknown));
             (entry, warnings)
@@ -316,6 +316,18 @@ fn parse_model_override_table(
             }
         }
     };
+    // A configured model has a single URL, `base_url`. `api_base_url` is an
+    // older spelling of it.
+    match (entry.base_url.is_some(), entry.api_base_url.take()) {
+        (false, url) => entry.base_url = url,
+        (true, Some(_)) => warnings.push(ConfigWarning::model(
+            model_key,
+            Some("api_base_url"),
+            ConfigWarningKind::DuplicateAlias,
+            "api_base_url is ignored: base_url is set, and a model has one URL".to_owned(),
+        )),
+        (true, None) => {}
+    }
 
     if entry.auth_provider.is_some() {
         // A non-empty `api_key` always shadows; an `env_key` only shadows when
@@ -756,7 +768,8 @@ mod tests {
             env_key: Some(crate::agent::config::EnvKeys::single("ENV_KEY")),
             auth_provider: Some("corp-gateway".into()),
             model_provider: Some("gateway".into()),
-            api_base_url: Some("https://api.example.com".into()),
+            // A parsed model has a single URL, so a set `api_base_url` cannot round-trip.
+            api_base_url: None,
             max_completion_tokens: Some(1024),
             temperature: Some(0.5),
             top_p: Some(0.9),
@@ -829,6 +842,39 @@ mod tests {
         assert_eq!(warnings.len(), 1);
         let reparsed = toml::Value::try_from(models.get("m").unwrap()).unwrap();
         assert_eq!(reparsed, serialized, "round-trip must be lossless");
+    }
+
+    #[test]
+    fn api_base_url_folds_into_base_url_and_warns_when_both_are_set() {
+        let mut entry = toml::map::Map::new();
+        entry.insert(
+            "api_base_url".to_owned(),
+            toml::Value::String("http://localhost:18080/v1".into()),
+        );
+        let (models, warnings) = parse_single_entry(entry);
+        assert_eq!(warnings, Vec::new());
+        let parsed = models.get("m").unwrap();
+        assert_eq!(
+            parsed.base_url.as_deref(),
+            Some("http://localhost:18080/v1")
+        );
+        assert_eq!(parsed.api_base_url, None);
+
+        let mut entry = toml::map::Map::new();
+        entry.insert(
+            "base_url".to_owned(),
+            toml::Value::String("https://a.example".into()),
+        );
+        entry.insert(
+            "api_base_url".to_owned(),
+            toml::Value::String("https://b.example".into()),
+        );
+        let (models, warnings) = parse_single_entry(entry);
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].kind, ConfigWarningKind::DuplicateAlias);
+        let parsed = models.get("m").unwrap();
+        assert_eq!(parsed.base_url.as_deref(), Some("https://a.example"));
+        assert_eq!(parsed.api_base_url, None);
     }
 
     /// `auth_provider` alongside `api_key`/`env_key` warns (static keys
