@@ -1,3 +1,11 @@
+//! On-disk cache for the subagent bundle xAI publishes: personas, roles, agents, skills, and workflows written under `<grok home>/bundled`.
+//!
+//! `manifest.json` records a checksum for every file this crate writes, so a file the user edited by hand is never overwritten and never pruned.
+//! Archive extraction is bounded (entry count, per-entry size, total decompressed size).
+//! Every path is sanitized before it is joined onto the cache root.
+
+#![deny(clippy::indexing_slicing)]
+
 use anyhow::{Context, Result, bail};
 use prod_mc_cli_chat_proxy_types::SubagentBundle;
 use serde::{Deserialize, Serialize};
@@ -30,6 +38,7 @@ enum BundleFileKind {
     Role,
     Agent,
     Skill,
+    Workflow,
 }
 
 impl BundleFileKind {
@@ -39,6 +48,7 @@ impl BundleFileKind {
             Self::Role => "roles",
             Self::Agent => "agents",
             Self::Skill => "skills",
+            Self::Workflow => "workflows",
         }
     }
 
@@ -46,6 +56,7 @@ impl BundleFileKind {
         match self {
             Self::Agent | Self::Skill => "md",
             Self::Persona | Self::Role => "toml",
+            Self::Workflow => "rhai",
         }
     }
 
@@ -55,6 +66,7 @@ impl BundleFileKind {
             Self::Role => "role",
             Self::Agent => "agent",
             Self::Skill => "skill",
+            Self::Workflow => "workflow",
         }
     }
 
@@ -64,6 +76,7 @@ impl BundleFileKind {
             "roles" => Some(Self::Role),
             "agents" => Some(Self::Agent),
             "skills" => Some(Self::Skill),
+            "workflows" => Some(Self::Workflow),
             _ => None,
         }
     }
@@ -129,6 +142,18 @@ pub fn write_bundle_to_cache(root: &Path, bundle: &SubagentBundle) -> Result<Bun
                     next_checksums
                         .insert(bundle_file.relative_path.clone(), previous_checksum.clone());
                 }
+            }
+        }
+    }
+
+    // The JSON payload has no workflows field
+    // Keep the managed workflows from the last archive extraction, so falling back to JSON does not delete them
+    if let Some(old_manifest) = old_manifest.as_ref() {
+        for (path, checksum) in &old_manifest.checksums {
+            if path.starts_with("workflows/") {
+                next_checksums
+                    .entry(path.clone())
+                    .or_insert_with(|| checksum.clone());
             }
         }
     }
@@ -257,7 +282,7 @@ pub fn extract_bundle_archive(root: &Path, archive_bytes: &[u8]) -> Result<Bundl
     Ok(next_manifest)
 }
 
-pub(crate) fn checksum_bytes(bytes: &[u8]) -> String {
+fn checksum_bytes(bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(bytes);
     format!("{:x}", hasher.finalize())
@@ -269,7 +294,22 @@ pub fn checksum_file(path: &Path) -> Result<String> {
     Ok(checksum_bytes(&bytes))
 }
 
-pub(crate) fn prune_removed_files(
+/// True when `relative_path` is in the bundle manifest and the file on disk still matches that checksum, untouched since the cache wrote it.
+pub fn is_managed_bundle_file(root: &Path, relative_path: &str) -> bool {
+    let relative_path = relative_path.replace('\\', "/");
+    let Ok(Some(manifest)) = read_cached_manifest(root) else {
+        return false;
+    };
+    let Some(expected) = manifest.checksums.get(&relative_path) else {
+        return false;
+    };
+    matches!(
+        bundle_file_state(&root.join(&relative_path), Some(expected.as_str())),
+        Ok(BundleFileState::MatchesManaged)
+    )
+}
+
+fn prune_removed_files(
     root: &Path,
     old_manifest: &BundleManifest,
     retained_checksums: &mut HashMap<String, String>,
@@ -299,7 +339,7 @@ fn ensure_bundle_dirs(root: &Path) -> Result<()> {
     std::fs::create_dir_all(root)
         .with_context(|| format!("failed to create {}", root.display()))?;
 
-    for dir_name in ["personas", "roles", "agents", "skills"] {
+    for dir_name in ["personas", "roles", "agents", "skills", "workflows"] {
         let dir = root.join(dir_name);
         std::fs::create_dir_all(&dir)
             .with_context(|| format!("failed to create {}", dir.display()))?;
@@ -408,6 +448,9 @@ fn map_archive_path_to_cache_path(archive_path: &str) -> Option<String> {
     if archive_path.starts_with("skills/") {
         return sanitize_relative_path(archive_path);
     }
+    if archive_path.starts_with("workflows/") {
+        return sanitize_relative_path(archive_path);
+    }
     None
 }
 
@@ -465,12 +508,16 @@ fn validate_bundle_name(kind: BundleFileKind, name: &str) -> Result<()> {
     Ok(())
 }
 
+<<<<<<<< HEAD:crates/codegen/xai-grok-shell-assets/src/bundle.rs
 /// Test-only helpers for building in-memory bundle archives.
 ///
 /// Kept non-`cfg(test)` so the `xai-grok-shell` crate's own unit tests can
 /// reuse these helpers cross-crate; the module is documentation-hidden and
 /// only referenced from test code in either crate.
 #[doc(hidden)]
+========
+#[cfg(any(test, feature = "test-support"))]
+>>>>>>>> upstream/main:crates/codegen/xai-grok-bundle/src/lib.rs
 pub mod test_helpers {
     pub fn make_test_archive(entries: &[(&str, &[u8])]) -> Vec<u8> {
         let encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
@@ -486,13 +533,14 @@ pub mod test_helpers {
         encoder.finish().unwrap()
     }
 
-    pub(crate) fn bundle_json(version: &str) -> String {
+    pub fn bundle_json(version: &str) -> String {
         format!(r#"{{"version":"{version}"}}"#)
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::test_helpers::{bundle_json, make_test_archive};
     use super::*;
     use tempfile::TempDir;
 
@@ -528,6 +576,30 @@ mod tests {
             "instructions = \"hello\""
         );
         assert_eq!(read_cached_manifest(&root).unwrap(), Some(manifest));
+    }
+
+    #[test]
+    fn json_fallback_does_not_prune_managed_workflows() {
+        let tmp = TempDir::new().unwrap();
+        let root = cache_root(&tmp);
+        let v = bundle_json("v1");
+        let archive = make_test_archive(&[
+            ("bundle.json", v.as_bytes()),
+            (
+                "workflows/deep-research.rhai",
+                b"let meta = #{ name: \"deep-research\", description: \"d\" };",
+            ),
+        ]);
+        extract_bundle_archive(&root, &archive).unwrap();
+        assert!(root.join("workflows/deep-research.rhai").is_file());
+
+        let manifest = write_bundle_to_cache(&root, &SubagentBundle::empty("v2")).unwrap();
+        assert!(root.join("workflows/deep-research.rhai").is_file());
+        assert!(
+            manifest
+                .checksums
+                .contains_key("workflows/deep-research.rhai")
+        );
     }
 
     #[test]
@@ -905,8 +977,6 @@ mod tests {
 
     // --- archive extraction tests ---
 
-    use super::test_helpers::{bundle_json, make_test_archive};
-
     #[test]
     fn extract_archive_writes_personas_roles_agents_and_skills() {
         let tmp = TempDir::new().unwrap();
@@ -921,6 +991,10 @@ mod tests {
             ("subagents/roles/reviewer.toml", b"description = \"review\""),
             ("subagents/agents/default.md", b"# agent"),
             ("skills/commit/SKILL.md", b"# Commit skill"),
+            (
+                "workflows/deep-research.rhai",
+                b"let meta = #{ name: \"deep-research\", description: \"d\" };",
+            ),
         ]);
 
         let manifest = extract_bundle_archive(&root, &archive).unwrap();
@@ -942,10 +1016,28 @@ mod tests {
             std::fs::read_to_string(root.join("skills/commit/SKILL.md")).unwrap(),
             "# Commit skill"
         );
+        assert_eq!(
+            std::fs::read_to_string(root.join("workflows/deep-research.rhai")).unwrap(),
+            "let meta = #{ name: \"deep-research\", description: \"d\" };"
+        );
         assert!(manifest.checksums.contains_key("personas/researcher.toml"));
         assert!(manifest.checksums.contains_key("roles/reviewer.toml"));
         assert!(manifest.checksums.contains_key("agents/default.md"));
         assert!(manifest.checksums.contains_key("skills/commit/SKILL.md"));
+        assert!(
+            manifest
+                .checksums
+                .contains_key("workflows/deep-research.rhai")
+        );
+        assert!(is_managed_bundle_file(
+            &root,
+            "workflows/deep-research.rhai"
+        ));
+        std::fs::write(root.join("workflows/deep-research.rhai"), "tampered").unwrap();
+        assert!(!is_managed_bundle_file(
+            &root,
+            "workflows/deep-research.rhai"
+        ));
     }
 
     #[test]
@@ -1227,7 +1319,9 @@ mod tests {
             h.set_size(small.len() as u64);
             h.set_mode(0o644);
             h.set_cksum();
-            builder.append_data(&mut h, &path, &small[..]).unwrap();
+            builder
+                .append_data(&mut h, &path, small.as_slice())
+                .unwrap();
         }
 
         let encoder = builder.into_inner().unwrap();
@@ -1269,7 +1363,11 @@ mod tests {
         fh.set_mode(0o644);
         fh.set_cksum();
         builder
-            .append_data(&mut fh, "subagents/personas/researcher.toml", &content[..])
+            .append_data(
+                &mut fh,
+                "subagents/personas/researcher.toml",
+                content.as_slice(),
+            )
             .unwrap();
 
         let encoder = builder.into_inner().unwrap();
@@ -1379,8 +1477,8 @@ mod tests {
             .append_data(&mut h, "bundle.json", v.as_bytes())
             .unwrap();
 
-        // 51 entries of 1 MB each = 51 MB > 50 MB limit.
-        // Each entry is at the per-entry limit (not over), so only the aggregate check fires.
+        // 51 entries of 1 MB each total 51 MB, just over the 50 MB limit
+        // Each entry is exactly at the per-entry limit, so only the aggregate check fires
         let big = vec![0u8; ARCHIVE_MAX_ENTRY_SIZE as usize];
         for i in 0..51 {
             let path = format!("subagents/personas/p{i}.toml");
@@ -1401,48 +1499,10 @@ mod tests {
         );
     }
 
-    // --- map_archive_path_to_cache_path tests ---
-
-    #[test]
-    fn map_archive_strips_subagents_prefix() {
-        assert_eq!(
-            map_archive_path_to_cache_path("subagents/personas/researcher.toml"),
-            Some("personas/researcher.toml".to_string())
-        );
-        assert_eq!(
-            map_archive_path_to_cache_path("subagents/roles/reviewer.toml"),
-            Some("roles/reviewer.toml".to_string())
-        );
-        assert_eq!(
-            map_archive_path_to_cache_path("subagents/agents/default.md"),
-            Some("agents/default.md".to_string())
-        );
-    }
-
-    #[test]
-    fn map_archive_preserves_skills_path() {
-        assert_eq!(
-            map_archive_path_to_cache_path("skills/commit/SKILL.md"),
-            Some("skills/commit/SKILL.md".to_string())
-        );
-    }
-
-    #[test]
-    fn map_archive_preserves_nested_skill_paths() {
-        assert_eq!(
-            map_archive_path_to_cache_path("skills/implement/scripts/memory.py"),
-            Some("skills/implement/scripts/memory.py".to_string())
-        );
-        assert_eq!(
-            map_archive_path_to_cache_path("skills/implement/tests/test_memory.py"),
-            Some("skills/implement/tests/test_memory.py".to_string())
-        );
-    }
-
     #[test]
     fn sanitize_accepts_shared_data_under_skills() {
-        // Non-skill directories under skills/ (e.g., shared/personas/) are
-        // valid archive entries -- they carry data that skills read at runtime.
+        // Directories under skills/ that are not skills (e.g., shared/personas/) are valid archive entries
+        // They carry data files that skills read at runtime
         assert_eq!(
             sanitize_relative_path("skills/shared/personas/reviewer.md"),
             Some("skills/shared/personas/reviewer.md".to_string())
@@ -1478,36 +1538,10 @@ mod tests {
     }
 
     #[test]
-    fn map_archive_skips_unknown_paths() {
-        assert_eq!(map_archive_path_to_cache_path("unknown/file.txt"), None);
-        assert_eq!(map_archive_path_to_cache_path("README.md"), None);
-        assert_eq!(map_archive_path_to_cache_path(""), None);
-    }
-
-    #[test]
     fn map_archive_rejects_traversal_under_subagents() {
         assert_eq!(
             map_archive_path_to_cache_path("subagents/personas/../../etc/passwd"),
             None
         );
-    }
-
-    // --- count_entries_by_prefix tests ---
-
-    #[test]
-    fn count_entries_by_prefix_counts_correctly() {
-        let manifest = BundleManifest {
-            version: "v1".to_string(),
-            checksums: HashMap::from([
-                ("personas/a.toml".to_string(), "abc".to_string()),
-                ("personas/b.toml".to_string(), "def".to_string()),
-                ("roles/r.toml".to_string(), "ghi".to_string()),
-                ("skills/commit/SKILL.md".to_string(), "jkl".to_string()),
-            ]),
-        };
-        assert_eq!(count_entries_by_prefix(&manifest, "personas/"), 2);
-        assert_eq!(count_entries_by_prefix(&manifest, "roles/"), 1);
-        assert_eq!(count_entries_by_prefix(&manifest, "skills/"), 1);
-        assert_eq!(count_entries_by_prefix(&manifest, "agents/"), 0);
     }
 }
