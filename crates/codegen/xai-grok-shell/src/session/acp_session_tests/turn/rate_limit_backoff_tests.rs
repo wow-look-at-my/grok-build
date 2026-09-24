@@ -441,7 +441,9 @@ async fn main_session_429_is_owned_by_the_sampler_never_the_pacer() {
                         Ok(_) => panic!("persistent 429 past the sampler budget must fail"),
                     }
                 }
-                let expected_requests = if expect_ok { enqueued + 1 } else { threshold };
+                let expected_requests =
+                    u32::try_from(if expect_ok { enqueued + 1 } else { threshold })
+                        .expect("request count fits u32");
                 assert_eq!(
                     server.request_count(),
                     requests_before + expected_requests,
