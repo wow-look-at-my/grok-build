@@ -112,6 +112,22 @@ pub(crate) enum GapsUpdate<'a> {
     Preserve,
 }
 
+/// The goal-rules sentence that says what happens when the work looks done.
+pub(super) fn goal_completion_check_text(
+    mode: crate::session::goal_tracker::GoalMode,
+) -> &'static str {
+    match mode {
+        crate::session::goal_tracker::GoalMode::Full => {
+            "When the work appears complete it runs the adversarial verification panel \
+             itself and continues with any concrete gaps."
+        }
+        crate::session::goal_tracker::GoalMode::Lite => {
+            "When that check finds the work complete, the goal ends. Until then it sends \
+             you back with the reason the goal is not met yet."
+        }
+    }
+}
+
 impl SessionActor {
     async fn evaluate_goal_round(
         &self,
@@ -119,12 +135,16 @@ impl SessionActor {
         use crate::session::goal_evaluator::{
             bounded_goal_transcript, build_goal_evaluator_request, parse_goal_evaluator_verdict,
         };
-        let (objective, plan_file) = {
+        let (objective, mode, plan_file) = {
             let tracker = self.goal_tracker.lock();
             let snapshot = tracker
                 .snapshot()
                 .ok_or_else(|| "goal state disappeared before evaluation".to_string())?;
-            (snapshot.objective.clone(), snapshot.plan_file.clone())
+            (
+                snapshot.objective.clone(),
+                snapshot.mode,
+                snapshot.plan_file.clone(),
+            )
         };
         let transcript = bounded_goal_transcript(&self.chat_state_handle.get_conversation().await);
         let plan = match plan_file {
@@ -154,6 +174,7 @@ impl SessionActor {
             };
             let request = build_goal_evaluator_request(
                 &objective,
+                mode,
                 &transcript,
                 plan.as_deref(),
                 active_model.clone(),
@@ -954,7 +975,19 @@ impl SessionActor {
         .with_todo(bridge.tool_for_kind(ToolKind::Plan).await)
     }
 
-    pub(super) async fn setup_goal(&self, objective: &str, token_budget: Option<i64>) -> String {
+    /// Whether the current goal gets a planner. A lite goal never does, so
+    /// every planner entry point and plan-path read goes through this.
+    pub(crate) fn goal_planner_on(&self) -> bool {
+        self.goal_planner_enabled
+            && self.goal_tracker.lock().mode() == crate::session::goal_tracker::GoalMode::Full
+    }
+
+    pub(super) async fn setup_goal(
+        &self,
+        objective: &str,
+        token_budget: Option<i64>,
+        mode: crate::session::goal_tracker::GoalMode,
+    ) -> String {
         let goal_id = uuid::Uuid::new_v4().to_string();
         let created_at = chrono::Utc::now().to_rfc3339();
         let token_baseline = self.chat_state_handle.get_total_tokens().await as i64;
@@ -974,6 +1007,7 @@ impl SessionActor {
             );
             if let Some(o) = tracker.snapshot_mut() {
                 o.start_prompt_index = Some(start_prompt_index);
+                o.mode = mode;
             }
         }
         self.goal_turn_task_ids.lock().clear();
@@ -993,41 +1027,55 @@ impl SessionActor {
             );
         }
 
-        self.maybe_run_goal_planner(objective).await;
+        if self.goal_planner_on() {
+            self.maybe_run_goal_planner(objective).await;
+        }
 
         let names = self.resolve_goal_tool_names().await;
-        let planner_enabled = self.goal_planner_enabled;
+        let planner_enabled = self.goal_planner_on();
         let body = {
             let tracker = self.goal_tracker.lock();
             let o = tracker
                 .snapshot()
                 .expect("create_goal must populate the orchestration snapshot");
-            let plan_path = goal_reminder_plan_path(planner_enabled, o);
-            let scratch_dir = crate::session::goal_tracker::implementer_scratch_dir(&o.verifier_id);
-            let scratch = scratch_dir.to_string_lossy();
-            if self.goal_runs_on_workflow_engine() {
-                render_goal_rules(
-                    objective,
-                    &names,
-                    "",
-                    "",
-                    plan_path,
-                    &scratch,
-                    o.scratch_dir_ready,
-                )
-            } else {
-                render_goal_rules_legacy(
-                    objective,
-                    &names,
-                    "",
-                    "",
-                    plan_path,
-                    &scratch,
-                    o.scratch_dir_ready,
-                )
-            }
+            self.render_goal_rules_for(o, &names, "", "", planner_enabled)
         };
         format!("<system-reminder>\n{body}\nStart now.\n</system-reminder>\n\n")
+    }
+
+    /// Render the goal rules for the active driver and the goal's mode.
+    fn render_goal_rules_for(
+        &self,
+        o: &crate::session::goal_tracker::GoalOrchestration,
+        names: &GoalToolNames,
+        block_recap: &str,
+        goal_state: &str,
+        planner_enabled: bool,
+    ) -> String {
+        let plan_path = goal_reminder_plan_path(planner_enabled, o);
+        let scratch_dir = crate::session::goal_tracker::implementer_scratch_dir(&o.verifier_id);
+        let scratch = scratch_dir.to_string_lossy();
+        if !self.goal_runs_on_workflow_engine() {
+            return render_goal_rules_legacy(
+                &o.objective,
+                names,
+                block_recap,
+                goal_state,
+                plan_path,
+                &scratch,
+                o.scratch_dir_ready,
+            );
+        }
+        render_goal_rules(
+            &o.objective,
+            names,
+            block_recap,
+            goal_state,
+            plan_path,
+            &scratch,
+            o.scratch_dir_ready,
+        )
+        .replace("{COMPLETION_CHECK}", goal_completion_check_text(o.mode))
     }
 
     pub(super) async fn resume_goal(&self) -> GoalResumeOutcome {
@@ -1105,7 +1153,7 @@ impl SessionActor {
         self.goal_blocked_streak
             .store(0, std::sync::atomic::Ordering::Relaxed);
 
-        if was_resumed {
+        if was_resumed && self.goal_planner_on() {
             let needs_retry = {
                 let tracker = self.goal_tracker.lock();
                 tracker
@@ -1168,7 +1216,7 @@ impl SessionActor {
             _ => String::new(),
         };
 
-        let planner_enabled = self.goal_planner_enabled;
+        let planner_enabled = self.goal_planner_on();
         let reminder = {
             let mut tracker = self.goal_tracker.lock();
             tracker.account_elapsed();
@@ -1179,31 +1227,13 @@ impl SessionActor {
                      {elapsed}\n</goal-state>\n\n",
                     tokens = tokens_used,
                 );
-                let plan_path = goal_reminder_plan_path(planner_enabled, o);
-                let scratch_dir =
-                    crate::session::goal_tracker::implementer_scratch_dir(&o.verifier_id);
-                let scratch = scratch_dir.to_string_lossy();
-                let body = if self.goal_runs_on_workflow_engine() {
-                    render_goal_rules(
-                        &o.objective,
-                        &names,
-                        &block_recap,
-                        &goal_state,
-                        plan_path,
-                        &scratch,
-                        o.scratch_dir_ready,
-                    )
-                } else {
-                    render_goal_rules_legacy(
-                        &o.objective,
-                        &names,
-                        &block_recap,
-                        &goal_state,
-                        plan_path,
-                        &scratch,
-                        o.scratch_dir_ready,
-                    )
-                };
+                let body = self.render_goal_rules_for(
+                    o,
+                    &names,
+                    &block_recap,
+                    &goal_state,
+                    planner_enabled,
+                );
                 format!("<system-reminder>\n{body}\nContinue working now.\n</system-reminder>")
             })
         };
@@ -1300,7 +1330,7 @@ impl SessionActor {
         let todo_tool = &names.todo;
         let goal_tool = names.goal.as_str();
 
-        let planner_enabled = self.goal_planner_enabled;
+        let planner_enabled = self.goal_planner_on();
         let (
             objective,
             elapsed,
@@ -1373,7 +1403,11 @@ impl SessionActor {
         } else {
             ""
         };
-        let reverify_block = if legacy {
+        // A lite goal runs no verification, so there is nothing to re-fire.
+        let lite = self.goal_tracker.lock().mode() == crate::session::goal_tracker::GoalMode::Lite;
+        let reverify_block = if lite {
+            String::new()
+        } else if legacy {
             render_goal_reverify_block_legacy(
                 rounds_since_verify,
                 refuted,
@@ -1469,6 +1503,7 @@ impl SessionActor {
         if self.enforce_goal_token_budget(current_tokens).await {
             return GoalRoundDecision::EndTurn;
         }
+        let lite = self.goal_tracker.lock().mode() == crate::session::goal_tracker::GoalMode::Lite;
         match verdict.decision {
             GoalEvaluatorDecision::Continue => {
                 {
@@ -1485,7 +1520,11 @@ impl SessionActor {
                     self.goal_notify_sender().persist_goal_state(&tracker);
                 }
                 self.record_goal_round_progress(&verdict.evidence, false);
-                self.verify_goal_candidate().await;
+                if lite {
+                    self.complete_lite_goal(&verdict.evidence).await;
+                } else {
+                    self.verify_goal_candidate().await;
+                }
             }
             GoalEvaluatorDecision::Blocked => {
                 self.record_goal_round_progress(&verdict.evidence, false);
@@ -1524,6 +1563,10 @@ impl SessionActor {
         let Some(mut plan) = self.prepare_goal_continuation(current_tokens).await else {
             return GoalRoundDecision::EndTurn;
         };
+        if lite {
+            plan.directive.push_str("\nWhy the goal is not met yet: ");
+            plan.directive.push_str(verdict.evidence.trim());
+        }
         plan.directive.push_str("\nEvaluator next step: ");
         plan.directive.push_str(verdict.next_step.trim());
         plan.directive.push('\n');
@@ -1534,6 +1577,67 @@ impl SessionActor {
             self.record_and_emit_premature_stop(pattern);
         }
         GoalRoundDecision::Continue(plan.directive)
+    }
+
+    /// End a lite goal on its evaluator's `candidate_complete`. No panel runs:
+    /// that verdict is the whole check.
+    async fn complete_lite_goal(&self, evidence: &str) {
+        let current_tokens = self.chat_state_handle.get_total_tokens().await as i64;
+        let (tokens_used, finished) = self.goal_tokens(current_tokens);
+        {
+            let mut tracker = self.goal_tracker.lock();
+            Self::record_verdict_on_orchestration(
+                &mut tracker,
+                crate::session::goal_tracker::GoalClassifierVerdict::Achieved,
+                None,
+                GapsUpdate::Clear,
+            );
+            tracker.complete();
+            self.goal_notify_sender()
+                .emit_goal_updated(&mut tracker, tokens_used, finished);
+        }
+        self.send_slash_command_output(&format!("Goal complete.\n{}", evidence.trim()))
+            .await;
+    }
+
+    /// Answer a lite goal's `update_goal(completed: true)` with a single
+    /// evaluator call. The goal completes only on `candidate_complete`.
+    async fn lite_completion_ack(
+        &self,
+    ) -> xai_grok_tools::implementations::grok_build::update_goal::UpdateGoalAck {
+        use crate::session::goal_evaluator::GoalEvaluatorDecision;
+        use xai_grok_tools::implementations::grok_build::update_goal::{
+            RejectReason, UpdateGoalAck,
+        };
+        if self.goal_tracker.lock().status()
+            != Some(crate::session::goal_tracker::GoalStatus::Active)
+        {
+            return UpdateGoalAck::Rejected {
+                reason: RejectReason::NonActive,
+                detail: "Goal is not Active; cannot mark complete".to_string(),
+            };
+        }
+        match self.evaluate_goal_round().await {
+            Ok(verdict) if verdict.decision == GoalEvaluatorDecision::CandidateComplete => {
+                self.complete_lite_goal(&verdict.evidence).await;
+                UpdateGoalAck::CompletedWithoutClassifier
+            }
+            Ok(verdict) => UpdateGoalAck::Rejected {
+                reason: RejectReason::LiteCheckNotMet,
+                detail: format!(
+                    "The completion check says the goal is not met yet: {}\nNext step: {}",
+                    verdict.evidence.trim(),
+                    verdict.next_step.trim()
+                ),
+            },
+            Err(error) => UpdateGoalAck::Rejected {
+                reason: RejectReason::LiteCheckNotMet,
+                detail: format!(
+                    "The completion check could not reach a verdict: {error}. The goal stays \
+                     open."
+                ),
+            },
+        }
     }
 
     pub(super) async fn inject_goal_continuation_message(&self, directive: String) {
@@ -1852,6 +1956,12 @@ impl SessionActor {
 
             self.goal_blocked_streak
                 .store(0, std::sync::atomic::Ordering::Relaxed);
+
+            if self.goal_tracker.lock().mode() == crate::session::goal_tracker::GoalMode::Lite {
+                let ack = self.lite_completion_ack().await;
+                try_send_ack(ack_tx, ack);
+                continue;
+            }
 
             let policy = self.resolve_goal_classifier_policy();
 
