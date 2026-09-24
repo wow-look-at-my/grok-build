@@ -396,10 +396,12 @@ impl ConfigModelOverride {
         merged.model_provider = None;
         merged.base_url = merged.base_url.or_else(|| base_url.clone());
         merged.api_base_url = merged.api_base_url.or_else(|| api_base_url.clone());
-        // A provider that names only api_base_url has a single URL. Without
-        // this the model keeps the cli-chat-proxy URL of the fallback entry.
+        // A provider has a single URL, `base_url`. `api_base_url` is an
+        // older spelling of it.
         if merged.base_url.is_none() {
-            merged.base_url = merged.api_base_url.clone();
+            merged.base_url = merged.api_base_url.take();
+        } else {
+            merged.api_base_url = None;
         }
         merged.api_backend = merged.api_backend.or_else(|| api_backend.clone());
         merged.context_window = merged.context_window.or(*context_window);

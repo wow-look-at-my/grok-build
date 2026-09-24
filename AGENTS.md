@@ -445,6 +445,7 @@ Every one of those is the test doing its job. Making them pass there means weake
 
 ## `[model_providers.<id>]` notes
 
+- A configured model or provider has one URL, `base_url`. `api_base_url` is folded into it at parse time (`parse_model_override_table`, `with_provider_defaults`). The two-URL split exists only for the built-in xAI models. There `api_base_url` is the direct API that the `XAI_API_KEY` path takes. A provider that set only `api_base_url` used to leave its models on the cli-chat-proxy URL.
 - A provider block carries every `[model.<id>]` field except the ones that name one model: `model`, `name`, `description`. `ModelProviderConfig` and `with_provider_defaults` (`agent/model_providers.rs`) destructure the whole struct, so a field added to one is a compile error until the merge handles it.
 - The merge runs before `ConfigModelOverride::apply`, on a clone with `model_provider` cleared (`resolve_model_list`). So a provider's value is indistinguishable from one the model wrote, and every later layer treats it the same.
 - `extra_headers`, `query_params` and `env_http_headers` inherit PER KEY. Wholesale inheritance cost a model its whole inherited header set the moment it added one header of its own. That is the duplication the block exists to remove. Header names compare case-insensitively, because they lower into an `http::HeaderMap` where one name is one header whatever its casing.

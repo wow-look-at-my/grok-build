@@ -287,7 +287,7 @@ fn parse_model_override_table(
 
     // Unknown-field warnings come from whichever parse produces the returned
     // entry, so both paths report them identically.
-    let (entry, mut warnings) = match deserialize_with_unknown_fields(table.clone()) {
+    let (mut entry, mut warnings) = match deserialize_with_unknown_fields(table.clone()) {
         Ok((entry, unknown)) => {
             warnings.extend(unknown_field_warnings(model_key, unknown));
             (entry, warnings)
@@ -316,6 +316,18 @@ fn parse_model_override_table(
             }
         }
     };
+    // A configured model has a single URL, `base_url`. `api_base_url` is an
+    // older spelling of it.
+    match (entry.base_url.is_some(), entry.api_base_url.take()) {
+        (false, url) => entry.base_url = url,
+        (true, Some(_)) => warnings.push(ConfigWarning::model(
+            model_key,
+            Some("api_base_url"),
+            ConfigWarningKind::DuplicateAlias,
+            "api_base_url is ignored: base_url is set, and a model has one URL".to_owned(),
+        )),
+        (true, None) => {}
+    }
 
     if entry.auth_provider.is_some() {
         // A non-empty `api_key` always shadows; an `env_key` only shadows when
