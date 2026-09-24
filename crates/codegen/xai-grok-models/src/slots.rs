@@ -174,6 +174,14 @@ pub const HARNESS_MODEL_SLOTS: &[ModelSlot] = &[
         fallback: SlotFallback::SessionModel,
     },
     ModelSlot {
+        id: "thinking_summary",
+        label: "Thinking summary model",
+        description: "Model that writes the one- or two-sentence summary under a long thinking block.",
+        env: "GROK_MODEL_THINKING_SUMMARY",
+        keywords: &["thinking", "reasoning", "thought", "summary", "model"],
+        fallback: SlotFallback::SessionModel,
+    },
+    ModelSlot {
         id: "side_note",
         label: "Side note model (/btw)",
         description: "Model that handles a `/btw` side note without interrupting the turn.",
@@ -263,6 +271,7 @@ pub fn slot_setting_keys() -> &'static [(&'static str, &'static str)] {
         ("compaction", "models.compaction"),
         ("recap", "models.recap"),
         ("turn_summary", "models.turn_summary"),
+        ("thinking_summary", "models.thinking_summary"),
         ("side_note", "models.side_note"),
         ("todo_capture", "models.todo_capture"),
         ("memory_flush", "models.memory_flush"),
