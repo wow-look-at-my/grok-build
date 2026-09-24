@@ -52,13 +52,12 @@ After a plan exists, run **`/view-plan`** (aliases `/show-plan`, `/plan-view`) t
 
 The plan is written to `plan.md` inside the session directory (`~/.grok/sessions/<cwd>/<session-id>/plan.md`, where `<cwd>` is an encoded directory name, not the literal path).
 
-The plan file contains:
+Plan mode is the interactive version of the `/goal` planner, and the plan uses the same sections:
 
-- A **Context** section explaining why the change is being made
-- The recommended approach (not every alternative)
-- The paths of critical files to modify
-- Existing functions and utilities to reuse, with their file paths
-- A verification section describing how to test the changes end to end
+- `# Plan:` with a single sentence
+- **Acceptance criteria**: the outcomes the work must reach
+- **Verification plan**: the commands to run, and what their output must show
+- **Non-goals**, **Assumed scope**, **Implementation approach** and a **Task checklist**
 
 ---
 
@@ -83,6 +82,12 @@ Scroll the plan with the arrow keys or `j`/`k`. The action bar shows these short
 Press `Tab` to move focus between the plan preview and the prompt.
 
 While the plan approval view is open, `Ctrl+P` (command palette → model) still works for switching model before you press `a` to approve.
+
+### Approval Starts a Goal
+
+When goal mode is enabled, approving the plan starts a `/goal` with the plan as its contract. The goal planner does not run, because you already reviewed the plan. From there the goal runs like any other: Grok keeps working across rounds, and independent reviewers check the finished work against the acceptance criteria. The verification plan. Use `/goal status`, `/goal pause` and `/goal clear` as usual.
+
+A goal that is already active stays in place: approving a plan does not replace it. Without goal mode, approval only leaves plan mode.
 
 ### Providing Feedback
 
