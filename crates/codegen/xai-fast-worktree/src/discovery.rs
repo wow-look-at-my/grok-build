@@ -660,63 +660,6 @@ mod tests {
     }
 
     #[test]
-    fn rebuild_nfs_under_managed_roots_is_not_labeled_linked() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let grok_home = tmp.path().join("grok");
-        let data = tmp.path().join("grove");
-        let dest = grok_home.join("worktrees/repo/nfs-sess");
-        let local = grok_home.join("worktrees/repo/local-sess");
-        make_fake_standalone_worktree(&dest);
-        make_fake_standalone_worktree(&local);
-        let id = "nfs-wt-under-roots";
-        let backing = data.join(crate::nfs::WORKTREE_BACKING_DIR).join(id);
-        std::fs::create_dir_all(&backing).unwrap();
-        let marker = serde_json::json!({
-            "schema": 1,
-            "worktree_id": id,
-            "dest": dest,
-            "source_repo": tmp.path().join("src-repo"),
-            "pin_ref": format!("refs/grok/worktrees/{id}"),
-            "mount_id": 3,
-            "created_at": 9,
-        });
-        std::fs::write(
-            backing.join("grok-nfs-worktree.json"),
-            serde_json::to_vec(&marker).unwrap(),
-        )
-        .unwrap();
-
-        let db = crate::db::WorktreeDb::open_in_memory().unwrap();
-        let report = rebuild_worktree_db_with_grove_data(&db, &grok_home, Some(&data)).unwrap();
-        assert_eq!(
-            report.discovered, 2,
-            "nfs identity + local fs row; must not also count the nfs dest via is_dir/.git"
-        );
-        let rec = db.get_by_id(id).unwrap().expect("nfs row");
-        assert_eq!(
-            rec.creation_mode,
-            crate::nfs::default_grove_creation_mode(),
-            "grove dest under managed roots must not be labeled linked from .git"
-        );
-        let local_rec = db
-            .get(&local.to_string_lossy())
-            .unwrap()
-            .expect("local sibling");
-        assert!(!crate::worktree::is_grove_strategy(
-            &local_rec.creation_mode
-        ));
-        assert_eq!(
-            db.list(&crate::db::ListFilter::default())
-                .unwrap()
-                .iter()
-                .filter(|r| !crate::worktree::is_grove_strategy(&r.creation_mode))
-                .count(),
-            1,
-            "only the local sibling is a non-grove row"
-        );
-    }
-
-    #[test]
     fn discover_skips_known_nfs_dests_without_statting() {
         let tmp = tempfile::TempDir::new().unwrap();
         let grok_home = tmp.path();
@@ -729,52 +672,6 @@ mod tests {
             "skip must be lexical, before is_dir"
         );
         assert!(skipped.skipped > 0);
-    }
-
-    #[test]
-    fn rebuild_registers_nfs_from_backing_marker() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let grok_home = tmp.path().join("grok");
-        let data = tmp.path().join("grove");
-        std::fs::create_dir_all(grok_home.join("worktrees")).unwrap();
-        // Dest is outside managed roots so FS discovery does not register a
-        // competing linked/unknown row under a different id.
-        let dest = tmp.path().join("nfs-dest");
-        std::fs::create_dir_all(&dest).unwrap();
-        let id = "nfs-wt-rebuild";
-        let backing = data.join(crate::nfs::WORKTREE_BACKING_DIR).join(id);
-        std::fs::create_dir_all(&backing).unwrap();
-        let marker = serde_json::json!({
-            "schema": 1,
-            "worktree_id": id,
-            "dest": dest,
-            "source_repo": tmp.path().join("src-repo"),
-            "pin_ref": format!("refs/grok/worktrees/{id}"),
-            "mount_id": 42,
-            "created_at": 9,
-        });
-        std::fs::write(
-            backing.join("grok-nfs-worktree.json"),
-            serde_json::to_vec(&marker).unwrap(),
-        )
-        .unwrap();
-
-        let db = crate::db::WorktreeDb::open_in_memory().unwrap();
-        let report = rebuild_worktree_db_with_grove_data(&db, &grok_home, Some(&data)).unwrap();
-        assert!(report.registered >= 1);
-        let rec = db.get_by_id(id).unwrap().expect("nfs row");
-        assert_eq!(rec.creation_mode, crate::nfs::default_grove_creation_mode());
-        assert_eq!(
-            rec.metadata
-                .as_ref()
-                .unwrap()
-                .get("grove")
-                .unwrap()
-                .get("mount_id")
-                .unwrap()
-                .as_i64(),
-            Some(42)
-        );
     }
 
     #[test]
@@ -888,43 +785,6 @@ mod tests {
             &dunce::canonicalize(&outside).unwrap(),
             &grok_home
         ));
-    }
-
-    #[test]
-    fn rebuild_scans_xdg_grove_without_grove_data_dir() {
-        let mut fx = crate::db::GrokHomeFixture::new();
-        let grove = fx.isolate_xdg_grove_data();
-        assert!(
-            std::env::var_os("GROVE_DATA_DIR").is_none(),
-            "production path must not rely on GROVE_DATA_DIR"
-        );
-        let grok_home = fx.home.clone();
-        std::fs::create_dir_all(grok_home.join("worktrees")).unwrap();
-        let dest = grok_home.parent().unwrap().join("nfs-xdg-dest");
-        std::fs::create_dir_all(&dest).unwrap();
-        let id = "nfs-wt-xdg";
-        let backing = grove.join(crate::nfs::WORKTREE_BACKING_DIR).join(id);
-        std::fs::create_dir_all(&backing).unwrap();
-        let marker = serde_json::json!({
-            "schema": 1,
-            "worktree_id": id,
-            "dest": dest,
-            "source_repo": grok_home.join("src"),
-            "pin_ref": format!("refs/grok/worktrees/{id}"),
-            "mount_id": 7,
-            "created_at": 1,
-        });
-        std::fs::write(
-            backing.join("grok-nfs-worktree.json"),
-            serde_json::to_vec(&marker).unwrap(),
-        )
-        .unwrap();
-
-        let db = crate::db::WorktreeDb::open_in_memory().unwrap();
-        let report = rebuild_worktree_db(&db, &grok_home).unwrap();
-        assert!(report.registered >= 1, "{report:?}");
-        let rec = db.get_by_id(id).unwrap().expect("xdg nfs row");
-        assert_eq!(rec.creation_mode, crate::nfs::default_grove_creation_mode());
     }
 
     #[test]

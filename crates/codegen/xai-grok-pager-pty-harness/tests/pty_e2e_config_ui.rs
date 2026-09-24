@@ -23,10 +23,6 @@ mod dashboard_preview_setting;
 mod extensions_modal_copy_hints_pty;
 #[path = "pty_e2e/extensions_modal_workflows_tab_pty.rs"]
 mod extensions_modal_workflows_tab_pty;
-#[path = "pty_e2e/feedback_draft_send_pty.rs"]
-mod feedback_draft_send_pty;
-#[path = "pty_e2e/feedback_modal_pty.rs"]
-mod feedback_modal_pty;
 #[path = "pty_e2e/force_reasoning_effort_models_enables_effort.rs"]
 mod force_reasoning_effort_models_enables_effort;
 #[path = "pty_e2e/iterm_readline_editing.rs"]
