@@ -3,20 +3,19 @@
 
 use xai_grok_shell::agent::config::FEATURES;
 
-const ENTERPRISE: &str = include_str!("../docs/internal/25-enterprise.md");
-const ENV_VARS: &str = include_str!("../docs/internal/22-environment-variables.md");
+const CONFIG_REFERENCE: &str = include_str!("../docs/user-guide/26-config-reference.md");
 
 #[test]
 fn every_registered_feature_reaches_the_operator() {
     for spec in FEATURES {
         assert!(
-            ENTERPRISE.contains(&format!("`{}`", spec.key)),
-            "{} has no row in the 25-enterprise.md pinning table",
+            CONFIG_REFERENCE.contains(&format!("`features.{}`", spec.key)),
+            "{} has no row in 26-config-reference.md",
             spec.key,
         );
         assert!(
-            ENV_VARS.contains(&format!("`{}`", spec.env)),
-            "{} is undocumented in 22-environment-variables.md",
+            CONFIG_REFERENCE.contains(&format!("`{}`", spec.env)),
+            "{} is undocumented in 26-config-reference.md",
             spec.env,
         );
     }
