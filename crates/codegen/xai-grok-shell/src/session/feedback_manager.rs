@@ -1591,7 +1591,6 @@ mod tests {
         );
     }
 
- uses the short worker-exit budget.
     #[tokio::test]
     async fn test_shutdown_empty_queue_uses_short_drain_budget() {
         use crate::session::repo_changes::{TraceExportConfig, UploadMethod};

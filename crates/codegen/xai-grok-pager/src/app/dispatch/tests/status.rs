@@ -1138,7 +1138,6 @@ fn superseded_opt_in_success_is_kept_when_later_opt_out_fails() {
     assert!(app.coding_data_pending_write.is_none());
 }
 
- is write 1, the user opts in before it lands, and write 2 answers first.
 /// Covered: write 2 succeeds and the stale write 1 reply (either kind) must not set the mirror or toast; both writes fail and
 /// write 2 must fall back to the opt-in it inherited from write 1, not to write 1's optimistic out.
 /// Not covered: write 2 fails, then write 1 succeeds — the pending write is already gone, so that success is dropped (deferred).
