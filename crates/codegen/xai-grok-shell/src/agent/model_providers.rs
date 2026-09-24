@@ -1086,10 +1086,7 @@ mod tests {
             model.info.api_backend,
             crate::sampling::ApiBackend::Responses
         );
-        assert_eq!(
-            model.base_url.as_deref(),
-            Some("https://gateway.example/v1")
-        );
+        assert_eq!(model.base_url, "https://gateway.example/v1");
         assert_eq!(model.api_base_url, None, "a provider model has one URL");
     }
 
