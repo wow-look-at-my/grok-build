@@ -4,7 +4,11 @@ use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct BranchStats {
+    pub ahead_behind: Option<(usize, usize)>,
+    pub base: Option<String>,
+    pub insertions: usize,
     pub deletions: usize,
 }
 
@@ -12,6 +16,7 @@ type CacheEntry = (Option<BranchStats>, Instant);
 static CACHE: LazyLock<Mutex<HashMap<PathBuf, CacheEntry>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
+const REFRESH_TTL: Duration = Duration::from_secs(5);
 const CACHE_CAP: usize = 64;
 
 /// Cached stats for `cwd`. Starts an off-thread refresh when the entry is
@@ -106,12 +111,8 @@ pub fn compute_branch_stats(cwd: &Path) -> Result<Option<BranchStats>, git2::Err
     Ok(Some(stats))
 }
 
-/// The branch HEAD was created from, as a full ref name and its tip.
-///
-/// The order is: the "Created from" entry in the branch's reflog.
-/// upstream that names a different branch, then the remote's default branch,
-/// then `main` or `master`.
-/// skipped, so `master` compares against `origin/master`.
+/// The branch HEAD was created from, as a full ref name and its tip. The
+/// current branch is never its own base.
 fn resolve_base(repo: &git2::Repository, head_ref: Option<&str>) -> Option<(String, git2::Oid)> {
     let usable = |name: &str| -> Option<(String, git2::Oid)> {
         if Some(name) == head_ref {
@@ -134,7 +135,7 @@ fn resolve_base(repo: &git2::Repository, head_ref: Option<&str>) -> Option<(Stri
             return Some(found);
         }
         if let Ok(upstream) = repo.branch_upstream_name(head_ref)
-            && let Some(upstream) = upstream.as_str()
+            && let Ok(upstream) = upstream.as_str()
             && !upstream_tracks_same_branch(upstream, head_ref)
             && let Some(found) = usable(upstream)
         {
