@@ -12,7 +12,6 @@ pub mod acp_command;
 pub mod command;
 pub mod commands;
 pub mod matcher;
-pub mod mode_support;
 pub mod mru;
 pub mod registry;
 
@@ -30,7 +29,6 @@ use registry::{CommandRegistry, CommandSource, CommandTrigger};
 pub use command::{
     AppCtx, ArgItem, CommandExecCtx, CommandProvenance, CommandResult, SlashCommand,
 };
-pub use mode_support::{ModeSupport, Remedy};
 
 /// Maximum number of visible rows in the dropdown (scroll beyond this).
 pub const MAX_VISIBLE_SUGGESTIONS: usize = 6;
@@ -309,12 +307,6 @@ pub struct SlashController {
     /// Whether `/usage` is offered. Default `true`; cleared for external auth.
     usage_command_visible: bool,
     workflows_available: bool,
-    /// Effective render mode of this process (immutable after startup — it only
-    /// changes via a full `/minimal`-`/fullscreen` re-exec). Injected via
-    /// [`Self::set_screen_mode`] wherever prompts are created; gates the
-    /// screen-mode-switcher commands' visibility through [`AppCtx`]. Defaults
-    /// to `Fullscreen` (the process default) for tests and unwired surfaces.
-    screen_mode: crate::app::ScreenMode,
     /// MRU/recency store. Owned by `AppView` in production and injected via
     /// [`Self::set_mru`] so agent prompts and the dashboard share one store;
     /// defaults to an isolated in-memory store (no disk I/O) for tests and any
@@ -352,7 +344,6 @@ impl SlashController {
             billing_surface_visible: true,
             usage_command_visible: true,
             workflows_available: false,
-            screen_mode: crate::app::ScreenMode::Fullscreen,
             mru,
             command_tags: std::rc::Rc::new(std::cell::RefCell::new(
                 std::collections::HashMap::new(),
@@ -409,15 +400,6 @@ impl SlashController {
         self.workflows_available
     }
 
-    /// Record the process's effective screen mode (see the field doc).
-    pub(crate) fn set_screen_mode(&mut self, mode: crate::app::ScreenMode) {
-        self.screen_mode = mode;
-    }
-
-    pub(crate) fn screen_mode(&self) -> crate::app::ScreenMode {
-        self.screen_mode
-    }
-
     pub(crate) fn app_ctx<'a>(&'a self, models: &'a ModelState) -> AppCtx<'a> {
         AppCtx {
             models,
@@ -426,7 +408,6 @@ impl SlashController {
             billing_surface_visible: self.billing_surface_visible,
             usage_command_visible: self.usage_command_visible,
             workflows_available: self.workflows_available,
-            screen_mode: self.screen_mode,
         }
     }
 
@@ -1191,15 +1172,6 @@ impl SlashController {
 /// offered ONLY when `hide_session_scoped` is set (the dashboard surface)
 /// and suppressed on every session surface.
 ///
-/// Commands are also filtered by the render mode they declare support for
-/// ([`SlashCommand::mode_support`]): a fullscreen-only command
-/// (`/find`, `/theme`, …) is not offered under `--minimal`, and a minimal-only
-/// command (`/expand`, `/edit-prompt`) is not offered in the full TUI. Note
-/// this gate is completion-only — [`registry::CommandRegistry::get_for_dispatch`]
-/// still resolves such a command so a fully-typed invocation reaches the
-/// central dispatch gate's [`ModeSupport::refusal`] instead of leaking to the
-/// model as a raw prompt.
-///
 /// Callers that execute slash commands on a session-less surface (e.g.
 /// `dispatch_dashboard_dispatch_slash`) must consult this before
 /// `command.run` so typed tokens that were filtered from the dropdown
@@ -1209,8 +1181,7 @@ pub(crate) fn command_offered(
     ctx: &AppCtx,
     hide_session_scoped: bool,
 ) -> bool {
-    command.mode_support().supports(ctx.screen_mode)
-        && command.visible(ctx)
+    command.visible(ctx)
         && !(hide_session_scoped
             && command.session_scoped()
             && !command.offered_when_session_less())
@@ -3295,65 +3266,28 @@ mod tests {
         );
     }
 
-    /// A command's `mode_support()` declaration is the whole story for
-    /// completion: a fullscreen-only command must not be offered under
-    /// `--minimal`, a minimal-only one must not be offered in the full TUI,
-    /// and `Inline` (`--no-alt-screen`) counts as the full TUI.
     #[test]
-    fn completion_offers_only_commands_that_support_the_mode() {
+    fn completion_offers_theme() {
         let models = ModelState::default();
-        let offered = |mode, query: &str| {
-            let mut ctrl = SlashController::with_builtins(std::path::PathBuf::from("."));
-            ctrl.set_screen_mode(mode);
-            let state = SlashState::default();
-            ctrl.refresh(&state, query, query.len(), &models);
+        let mut ctrl = SlashController::with_builtins(std::path::PathBuf::from("."));
+        let state = SlashState::default();
+        ctrl.refresh(&state, "/theme", "/theme".len(), &models);
+        assert!(
             state
                 .snapshot()
                 .matches
                 .iter()
-                .any(|row| row.display == query)
-        };
-
-        for full_tui in [
-            crate::app::ScreenMode::Fullscreen,
-            crate::app::ScreenMode::Inline,
-        ] {
-            assert!(offered(full_tui, "/theme"), "{full_tui:?}");
-            assert!(!offered(full_tui, "/expand"), "{full_tui:?}");
-        }
-
-        assert!(!offered(crate::app::ScreenMode::Minimal, "/theme"));
-        assert!(offered(crate::app::ScreenMode::Minimal, "/expand"));
+                .any(|row| row.display == "/theme")
+        );
     }
 
     #[test]
-    fn mid_text_arg_suggestions_respect_the_mode() {
+    fn mid_text_arg_suggestions_complete_theme() {
         let models = ModelState::default();
-        let arg_rows = |mode| {
-            let mut ctrl = SlashController::with_builtins(std::path::PathBuf::from("."));
-            ctrl.set_screen_mode(mode);
-            let state = SlashState::default();
-            let text = "look at this /theme ";
-            ctrl.refresh(&state, text, text.len(), &models);
-            state.snapshot().matches.len()
-        };
-
-        assert!(
-            arg_rows(crate::app::ScreenMode::Fullscreen) > 0,
-            "themes should complete where /theme runs"
-        );
-        assert_eq!(arg_rows(crate::app::ScreenMode::Minimal), 0);
-    }
-
-    /// Hidden from completion, still resolvable: dispatch must reach the
-    /// central gate's refusal rather than let `/theme` fall through to the
-    /// model as a raw prompt.
-    #[test]
-    fn mode_gated_commands_still_resolve_for_dispatch() {
-        let reg = test_registry();
-        assert_eq!(
-            reg.get_for_dispatch("theme").map(|cmd| cmd.name()),
-            Some("theme")
-        );
+        let mut ctrl = SlashController::with_builtins(std::path::PathBuf::from("."));
+        let state = SlashState::default();
+        let text = "look at this /theme ";
+        ctrl.refresh(&state, text, text.len(), &models);
+        assert!(!state.snapshot().matches.is_empty());
     }
 }

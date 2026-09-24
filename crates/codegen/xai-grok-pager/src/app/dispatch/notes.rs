@@ -26,17 +26,8 @@ pub(crate) const FEEDBACK_QUESTION_LABEL: &str = "How can we improve Grok Build?
 /// Shared by the pane guard and the send path so both say the same thing.
 const NO_SESSION_NOTICE: &str = "No active session";
 
-/// Minimal mode has no toast surface, so the notice goes to the transcript instead.
 fn feedback_notice(app: &mut AppView, message: &str) {
-    if app.screen_mode.is_minimal() {
-        with_active_agent(app, |agent| {
-            agent
-                .scrollback
-                .push_block(RenderBlock::system(message.to_string()));
-        });
-    } else {
-        app.show_toast(message);
-    }
+    app.show_toast(message);
 }
 
 /// Why the bare `/feedback` pane refuses to open, if anything blocks it.
@@ -352,46 +343,28 @@ pub(super) fn dispatch_send_btw(app: &mut AppView, question: String) -> Vec<Effe
     let ActiveView::Agent(id) = app.active_view else {
         return vec![];
     };
-    let minimal = app.screen_mode.is_minimal();
-    let (session_id, minimal_request_id) = {
+    let session_id = {
         let Some(agent) = app.agents.get_mut(&id) else {
             return vec![];
         };
         let Some(session_id) = agent.session.session_id.clone() else {
-            if minimal {
-                agent
-                    .scrollback
-                    .push_block(crate::scrollback::block::RenderBlock::system(
-                        "No active session",
-                    ));
-            } else {
-                agent.show_toast("No active session");
-            }
+            agent.show_toast("No active session");
             return vec![];
         };
 
         agent.prompt.set_text("");
-        let minimal_request_id = if minimal {
-            Some(crate::minimal_api::start_minimal_btw(
-                agent,
-                question.clone(),
-            ))
-        } else {
-            agent.btw_state = Some(crate::views::btw_overlay::BtwOverlayState::Loading {
-                question: question.clone(),
-            });
-            // Prompt keeps focus while the answer is in flight (panel focuses on Done).
-            agent.btw_focused = false;
-            None
-        };
-        (session_id, minimal_request_id)
+        agent.btw_state = Some(crate::views::btw_overlay::BtwOverlayState::Loading {
+            question: question.clone(),
+        });
+        // Prompt keeps focus while the answer is in flight (panel focuses on Done).
+        agent.btw_focused = false;
+        session_id
     };
 
     vec![Effect::SendBtw {
         agent_id: id,
         session_id,
         question,
-        minimal_request_id,
     }]
 }
 
@@ -482,20 +455,13 @@ pub(super) fn dispatch_send_todo(app: &mut AppView, request: String, urgent: boo
     let ActiveView::Agent(id) = app.active_view else {
         return vec![];
     };
-    let minimal = app.screen_mode.is_minimal();
     let capture_id = uuid::Uuid::new_v4().to_string();
     let session_id = {
         let Some(agent) = app.agents.get_mut(&id) else {
             return vec![];
         };
         let Some(session_id) = agent.session.session_id.clone() else {
-            if minimal {
-                agent
-                    .scrollback
-                    .push_block(RenderBlock::system(NO_SESSION_NOTICE));
-            } else {
-                agent.show_toast(NO_SESSION_NOTICE);
-            }
+            agent.show_toast(NO_SESSION_NOTICE);
             return vec![];
         };
         agent.prompt.set_text("");
@@ -683,14 +649,9 @@ pub(super) fn handle_btw_response(
     app: &mut AppView,
     agent_id: AgentId,
     result: Result<String, String>,
-    minimal_request_id: Option<uuid::Uuid>,
 ) -> Vec<Effect> {
     if let Some(agent) = app.agents.get_mut(&agent_id) {
         use crate::views::btw_overlay::BtwOverlayState;
-        if let Some(request_id) = minimal_request_id {
-            crate::minimal_api::finish_minimal_btw(agent, request_id, result);
-            return vec![];
-        }
         let question = match &agent.btw_state {
             Some(BtwOverlayState::Loading { question }) => question.clone(),
             _ => String::new(),

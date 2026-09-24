@@ -229,7 +229,6 @@ fn dispatch_load_session_ungated(
         app.usage_visible,
         !app.has_external_auth_provider,
         app.chat_mode,
-        app.screen_mode,
         &app.active_announcements,
         &app.tier_restricted_commands,
     );
@@ -991,7 +990,6 @@ pub(in crate::app::dispatch) fn dispatch_load_session_with_restore(
             app.usage_visible,
             !app.has_external_auth_provider,
             app.chat_mode,
-            app.screen_mode,
             &app.active_announcements,
             &app.tier_restricted_commands,
         );
@@ -1096,7 +1094,7 @@ pub(in crate::app::dispatch) fn handle_session_loaded(
                 sid,
                 &info.parent_sid,
                 info.worktree,
-                crate::views::dashboard::session_switch_hint_command(app.screen_mode.is_minimal()),
+                crate::views::dashboard::session_switch_hint_command(),
             );
             agent.scrollback.push_block(RenderBlock::system(banner));
         }

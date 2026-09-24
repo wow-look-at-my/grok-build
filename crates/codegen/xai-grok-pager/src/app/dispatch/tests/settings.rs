@@ -1658,9 +1658,6 @@ fn move_setting_away_from_default(app: &mut AppView, key: crate::settings::Setti
         "show_tips" => {
             let _ = dispatch(Action::SetShowTips(false), app);
         }
-        "auto_update" => {
-            let _ = dispatch(Action::SetAutoUpdate(false), app);
-        }
         "vim_mode" => {
             let _ = dispatch(Action::SetVimMode(true), app);
         }
@@ -1716,9 +1713,6 @@ fn move_setting_away_from_default(app: &mut AppView, key: crate::settings::Setti
         }
         "hunk_tracker_mode" => {
             let _ = dispatch(Action::SetHunkTrackerMode("all_dirty".to_string()), app);
-        }
-        "screen_mode" => {
-            let _ = dispatch(Action::SetScreenMode("minimal".to_string()), app);
         }
         "voice_keybind_enabled" => {
             let _ = dispatch(Action::SetVoiceKeybindEnabled(false), app);

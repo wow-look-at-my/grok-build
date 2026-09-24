@@ -905,18 +905,6 @@ impl AgentSession {
     pub fn is_auto(&self) -> bool {
         self.auto_mode
     }
-    /// Test-only setter for `yolo_mode` (the field is private; production toggles
-    /// it via the permission-mode facade). Available to sibling crates' test
-    /// builds through the test-only helpers.
-    #[cfg(any(test, feature = "test-support"))]
-    pub(crate) fn set_yolo_mode_for_test(&mut self, on: bool) {
-        self.yolo_mode = on;
-    }
-    /// Test-only setter for `auto_mode`. See [`Self::set_yolo_mode_for_test`].
-    #[cfg(any(test, feature = "test-support"))]
-    pub(crate) fn set_auto_mode_for_test(&mut self, on: bool) {
-        self.auto_mode = on;
-    }
     /// Process an ACP session update. Returns true if scrollback was modified.
     pub fn handle_update(
         &mut self,

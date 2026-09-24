@@ -2490,15 +2490,13 @@ async fn test_no_version_mismatch_notification_when_versions_match() {
 
 // ── Shutdown reason end-to-end ────────────────────────────────────────
 
-/// End-to-end test: a connected `LeaderClient` receives `ShuttingDown { reason: AutoUpdate }`
-/// and `LeaderClient::shutting_down_reason()` updates to `Some(AutoUpdate)`.
+/// End-to-end test: a connected `LeaderClient` receives `ShuttingDown { reason }`
+/// and `LeaderClient::shutting_down_reason()` updates to `Some(reason)`.
 ///
-/// This covers the full propagation path:
-///   shutdown_tx.send(AutoUpdate) → cancel → server cancel branch reads reason →
-///   broadcast_shutdown(AutoUpdate) → client read loop receives ShuttingDown →
-///   shutting_down_tx.send(Some(AutoUpdate)) → shutting_down_rx observes Some(AutoUpdate)
+/// The reason is `IdleTimeout` because it differs from the `Manual` default:
+/// only a reason the sender wrote proves the path carries it.
 #[tokio::test]
-async fn test_auto_update_shutdown_reason_reaches_client() {
+async fn test_shutdown_reason_reaches_client() {
     use xai_grok_shell::leader::{ClientCapabilities, ClientMode, LeaderClient, ShutdownReason};
 
     let temp = TempDir::new().unwrap();
@@ -2525,9 +2523,11 @@ async fn test_auto_update_shutdown_reason_reaches_client() {
         "shutdown reason must be None before any ShuttingDown message"
     );
 
-    // Simulate what run_auto_update_checker does:
-    // write AutoUpdate BEFORE cancelling so the server reads the right reason.
-    handle.shutdown_tx.send(ShutdownReason::AutoUpdate).unwrap();
+    // Write the reason BEFORE cancelling so the server reads it.
+    handle
+        .shutdown_tx
+        .send(ShutdownReason::IdleTimeout)
+        .unwrap();
     handle.cancel.cancel();
 
     // Wait for the ShuttingDown reason to propagate to the client.
@@ -2538,8 +2538,8 @@ async fn test_auto_update_shutdown_reason_reaches_client() {
 
     assert_eq!(
         *shutdown_reason_rx.borrow(),
-        Some(ShutdownReason::AutoUpdate),
-        "connected client must observe AutoUpdate as the shutdown reason"
+        Some(ShutdownReason::IdleTimeout),
+        "connected client must observe the reason the leader sent"
     );
 
     // Also verify the disconnect reason eventually becomes LeaderShutdown.
@@ -2554,167 +2554,6 @@ async fn test_auto_update_shutdown_reason_reaches_client() {
     assert_eq!(
         *disconnect_rx.borrow(),
         xai_grok_shell::leader::DisconnectReason::LeaderShutdown
-    );
-}
-
-// ── Disruptive relaunch-for-update ────────────────────────────────────
-
-/// A `RelaunchForUpdate` with a strictly-newer target is accepted with a
-/// `Relaunching` ack, and the leader then broadcasts `ShuttingDown { AutoUpdate }`
-/// (idle → drains immediately) so connected clients reconnect onto the new binary.
-#[tokio::test]
-async fn test_relaunch_for_update_accepts_and_shuts_down() {
-    use xai_grok_shell::leader::{
-        ClientCapabilities, ClientMode, ControlCommand, ControlPayload, LeaderClient,
-        ShutdownReason,
-    };
-
-    let temp = TempDir::new().unwrap();
-    let sock_path = temp.path().join("leader.sock");
-    let _handle = spawn_leader_server(sock_path.clone()).await.unwrap();
-    wait_for_socket(&sock_path).await;
-
-    let client = LeaderClient::connect(
-        sock_path,
-        "test-client",
-        ClientMode::Stdio,
-        ClientCapabilities::default(),
-    )
-    .await
-    .unwrap();
-
-    let mut shutdown_reason_rx = client.shutting_down_reason();
-
-    // A strictly-newer target is accepted.
-    let payload = client
-        .send_control(ControlCommand::RelaunchForUpdate {
-            to_version: "999.0.0".to_string(),
-        })
-        .await
-        .expect("control transport ok")
-        .expect("control result ok");
-    match payload {
-        ControlPayload::Relaunching { to_version, .. } => assert_eq!(to_version, "999.0.0"),
-        other => panic!("expected Relaunching, got {other:?}"),
-    }
-
-    // Idle leader drains immediately, then broadcasts AutoUpdate.
-    tokio::time::timeout(Duration::from_secs(5), shutdown_reason_rx.changed())
-        .await
-        .expect("timeout waiting for ShuttingDown after relaunch")
-        .expect("watch sender dropped");
-    assert_eq!(
-        *shutdown_reason_rx.borrow(),
-        Some(ShutdownReason::AutoUpdate),
-        "relaunch must broadcast AutoUpdate"
-    );
-}
-
-/// A `RelaunchForUpdate` whose target is not strictly newer than the leader is
-/// declined (directional guard), and the leader stays up.
-#[tokio::test]
-async fn test_relaunch_for_update_declines_when_not_newer() {
-    use xai_grok_shell::leader::{
-        ClientCapabilities, ClientMode, ControlCommand, ControlPayload, LeaderClient,
-    };
-
-    let temp = TempDir::new().unwrap();
-    let sock_path = temp.path().join("leader.sock");
-    let _handle = spawn_leader_server(sock_path.clone()).await.unwrap();
-    wait_for_socket(&sock_path).await;
-
-    let client = LeaderClient::connect(
-        sock_path,
-        "test-client",
-        ClientMode::Stdio,
-        ClientCapabilities::default(),
-    )
-    .await
-    .unwrap();
-
-    let shutdown_reason_rx = client.shutting_down_reason();
-
-    let payload = client
-        .send_control(ControlCommand::RelaunchForUpdate {
-            to_version: "0.0.0".to_string(),
-        })
-        .await
-        .expect("control transport ok")
-        .expect("control result ok");
-    assert!(
-        matches!(payload, ControlPayload::RelaunchDeclined { .. }),
-        "a target that is not strictly newer is declined, got {payload:?}"
-    );
-
-    // The leader must NOT begin shutting down.
-    tokio::time::sleep(Duration::from_millis(200)).await;
-    assert_eq!(
-        *shutdown_reason_rx.borrow(),
-        None,
-        "declined relaunch must not shut the leader down"
-    );
-}
-
-/// The bounded-grace drain waits while the agent is busy and only relaunches
-/// once it goes idle — so an in-flight turn isn't cut off the instant a
-/// relaunch is requested.
-#[tokio::test]
-async fn test_relaunch_for_update_waits_for_busy_then_exits() {
-    use std::sync::atomic::Ordering;
-    use xai_grok_shell::leader::{
-        ClientCapabilities, ClientMode, ControlCommand, ControlPayload, LeaderClient,
-        ShutdownReason,
-    };
-
-    let temp = TempDir::new().unwrap();
-    let sock_path = temp.path().join("leader.sock");
-    let handle = spawn_leader_server(sock_path.clone()).await.unwrap();
-    wait_for_socket(&sock_path).await;
-
-    // Mark the agent busy before requesting the relaunch so the drain must wait.
-    handle.agent_busy.store(true, Ordering::Relaxed);
-
-    let client = LeaderClient::connect(
-        sock_path,
-        "test-client",
-        ClientMode::Stdio,
-        ClientCapabilities::default(),
-    )
-    .await
-    .unwrap();
-
-    let mut shutdown_reason_rx = client.shutting_down_reason();
-
-    let payload = client
-        .send_control(ControlCommand::RelaunchForUpdate {
-            to_version: "999.0.0".to_string(),
-        })
-        .await
-        .expect("control transport ok")
-        .expect("control result ok");
-    assert!(
-        matches!(payload, ControlPayload::Relaunching { .. }),
-        "a busy leader still accepts the relaunch, got {payload:?}"
-    );
-
-    // While busy, the leader must NOT shut down — the drain is waiting.
-    tokio::time::sleep(Duration::from_millis(300)).await;
-    assert_eq!(
-        *shutdown_reason_rx.borrow(),
-        None,
-        "leader must keep draining while the agent is busy"
-    );
-
-    // Going idle lets the drain proceed (it polls every 100ms).
-    handle.agent_busy.store(false, Ordering::Relaxed);
-    tokio::time::timeout(Duration::from_secs(2), shutdown_reason_rx.changed())
-        .await
-        .expect("timeout waiting for ShuttingDown after going idle")
-        .expect("watch sender dropped");
-    assert_eq!(
-        *shutdown_reason_rx.borrow(),
-        Some(ShutdownReason::AutoUpdate),
-        "leader must relaunch once the agent is idle"
     );
 }
 

@@ -49,8 +49,6 @@ mod interjection_reaches_model_ctrl_l_in_vscode_family;
 mod interjection_reaches_model_in_same_turn;
 #[path = "pty_e2e/mid_turn_slash_dropdown_esc_dismisses_not_cancel.rs"]
 mod mid_turn_slash_dropdown_esc_dismisses_not_cancel;
-#[path = "pty_e2e/minimal/minimal_ctrl_o_interrupts_queued_apple_terminal.rs"]
-mod minimal_ctrl_o_interrupts_queued_apple_terminal;
 #[path = "pty_e2e/queue_and_interjection_lifecycle.rs"]
 mod queue_and_interjection_lifecycle;
 #[path = "pty_e2e/queue_reorder_local_row_above_server_row.rs"]

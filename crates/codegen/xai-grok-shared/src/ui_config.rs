@@ -208,7 +208,7 @@ pub struct UiConfig {
     /// steady block. Config-file-only knob (no /settings row).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cursor_blink: Option<bool>,
-    /// `"fullscreen"` | `"minimal"`; unset → product default fullscreen.
+    /// No effect: minimal mode is gone. The key is kept so old files load.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub screen_mode: Option<String>,
     /// Retired hidden opt-in for terminal-like double/triple-click word/line

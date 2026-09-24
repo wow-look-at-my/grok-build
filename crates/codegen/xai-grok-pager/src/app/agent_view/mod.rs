@@ -157,7 +157,6 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::Instant;
 mod cta;
 mod input;
-pub(crate) use input::ExternalPromptEditorAccess;
 mod interactions;
 mod jump;
 mod key_owner;
@@ -1273,8 +1272,6 @@ pub struct AgentView {
     /// Active /btw side question overlay. When `Some`, renders as a dismissible
     /// overlay and captures keyboard input (Esc/Enter/Space to dismiss).
     pub btw_state: Option<crate::views::btw_overlay::BtwOverlayState>,
-    /// Minimal-only ownership/correlation for `btw_state`; absent in fullscreen.
-    pub(crate) minimal_btw_lifecycle: Option<crate::minimal_api::MinimalBtwLifecycle>,
     /// Whether the /btw panel holds keyboard focus. The panel is non-blocking,
     /// so Up/Down/PgUp/PgDn scroll it when focused and otherwise reach the
     /// prompt. Set on a `Done` answer; cleared when the user types in or clicks
@@ -2177,7 +2174,6 @@ fn resolve_action(action_id: Option<ActionId>) -> Option<InputOutcome> {
         ActionId::OpenSettings => return None,
         ActionId::ToggleTodos
         | ActionId::ToggleTasks
-        | ActionId::EditPromptExternal
         | ActionId::ToggleQueue
         | ActionId::OpenSessions
         | ActionId::OpenExtensions

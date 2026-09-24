@@ -1848,13 +1848,9 @@ mod tests {
     }
 
     #[test]
-    fn build_entries_show_mode_correct_ctrl_g_and_shared_ctrl_b() {
-        for mode in [
-            crate::app::ScreenMode::Fullscreen,
-            crate::app::ScreenMode::Inline,
-            crate::app::ScreenMode::Minimal,
-        ] {
-            let registry = ActionRegistry::defaults_for(mode);
+    fn build_entries_show_ctrl_g_and_ctrl_b() {
+        {
+            let registry = ActionRegistry::defaults();
             let prompt_contexts = [When::PromptFocused, When::AgentScreen, When::Always];
             let entries = build_entries(&prompt_contexts, &registry, true);
 
@@ -1888,27 +1884,9 @@ mod tests {
                     _ => None,
                 })
                 .collect();
-            if mode.is_minimal() {
-                assert!(row(ActionId::FocusScrollback).is_none());
-            } else {
-                assert!(row(ActionId::FocusScrollback).is_some());
-            }
-
-            let expected = if mode.is_minimal() {
-                ActionId::EditPromptExternal
-            } else {
-                ActionId::ToggleTasks
-            };
-            assert_eq!(agent_ctrl_g_rows, vec![expected]);
-            assert!(row(expected).is_some());
-            assert!(
-                row(if mode.is_minimal() {
-                    ActionId::ToggleTasks
-                } else {
-                    ActionId::EditPromptExternal
-                })
-                .is_none()
-            );
+            assert!(row(ActionId::FocusScrollback).is_some());
+            assert_eq!(agent_ctrl_g_rows, vec![ActionId::ToggleTasks]);
+            assert!(row(ActionId::ToggleTasks).is_some());
         }
     }
 

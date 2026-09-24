@@ -1133,10 +1133,6 @@ impl PromptWidget {
     /// Record the process's effective screen mode so slash visibility gates
     /// (`/minimal`, `/fullscreen`) see it. Injected wherever prompts are
     /// created — the mode is fixed for the process lifetime.
-    pub(crate) fn set_screen_mode(&mut self, mode: crate::app::ScreenMode) {
-        self.slash_controller.set_screen_mode(mode);
-    }
-
     /// Adopt the shared slash MRU store so this prompt's completion shares
     /// command recency with other agent prompts and the dashboard dispatch.
     /// Injected by `AppView`, which owns the single process store.

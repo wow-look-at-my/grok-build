@@ -1,8 +1,6 @@
 //! `/help` -- open the command palette (the command + shortcut browser).
 //!
-//! In minimal mode there's no always-visible footer of hints, so `/help` is the
-//! discoverable entry point (advertised in the status line). It opens the same
-//! command palette as Ctrl+P, hosted inline by the overlay app-modal host.
+//! It opens the same command palette as Ctrl+P.
 
 use crate::app::actions::Action;
 use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand};
@@ -53,7 +51,6 @@ mod tests {
             models: &models,
             session_id: None,
             bundle_state: &DEFAULT_BUNDLE_STATE,
-            screen_mode: crate::app::ScreenMode::Minimal,
             billing_surface_visible: true,
             usage_command_visible: true,
             pager_state: PagerLocalSnapshot::default(),

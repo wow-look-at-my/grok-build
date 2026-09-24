@@ -98,55 +98,33 @@ pub fn dashboard_enabled() -> bool {
 /// Command to name in the "use /X to switch between sessions" session
 /// banners (the `/new` session-created banner and the fork marker).
 ///
-/// Minimal mode has no dashboard — `/dashboard` is refused there — but the
-/// `/resume` session picker still works, so point at it instead (regardless
-/// of the dashboard flag, which gates a surface minimal doesn't have).
-/// Outside minimal, `/dashboard` when the feature is enabled; `None` when it
-/// is off — the tip would point at a refused command, so callers fall back
-/// to a plain session-id banner.
-pub(crate) fn session_switch_hint_command(minimal: bool) -> Option<&'static str> {
-    if minimal {
-        Some("/resume")
-    } else if dashboard_enabled() {
-        Some("/dashboard")
-    } else {
-        None
-    }
+/// `/dashboard` when the feature is enabled; `None` when it is off — the tip
+/// would point at a refused command, so callers fall back to a plain
+/// session-id banner.
+pub(crate) fn session_switch_hint_command() -> Option<&'static str> {
+    dashboard_enabled().then_some("/dashboard")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// Minimal mode always points at `/resume`: the dashboard is refused
-    /// there no matter what the feature flag says, so the hint must not
-    /// depend on it. Runs under the same serial key as the other
-    /// `GROK_AGENT_DASHBOARD` env-mutating tests.
+    /// The hint mirrors the dashboard flag: `None` when the env override
+    /// disables it (the tip would name a refused command), otherwise whatever
+    /// `dashboard_enabled()` says — asserted as consistency, not a fixed
+    /// value, so the test doesn't depend on the machine's persisted
+    /// `[dashboard].enabled`.
     #[serial_test::serial(GROK_AGENT_DASHBOARD)]
     #[test]
-    fn switch_hint_minimal_is_resume_even_with_dashboard_disabled() {
+    fn switch_hint_follows_dashboard_flag() {
         // SAFETY: the test temporarily mutates a process-wide env var.
         // `serial_test`'s lock ensures no other test marked with the same
         // `GROK_AGENT_DASHBOARD` key reads it concurrently.
         unsafe { std::env::set_var("GROK_AGENT_DASHBOARD", "0") };
-        assert_eq!(session_switch_hint_command(true), Some("/resume"));
-        unsafe { std::env::remove_var("GROK_AGENT_DASHBOARD") };
-    }
-
-    /// Outside minimal the hint mirrors the dashboard flag: `None` when the
-    /// env override disables it (the tip would name a refused command),
-    /// otherwise whatever `dashboard_enabled()` says — asserted as
-    /// consistency, not a fixed value, so the test doesn't depend on the
-    /// machine's persisted `[dashboard].enabled`.
-    #[serial_test::serial(GROK_AGENT_DASHBOARD)]
-    #[test]
-    fn switch_hint_non_minimal_follows_dashboard_flag() {
-        // SAFETY: see above — serialized on the GROK_AGENT_DASHBOARD key.
-        unsafe { std::env::set_var("GROK_AGENT_DASHBOARD", "0") };
-        assert_eq!(session_switch_hint_command(false), None);
+        assert_eq!(session_switch_hint_command(), None);
         unsafe { std::env::remove_var("GROK_AGENT_DASHBOARD") };
         assert_eq!(
-            session_switch_hint_command(false),
+            session_switch_hint_command(),
             dashboard_enabled().then_some("/dashboard")
         );
     }

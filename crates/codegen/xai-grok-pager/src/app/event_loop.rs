@@ -51,10 +51,6 @@ impl TimedInputEvent {
 pub(crate) struct TerminalState {
     pub is_control_mode: bool,
     pub screen_mode: super::ScreenMode,
-    /// One-shot `/minimal` re-exec (env override already consumed).
-    pub relaunched_into_minimal: bool,
-    /// One-shot `/fullscreen` re-exec (env override already consumed).
-    pub relaunched_into_fullscreen: bool,
     /// Do NOT re-resolve via `theme::cache::resolve_initial_theme()` here:
     /// its OSC 11 fallback reads stdin and competes with the input reader.
     pub initial_theme: ThemeKind,
@@ -63,10 +59,6 @@ pub(crate) struct TerminalState {
 /// Result of the event loop run.
 pub(crate) struct RunResult {
     pub exit_info: Option<super::ExitInfo>,
-    pub quit_for_update: bool,
-    /// When set, the process should re-exec into the other screen mode after
-    /// terminal restore. See `/minimal` and `/fullscreen`.
-    pub relaunch: Option<super::app_view::ScreenModeRelaunch>,
 }
 
 /// In-flight reconnect re-initialization, tied to the agents whose reload
@@ -258,7 +250,7 @@ fn suspend_for_child(
     reader_parked: &std::sync::atomic::AtomicBool,
     input_rx: &mut tokio::sync::mpsc::UnboundedReceiver<TimedInputEvent>,
     run_child: impl FnOnce(),
-) -> std::io::Result<Option<(u16, u16)>> {
+) -> std::io::Result<()> {
     use std::sync::atomic::Ordering;
     if !park_input_reader(input_paused, reader_parked, Duration::from_millis(500)) {
         input_paused.store(false, Ordering::Release);
@@ -283,12 +275,6 @@ fn suspend_for_child(
         }
     }
 
-    // Pre-child cursor probe (minimal only — minimal's startup already proved
-    // this terminal answers CPR). Reader is parked, so the reply is ours.
-    let pre_cursor = screen_mode
-        .is_minimal()
-        .then(|| crossterm::cursor::position().ok())
-        .flatten();
     if screen_mode.is_fullscreen() {
         xai_grok_shell::util::with_locked_stderr(|stderr| {
             let _ = crossterm::execute!(stderr, crossterm::terminal::LeaveAlternateScreen);
@@ -307,17 +293,10 @@ fn suspend_for_child(
     while crossterm::event::poll(Duration::from_millis(0)).unwrap_or(false) {
         let _ = crossterm::event::read();
     }
-    // Post-child cursor probe: `Some` iff the child left the cursor somewhere
-    // other than where it found it; restore_after_child uses that to re-anchor
-    // minimal mode after main-screen output.
-    let moved_cursor = pre_cursor.and_then(|pre| {
-        let post = crossterm::cursor::position().ok()?;
-        (post != pre).then_some(post)
-    });
     // Only the pre-park race can reach this channel; later input stays in the tty.
     while input_rx.try_recv().is_ok() {}
     input_paused.store(false, Ordering::Release);
-    Ok(moved_cursor)
+    Ok(())
 }
 
 /// Coalesces draw requests, gates in-flight frames, and owns draw cadence.
@@ -466,75 +445,9 @@ fn defer_suspend_retry(
 const EDITOR_SUSPEND_WAIT: &str = "Editor is waiting for a safe terminal handoff";
 const TRANSCRIPT_SUSPEND_WAIT: &str = "Transcript is waiting for a safe terminal handoff";
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum SuspendWaitSink {
-    Toast,
-    SystemBlock,
-}
-
-fn suspend_wait_sink(screen_mode: crate::app::ScreenMode) -> SuspendWaitSink {
-    if screen_mode.is_minimal() {
-        SuspendWaitSink::SystemBlock
-    } else {
-        SuspendWaitSink::Toast
-    }
-}
-
-/// Report a handoff wait through the sink visible in the current screen mode.
-/// The caller deduplicates reports across retries per handoff request.
-fn report_suspend_wait(app: &mut AppView, message: &str) {
-    match suspend_wait_sink(app.screen_mode) {
-        SuspendWaitSink::Toast => app.show_toast(message),
-        SuspendWaitSink::SystemBlock => {
-            if let ActiveView::Agent(id) = app.active_view
-                && let Some(agent) = app.agents.get_mut(&id)
-            {
-                let block = crate::scrollback::block::RenderBlock::system(message);
-                if let Some(child_sid) = agent.active_subagent.clone()
-                    && let Some(child) = agent.subagent_views.get_mut(&child_sid)
-                {
-                    child.scrollback.push_block(block);
-                } else {
-                    agent.scrollback.push_block(block);
-                }
-            }
-        }
-    }
-}
-
 fn requeue_after_suspend_timeout<T>(pending: &mut Option<T>, request: T) {
     // The child never started, so preserve the one-shot request.
     *pending = Some(request);
-}
-
-/// Restore presentation after a child releases the tty.
-///
-/// A cat-style child leaves minimal mode's cursor below appended main-screen
-/// output, so re-anchor the live viewport there. An alternate-screen child
-/// restores the original cursor and needs no re-anchor. The caller then requests
-/// a full repaint because the child's writes bypassed ratatui's diff.
-fn restore_after_child(
-    terminal: &mut PagerTerminal,
-    screen_mode: crate::app::ScreenMode,
-    moved_cursor: Option<(u16, u16)>,
-) {
-    use ratatui::backend::Backend as _;
-    if let Some((_x, y)) = moved_cursor
-        && screen_mode.is_minimal()
-    {
-        let screen = terminal.last_known_area();
-        let cur = terminal.viewport_area();
-        let vh = cur.height.max(1).min(screen.height.max(1));
-        // Buffered append stays ordered before the gated repaint.
-        let _ = terminal.backend_mut().append_lines(vh.saturating_sub(1));
-        let available = screen.height.saturating_sub(y).saturating_sub(1);
-        let top = y.saturating_sub(vh.saturating_sub(1).saturating_sub(available));
-        terminal.set_viewport_area(ratatui::layout::Rect {
-            y: top,
-            height: vh,
-            ..cur
-        });
-    }
 }
 
 /// Consume a pending `$EDITOR` / `$PAGER` suspend request, if any.
@@ -570,18 +483,17 @@ fn run_pending_suspends(
     *suspend_retry_after = None;
 
     // $EDITOR suspend: leave alt screen, disable raw mode, spawn
-    // editor, wait for exit, then restore. Preparation materializes prompt
-    // drafts only immediately before this safe terminal handoff.
+    // editor, wait for exit, then restore.
     if let Some(request) = app.pending_editor.take() {
         let retry_request = request.clone();
-        match crate::app::external_editor::prepare(app, request) {
+        match crate::app::external_editor::prepare(request) {
             Ok(Some(prepared)) => {
                 let launch = prepared.launch();
                 let mut editor_result = Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidInput,
                     "invalid editor command",
                 ));
-                let moved_cursor = match suspend_for_child(
+                match suspend_for_child(
                     app.screen_mode,
                     terminal,
                     input_paused,
@@ -594,7 +506,7 @@ fn run_pending_suspends(
                             .status();
                     },
                 ) {
-                    Ok(moved_cursor) => moved_cursor,
+                    Ok(()) => {}
                     Err(error) if error.kind() == std::io::ErrorKind::TimedOut => {
                         drop(prepared);
                         requeue_after_suspend_timeout(&mut app.pending_editor, retry_request);
@@ -604,7 +516,7 @@ fn run_pending_suspends(
                             Instant::now(),
                         );
                         if first_timeout {
-                            report_suspend_wait(app, EDITOR_SUSPEND_WAIT);
+                            app.show_toast(EDITOR_SUSPEND_WAIT);
                             presenter.request_presentation(app, terminal, false);
                         }
                         return Ok(());
@@ -612,10 +524,8 @@ fn run_pending_suspends(
                     Err(error) => return Err(error.into()),
                 };
                 crate::app::external_editor::finish(app, prepared, editor_result);
-                // The child owned the screen; re-anchor if it printed inline, and
-                // repaint the full viewport rather than diffing against a screen
-                // state we can no longer vouch for.
-                restore_after_child(terminal, app.screen_mode, moved_cursor);
+                // The child owned the screen; repaint the full viewport rather
+                // than diffing against a screen state we can no longer vouch for.
                 presenter.request_presentation(app, terminal, true);
                 suspend_wait_reports.editor_reported = false;
             }
@@ -635,12 +545,11 @@ fn run_pending_suspends(
     // then restore and delete the temp file. Shares the editor's
     // suspend/restore dance (reader park, raw mode, alt screen).
     if let Some(path) = app.pending_pager_path.take() {
-        let ansi = std::mem::take(&mut app.pending_pager_ansi);
         let pager = std::env::var("PAGER")
             .ok()
             .filter(|p| !p.trim().is_empty())
             .unwrap_or_else(|| "less".to_string());
-        let moved_cursor = match suspend_for_child(
+        match suspend_for_child(
             app.screen_mode,
             terminal,
             input_paused,
@@ -651,43 +560,15 @@ fn run_pending_suspends(
                 // whitespace so program + args are both honored.
                 let mut parts = pager.split_whitespace();
                 if let Some(prog) = parts.next() {
-                    let mut args: Vec<String> = parts.map(str::to_string).collect();
-                    // An ANSI transcript (minimal full view) needs
-                    // `less` to interpret raw control codes, else the
-                    // colors show as literal escapes. Add `-R` when
-                    // using less and it isn't already requested.
-                    let is_less = std::path::Path::new(prog)
-                        .file_name()
-                        .and_then(|n| n.to_str())
-                        == Some("less");
-                    if ansi
-                        && is_less
-                        && !args.iter().any(|a| {
-                            matches!(
-                                a.as_str(),
-                                "-R" | "-r" | "--RAW-CONTROL-CHARS" | "--raw-control-chars"
-                            )
-                        })
-                    {
-                        args.push("-R".to_string());
-                    }
-                    // Open the transcript at its END: minimal's prompt sits at
-                    // the bottom of the conversation, so the pager starts where
-                    // the user already is (`g` jumps back to the top). less-only
-                    // like `-R` — other $PAGERs may not understand `+G`.
-                    if ansi && is_less && !args.iter().any(|a| a == "+G") {
-                        args.push("+G".to_string());
-                    }
                     let _ = std::process::Command::new(prog)
-                        .args(&args)
+                        .args(parts)
                         .arg(&path)
                         .status();
                 }
             },
         ) {
-            Ok(moved_cursor) => moved_cursor,
+            Ok(()) => {}
             Err(error) if error.kind() == std::io::ErrorKind::TimedOut => {
-                app.pending_pager_ansi = ansi;
                 requeue_after_suspend_timeout(&mut app.pending_pager_path, path);
                 let first_timeout = defer_suspend_retry(
                     suspend_retry_after,
@@ -695,7 +576,7 @@ fn run_pending_suspends(
                     Instant::now(),
                 );
                 if first_timeout {
-                    report_suspend_wait(app, TRANSCRIPT_SUSPEND_WAIT);
+                    app.show_toast(TRANSCRIPT_SUSPEND_WAIT);
                     presenter.request_presentation(app, terminal, false);
                 }
                 return Ok(());
@@ -703,29 +584,17 @@ fn run_pending_suspends(
             Err(error) => return Err(error.into()),
         };
         let _ = std::fs::remove_file(&path);
-        // The pager owned the screen; re-anchor if it printed inline (cat) and
-        // repaint the full viewport rather than diffing against a screen state
-        // we can no longer vouch for.
-        restore_after_child(terminal, app.screen_mode, moved_cursor);
+        // The pager owned the screen; repaint the full viewport rather than
+        // diffing against a screen state we can no longer vouch for.
         presenter.request_presentation(app, terminal, true);
         suspend_wait_reports.pager_reported = false;
     }
     Ok(())
 }
 
-/// Minimal mode opens an empty session after the welcome branch (now, or
-/// post-auth via the deferred drain), so that session create ends startup.
-fn minimal_will_open_session(term_state: &TerminalState, app: &AppView) -> bool {
-    term_state.screen_mode.is_minimal()
-        && matches!(app.active_view, ActiveView::Welcome)
-        && !app.is_zdr_blocked()
-}
-
 /// Run the main event loop until quit.
 ///
-/// Returns a [`RunResult`] with optional exit info (for the resume hint)
-/// and a flag indicating whether the caller should restart the binary
-/// to pick up a downloaded update.
+/// Returns a [`RunResult`] with optional exit info (for the resume hint).
 ///
 /// The initial theme MUST come from `term_state.initial_theme`; see
 /// [`TerminalState::initial_theme`] for why.
@@ -740,9 +609,6 @@ pub(crate) async fn run(
     remote_settings: Option<xai_grok_shell::util::config::RemoteSettings>,
     term_state: TerminalState,
     materialized: crate::app::session_startup::MaterializedStartup,
-    bg_update_rx: Option<
-        tokio::sync::oneshot::Receiver<Option<xai_grok_update::auto_update::UpdateAvailable>>,
-    >,
     mut writer_event_rx: tokio::sync::mpsc::UnboundedReceiver<crate::render::draw::WriterEvent>,
 ) -> anyhow::Result<RunResult> {
     // Initialize tracing capture. The channel `rx` will be wired to a
@@ -774,22 +640,6 @@ pub(crate) async fn run(
     // poll the leader roster (see the roster-poll arm below).
     app.leader_mode = connection.leader_status_rx.is_some();
     app.screen_mode = term_state.screen_mode;
-    // `AppView::new` precedes the terminal's resolved screen mode. Rebuild the
-    // registry at this I/O boundary; the later config-aware rebuild preserves
-    // this mode while adding the optional mouse-reporting action.
-    app.registry = crate::actions::ActionRegistry::defaults_for(term_state.screen_mode);
-    // Agent/dashboard prompts pick the mode up at their creation sites
-    // (`apply_app_scoped_gates` / `ensure_dashboard_state`); the welcome prompt
-    // already exists, so inject here.
-    app.welcome_prompt.set_screen_mode(term_state.screen_mode);
-    if app.screen_mode.is_minimal() && term_state.relaunched_into_minimal {
-        app.minimal_state.welcome_pending = true;
-    }
-    if term_state.relaunched_into_minimal && app.screen_mode.is_minimal() {
-        app.screen_mode_switch_hint = Some("Switched to minimal mode · /fullscreen to go back");
-    } else if term_state.relaunched_into_fullscreen && !app.screen_mode.is_minimal() {
-        app.screen_mode_switch_hint = Some("Switched to fullscreen mode · /minimal to go back");
-    }
     let remote_permission_mode = remote_settings
         .as_ref()
         .and_then(|s| s.permission_mode.as_deref());
@@ -1407,10 +1257,7 @@ pub(crate) async fn run(
         effective_config.as_ref(),
         &app.current_ui,
     );
-    app.registry = crate::actions::ActionRegistry::defaults_with_config_for(
-        term_state.screen_mode,
-        mouse_toggle.value,
-    );
+    app.registry = crate::actions::ActionRegistry::defaults_with_config(mouse_toggle.value);
     // Cache the resolved flag so the `/toggle-mouse-reporting` slash command can
     // gate its visibility/execution without re-reading config on every keystroke.
     crate::app::MOUSE_REPORTING_TOGGLE_ENABLED
@@ -1435,7 +1282,6 @@ pub(crate) async fn run(
     );
     let config_session_bools = load_initial_config_session_bools();
     app.show_tips = config_session_bools.show_tips;
-    app.auto_update = config_session_bools.auto_update;
     app.ask_user_question_timeout_enabled = config_session_bools.ask_user_question_timeout_enabled;
     // Prime thread-local caches so first render doesn't hit disk.
     crate::appearance::cache::prime(&app.current_ui);
@@ -1748,7 +1594,7 @@ pub(crate) async fn run(
             return Ok(finish_run(&mut app));
         }
         presenter.request_presentation(&mut app, terminal, false);
-    } else if args.initial_prompt().is_none() && !minimal_will_open_session(&term_state, &app) {
+    } else if args.initial_prompt().is_none() {
         // No session work follows: startup ends at interactive.
         app.finish_startup(xai_grok_telemetry::startup::StartupOutcome::Ok);
     }
@@ -1796,32 +1642,6 @@ pub(crate) async fn run(
         }
     }
 
-    // Minimal (scrollback-native) mode has no welcome screen: the live region
-    // only renders for an Agent view. If nothing above already started a
-    // session (no resume / initial prompt / worktree / dashboard), open an
-    // empty one so the user lands directly at the prompt. Unauthenticated /
-    // ZDR-blocked startup stays on Welcome, where `crate::minimal::live` shows
-    // a sign-in hint instead of a blank region.
-    if minimal_will_open_session(&term_state, &app) {
-        if app.session_startup_allowed() {
-            // Already authenticated + trusted: open the empty session now so the
-            // user lands directly at the prompt.
-            let effs = dispatch::dispatch(Action::NewSession, &mut app);
-            if process_effects(effs, &mut tasks, &mut app, &progress_tx) {
-                return Ok(finish_run(&mut app));
-            }
-            presenter.request_presentation(&mut app, terminal, false);
-        } else {
-            // Sign-in (or folder-trust) still pending: minimal renders the
-            // device / external sign-in flow in its live region. Defer the
-            // empty-session creation so the post-auth (or post-trust) drain
-            // (`drain_startup_actions`) opens it — otherwise minimal would
-            // authenticate but never create a session, stranding the user on the
-            // sign-in screen.
-            app.deferred_startup.new_session = true;
-        }
-    }
-
     // Startup intents are now fully classified; only an untouched welcome can nudge.
     if let Some(effect) = app.begin_foreign_resume_detection()
         && process_effects(vec![effect], &mut tasks, &mut app, &progress_tx)
@@ -1865,10 +1685,6 @@ pub(crate) async fn run(
     // Swallows the fire-and-forget XTVERSION reply whenever it arrives;
     // armed only when the startup query is still unanswered.
     let mut xt_filter = super::xt_filter::XtversionFilter::new();
-
-    // Background update check: resolves when the spawned update task
-    // determines whether a newer version is available.
-    let mut bg_update_rx = bg_update_rx;
 
     debug_assert_eq!(term_state.initial_theme, theme_cache::current_kind());
     let mut appearance_watcher =
@@ -2294,32 +2110,6 @@ pub(crate) async fn run(
                     break;
                 }
                 presenter.request(false);
-            }
-
-            // Background update check completed.
-            result = async {
-                match bg_update_rx.as_mut() {
-                    Some(rx) => rx.await.ok().flatten(),
-                    None => std::future::pending().await,
-                }
-            } => {
-                // Consume the receiver so this arm becomes inert.
-                bg_update_rx = None;
-                if let Some(update) = result {
-                    tracing::info!(
-                        latest_version = %update.latest_version,
-                        "Background update check: newer version available"
-                    );
-                    let latest = update.latest_version;
-                    app.pending_update_version = Some(latest.clone());
-                    // The full TUI surfaces this on the welcome screen, which
-                    // minimal has none of — commit a one-line notice into
-                    // native scrollback instead (update notice).
-                    if term_state.screen_mode.is_minimal() {
-                        dispatch::commit_minimal_update_notice(&mut app, &latest);
-                    }
-                    presenter.request(false);
-                }
             }
 
             maybe_ev = input_rx.recv() => {
@@ -3003,7 +2793,6 @@ pub(crate) fn load_initial_ui_config() -> xai_grok_shell::agent::config::UiConfi
 #[derive(Default)]
 struct InitialConfigSessionBools {
     show_tips: Option<bool>,
-    auto_update: Option<bool>,
     ask_user_question_timeout_enabled: Option<bool>,
 }
 
@@ -3014,7 +2803,6 @@ fn load_initial_config_session_bools() -> InitialConfigSessionBools {
     let cli_bool = |key: &str| -> Option<bool> { root.get("cli")?.get(key)?.as_bool() };
     InitialConfigSessionBools {
         show_tips: cli_bool("show_tips"),
-        auto_update: cli_bool("auto_update"),
         ask_user_question_timeout_enabled: root
             .get("toolset")
             .and_then(|t| t.get("ask_user_question"))
@@ -3165,15 +2953,10 @@ fn finish_run(app: &mut AppView) -> RunResult {
         };
         Some(super::ExitInfo {
             session_id: sid.0.to_string(),
-            minimal: app.screen_mode.is_minimal(),
             summary,
         })
     });
-    RunResult {
-        exit_info,
-        quit_for_update: app.quit_for_update,
-        relaunch: app.relaunch.clone(),
-    }
+    RunResult { exit_info }
 }
 
 /// Result of draining and processing terminal events.
@@ -4235,9 +4018,9 @@ mod tests {
         let mut app = crate::app::app_view::tests::test_app();
         assert!(!tty_suspend_armed(&app));
         app.pending_editor = Some(
-            crate::app::external_editor::PendingEditorRequest::PromptDraft {
-                agent_id: crate::app::agent::AgentId(0),
-                original_text: "draft".to_owned(),
+            crate::app::external_editor::PendingEditorRequest::ConfigFile {
+                path: std::path::PathBuf::from("/tmp/agent-config.md"),
+                refresh_agents_modal: None,
             },
         );
         assert!(tty_suspend_armed(&app));
@@ -4719,63 +4502,6 @@ mod tests {
             &mut reports.pager_reported,
             now
         ));
-    }
-
-    #[test]
-    fn suspend_wait_sink_is_mode_appropriate() {
-        assert_eq!(
-            suspend_wait_sink(crate::app::ScreenMode::Minimal),
-            SuspendWaitSink::SystemBlock
-        );
-        assert_eq!(
-            suspend_wait_sink(crate::app::ScreenMode::Inline),
-            SuspendWaitSink::Toast
-        );
-        assert_eq!(
-            suspend_wait_sink(crate::app::ScreenMode::Fullscreen),
-            SuspendWaitSink::Toast
-        );
-    }
-
-    #[test]
-    fn suspend_wait_report_uses_system_block_in_minimal_mode() {
-        use crate::scrollback::block::RenderBlock;
-
-        let mut app = crate::app::app_view::tests::test_app();
-        let id = crate::app::agent::AgentId(0);
-        let agent = crate::test_util::make_agent_view(Some("session"), "/tmp");
-        app.agents.insert(id, agent);
-        app.active_view = ActiveView::Agent(id);
-        app.screen_mode = crate::app::ScreenMode::Minimal;
-
-        report_suspend_wait(&mut app, EDITOR_SUSPEND_WAIT);
-
-        let agent = app.agents.get(&id).expect("active agent");
-        let entry = agent.scrollback.last().expect("system block");
-        assert!(matches!(
-            &entry.block,
-            RenderBlock::System(block) if block.text == EDITOR_SUSPEND_WAIT
-        ));
-        assert!(agent.toast.is_none());
-    }
-
-    #[test]
-    fn suspend_wait_report_uses_toast_outside_minimal_mode() {
-        let mut app = crate::app::app_view::tests::test_app();
-        let id = crate::app::agent::AgentId(0);
-        let agent = crate::test_util::make_agent_view(Some("session"), "/tmp");
-        app.agents.insert(id, agent);
-        app.active_view = ActiveView::Agent(id);
-        app.screen_mode = crate::app::ScreenMode::Inline;
-
-        report_suspend_wait(&mut app, EDITOR_SUSPEND_WAIT);
-
-        let agent = app.agents.get(&id).expect("active agent");
-        assert_eq!(
-            agent.toast.as_ref().map(|(message, _)| message.as_str()),
-            Some(EDITOR_SUSPEND_WAIT)
-        );
-        assert!(agent.scrollback.last().is_none());
     }
 
     #[test]
@@ -5582,7 +5308,6 @@ mod tests {
         let mut app = seeded_quit_app(crate::app::ScreenMode::Fullscreen);
         let info = finish_run(&mut app).exit_info.expect("agent exit info");
         assert_eq!(info.session_id, "test-session");
-        assert!(!info.minimal);
         let summary = info.summary.expect("summary on fullscreen quit");
         // Deliberate: title comes from the first prompt, last_prompt from the newest.
         assert_eq!(summary.title, "fix the flaky CI test");
@@ -5616,16 +5341,10 @@ mod tests {
     }
 
     #[test]
-    fn finish_run_inline_and_minimal_quits_omit_summary() {
+    fn finish_run_inline_quit_omits_summary() {
         let mut app = seeded_quit_app(crate::app::ScreenMode::Inline);
         let info = finish_run(&mut app).exit_info.expect("agent exit info");
         assert!(info.summary.is_none());
-        assert!(!info.minimal);
-
-        let mut app = seeded_quit_app(crate::app::ScreenMode::Minimal);
-        let info = finish_run(&mut app).exit_info.expect("agent exit info");
-        assert!(info.summary.is_none());
-        assert!(info.minimal);
     }
 
     #[test]

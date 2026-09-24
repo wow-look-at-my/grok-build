@@ -191,54 +191,6 @@ fn session_created_omits_cta_catalog_when_disabled() {
             .any(|e| matches!(e, Effect::CheckMarketplaceUpdates { .. }))
     );
 }
-/// All System-block texts in an agent's scrollback, in order.
-fn all_system_texts(app: &AppView, id: AgentId) -> Vec<String> {
-    let sb = &app.agents[&id].scrollback;
-    (0..sb.len())
-        .filter_map(|i| match &sb.get(i).expect("index in range").block {
-            RenderBlock::System(sys) => Some(sys.text.clone()),
-            _ => None,
-        })
-        .collect()
-}
-/// In minimal mode the `/new` session banner must advertise `/resume`, not
-/// `/dashboard` — the dashboard command is refused there, while the
-/// `/resume` session picker works. Deterministic regardless of the
-/// dashboard feature flag: the minimal branch of
-/// `session_switch_hint_command` never consults it.
-#[test]
-fn session_created_banner_advertises_resume_in_minimal_mode() {
-    let mut app = test_app_with_agent();
-    app.screen_mode = crate::app::ScreenMode::Minimal;
-    let id = AgentId(1);
-    let mut session = make_test_agent_session(&app, id, "unused");
-    session.session_id = None;
-    session.created_via_new = true;
-    app.agents
-        .insert(id, AgentView::new(session, ScrollbackState::new()));
-    dispatch(
-        Action::TaskComplete(TaskResult::SessionCreated {
-            agent_id: id,
-            session_id: "new-session-123".into(),
-            models: None,
-            scheduler_background_loops: None,
-        }),
-        &mut app,
-    );
-    let texts = all_system_texts(&app, id);
-    let banner = texts
-        .iter()
-        .find(|t| t.contains("switch between sessions"))
-        .unwrap_or_else(|| panic!("expected a session-switch banner, got: {texts:?}"));
-    assert!(
-        banner.contains("Session new-session-123 \u{2014} use /resume to switch between sessions"),
-        "minimal mode must advertise /resume: {banner}"
-    );
-    assert!(
-        !texts.iter().any(|t| t.contains("/dashboard")),
-        "minimal mode must NOT advertise /dashboard: {texts:?}"
-    );
-}
 #[test]
 fn global_cancel_subagents_pref_skips_panel_without_session_override() {
     let mut app = test_app_with_agent();

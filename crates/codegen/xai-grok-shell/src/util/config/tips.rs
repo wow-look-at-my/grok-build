@@ -169,20 +169,6 @@ pub fn resolve_slash_command_tags(
     resolve_slash_command_tags_with_env(effective_config, remote, slash_command_tags_from_env())
 }
 
-/// Read `[cli] channel` from config.toml.
-/// Returns `None` when absent (falls through to remote settings).
-pub fn channel_from_toml_opt(root: &TomlValue) -> Option<String> {
-    if let TomlValue::Table(table) = root
-        && let Some(TomlValue::Table(cli)) = table.get("cli")
-    {
-        cli.get("channel")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string())
-    } else {
-        None
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use crate::util::config::RemoteSettings;

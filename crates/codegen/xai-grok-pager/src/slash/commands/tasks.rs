@@ -1,8 +1,6 @@
 //! `/tasks` -- list background tasks, subagents, and scheduled tasks.
 //!
-//! Minimal mode has no interactive `TasksPane`, so `/tasks` is the way
-//! to snapshot what's running in the background. It works in every render mode.
-//! The dispatcher (`dispatch_show_tasks`) reads the three task sources and
+//! A snapshot of what's running in the background. The dispatcher (`dispatch_show_tasks`) reads the three task sources and
 //! commits a read-only list; killing/attaching is out of scope here (use the
 //! tasks pane in the full TUI).
 
@@ -61,7 +59,6 @@ mod tests {
             models: &models,
             session_id: sid,
             bundle_state: &DEFAULT_BUNDLE_STATE,
-            screen_mode: crate::app::ScreenMode::Minimal,
             billing_surface_visible: true,
             usage_command_visible: true,
             pager_state: PagerLocalSnapshot::default(),

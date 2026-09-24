@@ -129,7 +129,7 @@ jobs:
         if: ${{ !cancelled() }}
         run: |
           cargo nextest run --locked --workspace --profile ci \
-            -E 'binary(pty_e2e_smoke) or binary(pty_e2e_config_ui) or binary(pty_e2e_minimal)' \
+            -E 'binary(pty_e2e_smoke) or binary(pty_e2e_config_ui)' \
             --run-ignored all --test-threads 4
 
       - uses: ./.github/actions/upload-cargo-timings

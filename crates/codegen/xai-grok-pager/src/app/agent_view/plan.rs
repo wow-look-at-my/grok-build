@@ -251,12 +251,6 @@ impl AgentView {
         } else {
             Some(formatted)
         };
-        if crate::app::minimal_mode_active()
-            && let Some(msg) = to_send.as_deref().map(str::trim).filter(|s| !s.is_empty())
-        {
-            self.scrollback
-                .push_block(crate::scrollback::RenderBlock::user_prompt(msg.to_string()));
-        }
         pav.send_cancelled(to_send);
         if pav.source == PlanReviewSource::Inline {
             self.latest_inline_plan_content = None;

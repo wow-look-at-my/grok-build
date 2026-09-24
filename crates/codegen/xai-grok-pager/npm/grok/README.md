@@ -34,11 +34,7 @@ export XAI_API_KEY="xai-..."
 
 ## Update
 
-```bash
-grok update
-```
-
-Or if installed via npm:
+If installed via npm:
 
 ```bash
 npm i -g @xai-official/grok@latest

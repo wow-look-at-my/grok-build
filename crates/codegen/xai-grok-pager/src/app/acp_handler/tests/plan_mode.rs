@@ -119,10 +119,7 @@
             let agent = app.agents.get_mut(&AgentId(0)).unwrap();
             seed_pending_tool(agent, "create-plan-call", "CreatePlan");
             agent.active_modal = Some(crate::views::modal::ActiveModal::CommandPalette {
-                entries: crate::views::modal::default_palette_entries(
-                    agent.sharing_enabled,
-                    &agent.prompt.slash_controller,
-                ),
+                entries: crate::views::modal::default_palette_entries(agent.sharing_enabled),
                 state: crate::views::picker::PickerState::input_active(),
                 window: crate::views::modal_window::ModalWindowState::new(),
             });

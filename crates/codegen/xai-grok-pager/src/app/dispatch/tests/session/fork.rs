@@ -893,22 +893,6 @@ fn build_child_fork_marker_omits_dashboard_tip_when_disabled() {
     );
 }
 
-/// In minimal mode the caller passes `/resume` (the dashboard is refused
-/// there but the session picker works) — the banner must advertise it and
-/// never mention `/dashboard`.
-#[test]
-fn build_child_fork_marker_minimal_mode_advertises_resume() {
-    let banner = build_child_fork_marker("child-sid", "parent-sid", false, Some("/resume"));
-    assert!(
-        banner.contains("use /resume to switch between sessions"),
-        "must advertise /resume in minimal mode: {banner}"
-    );
-    assert!(
-        !banner.contains("/dashboard"),
-        "must NOT advertise /dashboard in minimal mode: {banner}"
-    );
-}
-
 #[test]
 fn dispatch_fork_pushes_progress_message_worktree() {
     let mut app = fork_test_app();

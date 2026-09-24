@@ -488,7 +488,6 @@ mod tests {
             billing_surface_visible: true,
             usage_command_visible: true,
             workflows_available: true,
-            screen_mode: crate::app::ScreenMode::Fullscreen,
         }
     }
 
@@ -740,7 +739,6 @@ mod tests {
             models,
             session_id: None,
             bundle_state: &EMPTY_BUNDLE,
-            screen_mode: crate::app::ScreenMode::Inline,
             billing_surface_visible: true,
             usage_command_visible: true,
             pager_state: crate::settings::PagerLocalSnapshot {
@@ -781,7 +779,6 @@ mod tests {
             billing_surface_visible: true,
             usage_command_visible: true,
             workflows_available: true,
-            screen_mode: crate::app::ScreenMode::Fullscreen,
         };
         let items = cmd.suggest_args(&ctx, "").unwrap();
         assert_eq!(items.len(), 2, "model phase: one row per logical model");
@@ -814,7 +811,6 @@ mod tests {
             billing_surface_visible: true,
             usage_command_visible: true,
             workflows_available: true,
-            screen_mode: crate::app::ScreenMode::Fullscreen,
         };
         // Args query has a trailing space -> effort phase. Items come out
         // ordered xhigh -> low (strongest first) per EFFORT_LEVELS.
@@ -846,7 +842,6 @@ mod tests {
             billing_surface_visible: true,
             usage_command_visible: true,
             workflows_available: true,
-            screen_mode: crate::app::ScreenMode::Fullscreen,
         };
         // Still in effort phase; matcher upstream narrows to high / xhigh.
         let items = cmd.suggest_args(&ctx, "Reasoning X h").unwrap();
@@ -867,7 +862,6 @@ mod tests {
             billing_surface_visible: true,
             usage_command_visible: true,
             workflows_available: true,
-            screen_mode: crate::app::ScreenMode::Fullscreen,
         };
         // No trailing space, user is still typing the model name.
         let items = cmd.suggest_args(&ctx, "Reason").unwrap();

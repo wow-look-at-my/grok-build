@@ -220,28 +220,9 @@ pub(super) fn dispatch_export_conversation(
     });
 }
 
-/// Open the full transcript in `$PAGER`.
-///
-/// **Minimal mode** renders a full-fidelity ANSI transcript — every block
-/// fully expanded (reasoning in full, tool output uncapped, diff colors kept)
-/// — a full layout + syntax-highlight + ANSI-serialization pass over the whole
-/// session. Rendering that inline froze the event loop for seconds on long
-/// sessions ("laggy /transcript"), and the block model is `!Send` (syntect's
-/// resumable highlighter state lives inside markdown blocks), so it can't be
-/// shipped to a worker either. Instead this only ARMS the request; the minimal
-/// render loop builds the transcript **incrementally, a time-budgeted slice
-/// per frame** (`full_view::pump_transcript`, the same time-sliced amortization
-/// pattern other TUIs use for heavy transcript work), then arms `pending_pager_path`
-/// for the event loop's suspend-into-`$PAGER`.
-///
-/// **Other modes** keep the compact markdown export (string concatenation, no
-/// layout or highlighting — cheap enough to stay synchronous).
+/// Open the full transcript in `$PAGER` as a compact markdown export (string
+/// concatenation, no layout or highlighting — cheap enough to stay synchronous).
 pub(crate) fn dispatch_open_transcript_pager(app: &mut AppView) {
-    if app.screen_mode.is_minimal() {
-        crate::minimal_api::request_minimal_transcript(app);
-        return;
-    }
-
     let mut md = None;
     with_active_agent(app, |agent| {
         let blocks: Vec<_> = (0..agent.scrollback.len())
@@ -266,7 +247,6 @@ pub(crate) fn dispatch_open_transcript_pager(app: &mut AppView) {
     match std::fs::write(&path, content) {
         Ok(()) => {
             app.pending_pager_path = Some(path);
-            app.pending_pager_ansi = false;
         }
         Err(e) => {
             with_active_agent(app, |agent| {

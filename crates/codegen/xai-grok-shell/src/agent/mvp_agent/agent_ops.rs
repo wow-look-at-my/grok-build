@@ -499,9 +499,8 @@ impl MvpAgent {
     pub fn set_memory_config(&mut self, config: crate::config::MemoryConfig) {
         self.memory_config = if config.enabled { Some(config) } else { None };
     }
-    /// Adopt the leader's [`AgentActivity`] so the auto-update checker sees
-    /// the agent's live view of running turns/subagents and can flush
-    /// sessions at shutdown.
+    /// Adopt the leader's [`AgentActivity`] so the leader sees the agent's
+    /// live view of running turns/subagents and can flush sessions at shutdown.
     ///
     /// Must be called right after construction: entries registered on the
     /// constructor-created default instance are NOT migrated.
@@ -516,8 +515,8 @@ impl MvpAgent {
     ///
     /// Call on non-leader process quit **after** the cancel token fires but
     /// **before** dropping the agent / exiting the process, so session actors
-    /// are not killed mid-hook. Mirrors the leader auto-update / relaunch
-    /// flush path ([`crate::agent::activity::AgentActivity::flush_all_sessions`]).
+    /// are not killed mid-hook. See
+    /// [`crate::agent::activity::AgentActivity::flush_all_sessions`].
     pub async fn flush_all_sessions(&self, grace: std::time::Duration) {
         self.activity.flush_all_sessions(grace).await;
     }

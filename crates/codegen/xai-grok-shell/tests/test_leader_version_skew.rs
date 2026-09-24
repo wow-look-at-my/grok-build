@@ -15,9 +15,6 @@ mod common;
 use std::path::Path;
 use std::time::Duration;
 
-use xai_grok_shell::leader::{
-    ClientCapabilities, ClientMode, ControlCommand, ControlPayload, LeaderClient,
-};
 use xai_grok_test_support::leader::{
     LeaderFixture, client_binary, leader_binary, leader_log, pid_alive, read_leader_pid,
     wait_for_live_leader, wait_for_replay_notifications,
@@ -228,110 +225,6 @@ async fn old_client_adopts_new_leader_and_still_functions() {
                         "leader never logged the version mismatch\nleader log:\n{}",
                         leader_log(sandbox.home()),
                     );
-                })
-            })
-            .await;
-        })
-        .await;
-}
-
-/// Update relaunch exits the current leader and elects another current binary.
-#[tokio::test]
-#[ignore = "leader-acceptance: version-skew replacement cleanup needs OS containment or a test-only leader binary"]
-async fn relaunch_for_update_drives_real_old_leader_to_exit() {
-    let Some((old_bin, new_bin)) = skew_binaries() else {
-        return;
-    };
-    tokio::task::LocalSet::new()
-        .run_until(async {
-            let server = MockInferenceServer::start().await.unwrap();
-            let workdir = git_workdir();
-            let sandbox = TestSandbox::new();
-            let fixture =
-                LeaderFixture::start_with_binary(&old_bin, &server, workdir.workspace(), &sandbox)
-                    .await
-                    .expect("start owned version-skew leader");
-            let mut clients = Vec::new();
-            common::leader::run_with_cleanup(&fixture, &mut clients, |fixture, clients| {
-                Box::pin(async move {
-                    clients.push(
-                        fixture
-                            .spawn_client_with_binary(
-                                &old_bin,
-                                &server,
-                                workdir.workspace(),
-                                &sandbox,
-                            )
-                            .await
-                            .expect("spawn old leader client"),
-                    );
-                    clients[0].initialize().await;
-                    let session = clients[0].create_session(workdir.workspace()).await;
-                    clients[0]
-                        .prompt(&session, "before relaunch")
-                        .await
-                        .expect("pre-relaunch prompt failed");
-                    let old_pid = wait_for_live_leader(sandbox.home(), Duration::from_secs(10))
-                        .await
-                        .expect("no live old leader");
-
-                    clients.push(
-                        fixture
-                            .spawn_client_with_binary(
-                                &new_bin,
-                                &server,
-                                workdir.workspace(),
-                                &sandbox,
-                            )
-                            .await
-                            .expect("spawn new leader client"),
-                    );
-                    clients[1].initialize().await;
-                    let current_pid = fixture
-                        .wait_for_new_leader(old_pid, Duration::from_secs(60))
-                        .await
-                        .expect("current client must replace old leader");
-                    clients[0]
-                        .close()
-                        .await
-                        .expect("close old client before relaunch");
-
-                    let control = LeaderClient::connect(
-                        sandbox.home().join(".grok").join("leader.sock"),
-                        "grok-pager-update",
-                        ClientMode::Stdio,
-                        ClientCapabilities::default(),
-                    )
-                    .await
-                    .expect("control connect to current leader failed");
-                    if !control.registration().supports_relaunch() {
-                        eprintln!(
-                            "SKIP: current leader {:?} does not advertise relaunch_v1",
-                            control.registration().leader_binary_version
-                        );
-                        control.cancel();
-                        return;
-                    }
-
-                    let ack = control
-                        .send_control(ControlCommand::RelaunchForUpdate {
-                            to_version: "999.0.0".to_string(),
-                        })
-                        .await;
-                    control.cancel();
-                    match ack {
-                        Ok(Ok(ControlPayload::Relaunching { .. })) | Err(_) => {}
-                        other => panic!("unexpected RelaunchForUpdate reply: {other:?}"),
-                    }
-                    assert!(
-                        wait_for_pid_death(current_pid, Duration::from_secs(30)).await,
-                        "leader pid {current_pid} did not exit after relaunch\nleader log:\n{}",
-                        leader_log(sandbox.home()),
-                    );
-                    let _new_pid = fixture
-                        .wait_for_new_leader(current_pid, Duration::from_secs(60))
-                        .await
-                        .expect("no re-elected leader after relaunch");
                 })
             })
             .await;
