@@ -156,7 +156,7 @@ pub enum SamplingError {
     /// The URL is not in `[endpoints] allowed_endpoints`, so nothing was sent.
     #[error("{0}")]
     EndpointNotAllowed(String),
-    #[error("request error: {0}")]
+    #[error("request error: {}", error_chain(.0))]
     Http(reqwest::Error),
     #[error("{prefix}{0}", prefix = SERIALIZATION_DISPLAY_PREFIX)]
     Serialization(serde_json::Error),
@@ -679,24 +679,33 @@ pub const MAX_USER_ERROR_BODY_CHARS: usize = 280;
 /// Edge proxies (Cloudflare 52x, 502/503/504) return HTML pages; we never
 /// sniff body text — only the HTTP status drives this fallback.
 pub fn status_user_message(status: StatusCode) -> String {
+    status_copy(status, "The server", "the server")
+}
+
+/// As [`status_user_message`], naming the service that answered.
+///
+/// Every provider shares this copy. So the name comes from the request, never
+/// from a constant: a fixed name blames a service the request never reached.
+pub fn status_user_message_from(status: StatusCode, service: &str) -> String {
+    status_copy(status, service, service)
+}
+
+/// The status phrase.
+fn status_copy(status: StatusCode, subject: &str, service: &str) -> String {
     match status.as_u16() {
-        code @ 502..=504 => {
-            format!("Grok is temporarily unavailable. Please try again in a moment. (HTTP {code}).")
-        }
+        code @ 502..=504 => format!(
+            "{subject} is temporarily unavailable. Please try again in a moment. (HTTP {code})."
+        ),
         // Upstream capacity, not an edge failure — see [`SamplingError::is_overloaded`].
-        code @ 529 => {
-            format!("Grok is temporarily overloaded. Please try again in a moment. (HTTP {code}).")
-        }
-        // Cloudflare edge: origin unreachable or timed out (520–524), or an
-        // edge-side 1xxx failure (530).
-        code @ 520..=524 | code @ 530 => {
-            format!(
-                "Connection to Grok timed out or was interrupted. Please try again. (HTTP {code})."
-            )
-        }
+        code @ 529 => format!(
+            "{subject} is temporarily overloaded. Please try again in a moment. (HTTP {code})."
+        ),
+        code @ 520..=524 | code @ 530 => format!(
+            "Connection to {service} timed out or was interrupted. Please try again. (HTTP {code})."
+        ),
         // Cloudflare origin TLS (handshake / invalid certificate) — not transient.
         code @ 525 | code @ 526 => {
-            format!("Secure connection to Grok failed. (HTTP {code}).")
+            format!("Secure connection to {service} failed. (HTTP {code}).")
         }
         code if status.is_server_error() => {
             format!("Something went wrong on the server (HTTP {code}).")
@@ -744,22 +753,32 @@ fn structured_error_message(bytes: &[u8]) -> Option<String> {
 }
 
 /// Parse an API error body into a short string.
-///
-/// Only structured JSON error envelopes are surfaced. Non-JSON bodies
-/// (HTML edge pages, plain text dumps) return a fixed placeholder — never
-/// the raw bytes. Prefer [`user_facing_api_error_message`] when a status
-/// code is available.
 pub fn parse_error_bytes(bytes: &[u8]) -> String {
     structured_error_message(bytes).unwrap_or_else(|| "upstream error".into())
 }
 
+/// A plain-text error body, trimmed and capped. `None` for an empty body or
+/// markup. A gateway or an inference server often answers in plain text.
+fn plain_text_error_message(bytes: &[u8]) -> Option<String> {
+    let text = std::str::from_utf8(bytes).ok()?.trim();
+    if text.is_empty() || text.starts_with('<') {
+        return None;
+    }
+    Some(truncate_user_error(text))
+}
+
 /// User-facing message for a failed API call.
 ///
-/// Structured JSON error envelopes keep their message. Everything else
-/// (including Cloudflare HTML) maps to a status-based string — no body
-/// content matching.
+/// A structured JSON error envelope keeps its message. A plain-text body is
+/// shown after the status. Markup and an empty body map to a status phrase.
 pub fn user_facing_api_error_message(status: StatusCode, bytes: &[u8]) -> String {
-    structured_error_message(bytes).unwrap_or_else(|| status_user_message(status))
+    if let Some(message) = structured_error_message(bytes) {
+        return message;
+    }
+    match plain_text_error_message(bytes) {
+        Some(text) => format!("HTTP {}: {text}", status.as_u16()),
+        None => status_user_message(status),
+    }
 }
 
 /// As [`user_facing_api_error_message`], naming the endpoint on a 404.
@@ -770,7 +789,17 @@ pub fn user_facing_api_error_message(status: StatusCode, bytes: &[u8]) -> String
 /// ("Request failed (HTTP 404).") describing nothing a user can act on. Other
 /// statuses are about the request, not the address, and keep their message.
 pub fn api_error_message_for_endpoint(status: StatusCode, bytes: &[u8], endpoint: &str) -> String {
-    let message = user_facing_api_error_message(status, bytes);
+    let host = reqwest::Url::parse(endpoint)
+        .ok()
+        .and_then(|url| url.host_str().map(str::to_owned));
+    let message = match (structured_error_message(bytes), &host) {
+        (Some(message), _) => message,
+        (None, Some(host)) => match plain_text_error_message(bytes) {
+            Some(text) => format!("{host} answered HTTP {}: {text}", status.as_u16()),
+            None => status_user_message_from(status, host),
+        },
+        (None, None) => user_facing_api_error_message(status, bytes),
+    };
     if status == StatusCode::NOT_FOUND {
         format!("{message} No such endpoint: {endpoint}")
     } else {
@@ -806,6 +835,23 @@ pub fn is_context_length_error(message: &str) -> bool {
 /// own 52x pages when the origin is unreachable).
 pub fn is_retryable_api_status(status: StatusCode) -> bool {
     RetryPolicy::edge_client().should_retry(status.as_u16())
+}
+
+/// Render an error with every cause in its `source()` chain. reqwest prints
+/// only a category, such as "error decoding response body". The real cause (a
+/// reset stream, an early EOF, a timeout) is in the chain.
+pub fn error_chain(err: &(dyn std::error::Error + 'static)) -> String {
+    let mut text = err.to_string();
+    let mut source = err.source();
+    while let Some(cause) = source {
+        let part = cause.to_string();
+        if !part.is_empty() && !text.contains(&part) {
+            text.push_str(": ");
+            text.push_str(&part);
+        }
+        source = cause.source();
+    }
+    text
 }
 
 /// Decide whether a [`reqwest::Error`] is worth retrying.
@@ -1104,6 +1150,33 @@ mod tests {
         assert!(err.is_stream_interrupted());
     }
 
+    #[tokio::test]
+    async fn a_decode_failure_carries_its_cause_not_only_its_category() {
+        let rendered = SamplingError::Http(decode_error().await).to_string();
+        assert!(
+            rendered.starts_with("request error: error decoding response body: "),
+            "the category comes first, then the cause: {rendered}"
+        );
+        assert!(
+            rendered.contains("expected ident"),
+            "serde's own reason for the failure must reach the user: {rendered}"
+        );
+    }
+
+    #[test]
+    fn a_status_fallback_names_the_host_that_answered() {
+        let msg = api_error_message_for_endpoint(
+            StatusCode::BAD_GATEWAY,
+            b"<html>bad gateway</html>",
+            "https://api.anthropic.com/v1/messages",
+        );
+        assert_eq!(
+            msg,
+            "api.anthropic.com is temporarily unavailable. Please try again in a moment. (HTTP 502)."
+        );
+        assert!(!status_user_message(StatusCode::BAD_GATEWAY).contains("Grok"));
+    }
+
     #[test]
     fn a_request_stream_error_names_the_request_not_the_http_crate() {
         let msg =
@@ -1233,16 +1306,18 @@ mod tests {
     }
 
     #[test]
-    fn user_facing_api_error_message_maps_non_json_by_status() {
+    fn user_facing_api_error_message_maps_html_by_status_and_shows_plain_text() {
         let html = br#"<!DOCTYPE html><html><body>timeout</body></html>"#;
         let msg = user_facing_api_error_message(StatusCode::from_u16(524).unwrap(), html);
         assert_eq!(msg, status_user_message(StatusCode::from_u16(524).unwrap()));
 
-        let msg_503 =
-            user_facing_api_error_message(StatusCode::SERVICE_UNAVAILABLE, b"not json either");
+        let msg_503 = user_facing_api_error_message(
+            StatusCode::SERVICE_UNAVAILABLE,
+            b"  upstream model is loading  ",
+        );
         assert_eq!(
-            msg_503,
-            status_user_message(StatusCode::SERVICE_UNAVAILABLE)
+            msg_503, "HTTP 503: upstream model is loading",
+            "a plain-text body is the server's own reason, so it is shown"
         );
     }
 

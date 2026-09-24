@@ -559,7 +559,7 @@ pub(crate) fn clone_error(err: &SamplingError) -> SamplingError {
             // reqwest::Error is not Clone; preserve the rendered message
             // as an EventStreamError (the closest retryable transport
             // variant) so callers see an equivalent description.
-            SamplingError::EventStreamError(e.to_string())
+            SamplingError::EventStreamError(xai_grok_sampling_types::error::error_chain(e))
         }
         SamplingError::Serialization(e) => {
             // serde_json::Error is not Clone; its Display already carries the
