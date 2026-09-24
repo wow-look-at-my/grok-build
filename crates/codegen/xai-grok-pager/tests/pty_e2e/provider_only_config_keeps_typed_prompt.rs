@@ -3,8 +3,6 @@
 use super::common::*;
 use xai_grok_pager_pty_harness::EnvOp;
 
-/// The earliest-party URLs and the API key the harness baseline sets. A user
-/// who runs only a `[model_providers.*]` block has none of them.
 const FIRST_PARTY_ENV: &[&str] = &[
     "GROK_CLI_CHAT_PROXY_BASE_URL",
     "GROK_XAI_API_BASE_URL",
@@ -23,7 +21,8 @@ fn write_provider_config(content: &ContentController) {
     std::fs::write(
         grok_home.join("config.toml"),
         format!(
-            "[model_providers.internal]\nbase_url = \"{}\"\napi_key = \"internal-key\"\n\n\
+            "[model_providers.internal]\napi_backend = \"chat_completions\"\n\
+             api_base_url = \"{}\"\nenv_key = [\"PROVIDER_AUTH_TOKEN\"]\n\n\
              [model.my-model]\nmodel = \"test-model\"\nmodel_provider = \"internal\"\n",
             content.url()
         ),
@@ -34,6 +33,7 @@ fn write_provider_config(content: &ContentController) {
 fn spawn_provider_only(content: &ContentController, extra: &[EnvOp<'_>]) -> PtyHarness {
     write_provider_config(content);
     let mut ops: Vec<EnvOp<'_>> = FIRST_PARTY_ENV.iter().map(|k| EnvOp::remove(k)).collect();
+    ops.push(EnvOp::set("PROVIDER_AUTH_TOKEN", "internal-key"));
     ops.extend_from_slice(extra);
     let binary = pager_binary().expect("resolve pager binary");
     PtyHarness::spawn_with_content_env_ops(&binary, DEFAULT_ROWS, DEFAULT_COLS, content, &[], &ops)
