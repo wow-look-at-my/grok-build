@@ -23,7 +23,7 @@ fn failure(kind: SamplingErrorKind, retry_after_secs: Option<u64>) -> SamplingEr
         empty_response_context: None,
         doom_loop_triggers: None,
         doom_loop_aborted_at_chunk: None,
-        credential: xai_grok_sampling_types::SentCredential::Unknown,
+        credential: xai_grok_sampling_types::SentCredential::Unknown, output_rate: None,
     }
 }
 

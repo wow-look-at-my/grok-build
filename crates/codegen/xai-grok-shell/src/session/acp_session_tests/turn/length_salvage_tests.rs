@@ -281,7 +281,7 @@ fn error_with_tiny_window(
         empty_response_context: None,
         doom_loop_triggers: None,
         doom_loop_aborted_at_chunk: None,
-        credential: xai_grok_sampling_types::SentCredential::Unknown,
+        credential: xai_grok_sampling_types::SentCredential::Unknown, output_rate: None,
     }
 }
 /// A rate-limited terminal error mid-continuation keeps its terminal arm even when the estimate exceeds the reported window.

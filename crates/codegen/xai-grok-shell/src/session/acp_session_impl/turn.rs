@@ -2647,6 +2647,7 @@ impl SessionActor {
         trace_gcs_config: Option<crate::session::repo_changes::TraceExportConfig>,
         artifact_tracker: Option<&crate::upload::manifest::ArtifactTracker>,
         json_schema: Option<serde_json::Value>,
+        first_round: bool,
         salvage: &mut super::length_salvage::LengthSalvage,
         turn_sampling: &mut TurnSampling,
     ) -> Result<TurnOutcome, acp::Error> {
@@ -2656,6 +2657,7 @@ impl SessionActor {
                 trace_gcs_config,
                 artifact_tracker,
                 json_schema,
+                first_round,
                 salvage,
                 turn_sampling,
             )
@@ -3256,6 +3258,7 @@ impl SessionActor {
                             attempt: transient_retry_attempts,
                             max_retries: display_max,
                             reason: format!("{cause}; retrying request"),
+                            retry_in_ms: Some(delay.as_millis() as u64),
                             error_type: Some(kind.as_ref().to_string()),
                         },
                     ))
@@ -3647,6 +3650,7 @@ impl SessionActor {
                         attempt: media_gen_resamples,
                         max_retries: MAX_MEDIA_GEN_OVER_CAP_RESAMPLES,
                         reason: "Too many parallel media-gen calls; retrying".to_string(),
+                        retry_in_ms: None,
                         error_type: None,
                     },
                 ))
@@ -4204,6 +4208,7 @@ mod identical_tool_call_run_tests {
             id: "id".into(),
             name: name.to_string(),
             arguments: args.into(),
+            vendor: Default::default(),
         };
         assert_eq!(
             step_signature(&[call("read_file", r#"{"path":"a","limit":10}"#)]),
@@ -4537,6 +4542,7 @@ mod last_sample_span_tests {
                 id: "call-1".into(),
                 name: "bash".to_string(),
                 arguments: "{}".into(),
+                vendor: Default::default(),
             });
         }
         response

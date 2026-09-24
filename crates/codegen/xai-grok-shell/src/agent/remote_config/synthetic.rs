@@ -119,7 +119,10 @@ pub(crate) fn apply_synthetic_schema(
         .and_then(|rp| rp.get("efforts"))
         .and_then(|v| v.as_array())
     {
-        parsed.reasoning_efforts = xai_grok_sampling_types::parse_reasoning_effort_options(arr);
+        parsed.reasoning_efforts = xai_grok_sampling_types::parse_reasoning_effort_options(
+            arr,
+            "reasoning_parameters.efforts",
+        );
     }
 
     parsed

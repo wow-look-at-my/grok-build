@@ -575,9 +575,6 @@ pub(crate) fn snapshot_to_turn_delta(
 
 #[cfg(test)]
 mod egress_disabled_pins {
-    use prod_mc_cli_chat_proxy_types::feedback_types::{
-        SessionEventRequest, SessionEventType, SessionSignalsUpdate,
-    };
 
     use super::*;
 
@@ -597,20 +594,10 @@ mod egress_disabled_pins {
             &crate::session::signals::SessionSignals::default(),
             ClientType::Tui,
         );
-        let event = SessionEventRequest {
-            event_type: SessionEventType::Error,
-            event_data: None,
-            timestamp: None,
-        };
-
         let results: Vec<(&str, anyhow::Result<()>)> = vec![
             (
                 "signals",
                 client.update_signals("session", &signals).await.map(|_| ()),
-            ),
-            (
-                "events",
-                client.record_event("session", &event).await.map(|_| ()),
             ),
             (
                 "dismiss",

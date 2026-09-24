@@ -618,7 +618,7 @@ async fn mcp_error_result_fires_only_failure_and_delivers_original_output() {
             let call = crate::sampling::types::ToolCallResponse {
                 id: "call_mcp_err".to_string(),
                 kind: "function".to_string(),
-                function: crate::sampling::types::ToolCallFunction::new("mock_error_tool", "{}"),
+                function: crate::sampling::types::ToolCallFunction::new("mock_error_tool", "{}"), vendor: Default::default(),
             };
             actor
                 .execute_tool_calls(vec![call], None)
@@ -674,7 +674,7 @@ async fn post_tool_use_failure_additional_context_reaches_model() {
                 function: crate::sampling::types::ToolCallFunction::new(
                     "todo_write",
                     r#"{"todos":[{"id":"t1","content":"do","status":"completed"}]}"#,
-                ),
+                ), vendor: Default::default(),
             };
 
             actor

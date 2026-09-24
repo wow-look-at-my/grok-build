@@ -150,7 +150,7 @@ fn image_compaction_history() -> Vec<ConversationItem> {
         ConversationItem::assistant_tool_calls(vec![ToolCall {
             id: "call-image-sentinel".into(),
             name: "read_file".into(),
-            arguments: r#"{"target_file":"image.png"}"#.into(),
+            arguments: r#"{"target_file":"image.png"}"#.into(), vendor: Default::default(),
         }]),
         ConversationItem::tool_result_with_images(
             "call-image-sentinel",

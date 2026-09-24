@@ -103,6 +103,7 @@ impl Default for SubagentsConfig {
             sampling_limit: None,
             limit_behavior: None,
             workflow_max_concurrent: None,
+            usage_frequency: None,
             models: std::collections::HashMap::new(),
             toggle: std::collections::HashMap::new(),
             roles: std::collections::HashMap::new(),

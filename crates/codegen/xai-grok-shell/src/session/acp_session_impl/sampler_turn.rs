@@ -108,7 +108,9 @@ pub(super) fn transient_retry_eligible(error: &xai_grok_sampler::SamplingErrorIn
         | SamplingErrorKind::RateLimited
         | SamplingErrorKind::EmptyResponse
         | SamplingErrorKind::MaxTokensTruncation
-        | SamplingErrorKind::DoomLoopDetected => false,
+        | SamplingErrorKind::DoomLoopDetected
+        | SamplingErrorKind::OutputRateCollapsed
+        | SamplingErrorKind::FirstTokenTimeout => false,
     }
 }
 
@@ -298,6 +300,7 @@ fn revoked_sampling_info() -> xai_grok_sampler::SamplingErrorInfo {
         empty_response_context: None,
         doom_loop_triggers: None,
         doom_loop_aborted_at_chunk: None,
+        output_rate: None,
         credential: xai_grok_sampling_types::SentCredential::Unknown,
     }
 }
@@ -1845,6 +1848,7 @@ impl SessionActor {
                     report.items_after
                 ),
                 retry_in_ms: None,
+                error_type: None,
             },
         ))
         .await;
@@ -2220,6 +2224,7 @@ impl SessionActor {
                     "Too many requests in flight; waiting {} before trying again",
                     human_duration(announced)
                 ),
+                retry_in_ms: Some(backoff.as_millis() as u64),
                 error_type: None,
             },
         ))
@@ -2655,6 +2660,7 @@ mod stream_drain_tests {
             empty_response_context: None,
             doom_loop_triggers: None,
             doom_loop_aborted_at_chunk: None,
+            output_rate: None,
             credential: xai_grok_sampling_types::SentCredential::Unknown,
         };
         let result = error_after_stream_drain(StreamDrainOutcome::Revoked, original);

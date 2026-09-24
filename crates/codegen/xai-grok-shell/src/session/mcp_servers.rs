@@ -166,7 +166,7 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn a_wedged_init_gives_up_instead_of_waiting_forever() {
         let mut state = inner::McpState::new(vec![stdio("kagi")]);
-        assert!(state.try_start_init());
+        let _claim = state.try_start_init().expect("init can start");
         state.mark_servers_initializing(["kagi".to_string()]);
         let state = tokio::sync::Mutex::new(state);
 
@@ -185,7 +185,7 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn a_server_that_finishes_is_waited_for() {
         let mut state = inner::McpState::new(vec![stdio("kagi")]);
-        assert!(state.try_start_init());
+        let _claim = state.try_start_init().expect("init can start");
         state.mark_servers_initializing(["kagi".to_string()]);
         let state = std::sync::Arc::new(tokio::sync::Mutex::new(state));
 

@@ -2128,67 +2128,49 @@ email = ["$GROK_TEST_WORK_EMAIL"]
             "GROK_USER_METADATA",
             r#"{"team": "platform-tools", "structured_feedback": {"type": "forged"}}"#,
         );
-        let (addr, captured) = start_capture_server().await;
-        let client = crate::agent::feedback_client::FeedbackClient::with_client(
-            reqwest::Client::new(),
-            format!("http://{addr}/v1"),
-            Some("tok".into()),
-        );
         let envelope = serde_json::json!({
             "schema_version": 1,
             "source": "write",
             "type": "bug",
         });
+        async fn persisted_metadata(mut submission: FeedbackSubmission) -> serde_json::Value {
+            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+            let outcome = submit_feedback_workflow(
+                &mut submission,
+                None,
+                Some(&tx),
+                SubmitFeedbackOptions {
+                    solicited: false,
+                    telemetry_enabled: false,
+                    author_identity: None,
+                },
+            )
+            .await;
+            assert!(matches!(outcome, SubmitOutcome::LocalOnly));
+            let msg = rx.try_recv().expect("persistence entry was sent");
+            let PersistenceMsg::Feedback(LocalFeedbackEntry::UserFeedback(entry)) = msg else {
+                panic!("expected a feedback persistence entry");
+            };
+            entry
+                .submission
+                .expect("submission persisted")
+                .metadata
+                .expect("metadata persisted")
+        }
+
         let mut submission = text_submission();
         submission.metadata = Some(serde_json::json!({ "structured_feedback": envelope.clone() }));
-
-        let outcome = submit_feedback_workflow(
-            &mut submission,
-            Some(&client),
-            None,
-            SubmitFeedbackOptions {
-                solicited: false,
-                telemetry_enabled: false,
-                author_identity: None,
-            },
-        )
-        .await;
-        assert!(matches!(outcome, SubmitOutcome::Submitted));
-
-        let body = captured.lock().clone().expect("server saw the POST");
+        let metadata = persisted_metadata(submission).await;
+        assert_eq!(metadata.get("structured_feedback"), Some(&envelope));
         assert_eq!(
-            body.get("metadata")
-                .and_then(|m| m.get("structured_feedback")),
-            Some(&envelope)
-        );
-        assert_eq!(
-            body.get("metadata").and_then(|m| m.get("team")),
+            metadata.get("team"),
             Some(&serde_json::json!("platform-tools"))
         );
 
-        // A report without the envelope must not grow one from the environment either.
-        *captured.lock() = None;
-        let mut submission = text_submission();
-        let outcome = submit_feedback_workflow(
-            &mut submission,
-            Some(&client),
-            None,
-            SubmitFeedbackOptions {
-                solicited: false,
-                telemetry_enabled: false,
-                author_identity: None,
-            },
-        )
-        .await;
-        assert!(matches!(outcome, SubmitOutcome::Submitted));
-        let body = captured.lock().clone().expect("server saw the POST");
-        assert!(
-            body.get("metadata")
-                .and_then(|m| m.get("structured_feedback"))
-                .is_none()
-        );
+        let metadata = persisted_metadata(text_submission()).await;
+        assert!(metadata.get("structured_feedback").is_none());
         assert_eq!(
-            body.get("metadata").and_then(|m| m.get("team")),
+            metadata.get("team"),
             Some(&serde_json::json!("platform-tools"))
         );
     }

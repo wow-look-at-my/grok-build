@@ -345,6 +345,7 @@ mod tests {
                     id: Arc::from(format!("call-{step}")),
                     name: "read_file".to_owned(),
                     arguments: Arc::from(format!("{{\"path\":\"src/file{step}.rs\"}}")),
+                    vendor: Default::default(),
                 });
             }
             items.push(assistant);

@@ -21,7 +21,7 @@ fn search_call(id: &str, path: &str) -> crate::sampling::types::ToolCallResponse
         function: crate::sampling::types::ToolCallFunction::new(
             "search_code",
             serde_json::json!({"pattern": "needle-keep", "path": path}).to_string(),
-        ),
+        ), vendor: Default::default(),
     }
 }
 
@@ -204,7 +204,7 @@ fn tool_call(
     crate::sampling::types::ToolCallResponse {
         id: id.to_owned(),
         kind: "function".to_owned(),
-        function: crate::sampling::types::ToolCallFunction::new(name, args.to_string()),
+        function: crate::sampling::types::ToolCallFunction::new(name, args.to_string()), vendor: Default::default(),
     }
 }
 

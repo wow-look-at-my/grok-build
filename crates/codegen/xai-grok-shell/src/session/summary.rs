@@ -253,7 +253,7 @@ mod tests {
         let sampling_client =
             OaiCompatClient::new(xai_grok_sampler::SamplerConfig::default()).unwrap();
         let mut generator = SummaryGenerator::new(SummaryConfig {
-            sampling_client,
+            sampling_client: Some(sampling_client),
             model: String::new(),
             persistence_tx: tx.downgrade(),
         });

@@ -64,7 +64,7 @@ pub(crate) fn build_run_log(
     for item in items {
         match item {
             ConversationItem::User(u) => {
-                if u.synthetic_reason == Some(SyntheticReason::CompactionMeta) {
+                if u.synthetic_reason == SyntheticReason::CompactionMeta {
                     // The summary sits at or after the goal start when the
                     // goal is active, so what follows it is the goal's.
                     compacted |= in_goal;
@@ -232,7 +232,7 @@ mod tests {
             content: vec![ContentPart::Text {
                 text: "summary".into(),
             }],
-            synthetic_reason: Some(SyntheticReason::CompactionMeta),
+            synthetic_reason: SyntheticReason::CompactionMeta,
             ..Default::default()
         })
     }

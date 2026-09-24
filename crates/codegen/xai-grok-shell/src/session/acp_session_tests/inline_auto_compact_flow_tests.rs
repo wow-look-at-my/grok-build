@@ -1055,7 +1055,15 @@ async fn second_consecutive_overflow_reduces_instead_of_compacting_again() {
                 .context_overflow_recovery
                 .set(ContextOverflowRecovery::Compacted);
             let err = api_error_with_context_window(200_000);
-            let result = actor.handle_sampling_failure(err).await;
+            let result = actor
+                .handle_sampling_failure(
+                    err,
+                    0,
+                    transient_state(0, true),
+                    false,
+                    TurnParkState::Fresh,
+                )
+                .await;
             assert!(
                 matches!(result, Ok(SamplerFailureRecovery::ReduceAndResubmit)),
                 "expected ReduceAndResubmit (not another CompactAndResubmit), got {result:?}"
@@ -1090,7 +1098,15 @@ async fn third_consecutive_overflow_gives_up_instead_of_looping() {
                 .context_overflow_recovery
                 .set(ContextOverflowRecovery::Reduced);
             let err = api_error_with_context_window(200_000);
-            let result = actor.handle_sampling_failure(err).await;
+            let result = actor
+                .handle_sampling_failure(
+                    err,
+                    0,
+                    transient_state(0, true),
+                    false,
+                    TurnParkState::Fresh,
+                )
+                .await;
             assert!(
                 result.is_err(),
                 "third consecutive overflow must be terminal, not another retry: {result:?}"

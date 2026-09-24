@@ -414,7 +414,7 @@ async fn completed_event_releases_stream_drain_barrier_and_timeout_keeps_request
                     kind: xai_grok_sampler::SamplingErrorKind::DoomLoopDetected,
                     reason: "queued retry after timeout".to_string(),
                     doom_loop_triggers: Some(vec!["tail_repetition:8@thinking".to_string()]),
-                    doom_loop_aborted_at_chunk: Some(42),
+                    doom_loop_aborted_at_chunk: Some(42), retry_in_ms: None,
                 })
                 .await;
             assert_eq!(
@@ -608,7 +608,7 @@ async fn unowned_retry_does_not_notify_the_next_turn() {
                     kind: SamplingErrorKind::DoomLoopDetected,
                     reason: "late retry from cancelled request".to_string(),
                     doom_loop_triggers: Some(vec!["tail_repetition:8@thinking".to_string()]),
-                    doom_loop_aborted_at_chunk: Some(42),
+                    doom_loop_aborted_at_chunk: Some(42), retry_in_ms: None,
                 })
                 .await;
             tokio::task::yield_now().await;
@@ -685,7 +685,7 @@ async fn failed_event_preserves_streaming_capture_for_takeout() {
                         empty_response_context: None,
                         doom_loop_triggers: None,
                         doom_loop_aborted_at_chunk: None,
-                        credential: xai_grok_sampling_types::SentCredential::Unknown,
+                        credential: xai_grok_sampling_types::SentCredential::Unknown, output_rate: None,
                     },
                 })
                 .await;
@@ -730,7 +730,7 @@ async fn failed_event_preserves_streaming_capture_for_takeout() {
                         empty_response_context: None,
                         doom_loop_triggers: None,
                         doom_loop_aborted_at_chunk: None,
-                        credential: xai_grok_sampling_types::SentCredential::Unknown,
+                        credential: xai_grok_sampling_types::SentCredential::Unknown, output_rate: None,
                     },
                 })
                 .await;
@@ -761,7 +761,7 @@ async fn failed_event_preserves_streaming_capture_for_takeout() {
                         empty_response_context: None,
                         doom_loop_triggers: None,
                         doom_loop_aborted_at_chunk: None,
-                        credential: xai_grok_sampling_types::SentCredential::Unknown,
+                        credential: xai_grok_sampling_types::SentCredential::Unknown, output_rate: None,
                     },
                 })
                 .await;
@@ -1014,7 +1014,7 @@ async fn doom_loop_recovery_stamps_capture_segments_and_counters() {
                     kind: SamplingErrorKind::DoomLoopDetected,
                     reason: "doom loop detected: tail_repetition:8@thinking".to_string(),
                     doom_loop_triggers: Some(vec!["tail_repetition:8@thinking".to_string()]),
-                    doom_loop_aborted_at_chunk: Some(421),
+                    doom_loop_aborted_at_chunk: Some(421), retry_in_ms: None,
                 })
                 .await;
             // Replaying the same ordinal must be idempotent.
@@ -1026,7 +1026,7 @@ async fn doom_loop_recovery_stamps_capture_segments_and_counters() {
                     kind: SamplingErrorKind::DoomLoopDetected,
                     reason: "duplicate queued retry".to_string(),
                     doom_loop_triggers: Some(vec!["tail_repetition:8@thinking".to_string()]),
-                    doom_loop_aborted_at_chunk: Some(421),
+                    doom_loop_aborted_at_chunk: Some(421), retry_in_ms: None,
                 })
                 .await;
             assert_eq!(1, actor.doom_loop_turn_tally.lock().attempts);
@@ -1332,7 +1332,7 @@ async fn reasoning_only_doomloop_turn_captures_every_generation_as_segments() {
                 }),
                 doom_loop_triggers: None,
                 doom_loop_aborted_at_chunk: None,
-                credential: xai_grok_sampling_types::SentCredential::Unknown,
+                credential: xai_grok_sampling_types::SentCredential::Unknown, output_rate: None,
             };
 
             // Drainer side: the terminal `Failed` is telemetry-only and must NOT collapse the accumulated doomloop segments

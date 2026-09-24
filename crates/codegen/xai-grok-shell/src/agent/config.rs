@@ -4159,44 +4159,10 @@ impl ModelEntryConfig {
     /// this, rather than restating thirty fields it has no answer for.
     pub(crate) fn minimal(base_url: &str) -> Self {
         Self {
-            id: None,
-            model: String::new(),
             base_url: base_url.to_owned(),
-            api_base_url: None,
-            name: None,
-            description: None,
             context_window: NonZeroU64::new(crate::remote::DEFAULT_CONTEXT_WINDOW)
                 .expect("the default window is non-zero"),
-            auto_compact_threshold_percent: None,
-            system_prompt_label: None,
-            temperature: None,
-            top_p: None,
-            max_completion_tokens: None,
-            api_backend: ApiBackend::default(),
-            auth_scheme: None,
-            agent_type: default_agent_type(),
-            inference_idle_timeout_secs: None,
-            max_retries: None,
-            api_key: None,
-            env_key: None,
-            extra_headers: IndexMap::new(),
-            use_concise: false,
-            hidden: false,
-            supported_in_api: true,
-            reasoning_effort: None,
-            supports_reasoning_effort: false,
-            reasoning_efforts: Vec::new(),
-            supports_backend_search: false,
-            compactions_remaining: None,
-            compaction_at_tokens: None,
-            show_model_fingerprint: false,
-            stream_tool_calls: None,
-            strict_message_schema: false,
-            laziness_detector: LazinessDetectorPerModelConfig::default(),
-            pricing: xai_grok_sampling_types::ModelPricing::default(),
-            min_output_tokens_per_sec: None,
-            ttft_timeout_secs: None,
-            loaded_in_vram: None,
+            ..Self::default()
         }
     }
 }
@@ -4461,6 +4427,11 @@ impl Default for ModelEntryConfig {
             stream_tool_calls: None,
             reasoning_summary: None,
             laziness_detector: LazinessDetectorPerModelConfig::default(),
+            pricing: xai_grok_sampling_types::ModelPricing::default(),
+            min_output_tokens_per_sec: None,
+            ttft_timeout_secs: None,
+            loaded_in_vram: None,
+            strict_message_schema: false,
         }
     }
 }
@@ -5056,6 +5027,7 @@ impl ModelEntry {
         info.base_url = String::new();
         Self {
             info,
+            mtls_cert_dir: None,
             api_key: None,
             env_key: None,
             auth_provider: None,

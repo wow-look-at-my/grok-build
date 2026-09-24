@@ -212,6 +212,7 @@ async fn interjection_buffered_during_tool_call_reaches_next_request() {
                         None,
                         None,
                         true,
+                        false,
                         None,
                         None,
                         None,
@@ -294,7 +295,7 @@ async fn interjection_buffered_during_tool_call_reaches_next_request() {
             let conv = actor.chat_state_handle.get_conversation().await;
             let has_interjection = conv.iter().any(|item| {
                 matches!(item, ConversationItem::User(u)
-                    if u.synthetic_reason == Some(SyntheticReason::Interjection))
+                    if u.synthetic_reason == SyntheticReason::Interjection)
                     && item.text_content().contains(INTERJECTION_NEEDLE)
             });
             assert!(
@@ -371,6 +372,7 @@ async fn interjection_buffered_during_stream_reaches_next_request() {
                         None,
                         None,
                         true,
+                        false,
                         None,
                         None,
                         None,
@@ -430,7 +432,7 @@ async fn interjection_buffered_during_stream_reaches_next_request() {
             let conv = actor.chat_state_handle.get_conversation().await;
             let has_interjection = conv.iter().any(|item| {
                 matches!(item, ConversationItem::User(u)
-                    if u.synthetic_reason == Some(SyntheticReason::Interjection))
+                    if u.synthetic_reason == SyntheticReason::Interjection)
                     && item.text_content().contains(INTERJECTION_NEEDLE)
             });
             assert!(
@@ -512,7 +514,7 @@ async fn queued_followup_harvested_into_running_turn_reaches_next_request() {
             }
 
             let (completion_tx, mut completion_rx) =
-                tokio::sync::mpsc::unbounded_channel::<(String, PromptTurnResult)>();
+                tokio::sync::mpsc::unbounded_channel::<TurnCompletionMsg>();
             actor.clone().maybe_start_running_task(completion_tx).await;
 
             // Wait until the first model request (the tool call) has been sent.
@@ -587,7 +589,7 @@ async fn queued_followup_harvested_into_running_turn_reaches_next_request() {
             let conv = actor.chat_state_handle.get_conversation().await;
             let has_interjection = conv.iter().any(|item| {
                 matches!(item, ConversationItem::User(u)
-                    if u.synthetic_reason == Some(SyntheticReason::Interjection))
+                    if u.synthetic_reason == SyntheticReason::Interjection)
                     && item.text_content().contains(HARVEST_NEEDLE)
             });
             assert!(
@@ -656,7 +658,7 @@ async fn interjection_during_stream_cancels_and_resubmits_with_partial_preserved
                 state.pending_inputs.push_back(initial);
             }
             let (completion_tx, mut completion_rx) =
-                tokio::sync::mpsc::unbounded_channel::<(String, PromptTurnResult)>();
+                tokio::sync::mpsc::unbounded_channel::<TurnCompletionMsg>();
             actor.clone().maybe_start_running_task(completion_tx).await;
 
             // Wait until the first stream is parked at its terminal-event
@@ -726,7 +728,7 @@ async fn interjection_during_stream_cancels_and_resubmits_with_partial_preserved
             // And the interjection must be present as a synthetic user message.
             let has_interjection = conv.iter().any(|item| {
                 matches!(item, ConversationItem::User(u)
-                    if u.synthetic_reason == Some(SyntheticReason::Interjection))
+                    if u.synthetic_reason == SyntheticReason::Interjection)
                     && item.text_content().contains(INTERJECTION_NEEDLE)
             });
             assert!(

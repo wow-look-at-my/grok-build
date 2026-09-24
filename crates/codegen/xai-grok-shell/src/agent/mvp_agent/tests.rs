@@ -8899,7 +8899,7 @@ async fn remote_settings_alone_cannot_enable_session_replicas() {
         session_registry_enabled: Some(true),
         ..Default::default()
     });
-    let agent = MvpAgent::new(gateway, &cfg, auth_manager, None).expect("valid test config");
+    let agent = MvpAgent::new(gateway, &cfg, auth_manager, None, None).expect("valid test config");
 
     assert!(
         agent.build_registry_config().is_none(),

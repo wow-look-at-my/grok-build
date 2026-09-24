@@ -19,7 +19,7 @@ async fn prepare(a: &SessionActor, id: &str, tool: &str) -> Result<PreparedToolC
     let call = crate::sampling::types::ToolCallResponse {
         id: id.to_string(),
         kind: "function".to_string(),
-        function: crate::sampling::types::ToolCallFunction::new(tool, "{}".to_string()),
+        function: crate::sampling::types::ToolCallFunction::new(tool, "{}".to_string()), vendor: Default::default(),
     };
     let mut deferred = Vec::new();
     a.prepare_tool_call(call, &mut deferred, None)
@@ -229,6 +229,7 @@ async fn progressive_body() {
     // A zero-turn rebuild rebuilds the prefix through the same policy, so a delivery-tools session still holds the wait.
     let (_, rebuild_wait) = timed(wedged.handle_rebuild_agent_for_definition(
         xai_grok_agent::AgentDefinition::default_grok_build(),
+        true,
         xai_grok_agent::DEFAULT_SYSTEM_PROMPT_LABEL.to_owned(),
     ))
     .await;

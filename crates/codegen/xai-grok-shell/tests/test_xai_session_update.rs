@@ -148,8 +148,10 @@ async fn test_turn_completed_round_trips_through_storage() {
             prompt_id: "prompt-1".to_string(),
             stop_reason: "end_turn".to_string(),
             agent_result: Some("all done".to_string()),
+            error_kind: None,
             usage: None,
             session_cost_usd_ticks: Some(24_000),
+            elapsed_ms: None,
         },
         meta: None,
     };
