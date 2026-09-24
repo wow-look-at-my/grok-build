@@ -101,18 +101,13 @@ fn assert_materialized_auto_socket_denies(profile: &SandboxProfile) {
     assert_deny_eq_order_insensitive(profile, expected);
 }
 
-#[cfg(unix)]
 fn temp_runtime_root(tag: &str) -> PathBuf {
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let root = std::env::temp_dir().join(format!(
-        "grok-runtime-sockets-{tag}-{}-{nanos}",
-        std::process::id()
-    ));
+    static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let root = PathBuf::from("/tmp").join(format!("grs-{tag}-{}-{n}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(&root).unwrap();
-    root
+    std::fs::canonicalize(&root).unwrap()
 }
 
 #[test]
