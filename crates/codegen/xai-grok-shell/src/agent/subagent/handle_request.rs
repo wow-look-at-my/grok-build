@@ -54,9 +54,12 @@ pub(super) fn task_model_override_error(
     let requested = requested?;
     crate::agent::models::task_model_error_for_catalog(requested, available, is_session_auth)
 }
-/// Item contents of a bound session's live todo list, in order.
-///
-/// A session's todo list is a `State<TodoState>` resource on its OWN toolset,
+/// The model a forked child runs on. A fork reuses the parent's prompt cache
+/// only on the parent's model.
+    requested
+        .filter(|m| !m.trim().is_empty())
+        .unwrap_or_else(|| parent.to_string())
+} is a `State<TodoState>` resource on its OWN toolset,
 /// and every session the workspace knows is bound here keyed by session id — so
 /// this is how a parent reads a child's list without the child having to hand it
 /// over. Empty when the session is unknown (proxy mode, or a session that was
@@ -449,7 +452,10 @@ pub(crate) async fn run_shell_child(
         });
     }
     if request.fork_context {
-        effective_runtime.model = Some(ctx.model_id.0.to_string());
+        effective_runtime.model = Some(fork_runtime_model(
+            request.runtime_overrides.model.clone(),
+            &ctx.model_id.0,
+        ));
     }
     let (mut effective_sampling_config, mut effective_model_id) = resolve_effective_model_config(
         effective_runtime.model.as_deref(),
