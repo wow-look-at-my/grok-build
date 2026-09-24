@@ -1359,7 +1359,9 @@ impl ApiBackend {
     /// The xAI inference proxy rejects bodies over 50 MiB (nginx `proxy-body-size`); Messages API hosts reject bodies over 30 MB.
     pub const fn default_max_request_bytes(&self) -> NonZeroU64 {
         match self {
-            Self::ChatCompletions | Self::Responses => NonZeroU64::new(50 * 1024 * 1024).unwrap(),
+            Self::ChatCompletions | Self::Responses | Self::Ollama => {
+                NonZeroU64::new(50 * 1024 * 1024).unwrap()
+            }
             Self::Messages => NonZeroU64::new(30_000_000).unwrap(),
         }
     }
