@@ -325,8 +325,7 @@ pub(super) fn handle_session_notification_with_origin(
             // preview of a call that is already on screen. A delta carries no
             // prompt id, so while a wake turn runs it cannot be told apart
             // from the wake turn's own output and is dropped whole.
-            if meta.is_replay || agent.session.loading_replay || agent.running_wake_turn.is_some()
-            {
+            if meta.is_replay || agent.session.loading_replay || agent.running_wake_turn.is_some() {
                 false
             } else {
                 let had_activity_before = agent.session.tracker.activity().is_some();

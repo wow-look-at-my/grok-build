@@ -230,7 +230,8 @@ fn remote_settings_length_salvage_budget_serde_cells() {
         serde_json::from_value(serde_json::json!({ "length_salvage_budget": 0 }))
             .expect("kill value");
     assert_eq!(set.length_salvage_budget, Some(0));
-} /// Default agent with the gate off (no env var): a Length cut keeps its text. The turn continues. /// Salvage owns the case only when it is on, so its reminder must not appear here.
+}
+/// Default agent with the gate off (no env var): a Length cut keeps its text. The turn continues. /// Salvage owns the case only when it is on, so its reminder must not appear here.
 #[test]
 fn default_agent_gate_off_resumes_a_length_cut_turn() {
     if xai_grok_config::env_bool("GROK_LENGTH_SALVAGE") == Some(true) {
