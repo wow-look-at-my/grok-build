@@ -326,6 +326,41 @@ pub(crate) fn apply_favorites(cfg: &config::Config, catalog: &mut IndexMap<Strin
     }
 }
 
+/// A model that names a `model_provider` routes to that provider. A config
+/// model starts from an entry that carries the cli-chat-proxy URL, and some
+/// provider shapes leave it there. Replace it with the provider's other URL,
+/// or with none.
+fn keep_provider_models_off_the_proxy(
+    cfg: &config::Config,
+    catalog: &mut IndexMap<String, ModelEntry>,
+) {
+    let proxy = cfg.endpoints.resolve_inference_base_url();
+    if proxy.trim().is_empty() {
+        return;
+    }
+    let models_base = Some(cfg.endpoints.models_base_url.trim())
+        .filter(|u| !u.is_empty())
+        .map(str::to_owned);
+    for (key, entry) in catalog.iter_mut() {
+        if entry.info.model_provider.is_none() || entry.info.base_url != proxy {
+            continue;
+        }
+        let replacement = entry
+            .api_base_url
+            .clone()
+            .filter(|u| !u.trim().is_empty())
+            .or_else(|| models_base.clone())
+            .unwrap_or_default();
+        tracing::warn!(
+            model = %key,
+            provider = ?entry.info.model_provider,
+            base_url = %replacement,
+            "provider model had the cli-chat-proxy URL; using the provider's own URL"
+        );
+        entry.info.base_url = replacement;
+    }
+}
+
 /// A model with no URL cannot answer. The picker never offers it, and the
 /// default never picks it.
 fn unselect_models_without_a_url(catalog: &mut IndexMap<String, ModelEntry>) {
@@ -453,6 +488,7 @@ pub(crate) fn merge_additive_catalog(
     provider_models: &IndexMap<String, ModelEntry>,
 ) -> IndexMap<String, ModelEntry> {
     let mut additive = provider_models.clone();
+    keep_provider_models_off_the_proxy(cfg, &mut additive);
 
     if let Ok(Some(disabled)) = ModelGlobSet::compile(cfg.models.disabled_models.as_ref()) {
         additive.retain(|key, entry| !disabled.matches(key, &entry.model));
