@@ -988,6 +988,29 @@ impl SessionActor {
         token_budget: Option<i64>,
         mode: crate::session::goal_tracker::GoalMode,
     ) -> String {
+        self.create_goal_orchestration(objective, token_budget)
+            .await;
+        {
+            let mut tracker = self.goal_tracker.lock();
+            if let Some(o) = tracker.snapshot_mut() {
+                o.mode = mode;
+            }
+            self.goal_notify_sender().persist_goal_state(&tracker);
+        }
+        if self.goal_planner_on() {
+            self.maybe_run_goal_planner(objective).await;
+        }
+        let planner_enabled = self.goal_planner_on();
+        self.render_goal_start_reminder(objective, |o| goal_reminder_plan_path(planner_enabled, o))
+            .await
+    }
+
+    /// Create the goal orchestration and announce it. Returns the new goal id.
+    pub(super) async fn create_goal_orchestration(
+        &self,
+        objective: &str,
+        token_budget: Option<i64>,
+    ) -> String {
         let goal_id = uuid::Uuid::new_v4().to_string();
         let created_at = chrono::Utc::now().to_rfc3339();
         let token_baseline = self.chat_state_handle.get_total_tokens().await as i64;
@@ -998,7 +1021,7 @@ impl SessionActor {
         {
             let mut tracker = self.goal_tracker.lock();
             tracker.create_goal(
-                goal_id,
+                goal_id.clone(),
                 objective.to_owned(),
                 token_budget,
                 token_baseline,
@@ -1007,7 +1030,6 @@ impl SessionActor {
             );
             if let Some(o) = tracker.snapshot_mut() {
                 o.start_prompt_index = Some(start_prompt_index);
-                o.mode = mode;
             }
         }
         self.goal_turn_task_ids.lock().clear();
@@ -1026,19 +1048,26 @@ impl SessionActor {
                 finished_marginal,
             );
         }
+        goal_id
+    }
 
-        if self.goal_planner_on() {
-            self.maybe_run_goal_planner(objective).await;
-        }
-
+ that opens a goal's implementing turn. `plan_path` reads
+    /// the plan the reminder names off the orchestration.
+    pub(super) async fn render_goal_start_reminder(
+        &self,
+        objective: &str,
+        plan_path: impl FnOnce(
+            &crate::session::goal_tracker::GoalOrchestration,
+        ) -> Option<&std::path::Path>,
+    ) -> String {
         let names = self.resolve_goal_tool_names().await;
-        let planner_enabled = self.goal_planner_on();
         let body = {
             let tracker = self.goal_tracker.lock();
             let o = tracker
                 .snapshot()
                 .expect("create_goal must populate the orchestration snapshot");
-            self.render_goal_rules_for(o, &names, "", "", planner_enabled)
+            let plan_path = plan_path(o);
+            self.render_goal_rules_for(objective, o, &names, "", "", plan_path)
         };
         format!("<system-reminder>\n{body}\nStart now.\n</system-reminder>\n\n")
     }
@@ -1046,18 +1075,18 @@ impl SessionActor {
     /// Render the goal rules for the active driver and the goal's mode.
     fn render_goal_rules_for(
         &self,
+        objective: &str,
         o: &crate::session::goal_tracker::GoalOrchestration,
         names: &GoalToolNames,
         block_recap: &str,
         goal_state: &str,
-        planner_enabled: bool,
+        plan_path: Option<&std::path::Path>,
     ) -> String {
-        let plan_path = goal_reminder_plan_path(planner_enabled, o);
         let scratch_dir = crate::session::goal_tracker::implementer_scratch_dir(&o.verifier_id);
         let scratch = scratch_dir.to_string_lossy();
         if !self.goal_runs_on_workflow_engine() {
             return render_goal_rules_legacy(
-                &o.objective,
+                objective,
                 names,
                 block_recap,
                 goal_state,
@@ -1067,7 +1096,7 @@ impl SessionActor {
             );
         }
         render_goal_rules(
-            &o.objective,
+            objective,
             names,
             block_recap,
             goal_state,
@@ -1228,11 +1257,12 @@ impl SessionActor {
                     tokens = tokens_used,
                 );
                 let body = self.render_goal_rules_for(
+                    &o.objective,
                     o,
                     &names,
                     &block_recap,
                     &goal_state,
-                    planner_enabled,
+                    goal_reminder_plan_path(planner_enabled, o),
                 );
                 format!("<system-reminder>\n{body}\nContinue working now.\n</system-reminder>")
             })

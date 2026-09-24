@@ -93,6 +93,8 @@ pub(crate) use types::*;
 pub use types::{TodoGateDecision, TodoGateReason};
 #[path = "acp_session_impl/goal.rs"]
 mod goal;
+#[path = "acp_session_impl/plan_goal.rs"]
+mod plan_goal;
 #[path = "acp_session_impl/tool_layer_images.rs"]
 mod tool_layer_images;
 #[path = "acp_session_impl/turn.rs"]
@@ -1687,6 +1689,9 @@ mod observability_bridge_mapping_tests;
 #[cfg(test)]
 #[path = "acp_session_tests/permission_auto_mode_tests.rs"]
 mod permission_auto_mode_tests;
+#[cfg(test)]
+#[path = "acp_session_tests/plan_approval_goal_tests.rs"]
+mod plan_approval_goal_tests;
 /// Resume re-park of the parked `exit_plan_mode` approval.
 #[cfg(test)]
 #[path = "acp_session_tests/plan_approval_resume_tests.rs"]
