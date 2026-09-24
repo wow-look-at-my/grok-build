@@ -95,6 +95,17 @@ async fn stream_503_html_uses_unavailable_copy() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn stream_502_names_the_endpoint_that_answered() {
+    let err = stream_err(502, "<html><body>Bad Gateway</body></html>").await;
+    let s = err.to_string();
+    assert!(
+        s.contains("127.0.0.1 is temporarily unavailable"),
+        "the 502 came from the configured endpoint, so the message names it: {s}"
+    );
+    assert!(!s.contains("Grok"), "no Grok endpoint was called: {s}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn stream_json_error_envelope_is_preserved() {
     let body = r#"{"error":{"message":"rate limit exceeded","type":"rate_limit_error"}}"#;
     let err = stream_err(429, body).await;

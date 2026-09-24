@@ -22,7 +22,8 @@ use reqwest::header::{
 use serde::Serialize;
 
 use xai_grok_sampling_types::error::{
-    api_error_message_for_endpoint, try_parse_stream_error, user_facing_api_error_message,
+    api_error_message_for_endpoint, error_chain, try_parse_stream_error,
+    user_facing_api_error_message,
 };
 use xai_grok_sampling_types::{
     ChatCompletionChunk, ChatCompletionRequest, ChatCompletionResponse, ConversationRequest,
@@ -1378,7 +1379,7 @@ impl SamplingClient {
                     }
                     Err(e) => {
                         *had_transport_error = true;
-                        Some(Err(SamplingError::EventStreamError(e.to_string())))
+                        Some(Err(SamplingError::EventStreamError(sse_error_text(&e))))
                     }
                 };
                 std::future::ready(item)
@@ -1755,7 +1756,7 @@ impl SamplingClient {
                     }
                     Err(e) => {
                         *had_transport_error = true;
-                        Some(Some(Err(SamplingError::EventStreamError(e.to_string()))))
+                        Some(Some(Err(SamplingError::EventStreamError(sse_error_text(&e)))))
                     }
                 };
                 std::future::ready(item)
@@ -2075,7 +2076,7 @@ impl SamplingClient {
                     }
                     Err(e) => {
                         *had_transport_error = true;
-                        Some(Err(SamplingError::EventStreamError(e.to_string())))
+                        Some(Err(SamplingError::EventStreamError(sse_error_text(&e))))
                     }
                 };
                 std::future::ready(item)
@@ -2469,7 +2470,15 @@ fn native_host_root(base_url: &str) -> String {
     trimmed.to_owned()
 }
 
-/// Reassemble an NDJSON byte stream into one parsed object per line.
+/// The text of an SSE stream failure, with the transport's full cause chain.
+fn sse_error_text(error: &eventsource_stream::EventStreamError<reqwest::Error>) -> String {
+    match error {
+        eventsource_stream::EventStreamError::Transport(inner) => error_chain(inner),
+        other => other.to_string(),
+    }
+}
+
+/// Parse an NDJSON byte stream into a single object for each line.
 ///
 /// A transport chunk boundary lands at an arbitrary byte, so a line can
 /// straddle two of them and the tail has to be carried across. The final line
@@ -2495,7 +2504,7 @@ where
                     // it; reporting it as a finished response would hand the
                     // turn a truncated answer.
                     failed = true;
-                    yield Err(SamplingError::EventStreamError(error.to_string()));
+                    yield Err(SamplingError::EventStreamError(error_chain(&error)));
                     break;
                 }
             };

@@ -156,7 +156,7 @@ pub enum SamplingError {
     /// The URL is not in `[endpoints] allowed_endpoints`, so nothing was sent.
     #[error("{0}")]
     EndpointNotAllowed(String),
-    #[error("request error: {0}")]
+    #[error("request error: {}", error_chain(.0))]
     Http(reqwest::Error),
     #[error("{prefix}{0}", prefix = SERIALIZATION_DISPLAY_PREFIX)]
     Serialization(serde_json::Error),
@@ -679,24 +679,28 @@ pub const MAX_USER_ERROR_BODY_CHARS: usize = 280;
 /// Edge proxies (Cloudflare 52x, 502/503/504) return HTML pages; we never
 /// sniff body text — only the HTTP status drives this fallback.
 pub fn status_user_message(status: StatusCode) -> String {
+    status_user_message_from(status, "The server")
+}
+
+/// As [`status_user_message`], naming the service that answered.
+///
+/// Every provider shares this copy. So the name comes from the request, never
+/// from a constant: a fixed name blames a service the request never reached.
+pub fn status_user_message_from(status: StatusCode, service: &str) -> String {
     match status.as_u16() {
-        code @ 502..=504 => {
-            format!("Grok is temporarily unavailable. Please try again in a moment. (HTTP {code}).")
-        }
+        code @ 502..=504 => format!(
+            "{service} is temporarily unavailable. Please try again in a moment. (HTTP {code})."
+        ),
         // Upstream capacity, not an edge failure — see [`SamplingError::is_overloaded`].
-        code @ 529 => {
-            format!("Grok is temporarily overloaded. Please try again in a moment. (HTTP {code}).")
-        }
-        // Cloudflare edge: origin unreachable or timed out (520–524), or an
-        // edge-side 1xxx failure (530).
-        code @ 520..=524 | code @ 530 => {
-            format!(
-                "Connection to Grok timed out or was interrupted. Please try again. (HTTP {code})."
-            )
-        }
+        code @ 529 => format!(
+            "{service} is temporarily overloaded. Please try again in a moment. (HTTP {code})."
+        ),
+        code @ 520..=524 | code @ 530 => format!(
+            "Connection to {service} timed out or was interrupted. Please try again. (HTTP {code})."
+        ),
         // Cloudflare origin TLS (handshake / invalid certificate) — not transient.
         code @ 525 | code @ 526 => {
-            format!("Secure connection to Grok failed. (HTTP {code}).")
+            format!("Secure connection to {service} failed. (HTTP {code}).")
         }
         code if status.is_server_error() => {
             format!("Something went wrong on the server (HTTP {code}).")
@@ -770,7 +774,13 @@ pub fn user_facing_api_error_message(status: StatusCode, bytes: &[u8]) -> String
 /// ("Request failed (HTTP 404).") describing nothing a user can act on. Other
 /// statuses are about the request, not the address, and keep their message.
 pub fn api_error_message_for_endpoint(status: StatusCode, bytes: &[u8], endpoint: &str) -> String {
-    let message = user_facing_api_error_message(status, bytes);
+    let host = reqwest::Url::parse(endpoint)
+        .ok()
+        .and_then(|url| url.host_str().map(str::to_owned));
+    let message = structured_error_message(bytes).unwrap_or_else(|| match &host {
+        Some(host) => status_user_message_from(status, host),
+        None => status_user_message(status),
+    });
     if status == StatusCode::NOT_FOUND {
         format!("{message} No such endpoint: {endpoint}")
     } else {
@@ -806,6 +816,23 @@ pub fn is_context_length_error(message: &str) -> bool {
 /// own 52x pages when the origin is unreachable).
 pub fn is_retryable_api_status(status: StatusCode) -> bool {
     RetryPolicy::edge_client().should_retry(status.as_u16())
+}
+
+/// Render an error with every cause in its `source()` chain. reqwest prints
+/// only a category, such as "error decoding response body". The real cause (a
+/// reset stream, an early EOF, a timeout) is in the chain.
+pub fn error_chain(err: &(dyn std::error::Error + 'static)) -> String {
+    let mut text = err.to_string();
+    let mut source = err.source();
+    while let Some(cause) = source {
+        let part = cause.to_string();
+        if !part.is_empty() && !text.contains(&part) {
+            text.push_str(": ");
+            text.push_str(&part);
+        }
+        source = cause.source();
+    }
+    text
 }
 
 /// Decide whether a [`reqwest::Error`] is worth retrying.
@@ -1102,6 +1129,33 @@ mod tests {
         let err = SamplingError::Http(err);
         assert!(err.is_retryable());
         assert!(err.is_stream_interrupted());
+    }
+
+    #[tokio::test]
+    async fn a_decode_failure_carries_its_cause_not_only_its_category() {
+        let rendered = SamplingError::Http(decode_error().await).to_string();
+        assert!(
+            rendered.starts_with("request error: error decoding response body: "),
+            "the category comes first, then the cause: {rendered}"
+        );
+        assert!(
+            rendered.contains("expected ident"),
+            "serde's own reason for the failure must reach the user: {rendered}"
+        );
+    }
+
+    #[test]
+    fn a_status_fallback_names_the_host_that_answered() {
+        let msg = api_error_message_for_endpoint(
+            StatusCode::BAD_GATEWAY,
+            b"<html>bad gateway</html>",
+            "https://api.anthropic.com/v1/messages",
+        );
+        assert_eq!(
+            msg,
+            "api.anthropic.com is temporarily unavailable. Please try again in a moment. (HTTP 502)."
+        );
+        assert!(!status_user_message(StatusCode::BAD_GATEWAY).contains("Grok"));
     }
 
     #[test]
