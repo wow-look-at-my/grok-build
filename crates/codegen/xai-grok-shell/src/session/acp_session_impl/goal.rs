@@ -1051,6 +1051,8 @@ impl SessionActor {
         goal_id
     }
 
+    /// The reminder that opens the earliest implementing turn of a goal.
+    /// The plan_path closure reads the plan path off the orchestration.
     pub(super) async fn render_goal_start_reminder(
         &self,
         objective: &str,
