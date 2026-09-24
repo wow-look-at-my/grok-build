@@ -24,7 +24,9 @@ enum State {
 
 /// Dependencies for session title generation and fan-out.
 pub(crate) struct SummaryConfig {
-    pub(crate) sampling_client: OaiCompatClient,
+    /// `None` when no title model can be reached. The title then comes from
+    /// the user's own text.
+    pub(crate) sampling_client: Option<OaiCompatClient>,
     pub(crate) model: String,
     /// Channel back to the persistence actor for sequential storage writes.
     /// Weak: a strong sender here would keep the actor's own channel and task alive.
@@ -78,8 +80,12 @@ impl SummaryGenerator {
                 // persistence actor can continue processing messages
                 // (updates, flushes) without waiting for the LLM call.
                 tokio::spawn(async move {
-                    let mut title =
-                        generate_session_summary(content.clone(), sampling_client, &model).await;
+                    let mut title = match sampling_client {
+                        Some(client) => {
+                            generate_session_summary(content.clone(), client, &model).await
+                        }
+                        None => String::new(),
+                    };
                     if title.trim().is_empty() {
                         title =
                             crate::session::helpers::session_summary::title_fallback_from_user_text(
