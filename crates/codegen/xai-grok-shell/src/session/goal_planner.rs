@@ -869,7 +869,7 @@ mod tests {
         assert!(t.contains("error/edge/invalid-input handling"));
         // The model picks the split, and a core mechanic is never omitted.
         assert!(t.contains("You decide how to break the defining mechanics into criteria"));
-        assert!(t.contains("Never silently omit a\ncore mechanic"));
+        assert!(t.contains("Never silently omit a core mechanic"));
         // Gating-test sentence (distinctive substring, not the bare word).
         assert!(t.contains("is it still recognizably"));
         // OBJECTIVE wins; non-core routed to Non-goals.
