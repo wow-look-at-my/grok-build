@@ -144,33 +144,13 @@ pub(crate) fn drain_redirect_events(event: &WorktreeEnded) {
     });
 }
 
-/// The daemon's redirect-event ring: fetch the entries after `ack_through`,
-/// and drop every entry up to it. Returns the entries and the next seq.
-trait RedirectEventSource {
-    fn redirect_events(
-        &self,
-        ack_through: u64,
-        timeout: std::time::Duration,
-    ) -> anyhow::Result<(Vec<serde_json::Value>, u64)>;
-}
-
-impl RedirectEventSource for NfsWorktreeClient {
-    fn redirect_events(
-        &self,
-        ack_through: u64,
-        timeout: std::time::Duration,
-    ) -> anyhow::Result<(Vec<serde_json::Value>, u64)> {
-        NfsWorktreeClient::redirect_events(self, ack_through, timeout)
-    }
-}
-
 /// Blocking drain, decode, log, then ack through the last seq seen. Returns
 /// `(logged, undecodable)`. Delivery is at least once, since the ring keeps an
 /// entry until acked and a host that dies mid-translation, or a second host
 /// sharing the daemon, logs it again. Undecodable entries are acked too,
 /// because the host cannot use them and leaving them would block the ring
 /// forever.
-fn drain_redirect_events_sync(client: &impl RedirectEventSource) -> (usize, usize) {
+fn drain_redirect_events_sync(client: &NfsWorktreeClient) -> (usize, usize) {
     // Each call receives the time left on this deadline and applies it per
     // socket operation, so the deadline bounds the ack's start, not the total.
     let deadline = Instant::now() + REDIRECT_EVENTS_DRAIN_TIMEOUT;
@@ -904,46 +884,12 @@ mod tests {
     }
 
     #[cfg(unix)]
-    struct WireClient(std::path::PathBuf);
-
-    #[cfg(unix)]
-    impl RedirectEventSource for WireClient {
-        fn redirect_events(
-            &self,
-            ack_through: u64,
-            timeout: std::time::Duration,
-        ) -> anyhow::Result<(Vec<serde_json::Value>, u64)> {
-            use std::io::{BufRead, BufReader, Write};
-            let mut stream = std::os::unix::net::UnixStream::connect(&self.0)?;
-            stream.set_read_timeout(Some(timeout))?;
-            stream.set_write_timeout(Some(timeout))?;
-            let request =
-                serde_json::json!({"op": "redirect_events", "v": 1, "ack_through": ack_through});
-            writeln!(stream, "{request}")?;
-            let mut line = String::new();
-            BufReader::new(&stream).read_line(&mut line)?;
-            let reply: serde_json::Value = serde_json::from_str(line.trim())?;
-            anyhow::ensure!(
-                reply.get("status").and_then(|v| v.as_str()) == Some("ok"),
-                "daemon refused redirect_events: {reply}"
-            );
-            let data = &reply["data"];
-            let events = data
-                .get("redirect_events")
-                .and_then(|v| v.as_array())
-                .cloned()
-                .unwrap_or_default();
-            let next_seq = data
-                .get("redirect_next_seq")
-                .and_then(|v| v.as_u64())
-                .ok_or_else(|| anyhow::anyhow!("reply has no redirect_next_seq: {reply}"))?;
-            Ok((events, next_seq))
-        }
-    }
-
-    #[cfg(unix)]
-    fn client_for(sock: &std::path::Path) -> WireClient {
-        WireClient(sock.to_path_buf())
+    fn client_for(sock: &std::path::Path) -> NfsWorktreeClient {
+        NfsWorktreeClient::from_opts(&NfsWorktreeOpts {
+            control_sock: Some(sock.to_path_buf()),
+            runtime_dir: Some(sock.parent().unwrap().to_path_buf()),
+            ..NfsWorktreeOpts::default()
+        })
     }
 
     #[cfg(unix)]
