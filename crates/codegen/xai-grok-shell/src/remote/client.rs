@@ -968,6 +968,7 @@ pub(crate) fn parse_remote_model_value(
         .or_else(|| meta.and_then(|m| get_u64(m, "totalContextTokens")))
         .or_else(|| get_u64(obj, "context_length"))
         .or_else(|| top_provider.and_then(|tp| get_u64(tp, "context_length")))
+        .or_else(|| get_u64(obj, "max_model_len"))
         .or_else(|| get_u64(obj, "max_input_tokens"))
         .or_else(|| get_u64(obj, "maxInputTokens"))
         .filter(|&v| v > 0)
@@ -1696,6 +1697,23 @@ mod tests {
         assert_eq!(result.model, "deepseek/deepseek-v4-pro-0813");
         assert_eq!(result.base_url, "https://openrouter.ai/api/v1");
         assert_eq!(result.context_window.get(), 1_000_000);
+    }
+    #[test]
+    fn parse_vllm_listing_max_model_len_resolves_context_window() {
+        // The shape vLLM's `/v1/models` returns. Its window is `max_model_len`.
+        let value = serde_json::json!({
+            "id": "Qwen/Qwen3-32B",
+            "object": "model",
+            "created": 1750000000,
+            "owned_by": "vllm",
+            "root": "Qwen/Qwen3-32B",
+            "parent": null,
+            "max_model_len": 40_960,
+            "permission": []
+        });
+        let result = parse_remote_model_value(&value, "http://localhost:8000/v1").unwrap();
+        assert_eq!(result.model, "Qwen/Qwen3-32B");
+        assert_eq!(result.context_window.get(), 40_960);
     }
     #[test]
     fn parse_openrouter_context_length_only_under_top_provider_resolves() {
