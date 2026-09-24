@@ -1687,13 +1687,13 @@ mod observability_bridge_mapping_tests;
 #[cfg(test)]
 #[path = "acp_session_tests/permission_auto_mode_tests.rs"]
 mod permission_auto_mode_tests;
+#[cfg(test)]
+#[path = "acp_session_tests/plan_approval_goal_tests.rs"]
+mod plan_approval_goal_tests;
 /// Resume re-park of the parked `exit_plan_mode` approval.
 #[cfg(test)]
 #[path = "acp_session_tests/plan_approval_resume_tests.rs"]
 mod plan_approval_resume_tests;
-#[cfg(test)]
-#[path = "acp_session_tests/plan_approval_goal_tests.rs"]
-mod plan_approval_goal_tests;
 /// Mixed-batch plan.md write + exit_plan_mode snapshot.
 #[cfg(test)]
 #[path = "acp_session_tests/plan_exit_batch_barrier_tests.rs"]
