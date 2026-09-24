@@ -867,11 +867,9 @@ mod tests {
         // Domain-agnostic (non-game example) + primary, not error-path behaviors.
         assert!(t.contains("round-trip of valid input"));
         assert!(t.contains("error/edge/invalid-input handling"));
-        // Convergence guard: group (don't drop) to fit the cap; a core mechanic
-        // that can't fit is an EXPLICIT deferral, never a silent omission.
-        assert!(t.contains("Do not map one criterion per mechanic"));
-        assert!(t.contains("Grouping, NOT dropping"));
-        assert!(t.contains("record it under `## Non-goals` (or `## Assumed scope`)"));
+        // The model picks the split, and a core mechanic is never omitted.
+        assert!(t.contains("You decide how to break the defining mechanics into criteria"));
+        assert!(t.contains("Never silently omit a core mechanic"));
         // Gating-test sentence (distinctive substring, not the bare word).
         assert!(t.contains("is it still recognizably"));
         // OBJECTIVE wins; non-core routed to Non-goals.
@@ -1501,17 +1499,91 @@ mod tests {
         assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("never part of the judged contract"),);
         assert!(
             GOAL_PLANNER_PROMPT_TEMPLATE.contains("as many ordered"),
-            "checklist size must follow the work, not a 4–6 / 3–8 cap"
+            "checklist size must follow the work, not a cap"
         );
+    }
+
+    /// The model decides how to break up a task. So the prompt carries no
+    /// count, range or cap for any section.
+    #[test]
+    fn planner_prompt_sets_no_count_limit_anywhere() {
+        let t = GOAL_PLANNER_PROMPT_TEMPLATE;
+        let ranges = numeric_ranges(t);
         assert!(
-            !GOAL_PLANNER_PROMPT_TEMPLATE.contains("3-8"),
-            "a numeric todo cap makes small tasks over-specific and large ones underspecified"
+            ranges.is_empty(),
+            "the planner prompt states a numeric range: {ranges:?}"
         );
-        assert!(
-            !GOAL_PLANNER_PROMPT_TEMPLATE.contains("4-6")
-                && !GOAL_PLANNER_PROMPT_TEMPLATE.contains("4–6"),
-            "a numeric todo cap makes small tasks over-specific and large ones underspecified"
+        let lower = t.to_lowercase();
+        for phrase in [
+            "cap below",
+            "fit the cap",
+            "a ceiling",
+            "at least one",
+            "at most",
+            "no more than",
+            "up to ",
+            "(aim ",
+            "keep it small",
+            "keep it short",
+            "keep each small",
+        ] {
+            assert!(
+                !lower.contains(phrase),
+                "the planner prompt limits the breakdown with {phrase:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn numeric_ranges_finds_every_spelling() {
+        assert_eq!(
+            numeric_ranges("aim 3-5, or 1–2, or 4 - 6, or 2 to 8; HTTP 200"),
+            ["3-5", "1–2", "4 - 6", "2 to 8"]
         );
+        assert!(numeric_ranges("status 200 and > 0 pixels").is_empty());
+    }
+
+    /// Every `N-M`, `N–M` or `N to M` in `text`, as it is spelled there.
+    fn numeric_ranges(text: &str) -> Vec<String> {
+        let chars: Vec<char> = text.chars().collect();
+        let digits_end = |mut i: usize| {
+            let start = i;
+            while i < chars.len() && chars[i].is_ascii_digit() {
+                i += 1;
+            }
+            (i > start).then_some(i)
+        };
+        let skip_spaces = |mut i: usize| {
+            while i < chars.len() && chars[i] == ' ' {
+                i += 1;
+            }
+            i
+        };
+        let mut found = Vec::new();
+        let mut i = 0;
+        while i < chars.len() {
+            let fresh = i == 0 || !chars[i - 1].is_ascii_digit();
+            let Some(end) = digits_end(i).filter(|_| fresh) else {
+                i += 1;
+                continue;
+            };
+            let j = skip_spaces(end);
+            let sep = if matches!(chars.get(j), Some('-' | '–')) {
+                Some(j + 1)
+            } else if chars[j..].starts_with(&['t', 'o', ' ']) {
+                Some(j + 2)
+            } else {
+                None
+            };
+            match sep.and_then(|k| digits_end(skip_spaces(k))) {
+                Some(stop) => {
+                    found.push(chars[i..stop].iter().collect());
+                    i = stop;
+                }
+                None => i = end,
+            }
+        }
+        found
     }
 
     /// Pin the visual/interactive guidance: gamedev/UI goals must be
