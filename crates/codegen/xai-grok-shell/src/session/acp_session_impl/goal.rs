@@ -947,51 +947,15 @@ impl SessionActor {
         objective: &str,
         token_budget: Option<i64>,
     ) -> GoalSetupOutcome {
-        let goal_id = uuid::Uuid::new_v4().to_string();
-        let created_at = chrono::Utc::now().to_rfc3339();
-        let token_baseline = self.chat_state_handle.get_total_tokens().await as i64;
-        let baseline_commit =
-            crate::session::goal_classifier::capture_git_baseline(self.tool_context.cwd.as_path())
-                .await;
-        let start_prompt_index = self.chat_state_handle.get_prompt_index().await;
-        {
-            let mut tracker = self.goal_tracker.lock();
-            tracker.create_goal(
-                goal_id,
-                objective.to_owned(),
-                token_budget,
-                token_baseline,
-                created_at,
-                baseline_commit,
-            );
-            if let Some(o) = tracker.snapshot_mut() {
-                o.start_prompt_index = Some(start_prompt_index);
-            }
-        }
-        self.goal_turn_task_ids.lock().clear();
-        self.clear_pending_classifier_completions();
-        self.goal_continuation_streak
-            .store(0, std::sync::atomic::Ordering::Relaxed);
-        self.goal_blocked_streak
-            .store(0, std::sync::atomic::Ordering::Relaxed);
-
-        {
-            let (tokens_used, finished_marginal) = self.goal_tokens(token_baseline);
-            let notify = self.goal_notify_sender();
-            notify.emit_goal_updated(
-                &mut self.goal_tracker.lock(),
-                tokens_used,
-                finished_marginal,
-            );
-        }
-
+        self.create_goal_orchestration(objective, token_budget)
+            .await;
         self.maybe_run_goal_planner(objective).await;
         if let Some(msg) = self.planner_pause_short_circuit_message("Goal paused.") {
             return GoalSetupOutcome::Message(msg);
         }
 
-        let names = self.resolve_goal_tool_names().await;
         let planner_enabled = self.goal_planner_enabled;
+        let names = self.resolve_goal_tool_names().await;
         let body = {
             let tracker = self.goal_tracker.lock();
             tracker.snapshot().map(|o| {
@@ -1028,6 +992,95 @@ impl SessionActor {
         GoalSetupOutcome::Inference {
             reminder: format!("<system-reminder>\n{body}\nStart now.\n</system-reminder>\n\n"),
         }
+    }
+
+    /// Create the goal orchestration and announce it. Returns the new goal id.
+    pub(super) async fn create_goal_orchestration(
+        &self,
+        objective: &str,
+        token_budget: Option<i64>,
+    ) -> String {
+        let goal_id = uuid::Uuid::new_v4().to_string();
+        let created_at = chrono::Utc::now().to_rfc3339();
+        let token_baseline = self.chat_state_handle.get_total_tokens().await as i64;
+        let baseline_commit =
+            crate::session::goal_classifier::capture_git_baseline(self.tool_context.cwd.as_path())
+                .await;
+        let start_prompt_index = self.chat_state_handle.get_prompt_index().await;
+        {
+            let mut tracker = self.goal_tracker.lock();
+            tracker.create_goal(
+                goal_id.clone(),
+                objective.to_owned(),
+                token_budget,
+                token_baseline,
+                created_at,
+                baseline_commit,
+            );
+            if let Some(o) = tracker.snapshot_mut() {
+                o.start_prompt_index = Some(start_prompt_index);
+            }
+        }
+        self.goal_turn_task_ids.lock().clear();
+        self.clear_pending_classifier_completions();
+        self.goal_continuation_streak
+            .store(0, std::sync::atomic::Ordering::Relaxed);
+        self.goal_blocked_streak
+            .store(0, std::sync::atomic::Ordering::Relaxed);
+
+        {
+            let (tokens_used, finished_marginal) = self.goal_tokens(token_baseline);
+            let notify = self.goal_notify_sender();
+            notify.emit_goal_updated(
+                &mut self.goal_tracker.lock(),
+                tokens_used,
+                finished_marginal,
+            );
+        }
+        goal_id
+    }
+
+    /// The reminder that opens a goal's implementing turn. `plan_path` reads
+    /// the plan the reminder names off the orchestration.
+    pub(super) async fn render_goal_start_reminder(
+        &self,
+        objective: &str,
+        plan_path: impl FnOnce(
+            &crate::session::goal_tracker::GoalOrchestration,
+        ) -> Option<&std::path::Path>,
+    ) -> String {
+        let names = self.resolve_goal_tool_names().await;
+        let body = {
+            let tracker = self.goal_tracker.lock();
+            let o = tracker
+                .snapshot()
+                .expect("create_goal must populate the orchestration snapshot");
+            let plan_path = plan_path(o);
+            let scratch_dir = crate::session::goal_tracker::implementer_scratch_dir(&o.verifier_id);
+            let scratch = scratch_dir.to_string_lossy();
+            if self.goal_runs_on_workflow_engine() {
+                render_goal_rules(
+                    objective,
+                    &names,
+                    "",
+                    "",
+                    plan_path,
+                    &scratch,
+                    o.scratch_dir_ready,
+                )
+            } else {
+                render_goal_rules_legacy(
+                    objective,
+                    &names,
+                    "",
+                    "",
+                    plan_path,
+                    &scratch,
+                    o.scratch_dir_ready,
+                )
+            }
+        };
+        format!("<system-reminder>\n{body}\nStart now.\n</system-reminder>\n\n")
     }
 
     pub(super) async fn resume_goal(&self) -> GoalResumeOutcome {

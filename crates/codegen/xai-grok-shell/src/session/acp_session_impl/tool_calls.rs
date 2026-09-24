@@ -2075,6 +2075,12 @@ impl SessionActor {
                     }
                     PlanApprovalOutcome::Approved => {
                         tracing::info!("[exit_plan_mode] user approved — executing tool");
+                        // The reminder follows the tool result, which keeps the call and its result together.
+                        if let Some(plan) = plan_content.as_deref()
+                            && let Some(reminder) = self.setup_goal_from_approved_plan(plan).await
+                        {
+                            deferred_followups.push(ConversationItem::system_reminder(reminder));
+                        }
                     }
                 },
                 Err(err) => {
@@ -2269,7 +2275,7 @@ impl SessionActor {
             "[exit_plan_mode] re-parking approval after resume"
         );
         let parsed = match self
-            .request_plan_approval(&tool_call_id, Some(plan_content))
+            .request_plan_approval(&tool_call_id, Some(plan_content.clone()))
             .await
         {
             Ok(parsed) => parsed,
@@ -2291,8 +2297,12 @@ impl SessionActor {
             ResumeAction::LeaveAndImplement => {
                 tracing::info!("[exit_plan_mode] resume: user approved plan");
                 self.leave_plan_mode_to_default();
+                let goal_reminder = self
+                    .setup_goal_from_approved_plan(&plan_content)
+                    .await
+                    .unwrap_or_default();
                 self.start_resume_turn(
-                    PLAN_APPROVED_IMPLEMENT_MESSAGE.to_string(),
+                    format!("{goal_reminder}{PLAN_APPROVED_IMPLEMENT_MESSAGE}"),
                     PromptMode::Agent,
                     completion_tx,
                 )

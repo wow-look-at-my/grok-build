@@ -449,6 +449,7 @@ impl SessionActor {
         let extra = serde_json::json!({
             "plan_path": plan_path.display().to_string(),
             "plan_has_content": plan_has_content,
+            "goal_contract": !self.startup_hints.is_subagent && self.goal_harness_enabled(),
         });
         self.agent
             .borrow()

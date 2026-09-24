@@ -96,6 +96,8 @@ pub use types::{TodoGateDecision, TodoGateReason};
 mod goal;
 #[path = "acp_session_impl/named_workflow_args.rs"]
 mod named_workflow_args;
+#[path = "acp_session_impl/plan_goal.rs"]
+mod plan_goal;
 #[path = "acp_session_impl/turn.rs"]
 mod turn;
 #[path = "acp_session_impl/workflow.rs"]
@@ -1759,7 +1761,10 @@ mod permission_auto_mode_tests;
 #[cfg(test)]
 #[path = "acp_session_tests/permission_prompt_notification_tests.rs"]
 mod permission_prompt_notification_tests;
-/// Tests that a resume re-parks the parked `exit_plan_mode` approval.
+#[cfg(test)]
+#[path = "acp_session_tests/plan_approval_goal_tests.rs"]
+mod plan_approval_goal_tests;
+/// Resume re-park of the parked `exit_plan_mode` approval.
 #[cfg(test)]
 #[path = "acp_session_tests/plan_approval_resume_tests.rs"]
 mod plan_approval_resume_tests;
