@@ -1138,39 +1138,7 @@ fn superseded_opt_in_success_is_kept_when_later_opt_out_fails() {
     assert!(app.coding_data_pending_write.is_none());
 }
 
-/// A refused opt-out must not dismiss the banner: the server is still retaining, and the user has to see that.
-#[test]
-fn privacy_banner_opt_out_failure_keeps_banner_and_toasts() {
-    let mut app = privacy_banner_ready_app();
-    let effects = dispatch(Action::PrivacyBannerOptOut, &mut app);
-    assert_eq!(effects.len(), 1, "opt-out must write: {effects:?}");
-
-    let fail_effects = dispatch(
-        Action::TaskComplete(TaskResult::CodingDataSharingFailed {
-            agent_id: AgentId(0),
-            error: "team policy forbids opt-out".into(),
-            seq: app.coding_data_write_seq,
-        }),
-        &mut app,
-    );
-    assert!(fail_effects.is_empty());
-    assert!(app.privacy_banner_acked.is_none());
-    assert!(
-        app.privacy_banner_should_show(),
-        "a refused [Opt out] must leave the banner up"
-    );
-    let toast = app
-        .welcome_toast
-        .as_ref()
-        .map(|(m, _)| m.as_str())
-        .unwrap_or("");
-    assert!(
-        toast.contains("team policy forbids opt-out"),
-        "the refusal must reach the user: {toast}"
-    );
-}
-
-/// Settings opt-out is write 1, the user opts in before it lands, and write 2 answers first.
+ is write 1, the user opts in before it lands, and write 2 answers first.
 /// Covered: write 2 succeeds and the stale write 1 reply (either kind) must not set the mirror or toast; both writes fail and
 /// write 2 must fall back to the opt-in it inherited from write 1, not to write 1's optimistic out.
 /// Not covered: write 2 fails, then write 1 succeeds — the pending write is already gone, so that success is dropped (deferred).

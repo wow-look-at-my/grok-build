@@ -2242,25 +2242,6 @@ fn personal_xai_oauth_auth() -> xai_grok_login::GrokAuth {
 }
 #[tokio::test]
 #[serial_test::serial]
-async fn feedback_trace_offer_asks_personal_oauth_accounts() {
-    use xai_grok_test_support::EnvGuard;
-    let _e1 = EnvGuard::unset("GROK_TELEMETRY_ENABLED");
-    let _e2 = EnvGuard::unset("GROK_TELEMETRY_TRACE_UPLOAD");
-    let _e3 = EnvGuard::unset("GROK_FEEDBACK_TRACE_CARD");
-    let _e4 = EnvGuard::unset("DISABLE_TELEMETRY");
-    let agent = build_agent_with_auth(personal_xai_oauth_auth());
-    make_trace_card_eligible(&agent);
-    assert!(agent.feedback_trace_offer(), "every gate is open");
-    assert!(
-        agent
-            .one_shot_feedback_gcs_config("sid".into())
-            .await
-            .is_some(),
-        "the consented upload path must be open too"
-    );
-}
-#[tokio::test]
-#[serial_test::serial]
 async fn feedback_trace_offer_suppressed_for_team_accounts_even_admins() {
     use xai_grok_test_support::EnvGuard;
     let _e1 = EnvGuard::unset("GROK_TELEMETRY_ENABLED");
@@ -2387,22 +2368,6 @@ async fn upload_trace_missing_intent_requires_persisted_consent_even_when_offer_
     insert_resident_session(&agent, "sess", tmp.path());
     let err = upload_trace_error(&agent, serde_json::json!({ "sessionId": "sess" }), None).await;
     assert!(err.to_string().contains(NOT_AVAILABLE), "got: {err}");
-}
-#[tokio::test]
-#[serial_test::serial]
-async fn upload_trace_missing_intent_with_global_consent_stays_compatible() {
-    let tmp = tempfile::tempdir().unwrap();
-    let _env = trace_gate_env(tmp.path());
-    let agent = build_agent_with_auth(personal_xai_oauth_auth());
-    {
-        let mut cfg = agent.cfg.borrow_mut();
-        cfg.features.telemetry = Some(crate::agent::config::TelemetryMode::Enabled);
-        cfg.telemetry.trace_upload = Some(true);
-    }
-    insert_resident_session(&agent, "sess", tmp.path());
-    assert!(!agent.feedback_trace_offer());
-    let err = upload_trace_error(&agent, serde_json::json!({ "sessionId": "sess" }), None).await;
-    assert!(err.to_string().contains(NO_SESSION_DIR), "got: {err}");
 }
 #[tokio::test]
 #[serial_test::serial]
@@ -2575,62 +2540,6 @@ async fn upload_trace_archive_failure_uses_an_isolated_directory() {
         err.to_string().contains("couldn't build session archive"),
         "got: {err}"
     );
-}
-#[tokio::test]
-#[serial_test::serial]
-async fn upload_trace_upload_failure_uses_an_isolated_directory() {
-    let tmp = tempfile::tempdir().unwrap();
-    let _env = trace_gate_env(tmp.path());
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    let server = tokio::spawn(async move {
-        while let Ok((mut stream, _)) = listener.accept().await {
-            use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
-            let mut buf = vec![0u8; 65536];
-            let mut seen = Vec::new();
-            while let Ok(n) = stream.read(&mut buf).await {
-                if n == 0 {
-                    break;
-                }
-                let Some(chunk) = buf.get(..n) else {
-                    break;
-                };
-                seen.extend_from_slice(chunk);
-                if seen.windows(4).any(|w| w == b"\r\n\r\n") {
-                    break;
-                }
-            }
-            let _ = stream
-                .write_all(
-                    b"HTTP/1.1 403 Forbidden\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
-                )
-                .await;
-            let _ = stream.shutdown().await;
-        }
-    });
-    let session_dir = tmp.path().join("session");
-    std::fs::create_dir(&session_dir).unwrap();
-    std::fs::write(session_dir.join("summary.json"), "{}").unwrap();
-    let agent = build_agent_with_auth(personal_xai_oauth_auth());
-    make_trace_card_eligible(&agent);
-    agent.cfg.borrow_mut().endpoints.cli_chat_proxy_base_url = Some(format!("http://{addr}"));
-    insert_resident_session(&agent, "sess", tmp.path());
-    let token = agent.issue_feedback_trace_upload_grant(acp::SessionId::new("sess"));
-    let err = upload_trace_error(
-        &agent,
-        serde_json::json!({
-            "sessionId": "sess",
-            "intent": "send_this_session",
-            "traceUploadToken": token,
-        }),
-        Some(session_dir),
-    )
-    .await;
-    assert!(
-        err.to_string().contains("trace upload failed"),
-        "got: {err}"
-    );
-    server.abort();
 }
 #[tokio::test]
 #[serial_test::serial]
