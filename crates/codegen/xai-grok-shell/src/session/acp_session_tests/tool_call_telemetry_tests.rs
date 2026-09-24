@@ -132,5 +132,3 @@ async fn renamed_grep_keeps_its_output_after_a_later_model_request() {
         })
         .await;
 }
-
-
