@@ -176,7 +176,7 @@ pub const HARNESS_MODEL_SLOTS: &[ModelSlot] = &[
     ModelSlot {
         id: "thinking_summary",
         label: "Thinking summary model",
-        description: "Model that writes the one- or two-sentence summary under a long thinking block.",
+        description: "Model that writes the short summary under a long thinking block.",
         env: "GROK_MODEL_THINKING_SUMMARY",
         keywords: &["thinking", "reasoning", "thought", "summary", "model"],
         fallback: SlotFallback::SessionModel,

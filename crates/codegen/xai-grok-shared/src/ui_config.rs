@@ -188,6 +188,8 @@ pub struct UiConfig {
     /// `None` = on (client default). Written by the pager's settings modal.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub show_thinking_blocks: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking_summaries: Option<bool>,
     /// Fold runs of consecutive non-destructive tool calls (reads, searches,
     /// lists) into one transcript row. `None` = on (client default). Written
     /// by the pager's settings modal.
@@ -342,6 +344,7 @@ impl Default for UiConfig {
             keep_text_selection: None,
             selection_highlight_duration_ms: None,
             show_thinking_blocks: None,
+            thinking_summaries: None,
             group_tool_verbs: None,
             collapsed_edit_blocks: None,
             prompt_suggestions: None,
@@ -406,10 +409,14 @@ impl UiConfig {
             .unwrap_or(Self::STOP_GATE_CI_FAILING_DEFAULT)
     }
 
-    /// Default for [`Self::min_output_tokens_per_sec`] when unset. Well under
-    /// what any endpoint here reaches in health, so an ordinary stream never
-    /// approaches it and a collapsed engine is still caught. A zero here ships
-    /// the gate dead, which is the same as not having it.
+    pub const THINKING_SUMMARIES_DEFAULT: bool = true;
+
+    pub fn thinking_summaries_enabled(&self) -> bool {
+        self.thinking_summaries
+            .unwrap_or(Self::THINKING_SUMMARIES_DEFAULT)
+    }
+
+    /// Default for [`Self::min_output_tokens_per_sec`] when unset.
     pub const MIN_OUTPUT_TOKENS_PER_SEC_DEFAULT: u32 = 15;
 
     /// Default for [`Self::output_rate_sustained_secs`] when unset.
