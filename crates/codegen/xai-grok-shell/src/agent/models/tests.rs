@@ -632,6 +632,34 @@ fn a_provider_models_requests_go_to_the_provider_url() {
     }
 }
 
+#[test]
+fn a_provider_model_never_keeps_the_proxy_url() {
+    let cfg = config_from_toml(
+        r#"
+            [endpoints]
+            cli_chat_proxy_base_url = "https://cli-chat-proxy.grok.com/v1"
+            models_base_url = "http://localhost:18080/v1"
+            [model_providers.messages]
+            models_autodetect = false
+            [model.claude]
+            model = "claude-opus-5"
+            model_provider = "messages"
+            "#,
+    );
+    let catalog = resolve_model_catalog(&cfg, None);
+    let claude = catalog.get("claude").expect("claude");
+    assert_eq!(claude.info.base_url, "http://localhost:18080/v1");
+    for (key, entry) in &catalog {
+        if entry.info.model_provider.is_some() {
+            assert!(
+                !entry.info.base_url.contains("cli-chat-proxy"),
+                "{key} routes to {}",
+                entry.info.base_url
+            );
+        }
+    }
+}
+
 /// A default that names a listed model is absent at startup. The listing
 /// must move the current model onto it, and a model with no URL must never
 /// be offered.

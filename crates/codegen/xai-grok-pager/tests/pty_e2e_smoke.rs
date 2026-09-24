@@ -27,6 +27,8 @@ mod initial_prompt_positional_auto_submits;
 mod input_echoes_at_idle_prompt;
 #[path = "pty_e2e/plan_revise_empty_enter_does_not_approve.rs"]
 mod plan_revise_empty_enter_does_not_approve;
+#[path = "pty_e2e/provider_only_config_keeps_typed_prompt.rs"]
+mod provider_only_config_keeps_typed_prompt;
 #[path = "pty_e2e/question_tab_cycles_answers.rs"]
 mod question_tab_cycles_answers;
 #[path = "pty_e2e/renders_on_action.rs"]

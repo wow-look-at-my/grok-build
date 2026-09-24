@@ -155,7 +155,7 @@ impl MvpAgent {
     pub(super) fn build_summary_client(
         &self,
         primary: &SamplingConfig,
-    ) -> Result<(OaiCompatClient, String), acp::Error> {
+    ) -> Result<(Option<OaiCompatClient>, String), acp::Error> {
         let slug = self.resolve_session_summary_model();
         // Config resolution fills the compiled default in, so only another
         // model counts as a choice.
@@ -200,7 +200,15 @@ impl MvpAgent {
             _ => primary.clone(),
         };
         let model = config.model.clone();
-        let client = OaiCompatClient::new(config).map_err(map_sampling_err_to_acp)?;
+        // A title is cosmetic. A title client that cannot be built must never
+        // fail the session: the earliest turn reports the same error in full.
+        let client = match OaiCompatClient::new(config) {
+            Ok(client) => Some(client),
+            Err(error) => {
+                tracing::warn!(%error, model, "no session title model; the title comes from the prompt");
+                None
+            }
+        };
         Ok((client, model))
     }
     fn has_proxy_credentials(&self) -> bool {

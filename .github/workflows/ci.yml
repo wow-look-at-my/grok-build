@@ -102,7 +102,7 @@ jobs:
             target/debug/build
             target/debug/.fingerprint
           run: |
-            # ${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+            # ${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', '**/Cargo.toml') }}
             export CARGO_BUILD_JOBS=3
             cargo test --locked --workspace --no-run --no-fail-fast
             ci/cache-deps.sh prune target/debug
@@ -227,10 +227,14 @@ jobs:
             target/${{ matrix.target }}/release/deps
             target/${{ matrix.target }}/release/build
             target/${{ matrix.target }}/release/.fingerprint
+            target/release/deps
+            target/release/build
+            target/release/.fingerprint
           run: |
-            # ${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+            # ${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', '**/Cargo.toml') }}
             cargo build --locked --release --target ${{ matrix.target }} -p xai-grok-pager-bin
             ci/cache-deps.sh prune target/${{ matrix.target }}/release
+            ci/cache-deps.sh prune target/release
 
       # On the darwin row the link at the end of this records itself into GROK_DARWIN_LINK_BUNDLE rather than running.
       - name: Build release binary

@@ -42,7 +42,7 @@ fn test_actor_with_remote_sync(
             relay_sync: None,
             summary: crate::session::summary::SummaryGenerator::new(
                 crate::session::summary::SummaryConfig {
-                    sampling_client,
+                    sampling_client: Some(sampling_client),
                     model: String::new(),
                     persistence_tx: tx.downgrade(),
                 },

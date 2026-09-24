@@ -1,5 +1,3 @@
-//! The endpoints a model request may reach. Nothing is allowed until the user
-//! lists it, in `[endpoints] allowed_endpoints` or in `GROK_ALLOWED_ENDPOINTS`.
 //!
 //! An entry is a host (`api.example.com`), a host and port (`localhost:11434`),
 //! every subdomain of a host (`*.example.com`), or a URL
@@ -19,9 +17,25 @@ pub fn set_configured(entries: Vec<String>) {
     *guard = entries;
 }
 
-/// Every entry now in force: config first, then the environment.
+static CONFIG_URLS: RwLock<Vec<String>> = RwLock::new(Vec::new());
+
+/// Replace the endpoints the user wrote as URLs in their own config, such as a
+/// provider's `base_url`. Writing a URL there is the user choosing it.
+pub fn set_config_urls(entries: Vec<String>) {
+    let mut guard = CONFIG_URLS.write().unwrap_or_else(|p| p.into_inner());
+    *guard = entries;
+}
+
+/// Every entry now in force: config then the environment.
 pub fn allowed_endpoints() -> Vec<String> {
     let mut entries = CONFIGURED.read().unwrap_or_else(|p| p.into_inner()).clone();
+    entries.extend(
+        CONFIG_URLS
+            .read()
+            .unwrap_or_else(|p| p.into_inner())
+            .iter()
+            .cloned(),
+    );
     if let Ok(env) = std::env::var(ENV_GROK_ALLOWED_ENDPOINTS) {
         entries.extend(env.split(',').map(str::to_owned));
     }
