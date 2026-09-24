@@ -24,8 +24,8 @@ pub use self::doom_loop::{
 };
 pub use self::error::{
     EmptyReason, EmptyResponseContext, ResponseModelMetadata, Result, SamplingError,
-    SentCredential, is_context_length_error, is_retryable_api_status, status_user_message,
-    user_facing_api_error_message,
+    SentCredential, error_chain, is_context_length_error, is_retryable_api_status,
+    status_user_message, status_user_message_from, user_facing_api_error_message,
 };
 pub use self::output_rate::{
     OutputRateFloorPolicy, OutputRateGate, OutputRateHealth, OutputRateMeter, RateTick,
