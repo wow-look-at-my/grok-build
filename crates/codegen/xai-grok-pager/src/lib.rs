@@ -5,6 +5,7 @@
 pub mod acp;
 pub mod actions;
 pub mod app;
+pub mod branch_stats;
 pub mod ci_status;
 pub mod client_identity;
 pub mod completions_cmd;
