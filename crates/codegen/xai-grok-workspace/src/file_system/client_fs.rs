@@ -2008,13 +2008,11 @@ mod tests {
 
     #[tokio::test]
     async fn write_file_round_trips_binary() {
-        use rand::RngCore;
-
         let ws = make_handle();
         let root = ws.root_cwd().unwrap();
         // Random bytes with zero bytes and invalid UTF-8 forced in.
         let mut payload = vec![0u8; 3 * 1024 + 17];
-        rand::rng().fill_bytes(&mut payload);
+        rand::fill(&mut payload[..]);
         payload.splice(0..3, [0u8, 0xff, 0xfe]);
         if let Some(byte) = payload.get_mut(100) {
             *byte = 0;

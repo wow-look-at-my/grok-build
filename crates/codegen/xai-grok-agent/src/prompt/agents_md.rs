@@ -1305,8 +1305,10 @@ mod tests {
             repo.to_str().unwrap(),
             None,
             CompatConfig::default(),
+            &PathsConfig::default(),
             repo.clone(),
             None,
+            /*project_trusted*/ true,
         )
         .await;
         let imported = configs
@@ -1336,8 +1338,10 @@ mod tests {
             repo.to_str().unwrap(),
             None,
             CompatConfig::default(),
+            &PathsConfig::default(),
             repo.clone(),
             None,
+            /*project_trusted*/ true,
         )
         .await;
         assert_eq!(
@@ -1365,8 +1369,10 @@ mod tests {
             repo.to_str().unwrap(),
             None,
             CompatConfig::default(),
+            &PathsConfig::default(),
             repo.clone(),
             None,
+            /*project_trusted*/ true,
         )
         .await;
         assert!(
@@ -1393,8 +1399,10 @@ mod tests {
             repo.to_str().unwrap(),
             None,
             CompatConfig::default(),
+            &PathsConfig::default(),
             repo.clone(),
             None,
+            /*project_trusted*/ true,
         )
         .await;
         let imported = configs

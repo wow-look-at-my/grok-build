@@ -1747,7 +1747,6 @@ mod tests {
         let desc = task_model_guidance(
             TaskModelSelection::Selectable,
             &["zeta".to_string(), "alpha".to_string(), "alpha".to_string()],
-            xai_tool_types::AgentUsageFrequency::Default,
         );
         assert!(desc.contains("- alpha\n- zeta"));
         assert!(desc.contains("${{ params.task.model }}"));

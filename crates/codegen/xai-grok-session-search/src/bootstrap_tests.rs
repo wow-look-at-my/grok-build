@@ -425,17 +425,7 @@ async fn test_concurrent_gates_single_flight() {
 async fn test_gate_does_not_reindex_behind_a_live_peer_claim() {
     let tmp = tempfile::TempDir::new().unwrap();
     let root = tmp.path().to_path_buf();
-    let storage = JsonlStorageAdapter::with_root(root.clone());
-    for id in ["s1", "s2"] {
-        let info = Info {
-            id: acp::SessionId::new(id),
-            cwd: "/ws".to_string(),
-        };
-        storage
-            .init_session(&info, acp::ModelId::new("test"))
-            .await
-            .unwrap();
-    }
+    let source = FakeSource::with_session_ids(&["s1", "s2"]);
     let db_path = search_db_path(&root);
     with_search_index(&db_path, |_| Ok(())).unwrap();
 
@@ -452,7 +442,8 @@ async fn test_gate_does_not_reindex_behind_a_live_peer_claim() {
     let progress = Arc::new(BootstrapProgress::default());
     let outcome = bootstrap_with_lease_inner(
         &root,
-        &storage,
+        &source,
+        no_content,
         &progress,
         &TEST_TIMING,
         BootstrapRole::Launch,
