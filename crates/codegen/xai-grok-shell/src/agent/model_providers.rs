@@ -396,6 +396,11 @@ impl ConfigModelOverride {
         merged.model_provider = None;
         merged.base_url = merged.base_url.or_else(|| base_url.clone());
         merged.api_base_url = merged.api_base_url.or_else(|| api_base_url.clone());
+        // A provider that names only api_base_url has a single URL. Without
+        // this the model keeps the cli-chat-proxy URL of the fallback entry.
+        if merged.base_url.is_none() {
+            merged.base_url = merged.api_base_url.clone();
+        }
         merged.api_backend = merged.api_backend.or_else(|| api_backend.clone());
         merged.context_window = merged.context_window.or(*context_window);
         merged.temperature = merged.temperature.or(*temperature);
@@ -541,6 +546,27 @@ mod tests {
             resolve_model_list(&cfg, None).values(),
             any_provider_has_own_credentials(&cfg),
         ));
+    }
+    #[test]
+    fn a_provider_with_only_api_base_url_routes_its_models_there() {
+        let raw_config: toml::Value = toml::from_str(
+            r#"
+            [endpoints]
+            cli_chat_proxy_base_url = "https://cli-chat-proxy.grok.com/v1"
+
+            [model_providers.messages]
+            api_base_url = "https://inference.internal/anthropic"
+
+            [model.claude]
+            model = "claude-opus-5"
+            model_provider = "messages"
+            "#,
+        )
+        .unwrap();
+        let cfg = Config::new_from_toml_cfg(&raw_config).expect("config should parse");
+        let resolved = resolve_model_list(&cfg, None);
+        let model = resolved.get("claude").expect("model should exist");
+        assert_eq!(model.info.base_url, "https://inference.internal/anthropic");
     }
     #[test]
     fn model_inherits_provider_connection_defaults() {
