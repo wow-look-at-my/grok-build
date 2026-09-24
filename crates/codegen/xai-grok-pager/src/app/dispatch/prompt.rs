@@ -743,9 +743,9 @@ pub(super) fn dispatch_send_prompt_inner(
         //
         // The IDLE case is unchanged (falls through to the local path below,
         // which drains instantly and renders the user block) — preserving the
-        // byte-for-byte idle experience. Image/skill/editing/non-running cases
-        // also stay local; they're out of immediate-send scope.
-        // Plain prompts also require "no images" (image prompts stay local).
+        // byte-for-byte idle experience. Skill/editing/non-running cases also
+        // stay local. An image prompt takes the immediate path: the shell
+        // harvests its image blocks into the running turn with the text.
         //
         // A follow-up chip submission supersedes the current response's
         // suggestions: clear the visible chips here — INSIDE the send/enqueue
@@ -779,8 +779,7 @@ pub(super) fn dispatch_send_prompt_inner(
             .slash_controller
             .recognized_token_ranges(&text, &agent.session.models);
 
-        let immediate_server_send =
-            immediate_server_send_eligible(agent) && agent.prompt.images.is_empty();
+        let immediate_server_send = immediate_server_send_eligible(agent);
         tracing::debug!(
             target: "qtrace",
             pid = std::process::id(),
@@ -800,9 +799,8 @@ pub(super) fn dispatch_send_prompt_inner(
         let parked_sendable_wait = agent.is_parked_on_sendable_wait();
         let hold_behind_existing_queue = parked_sendable_wait && agent.has_held_user_queue();
 
-        // Images can't ride immediate server-send; empty-held park still send-nows.
-        if !immediate_server_send
-            && immediate_server_send_eligible(agent)
+        // An image prompt on an empty held wait send-nows.
+        if immediate_server_send
             && !agent.prompt.images.is_empty()
             && parked_sendable_wait
             && !hold_behind_existing_queue
@@ -824,16 +822,23 @@ pub(super) fn dispatch_send_prompt_inner(
                 .clone()
                 .expect("session_id is_some checked");
             let agent_id = agent.session.id;
+            let cwd = agent.session.cwd.clone();
             let prompt_id = uuid::Uuid::new_v4().to_string();
             // Self-originated: when this prompt becomes the running turn (via the
             // `running_prompt_id` adoption + turn-start shim), the ACP gate must
             // treat its deltas as ours, not adopt them as another client's turn.
             agent.note_self_originated_prompt(&prompt_id);
-            // Plain image-free sends stay unarmed: shell queue state and cancelTrigger decide disposition.
+            // Queued sends stay unarmed: shell queue state and cancelTrigger decide disposition.
 
+            // Take the images before `set_text`, which clears them.
+            let images = if consume_input {
+                agent.prompt.drain_images()
+            } else {
+                Vec::new()
+            };
             if consume_input {
-                // Plain prompt: no images to drain. Clear textarea + record
-                // up-arrow history (same as the local path's history insert).
+                // Clear textarea + record up-arrow history (same as the local
+                // path's history insert).
                 agent.prompt.set_text("");
                 let trimmed_key = text.trim().to_string();
                 if !trimmed_key.is_empty() {
@@ -868,13 +873,15 @@ pub(super) fn dispatch_send_prompt_inner(
             if queued_while_running && !parked_sendable_wait {
                 maybe_show_send_now_tip(app);
             }
-            return vec![Effect::SendPrompt {
+            return vec![super::queue::server_queue_send_effect(
                 agent_id,
                 session_id,
                 text,
+                images,
+                &cwd,
                 prompt_id,
                 skill_token_ranges,
-            }];
+            )];
         }
 
         agent
@@ -885,7 +892,7 @@ pub(super) fn dispatch_send_prompt_inner(
             drain_prompt_state_to_last_queued(agent);
             agent.prompt.set_text("");
         }
-        // Local queue while a turn is running (e.g. images attached): tip after
+        // Local queue while a turn is running: tip after
         // this branch so the agent mut-borrow is released first.
         tip_send_now_after_queue = queued_while_running;
     }
