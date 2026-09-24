@@ -38,11 +38,7 @@ fn combine_queued_prompts_enabled() -> bool {
 /// Whether a prompt/command submitted right now should take the
 /// server-authoritative immediate-send path: the **server is busy**
 /// (running a turn or still holding queued prompts), the session exists, the
-/// local drip-feed queue is empty, and we're not mid-edit / model-switch /
-/// replay. Kind-specific extras (e.g. the plain-prompt "no images" rule) are
-/// checked by the caller.
-///
-/// **Server-busy — `is_turn_running() || !shared_queue.is_empty()`:** the
+ — `is_turn_running() || !shared_queue.is_empty()`:** the
 /// immediate-send path is for prompts that must queue server-side rather than
 /// start a turn locally. It is NOT enough to check `is_turn_running()`: in
 /// leader mode there is a turn-end window where this client has processed the
@@ -79,9 +75,9 @@ fn combine_queued_prompts_enabled() -> bool {
 /// drip-feed queue instead reaches the model only once the whole turn ends, so
 /// gating this on leader mode meant single-client sessions never got ASAP
 /// delivery at all. Multi-client ordering is a separate concern the shared
-/// queue also solves; with one client the two queues still merge as *server
-/// rows first, then local rows*, so a local row (slash command, image prompt,
-/// scheduled prompt) can never move above them.
+/// queue also solves; with a single client both queues still merge as
+/// rows then local rows*, so a local row (slash command, scheduled
+/// prompt) can never move above them.
 pub(super) fn immediate_server_send_eligible(agent: &AgentView) -> bool {
     let server_busy = agent.session.state.is_turn_running() || !agent.shared_queue.is_empty();
     server_busy
@@ -92,20 +88,51 @@ pub(super) fn immediate_server_send_eligible(agent: &AgentView) -> bool {
         && !agent.session.loading_replay
 }
 
-/// Whether a local row carries nothing but text, and so can be re-sent as a
-/// plain [`Effect::SendPrompt`] without losing anything.
-///
-/// Everything else a row can carry — a skill's wire payload, images, a cron
-/// task's framing, collapsed chips, combined display segments — has no place
-/// in that effect, so a row holding any of it stays local.
+/// Whether a local row carries only text and images, and so survives the trip
+/// through [`server_queue_send_effect`] without losing anything the model
+/// sees.
 fn row_is_plain_text(prompt: &crate::app::agent::QueuedPrompt) -> bool {
     prompt.kind == crate::app::agent::QueueEntryKind::Prompt
         && prompt.wire_blocks.is_none()
-        && prompt.images.is_empty()
         && prompt.task_id.is_none()
         && prompt.human_schedule.is_none()
         && prompt.combined_texts.is_empty()
-        && prompt.chip_elements.is_empty()
+}
+
+/// The effect that puts a prompt on the shell's queue. The shell harvests a
+/// row's image blocks into the running turn with its text, so an image prompt
+/// takes this route too. It must never wait in the local queue for the turn end.
+pub(super) fn server_queue_send_effect(
+    agent_id: AgentId,
+    session_id: acp::SessionId,
+    text: String,
+    images: Vec<crate::prompt_images::PastedImage>,
+    cwd: &str,
+    prompt_id: String,
+    skill_token_ranges: Vec<std::ops::Range<usize>>,
+) -> Effect {
+    if images.is_empty() {
+        return Effect::SendPrompt {
+            agent_id,
+            session_id,
+            text,
+            prompt_id,
+            skill_token_ranges,
+        };
+    }
+    // The builder rewrites the text (placeholder removal), so token ranges
+    // are not stamped here. The local image drain does the same.
+    let blocks = crate::prompt_images::build_content_blocks_with_workspace(
+        text,
+        images,
+        Some(std::path::Path::new(cwd)),
+    );
+    Effect::SendPromptBlocks {
+        agent_id,
+        session_id,
+        blocks,
+        prompt_id,
+    }
 }
 
 /// Whether a local row may be handed to the shell as a plain prompt row.
@@ -125,10 +152,7 @@ fn row_may_be_migrated(prompt: &crate::app::agent::QueuedPrompt) -> bool {
 ///
 /// [`maybe_drain_queue`] only drains local rows once the session is idle, and
 /// [`immediate_server_send_eligible`] only lets a prompt onto the shell's queue
-/// while the local queue is empty. Together those two rules trap each other: a
-/// single row parked locally during a turn — an image prompt, a prompt typed
-/// during the startup race — keeps every later prompt local as well, and a
-/// local row is never harvested into the running turn
+ into the running turn
 /// (`harvest_queued_prompts_into_interjections` reads the shell's queue). A
 /// session that never idles — one driving a goal — never reaches the recovery
 /// in [`maybe_drain_queue`], so this function is the only rescue: it also runs
@@ -163,6 +187,7 @@ pub(crate) fn migrate_local_rows_to_server_queue(app: &mut AppView) -> Vec<Effec
     };
     let session_agent_id = agent.session.id;
     let sid_str = session_id.0.to_string();
+    let cwd = agent.session.cwd.clone();
 
     while app
         .agents
@@ -194,15 +219,17 @@ pub(crate) fn migrate_local_rows_to_server_queue(app: &mut AppView) -> Vec<Effec
         crate::unified_log::info(
             "prompt.migrated_to_server_queue",
             Some(&sid_str),
-            Some(serde_json::json!({ "len": row.text.len() })),
+            Some(serde_json::json!({ "len": row.text.len(), "images": row.images.len() })),
         );
-        effects.push(Effect::SendPrompt {
-            agent_id: session_agent_id,
-            session_id: session_id.clone(),
-            text: row.text,
+        effects.push(server_queue_send_effect(
+            session_agent_id,
+            session_id.clone(),
+            row.text,
+            row.images,
+            &cwd,
             prompt_id,
-            skill_token_ranges: row.skill_token_ranges,
-        });
+            row.skill_token_ranges,
+        ));
     }
     effects
 }

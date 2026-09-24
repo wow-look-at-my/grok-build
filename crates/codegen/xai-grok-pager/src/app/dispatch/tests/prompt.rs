@@ -4150,7 +4150,83 @@ fn image_prompt_during_sendable_wait_routes_to_send_now() {
     );
 }
 
-/// The local drip-feed drain must hold while a non-running server row exists —
+#[test]
+fn image_prompt_while_running_goes_to_server_queue() {
+	let mut app = test_app_with_agent();
+	let id = AgentId(0);
+	dispatch(Action::SendPrompt("first".into()), &mut app);
+	assert!(app.agents[&id].session.state.is_turn_running());
+
+	let img = crate::prompt_images::from_clipboard_data(&crate::clipboard::ImageData {
+		data: vec![1, 2, 3],
+		mime_type: "image/png".into(),
+	});
+	app.agents
+		.get_mut(&id)
+		.unwrap()
+		.prompt
+		.insert_image(img)
+		.unwrap();
+
+	let effects = dispatch(Action::SendPrompt("look at [Image #1]".into()), &mut app);
+	let prompt_id = match effects.as_slice() {
+		[Effect::SendPromptBlocks {
+			blocks, prompt_id, ..
+		}] => {
+			assert!(
+				blocks
+					.iter()
+					.any(|b| matches!(b, acp::ContentBlock::Image(_))),
+				"the image must ride the queued send, got {blocks:?}"
+			);
+			prompt_id.clone()
+		}
+		other => panic!("expected a server-queue SendPromptBlocks, got {other:?}"),
+	};
+	let agent = &app.agents[&id];
+	assert!(
+		agent.session.pending_prompts.is_empty(),
+		"the image prompt must not wait in the local queue"
+	);
+	assert!(agent.prompt.images.is_empty(), "the send consumes the images");
+	assert!(
+		agent.shared_queue.iter().any(|e| e.id == prompt_id),
+		"the queue pane shows the server row"
+	);
+	assert!(
+		agent.expect_send_now_cancel.is_none(),
+		"a queued send must not arm a send-now cancel"
+	);
+}
+
+#[test]
+fn stranded_image_row_migrates_to_server_queue() {
+	let mut app = test_app_with_agent();
+	let id = AgentId(0);
+	dispatch(Action::SendPrompt("first".into()), &mut app);
+	let img = crate::prompt_images::from_clipboard_data(&crate::clipboard::ImageData {
+		data: vec![1, 2, 3],
+		mime_type: "image/png".into(),
+	});
+	{
+		let agent = app.agents.get_mut(&id).unwrap();
+		agent.session.enqueue_prompt("see [Image #1]".into());
+		agent.session.pending_prompts.back_mut().unwrap().images = vec![img];
+	}
+
+	let effects = crate::app::dispatch::migrate_local_rows_to_server_queue(&mut app);
+	match effects.as_slice() {
+		[Effect::SendPromptBlocks { blocks, .. }] => assert!(
+			blocks
+				.iter()
+				.any(|b| matches!(b, acp::ContentBlock::Image(_))),
+			"the migrated row keeps its image, got {blocks:?}"
+		),
+		other => panic!("expected the image row to migrate, got {other:?}"),
+	}
+	assert!(app.agents[&id].session.pending_prompts.is_empty());
+}
+
 /// the shell owns the next turn (its `running_prompt_id` broadcast starts it).
 /// Draining locally would promote a bogus local turn that swallows the real
 /// turn's deltas.
