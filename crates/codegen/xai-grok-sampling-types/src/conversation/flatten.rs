@@ -175,7 +175,7 @@ fn tool_result_as_user(t: ToolResultItem) -> ConversationItem {
     parts.extend(images);
     ConversationItem::User(UserItem {
         content: parts,
-        synthetic_reason: Some(SyntheticReason::HistoryFlattened),
+        synthetic_reason: SyntheticReason::HistoryFlattened,
         ..UserItem::default()
     })
 }
@@ -337,7 +337,7 @@ mod tests {
             ConversationItem::User(u) => {
                 assert_eq!(
                     u.synthetic_reason,
-                    Some(SyntheticReason::HistoryFlattened),
+                    SyntheticReason::HistoryFlattened,
                     "a flattened result is not something the user typed"
                 );
             }
@@ -374,6 +374,7 @@ mod tests {
         let items = vec![
             ConversationItem::System(crate::conversation::SystemItem {
                 content: Arc::<str>::from("you are an agent"),
+                synthetic_reason: SyntheticReason::Primary,
             }),
             tool_result("call_1", "x"),
         ];

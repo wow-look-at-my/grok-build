@@ -203,6 +203,10 @@ impl MvpAgent {
         let parent_model_agent_type =
             config::find_model_by_id(&available_models, parent_model_id.0.as_ref())
                 .map(|e| e.info.agent_type.clone());
+        let parent_base_url =
+            config::find_model_by_id(&available_models, parent_model_id.0.as_ref())
+                .map(|e| e.info.base_url.clone())
+                .unwrap_or_default();
         let parent_non_interactive = parent_handle
             .as_ref()
             .map(|h| h.non_interactive)
@@ -227,13 +231,21 @@ impl MvpAgent {
             None => (None, None),
         };
         let project_trusted = crate::agent::folder_trust::project_scope_allowed(&parent_cwd);
-        let (base_roles, base_personas, subagent_model_overrides, subagent_toggle) = {
+        let (
+            base_roles,
+            base_personas,
+            subagent_model_overrides,
+            subagent_toggle,
+            subagent_default_model,
+        ) = {
             let cfg = self.cfg.borrow();
             (
                 cfg.subagent_roles.clone(),
                 cfg.subagent_personas.clone(),
                 cfg.subagent_model_overrides.clone(),
                 cfg.subagent_toggle.clone(),
+                cfg.resolve_harness_model("subagent_default")
+                    .map(|r| r.value),
             )
         };
         let (subagent_roles, subagent_personas) =
@@ -281,6 +293,7 @@ impl MvpAgent {
             subagent_event_tx: self.subagent_event_tx.event_sender().0,
             parent_depth,
             subagents_max_depth: self.cfg.borrow().subagents_max_depth,
+            subagent_usage_frequency: self.cfg.borrow().subagent_usage_frequency,
             workflow_max_concurrent_agents: self.cfg.borrow().workflow_max_concurrent_agents,
             media_gen_batch_limits: self.cfg.borrow().media_gen_batch_limits,
             inference_idle_timeout_secs,
@@ -303,7 +316,7 @@ impl MvpAgent {
                         crate::config::MemoryMode::Legacy
                     }
                 }),
-            web_search_sampling_config: self.prepare_web_search_sampling_config(),
+            web_search_sampling_config: self.prepare_web_search_sampling_config(&parent_base_url),
             web_fetch_config: self.prepare_web_fetch_config(),
             image_gen_config: self.prepare_image_gen_config(),
             video_gen_config: self.prepare_video_gen_config(),
@@ -330,6 +343,7 @@ impl MvpAgent {
             parent_max_turns,
             available_models,
             subagent_model_overrides,
+            subagent_default_model,
             subagent_toggle,
             subagent_roles,
             subagent_personas,

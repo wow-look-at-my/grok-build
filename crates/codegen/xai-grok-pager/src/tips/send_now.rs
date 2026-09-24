@@ -8,13 +8,8 @@ use ratatui::text::{Line, Span};
 use super::EphemeralTip;
 use crate::theme::Theme;
 
-/// Ephemeral-tip dedup key for the queued-follow-up send-now hint.
 pub(crate) const SEND_NOW_TIP_KEY: &str = "send_now_tip";
-
-/// Key into the per-session in-memory seen-count map for this tip.
 pub(crate) const SEND_NOW_TIP_SEEN_KEY: &str = "send_now_tip_shown_count";
-
-/// Stop showing after this many shows within a single session.
 const SEND_NOW_TIP_SEEN_CAP: u32 = 3;
 
 /// Build "Queued · Enter to interrupt & send", seen-gated to

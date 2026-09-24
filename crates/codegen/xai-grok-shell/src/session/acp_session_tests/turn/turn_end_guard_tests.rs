@@ -9,11 +9,9 @@ use std::collections::HashMap;
 use xai_grok_tools::types::template_renderer::TemplateRenderer;
 use xai_grok_tools::types::tool::ToolKind;
 
-// ── TodoGate pure-function tests ──────────────────────────────────
-//
+// ── TodoGate pure-function tests ──────────────────────────────────.
 // Integration coverage lands via the replay harness.
-// These tests cover the gate's decision function plus the reminder
-// builders.
+// These tests cover the gate's decision function plus the reminder builders.
 
 #[test]
 fn todo_gate_fires_when_pending_remains() {
@@ -31,7 +29,7 @@ fn todo_gate_fires_when_pending_remains() {
 
 #[test]
 fn todo_gate_passes_when_in_progress_count_le_backing_count() {
-    // One in-progress item, one live backing task → backed → no nudge.
+    // One in-progress item with one live backing task counts as backed, so no nudge
     let input = TodoGateInput {
         pending: vec![],
         in_progress_unbacked: vec![],
@@ -46,8 +44,7 @@ fn todo_gate_passes_when_in_progress_count_le_backing_count() {
 
 #[test]
 fn todo_gate_fires_when_in_progress_exceeds_backing_count() {
-    // The `/pr-babysit` false-positive regression test: 3 PR todos
-    // in_progress but only 1 polling subagent → 2 unbacked.
+    // The `/pr-babysit` false-positive regression test: 3 PR todos in_progress but only 1 polling subagent leaves 2 unbacked
     let input = TodoGateInput {
         pending: vec![],
         in_progress_unbacked: vec!["pr-2:ci-green", "pr-3:ci-green"],
@@ -59,13 +56,10 @@ fn todo_gate_fires_when_in_progress_exceeds_backing_count() {
         panic!("expected Nudge when in_progress exceeds backing count");
     };
     assert_eq!(reason, TodoGateReason::InFlight);
-    // The reminder must surface the unbacked items so the model
-    // knows which ones to advance.
+    // The reminder must list the unbacked items so the model knows which ones to advance
     assert!(reminder.contains("pr-2:ci-green"));
     assert!(reminder.contains("pr-3:ci-green"));
-    // Backed items are deliberately NOT listed — the gate already
-    // decided not to nudge on them, so re-listing them would be
-    // noise.
+    // Backed items are deliberately NOT listed: the gate already decided not to nudge on them, so re-listing them would be noise
     assert!(!reminder.contains("pr-1:ci-green"));
 }
 
@@ -164,9 +158,7 @@ fn toggle_off_blocks_nothing_at_any_budget_state() {
 
 #[test]
 fn todo_gate_empty_state_no_compaction_passes() {
-    // Degenerate-input test: empty everything → no nudge. Required
-    // because the gate is reachable on the very first content-only
-    // turn of a session before any todo_write has happened.
+    // The gate is reachable on the very first content-only turn of a session, before any todo_write has happened, so empty input must pass
     let input = TodoGateInput {
         pending: vec![],
         in_progress_unbacked: vec![],
@@ -182,21 +174,16 @@ fn todo_gate_empty_state_no_compaction_passes() {
 #[test]
 fn todo_gate_reminder_omits_empty_sections() {
     // Only the populated sections render; empty buckets are dropped.
-    // The backed-in-progress bucket is never listed (deliberately
-    // removed — the gate already decided not to nudge on those).
+    // The backed-in-progress bucket is never listed: the gate already decided not to nudge on those
     let r = build_todo_gate_reminder(&["only-pending"], &[]);
     assert!(r.contains("Pending:"));
     assert!(!r.contains("In-progress (no backing"));
     assert!(!r.contains("backed by a live background task"));
 }
 
-// ── `CollectedTodoGateInput::as_input` partition heuristic ───────
-//
-// The "first N in_progress are backed (insertion order); pending is
-// never backed" rule is the design's primary fix for the
-// `/pr-babysit` false-positive. Earlier tests constructed the
-// partition by hand —
-// these tests exercise the real `as_input` against owned input.
+// ── `CollectedTodoGateInput::as_input` partition heuristic ───────.
+// The rule "first N in_progress are backed (insertion order); pending is never backed" is the primary fix for the `/pr-babysit` false-positive.
+// Earlier tests constructed the partition by hand; these tests exercise the real `as_input` against owned input.
 
 fn collected(
     items: &[(&str, &str, TodoStatus)],
@@ -213,7 +200,7 @@ fn collected(
 
 #[test]
 fn as_input_marks_everything_unbacked_when_no_backing_tasks() {
-    // (a) backing_count = 0 with one in_progress → all unbacked.
+    // With backing_count 0, the one in_progress item is unbacked
     let c = collected(&[("ip", "do work", TodoStatus::InProgress)], 0);
     let input = c.as_input();
     assert_eq!(input.in_progress_backed, Vec::<&str>::new());
@@ -223,7 +210,7 @@ fn as_input_marks_everything_unbacked_when_no_backing_tasks() {
 
 #[test]
 fn as_input_marks_all_backed_when_backing_count_ge_in_progress() {
-    // (b) backing_count >= |in_progress| → all backed, none unbacked.
+    // When backing_count is at least the in_progress count, every item is backed
     let c = collected(
         &[
             ("a", "alpha", TodoStatus::InProgress),
@@ -232,14 +219,14 @@ fn as_input_marks_all_backed_when_backing_count_ge_in_progress() {
         5,
     );
     let input = c.as_input();
-    // Insertion order preserved: alpha before bravo.
+    // Insertion order is preserved: alpha before bravo
     assert_eq!(input.in_progress_backed, vec!["alpha", "bravo"]);
     assert!(input.in_progress_unbacked.is_empty());
 }
 
 #[test]
 fn as_input_partitions_first_n_as_backed() {
-    // (c) backing_count = 1, |in_progress| = 3 → 1 backed + 2 unbacked.
+    // With backing_count 1 and three in_progress items, one is backed and two are unbacked
     // This is the `/pr-babysit` regression: 3 PR todos, 1 poller.
     let c = collected(
         &[
@@ -250,7 +237,7 @@ fn as_input_partitions_first_n_as_backed() {
         1,
     );
     let input = c.as_input();
-    // Insertion order: pr-1 is backed; pr-2 / pr-3 are unbacked.
+    // Insertion order: pr-1 is backed; pr-2 and pr-3 are unbacked
     assert_eq!(input.in_progress_backed, vec!["pr-1:ci-green"]);
     assert_eq!(
         input.in_progress_unbacked,
@@ -260,7 +247,7 @@ fn as_input_partitions_first_n_as_backed() {
 
 #[test]
 fn as_input_pending_never_backed_even_with_high_backing_count() {
-    // (d) pending items never count as backed, regardless of count.
+    // Pending items never count as backed, regardless of backing_task_count
     let c = collected(
         &[
             ("p", "pending-task", TodoStatus::Pending),
@@ -269,19 +256,16 @@ fn as_input_pending_never_backed_even_with_high_backing_count() {
         100,
     );
     let input = c.as_input();
-    // Pending bucket carries the pending item.
     assert_eq!(input.pending, vec!["pending-task"]);
-    // The single in-progress item is backed (count >= 1) but the
-    // pending item does NOT appear in either in_progress bucket.
+    // The single in-progress item is backed, and the pending item does NOT appear in either in_progress bucket
     assert_eq!(input.in_progress_backed, vec!["in-progress-task"]);
     assert!(input.in_progress_unbacked.is_empty());
 }
 
 #[test]
 fn as_input_completed_and_cancelled_are_dropped() {
-    // Completed/cancelled items aren't actionable for the gate and
-    // must not appear in any output bucket. They also must not
-    // shift the insertion-order partition for in_progress items.
+    // Completed/cancelled items aren't actionable for the gate and must not appear in any output bucket
+    // They also must not shift the insertion-order partition for in_progress items
     let c = collected(
         &[
             ("done", "done-task", TodoStatus::Completed),
@@ -293,9 +277,8 @@ fn as_input_completed_and_cancelled_are_dropped() {
     );
     let input = c.as_input();
     assert!(input.pending.is_empty());
-    // Insertion-order partition is computed AFTER completed /
-    // cancelled are filtered out: `first-ip` (which appears
-    // before `second-ip` in `todos`) is the one backed slot.
+    // The insertion-order partition is computed AFTER completed and cancelled items are filtered out
+    // `first-ip` (which appears before `second-ip` in `todos`) takes the one backed slot
     assert_eq!(input.in_progress_backed, vec!["first-ip"]);
     assert_eq!(input.in_progress_unbacked, vec!["second-ip"]);
 }

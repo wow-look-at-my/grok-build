@@ -141,6 +141,12 @@ fn input_title(
         ToolInput::KillTask(kill_task) => format!("Kill task: {}", kill_task.task_id),
         ToolInput::Skill(skill) => format!("Skill: {}", skill.skill),
         ToolInput::ApplyPatch(_) => "Apply patch".to_string(),
+        ToolInput::Dynamic(_)
+            if wire_name
+                == xai_grok_tools::implementations::grok_build::SEND_FEEDBACK_TOOL_NAME =>
+        {
+            "Feedback drafted".to_string()
+        }
         ToolInput::Dynamic(args) => dynamic_tool_title(wire_name, kind, args, cwd),
         ToolInput::MemorySearch(ms) => {
             let end = ms
@@ -148,48 +154,60 @@ fn input_title(
                 .char_indices()
                 .nth(60)
                 .map_or(ms.query.len(), |(i, _)| i);
-            format!("Memory search: \"{}\"", &ms.query[..end])
+            format!(
+                "Memory search: \"{}\"",
+                ms.query.get(..end).unwrap_or(ms.query.as_str())
+            )
         }
         ToolInput::MemoryGet(mg) => format!("Memory read: {}", mg.path),
         ToolInput::HashlineEdit(he) => format!("Edit `{}`", he.file_path),
         ToolInput::Task(task) => task.description.clone(),
         ToolInput::EnterPlanMode(_) => "Plan: Enter".to_string(),
         ToolInput::ExitPlanMode(_) => "Plan: Exit".to_string(),
-        ToolInput::AskUserQuestion(ask) => {
-            if ask.questions.len() == 1 {
-                format!("Ask: {}", ask.questions[0].question)
-            } else {
-                format!("Ask {} questions", ask.questions.len())
-            }
-        }
+        ToolInput::AskUserQuestion(ask) => match ask.questions.as_slice() {
+            [q] => format!("Ask: {}", q.question),
+            qs => format!("Ask {} questions", qs.len()),
+        },
         ToolInput::WebFetch(wf) => format!("Fetch: {}", wf.url),
         ToolInput::SearchTool(st) => format!("Search tools: \"{}\"", st.query),
-        ToolInput::UseTool(ut) => ut.tool_name.clone(),
+        ToolInput::UseTool(ut) => ut
+            .target_name()
+            .map(str::to_owned)
+            .unwrap_or_else(|| "Read MCP invocation source".to_owned()),
         ToolInput::Write(w) => format!("Write `{}`", w.file_path),
         ToolInput::Workflow(w) => {
+            use xai_grok_tools::implementations::grok_build::workflow::WorkflowSource;
             let script_name = |script: &str| -> Option<String> {
                 let head = script.get(..600).unwrap_or(script);
-                let rest = &head[head.find("name:")? + 5..];
-                let rest = &rest[rest.find('"')? + 1..];
-                Some(rest[..rest.find('"')?].to_string())
+                let rest = head.get(head.find("name:")? + 5..)?;
+                let rest = rest.get(rest.find('"')? + 1..)?;
+                Some(rest.get(..rest.find('"')?)?.to_string())
             };
-            let inline_name = w.script.as_deref().and_then(script_name);
+            let inline_name = match &w.source {
+                WorkflowSource::Script { script } => script_name(script),
+                _ => None,
+            };
             if w.validate_only {
-                match inline_name.or_else(|| w.name.clone()) {
-                    Some(n) => format!("Validating workflow '{n}'"),
+                let source_name = match &w.source {
+                    WorkflowSource::Name { name } => Some(name.clone()),
+                    _ => inline_name,
+                };
+                match source_name {
+                    Some(name) => format!("Validating workflow '{name}'"),
                     None => "Validating workflow script".to_string(),
                 }
-            } else if w.script.is_some() {
-                match inline_name {
-                    Some(n) => format!("Creating workflow '{n}'"),
-                    None => "Creating workflow".to_string(),
-                }
-            } else if let Some(ref name) = w.name {
-                format!("Workflow: {name}")
-            } else if w.resume_from_run_id.is_some() {
-                "Workflow: resume run".to_string()
             } else {
-                "Workflow: launch script".to_string()
+                match &w.source {
+                    WorkflowSource::Script { .. } => match inline_name {
+                        Some(name) => format!("Creating workflow '{name}'"),
+                        None => "Creating workflow".to_string(),
+                    },
+                    WorkflowSource::Name { name } => format!("Workflow: {name}"),
+                    WorkflowSource::Resume { .. } => "Workflow: resume run".to_string(),
+                    WorkflowSource::Pause { .. } => "Workflow: pause run".to_string(),
+                    WorkflowSource::Stop { .. } => "Workflow: stop run".to_string(),
+                    WorkflowSource::ScriptPath { .. } => "Workflow: launch script".to_string(),
+                }
             }
         }
         ToolInput::UpdateGoal(ug) => {
@@ -227,6 +245,13 @@ fn input_title(
         ToolInput::CodexReadFile(rf) => format!("Read `{}`", rf.file_path),
         ToolInput::Lsp(lsp) => lsp_tool_title(lsp),
         ToolInput::SendMessage(sm) => format!("Message {}", sm.to),
+        ToolInput::SendFeedback(_) => "Feedback drafted".to_string(),
+        ToolInput::SendSubagentMessage(message) => {
+            super::active_agent_message_presentation::active_agent_message_tool_call_display(
+                message,
+            )
+            .0
+        }
     }
 }
 fn lsp_tool_title(lsp: &xai_grok_tools::implementations::lsp::LspToolInput) -> String {

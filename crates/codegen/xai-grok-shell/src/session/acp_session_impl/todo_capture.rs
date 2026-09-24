@@ -9,7 +9,7 @@
 //!
 //! see AGENTS.md, "`/todo` capture feature notes"
 
-use super::side_call::{AuxCall, collect_aux_call, log_prompt_cache_hit};
+use super::side_call::{AuxCall, collect_aux_call, log_prompt_cache_usage};
 use super::*;
 
 use std::path::{Path, PathBuf};
@@ -545,7 +545,7 @@ impl SessionActor {
                     );
                 })
                 .await?;
-            log_prompt_cache_hit("todo", sampling_client.api_backend(), &response);
+            log_prompt_cache_usage("todo", sampling_client.api_backend(), &response);
 
             let calls: Vec<ToolCall> = response.tool_calls().to_vec();
             items.extend(echoed_response_items(response.items, strip_reasoning));

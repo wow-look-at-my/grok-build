@@ -508,16 +508,7 @@ fn validate_bundle_name(kind: BundleFileKind, name: &str) -> Result<()> {
     Ok(())
 }
 
-<<<<<<<< HEAD:crates/codegen/xai-grok-shell-assets/src/bundle.rs
-/// Test-only helpers for building in-memory bundle archives.
-///
-/// Kept non-`cfg(test)` so the `xai-grok-shell` crate's own unit tests can
-/// reuse these helpers cross-crate; the module is documentation-hidden and
-/// only referenced from test code in either crate.
-#[doc(hidden)]
-========
 #[cfg(any(test, feature = "test-support"))]
->>>>>>>> upstream/main:crates/codegen/xai-grok-bundle/src/lib.rs
 pub mod test_helpers {
     pub fn make_test_archive(entries: &[(&str, &[u8])]) -> Vec<u8> {
         let encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());

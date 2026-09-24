@@ -1,17 +1,16 @@
 //! Remote storage client for the backend.
-
 pub mod agent;
 pub(crate) mod chat_models_client;
 pub mod client;
 pub mod conversations_client;
 pub(crate) mod local_runtime;
+mod model_source;
 pub mod pull;
 #[cfg(test)]
 mod pull_smoke_test;
 pub(crate) mod skills_client;
 pub mod sync;
 pub mod workspaces_client;
-
 pub use agent::{
     SandboxClient, SandboxCreateEnvironmentRequest, SandboxEnvironment, SandboxEnvironmentResponse,
     SandboxEnvironmentVariable, SandboxEnvironmentWithMetadata, SandboxForkRequest,
@@ -25,19 +24,21 @@ pub use agent::{
 pub use chat_models_client::{
     ChatModelsClient, ChatModelsError, ListModesResponse, Mode, ModeAvailability,
 };
+pub(crate) use client::DEFAULT_CONTEXT_WINDOW;
 pub use client::{
     BackendClient, BackendError, FetchModelsResult, FetchedBundle, SettingsFetch, fetch_bundle,
-    fetch_login_device_flow, fetch_settings_blocking, fetch_subagent_bundle, share_url,
+    fetch_settings_blocking, fetch_subagent_bundle, share_url,
 };
 pub(crate) use client::{
-    DEFAULT_CONTEXT_WINDOW, fetch_models_blocking, fetch_models_for_api_base_blocking,
-    fetch_models_for_list_url_blocking, models_list_url, models_list_url_for_base,
+    DEFAULT_CONTEXT_WINDOW, fetch_models_for_api_base_blocking, fetch_models_for_list_url_blocking,
+    models_list_url_for_base,
 };
 pub use conversations_client::{
     ConvError, ConvQuery, Conversation, ConversationsClient, ListConversationsPage,
     UpdateConversationBody,
 };
 pub(crate) use local_runtime::{fetch_local_listing_blocking, fetch_residency_blocking};
+pub(crate) use model_source::{ModelSource, active_model_source};
 pub use pull::{PullResult, pull_session_to_local};
 pub use skills_client::{
     BundledSkill, CHAT_PRODUCT_META_KEY, CHAT_PRODUCT_META_VALUE, ListBundledSkillsResponse,

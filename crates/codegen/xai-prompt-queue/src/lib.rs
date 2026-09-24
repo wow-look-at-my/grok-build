@@ -1,6 +1,8 @@
 //! Shared prompt-queue wire types, merge rules, and the one definition of
 //! "this queue row's text is a command".
 
+#![deny(clippy::indexing_slicing)]
+
 mod combine;
 mod types;
 

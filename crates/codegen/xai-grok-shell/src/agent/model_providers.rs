@@ -1,3 +1,5 @@
+use std::num::NonZeroU64;
+
 use indexmap::IndexMap;
 
 use xai_grok_sampling_types::{
@@ -33,7 +35,7 @@ pub struct ModelProviderConfig {
     /// client build.
     pub env_http_headers: IndexMap<String, String>,
     pub auth_provider: Option<String>,
-    pub auth: Option<crate::auth::AuthProviderConfig>,
+    pub auth: Option<xai_grok_config_types::AuthProviderConfig>,
     pub context_window: Option<u64>,
     pub temperature: Option<f32>,
     pub top_p: Option<f32>,
@@ -81,6 +83,8 @@ pub struct ModelProviderConfig {
     /// Extra top-level fields merged into every request body this provider
     /// serves. Inherited per key, like `extra_headers`.
     pub extra_body: IndexMap<String, toml::Value>,
+    /// Request-body cap of this endpoint; inherited by models that set none of their own.
+    pub max_request_bytes: Option<NonZeroU64>,
 }
 
 /// The shape of a provider's model listing.
@@ -202,7 +206,7 @@ pub(crate) fn model_provider_auth_name(provider_id: &str) -> String {
 }
 
 pub(crate) fn auth_config_issues(
-    config: &crate::auth::AuthProviderConfig,
+    config: &xai_grok_config_types::AuthProviderConfig,
 ) -> Vec<(&'static str, ConfigWarningKind, String)> {
     let mut issues = Vec::new();
     if !config.is_usable() {
@@ -212,7 +216,7 @@ pub(crate) fn auth_config_issues(
             "missing or empty command; models resolve with no credential".to_owned(),
         ));
     }
-    let skew = crate::auth::PROVIDER_TOKEN_EXPIRY_SKEW_SECS;
+    let skew = xai_grok_login::PROVIDER_TOKEN_EXPIRY_SKEW_SECS;
     if config.token_ttl_secs.is_some_and(|ttl| ttl <= skew) {
         issues.push((
             "token_ttl_secs",
@@ -223,9 +227,9 @@ pub(crate) fn auth_config_issues(
         ));
     }
     if let Some(timeout) = config.timeout_secs
-        && !(1..=crate::auth::PROVIDER_TIMEOUT_CEILING_SECS).contains(&timeout)
+        && !(1..=xai_grok_login::PROVIDER_TIMEOUT_CEILING_SECS).contains(&timeout)
     {
-        let ceiling = crate::auth::PROVIDER_TIMEOUT_CEILING_SECS;
+        let ceiling = xai_grok_login::PROVIDER_TIMEOUT_CEILING_SECS;
         issues.push((
             "timeout_secs",
             ConfigWarningKind::InvalidValue,
@@ -390,6 +394,7 @@ impl ConfigModelOverride {
             context_window_source: _,
             pricing_lookup_enabled: _,
             extra_body,
+            max_request_bytes,
         } = provider;
 
         let mut merged = self.clone();
@@ -432,6 +437,7 @@ impl ConfigModelOverride {
             .min_output_tokens_per_sec
             .or(*min_output_tokens_per_sec);
         merged.ttft_timeout_secs = merged.ttft_timeout_secs.or(*ttft_timeout_secs);
+        merged.max_request_bytes = merged.max_request_bytes.or(*max_request_bytes);
         if merged.reasoning_efforts.is_empty() {
             merged.reasoning_efforts = reasoning_efforts.clone();
         }
@@ -477,9 +483,11 @@ impl ConfigModelOverride {
 
 #[cfg(test)]
 mod tests {
+    use std::num::NonZeroU64;
+
     use crate::agent::config::{
         Config, any_provider_has_own_credentials, first_provider_with_own_credentials,
-        resolve_credentials, resolve_model_list,
+        resolve_credentials, resolve_model_list, sampling_config_for_model,
     };
 
     /// The whole point of the provider-side credential probe: a session that
@@ -631,6 +639,53 @@ mod tests {
         let model = resolved.get("override-url").expect("model should exist");
         assert_eq!(model.info.base_url, "https://model-specific.example/v1");
         assert_eq!(model.info.context_window.get(), 200000);
+    }
+
+    #[test]
+    fn model_inherits_provider_max_request_bytes() {
+        let raw_config: toml::Value = toml::from_str(
+            r#"
+            [model_providers.messages-gateway]
+            base_url = "https://gateway.example/v1"
+            api_backend = "messages"
+            max_request_bytes = 20000000
+
+            [model.inherits]
+            model = "claude-sonnet"
+            model_provider = "messages-gateway"
+
+            [model.overrides]
+            model = "claude-opus"
+            model_provider = "messages-gateway"
+            max_request_bytes = 10000000
+            "#,
+        )
+        .unwrap();
+
+        let cfg = Config::new_from_toml_cfg(&raw_config).expect("config should parse");
+        let resolved = resolve_model_list(&cfg, None);
+        let max_request_bytes = |key: &str| {
+            let model = resolved.get(key).expect("model should exist");
+            sampling_config_for_model(
+                model,
+                resolve_credentials(model, None),
+                None,
+                None,
+                None,
+                None,
+            )
+            .max_request_bytes
+        };
+        assert_eq!(
+            NonZeroU64::new(20_000_000),
+            max_request_bytes("inherits"),
+            "the provider cap reaches a model that sets none and beats the messages default"
+        );
+        assert_eq!(
+            NonZeroU64::new(10_000_000),
+            max_request_bytes("overrides"),
+            "the model's own cap overrides the provider's"
+        );
     }
 
     #[test]
@@ -1381,7 +1436,10 @@ mod tests {
         .unwrap();
         let cfg = Config::new_from_toml_cfg(&raw_config).expect("config should parse");
         let resolved = resolve_model_list(&cfg, None);
-        let provider = resolved["m"]
+        let Some(model) = resolved.get("m") else {
+            panic!("expected model m: {resolved:?}");
+        };
+        let provider = model
             .auth_provider
             .as_ref()
             .expect("blank api_key must not fail-close a working gateway");

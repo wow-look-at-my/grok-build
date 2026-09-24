@@ -87,8 +87,8 @@ async fn npm_same_version_no_update() {
 #[tokio::test]
 #[serial]
 async fn npm_rollback_does_not_report_update() {
-    // Stable pointer rolled back 0.2.7 → 0.2.5. npm user on 0.2.7 must NOT
-    // see an update — stale registries make this path unsafe.
+    // Stable pointer rolled back from 0.2.7 to 0.2.5
+    // npm user on 0.2.7 must NOT see an update; stale registries make this path unsafe
     let g = setup_npm("0.2.7");
     g.set_stdout("\"0.2.5\"");
 
@@ -103,7 +103,7 @@ async fn npm_rollback_does_not_report_update() {
 #[tokio::test]
 #[serial]
 async fn npm_drastically_old_registry_does_not_report_update() {
-    // Corporate registry returns ancient version.
+    // The corporate registry returns an ancient version
     let g = setup_npm("0.2.7");
     g.set_stdout("\"0.1.4\"");
 
@@ -123,13 +123,8 @@ async fn gh_release_same_version_no_update() {
     assert!(!status.update_available);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// auto_update_target: the leader/background auto-install decision
-//
-// Unlike the upgrade-only `check_update_status` report, this is the
-// downgrade-aware convergence decision. It gates on the installer, so
-// authoritative installers (gh-release/internal) follow a rolled-back pointer
-// while npm never downgrades. `fetch_latest_version` keeps these hermetic.
+// It gates on the installer, so authoritative installers (gh-release/internal) follow a rolled-back pointer while npm
+// never downgrades `fetch_latest_version` keeps these hermetic
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[tokio::test]
@@ -144,7 +139,7 @@ async fn auto_update_target_gh_release_same_version_returns_none() {
 #[tokio::test]
 #[serial]
 async fn auto_update_target_npm_rollback_returns_none() {
-    // npm registries can serve stale versions — never downgrade npm installs.
+    // npm registries can serve stale versions, so never downgrade npm installs
     let g = setup_npm("0.2.26");
     g.set_stdout("\"0.2.22\"");
 
@@ -155,19 +150,11 @@ async fn auto_update_target_npm_rollback_returns_none() {
     );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Disk-aware convergence: ensure_latest_on_disk + installed_on_disk_version
-//
-// Concurrent updaters (TUI background download, leader hourly checker,
-// explicit `grok update`) must decide staleness from the on-disk install, not
-// their own compiled-in version — a binary another process already installed
-// is never downloaded a second time, but a stale running process still gets
-// the relaunch signal.
+// Each must decide staleness from the on-disk install, not its own compiled-in version. A binary another process already
+// installed is never downloaded a second time, but a stale running process still gets the relaunch signal
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Lay down a managed-install layout in the test GROK_HOME:
-/// `bin/grok -> ../downloads/grok-<version>-<platform>` (what
-/// `install_internal_from_base` produces).
+/// Lay down what `install_internal_from_base` produces in the test GROK_HOME: `bin/grok -> ../downloads/grok-<version>-<platform>`.
 fn fake_managed_install(version: &str) {
     let home = test_home();
     let downloads = home.join("downloads");

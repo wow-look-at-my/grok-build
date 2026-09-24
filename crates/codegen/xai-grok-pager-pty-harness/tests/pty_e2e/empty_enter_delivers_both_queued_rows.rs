@@ -2,16 +2,10 @@
 #[allow(unused_imports)]
 use super::common::*;
 
-<<<<<<<< HEAD:crates/codegen/xai-grok-pager-pty-harness/tests/pty_e2e/empty_enter_delivers_both_queued_rows.rs
 /// With two mid-turn queued rows, empty Enter delivers **both** into the
 /// running turn, in queue order — the interrupt is "take everything I have",
 /// not "take the top one". The resubmitted request carries the original prompt
 /// followed by alpha then bravo, each with the mid-turn preamble.
-========
-/// With two mid-turn queued rows, empty Enter sends the **top** (first) row now, not the most recently typed one.
-/// The running turn is cancelled silently and alpha runs as its own next turn, with the interjection preamble.
-/// Bravo stays queued and promotes afterwards.
->>>>>>>> upstream/main:crates/codegen/xai-grok-pager-pty-harness/tests/pty_e2e/empty_enter_sends_top_not_last_of_two.rs
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore]
 async fn empty_enter_delivers_both_queued_rows() {
@@ -66,16 +60,10 @@ async fn empty_enter_delivers_both_queued_rows() {
         .wait_for_text("\u{276F} queue-alpha-top", Duration::from_secs(30))
         .expect("alpha delivered into the running turn");
     turn_one.release();
-<<<<<<<< HEAD:crates/codegen/xai-grok-pager-pty-harness/tests/pty_e2e/empty_enter_delivers_both_queued_rows.rs
     // Both rows land on the resubmitted request. Blocks can scroll above the
     // viewport before a 100ms poll observes them, so gate on the WIRE — the
     // authoritative record — rather than on-screen markers. Pump the event loop
     // while waiting so the delivery actually happens.
-========
-    // Alpha (the promoted TOP row) then bravo drain back-to-back after the completion release. Waiting
-    // on any on-screen marker is thus racy: a flaky observation, not a real failure, same rationale as
-    // `removed_queued_prompt_never_sent`.
->>>>>>>> upstream/main:crates/codegen/xai-grok-pager-pty-harness/tests/pty_e2e/empty_enter_sends_top_not_last_of_two.rs
     let deadline = std::time::Instant::now() + Duration::from_secs(90);
     while !all_user_messages(&content)
         .iter()
@@ -92,10 +80,7 @@ async fn empty_enter_delivers_both_queued_rows() {
         .await
         .expect("resubmitted turn expectation satisfied");
 
-<<<<<<<< HEAD:crates/codegen/xai-grok-pager-pty-harness/tests/pty_e2e/empty_enter_delivers_both_queued_rows.rs
     // Interrupting is not cancelling: the turn continues, so no marker.
-========
->>>>>>>> upstream/main:crates/codegen/xai-grok-pager-pty-harness/tests/pty_e2e/empty_enter_sends_top_not_last_of_two.rs
     assert!(
         !harness.contains_text("Turn cancelled by user"),
         "an interrupt must not render a cancelled marker\nscreen:\n{}",
@@ -109,22 +94,11 @@ async fn empty_enter_delivers_both_queued_rows() {
         .unwrap_or_else(|| panic!("top row never on wire: {users:#?}"));
     assert!(
         alpha.contains(INTERJECTION_WIRE_PREFIX),
-<<<<<<<< HEAD:crates/codegen/xai-grok-pager-pty-harness/tests/pty_e2e/empty_enter_delivers_both_queued_rows.rs
         "delivered rows arrive as mid-turn interjections; wire was: {users:#?}"
     );
 
     // The final request's user sequence proves the order: prompt, then alpha,
     // then bravo — never bravo before alpha.
-========
-        "send-now must use the interjection preamble: {alpha}"
-    );
-    assert!(
-        alpha.contains("<user_query>"),
-        "send-now must wrap the steered text in user_query: {alpha}"
-    );
-
-    // The final request's user sequence proves the order: prompt, then the TOP row (alpha), then bravo
->>>>>>>> upstream/main:crates/codegen/xai-grok-pager-pty-harness/tests/pty_e2e/empty_enter_sends_top_not_last_of_two.rs
     let bodies = content.request_bodies();
     let last = bodies.last().expect("final request recorded");
     let finals: Vec<String> = last["messages"]
@@ -146,8 +120,8 @@ async fn empty_enter_delivers_both_queued_rows() {
         "second must be the TOP row: {finals:#?}"
     );
     assert!(
-        finals[2].contains("queue-bravo-later") && !finals[2].contains(INTERJECTION_WIRE_PREFIX),
-        "third must be the naturally drained bravo with no send-now preamble: {finals:#?}"
+        finals[2].contains("queue-bravo-later"),
+        "third must be bravo: {finals:#?}"
     );
 
     assert!(

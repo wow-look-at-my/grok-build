@@ -3916,12 +3916,6 @@ dependencies = [
  "libc",
  "libgit2-sys",
  "log",
-<<<<<<< HEAD
-=======
- "openssl-probe",
- "openssl-sys",
- "url",
->>>>>>> upstream/main
 ]
 
 [[package]]
@@ -5982,9 +5976,7 @@ checksum = "7f7c568b25d7489bc3fb2988ed69ab111d2944d2f5fec3d5c987fe545ea97b50"
 dependencies = [
  "cc",
  "libc",
- "libssh2-sys",
  "libz-sys",
- "openssl-sys",
  "pkg-config",
 ]
 
@@ -6032,20 +6024,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "133c182a6a2c87864fe97778797e46c7e999672690dc9fa3ee8e241aa4a9c13f"
 dependencies = [
  "cc",
- "pkg-config",
- "vcpkg",
-]
-
-[[package]]
-name = "libssh2-sys"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "220e4f05ad4a218192533b300327f5150e809b54c4ec83b5a1d91833601811b9"
-dependencies = [
- "cc",
- "libc",
- "libz-sys",
- "openssl-sys",
  "pkg-config",
  "vcpkg",
 ]
@@ -7257,18 +7235,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d05e27ee213611ffe7d6348b942e8f942b37114c00cc03cec254295a4a17852e"
 
 [[package]]
-name = "openssl-sys"
-version = "0.9.117"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b47e7e6bb2c38cd930d25a23b40fa52e068c10e85f3e03a7f5ba5aaca5713695"
-dependencies = [
- "cc",
- "libc",
- "pkg-config",
- "vcpkg",
-]
-
-[[package]]
 name = "opentelemetry"
 version = "0.32.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8466,12 +8432,8 @@ dependencies = [
  "bytes",
  "getrandom 0.4.1",
  "lru-slab",
-<<<<<<< HEAD
  "rand 0.10.2",
  "rand_pcg",
-=======
- "rand 0.9.5",
->>>>>>> upstream/main
  "ring",
  "rustc-hash 2.1.1",
  "rustls",
@@ -10651,7 +10613,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.1",
  "once_cell",
  "rustix 1.1.4",
  "windows-sys 0.61.2",
@@ -13450,10 +13412,10 @@ dependencies = [
 ]
 
 [[package]]
-<<<<<<< HEAD
 name = "xai-darwin-link"
 version = "0.1.0"
-=======
+
+[[package]]
 name = "xai-dirs"
 version = "0.1.0"
 dependencies = [
@@ -13462,7 +13424,6 @@ dependencies = [
  "tempfile",
  "tracing",
 ]
->>>>>>> upstream/main
 
 [[package]]
 name = "xai-fast-worktree"
@@ -13917,7 +13878,7 @@ dependencies = [
  "parking_lot",
  "pretty_assertions",
  "prost",
- "rand 0.9.5",
+ "rand 0.10.2",
  "reqwest 0.12.24",
  "rsa",
  "serde",
@@ -14020,10 +13981,7 @@ dependencies = [
  "xai-grok-config",
  "xai-grok-extra-ca",
  "xai-grok-sandbox",
-<<<<<<< HEAD
-=======
  "xai-grok-session-events",
->>>>>>> upstream/main
  "xai-grok-telemetry",
  "xai-grok-tools",
  "xai-grok-version",
@@ -14154,11 +14112,7 @@ dependencies = [
  "parking_lot",
  "portable-pty",
  "pretty_assertions",
-<<<<<<< HEAD
  "rand 0.10.2",
-=======
- "rand 0.9.5",
->>>>>>> upstream/main
  "ratatui",
  "regex",
  "serde",
@@ -14209,13 +14163,9 @@ dependencies = [
  "xai-grok-login",
  "xai-grok-markdown",
  "xai-grok-mermaid",
-<<<<<<< HEAD
  "xai-grok-models",
- "xai-grok-pager-pty-harness",
-=======
  "xai-grok-otel",
  "xai-grok-pager-diff",
->>>>>>> upstream/main
  "xai-grok-pager-render",
  "xai-grok-plugin-marketplace",
  "xai-grok-sampling-types",
@@ -14431,12 +14381,9 @@ dependencies = [
  "async-openai",
  "async-stream",
  "axum",
-<<<<<<< HEAD
- "bytes",
-=======
  "axum-server",
  "blake3",
->>>>>>> upstream/main
+ "bytes",
  "chrono",
  "eventsource-stream",
  "futures-util",
@@ -14446,11 +14393,8 @@ dependencies = [
  "rustls",
  "serde",
  "serde_json",
-<<<<<<< HEAD
  "serde_path_to_error",
-=======
  "strum 0.27.2",
->>>>>>> upstream/main
  "tokio",
  "tokio-util",
  "tracing",
@@ -14461,11 +14405,8 @@ dependencies = [
  "xai-grok-sampling-types",
  "xai-grok-test-support",
  "xai-grok-version",
-<<<<<<< HEAD
  "xai-token-estimation",
-=======
  "zstd",
->>>>>>> upstream/main
 ]
 
 [[package]]
@@ -14487,12 +14428,8 @@ dependencies = [
  "tracing",
  "xai-circuit-breaker",
  "xai-grok-compaction",
-<<<<<<< HEAD
- "xai-grok-tools",
  "xai-token-estimation",
-=======
  "xai-tool-types",
->>>>>>> upstream/main
 ]
 
 [[package]]
@@ -14642,11 +14579,6 @@ dependencies = [
  "parking_lot",
  "pretty_assertions",
  "prod-mc-cli-chat-proxy-types",
-<<<<<<< HEAD
- "prost",
- "rand 0.10.2",
-=======
->>>>>>> upstream/main
  "regex",
  "reqwest 0.12.24",
  "reqwest-middleware 0.4.2",
@@ -14803,12 +14735,6 @@ dependencies = [
 ]
 
 [[package]]
-<<<<<<< HEAD
-name = "xai-grok-stamp"
-version = "0.1.0"
-dependencies = [
- "xai-grok-version",
-=======
 name = "xai-grok-shell-terminal"
 version = "0.1.0"
 dependencies = [
@@ -14839,6 +14765,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "xai-grok-stamp"
+version = "0.1.0"
+dependencies = [
+ "xai-grok-version",
+]
+
+[[package]]
 name = "xai-grok-status-line"
 version = "0.1.0"
 dependencies = [
@@ -14846,7 +14779,6 @@ dependencies = [
  "serde_json",
  "strum 0.27.2",
  "toml",
->>>>>>> upstream/main
 ]
 
 [[package]]
@@ -15088,13 +15020,9 @@ dependencies = [
  "tracing",
  "url",
  "wiremock",
-<<<<<<< HEAD
- "xai-grok-extra-ca",
-=======
  "xai-dirs",
  "xai-grok-extra-ca",
  "xai-grok-login",
->>>>>>> upstream/main
  "xai-grok-shell",
  "xai-grok-telemetry",
  "xai-grok-tools",
@@ -15127,10 +15055,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "url",
-<<<<<<< HEAD
-=======
  "xai-dirs",
->>>>>>> upstream/main
  "xai-grok-extra-ca",
  "xai-tty-utils",
 ]
@@ -15167,7 +15092,7 @@ dependencies = [
  "nohash-hasher",
  "parking_lot",
  "prometheus",
- "rand 0.9.5",
+ "rand 0.10.2",
  "regex",
  "reqwest 0.12.24",
  "rustc-hash 2.1.1",
@@ -15382,11 +15307,7 @@ dependencies = [
  "ignore",
  "itertools 0.14.0",
  "pretty_assertions",
-<<<<<<< HEAD
  "rand 0.10.2",
-=======
- "rand 0.9.5",
->>>>>>> upstream/main
  "ratatui",
  "ratatui-core",
  "textwrap",
