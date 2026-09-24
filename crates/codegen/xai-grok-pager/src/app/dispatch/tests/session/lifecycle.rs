@@ -757,6 +757,7 @@ fn session_failed_orphan_gives_the_typed_text_back_to_the_welcome_prompt() {
         Action::TaskComplete(TaskResult::SessionFailed {
             agent_id: id,
             error: "endpoint refused".to_string(),
+            timed_out: false,
         }),
         &mut app,
     );

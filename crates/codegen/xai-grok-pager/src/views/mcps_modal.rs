@@ -657,8 +657,10 @@ mod tests {
                     tools: vec![],
                     auth_required: false,
                     setup_required: false,
+                    blocked_reason: None,
                 }),
             }],
+            session_mcp_resolved: None,
         });
 
         assert_eq!(servers[0].status, McpServerDisplayStatus::Unavailable);
@@ -688,8 +690,10 @@ mod tests {
                     tools: vec![],
                     auth_required: false,
                     setup_required: false,
+                    blocked_reason: None,
                 }),
             }],
+            session_mcp_resolved: None,
         };
         assert_eq!(convert_list_response(ready.clone())[0].error, None);
 

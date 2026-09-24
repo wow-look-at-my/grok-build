@@ -286,7 +286,7 @@ fn model_facts(ctx: &CommandExecCtx) -> ModelFacts {
         reasoning_effort: ctx
             .models
             .reasoning_effort
-            .map(|effort| effort.as_str().to_string()),
+            .map(|effort| effort.as_ref().to_string()),
     }
 }
 

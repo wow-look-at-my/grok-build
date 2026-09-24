@@ -22,6 +22,7 @@ fn first_phase_items(ctx: &AppCtx) -> Vec<ArgItem> {
             match_text: workflow.name.clone(),
             insert_text: format!("{} ", workflow.name),
             description: workflow.description.clone(),
+            loaded_in_vram: None,
         })
         .collect();
     items.extend(WORKFLOW_OPS.iter().map(|&(op, description)| {
@@ -35,6 +36,7 @@ fn first_phase_items(ctx: &AppCtx) -> Vec<ArgItem> {
             match_text: op.to_string(),
             insert_text,
             description: description.to_string(),
+            loaded_in_vram: None,
         }
     }));
     items
@@ -139,6 +141,7 @@ impl LaunchFlagSpec {
                 match_text: format!("{base} {}", self.name),
                 insert_text: format!("{base} {} ", self.name),
                 description: self.description.to_string(),
+                loaded_in_vram: None,
             }],
             LaunchValueProvider::ReasoningEffort => ctx
                 .models
@@ -163,6 +166,7 @@ impl LaunchFlagSpec {
                         match_text: format!("{base} {argument} {} {}", option.id, option.label),
                         insert_text: format!("{base} {argument} "),
                         description,
+                        loaded_in_vram: None,
                     }
                 })
                 .collect(),
@@ -334,6 +338,7 @@ fn manage_run_items(ctx: &AppCtx, op: &str) -> Vec<ArgItem> {
                 match_text: insert_text.clone(),
                 insert_text,
                 description: run.status.replace('_', " "),
+                loaded_in_vram: None,
             }
         })
         .collect()

@@ -50,6 +50,7 @@ fn session(
             auth_required: auth,
             setup_required: setup,
             blocked_reason: None,
+            error: None,
         }),
     }
 }

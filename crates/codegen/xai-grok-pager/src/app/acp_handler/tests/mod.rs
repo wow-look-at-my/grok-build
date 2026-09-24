@@ -1105,6 +1105,7 @@ pub(super) fn xai_turn_completed_notif_with_cost(
             prompt_id: prompt_id.into(),
             stop_reason: "end_turn".into(),
             agent_result: None,
+            error_kind: None,
             usage: Some(PromptUsage {
                 totals: PromptUsageModel {
                     input_tokens: 10,

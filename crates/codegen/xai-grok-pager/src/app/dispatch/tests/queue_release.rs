@@ -637,6 +637,7 @@ fn send_now_does_not_interject_held_follow_ups_into_cancelled_turn() {
             text: "just typed".into(),
             images: vec![],
             image_notice: None,
+            wire_blocks: None,
         },
         &mut app,
     );

@@ -2152,7 +2152,7 @@ pub(crate) fn detect_plan_mode_change_replayed(
             superseded_seq = superseded.seq,
             "Ignored a mode confirmation a later press superseded"
         );
-        return false;
+        return Some(PlanModeTransition::Unchanged);
     }
     // The shell is reporting where it actually stands, so nothing outstanding
     // is left to attribute.

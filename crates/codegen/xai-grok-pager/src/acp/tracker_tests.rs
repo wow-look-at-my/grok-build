@@ -2686,6 +2686,7 @@ fn writing_tool_call_delta_clears_retry_activity() {
         max_retries: 5,
         reason: "overloaded".into(),
         error_type: None,
+        retry_until: None,
     };
     let mut tracker = AcpUpdateTracker::new();
     tracker.set_retry_activity(Some(retrying.clone()));

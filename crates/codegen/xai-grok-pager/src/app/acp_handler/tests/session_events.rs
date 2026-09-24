@@ -1155,7 +1155,8 @@
             update,
             child_sid,
             &mut agent,
-            false
+            false,
+            None
         ));
 
         let rate = agent.subagent_views[child_sid]
@@ -1191,7 +1192,8 @@
             update,
             "unknown-child",
             &mut agent,
-            false
+            false,
+            None
         ));
     }
 
@@ -1216,6 +1218,7 @@
                     tool_index: 0,
                     name: Some("spawn_subagent".into()),
                     arguments_delta: None,
+                    title: None,
                 },
             ),
             &mut app,
@@ -1254,6 +1257,7 @@
                     tool_index: 0,
                     name: Some("write".into()),
                     arguments_delta: None,
+                    title: None,
                 },
             ),
             &mut app,
@@ -1352,6 +1356,7 @@
                     tool_index: 0,
                     name: Some("write".into()),
                     arguments_delta: None,
+                    title: None,
                 },
             ),
             &mut app,
@@ -1397,6 +1402,7 @@
                 tool_index: 0,
                 name: Some("write".into()),
                 arguments_delta: Some("{".into()),
+                title: None,
             },
             meta: Some(serde_json::json!({ "isReplay": true })),
         };

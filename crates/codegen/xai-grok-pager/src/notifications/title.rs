@@ -226,6 +226,7 @@ fn write_activity(buf: &mut String, activity: &TurnActivity) {
             max_retries,
             reason,
             error_type,
+            ..
         } => {
             buf.push_str(&crate::app::error_display::format_retry_activity_label(
                 *attempt,
