@@ -84,7 +84,8 @@ fn active_message_call_with_delivery(
         function: crate::sampling::types::ToolCallFunction::new(
             "send_subagent_message",
             arguments.to_string(),
-        ), vendor: Default::default(),
+        ),
+        vendor: Default::default(),
     }
 }
 
@@ -95,7 +96,8 @@ fn unrelated_tool_call(id: &str) -> crate::sampling::types::ToolCallResponse {
         function: crate::sampling::types::ToolCallFunction::new(
             "todo_write",
             r#"{"todos":[{"id":"t1","content":"do","status":"completed"}]}"#,
-        ), vendor: Default::default(),
+        ),
+        vendor: Default::default(),
     }
 }
 

@@ -68,7 +68,8 @@ async fn prepare(actor: &SessionActor, name: &str, arguments: &str) -> PreparedT
     let call = ToolCallResponse {
         id: "call-1".to_owned(),
         kind: "function".to_owned(),
-        function: crate::sampling::types::ToolCallFunction::new(name, arguments), vendor: Default::default(),
+        function: crate::sampling::types::ToolCallFunction::new(name, arguments),
+        vendor: Default::default(),
     };
     let mut deferred = Vec::new();
     match tokio::time::timeout(

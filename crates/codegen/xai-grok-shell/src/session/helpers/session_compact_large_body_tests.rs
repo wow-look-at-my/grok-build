@@ -106,7 +106,8 @@ async fn responses_large_tool_result_images_fit_transport_limit() {
         source.push(ConversationItem::assistant_tool_calls(vec![ToolCall {
             id: call_id.as_str().into(),
             name: "read_file".into(),
-            arguments: format!(r#"{{"target_file":"image-{index}.png"}}"#).into(), vendor: Default::default(),
+            arguments: format!(r#"{{"target_file":"image-{index}.png"}}"#).into(),
+            vendor: Default::default(),
         }]));
         source.push(ConversationItem::tool_result_with_images(
             call_id,

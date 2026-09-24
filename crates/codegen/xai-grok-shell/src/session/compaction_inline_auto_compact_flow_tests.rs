@@ -894,7 +894,8 @@ async fn family_switch_compacts_lossy_with_new_model() {
                 ConversationItem::assistant_tool_calls(vec![xai_grok_sampling_types::ToolCall {
                     id: std::sync::Arc::<str>::from("call_xai_minted_id"),
                     name: "run_terminal_command".to_string(),
-                    arguments: std::sync::Arc::<str>::from(r#"{"command":"ls"}"#), vendor: Default::default(),
+                    arguments: std::sync::Arc::<str>::from(r#"{"command":"ls"}"#),
+                    vendor: Default::default(),
                 }]),
                 ConversationItem::ToolResult(xai_grok_sampling_types::ToolResultItem {
                     tool_call_id: "call_xai_minted_id".to_string(),
@@ -1063,7 +1064,8 @@ async fn e2e_auto_compact_413_steps_ladder_then_sticky_size_suppress() {
                 ConversationItem::assistant_tool_calls(vec![xai_grok_sampling_types::ToolCall {
                     id: std::sync::Arc::<str>::from("call_1"),
                     name: "run_terminal_command".to_string(),
-                    arguments: std::sync::Arc::<str>::from(r#"{"command":"ls"}"#), vendor: Default::default(),
+                    arguments: std::sync::Arc::<str>::from(r#"{"command":"ls"}"#),
+                    vendor: Default::default(),
                 }]),
                 ConversationItem::ToolResult(xai_grok_sampling_types::ToolResultItem {
                     tool_call_id: "call_1".to_string(),

@@ -19,7 +19,8 @@ async fn prepare(a: &SessionActor, id: &str, tool: &str) -> Result<PreparedToolC
     let call = crate::sampling::types::ToolCallResponse {
         id: id.to_string(),
         kind: "function".to_string(),
-        function: crate::sampling::types::ToolCallFunction::new(tool, "{}".to_string()), vendor: Default::default(),
+        function: crate::sampling::types::ToolCallFunction::new(tool, "{}".to_string()),
+        vendor: Default::default(),
     };
     let mut deferred = Vec::new();
     a.prepare_tool_call(call, &mut deferred, None)

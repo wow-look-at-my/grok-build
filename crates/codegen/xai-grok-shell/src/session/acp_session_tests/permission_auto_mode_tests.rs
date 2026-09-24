@@ -390,7 +390,8 @@ fn build_classifier_turns_projects_full_filtered_resident_prefix() {
             xai_grok_sampling_types::conversation::ToolCall {
                 id: std::sync::Arc::from("tc1"),
                 name: "read_file".into(),
-                arguments: std::sync::Arc::from(r#"{"path":"a.rs"}"#), vendor: Default::default(),
+                arguments: std::sync::Arc::from(r#"{"path":"a.rs"}"#),
+                vendor: Default::default(),
             },
         ]),
         super::ConversationItem::assistant("checking another file"),
@@ -398,7 +399,8 @@ fn build_classifier_turns_projects_full_filtered_resident_prefix() {
             xai_grok_sampling_types::conversation::ToolCall {
                 id: std::sync::Arc::from("tc2"),
                 name: "grep".into(),
-                arguments: std::sync::Arc::from(r#"{"pattern":"needle"}"#), vendor: Default::default(),
+                arguments: std::sync::Arc::from(r#"{"pattern":"needle"}"#),
+                vendor: Default::default(),
             },
         ]),
     ]);
@@ -474,7 +476,8 @@ fn build_classifier_turns_caps_and_neutralizes_fields() {
                 name: malicious,
                 arguments: serde_json::json!({"value": "x".repeat(500)})
                     .to_string()
-                    .into(), vendor: Default::default(),
+                    .into(),
+                vendor: Default::default(),
             },
         ]),
     ]);
