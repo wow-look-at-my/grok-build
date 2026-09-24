@@ -1509,7 +1509,10 @@ mod tests {
     fn planner_prompt_sets_no_count_limit_anywhere() {
         let t = GOAL_PLANNER_PROMPT_TEMPLATE;
         let ranges = numeric_ranges(t);
-        assert!(ranges.is_empty(), "the planner prompt states a numeric range: {ranges:?}");
+        assert!(
+            ranges.is_empty(),
+            "the planner prompt states a numeric range: {ranges:?}"
+        );
         let lower = t.to_lowercase();
         for phrase in [
             "cap below",
