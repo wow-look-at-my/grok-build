@@ -1675,6 +1675,25 @@ impl AgentView {
                 .add_modifier(ratatui::style::Modifier::DIM);
             path_offset += git_text.width() as u16;
             parts.push(Span::styled(git_text, git_style));
+            let stats = crate::branch_stats::branch_stats_lazy(&self.session.cwd);
+            for (kind, text) in stats
+                .as_ref()
+                .map(crate::branch_stats::format_parts)
+                .unwrap_or_default()
+            {
+                let fg = match kind {
+                    crate::branch_stats::StatKind::Ahead
+                    | crate::branch_stats::StatKind::Behind => theme.gray_dim,
+                    crate::branch_stats::StatKind::Insertions => theme.accent_success,
+                    crate::branch_stats::StatKind::Deletions => theme.accent_error,
+                };
+                let text = format!(" {text}");
+                path_offset += text.width() as u16;
+                parts.push(Span::styled(
+                    text,
+                    Style::default().fg(fg).bg(theme.bg_base),
+                ));
+            }
             path_offset += 1;
             parts.push(Span::styled(" ", Style::default().bg(theme.bg_base)));
         }
