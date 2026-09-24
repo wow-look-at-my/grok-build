@@ -44,7 +44,7 @@ impl SessionActor {
         }
     }
 
-    async fn wait_for_mcp_initialized_unbounded(&self) {
+    pub(super) async fn wait_for_mcp_initialized_unbounded(&self) {
         let signal = self.mcp_state.lock().await.init_wait_signal();
         let mut re_owned = false;
         loop {

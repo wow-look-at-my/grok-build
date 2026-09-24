@@ -797,9 +797,12 @@ async fn delivered_message_is_durable_in_updates_and_chat_history_before_shutdow
     let local = tokio::task::LocalSet::new();
     await_with_timeout(local.run_until(async {
         let session_dir = tempfile::tempdir().expect("session dir");
-        let sampling_client =
-            crate::sampling::Client::new(xai_grok_sampler::SamplerConfig::default())
-                .expect("sampling client");
+        // A client needs a URL to build. The discard port answers nothing.
+        let sampling_client = crate::sampling::Client::new(xai_grok_sampler::SamplerConfig {
+            base_url: "http://127.0.0.1:9/v1".to_owned(),
+            ..xai_grok_sampler::SamplerConfig::default()
+        })
+        .expect("sampling client");
         let info = crate::session::info::Info {
             id: acp::SessionId::new("parent-message-durable"),
             cwd: "/tmp".to_owned(),

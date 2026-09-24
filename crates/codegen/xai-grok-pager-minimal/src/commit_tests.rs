@@ -836,7 +836,8 @@ fn committed_edit_keeps_diff_line_backgrounds() {
     ];
     let block = RenderBlock::edit_with_hunks("src/main.rs", vec![hunk]);
     let mut entry = ScrollbackEntry::new(block);
-    let (_theme_pin, theme) = pinned_theme();
+    // `_pin` above already holds the theme lock, which does not re-enter.
+    let theme = Theme::current();
     assert!(
         !theme.diff_uses_line_fg(),
         "this regression needs a banded theme; terminal-native is covered by \

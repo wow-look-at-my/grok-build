@@ -230,11 +230,9 @@ fn remote_settings_length_salvage_budget_serde_cells() {
         serde_json::from_value(serde_json::json!({ "length_salvage_budget": 0 }))
             .expect("kill value");
     assert_eq!(set.length_salvage_budget, Some(0));
-}
-/// Default agent with the gate off (no env var): a Length response is the legacy non-retryable hard failure.
-/// This is the safety property that nothing changes for production default agents until the rollout flag lands.
+} /// Default agent with the gate off (no env var): a Length cut keeps its text. The turn continues. /// Salvage owns the case only when it is on, so its reminder must not appear here.
 #[test]
-fn default_agent_gate_off_hard_fails_on_length() {
+fn default_agent_gate_off_resumes_a_length_cut_turn() {
     if xai_grok_config::env_bool("GROK_LENGTH_SALVAGE") == Some(true) {
         panic!("ambient GROK_LENGTH_SALVAGE=1 would flip the gate under test");
     }
@@ -242,19 +240,29 @@ fn default_agent_gate_off_hard_fails_on_length() {
         current_thread_local(async {
             let server = MockInferenceServer::start().await.expect("mock server");
             server.enqueue_response("/v1/chat/completions", length_sse("one, two, three,"));
+            server.enqueue_response("/v1/chat/completions", stop_sse(" four, five."));
             let actor = salvage_test_actor(&server).await;
             let outcome = run_prompt(&actor, "length-gate-off").await;
-            let err = outcome.expect_err("gate off: Length must hard-fail the turn");
-            let err_str = format!("{err:?}");
-            assert!(
-                err_str.contains("max_tokens") || err_str.contains("max tokens"),
-                "the failure must be the max-tokens truncation error: {err_str}"
-            );
+            outcome.expect("gate off: a Length cut resumes the turn instead of failing it");
             let conv = actor.chat_state_handle.get_conversation().await;
             let all_text: Vec<String> = conv.iter().map(|i| i.text_content()).collect();
             assert!(
+                all_text.iter().any(|t| t.contains("one, two, three,")),
+                "the text streamed before the cut is kept: {all_text:#?}"
+            );
+            assert!(
+                all_text
+                    .iter()
+                    .any(|t| t.contains("reached the maximum output length")),
+                "the resubmit carries the cut-off continuation reminder: {all_text:#?}"
+            );
+            assert!(
+                all_text.iter().any(|t| t.contains("four, five.")),
+                "the continuation lands in the same turn: {all_text:#?}"
+            );
+            assert!(
                 !all_text.iter().any(|t| t.contains(REMINDER_MARKER)),
-                "no continue reminder without the gate: {all_text:#?}"
+                "no salvage reminder without the gate: {all_text:#?}"
             );
         });
     });

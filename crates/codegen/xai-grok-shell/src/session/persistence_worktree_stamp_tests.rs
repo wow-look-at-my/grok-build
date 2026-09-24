@@ -7,6 +7,15 @@ use super::{
 };
 use crate::session::info::Info;
 
+/// A client needs a URL to build. The discard port answers nothing.
+fn discard_port_client() -> OaiCompatClient {
+    OaiCompatClient::new(xai_grok_sampler::SamplerConfig {
+        base_url: "http://127.0.0.1:9/v1".to_owned(),
+        ..xai_grok_sampler::SamplerConfig::default()
+    })
+    .unwrap()
+}
+
 fn worktree_cwd_under(home: &std::path::Path) -> String {
     let cwd = home
         .join("worktrees")
@@ -69,7 +78,7 @@ async fn new_with_explicit_dir_overrides_worktree_stamp_so_subagent_stays_hidden
     let cwd = worktree_cwd_under(home.path());
     let target_dir = home.path().join("child-session");
 
-    let sampling_client = OaiCompatClient::new(xai_grok_sampler::SamplerConfig::default()).unwrap();
+    let sampling_client = discard_port_client();
     let _persistence = new_with_explicit_dir(
         &Info {
             id: acp::SessionId::new("subagent-in-worktree"),
@@ -111,7 +120,7 @@ async fn new_with_explicit_dir_stores_requested_identity() {
         },
         target_dir.clone(),
         default_model_id(),
-        OaiCompatClient::new(xai_grok_sampler::SamplerConfig::default()).unwrap(),
+        discard_port_client(),
         "test-model".to_owned(),
         crate::session::persistence::ExplicitSessionOpen::New {
             identity: Some(ExplicitSessionIdentity {

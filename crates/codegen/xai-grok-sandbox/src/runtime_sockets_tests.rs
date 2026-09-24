@@ -501,3 +501,120 @@ fn materialized_dbus_candidates_skip_missing_keep_existing() {
     assert_eq!(paths, vec![present]);
     let _ = std::fs::remove_dir_all(root);
 }
+
+#[cfg(unix)]
+fn access_table<'a>(
+    table: &'a [(&'static str, u32, bool)],
+) -> impl Fn(&std::path::Path) -> Option<DirAccess> + 'a {
+    move |dir| {
+        table
+            .iter()
+            .find(|(path, _, _)| std::path::Path::new(path) == dir)
+            .map(|&(_, owner, searchable)| DirAccess { owner, searchable })
+    }
+}
+
+#[test]
+#[cfg(unix)]
+fn endpoint_behind_a_foreign_unsearchable_directory_is_unreachable() {
+    let table = [("/", 0, true), ("/run", 0, true), ("/run/podman", 0, false)];
+    assert!(blocked_by_foreign_directory(
+        std::path::Path::new("/run/podman/podman.sock"),
+        1001,
+        access_table(&table),
+    ));
+}
+
+/// The owner can chmod the directory open again, so the mask must stay.
+#[test]
+#[cfg(unix)]
+fn endpoint_behind_an_own_unsearchable_directory_stays_reachable() {
+    let table = [
+        ("/", 0, true),
+        ("/run", 0, true),
+        ("/run/podman", 1001, false),
+    ];
+    assert!(!blocked_by_foreign_directory(
+        std::path::Path::new("/run/podman/podman.sock"),
+        1001,
+        access_table(&table),
+    ));
+}
+
+#[test]
+#[cfg(unix)]
+fn endpoint_the_probe_cannot_judge_is_not_proven_unreachable() {
+    let searchable = [("/", 0, true), ("/run", 0, true), ("/run/podman", 0, true)];
+    assert!(
+        !blocked_by_foreign_directory(
+            std::path::Path::new("/run/podman/podman.sock"),
+            1001,
+            access_table(&searchable),
+        ),
+        "a searchable path gives no reason to drop the error"
+    );
+    let unknown = [("/", 0, true), ("/run", 0, true)];
+    assert!(
+        !blocked_by_foreign_directory(
+            std::path::Path::new("/run/podman/podman.sock"),
+            1001,
+            access_table(&unknown),
+        ),
+        "a directory the probe cannot stat must keep the error"
+    );
+}
+
+/// The probe answers nothing below `/run/user/0`, and that must not matter.
+#[test]
+#[cfg(unix)]
+fn the_first_unsearchable_directory_decides() {
+    let table = [
+        ("/", 0, true),
+        ("/run", 0, true),
+        ("/run/user", 0, true),
+        ("/run/user/0", 0, false),
+    ];
+    assert!(blocked_by_foreign_directory(
+        std::path::Path::new("/run/user/0/podman/podman.sock"),
+        1001,
+        access_table(&table),
+    ));
+}
+
+/// A socket under a mode-0000 directory this uid owns stays an error, because
+/// the owner can reopen the directory. Root ignores the mode and masks it.
+#[test]
+#[cfg(unix)]
+fn own_unsearchable_directory_keeps_the_resolution_error() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = temp_runtime_root("own-eacces");
+    let locked = root.join("podman");
+    std::fs::create_dir(&locked).unwrap();
+    let socket = locked.join("podman.sock");
+    let _listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+    let result = materialize_runtime_socket_deny_paths_from([socket.clone()]);
+    // SAFETY: geteuid is always safe.
+    let euid = unsafe { libc::geteuid() };
+    let probe = probe_dir_access(&locked).expect("the locked directory is stat-able");
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let _ = std::fs::remove_dir_all(&root);
+
+    assert_eq!(probe.owner, euid);
+    if euid == 0 {
+        assert!(probe.searchable, "root searches every directory");
+        assert_eq!(result.unwrap(), vec![socket]);
+    } else {
+        assert!(!probe.searchable, "mode 0000 refuses search to its owner");
+        let error = result.expect_err("an endpoint its owner can reopen must not be dropped");
+        assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+        assert!(
+            error
+                .to_string()
+                .contains("could not resolve runtime-socket deny path"),
+            "unexpected error: {error}"
+        );
+    }
+}

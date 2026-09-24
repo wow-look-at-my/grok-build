@@ -396,7 +396,8 @@ async fn main_session_429_is_owned_by_the_sampler_never_the_pacer() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            for (enqueued, expect_ok) in [(1usize, true), (2usize, false)] {
+            let threshold = xai_grok_sampler::RATE_LIMIT_RETRY_THRESHOLD as usize;
+            for (enqueued, expect_ok) in [(1usize, true), (threshold, false)] {
                 let server =
                     MockInferenceServer::start_with_models(vec![MockModelEntry::new("test")])
                         .await
@@ -440,10 +441,11 @@ async fn main_session_429_is_owned_by_the_sampler_never_the_pacer() {
                         Ok(_) => panic!("persistent 429 past the sampler budget must fail"),
                     }
                 }
+                let expected_requests = if expect_ok { enqueued + 1 } else { threshold };
                 assert_eq!(
                     server.request_count(),
-                    requests_before + 2,
-                    "the sampler's own attempt plus one retry (enqueued={enqueued})"
+                    requests_before + expected_requests,
+                    "the sampler's own attempt plus its 429 retries (enqueued={enqueued})"
                 );
                 assert_eq!(
                     budget.attempts_used(),

@@ -1,3 +1,4 @@
+//! A gRPC mTLS double opt-in with no client identity activates nothing.
 mod otlp_collector;
 
 use std::time::Duration;
@@ -45,9 +46,8 @@ fn external_stream_grpc_mtls_fails_without_client_identity() {
 
     xai_grok_telemetry::external::init(Some(cfg));
     assert!(
-        xai_grok_telemetry::external::is_active(),
-        "stream must build and activate so zero collector records mean rejection, \
-         not a construction failure"
+        !xai_grok_telemetry::external::is_active(),
+        "external OTLP stream is hard-disabled in the build baseline (gRPC mTLS, no client identity)"
     );
 
     xai_grok_telemetry::log_event(xai_grok_telemetry::events::SessionHarness {
@@ -72,14 +72,13 @@ fn external_stream_grpc_mtls_fails_without_client_identity() {
     col::block_on(
         recorder.wait_for_silence(Duration::from_millis(800), |events| !events.is_empty()),
     )
-    .expect("mTLS-required collector must reject clients without identity");
-    let health = xai_grok_telemetry::external::export_health()
-        .expect("active stream must expose export health");
+    .expect("disabled external stream must reach no collector");
     assert!(
-        health.export_failures > 0,
-        "mTLS rejection must record at least one export failure; health={health:?}"
+        xai_grok_telemetry::external::export_health().is_none(),
+        "a stream that never built has no export health to report"
     );
     assert_eq!(Vec::<OtelExport>::new(), recorder.exports());
 
     xai_grok_telemetry::external::shutdown();
+    assert!(!xai_grok_telemetry::external::is_active());
 }

@@ -318,8 +318,18 @@ pub(crate) enum GoalPlannerOutcome {
     Interrupted,
     FailClosed {
         reason: GoalPlannerFailClosedReason,
+        /// True only for an `Aborted` subagent that a person stopped.
+        user_stopped: bool,
         latency_ms: u64,
     },
+}
+
+/// True for a subagent cancel that the harness caused: max turns, a rewind, or a dequeue.
+/// The texts are the ones `agent::subagent::prompt_turn_result` writes.
+fn is_harness_cancellation(message: &str) -> bool {
+    message.starts_with("max turns")
+        || message == "Subagent turn was rewound"
+        || message == "Subagent turn was removed before it ran"
 }
 
 /// Production uses [`ChannelSpawner`]; tests use `MockSpawner` (defined in the tests module).
@@ -623,7 +633,14 @@ pub(crate) async fn run_goal_planner(
                 cancelled,
                 "goal planner: subagent runtime error; failing closed",
             );
-            return record_fail_closed(reason, inputs.attempt, started, emit_event);
+            let user_stopped = cancelled && !is_harness_cancellation(&message);
+            return record_fail_closed_by(
+                reason,
+                user_stopped,
+                inputs.attempt,
+                started,
+                emit_event,
+            );
         }
     };
 
@@ -665,13 +682,27 @@ fn record_fail_closed(
     started: std::time::Instant,
     emit_event: &dyn Fn(Event),
 ) -> GoalPlannerOutcome {
+    record_fail_closed_by(reason, false, attempt, started, emit_event)
+}
+
+fn record_fail_closed_by(
+    reason: GoalPlannerFailClosedReason,
+    user_stopped: bool,
+    attempt: u32,
+    started: std::time::Instant,
+    emit_event: &dyn Fn(Event),
+) -> GoalPlannerOutcome {
     let latency_ms = started.elapsed().as_millis() as u64;
     emit_event(Event::GoalPlannerFailClosed {
         reason: reason.as_const_str(),
         attempt,
         latency_ms,
     });
-    GoalPlannerOutcome::FailClosed { reason, latency_ms }
+    GoalPlannerOutcome::FailClosed {
+        reason,
+        user_stopped,
+        latency_ms,
+    }
 }
 
 // Tests

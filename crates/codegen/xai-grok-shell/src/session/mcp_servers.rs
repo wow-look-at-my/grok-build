@@ -195,6 +195,7 @@ mod tests {
             let mut state = settler.lock().await;
             state.mark_server_ready("kagi");
             state.finish_init();
+            state.complete_init();
         });
 
         assert_eq!(

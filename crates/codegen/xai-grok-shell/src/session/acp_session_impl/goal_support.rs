@@ -1198,12 +1198,6 @@ impl SessionActor {
         let _planner_state = GoalPlannerStateGuard {
             tracker: &self.goal_tracker,
         };
-        // A user Stop latches this session's Task spawns closed until a turn
-        // reopens them, and the planner runs off a slash command, not a turn.
-        // Without this, `/goal resume` after a Stop is rejected before a
-        // subagent is ever created — a fail-closed at latency 0 that repeats
-        // for every message the session has left.
-        self.open_subagent_spawn_admission();
         let mut attempt = 0u32;
         loop {
             // Exhausting the retry cap pauses the goal with the canonical message (like any other planner failure)
@@ -1355,10 +1349,15 @@ impl SessionActor {
                         )
                         .await;
                 }
-                crate::session::goal_planner::GoalPlannerOutcome::FailClosed { reason, .. } => {
-                    // An aborted planner is a pause the user asked for, and says so.
-                    let aborted =
-                        reason == crate::session::events::GoalPlannerFailClosedReason::Aborted;
+                crate::session::goal_planner::GoalPlannerOutcome::FailClosed {
+                    reason,
+                    user_stopped,
+                    ..
+                } => {
+                    // A planner a person stopped is a pause the user asked for, and says so.
+                    // A harness cancel (max turns, rewind, dequeue) is a planner failure.
+                    let aborted = user_stopped
+                        && reason == crate::session::events::GoalPlannerFailClosedReason::Aborted;
                     // History reads "Planning failed" + "Paused: planner", not a bare pause.
                     if !aborted {
                         let mut tracker = self.goal_tracker.lock();
@@ -1568,17 +1567,9 @@ impl SessionActor {
             tracing::debug!("goal planner: no subagent coordinator channel; skipping");
             return PlannerAttemptStep::Stop;
         };
-        // A previous user Stop (`ESC`/Ctrl-C with cancel_subagents) latches this
-        // session in the coordinator's `spawn_blocked_sessions` until an
-        // `OpenSpawnAdmission` is sent, and the only send site (turn start) runs
-        // AFTER the goal slash-command dispatch — so a `/goal` set or resume
-        // issued after a Stop would have every planner spawn rejected instantly
-        // and the goal paused with "Planning failed"; the resume path's
-        // early return then skips the next turn start, wedging the session
-        // until restart. Setting/resuming a goal IS explicit user re-engagement,
-        // so opening admission here (before we actually spawn) is the same
-        // intent as the next turn's reopen, and heals both the paused-goal
-        // resume and a fresh-goal-created-after-Stop.
+        // A user Stop latches this session's Task spawns closed until a turn
+        // reopens them. The planner can run outside a turn, so it reopens them
+        // itself. Without that, every planner spawn after a Stop is rejected.
         self.open_subagent_spawn_admission();
         let (goal_id, plan_file, attempt_plan_file) = {
             let tracker = self.goal_tracker.lock();

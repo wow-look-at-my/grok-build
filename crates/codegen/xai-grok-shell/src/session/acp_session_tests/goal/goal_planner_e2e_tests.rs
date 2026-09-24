@@ -2088,10 +2088,12 @@ async fn stop_then_slash_goal_resume_reopens_spawn_admission_before_planner_retr
                 "re-paused resume must end the host turn cleanly: {result:?}"
             );
 
+            // The turn reopens admission, and the planner reopens it again before it spawns.
             assert_eq!(
                 *log.lock().unwrap(),
                 vec![
                     FakeEvent::CancelParentSession,
+                    FakeEvent::OpenAdmission,
                     FakeEvent::OpenAdmission,
                     FakeEvent::Spawn { latched: false },
                 ],
@@ -2206,10 +2208,22 @@ async fn goal_resume_reminder_is_plan_aware_when_planner_enabled() {
             };
             println!("=== plan-aware /goal resume reminder ===\n{reminder}\n=== end ===\n");
 
+            assert!(
+                reminder.contains("Continue working now."),
+                "resume reminder must close with the continuation directive:\n{reminder}"
+            );
             let expected = format!("\nPlan: {}\n", plan_path.display());
             assert!(
                 reminder.contains(&expected),
                 "resume reminder must carry the plan pointer `{expected}`:\n{reminder}"
+            );
+            assert!(
+                !reminder.contains(PLAN_SEED_TODOS_PHRASE),
+                "resume reminder must not re-issue the manual seed directive:\n{reminder}"
+            );
+            assert!(
+                reminder.contains(PLAN_TODOS_ALREADY_SEEDED_PHRASE),
+                "resume reminder must say the plan's steps are already on the list:\n{reminder}"
             );
         })
         .await;
@@ -2371,14 +2385,6 @@ async fn resume_with_planner_disabled_keeps_infra_recap() {
             assert!(
                 reminder.contains("Previous error: Turn failed: rate limit"),
                 "{reminder}"
-            );
-            assert!(
-                !reminder.contains(PLAN_SEED_TODOS_PHRASE),
-                "resume reminder must not re-issue the manual seed directive:\n{reminder}"
-            );
-            assert!(
-                reminder.contains(PLAN_TODOS_ALREADY_SEEDED_PHRASE),
-                "resume reminder must say the plan's steps are already on the list:\n{reminder}"
             );
         })
         .await;

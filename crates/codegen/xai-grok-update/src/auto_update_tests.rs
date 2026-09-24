@@ -2340,16 +2340,29 @@ async fn download_and_decode_round_trips_each_codec() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path(format!("/grok-1.2.3-linux-x86_64.{suffix}")))
-            .respond_with(ResponseTemplate::new(200).set_body_bytes(body))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(body.clone()))
             .mount(&server)
             .await;
 
         let dir = tempfile::tempdir().unwrap();
         let dest = dir.path().join("grok-1.2.3-linux-x86_64");
         let url = format!("{}/grok-1.2.3-linux-x86_64.{suffix}", server.uri());
-        download_and_decode(&url, &dest, codec, false)
+        let err = download_and_decode(&url, &dest, codec, false)
             .await
-            .unwrap_or_else(|e| panic!("decode .{suffix}: {e}"));
+            .expect_err("downloads are disabled in this build");
+        assert!(
+            err.to_string().contains("auto-update disabled"),
+            ".{suffix}: unexpected error: {err:#}"
+        );
+        assert!(!dest.exists(), ".{suffix}: nothing may be published");
+        assert_no_requests(&server).await;
+
+        // The decoder behind the disabled download still round-trips each codec.
+        let comp = dir.path().join(format!("artifact.{suffix}"));
+        std::fs::write(&comp, &body).unwrap();
+        let decoded = dir.path().join("decoded.tmp");
+        decode_artifact(&comp, &decoded, codec).unwrap_or_else(|e| panic!("decode .{suffix}: {e}"));
+        publish_downloaded_artifact(&decoded, &dest).await.unwrap();
 
         assert_eq!(
             std::fs::read(&dest).unwrap(),
@@ -2358,6 +2371,18 @@ async fn download_and_decode_round_trips_each_codec() {
         );
         assert_decoded_executable(&dest);
     }
+}
+
+async fn assert_no_requests(server: &wiremock::MockServer) {
+    let requests = server
+        .received_requests()
+        .await
+        .expect("request recording is enabled on MockServer::start()");
+    assert!(
+        requests.is_empty(),
+        "a disabled download must not reach the network: {} request(s)",
+        requests.len()
+    );
 }
 
 #[tokio::test]
@@ -2396,18 +2421,22 @@ async fn download_cli_artifact_falls_back_to_plain() {
     let server = MockServer::start().await; // only the plain object exists; .zst/.gz 404
     Mock::given(method("GET"))
         .and(path("/grok-1.2.3-linux-x86_64"))
-        .respond_with(ResponseTemplate::new(200).set_body_bytes(payload.clone()))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(payload))
         .mount(&server)
         .await;
 
     let dir = tempfile::tempdir().unwrap();
     let dest = dir.path().join("grok-1.2.3-linux-x86_64");
-    download_cli_artifact_from_gcs(&server.uri(), "grok-1.2.3-linux-x86_64", &dest, false)
-        .await
-        .expect("fall back to the plain binary when compressed forms are absent");
-
-    assert_eq!(std::fs::read(&dest).unwrap(), payload);
-    assert_decoded_executable(&dest);
+    let err =
+        download_cli_artifact_from_gcs(&server.uri(), "grok-1.2.3-linux-x86_64", &dest, false)
+            .await
+            .expect_err("every candidate download is disabled in this build");
+    assert!(
+        err.to_string().contains("auto-update disabled"),
+        "the plain fallback's error must surface: {err:#}"
+    );
+    assert!(!dest.exists(), "nothing may be published");
+    assert_no_requests(&server).await;
 }
 
 #[tokio::test]
@@ -2431,16 +2460,19 @@ async fn download_cli_artifact_prefers_compressed_over_plain() {
 
     let dir = tempfile::tempdir().unwrap();
     let dest = dir.path().join("grok-1.2.3-linux-x86_64");
-    download_cli_artifact_from_gcs(&server.uri(), "grok-1.2.3-linux-x86_64", &dest, false)
-        .await
-        .expect("prefer the compressed sidecar when present");
-
-    assert_eq!(
-        std::fs::read(&dest).unwrap(),
-        payload,
-        "decoded compressed payload must win over the plain object"
+    let err =
+        download_cli_artifact_from_gcs(&server.uri(), "grok-1.2.3-linux-x86_64", &dest, false)
+            .await
+            .expect_err("every candidate download is disabled in this build");
+    assert!(
+        err.to_string().contains("auto-update disabled"),
+        "unexpected error: {err:#}"
     );
-    assert_decoded_executable(&dest);
+    assert!(
+        !dest.exists(),
+        "neither the compressed nor the plain object may be published"
+    );
+    assert_no_requests(&server).await;
 }
 
 #[test]

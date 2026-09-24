@@ -56,6 +56,11 @@ pub(crate) fn dry_run_opts() -> crate::api::gc::GcOptions {
     }
 }
 
+/// A detached `maintenance --auto` holds `objects/maintenance.lock` after git returns.
+pub(crate) fn no_background_maintenance(repo: &Path) {
+    run_git(repo, &["config", "maintenance.auto", "false"]);
+}
+
 pub(crate) fn seed_source(source: &Path, ignore_lines: &str) {
     let remote = source.with_file_name("remote.git");
     std::fs::create_dir_all(source.join("nested")).unwrap();
@@ -65,6 +70,7 @@ pub(crate) fn seed_source(source: &Path, ignore_lines: &str) {
         &["init", "--bare", remote.to_str().unwrap()],
     );
     xai_test_utils::git::git_init_seed(source);
+    no_background_maintenance(source);
     run_git(
         source,
         &["remote", "add", "origin", remote.to_str().unwrap()],

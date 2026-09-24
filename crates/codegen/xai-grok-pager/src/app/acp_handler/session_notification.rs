@@ -322,20 +322,20 @@ pub(super) fn handle_session_notification_with_origin(
         } => {
             // A replayed transcript already carries the finished `ToolCall`
             // for every one of these, so replaying the chunks would build a
-            // preview of a call that is already on screen.
-            if meta.is_replay || agent.session.loading_replay {
+            // preview of a call that is already on screen. A delta carries no
+            // prompt id, so while a wake turn runs it cannot be told apart
+            // from the wake turn's own output and is dropped whole.
+            if meta.is_replay || agent.session.loading_replay || agent.running_wake_turn.is_some()
+            {
                 false
             } else {
-                let mut changed = false;
-                if agent.running_wake_turn.is_none() {
-                    let had_activity_before = agent.session.tracker.activity().is_some();
-                    changed = agent
-                        .session
-                        .tracker
-                        .note_tool_call_arguments_delta(name.as_deref(), tool_index);
-                    if !had_activity_before && agent.session.tracker.activity().is_some() {
-                        note_first_turn_activity(agent);
-                    }
+                let had_activity_before = agent.session.tracker.activity().is_some();
+                let changed = agent
+                    .session
+                    .tracker
+                    .note_tool_call_arguments_delta(name.as_deref(), tool_index);
+                if !had_activity_before && agent.session.tracker.activity().is_some() {
+                    note_first_turn_activity(agent);
                 }
                 let previewed = agent.session.tracker.handle_tool_call_delta(
                     tool_call_id.as_deref(),

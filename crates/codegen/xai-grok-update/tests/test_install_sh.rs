@@ -451,6 +451,19 @@ fn run_with_proxy_url(script: &Path, proxy_url: &str) -> (bool, String, bool) {
     (status.success(), urls, managed)
 }
 
+/// The desktop installer lives in the monorepo's `frontend/` tree, which this repository does
+/// not carry. It is checked where it resolves, the same as `install-enterprise.sh`.
+fn proxy_url_scripts(pager_install: PathBuf) -> Vec<(&'static str, PathBuf)> {
+    let mut scripts = vec![("install.sh", pager_install)];
+    if let Some(enterprise) = script_path("install-enterprise.sh") {
+        scripts.push(("install-enterprise.sh", enterprise));
+    }
+    if let Some(desktop) = desktop_install_sh_path() {
+        scripts.push(("desktop install.sh", desktop));
+    }
+    scripts
+}
+
 fn assert_no_credentialed_proxy_request(label: &str, proxy_url: &str, urls: &str) {
     assert!(
         !urls.contains("/deployment/config")
@@ -467,16 +480,7 @@ fn install_scripts_refuse_bad_proxy_url_for_deployment_key() {
         eprintln!("skipping: install.sh not found relative to crate; run under cargo");
         return;
     };
-    let desktop = desktop_install_sh_path()
-        .expect("desktop install.sh must resolve when pager install.sh is present");
-
-    let mut scripts: Vec<(&str, PathBuf)> = vec![
-        ("install.sh", pager_install),
-        ("desktop install.sh", desktop),
-    ];
-    if let Some(enterprise) = script_path("install-enterprise.sh") {
-        scripts.insert(1, ("install-enterprise.sh", enterprise));
-    }
+    let scripts = proxy_url_scripts(pager_install);
 
     for (label, script_file) in &scripts {
         for proxy_url in BAD_PROXY_URLS {
@@ -549,16 +553,7 @@ fn install_scripts_allow_custom_https_proxy_url() {
         eprintln!("skipping: install.sh not found relative to crate; run under cargo");
         return;
     };
-    let desktop = desktop_install_sh_path()
-        .expect("desktop install.sh must resolve when pager install.sh is present");
-
-    let mut scripts: Vec<(&str, PathBuf)> = vec![
-        ("install.sh", pager_install),
-        ("desktop install.sh", desktop),
-    ];
-    if let Some(enterprise) = script_path("install-enterprise.sh") {
-        scripts.insert(1, ("install-enterprise.sh", enterprise));
-    }
+    let scripts = proxy_url_scripts(pager_install);
     for (label, script_file) in &scripts {
         for proxy_url in GOOD_PROXY_URLS {
             let (ok, urls, _managed) = run_with_proxy_url(script_file, proxy_url);

@@ -1,10 +1,68 @@
 //! This binary owns the process-global tracer.
-
+use std::collections::{BTreeMap, HashMap};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde_json::Value;
+use tracing::field::{Field, Visit};
+use tracing::span::{Attributes, Id, Record};
+use tracing_subscriber::layer::Context;
 use xai_grok_telemetry::config::{TelemetryConfig, TelemetryMode};
-use xai_grok_test_support::{MockInferenceServer, MockOtelServer, OtelSpan};
+use xai_grok_test_support::{MockInferenceServer, MockOtelServer};
+
+#[derive(Clone, Debug)]
+struct CapturedSpan {
+    name: String,
+    attributes: BTreeMap<String, String>,
+}
+
+struct SpanCapture(Arc<Mutex<HashMap<u64, CapturedSpan>>>);
+
+struct FieldVisitor<'a>(&'a mut BTreeMap<String, String>);
+
+impl Visit for FieldVisitor<'_> {
+    fn record_str(&mut self, field: &Field, value: &str) {
+        self.0.insert(field.name().to_owned(), value.to_owned());
+    }
+
+    fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
+        self.0.insert(field.name().to_owned(), format!("{value:?}"));
+    }
+}
+
+impl<S> tracing_subscriber::Layer<S> for SpanCapture
+where
+    S: tracing::Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>,
+{
+    fn on_new_span(&self, attrs: &Attributes<'_>, id: &Id, _ctx: Context<'_, S>) {
+        let mut attributes = BTreeMap::new();
+        attrs.record(&mut FieldVisitor(&mut attributes));
+        self.0.lock().unwrap().insert(
+            id.into_u64(),
+            CapturedSpan {
+                name: attrs.metadata().name().to_owned(),
+                attributes,
+            },
+        );
+    }
+
+    fn on_record(&self, id: &Id, values: &Record<'_>, _ctx: Context<'_, S>) {
+        if let Some(span) = self.0.lock().unwrap().get_mut(&id.into_u64()) {
+            values.record(&mut FieldVisitor(&mut span.attributes));
+        }
+    }
+}
+
+impl SpanCapture {
+    fn find(&self, invocation: &str) -> Option<CapturedSpan> {
+        self.0
+            .lock()
+            .unwrap()
+            .values()
+            .find(|span| attr(span, "invocation_id") == Some(invocation))
+            .cloned()
+    }
+}
 
 const SILENT: &str = "018f6b6c-7b3a-7c3a-8c3a-000000000001";
 const ENABLED: &str = "018f6b6c-7b3a-7c3a-8c3a-000000000002";
@@ -21,7 +79,7 @@ fn unset_env(key: &str) {
     unsafe { std::env::remove_var(key) }
 }
 
-fn install_tracing(traces: &str) {
+fn install_tracing(traces: &str, capture: SpanCapture) {
     set_env("GROK_INTERNAL_OTLP_TRACES_ENDPOINT", traces);
     set_env("GROK_INSTRUMENTATION", "server");
     set_env("GROK_OTEL_FILTER", "info");
@@ -43,8 +101,10 @@ fn install_tracing(traces: &str) {
         config,
     );
     use tracing_subscriber::layer::SubscriberExt as _;
-    tracing::subscriber::set_global_default(tracing_subscriber::registry().with(layer))
-        .expect("install subscriber");
+    tracing::subscriber::set_global_default(
+        tracing_subscriber::registry().with(layer).with(capture),
+    )
+    .expect("install subscriber");
 }
 
 fn init_product(server: &MockInferenceServer, mode: TelemetryMode) {
@@ -83,19 +143,8 @@ fn projected(invocation: &str, exit_code: i32) -> xai_grok_telemetry::events::To
     xai_grok_shell::session::complete_projected_call(span, invocation, &output, "success")
 }
 
-fn attr<'a>(span: &'a OtelSpan, key: &str) -> Option<&'a str> {
-    span.attributes.get(key).and_then(Value::as_str)
-}
-
-fn product_row<'a>(rows: &'a [Value], invocation: &str) -> Option<&'a Value> {
-    rows.iter().find(|event| {
-        event.get("event_name").and_then(Value::as_str) == Some("grok-shell-tool_call_completed")
-            && event
-                .get("event_metadata")
-                .and_then(|metadata| metadata.get("invocation_id"))
-                .and_then(Value::as_str)
-                == Some(invocation)
-    })
+fn attr<'a>(span: &'a CapturedSpan, key: &str) -> Option<&'a str> {
+    span.attributes.get(key).map(String::as_str)
 }
 
 #[tokio::test]
@@ -105,44 +154,38 @@ async fn span_and_product_row_agree_and_product_gate_is_independent() {
     set_env("GROK_HOME", home.to_str().unwrap());
     let traces = MockOtelServer::start().await.expect("traces");
     let product = MockInferenceServer::start().await.expect("product");
-    install_tracing(&format!("{}/v1/traces", traces.origin()));
+    let capture = SpanCapture::default();
+    install_tracing(&format!("{}/v1/traces", traces.origin()), capture.clone());
     init_product(&product, TelemetryMode::SessionMetrics);
 
     let silent = projected(SILENT, -1);
     xai_grok_telemetry::session_ctx::log_event_now(silent).await;
-    traces
-        .recorder()
-        .wait_for_spans(Duration::from_secs(5), |spans| {
-            spans
-                .iter()
-                .any(|span| attr(span, "invocation_id") == Some(SILENT))
-        })
-        .await
-        .expect("session-metrics export");
+    assert!(capture.find(SILENT).is_some(), "session-metrics span");
     assert_eq!(Vec::<Value>::new(), product.telemetry_events());
 
     init_product(&product, TelemetryMode::Enabled);
     let event = projected(ENABLED, -1);
+    // The product row's metadata is this serialization.
+    let metadata = serde_json::to_value(&event).expect("serialize event");
     xai_grok_telemetry::session_ctx::log_event_now(event).await;
     xai_grok_telemetry::otel_layer::shutdown_otel();
-    let spans = traces
+    traces
         .recorder()
-        .wait_for_spans(Duration::from_secs(5), |spans| {
-            spans
-                .iter()
-                .any(|span| attr(span, "invocation_id") == Some(ENABLED))
-        })
+        .wait_for_span_silence(Duration::from_millis(300))
         .await
-        .expect("enabled export");
-    let span = spans
-        .iter()
-        .find(|span| attr(span, "invocation_id") == Some(ENABLED))
-        .expect("matching span");
+        .expect("disabled trace export stays silent");
+    assert!(
+        traces.recorder().spans().is_empty(),
+        "OTLP trace export is hard-disabled: no span may leave"
+    );
+    assert_eq!(
+        Vec::<Value>::new(),
+        product.telemetry_events(),
+        "product events are hard-disabled: no row may post"
+    );
+    let span = &capture.find(ENABLED).expect("matching span");
     assert_eq!(span.name, "tool.execution");
     assert_eq!(attr(span, "session_id"), Some("session"));
-    let events = product.telemetry_events();
-    let row = product_row(&events, ENABLED).expect("product row");
-    let metadata = row.get("event_metadata").expect("metadata");
     assert_eq!(
         metadata.get("model_id").and_then(Value::as_str),
         Some("grok-4.6")
@@ -182,10 +225,7 @@ async fn span_and_product_row_agree_and_product_gate_is_independent() {
     );
     assert_eq!(attr(span, "outcome"), Some("error"));
     assert!(!span.attributes.contains_key("path_scope"));
-    let rendered = format!(
-        "{metadata} {span:?} {}",
-        traces.recorder().body_text().unwrap()
-    );
+    let rendered = format!("{metadata} {span:?}");
     assert!(!rendered.contains(CANARY_PATH));
     assert!(!rendered.contains("secret-project"));
     assert!(!rendered.contains("CANARY_PATTERN"));

@@ -227,11 +227,16 @@ fn arm_failed(arm: crate::worktree::WorktreeArm, err: &anyhow::Error) -> crate::
 }
 #[cfg(any(target_os = "linux", target_os = "macos", windows))]
 fn grove_arm(
-    _plan: &WorktreePlan,
-    _arm: WorktreeArm,
-    _skipped: &mut Vec<ArmSkip>,
+    plan: &WorktreePlan,
+    arm: WorktreeArm,
+    skipped: &mut Vec<ArmSkip>,
     _grove_lost_to_daemon: &mut bool,
 ) -> Result<Option<CreateWorktreeResult>> {
+    // This build has no Grove client. A caller that asked for Grove must
+    // learn why it got a fallback, so the arm records its skip.
+    if plan.nfs.as_ref().is_some_and(|opts| opts.enabled) {
+        skipped.push(ArmSkip::new(arm, "Grove is not available in this build"));
+    }
     Ok(None)
 }
 /// Dispatch worktree creation to the strategy implied by the creation mode.

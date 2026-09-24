@@ -2694,14 +2694,19 @@ fn cycle_mode_walks_the_published_modes_then_always_approve() {
                     "persist:always-approve".to_owned()
                 ]
             ),
-            ("Switched to mode: Agent", vec!["persist:ask".to_owned()]),
+            // Past Always-Approve the ring steps onto the agent-identity stops,
+            // and always-approve rides through them.
+            (
+                "Switched to mode: Orchestrator",
+                vec!["set_mode:grok-build-orchestrator".to_owned()]
+            ),
         ],
         presses
             .iter()
             .map(|(banner, effects)| (banner.as_str(), effects.clone()))
             .collect::<Vec<_>>()
     );
-    assert!(!test_agent(&app, AgentId(0)).session.is_yolo());
+    assert!(test_agent(&app, AgentId(0)).session.is_yolo());
 }
 
 #[test]

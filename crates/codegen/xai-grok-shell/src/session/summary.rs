@@ -250,8 +250,12 @@ mod tests {
     #[test]
     fn reset_returns_generator_to_idle() {
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-        let sampling_client =
-            OaiCompatClient::new(xai_grok_sampler::SamplerConfig::default()).unwrap();
+        // A client needs a URL to build. The discard port answers nothing.
+        let sampling_client = OaiCompatClient::new(xai_grok_sampler::SamplerConfig {
+            base_url: "http://127.0.0.1:9/v1".to_owned(),
+            ..xai_grok_sampler::SamplerConfig::default()
+        })
+        .unwrap();
         let mut generator = SummaryGenerator::new(SummaryConfig {
             sampling_client: Some(sampling_client),
             model: String::new(),

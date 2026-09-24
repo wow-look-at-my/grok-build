@@ -131,16 +131,23 @@ pub(crate) fn materialize_runtime_socket_deny_paths_from(
                     Err(metadata_error) if metadata_error.kind() == io::ErrorKind::NotFound => {
                         continue;
                     }
+                    Err(metadata_error)
+                        if unreachable_by_this_process(&candidate, &metadata_error) =>
+                    {
+                        continue;
+                    }
                     Ok(_) => return Err(with_context(error)),
                     Err(metadata_error) => return Err(with_context(metadata_error)),
                 }
             }
+            Err(error) if unreachable_by_this_process(&candidate, &error) => continue,
             Err(error) => return Err(with_context(error)),
         };
         let path = canonical_parent.join(file_name);
         let metadata = match std::fs::symlink_metadata(&path) {
             Ok(metadata) => metadata,
             Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+            Err(error) if unreachable_by_this_process(&path, &error) => continue,
             Err(error) => return Err(with_context(error)),
         };
         if metadata.file_type().is_symlink() {
@@ -154,6 +161,96 @@ pub(crate) fn materialize_runtime_socket_deny_paths_from(
         }
     }
     Ok(paths)
+}
+
+#[cfg(unix)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct DirAccess {
+    pub(crate) owner: u32,
+    pub(crate) searchable: bool,
+}
+
+/// True when `error` is EACCES and a directory on the way to `endpoint` refuses
+/// this process search permission. That directory must also have another
+/// owner, because the owner can `chmod` it back open. The sandboxed session runs
+/// as the same uid, so it cannot connect to the endpoint either, and a mask
+/// has nothing to cover. Any other answer keeps the error.
+fn unreachable_by_this_process(endpoint: &Path, error: &io::Error) -> bool {
+    if error.kind() != io::ErrorKind::PermissionDenied {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        // SAFETY: geteuid is always safe.
+        let euid = unsafe { libc::geteuid() };
+        let unreachable = blocked_by_foreign_directory(endpoint, euid, probe_dir_access);
+        if unreachable {
+            tracing::debug!(
+                endpoint = %endpoint.display(),
+                "runtime-socket endpoint is behind a directory this uid cannot search; no mask needed"
+            );
+        }
+        unreachable
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = endpoint;
+        false
+    }
+}
+
+/// Walks the ancestors of `endpoint` from the root down. The earliest directory
+/// that refuses search decides the answer: it blocks when `euid` does not own
+/// it. A probe that cannot answer means the endpoint is not proven unreachable.
+#[cfg(unix)]
+pub(crate) fn blocked_by_foreign_directory(
+    endpoint: &Path,
+    euid: u32,
+    probe: impl Fn(&Path) -> Option<DirAccess>,
+) -> bool {
+    let mut ancestors: Vec<&Path> = endpoint.ancestors().skip(1).collect();
+    ancestors.reverse();
+    for dir in ancestors {
+        let Some(access) = probe(dir) else {
+            return false;
+        };
+        if !access.searchable {
+            return access.owner != euid;
+        }
+    }
+    false
+}
+
+#[cfg(unix)]
+fn probe_dir_access(dir: &Path) -> Option<DirAccess> {
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::fs::MetadataExt;
+
+    let metadata = std::fs::metadata(dir).ok()?;
+    if !metadata.is_dir() {
+        return None;
+    }
+    let c_path = std::ffi::CString::new(dir.as_os_str().as_bytes()).ok()?;
+    // SAFETY: `c_path` is a valid NUL-terminated string for the whole call.
+    let rc = unsafe {
+        libc::faccessat(
+            libc::AT_FDCWD,
+            c_path.as_ptr(),
+            libc::X_OK,
+            libc::AT_EACCESS,
+        )
+    };
+    let searchable = if rc == 0 {
+        true
+    } else if io::Error::last_os_error().raw_os_error() == Some(libc::EACCES) {
+        false
+    } else {
+        return None;
+    };
+    Some(DirAccess {
+        owner: metadata.uid(),
+        searchable,
+    })
 }
 
 /// Encode the outer process's materialized automatic socket paths for bwrap re-exec.

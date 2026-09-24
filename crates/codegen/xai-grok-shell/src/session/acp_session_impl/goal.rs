@@ -1175,9 +1175,9 @@ impl SessionActor {
                     .map(|o| o.objective.clone());
                 if let Some(objective) = objective {
                     self.maybe_run_goal_planner(&objective).await;
-                    if let Some(msg) = self.planner_pause_short_circuit_message(
-                        "Planning failed again; goal paused. Resume with /goal to retry.",
-                    ) {
+                    if let Some(msg) = self
+                        .planner_pause_short_circuit_message("Planning failed again; goal paused.")
+                    {
                         return GoalResumeOutcome::Message(msg);
                     }
                     // `needs_retry` saw `plan_file == None` and the goal is still Active, so `Some` means this resume published.

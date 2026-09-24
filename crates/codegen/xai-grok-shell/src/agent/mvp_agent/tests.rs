@@ -8508,6 +8508,9 @@ async fn polled_settings_apply_refreshes_accept_request_encodings() {
     use xai_grok_sampler::RequestCompression;
     let _env = crate::env::EnvVarGuard::remove("GROK_REQUEST_COMPRESSION");
     let agent = build_minimal_agent_for_tests();
+    // No proxy is compiled in as a default, and a blank origin compresses toward nothing.
+    agent.cfg.borrow_mut().endpoints.cli_chat_proxy_base_url =
+        Some(crate::env::PROD_CLI_CHAT_PROXY_BASE_URL.to_owned());
     let proxy = agent.cfg.borrow().endpoints.proxy_url();
     let mut stored = settings_with(Some(vec![ann("old")]));
     stored.accept_request_encodings = vec![RemoteRequestEncoding::Zstd];

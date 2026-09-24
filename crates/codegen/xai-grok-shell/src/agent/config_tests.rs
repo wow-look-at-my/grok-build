@@ -7952,7 +7952,8 @@ fn is_telemetry_explicitly_disabled_sync_env_signals() {
 }
 #[test]
 #[serial]
-fn resolve_telemetry_mode_disable_env_beats_opt_in_but_not_requirements_pin() {
+fn resolve_telemetry_mode_stays_disabled_under_disable_env_opt_in_and_requirements_pin() {
+    // Telemetry is hard-disabled: no opt-in, env value or requirement pin turns it on.
     let home = tempfile::tempdir().unwrap();
     let _home = EnvGuard::set("GROK_HOME", home.path());
     let _enable = EnvGuard::set("GROK_TELEMETRY_ENABLED", "true");
@@ -7962,13 +7963,13 @@ fn resolve_telemetry_mode_disable_env_beats_opt_in_but_not_requirements_pin() {
     let resolved = cfg.resolve_telemetry_mode();
     assert_eq!(
         (resolved.value, resolved.source),
-        (TelemetryMode::Enabled, ConfigSource::Env)
+        (TelemetryMode::Disabled, ConfigSource::Default)
     );
     let _truthy = EnvGuard::set("DISABLE_TELEMETRY", "1");
     let resolved = cfg.resolve_telemetry_mode();
     assert_eq!(
         (resolved.value, resolved.source),
-        (TelemetryMode::Disabled, ConfigSource::Env)
+        (TelemetryMode::Disabled, ConfigSource::Default)
     );
     assert!(
         is_telemetry_disabled_sync(),
@@ -7981,7 +7982,7 @@ fn resolve_telemetry_mode_disable_env_beats_opt_in_but_not_requirements_pin() {
     let resolved = cfg.resolve_telemetry_mode();
     assert_eq!(
         (resolved.value, resolved.source),
-        (TelemetryMode::Enabled, ConfigSource::Requirement)
+        (TelemetryMode::Disabled, ConfigSource::Default)
     );
 }
 #[test]
@@ -9200,7 +9201,9 @@ fn mcp_recursive_config_watch_feature_flag_used_when_no_higher_layer() {
 #[serial_test::serial(remote_sig_disarm)]
 fn remote_settings_disarm_managed_config_signatures() {
     let prod = crate::env::PROD_CLI_CHAT_PROXY_BASE_URL;
-    let _env = crate::env::EnvVarGuard::remove("GROK_CLI_CHAT_PROXY_BASE_URL");
+    // No proxy is compiled in as a default, so the prod proxy must be configured to be the origin.
+    let env = crate::env::EnvVarGuard::remove("GROK_CLI_CHAT_PROXY_BASE_URL");
+    env.set_value(prod);
     xai_grok_config::signed_policy::apply_remote_managed_config_signature_verification(
         Some(true),
         true,
@@ -9327,7 +9330,9 @@ fn remote_settings_disarm_requires_prod_proxy_when_keys_embedded() {
         managed_config_signature_verification: Some(false),
         ..Default::default()
     };
+    // No proxy is compiled in as a default, so the prod proxy must be configured to be the origin.
     let env = crate::env::EnvVarGuard::remove("GROK_CLI_CHAT_PROXY_BASE_URL");
+    env.set_value(prod);
     apply_remote_settings_side_effects(Some(&settings), prod);
     assert!(
         !xai_grok_config::signed_policy::verification_active(),

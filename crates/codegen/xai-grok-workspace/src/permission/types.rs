@@ -280,7 +280,9 @@ impl From<&xai_grok_tools::types::ToolInput> for AccessKind {
             | ToolInput::EnterPlanMode(_)
             | ToolInput::ExitPlanMode(_)
             | ToolInput::AskUserQuestion(_)
-            | ToolInput::UpdateGoal(_) => AccessKind::Read(None),
+            | ToolInput::UpdateGoal(_)
+            // `ci` runs only allowlisted read-only `gh` queries.
+            | ToolInput::Ci(_) => AccessKind::Read(None),
             ToolInput::Task(_) => AccessKind::Tool("task".to_owned()),
             ToolInput::SchedulerCreate(_) => AccessKind::Tool("scheduler_create".to_owned()),
             ToolInput::SchedulerDelete(_) => AccessKind::Tool("scheduler_delete".to_owned()),
@@ -291,6 +293,9 @@ impl From<&xai_grok_tools::types::ToolInput> for AccessKind {
             ToolInput::ReferenceToVideo(_) => AccessKind::Tool("reference_to_video".to_owned()),
             ToolInput::SendSubagentMessage(message) => AccessKind::AgentMessage {
                 subagent_id: message.subagent_id.clone(),
+            },
+            ToolInput::SendMessage(message) => AccessKind::AgentMessage {
+                subagent_id: message.to.clone(),
             },
             ToolInput::SendFeedback(_) => AccessKind::Tool("send_feedback".to_owned()),
             ToolInput::WebSearch(ws) => AccessKind::WebSearch(ws.query.clone()),

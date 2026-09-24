@@ -221,6 +221,8 @@ fn tmux_config_and_reload_notes_output_is_stable() {
 
 #[test]
 fn limited_color_output_is_stable() {
+    // The theme list reads the `terminal` rollout gate, which is process-global and off by default.
+    let _guard = crate::theme::cache::pin_theme();
     let terminal = ghostty(false);
     let output = build_doctor(snapshot(
         &terminal,

@@ -2003,7 +2003,13 @@ impl Config {
                     "model.{model_id}.base_url must be an HTTPS URL with a host when mtls_cert_dir is set"
                 ));
             }
-            if model.api_base_url.is_some() {
+            // The parse folds `api_base_url` away, so the raw table is the only place it is still visible.
+            let raw_api_base_url = raw_config
+                .get("model")
+                .and_then(|models| models.get(model_id.as_str()))
+                .and_then(|table| table.get("api_base_url"))
+                .is_some();
+            if model.api_base_url.is_some() || raw_api_base_url {
                 return Err(format!(
                     "model.{model_id} cannot set both mtls_cert_dir and api_base_url; an mTLS identity must have one destination"
                 ));

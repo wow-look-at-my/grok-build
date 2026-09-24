@@ -1,9 +1,11 @@
+//! A complete HTTP mTLS double opt-in must still activate nothing in this build.
+
 mod otlp_collector;
 
 use std::time::Duration;
 
 use otlp_collector as col;
-use xai_grok_test_support::{OtelRecorder, OtelSignal};
+use xai_grok_test_support::OtelRecorder;
 
 fn write_temp(contents: &str) -> (tempfile::NamedTempFile, String) {
     let file = tempfile::NamedTempFile::new().expect("temp file");
@@ -68,9 +70,8 @@ fn external_stream_http_mtls_end_to_end() {
 
     xai_grok_telemetry::external::init(Some(cfg));
     assert!(
-        xai_grok_telemetry::external::is_active(),
-        "mTLS HTTP exporters must build and activate the stream \
-         (crypto provider installed; client cert={cert_path}, key={key_path}, ca={ca_path}, endpoint={endpoint})"
+        !xai_grok_telemetry::external::is_active(),
+        "external OTLP stream is hard-disabled in the build baseline (HTTP mTLS, endpoint={endpoint})"
     );
 
     xai_grok_telemetry::log_event(xai_grok_telemetry::events::SessionNew {
@@ -99,16 +100,20 @@ fn external_stream_http_mtls_end_to_end() {
     });
 
     xai_grok_telemetry::external::flush();
-    col::block_on(recorder.wait_for_signals(Duration::from_secs(10), &[OtelSignal::Logs]))
-        .expect("log records must arrive over HTTP mTLS");
-    let names = recorder.event_names();
-    assert!(
-        names.iter().any(|n| n == "grok_code.session_start"),
-        "expected grok_code.session_start in {names:?}"
+
+    // The metric interval above is 200ms.
+    std::thread::sleep(Duration::from_millis(600));
+    assert_eq!(
+        recorder.log_records().len(),
+        0,
+        "disabled external stream must export no logs over HTTP mTLS"
+    );
+    assert_eq!(
+        recorder.metric_points().len(),
+        0,
+        "disabled external stream must export no metrics over HTTP mTLS"
     );
 
-    col::block_on(recorder.wait_for_signals(Duration::from_secs(10), &[OtelSignal::Metrics]))
-        .expect("metric exports must arrive over HTTP mTLS");
-
     xai_grok_telemetry::external::shutdown();
+    assert!(!xai_grok_telemetry::external::is_active());
 }
