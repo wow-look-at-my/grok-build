@@ -18,7 +18,6 @@
 //! **Retried on their own budget** (the transport budget above is untouched):
 //! - A stream that died mid-body — `EventStreamError`, or a reqwest decode
 //!   failure ("error decoding response body"):
-//!   [`STREAM_INTERRUPT_MAX_RETRIES`] = 10, same exponential backoff.
 //!
 //! **Retried with lower cap** ([`RATE_LIMIT_RETRY_THRESHOLD`] = 5):
 //! - 429 (rate limited) — waits the server's `Retry-After`, clamped per
@@ -68,8 +67,6 @@ pub const RATE_LIMIT_RETRY_THRESHOLD: u32 = 5;
 pub const DEFAULT_MAX_RETRIES: u32 = 15;
 
 /// Retries granted to a stream that died mid-body
-/// ([`SamplingError::is_stream_interrupted`]): 10, each after the same
-/// exponential backoff the transport path uses. It is a budget of its own,
 /// like the doom-loop and output-rate ones: a dropped connection is not a
 /// server fault, and spending the transport budget on it leaves nothing for
 /// the 5xx that follows. It is also a guarantee — a model configured with a
@@ -141,7 +138,12 @@ pub fn output_rate_backoff(retry_count: u32) -> Duration {
     doom_loop_backoff(retry_count)
 }
 
-/// Exponential backoff (2s, 4s, 8s, ..., capped at [`MAX_RETRY_BACKOFF`])
+
+/// Backoff for a stream that died mid-body: [`STREAM_INTERRUPT_BACKOFF`] on
+/// every attempt, jittered. It does not grow.
+    jittered(STREAM_INTERRUPT_BACKOFF)
+}
+
 /// with +/-20% jitter to prevent thundering-herd retry storms.
 pub fn retry_backoff_with_jitter(retry_count: u32) -> Duration {
     let shift = retry_count.saturating_sub(1);
@@ -373,10 +375,13 @@ pub fn classify_error(
         if next_attempt >= max_retries {
             return RetryDecision::Fatal(clone_error(err));
         }
-        let backoff = err
-            .retry_after()
-            .map(|secs| jittered(Duration::from_secs(secs).min(MAX_RETRY_BACKOFF)))
-            .unwrap_or_else(|| retry_backoff_with_jitter(next_attempt));
+        let backoff = if err.is_stream_interrupted() {
+            stream_interrupt_backoff()
+        } else {
+            err.retry_after()
+                .map(|secs| jittered(Duration::from_secs(secs).min(MAX_RETRY_BACKOFF)))
+                .unwrap_or_else(|| retry_backoff_with_jitter(next_attempt))
+        };
         if next_attempt == 1 {
             return RetryDecision::RetryWithClientRebuild { backoff };
         }
@@ -1161,13 +1166,14 @@ mod tests {
     }
 
     /// The guarantee the budget exists for: a stream that dies mid-body is
-    /// retried exactly 10 times, on backoff that grows, whatever the model's
-    /// own `max_retries` says.
-    #[test]
-    fn a_stream_interruption_is_retried_ten_times_with_growing_backoff() {
+    /// A growing wait put 27s of dead time
+    /// model's own `max_retries` says.
+    /// [test]
+    fn a_stream_interruption_is_retried_ten_times_on_a_fixed_cadence() {
         let err = SamplingError::EventStreamError("error decoding response body".into());
         let budget = stream_interrupt_budget(3);
-        let mut previous = Duration::ZERO;
+        let low = STREAM_INTERRUPT_BACKOFF * 4 / 5;
+        let high = STREAM_INTERRUPT_BACKOFF * 6 / 5;
         for retries_done in 0..STREAM_INTERRUPT_MAX_RETRIES {
             let backoff =
                 match classify_error(&err, retries_done, budget, RATE_LIMIT_RETRY_THRESHOLD) {
@@ -1179,20 +1185,11 @@ mod tests {
                     RetryDecision::Retry { backoff } => backoff,
                     other => panic!("retry {retries_done} must happen, got {other:?}"),
                 };
-            // Only while the base is still under the ceiling: once every wait
-            // is a jittered 30s, one can land below the last.
-            if retries_done < 4 {
-                assert!(
-                    backoff > previous,
-                    "backoff must grow: {backoff:?} after {previous:?}"
-                );
-            }
-            previous = backoff;
+            assert!(
+                (low..=high).contains(&backoff),
+                "retry {retries_done} waited {backoff:?}, outside {low:?}..={high:?}"
+            );
         }
-        assert!(
-            previous >= Duration::from_secs(24),
-            "the tail must reach the {MAX_RETRY_BACKOFF:?} ceiling, got {previous:?}"
-        );
         match classify_error(
             &err,
             STREAM_INTERRUPT_MAX_RETRIES,
