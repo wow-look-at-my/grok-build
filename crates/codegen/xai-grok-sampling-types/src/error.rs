@@ -1301,16 +1301,18 @@ mod tests {
     }
 
     #[test]
-    fn user_facing_api_error_message_maps_non_json_by_status() {
+    fn user_facing_api_error_message_maps_html_by_status_and_shows_plain_text() {
         let html = br#"<!DOCTYPE html><html><body>timeout</body></html>"#;
         let msg = user_facing_api_error_message(StatusCode::from_u16(524).unwrap(), html);
         assert_eq!(msg, status_user_message(StatusCode::from_u16(524).unwrap()));
 
-        let msg_503 =
-            user_facing_api_error_message(StatusCode::SERVICE_UNAVAILABLE, b"not json either");
+        let msg_503 = user_facing_api_error_message(
+            StatusCode::SERVICE_UNAVAILABLE,
+            b"  upstream model is loading  ",
+        );
         assert_eq!(
-            msg_503,
-            status_user_message(StatusCode::SERVICE_UNAVAILABLE)
+            msg_503, "HTTP 503: upstream model is loading",
+            "a plain-text body is the server's own reason, so it is shown"
         );
     }
 
