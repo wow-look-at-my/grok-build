@@ -955,6 +955,20 @@ impl SessionActor {
     }
 
     pub(super) async fn setup_goal(&self, objective: &str, token_budget: Option<i64>) -> String {
+        self.create_goal_orchestration(objective, token_budget)
+            .await;
+        self.maybe_run_goal_planner(objective).await;
+        let planner_enabled = self.goal_planner_enabled;
+        self.render_goal_start_reminder(objective, |o| goal_reminder_plan_path(planner_enabled, o))
+            .await
+    }
+
+    /// Create the goal orchestration and announce it. Returns the new goal id.
+    pub(super) async fn create_goal_orchestration(
+        &self,
+        objective: &str,
+        token_budget: Option<i64>,
+    ) -> String {
         let goal_id = uuid::Uuid::new_v4().to_string();
         let created_at = chrono::Utc::now().to_rfc3339();
         let token_baseline = self.chat_state_handle.get_total_tokens().await as i64;
@@ -965,7 +979,7 @@ impl SessionActor {
         {
             let mut tracker = self.goal_tracker.lock();
             tracker.create_goal(
-                goal_id,
+                goal_id.clone(),
                 objective.to_owned(),
                 token_budget,
                 token_baseline,
@@ -992,17 +1006,25 @@ impl SessionActor {
                 finished_marginal,
             );
         }
+        goal_id
+    }
 
-        self.maybe_run_goal_planner(objective).await;
-
+    /// The reminder that opens a goal's implementing turn. `plan_path` reads
+    /// the plan the reminder names off the orchestration.
+    pub(super) async fn render_goal_start_reminder(
+        &self,
+        objective: &str,
+        plan_path: impl FnOnce(
+            &crate::session::goal_tracker::GoalOrchestration,
+        ) -> Option<&std::path::Path>,
+    ) -> String {
         let names = self.resolve_goal_tool_names().await;
-        let planner_enabled = self.goal_planner_enabled;
         let body = {
             let tracker = self.goal_tracker.lock();
             let o = tracker
                 .snapshot()
                 .expect("create_goal must populate the orchestration snapshot");
-            let plan_path = goal_reminder_plan_path(planner_enabled, o);
+            let plan_path = plan_path(o);
             let scratch_dir = crate::session::goal_tracker::implementer_scratch_dir(&o.verifier_id);
             let scratch = scratch_dir.to_string_lossy();
             if self.goal_runs_on_workflow_engine() {
