@@ -388,6 +388,24 @@ ${%- endif %}
 You should build your plan by writing to or editing this file. \
 Note that this is the only file you are allowed to edit.
 
+## Plan format:
+Write the plan with these sections, in order:
+- `# Plan: <one-sentence headline>`
+- `## Acceptance criteria`: numbered outcomes the work must reach. \
+Each one is concrete and checkable on its own, and every one must hold.
+- `## Verification plan`: numbered steps. Each names a command to run and what \
+its output must show, tagged `gating` or `evidence`.
+- `## Non-goals`: what is out of scope, or `- none`.
+- `## Assumed scope`: the files and modules the work touches.
+- `## Implementation approach`: how to build it. This is guidance, not a criterion.
+- `## Task checklist`: ordered `- [ ]` steps.
+${%- if goal_contract %}
+
+When the user approves the plan, it becomes a goal with this plan as its contract. \
+Independent reviewers check the finished work against the acceptance criteria and \
+the verification plan.
+${%- endif %}
+
 Your turn should only end with either ${{ tools.by_kind.ask_user }} to clarify \
 requirements or ${{ tools.by_kind.exit_plan }} to present your plan to the user."
 }
@@ -708,6 +726,50 @@ mod tests {
             "plan_has_content": plan_has_content,
         });
         renderer.render_with_extra(template, &extra).unwrap()
+    }
+    #[test]
+    fn full_reminder_asks_for_the_goal_plan_format() {
+        let r = test_renderer();
+        let text = render(
+            &r,
+            plan_mode_reminder_full_template(),
+            "/tmp/plan.md",
+            false,
+        );
+        for section in [
+            "# Plan:",
+            "## Acceptance criteria",
+            "## Verification plan",
+            "## Non-goals",
+            "## Assumed scope",
+            "## Implementation approach",
+            "## Task checklist",
+        ] {
+            assert!(text.contains(section), "missing {section}: {text}");
+        }
+    }
+    #[test]
+    fn full_reminder_names_the_goal_contract_only_when_approval_makes_a_goal() {
+        let r = test_renderer();
+        let contract = "it becomes a goal with this plan as its contract";
+        let with_goal = r
+            .render_with_extra(
+                plan_mode_reminder_full_template(),
+                &serde_json::json!({
+                    "plan_path": "/tmp/plan.md",
+                    "plan_has_content": false,
+                    "goal_contract": true,
+                }),
+            )
+            .unwrap();
+        assert!(with_goal.contains(contract), "{with_goal}");
+        let without_goal = render(
+            &r,
+            plan_mode_reminder_full_template(),
+            "/tmp/plan.md",
+            false,
+        );
+        assert!(!without_goal.contains(contract), "{without_goal}");
     }
     #[test]
     fn full_reminder_with_existing_plan() {
