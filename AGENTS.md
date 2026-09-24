@@ -149,6 +149,12 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - A goal role's model is NOT checked against `[models] allowed_models`. That list governs chat selection, and its own contract exempts subagents. A goal role is a subagent the user configured. A model missing from the catalog still falls back (`model_unknown`).
 - Every verification assigns the skeptics from the CURRENT pool (`assign_skeptic_models`). A goal never keeps a model the user has moved away from. The first skeptic continues its previous run only while its model holds (`skeptic0_model_changed`). A run cannot continue on a model that did not write it.
 
+## Plan approval starts a goal
+
+- Plan mode is the interactive goal planner. Approving the plan calls `setup_goal_from_approved_plan` (`acp_session_impl/plan_goal.rs`). That creates a goal and copies `plan.md` to the goal's plan and baseline. And the planner never runs.
+- A mid-turn approval sends the goal-start reminder as a deferred followup after the `exit_plan_mode` result. A resume approval puts it at the front of the implement turn.
+- An active goal is never replaced, and a subagent or a session without the goal harness gets no goal. The plan-mode reminder asks for the planner's sections. It names the contract only when `goal_contract` is true, since that is the only case where approval makes a goal.
+
 ## Goal-plan-to-todos notes
 
 - The implementing session no longer transcribes the plan into its todo list. The planner lists the plan's work on its OWN todo list, and the harness puts those items on the session's list as the plan is published (`apply_planner_todos` in `acp_session_impl/goal_support.rs`, called from the `Planned` publish branch of `maybe_run_goal_planner`, before the goal-start reminder is rendered).

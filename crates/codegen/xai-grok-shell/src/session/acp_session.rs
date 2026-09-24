@@ -93,6 +93,8 @@ pub(crate) use types::*;
 pub use types::{TodoGateDecision, TodoGateReason};
 #[path = "acp_session_impl/goal.rs"]
 mod goal;
+#[path = "acp_session_impl/plan_goal.rs"]
+mod plan_goal;
 #[path = "acp_session_impl/tool_layer_images.rs"]
 mod tool_layer_images;
 #[path = "acp_session_impl/turn.rs"]
@@ -1689,6 +1691,9 @@ mod permission_auto_mode_tests;
 #[cfg(test)]
 #[path = "acp_session_tests/plan_approval_resume_tests.rs"]
 mod plan_approval_resume_tests;
+#[cfg(test)]
+#[path = "acp_session_tests/plan_approval_goal_tests.rs"]
+mod plan_approval_goal_tests;
 /// Mixed-batch plan.md write + exit_plan_mode snapshot.
 #[cfg(test)]
 #[path = "acp_session_tests/plan_exit_batch_barrier_tests.rs"]
