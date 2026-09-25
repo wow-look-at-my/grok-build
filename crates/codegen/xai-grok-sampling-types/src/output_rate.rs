@@ -496,6 +496,15 @@ impl OutputRateGate {
         }
         RateTick::Quiet
     }
+
+    /// Start the sustained-breach clock again at `now`, while the rate stays
+    /// under the floor. A breach is reported a single time per slowdown.
+    pub fn rearm(&mut self, now: Instant) {
+        if self.slow_since.is_some() {
+            self.slow_since = Some(self.measured_at(now));
+        }
+        self.breached = false;
+    }
 }
 
 #[cfg(test)]
@@ -632,14 +641,37 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_rearmed_gate_breaches_again_after_the_sustained_duration() {
+        let policy = collapsed_policy();
+        let start = Instant::now();
+        let mut gate = OutputRateGate::new(Some(policy));
+        let first = drive(&mut gate, start, 40 * 4, |_| 1);
+        assert_eq!(
+            first
+                .iter()
+                .filter(|t| matches!(t, RateTick::Breached { .. }))
+                .count(),
+            1,
+            "{first:?}"
+        );
+
+        let rearmed_at = start + Duration::from_secs(40);
+        gate.rearm(rearmed_at);
+        let within = drive(&mut gate, rearmed_at, 9 * 4, |_| 1);
+        assert!(
+            within.is_empty(),
+            "no breach inside the new sustained duration: {within:?}"
+        );
+        let after = drive(&mut gate, rearmed_at + Duration::from_secs(9), 4 * 4, |_| 1);
+        assert!(
+            matches!(after.as_slice(), [RateTick::Breached { .. }]),
+            "one more breach after it: {after:?}"
+        );
+    }
+
     /// A dip that recovers is reported at both edges and never reissued over.
-    ///
-    /// The dip has to outlast the measurement window to show up at all — a
-    /// four-second stall after a fast burst leaves the ten-second average
-    /// healthy, which is the whole point of averaging over a window. So this
-    /// drives a twelve-second collapse against a thirty-second sustained
-    /// duration: long enough for the window to see it, short enough that the
-    /// request is never reissued.
+    /// The collapse here outlasts the window but not the sustained duration.
     #[test]
     fn a_recovered_dip_never_breaches() {
         let policy = OutputRateFloorPolicy {
