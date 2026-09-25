@@ -1999,9 +1999,10 @@ async fn lifecycle_resume_with_plan_does_not_re_fire_planner() {
 
 /// End-to-end gate (enabled side): when the planner is on and writes a
 /// plan, `setup_goal`'s reminder folds in the plan-aware block carrying
-/// the actual `plan_path()` pointer, the "already on your list" statement
-/// (NOT a manual seed directive), the `## Deviations` instruction, and the
-/// legacy discipline intact.
+/// the actual `plan_path()` pointer, the `## Deviations` instruction, and the
+/// legacy discipline intact. This planner lists no todo items, so nothing is
+/// seeded: the reminder must tell the implementer to put the steps on the
+/// list, and must never claim they are already there.
 #[tokio::test(flavor = "current_thread")]
 #[serial]
 async fn setup_goal_reminder_is_plan_aware_when_planner_enabled() {
@@ -2032,9 +2033,14 @@ async fn setup_goal_reminder_is_plan_aware_when_planner_enabled() {
                 "the manual seed-todos directive must be gone — the harness \
                  populates the list itself:\n{reminder}"
             );
+            assert!(!snap.plan_todos_seeded, "this planner seeds nothing");
             assert!(
-                reminder.contains(PLAN_TODOS_ALREADY_SEEDED_PHRASE),
-                "the reminder must say the plan's steps are already on the list:\n{reminder}"
+                !reminder.contains(PLAN_TODOS_ALREADY_SEEDED_PHRASE),
+                "an unseeded goal must not be told its steps are on the list:\n{reminder}"
+            );
+            assert!(
+                reminder.contains(PLAN_TODOS_TO_ADD_PHRASE),
+                "an unseeded goal must be told to put the steps on the list:\n{reminder}"
             );
             assert!(
                 reminder.contains("append a bullet to the plan's single"),
@@ -2130,8 +2136,12 @@ async fn goal_resume_reminder_is_plan_aware_when_planner_enabled() {
                 "resume reminder must not re-issue the manual seed directive:\n{reminder}"
             );
             assert!(
-                reminder.contains(PLAN_TODOS_ALREADY_SEEDED_PHRASE),
-                "resume reminder must say the plan's steps are already on the list:\n{reminder}"
+                !reminder.contains(PLAN_TODOS_ALREADY_SEEDED_PHRASE),
+                "nothing was seeded, so resume must not claim the steps are on the list:\n{reminder}"
+            );
+            assert!(
+                reminder.contains(PLAN_TODOS_TO_ADD_PHRASE),
+                "resume must tell the implementer to put the steps on the list:\n{reminder}"
             );
         })
         .await;
