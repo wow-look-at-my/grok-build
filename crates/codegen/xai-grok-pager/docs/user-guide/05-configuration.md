@@ -152,14 +152,14 @@ Each setting also has an environment-variable override, applied on first load on
 
 #### Slow output
 
-Some inference engines drop to a crawl in the middle of a response. Grok watches the output rate and reissues a model call that stays too slow. Tune it in `/settings` → **Slow output**, or in `[ui]`. A change applies to the next model call of every running session.
+Some inference engines drop to a crawl in the middle of a response. Grok watches the output rate. When a model call stays too slow, Grok starts a backup of that call and keeps the slow one streaming. Whichever gets ahead is the answer, and a slow call that speeds back up cancels its backup. Tune it in `/settings` → **Slow output**, or in `[ui]`. A change applies to the next model call of every running session.
 
 | Key | Values (default) | Behavior |
 |-----|------------------|----------|
 | `min_output_tokens_per_sec` | `0`–`500` (`15`) | The floor. `0` turns detection off. `[model.<id>].min_output_tokens_per_sec` overrides it for one model. |
-| `output_rate_sustained_secs` | `1`–`600` (`10`) | How long the rate must stay under the floor before the call is reissued. |
+| `output_rate_sustained_secs` | `1`–`600` (`10`) | How long the rate must stay under the floor before a backup starts. |
 | `output_rate_window_secs` | `2`–`120` (`10`) | How many seconds of output the rate is averaged over. |
-| `output_rate_max_retries` | `0`–`5` (`2`) | How many times one call is reissued. After that the response is kept at whatever rate it runs. `0` never reissues. |
+| `output_rate_max_retries` | `0`–`5` (`2`) | How many backups one call can start. After that the response is kept at whatever rate it runs. `0` starts none. |
 | `ttft_timeout_secs` | `0`–`1800` (`120`) | Time-to-first-token limit. A call with no output this many seconds after it was sent is reissued, on the same retry budget. `0` turns it off. `[model_providers.<id>].ttft_timeout_secs` overrides it for a provider, and `[model.<id>].ttft_timeout_secs` for one model. |
 
 ```toml
