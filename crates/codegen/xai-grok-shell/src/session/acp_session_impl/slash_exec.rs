@@ -840,10 +840,11 @@ impl SessionActor {
                     tracker.account_elapsed();
                     match tracker.snapshot() {
                         Some(goal) => format!(
-                            "Goal: {}\nStatus: {:?} | Phase: {:?}\nGoal tokens used: {}\nElapsed: {}",
+                            "Goal: {}\nStatus: {:?} | Phase: {:?} | Mode: {}\nGoal tokens used: {}\nElapsed: {}",
                             goal.objective,
                             goal.status,
                             goal.phase,
+                            goal.mode.as_str(),
                             goal_tokens,
                             crate::session::goal_orchestrator::format_elapsed(goal.elapsed_ms),
                         ),

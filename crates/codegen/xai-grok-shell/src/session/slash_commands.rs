@@ -325,7 +325,9 @@ pub(super) const BUILTIN_COMMANDS: &[BuiltinCommand] = &[
     BuiltinCommand {
         name: "goal",
         description: "Set, manage, or check an autonomous goal",
-        argument_hint: Some("<objective> [--budget <tokens>] | status | pause | resume | clear"),
+        argument_hint: Some(
+            "[--lite|--full] <objective> [--budget <tokens>] | status | pause | resume | clear",
+        ),
         aliases: &[],
         model_authored_eligibility: ModelAuthoredEligibility::Denied,
         gate: BuiltinGate::Goal,
@@ -338,16 +340,66 @@ pub(super) const BUILTIN_COMMANDS: &[BuiltinCommand] = &[
                 "resume" => BuiltinAction::GoalResume,
                 "clear" => BuiltinAction::GoalClear,
                 _ => {
-                    let (objective, token_budget) = parse_goal_budget(trimmed);
+                    let (objective, token_budget, mode) = parse_goal_args(trimmed);
                     BuiltinAction::GoalSet {
                         objective,
                         token_budget,
+                        mode,
                     }
                 }
             }
         },
     },
 ];
+/// Split the `/goal` flags off an objective: a `--lite` or `--full` token
+/// at either end, and a trailing `--budget <tokens>`. A mode flag must be
+/// its own token, and text must remain after it.
+fn parse_goal_args(
+    trimmed: &str,
+) -> (
+    String,
+    Option<i64>,
+    Option<crate::session::goal_tracker::GoalMode>,
+) {
+    let (leading, rest) = take_goal_mode_flag(trimmed, true);
+    let (trailing, rest) = take_goal_mode_flag(rest, false);
+    let (objective, budget) = parse_goal_budget(rest);
+    // `--lite` may also sit before a trailing `--budget N`.
+    let (before_budget, objective) = match (trailing, budget) {
+        (None, Some(_)) => {
+            let (mode, rest) = take_goal_mode_flag(&objective, false);
+            (mode, rest.to_string())
+        }
+        _ => (None, objective),
+    };
+    (objective, budget, leading.or(trailing).or(before_budget))
+}
+
+fn take_goal_mode_flag(
+    text: &str,
+    leading: bool,
+) -> (Option<crate::session::goal_tracker::GoalMode>, &str) {
+    use crate::session::goal_tracker::GoalMode;
+    let split = if leading {
+        text.split_once(char::is_whitespace)
+            .map(|(flag, rest)| (flag, rest.trim_start()))
+    } else {
+        text.rsplit_once(char::is_whitespace)
+            .map(|(rest, flag)| (flag, rest.trim_end()))
+    };
+    let Some((flag, rest)) = split else {
+        return (None, text);
+    };
+    let mode = match flag {
+        "--lite" => GoalMode::Lite,
+        "--full" => GoalMode::Full,
+        _ => return (None, text),
+    };
+    if rest.is_empty() {
+        return (None, text);
+    }
+    (Some(mode), rest)
+}
 /// Split a trailing `--budget <tokens>` flag off a `/goal` objective.
 /// Only a TRAILING, standalone flag is consumed: the flag must be its own whitespace-separated token and the value a final all-digit positive token.
 /// Anything else stays part of the objective so a goal text that merely mentions the flag is never silently mangled.
@@ -1260,6 +1312,7 @@ pub(super) enum BuiltinAction {
     GoalSet {
         objective: String,
         token_budget: Option<i64>,
+        mode: Option<crate::session::goal_tracker::GoalMode>,
     },
     GoalStatus,
     GoalPause,

@@ -3,6 +3,8 @@
 
 use super::support::*;
 use super::*;
+use crate::session::goal_tracker::GoalMode;
+use serial_test::serial;
 use std::sync::Arc as StdArc;
 use std::sync::atomic::{AtomicUsize, Ordering as SeqOrd};
 use tempfile::TempDir;
@@ -533,7 +535,9 @@ async fn the_seed_reaches_the_client_as_a_plan_update() {
             let (actor, _tmp, mut event_rx) = make_planner_actor_with_events(Some(tx), true).await;
             arm_todo_writes(&actor).await;
 
-            let _ = actor.setup_goal("ship the exporter", None).await;
+            let _ = actor
+                .setup_goal("ship the exporter", None, GoalMode::Full)
+                .await;
 
             let plans = plan_updates(&mut event_rx);
             let entries = plans
@@ -557,7 +561,40 @@ async fn the_seed_reaches_the_client_as_a_plan_update() {
         .await;
 }
 
-/// The gate for criterion 2's "the run's tool calls include it": the real spawn
+#[tokio::test(flavor = "current_thread")]
+#[serial]
+async fn a_lite_goal_never_spawns_the_planner() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (tx, _count, capture) =
+                spawn_planner_coordinator_capturing(scripted_planner_with_todos());
+            let (actor, _tmp) = make_planner_actor(Some(tx), true).await;
+
+            let GoalSetupOutcome::Inference { reminder } =
+                actor.setup_goal("ship it", None, GoalMode::Lite).await
+            else {
+                panic!("a lite goal must flow through to inference");
+            };
+            assert!(!reminder.contains("Plan:"), "no plan block: {reminder}");
+            actor
+                .goal_tracker
+                .lock()
+                .pause(crate::session::goal_tracker::GoalPauseReason::User);
+            let _ = actor.resume_goal().await;
+
+            assert!(
+                capture.prompt.lock().unwrap().is_empty(),
+                "a lite goal must not spawn the planner"
+            );
+            let tracker = actor.goal_tracker.lock();
+            let o = tracker.snapshot().expect("goal exists");
+            assert_eq!(o.status, crate::session::goal_tracker::GoalStatus::Active);
+            assert!(o.plan_file.is_none());
+        })
+        .await;
+}
+
 /// path hands the planner a prompt that tells it to list the plan's work with
 /// the session's own todo tool — the instruction the whole feature rests on,
 /// asserted on the prompt the coordinator was actually given rather than on a
@@ -572,7 +609,9 @@ async fn the_planner_is_spawned_with_the_todo_instruction() {
             let (actor, _tmp) = make_planner_actor(Some(tx), true).await;
             arm_todo_writes(&actor).await;
 
-            let _ = actor.setup_goal("ship the exporter", None).await;
+            let _ = actor
+                .setup_goal("ship the exporter", None, GoalMode::Full)
+                .await;
 
             let prompts = capture.prompt.lock().unwrap().clone();
             assert_eq!(prompts.len(), 1, "one planner spawn for one goal");
@@ -651,8 +690,9 @@ async fn setup_goal_seeds_the_planners_own_items_without_a_model_turn() {
 
             // The whole point: `setup_goal` returns the reminder, so no model
             // turn has run — and the list is already populated when it does.
-            let GoalSetupOutcome::Inference { reminder } =
-                actor.setup_goal("ship the exporter", None).await
+            let GoalSetupOutcome::Inference { reminder } = actor
+                .setup_goal("ship the exporter", None, GoalMode::Full)
+                .await
             else {
                 panic!("a published plan must flow through to inference");
             };
@@ -712,7 +752,7 @@ async fn the_planner_childs_own_items_are_the_source_not_the_plan_prose() {
             let (actor, _tmp) = make_planner_actor(Some(tx), true).await;
             arm_todo_writes(&actor).await;
 
-            let _ = actor.setup_goal("ship it", None).await;
+            let _ = actor.setup_goal("ship it", None, GoalMode::Full).await;
 
             let landed = live_todo_contents(&actor).await;
             println!(
@@ -746,7 +786,9 @@ async fn a_planner_that_named_no_items_leaves_the_list_untouched() {
             let (actor, _tmp) = make_planner_actor(Some(tx), true).await;
             arm_todo_writes(&actor).await;
 
-            let _ = actor.setup_goal("ship the exporter", None).await;
+            let _ = actor
+                .setup_goal("ship the exporter", None, GoalMode::Full)
+                .await;
 
             let snap = actor.goal_tracker.lock().snapshot().cloned().unwrap();
             assert!(snap.plan_file.is_some(), "the plan was still published");
@@ -784,7 +826,9 @@ async fn goal_seeding_is_append_only_and_idempotent() {
                 live_todos(&actor).await
             );
 
-            let _ = actor.setup_goal("ship the exporter", None).await;
+            let _ = actor
+                .setup_goal("ship the exporter", None, GoalMode::Full)
+                .await;
             let after_publish = live_todos(&actor).await;
             println!("=== todo list AFTER planning ===\n{after_publish:?}\n");
 
@@ -864,7 +908,9 @@ async fn a_failed_planner_leaves_the_todo_list_untouched() {
             arm_todo_writes(&actor).await;
             write_existing_todo(&actor, "t1", "the user's own item").await;
 
-            let _ = actor.setup_goal("ship the exporter", None).await;
+            let _ = actor
+                .setup_goal("ship the exporter", None, GoalMode::Full)
+                .await;
 
             let snap = actor.goal_tracker.lock().snapshot().cloned().unwrap();
             assert!(snap.plan_file.is_none(), "fail-closed publishes no plan");
@@ -917,7 +963,9 @@ async fn send_now_queues_planner_context_without_restart() {
 
             let planner = {
                 let actor = StdArc::clone(&actor);
-                tokio::task::spawn_local(async move { actor.setup_goal("do X", None).await })
+                tokio::task::spawn_local(async move {
+                    actor.setup_goal("do X", None, GoalMode::Full).await
+                })
             };
 
             assert_eq!(
@@ -2125,7 +2173,8 @@ async fn setup_goal_reminder_is_plan_aware_when_planner_enabled() {
             let (actor, _tmp) = make_planner_actor(Some(tx), true).await;
             let plan_path = actor.goal_tracker.lock().plan_path();
 
-            let GoalSetupOutcome::Inference { reminder } = actor.setup_goal("ship it", None).await
+            let GoalSetupOutcome::Inference { reminder } =
+                actor.setup_goal("ship it", None, GoalMode::Full).await
             else {
                 panic!("a published plan must flow through to inference");
             };
@@ -2163,7 +2212,8 @@ async fn setup_goal_reminder_is_no_plan_when_planner_disabled() {
         .run_until(async {
             let (actor, _tmp) = make_planner_actor(None, false).await;
 
-            let GoalSetupOutcome::Inference { reminder } = actor.setup_goal("ship it", None).await
+            let GoalSetupOutcome::Inference { reminder } =
+                actor.setup_goal("ship it", None, GoalMode::Full).await
             else {
                 panic!("a disabled planner must flow through to inference");
             };
@@ -2240,7 +2290,9 @@ async fn setup_goal_returns_message_when_planner_pauses() {
             });
             let (actor, _tmp) = make_planner_actor(Some(tx), true).await;
 
-            let GoalSetupOutcome::Message(msg) = actor.setup_goal("ship it", None).await else {
+            let GoalSetupOutcome::Message(msg) =
+                actor.setup_goal("ship it", None, GoalMode::Full).await
+            else {
                 panic!("a planner pause must end the turn, not seed inference");
             };
 
@@ -2278,7 +2330,9 @@ async fn setup_goal_message_is_total_when_pause_message_missing() {
                 }
             });
 
-            let GoalSetupOutcome::Message(msg) = actor.setup_goal("ship it", None).await else {
+            let GoalSetupOutcome::Message(msg) =
+                actor.setup_goal("ship it", None, GoalMode::Full).await
+            else {
                 panic!("a goal paused mid-plan must end the turn");
             };
 

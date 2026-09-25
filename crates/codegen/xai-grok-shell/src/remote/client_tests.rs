@@ -1128,6 +1128,23 @@ fn parse_openrouter_style_listing_context_length_resolves_context_window() {
     assert_eq!(result.context_window.get(), 1_000_000);
 }
 #[test]
+fn parse_vllm_listing_max_model_len_resolves_context_window() {
+    // The shape vLLM's `/v1/models` returns. Its window is `max_model_len`.
+    let value = serde_json::json!({
+        "id": "Qwen/Qwen3-32B",
+        "object": "model",
+        "created": 1750000000,
+        "owned_by": "vllm",
+        "root": "Qwen/Qwen3-32B",
+        "parent": null,
+        "max_model_len": 40_960,
+        "permission": []
+    });
+    let result = parse_remote_model_value(&value, "http://localhost:8000/v1").unwrap();
+    assert_eq!(result.model, "Qwen/Qwen3-32B");
+    assert_eq!(result.context_window.get(), 40_960);
+}
+#[test]
 fn parse_openrouter_context_length_only_under_top_provider_resolves() {
     // Some OpenRouter listings carry `context_length` only under
     // `top_provider`, with no top-level window field at all. The parser must

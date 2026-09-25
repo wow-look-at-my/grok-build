@@ -186,6 +186,13 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - A `## Verification plan` step reads back what the goal built. It is not a permit. The implementer read "do X to confirm Y" as an instruction to do X. A planner-invented check then became an action on a system nobody put in scope. Every place that demands verification says so now. Those are the planner prompt's `## Verification plan` contract, `goal_rules.md`'s VERIFY AS YOU GO, `goal_plan_block.md`, and the per-turn continuation directive.
 - The planner is told to prefer reading what the work already produced over operating anything. Files, logs, hashes, build output and source are what it reads. That is the whole mechanism. There is no label grammar and no validator. An earlier attempt added a reach DSL, a keyword list and a reject-and-retry loop to a planner prompt that is already long. That buys rigidity rather than scope discipline.
 
+## Lite `/goal` mode
+
+- `/goal --lite <objective>` (the flag may also be the last token) runs no planner and no skeptic panel. `GoalOrchestration::mode` holds the choice. A snapshot with no `mode` field reads as `Full`.
+- The per-round evaluator (`goal_evaluator.rs`) is the whole check. Its `candidate_complete` ends the goal (`complete_lite_goal`). Any other verdict sends the model back. And the directive carries the evaluator's evidence as the reason. The evaluator prompt changes with the mode, because a lite verdict is final.
+- Every planner entry and plan-path read goes through `goal_planner_on()`, which is false for a lite goal. That includes the load-time reconcile, which otherwise pauses an active goal that has no plan.
+- On the legacy driver, a lite `update_goal(completed: true)` makes one evaluator call and is refused with `LiteCheckNotMet` unless the verdict is `candidate_complete`.
+
 ## `/todo` capture feature notes
 
 - `/todo <request>` rides the `/btw` path, not the prompt queue: `Action::SendTodo` → `x.ai/todo` → `SessionCommand::TodoCapture`, spawned on the session's LocalSet (`session/acp_session_impl/todo_capture.rs`). The running turn is never interrupted. And the parent conversation is never mutated — the capture agent works from a snapshot of it.
@@ -489,6 +496,7 @@ Every one of those is the test doing its job. Making them pass there means weake
 
 - Both serve an OpenAI-compatible `/v1`, and that endpoint answers `/v1/models` with an id and nothing else — no window, no capabilities, no residency. A model discovered that way lands on `DEFAULT_CONTEXT_WINDOW` (256k). Ollama's runner is loaded at whatever its VRAM allowed (`OLLAMA_CONTEXT_LENGTH` documents the default as "4k/32k/256k based on VRAM") and **drops the oldest messages in silence** when the prompt overflows. So the harness never compacts and the conversation loses its head with nothing on the wire to say so. Reading each runtime's own listing is what makes the catalog's number true, and it is the whole reason this feature exists.
 - `[model_providers.<id>].models_list_dialect` picks the listing shape (`openai` default, `ollama`, `lmstudio`). `remote/local_runtime.rs` is both local dialects. Ollama needs three calls (`/api/tags` for what is on disk, `/api/ps` for what is resident, `/api/show` per model for the window and capabilities); LM Studio's `/api/v1/models` carries all three in one answer, falling back to `/api/v0/models` for a build older than 0.4.0.
+- vLLM needs no dialect. Its `openai` listing carries the window as `max_model_len`, and `parse_remote_model_value` reads it.
 - `context_window_source` decides which of the two windows reaches the catalog, and defaults to `loaded`. An UNLOADED model has no running window, so it falls back to the maximum — never to the client default, which is the guess this feature exists to remove.
 - `/api/ps` lists CPU-resident runners too. `size_vram > 0` is what separates them, and a dot that claims VRAM for a CPU runner is wrong.
 - The window is read through `general.architecture` (`llama.context_length`, `qwen2.context_length`). A scan for any `*.context_length` also matches a projector's, which describes a different tensor.

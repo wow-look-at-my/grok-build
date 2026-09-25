@@ -763,6 +763,7 @@ pub(crate) fn parse_remote_model_value(
         .or_else(|| meta.and_then(|m| get_u64(m, "totalContextTokens")))
         .or_else(|| get_u64(obj, "context_length"))
         .or_else(|| top_provider.and_then(|tp| get_u64(tp, "context_length")))
+        .or_else(|| get_u64(obj, "max_model_len"))
         .or_else(|| get_u64(obj, "max_input_tokens"))
         .or_else(|| get_u64(obj, "maxInputTokens"))
         .filter(|&v| v > 0)
