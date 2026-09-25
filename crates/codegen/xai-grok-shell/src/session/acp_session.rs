@@ -2340,6 +2340,7 @@ mod managed_gateway_tool_tests {
 #[cfg(test)]
 #[path = "acp_session_tests/goal/goal_compaction_reseed_tests.rs"]
 mod goal_compaction_reseed_tests;
+#[cfg(test)]
 #[path = "acp_session_tests/goal/goal_lite_mode_tests.rs"]
 mod goal_lite_mode_tests;
 #[cfg(test)]
