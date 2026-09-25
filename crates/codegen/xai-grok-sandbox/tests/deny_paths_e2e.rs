@@ -605,14 +605,24 @@ fn subprocess_devbox_marker_spoof(workspace: &Path) {
 /// Genuine devbox re-exec: with the marker fast path removed, Landlock must now also apply inside the real bwrap without breaking startup.
 fn subprocess_devbox_genuine(workspace: &Path) {
     let profile = xai_grok_sandbox::ProfileName::Devbox;
-    subprocess_profile_and_bwrap_reexec(&profile, workspace);
+    // Devbox re-execs only to bind an existing /data read-only.
+    let data_present = Path::new("/data").exists();
+    if data_present {
+        subprocess_profile_and_bwrap_reexec(&profile, workspace);
+    } else {
+        #[cfg(target_os = "linux")]
+        if xai_grok_sandbox::bwrap_reexec_for_profile(&profile, workspace).is_some() {
+            eprintln!("FAIL: devbox with no /data must not re-exec into bwrap");
+            std::process::exit(2);
+        }
+    }
     let mut sandbox = xai_grok_sandbox::SandboxManager::new(profile, workspace);
     if let Err(e) = sandbox.apply(workspace) {
         eprintln!("sandbox apply failed: {e}");
         std::process::exit(3);
     }
     if !sandbox.is_applied() {
-        eprintln!("FAIL: devbox must apply Landlock inside genuine bwrap");
+        eprintln!("FAIL: devbox must apply Landlock (data_present={data_present})");
         std::process::exit(4);
     }
     #[cfg(target_os = "linux")]
@@ -629,7 +639,11 @@ fn subprocess_devbox_genuine(workspace: &Path) {
         eprintln!("FAIL: genuine devbox /data must remain readable: {e}");
         std::process::exit(5);
     }
-    eprintln!("OK: devbox enforcement applied inside genuine bwrap");
+    if data_present {
+        eprintln!("OK: devbox enforcement applied inside genuine bwrap");
+    } else {
+        eprintln!("OK: devbox enforcement applied in place with no /data to bind");
+    }
     std::process::exit(0);
 }
 /// Workspace-profile Grok-owned hook write-deny probes (existing sources and first-run).
@@ -1153,10 +1167,14 @@ fn devbox_genuine_reexec_applies_enforcement() {
         .output()
         .expect("failed to spawn subprocess");
     let stderr = String::from_utf8_lossy(&output.stderr);
+    let expected = if Path::new("/data").exists() {
+        "OK: devbox enforcement applied inside genuine bwrap"
+    } else {
+        "OK: devbox enforcement applied in place with no /data to bind"
+    };
     assert!(
-        output.status.success()
-            && stderr.contains("OK: devbox enforcement applied inside genuine bwrap"),
-        "genuine devbox re-exec must keep applying enforcement\nstderr: {stderr}"
+        output.status.success() && stderr.contains(expected),
+        "genuine devbox startup must keep applying enforcement\nstderr: {stderr}"
     );
 }
 /// Hard-linked registry file must refuse sandbox startup (writable alias).
