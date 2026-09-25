@@ -1247,7 +1247,9 @@ impl SessionActor {
         if !self.goal_runs_on_workflow_engine() {
             self.maybe_reconcile_active_goal_without_harness().await;
         }
-        self.maybe_reconcile_active_goal_without_plan().await;
+        if self.goal_planner_on() {
+            self.maybe_reconcile_active_goal_without_plan().await;
+        }
         availability
     }
     /// Build the `CommandAvailability` snapshot from a precomputed slice
@@ -2190,6 +2192,9 @@ mod managed_gateway_tool_tests {
         assert!(!names.contains("slack__search"));
     }
 }
+#[cfg(test)]
+#[path = "acp_session_tests/goal/goal_lite_mode_tests.rs"]
+mod goal_lite_mode_tests;
 #[cfg(test)]
 #[path = "acp_session_tests/goal/goal_planner_e2e_tests.rs"]
 mod goal_planner_e2e_tests;
