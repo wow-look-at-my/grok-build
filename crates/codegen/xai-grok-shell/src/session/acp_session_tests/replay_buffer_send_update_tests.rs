@@ -548,6 +548,7 @@ async fn a_streaming_tool_call_is_named_from_the_arguments_so_far() {
             let fixture = read_file_streaming_fixture().await;
             let actor = Arc::new(fixture.actor);
             let req = RequestId::random();
+            own_request(&actor, &req);
             actor
                 .handle_sampling_event(SamplingEvent::StreamStarted {
                     request_id: req.clone(),
@@ -592,9 +593,11 @@ async fn a_streaming_tool_call_is_named_from_the_arguments_so_far() {
             );
             // A new stream reuses index 0, so the abandoned attempt's arguments
             // have to be gone by the time it opens.
+            let retry = RequestId::random();
+            own_request(&actor, &retry);
             actor
                 .handle_sampling_event(SamplingEvent::StreamStarted {
-                    request_id: RequestId::random(),
+                    request_id: retry,
                     timestamp_ms: 1,
                 })
                 .await;
@@ -613,6 +616,7 @@ async fn an_unreadable_streaming_call_is_left_unnamed() {
             let fixture = read_file_streaming_fixture().await;
             let actor = Arc::new(fixture.actor);
             let req = RequestId::random();
+            own_request(&actor, &req);
             actor
                 .handle_sampling_event(SamplingEvent::StreamStarted {
                     request_id: req.clone(),
@@ -645,6 +649,14 @@ async fn read_file_streaming_fixture() -> ReplaySendUpdateFixture {
     *fixture.actor.agent.borrow_mut() =
         test_agent_with_tools(vec![ToolConfig::for_tool::<ReadFileTool>()]).await;
     fixture
+}
+/// The actor drops sampler events for a request no turn owns.
+fn own_request(actor: &SessionActor, request_id: &xai_grok_sampler::RequestId) {
+    let (tx, _rx) = tokio::sync::oneshot::channel();
+    actor.turn_stream_drained.lock().insert(
+        request_id.clone(),
+        crate::session::acp_session::StreamOwnership::with_waiter(Some(tx)),
+    );
 }
 /// The title the actor has resolved for the call at `tool_index`, if any.
 fn streaming_title(actor: &SessionActor, tool_index: u32) -> Option<String> {
