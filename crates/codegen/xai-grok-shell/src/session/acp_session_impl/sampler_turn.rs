@@ -2141,6 +2141,11 @@ impl SessionActor {
                     if self.length_salvage_budget().is_none()
                         && original.kind == xai_grok_sampler::SamplingErrorKind::MaxTokensTruncation
                     {
+                        eprintln!(
+                            "DBGLEN queued={terminal_event_queued} outcome={outcome:?} cap={:?} segs={}",
+                            self.streaming_turn_capture.lock().response_text,
+                            self.streaming_turn_capture.lock().segments.len()
+                        );
                         let partial = self.partial_assistant_from_capture().await;
                         tracing::info!(
                             has_partial = partial.is_some(),
