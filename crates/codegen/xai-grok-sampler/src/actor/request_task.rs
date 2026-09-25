@@ -172,12 +172,12 @@ pub(crate) async fn run_request_task(
 
         // Once the resample budget is spent, the attempt runs with the abort
         // disarmed so it can complete and be accepted as-is.
-        let doom_check = doom_policy.filter(|_| doom_retry_count < doom_max_retries);
+        let doom_check = doom_policy.filter(|p| p.has_retries_left(doom_retry_count));
         // Same disarm as the doom check: once the resample budget is spent the
         // attempt runs ungated, so a persistently slow engine still answers
         // instead of the turn dying.
         let rate_check =
-            rate_policy.filter(|_| rate_retry_count.load(Ordering::Relaxed) < rate_max_retries);
+            rate_policy.filter(|p| p.has_retries_left(rate_retry_count.load(Ordering::Relaxed)));
         // A backup replaces output the caller has already seen, which is
         // exactly what a before-output-only caller cannot take.
         let backup = rate_policy
@@ -302,7 +302,7 @@ pub(crate) async fn run_request_task(
                         return request_id;
                     }
                     let backoff = retry_mod::doom_loop_backoff(doom_retry_count + 1);
-                    doom_retry_count += 1;
+                    doom_retry_count = doom_retry_count.saturating_add(1);
                     tracing::warn!(
                         target: crate::sampling_log::TARGET,
                         reason = %error,
@@ -1253,11 +1253,13 @@ impl<'a> BackupLauncher<'a> {
         let attempt = self
             .spent
             .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| {
-                (n < self.budget).then_some(n + 1)
+                self.rate_policy
+                    .has_retries_left(n)
+                    .then_some(n.saturating_add(1))
             })
             .ok()?
-            + 1;
-        let rate_check = Some(self.rate_policy).filter(|_| attempt < self.budget);
+            .saturating_add(1);
+        let rate_check = Some(self.rate_policy).filter(|p| p.has_retries_left(attempt));
         let (tx, events) = mpsc::unbounded_channel();
         let cancel = parent.child_token();
         let token = cancel.clone();
