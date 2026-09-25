@@ -4,11 +4,12 @@
 use std::pin::pin;
 use std::sync::{
     Arc, Mutex,
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicU32, Ordering},
 };
 use std::time::Duration;
 
 use futures_util::StreamExt;
+use futures_util::future::BoxFuture;
 use futures_util::stream::BoxStream;
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
@@ -149,7 +150,8 @@ pub(crate) async fn run_request_task(
         .flatten()
         .filter(OutputRateFloorPolicy::is_armed);
     let rate_max_retries = rate_policy.map_or(0, |p| p.max_retries);
-    let mut rate_retry_count: u32 = 0;
+    // Atomic because a backup generation spends it from inside an attempt.
+    let rate_retry_count = AtomicU32::new(0);
     // A fourth budget, for a stream that died mid-body. Same reasoning as the
     // two above: a dropped connection is not a server fault, and it must not
     // spend what the next 5xx needs.
@@ -171,7 +173,22 @@ pub(crate) async fn run_request_task(
         // Same disarm as the doom check: once the resample budget is spent the
         // attempt runs ungated, so a persistently slow engine still answers
         // instead of the turn dying.
-        let rate_check = rate_policy.filter(|_| rate_retry_count < rate_max_retries);
+        let rate_check =
+            rate_policy.filter(|_| rate_retry_count.load(Ordering::Relaxed) < rate_max_retries);
+        // A backup replaces output the caller has already seen, which is
+        // exactly what a before-output-only caller cannot take.
+        let backup = rate_policy
+            .filter(|_| !retry_policy.retry_only_before_output)
+            .map(|rate_policy| BackupLauncher {
+                client: &client,
+                request: &request,
+                request_id: request_id.clone(),
+                idle_timeout,
+                doom_check,
+                rate_policy,
+                spent: &rate_retry_count,
+                budget: rate_max_retries,
+            });
         let outcome = run_one_attempt(
             &client,
             request.clone(),
@@ -182,9 +199,11 @@ pub(crate) async fn run_request_task(
             doom_check,
             rate_check,
             Arc::clone(&output_observed),
+            backup.as_ref(),
         )
         .instrument(sampling_span.clone())
         .await;
+        drop(backup);
 
         let effective_max_retries =
             if retry_policy.retry_only_before_output && output_observed.load(Ordering::Relaxed) {
@@ -204,8 +223,11 @@ pub(crate) async fn run_request_task(
                         .iter()
                         .map(|signal| signal.raw.clone()),
                 );
-                metrics.attempts =
-                    retry_count + doom_retry_count + rate_retry_count + stream_retry_count + 1;
+                metrics.attempts = retry_count
+                    + doom_retry_count
+                    + rate_retry_count.load(Ordering::Relaxed)
+                    + stream_retry_count
+                    + 1;
                 if let Some(policy) = doom_policy {
                     let confident = policy.confident_triggers(&response.doom_loop_signals);
                     if !confident.is_empty() {
@@ -355,8 +377,8 @@ pub(crate) async fn run_request_task(
                         );
                         return request_id;
                     }
-                    let backoff = retry_mod::output_rate_backoff(rate_retry_count + 1);
-                    rate_retry_count += 1;
+                    let rate_retry_count = rate_retry_count.fetch_add(1, Ordering::Relaxed) + 1;
+                    let backoff = retry_mod::output_rate_backoff(rate_retry_count);
                     match &error {
                         SamplingError::FirstTokenTimeout {
                             waited_secs,
@@ -738,8 +760,12 @@ async fn sleep_or_cancel(
     }
 }
 
-/// Run a single attempt: build the raw stream, drive it through the matching L2 transform, and forward all non-terminal events to `event_tx`.
-/// `None` disarms the mid-stream abort and the terminal confidence check so the attempt completes and its response can be accepted.
+/// Run a single attempt: build the raw stream, drive it through the
+/// matching L2 transform, and forward all non-terminal events to `event_tx`.
+/// The rich `SamplingError` of the raw stream is kept for the retry loop.
+///
+/// A `None` for `doom_check` disarms the doom checks, so the response is kept.
+/// The `backup` launcher starts another generation on a rate-floor breach.
 #[allow(clippy::too_many_arguments)]
 async fn run_one_attempt(
     client: &SamplingClient,
@@ -751,6 +777,7 @@ async fn run_one_attempt(
     doom_check: Option<xai_grok_sampling_types::DoomLoopRecoveryPolicy>,
     rate_check: Option<OutputRateFloorPolicy>,
     output_observed: Arc<AtomicBool>,
+    backup: Option<&BackupLauncher<'_>>,
 ) -> AttemptOutcome {
     let ttft = FirstTokenDeadline::start(rate_check);
     let length_policy = request.length_policy;
@@ -774,6 +801,7 @@ async fn run_one_attempt(
                 FailedResponseCapture::default(),
                 output_observed,
                 length_policy,
+                backup,
             )
             .await
         }
@@ -818,6 +846,7 @@ async fn run_one_attempt(
                 failed_response,
                 output_observed,
                 length_policy,
+                backup,
             )
             .await
         }
@@ -843,6 +872,7 @@ async fn run_one_attempt(
                 FailedResponseCapture::default(),
                 output_observed,
                 length_policy,
+                backup,
             )
             .await
         }
@@ -866,6 +896,7 @@ async fn run_one_attempt(
                 FailedResponseCapture::default(),
                 output_observed,
                 length_policy,
+                backup,
             )
             .await
         }
@@ -964,9 +995,15 @@ fn tee_errors<'a, T: Send + 'a>(
 /// every backend's tokens and tool-call arguments pass through this loop, so
 /// one meter covers all three and the gate and the published rate are the same
 /// measurement. `rate_check`, when set, turns a full window under its floor
-/// into a retryable failure; dropping this future drops the L2 stream, which
-/// is what cancels the HTTP request. `ttft` fails an attempt that has sent no
-/// output by its deadline; the same tick checks it.
+/// into a slow response. With a `backup` launcher the slow response keeps
+/// streaming and another generation starts beside it, hidden. The earliest
+/// of these to happen decides the race:
+///
+/// - The original recovers above the floor or finishes: the backup stops.
+/// - The backup overtakes or finishes, or the original fails: it takes over.
+///
+/// Dropping this future drops the L2 stream, which cancels the HTTP request.
+/// The `ttft` deadline fails an attempt with no output, on the same tick.
 #[allow(clippy::too_many_arguments)]
 async fn drive_l2(
     l2: impl futures_util::Stream<Item = SamplingEvent>,
@@ -980,10 +1017,15 @@ async fn drive_l2(
     failed_response: FailedResponseCapture,
     output_observed: Arc<AtomicBool>,
     length_policy: xai_grok_sampling_types::LengthPolicy,
+    backup: Option<&BackupLauncher<'_>>,
 ) -> AttemptOutcome {
     let mut l2 = pin!(l2);
     // Per attempt: `output_observed` spans every attempt of the request.
     let mut first_output_seen = false;
+    let mut hedge: Option<Backup<'_>> = None;
+    // Output bytes this attempt has sent. A backup that passes it has
+    // overtaken, and nothing on screen is lost by the swap.
+    let mut generated_total: u64 = 0;
     // The gate measures whether or not a floor is armed: the rate it
     // publishes is what the client renders, and a session with no floor still
     // wants the number.
@@ -1030,6 +1072,9 @@ async fn drive_l2(
                             event = "output_rate_slowdown_end",
                             "output rate recovered above the floor"
                         );
+                        if let Some(b) = hedge.take() {
+                            b.abandon(&request_id, "the original recovered above the floor");
+                        }
                     }
                     RateTick::Breached { tokens_per_sec, slow_for } => {
                         let policy = rate_check.unwrap_or_default();
@@ -1043,19 +1088,80 @@ async fn drive_l2(
                             event = "output_rate_breached",
                             "output rate stayed under the floor for the sustained duration"
                         );
-                        return AttemptOutcome::Failed {
-                            error: SamplingError::OutputRateCollapsed {
-                                observed_tokens_per_sec: tokens_per_sec,
-                                floor_tokens_per_sec: policy.min_tokens_per_sec,
-                                window_secs: policy.window_secs,
-                            },
-                            doom_loop_signals,
-                            recovery_items: Vec::new(),
+                        let error = SamplingError::OutputRateCollapsed {
+                            observed_tokens_per_sec: tokens_per_sec,
+                            floor_tokens_per_sec: policy.min_tokens_per_sec,
+                            window_secs: policy.window_secs,
                         };
+                        let Some(launcher) = backup else {
+                            return AttemptOutcome::Failed {
+                                error,
+                                doom_loop_signals,
+                                recovery_items: Vec::new(),
+                            };
+                        };
+                        match launcher.launch(cancel_token, error) {
+                            Some(b) => {
+                                tracing::warn!(
+                                    target: crate::sampling_log::TARGET,
+                                    request_id = %request_id.as_str(),
+                                    attempt = b.attempt,
+                                    max_retries = b.budget,
+                                    original_output_bytes = generated_total,
+                                    event = "output_rate_backup_started",
+                                    "output-rate floor: started a backup generation; the slow one keeps streaming"
+                                );
+                                hedge = Some(b);
+                            }
+                            None => tracing::warn!(
+                                target: crate::sampling_log::TARGET,
+                                request_id = %request_id.as_str(),
+                                max_retries = launcher.budget,
+                                event = "output_rate_backup_budget_spent",
+                                "output-rate floor: backup budget spent; accepting the slow response"
+                            ),
+                        }
                     }
                 }
                 publish_rate(&gate, now, &request_id, event_tx, &mut last_published);
             }
+            signal = next_backup_signal(&mut hedge) => match signal {
+                BackupSignal::Event(event) => {
+                    let Some(b) = hedge.as_mut() else {
+                        unreachable!("a signal only comes from a running backup")
+                    };
+                    b.buffer(event);
+                    if b.generated > generated_total {
+                        let Some(b) = hedge.take() else {
+                            unreachable!("checked above")
+                        };
+                        return b
+                            .adopt(&request_id, event_tx, cancel_token, "it overtook the original", None)
+                            .await;
+                    }
+                }
+                BackupSignal::Done(outcome) => {
+                    let Some(b) = hedge.take() else {
+                        unreachable!("a signal only comes from a running backup")
+                    };
+                    if matches!(outcome, AttemptOutcome::Completed { .. }) {
+                        return b
+                            .adopt(&request_id, event_tx, cancel_token, "it finished first", Some(outcome))
+                            .await;
+                    }
+                    tracing::warn!(
+                        target: crate::sampling_log::TARGET,
+                        request_id = %request_id.as_str(),
+                        attempt = b.attempt,
+                        outcome = outcome.describe(),
+                        event = "output_rate_backup_failed",
+                        "output-rate floor: the backup generation failed; the slow one keeps streaming"
+                    );
+                    // Another sustained duration under the floor may start
+                    // another backup, while budget remains.
+                    gate.rearm(std::time::Instant::now());
+                }
+            },
             next = l2.next() => match next {
                 Some(SamplingEvent::Completed { response, metrics, .. }) => {
                     output_observed.store(true, Ordering::Relaxed);
@@ -1071,49 +1177,31 @@ async fn drive_l2(
                             triggers: all_triggers.clone(),
                         });
                     }
-                    // Doom outranks the truncation/empty classes: a confident loop poisons the attempt whatever else it looks like
-                    if let Some(policy) = doom_check {
-                        let triggers = policy.confident_triggers(&response.doom_loop_signals);
-                        if !triggers.is_empty() {
-                            return AttemptOutcome::Failed {
-                                error: SamplingError::DoomLoopDetected {
-                                    triggers,
-                                    aborted_at_chunk: None,
-                                },
-                                doom_loop_signals: all_triggers,
-                                recovery_items: failed_response.take_items(),
-                            };
+                    let outcome = completed_outcome(
+                        response,
+                        metrics,
+                        doom_check,
+                        length_policy,
+                        all_triggers,
+                        &failed_response,
+                    );
+                    if let Some(b) = hedge.take() {
+                        if !matches!(outcome, AttemptOutcome::Completed { .. }) {
+                            return b
+                                .adopt(&request_id, event_tx, cancel_token, "the original ended unusable", None)
+                                .await;
                         }
+                        b.abandon(&request_id, "the original finished first");
                     }
-                    // Fail-vs-salvage is centralized in `apply_length_policy`; detector metadata survives a failing verdict
-                    // A salvaged response has no empty reason, so it falls through to `Completed` below
-                    let response =
-                        match crate::client::apply_length_policy(length_policy, *response) {
-                            Ok(response) => Box::new(response),
-                            Err(error) => {
-                                return AttemptOutcome::Failed {
-                                    error,
-                                    doom_loop_signals: all_triggers,
-                                    recovery_items: Vec::new(),
-                                };
-                            }
-                        };
-                    // A content-filtered turn (Anthropic refusal, OpenAI
-                    // content_filter stop reason) is legitimately content-less and
-                    // deterministic — resampling it would retry-storm.
-                    let content_filtered = response.stop_reason
-                        == Some(xai_grok_sampling_types::StopReason::ContentFilter);
-                    if !content_filtered && let Some(reason) = response.empty_reason() {
-                        let context = build_empty_context(reason, &response);
-                        return AttemptOutcome::Empty {
-                            context,
-                            doom_loop_signals: all_triggers,
-                        };
-                    }
-                    return AttemptOutcome::Completed { response, metrics };
+                    return outcome;
                 }
                 Some(SamplingEvent::Failed { error: info, .. }) => {
                     await_first_output_span.take();
+                    if let Some(b) = hedge.take() {
+                        return b
+                            .adopt(&request_id, event_tx, cancel_token, "the original failed", None)
+                            .await;
+                    }
                     let raw = captured
                         .lock()
                         .ok()
@@ -1178,21 +1266,23 @@ async fn drive_l2(
                     // response that collapses while writing a large edit is
                     // the case the floor exists for, and counting only text
                     // would read it as total silence.
-                    let generated = match &other {
-                        SamplingEvent::ChannelToken { text, .. } => text.len() as u64,
-                        SamplingEvent::ToolCallDelta { arguments_delta, .. } => {
-                            arguments_delta.as_ref().map_or(0, |d| d.len() as u64)
-                        }
-                        _ => 0,
-                    };
+                    let generated = generated_bytes(&other);
                     if generated > 0 {
                         gate.record(std::time::Instant::now(), generated);
+                        generated_total = generated_total.saturating_add(generated);
                     }
                     let _ = event_tx.send(retag(other, &request_id));
                 }
                 None => {
-                    // L2 streams always terminate with Completed or Failed
-                    // Reaching None means the producer was dropped without termination; treat it as a synthetic transport error
+                    if let Some(b) = hedge.take() {
+                        return b
+                            .adopt(&request_id, event_tx, cancel_token, "the original failed", None)
+                            .await;
+                    }
+                    // L2 streams always terminate with Completed or
+                    // Failed; reaching None means the producer was
+                    // dropped without termination -- treat as a
+                    // synthetic transport error.
                     return AttemptOutcome::Failed {
                         error: SamplingError::EventStreamError(
                             "stream dropped without terminal event".to_string(),
@@ -1206,8 +1296,270 @@ async fn drive_l2(
     }
 }
 
+/// Judge a response the L2 stream completed with.
+fn completed_outcome(
+    response: Box<ConversationResponse>,
+    metrics: InferenceLatencyStats,
+    doom_check: Option<xai_grok_sampling_types::DoomLoopRecoveryPolicy>,
+    length_policy: xai_grok_sampling_types::LengthPolicy,
+    doom_loop_signals: Vec<String>,
+    failed_response: &FailedResponseCapture,
+) -> AttemptOutcome {
+    // Doom outranks the truncation/empty classes: a confident loop poisons
+    // the attempt whatever else it looks like.
+    if let Some(policy) = doom_check {
+        let triggers = policy.confident_triggers(&response.doom_loop_signals);
+        if !triggers.is_empty() {
+            return AttemptOutcome::Failed {
+                error: SamplingError::DoomLoopDetected {
+                    triggers,
+                    aborted_at_chunk: None,
+                },
+                doom_loop_signals,
+                recovery_items: failed_response.take_items(),
+            };
+        }
+    }
+    // `apply_length_policy` decides fail or salvage. A salvaged response has
+    // no empty reason, so it reaches `Completed`.
+    let response = match crate::client::apply_length_policy(length_policy, *response) {
+        Ok(response) => Box::new(response),
+        Err(error) => {
+            return AttemptOutcome::Failed {
+                error,
+                doom_loop_signals,
+                recovery_items: Vec::new(),
+            };
+        }
+    };
+    // A content filter's empty answer is deterministic. A resample repeats it.
+    let content_filtered =
+        response.stop_reason == Some(xai_grok_sampling_types::StopReason::ContentFilter);
+    if !content_filtered && let Some(reason) = response.empty_reason() {
+        let context = build_empty_context(reason, &response);
+        return AttemptOutcome::Empty {
+            context,
+            doom_loop_signals,
+        };
+    }
+    AttemptOutcome::Completed { response, metrics }
+}
+
+/// Output bytes an event carries.
+fn generated_bytes(event: &SamplingEvent) -> u64 {
+    match event {
+        SamplingEvent::ChannelToken { text, .. } => text.len() as u64,
+        SamplingEvent::ToolCallDelta {
+            arguments_delta, ..
+        } => arguments_delta.as_ref().map_or(0, |d| d.len() as u64),
+        _ => 0,
+    }
+}
+
+impl AttemptOutcome {
+    /// A short name for a log line.
+    fn describe(&self) -> String {
+        match self {
+            Self::Completed { .. } => "completed".to_string(),
+            Self::Empty { context, .. } => format!("empty: {}", context.reason),
+            Self::Failed { error, .. } | Self::InitFailed { error } => error.to_string(),
+            Self::Cancelled => "cancelled".to_string(),
+        }
+    }
+}
+
+/// What an attempt needs to start a backup generation beside itself when its
+/// rate floor breaches. The backup sends the same request the slow attempt
+/// sent, so a provider's prefix cache serves its whole prompt.
+pub(crate) struct BackupLauncher<'a> {
+    client: &'a SamplingClient,
+    request: &'a ConversationRequest,
+    request_id: RequestId,
+    idle_timeout: Duration,
+    doom_check: Option<xai_grok_sampling_types::DoomLoopRecoveryPolicy>,
+    rate_policy: OutputRateFloorPolicy,
+    spent: &'a AtomicU32,
+    budget: u32,
+}
+
+impl<'a> BackupLauncher<'a> {
+    /// Start a backup, or `None` when the rate budget is spent. `cause` is the
+    /// breach, reported to the caller if the backup replaces the original.
+    ///
+    /// The backup starts no backup of its own. After it replaces the original,
+    /// a breach of its floor ends the attempt, and the retry loop reissues.
+    fn launch(&self, parent: &CancellationToken, cause: SamplingError) -> Option<Backup<'a>> {
+        let attempt = self
+            .spent
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| {
+                (n < self.budget).then_some(n + 1)
+            })
+            .ok()?
+            + 1;
+        let rate_check = Some(self.rate_policy).filter(|_| attempt < self.budget);
+        let (tx, events) = mpsc::unbounded_channel();
+        let cancel = parent.child_token();
+        let token = cancel.clone();
+        let client = self.client;
+        let request = self.request.clone();
+        let request_id = self.request_id.clone();
+        let idle_timeout = self.idle_timeout;
+        let doom_check = self.doom_check;
+        let run: BoxFuture<'a, AttemptOutcome> = Box::pin(async move {
+            run_one_attempt(
+                client,
+                request,
+                request_id,
+                idle_timeout,
+                &tx,
+                &token,
+                doom_check,
+                rate_check,
+                Arc::new(AtomicBool::new(false)),
+                None,
+            )
+            .await
+        });
+        Some(Backup {
+            run,
+            events,
+            events_closed: false,
+            buffered: Vec::new(),
+            generated: 0,
+            cancel,
+            attempt,
+            budget: self.budget,
+            cause,
+        })
+    }
+}
+
+/// A backup generation in flight. Its events are held back until it replaces
+/// the original, because the caller renders a single stream at a time.
+struct Backup<'a> {
+    run: BoxFuture<'a, AttemptOutcome>,
+    events: mpsc::UnboundedReceiver<SamplingEvent>,
+    events_closed: bool,
+    buffered: Vec<SamplingEvent>,
+    generated: u64,
+    cancel: CancellationToken,
+    attempt: u32,
+    budget: u32,
+    cause: SamplingError,
+}
+
+enum BackupSignal {
+    Event(SamplingEvent),
+    Done(AttemptOutcome),
+}
+
+/// The next thing the running backup does. Never resolves with no backup.
+async fn next_backup_signal(hedge: &mut Option<Backup<'_>>) -> BackupSignal {
+    match hedge {
+        Some(b) => b.next_signal().await,
+        None => std::future::pending().await,
+    }
+}
+
+impl Backup<'_> {
+    async fn next_signal(&mut self) -> BackupSignal {
+        loop {
+            tokio::select! {
+                biased;
+                event = self.events.recv(), if !self.events_closed => match event {
+                    Some(event) => return BackupSignal::Event(event),
+                    None => self.events_closed = true,
+                },
+                outcome = &mut self.run => return BackupSignal::Done(outcome),
+            }
+        }
+    }
+
+    /// Hold an event back. The rate a hidden stream runs at is not the rate
+    /// on screen, so its rate events are dropped rather than replayed stale.
+    fn buffer(&mut self, event: SamplingEvent) {
+        if matches!(event, SamplingEvent::OutputRate { .. }) {
+            return;
+        }
+        self.generated = self.generated.saturating_add(generated_bytes(&event));
+        self.buffered.push(event);
+    }
+
+    /// Cancel the backup. Dropping its future drops its HTTP request.
+    fn abandon(self, request_id: &RequestId, why: &str) {
+        self.cancel.cancel();
+        tracing::info!(
+            target: crate::sampling_log::TARGET,
+            request_id = %request_id.as_str(),
+            attempt = self.attempt,
+            backup_output_bytes = self.generated,
+            event = "output_rate_backup_cancelled",
+            "output-rate floor: cancelled the backup generation because {why}"
+        );
+    }
+
+    /// Replace the original with this backup: tell the caller, replay what
+    /// the backup has produced, then follow it live to its end.
+    async fn adopt(
+        mut self,
+        request_id: &RequestId,
+        event_tx: &mpsc::UnboundedSender<SamplingEvent>,
+        cancel_token: &CancellationToken,
+        why: &str,
+        finished: Option<AttemptOutcome>,
+    ) -> AttemptOutcome {
+        tracing::warn!(
+            target: crate::sampling_log::TARGET,
+            request_id = %request_id.as_str(),
+            attempt = self.attempt,
+            backup_output_bytes = self.generated,
+            event = "output_rate_backup_adopted",
+            "output-rate floor: switched to the backup generation because {why}"
+        );
+        emit_retrying(
+            event_tx,
+            request_id,
+            self.attempt,
+            self.budget,
+            &self.cause,
+            None,
+        );
+        if finished.is_some() {
+            while let Ok(event) = self.events.try_recv() {
+                self.buffer(event);
+            }
+        }
+        for event in self.buffered.drain(..) {
+            let _ = event_tx.send(event);
+        }
+        if let Some(outcome) = finished {
+            return outcome;
+        }
+        loop {
+            tokio::select! {
+                biased;
+                _ = cancel_token.cancelled() => {
+                    self.cancel.cancel();
+                    return AttemptOutcome::Cancelled;
+                }
+                signal = self.next_signal() => match signal {
+                    BackupSignal::Event(event) => {
+                        let _ = event_tx.send(event);
+                    }
+                    BackupSignal::Done(outcome) => {
+                        while let Ok(event) = self.events.try_recv() {
+                            let _ = event_tx.send(event);
+                        }
+                        return outcome;
+                    }
+                },
+            }
+        }
+    }
+}
+
 /// Publish the gate's current rate. The event's whole job is to change what a
-/// client renders, so an unchanged reading is not sent — with one exception:
+/// client renders, so an unchanged reading is not sent — with a single exception:
 /// while the rate is under the floor the event also carries how long that has
 /// lasted, and that number moves even when the rate does not.
 fn publish_rate(
@@ -1611,6 +1963,7 @@ mod tests {
             FailedResponseCapture::default(),
             Arc::new(AtomicBool::new(false)),
             policy,
+            None,
         )
         .await
     }
@@ -1633,6 +1986,7 @@ mod tests {
             FailedResponseCapture::default(),
             Arc::new(AtomicBool::new(false)),
             xai_grok_sampling_types::LengthPolicy::Fail,
+            None,
         )
         .await
     }
@@ -1698,6 +2052,7 @@ mod tests {
             FailedResponseCapture::default(),
             Arc::new(AtomicBool::new(false)),
             xai_grok_sampling_types::LengthPolicy::Fail,
+            None,
         )
         .await;
 
@@ -1726,6 +2081,7 @@ mod tests {
         let outcome = drive_length_event(
             length_completed_event("partial"),
             xai_grok_sampling_types::LengthPolicy::Fail,
+            None,
         )
         .await;
         assert!(matches!(

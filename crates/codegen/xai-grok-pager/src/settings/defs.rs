@@ -757,9 +757,9 @@ pub fn default_settings() -> Vec<SettingMeta> {
             category: SettingCategory::Agent,
             owner: SettingOwner::Shared,
             label: "Slow-output grace period",
-            description: "How long the output rate must stay under the floor above before the \
-                          request is reissued. A shorter dip is a pause, not a collapsed \
-                          engine, and reissuing over one throws away good generation.",
+            description: "How long the output rate must stay under the floor above before a \
+                          backup of the request starts beside the slow one. A shorter dip is \
+                          a pause, not a collapsed engine.",
             keywords: &[
                 "tokens",
                 "rate",
@@ -805,13 +805,14 @@ pub fn default_settings() -> Vec<SettingMeta> {
             category: SettingCategory::Agent,
             owner: SettingOwner::Shared,
             label: "Slow-output max retries",
-            description: "How many times one model call is reissued because its output \
-                          stayed under the floor. When the retries are spent, the response \
-                          is accepted at whatever rate it runs. 0 never reissues. These \
-                          retries do not use the budget for network and server errors.",
+            description: "How many backups one model call can start because its output \
+                          stayed under the floor. The slow call keeps streaming, and the \
+                          faster of the two is kept. When the budget is spent, the response \
+                          is accepted at whatever rate it runs. 0 starts none. This budget \
+                          is separate from the one for network and server errors.",
             keywords: &[
-                "tokens", "rate", "slow", "retry", "retries", "reissue", "attempts",
-                "budget", "tok/s",
+                "tokens", "rate", "slow", "retry", "retries", "reissue", "backup", "hedge",
+                "attempts", "budget", "tok/s",
             ],
             kind: SettingKind::Int {
                 default: i64::from(ui_default.output_rate_max_retries_value()),
@@ -851,7 +852,7 @@ pub fn default_settings() -> Vec<SettingMeta> {
             category: SettingCategory::Agent,
             owner: SettingOwner::Shared,
             label: "Slow output",
-            description: "Detect a response whose tokens/sec collapses, and reissue it.",
+            description: "Detect a response whose tokens/sec collapses, and race a backup of it.",
             keywords: &[
                 "tokens",
                 "rate",
