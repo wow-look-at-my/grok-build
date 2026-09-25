@@ -216,7 +216,7 @@ easy to test: separate pure logic from I/O and prefer small testable units.
 Design guidance, NOT an acceptance criterion — do not refute working code for
 diverging from it, and do not restate it as a criterion.
 
-**Task checklist** (`code-change` only) — as many ordered `- [ ]` checkbox steps as the work needs. You decide how to break the work up: there is no count to reach and no cap to fit. The implementer executes and checks them off as it goes. The harness mines the first unchecked box as the per-turn "next step" nudge. Steps are HOW guidance like the approach, never part of the judged contract — keep each concrete (end with a testing/evidence step). Do not put checkboxes in any other section.
+**Task checklist** (`code-change` only) — as many ordered `- [ ]` checkbox steps as the work needs. You decide how to break the work up: there is no count to reach and no cap to fit. The implementer works them from the todo list you seed below, and that list drives the per-turn "next step" nudge. The plan's boxes are the fallback when no list is seeded. Name git state with a command that reads it at that step (`git rev-parse HEAD`, the branch name), never with a SHA you saw while planning. The user may commit while the goal runs. Steps are HOW guidance like the approach, never part of the judged contract — keep each concrete (end with a testing/evidence step). Do not put checkboxes in any other section.
 
 **Risks / Contradictions** (optional) — one bullet per genuine internal
 contradiction or environment infeasibility; omit when none.

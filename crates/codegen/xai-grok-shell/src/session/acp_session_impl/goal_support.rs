@@ -215,18 +215,45 @@ pub(super) fn render_goal_task_discipline(names: &GoalToolNames) -> String {
 /// on its own column-0 line — a single line-delimited pointer the
 /// model and any downstream consumer (debug log scraper, support
 /// tooling) can extract reliably, so keep the format stable.
-pub(super) fn render_goal_plan_block(plan_path: &std::path::Path, names: &GoalToolNames) -> String {
+///
+/// `plan_todos_seeded` picks the one checklist the implementer keeps. When the
+/// planner's items are on the todo list, that list is the checklist and the
+/// next-step nudge reads it. Otherwise the plan's own boxes are the checklist.
+pub(super) fn render_goal_plan_block(
+    plan_path: &std::path::Path,
+    names: &GoalToolNames,
+    plan_todos_seeded: bool,
+) -> String {
     debug_assert!(
         !plan_path.as_os_str().is_empty(),
         "render_goal_plan_block requires a non-empty plan_path; an \
          empty path renders a dangling `Plan:` line that the model \
          cannot follow",
     );
+    let checklist = if plan_todos_seeded {
+        GOAL_PLAN_CHECKLIST_ON_TODOS
+    } else {
+        GOAL_PLAN_CHECKLIST_IN_PLAN
+    };
     // Column-0 single-line `Plan: <abs>` contract — see fn docs.
     GOAL_PLAN_BLOCK_TEMPLATE
+        .replace("{CHECKLIST_BULLET}", checklist)
         .replace("{PLAN_PATH}", &plan_path.display().to_string())
         .replace("{TODO_TOOL}", &names.todo)
 }
+
+const GOAL_PLAN_CHECKLIST_ON_TODOS: &str = "\
+- The plan's steps are ALREADY on your todo list — the goal planner added one
+  item per step, in order, with ids that start with `plan-`. That list is your
+  checklist: work the items in order and keep each status current through
+  `{TODO_TOOL}`. Call `{TODO_TOOL}` with an empty `todos` array to read the
+  ids. Do not tick boxes in the plan file; the next-step nudge reads the list.";
+
+const GOAL_PLAN_CHECKLIST_IN_PLAN: &str = "\
+- If the plan has a `## Task checklist`, work it in order and flip each
+  `- [ ]` to `- [x]` in the plan file as you complete it — the harness mines
+  the first unchecked box as your next-step nudge, so a stale checklist
+  produces stale nudges.";
 
 /// Plan path for the goal-mode reminder, or `None` on the legacy path.
 /// `Some` only when the planner is enabled (`GROK_GOAL_PLANNER`) and a plan
@@ -293,12 +320,13 @@ pub(super) fn render_goal_rules(
     block_recap: &str,
     goal_state: &str,
     plan_path: Option<&std::path::Path>,
+    plan_todos_seeded: bool,
     scratch_dir: &str,
     scratch_ready: bool,
 ) -> String {
     let discipline = render_goal_task_discipline(names);
     let plan_block = match plan_path {
-        Some(path) => render_goal_plan_block(path, names),
+        Some(path) => render_goal_plan_block(path, names, plan_todos_seeded),
         None => String::new(),
     };
     GOAL_RULES_TEMPLATE
@@ -330,12 +358,13 @@ pub(super) fn render_goal_rules_legacy(
     block_recap: &str,
     goal_state: &str,
     plan_path: Option<&std::path::Path>,
+    plan_todos_seeded: bool,
     scratch_dir: &str,
     scratch_ready: bool,
 ) -> String {
     let discipline = render_goal_task_discipline(names);
     let plan_block = match plan_path {
-        Some(path) => render_goal_plan_block(path, names),
+        Some(path) => render_goal_plan_block(path, names, plan_todos_seeded),
         None => String::new(),
     };
     GOAL_RULES_TEMPLATE_LEGACY
@@ -712,12 +741,36 @@ pub(super) const GOAL_NEXT_STEP_MAX_CHARS: usize = 400;
 /// so this slot carries only the plan's next item to avoid duplicating
 /// the top gap.
 pub(super) fn resolve_goal_next_step(plan_path: Option<&Path>) -> Option<String> {
-    use crate::session::goal_classifier::{cap_chars, neutralize_reminder_tags};
     use crate::session::goal_next_step::first_unchecked_plan_item;
 
     plan_path
         .and_then(first_unchecked_plan_item)
-        .map(|item| neutralize_reminder_tags(cap_chars(&item, GOAL_NEXT_STEP_MAX_CHARS)))
+        .map(|item| sanitize_next_step(&item))
+}
+
+fn sanitize_next_step(item: &str) -> String {
+    use crate::session::goal_classifier::{cap_chars, neutralize_reminder_tags};
+    neutralize_reminder_tags(cap_chars(item, GOAL_NEXT_STEP_MAX_CHARS))
+}
+
+/// The next step when the todo list is the checklist: the first
+/// `in_progress` item, else the first `pending` one. It names the id, so the
+/// model can update the item without a read first. The plan's boxes are not
+/// read here, because nobody ticks them once the list is the checklist.
+pub(super) fn next_step_from_todos<'a>(
+    todos: impl IntoIterator<Item = (&'a str, &'a str, crate::tools::todo::TodoStatus)>,
+    todo_tool: &str,
+) -> String {
+    use crate::tools::todo::TodoStatus;
+    let todos: Vec<_> = todos.into_iter().collect();
+    let first = |want: TodoStatus| todos.iter().find(|(_, _, status)| *status == want);
+    match first(TodoStatus::InProgress).or_else(|| first(TodoStatus::Pending)) {
+        Some((id, content, _)) => format!("`{id}`: {}", sanitize_next_step(content)),
+        None => format!(
+            "Every item on your `{todo_tool}` list is closed. Re-read the plan's \
+             acceptance criteria and add an item for each one that does not hold yet."
+        ),
+    }
 }
 
 pub(super) fn format_blocked_chat_notification(reason: &str, detail: Option<&str>) -> String {
@@ -2035,11 +2088,63 @@ mod verification_scope_tests {
     /// anything the objective did not ask for.
     #[test]
     fn the_plan_block_keeps_verification_inside_the_objective() {
-        let block = render_goal_plan_block(std::path::Path::new("/tmp/plan.md"), &names());
+        for seeded in [true, false] {
+            let block =
+                render_goal_plan_block(std::path::Path::new("/tmp/plan.md"), &names(), seeded);
+            assert!(
+                block.contains("Checking is not doing"),
+                "running the verification plan must not widen the work: {block}"
+            );
+            assert!(!block.contains("{PLAN_PATH}"), "{block}");
+            assert!(!block.contains("{CHECKLIST_BULLET}"), "{block}");
+            assert!(!block.contains("{TODO_TOOL}"), "{block}");
+        }
+    }
+
+    /// Only one checklist is live. A seeded goal keeps the todo list and is
+    /// told not to tick plan boxes. An unseeded goal keeps the plan boxes and
+    /// is never told its steps are on a list that does not hold them.
+    #[test]
+    fn the_plan_block_names_exactly_one_checklist() {
+        let path = std::path::Path::new("/tmp/plan.md");
+        let seeded = render_goal_plan_block(path, &names(), true);
+        assert!(seeded.contains("ALREADY on your todo list"), "{seeded}");
+        assert!(seeded.contains("Do not tick boxes"), "{seeded}");
+        assert!(!seeded.contains("flip each"), "{seeded}");
+
+        let unseeded = render_goal_plan_block(path, &names(), false);
         assert!(
-            block.contains("Checking is not doing"),
-            "running the verification plan must not widen the work: {block}"
+            !unseeded.contains("ALREADY on your todo list"),
+            "{unseeded}"
         );
-        assert!(!block.contains("{PLAN_PATH}"), "{block}");
+        assert!(unseeded.contains("flip each"), "{unseeded}");
+    }
+
+    #[test]
+    fn the_todo_next_step_names_the_item_by_id() {
+        use crate::tools::todo::TodoStatus;
+        let todos = [
+            ("plan-a", "done already", TodoStatus::Completed),
+            ("plan-b", "write the parser", TodoStatus::Pending),
+            ("plan-c", "fix the build", TodoStatus::InProgress),
+        ];
+        assert_eq!(
+            next_step_from_todos(todos, "todo_write"),
+            "`plan-c`: fix the build",
+            "in_progress wins over an earlier pending item"
+        );
+        let only_pending = [
+            ("plan-a", "done already", TodoStatus::Cancelled),
+            ("plan-b", "write the parser", TodoStatus::Pending),
+        ];
+        assert_eq!(
+            next_step_from_todos(only_pending, "todo_write"),
+            "`plan-b`: write the parser"
+        );
+        let closed = next_step_from_todos(
+            [("plan-a", "done already", TodoStatus::Completed)],
+            "todo_write",
+        );
+        assert!(closed.contains("acceptance criteria"), "{closed}");
     }
 }
