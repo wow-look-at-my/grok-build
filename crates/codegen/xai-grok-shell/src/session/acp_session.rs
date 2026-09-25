@@ -1296,9 +1296,7 @@ impl SessionActor {
         if !self.goal_runs_on_workflow_engine() {
             self.maybe_reconcile_active_goal_without_harness().await;
         }
-        if self.goal_planner_on() {
-            self.maybe_reconcile_active_goal_without_plan().await;
-        }
+        self.maybe_reconcile_active_goal_without_plan().await;
         availability
     }
     /// Compute command availability without workflow-manager reads or goal reconciliation.

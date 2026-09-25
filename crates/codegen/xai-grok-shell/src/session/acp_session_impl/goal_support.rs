@@ -1154,7 +1154,7 @@ impl SessionActor {
         {
             return;
         }
-        if !self.goal_planner_enabled || !self.goal_harness_enabled() {
+        if !self.goal_planner_on() || !self.goal_harness_enabled() {
             return;
         }
         let needs_pause = {

@@ -263,9 +263,7 @@ impl SessionActor {
             .collect();
         let has_workflow_runs = !self.workflow_tracker().await.lock().list().is_empty();
         let availability = self.build_command_availability(&tool_names, has_workflow_runs);
-        if self.goal_planner_on() {
-            self.maybe_reconcile_active_goal_without_plan().await;
-        }
+        self.maybe_reconcile_active_goal_without_plan().await;
         let (_, workflows) = self.named_workflow_snapshot();
         let commands = slash_commands::available_commands(&skills, availability, &workflows);
         let meta = Some(slash_commands::build_tools_meta(&tool_names));
