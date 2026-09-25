@@ -121,7 +121,7 @@ dump, a headless-run log) as `evidence`, never as `gating`.
 ## Output contract — STRICT
 
 Use your `{WRITE_TOOL}` tool to write Markdown to `{PLAN_FILE}` with these
-sections, in order. `## Implementation approach` and `## Task checklist` are
+sections, in order. `## Implementation approach` and `## Task steps` are
 `code-change` only; include `## Risks / Contradictions` only when one exists.
 
 ```
@@ -145,9 +145,9 @@ sections, in order. `## Implementation approach` and `## Task checklist` are
 ## Implementation approach
 <code-change only: how to structure the code so it is easy to test>
 
-## Task checklist
-- [ ] <code-change only: first concrete implementation step>
-- [ ] <next step>
+## Task steps
+1. <code-change only: first concrete implementation step>
+2. <next step>
 
 ## Risks / Contradictions
 - <optional: an internal contradiction or infeasibility in OBJECTIVE>
@@ -216,7 +216,7 @@ easy to test: separate pure logic from I/O and prefer small testable units.
 Design guidance, NOT an acceptance criterion — do not refute working code for
 diverging from it, and do not restate it as a criterion.
 
-**Task checklist** (`code-change` only) — as many ordered `- [ ]` checkbox steps as the work needs. You decide how to break the work up: there is no count to reach and no cap to fit. The implementer works them from the todo list you seed below, and that list drives the per-turn "next step" nudge. The plan's boxes are the fallback when no list is seeded. Name git state with a command that reads it at that step (`git rev-parse HEAD`, the branch name), never with a SHA you saw while planning. The user may commit while the goal runs. Steps are HOW guidance like the approach, never part of the judged contract — keep each concrete (end with a testing/evidence step). Do not put checkboxes in any other section.
+**Task steps** (`code-change` only) — as many ordered, numbered steps as the work needs. You decide how to break the work up: there is no count to reach and no cap to fit. Write no `- [ ]` checkboxes anywhere in the plan. The todo list you seed below is the only checklist: the user watches it, and the per-turn "next step" nudge reads it. Name git state with a command that reads it at that step (`git rev-parse HEAD`, the branch name), never with a SHA you saw while planning. The user may commit while the goal runs. Steps are HOW guidance like the approach, never part of the judged contract — keep each concrete (end with a testing/evidence step).
 
 **Risks / Contradictions** (optional) — one bullet per genuine internal
 contradiction or environment infeasibility; omit when none.
@@ -224,7 +224,7 @@ contradiction or environment infeasibility; omit when none.
 ## Todo list — REQUIRED
 
 Before your terminal response, put the plan's steps on YOUR todo list with
-`{TODO_TOOL}`: one item per `## Task checklist` line, in plan order, each
+`{TODO_TOOL}`: one item per `## Task steps` entry, in plan order, each
 `pending`. When the plan has no checklist (an `analysis`/`research` goal), list
 its `## Acceptance criteria` entries instead, one item each. Your list and the
 plan must name the same steps: the session's todo list is populated from what you

@@ -440,13 +440,13 @@ const PLANNER_TODOS: &[&str] = &[
     "cover it with an end-to-end test",
 ];
 
-/// A plan whose `## Task checklist` names those same three steps, the way the
+/// A plan whose `## Task steps` names those same three steps, the way the
 /// planner prompt asks a real planner to write it.
 const CHECKLIST_PLAN: &[u8] = b"# Plan: ship the exporter\n\n## Goal kind\ncode-change\n\n\
-## Task checklist\n\
-- [ ] add the plan parser\n\
-- [ ] wire it into the publish path\n\
-- [ ] cover it with an end-to-end test\n";
+## Task steps\n\
+1. add the plan parser\n\
+2. wire it into the publish path\n\
+3. cover it with an end-to-end test\n";
 
 /// The scripted planner the seeding tests drive: it writes [`CHECKLIST_PLAN`]
 /// and reports the same steps on ITS OWN list with `todo_write`, which is what
@@ -609,7 +609,7 @@ async fn the_planner_is_spawned_with_the_todo_instruction() {
                  bridge: {prompt}",
             );
             assert!(
-                prompt.contains("one item per `## Task checklist` line"),
+                prompt.contains("one item per `## Task steps` entry"),
                 "one item per plan step, in order",
             );
             assert!(
@@ -728,7 +728,7 @@ async fn the_planner_childs_own_items_are_the_source_not_the_plan_prose() {
     local
         .run_until(async {
             let (tx, _c) = spawn_planner_coordinator(SpawnBehaviour::WritePlanThenDoneWithTodos {
-                body: b"# Plan\n\n## Task checklist\n- [ ] a step the plan body names\n",
+                body: b"# Plan\n\n## Task steps\n1. a step the plan body names\n",
                 todos: &["the child's first step", "the child's second step"],
             });
             let (actor, _tmp) = make_planner_actor(Some(tx), true).await;

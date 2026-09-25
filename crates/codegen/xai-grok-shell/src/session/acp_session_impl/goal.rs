@@ -1375,7 +1375,6 @@ impl SessionActor {
             scratch_ready,
             rounds_since_verify,
             refuted,
-            plan_todos_seeded,
         ) = {
             let mut tracker = self.goal_tracker.lock();
             tracker.account_elapsed();
@@ -1426,22 +1425,16 @@ impl SessionActor {
                 o.scratch_dir_ready,
                 rounds_since_verify,
                 refuted,
-                o.plan_todos_seeded,
             )
         };
-        let seeded_todos = match plan_todos_seeded && plan_path.is_some() {
-            true => self.goal_todo_snapshot().await,
-            false => None,
-        };
-        let next_step = match seeded_todos {
+        let next_step = match self.goal_todo_snapshot().await {
             Some(todos) => next_step_from_todos(
                 todos
                     .iter()
                     .map(|(id, content, status)| (id.as_str(), content.as_str(), *status)),
                 todo_tool,
             ),
-            None => resolve_goal_next_step(plan_path.as_deref())
-                .unwrap_or_else(|| format!("Check your `{todo_tool}` list for next steps.")),
+            None => format!("Check your `{todo_tool}` list for next steps."),
         };
         let tokens = u64::try_from(tokens_used).unwrap_or(0);
         let bail_preface = if stop_pattern.is_some() {
