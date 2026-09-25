@@ -25,7 +25,8 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - `cargo check -p <touched-crate>` before pushing.
 - `cargo test -p <touched-crate>` for the crate you changed.
 - Prefer committing real tests that drive the shipped code (not mocks of the unit under test, not hand-built expected objects).
-- **A web session cannot link the workspace.** `target/` reaches ~16 GB after a `cargo check` of the pager, against a ~12 GB session disk allowance, so `cargo build -p xai-grok-pager-bin` runs the container out of space. Check the crate, run that crate's tests, push, and let CI produce the binary.
+- **A web session cannot link the workspace.** `target/` reaches ~16 GB after a `cargo check` of the pager, against a ~12 GB session disk allowance. So `cargo build -p xai-grok-pager-bin` runs the container out of space. Check the crate, run that crate's tests, push, and let CI produce the binary.
+- **Do not run `cargo test -p xai-grok-shell` in a web session.** Its test binary runs the disk out the same way. Run `cargo check -p xai-grok-shell --tests`, push, and read the shell tests' result from CI's `Build & test`.
 - `protoc` is missing from the image and the `bin/protoc` dotslash shim cannot run either, so any build that reaches `xai-grok-tools-api` dies in its build script. Run `apt-get install -y protobuf-compiler` first.
 - `mold` is missing too, and the repo's cargo config passes `-fuse-ld=mold`. Every build script then fails to link with `collect2: fatal error: cannot find 'ld'`, on `proc-macro2` and `libc` — which reads as a broken C toolchain and is not one. Run `apt-get install -y mold`.
 
