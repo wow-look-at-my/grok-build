@@ -1106,7 +1106,7 @@ fn send_prompt_while_running_queues_on_server_when_follow_up_steer() {
 }
 
 #[test]
-fn send_prompt_while_running_with_follow_up_queue_stays_local_when_not_leader() {
+fn send_prompt_while_running_with_follow_up_queue_queues_on_server_when_not_leader() {
     struct ResetFollowUp(crate::appearance::FollowUpBehavior);
     impl Drop for ResetFollowUp {
         fn drop(&mut self) {
@@ -1128,12 +1128,18 @@ fn send_prompt_while_running_with_follow_up_queue_stays_local_when_not_leader() 
             .all(|e| !matches!(e, Effect::SendInterject { .. })),
         "Queue must not interject mid-turn, got {effects:?}"
     );
-    // Non-leader and Queue mode: local drip-feed path (not server-immediate)
-    assert_eq!(agent_ref(&app, id).session.queue_len(), 1);
+    assert!(
+        matches!(
+            effects.as_slice(),
+            [Effect::SendPrompt { text, .. }] if text == "later"
+        ),
+        "Queue should server-queue whatever the leader state, got {effects:?}"
+    );
+    assert_eq!(agent_ref(&app, id).session.queue_len(), 0);
 }
 
-/// With Steer, an older local drip-feed row still blocks server-immediate send.
-/// Newer Enter must not interject or jump the server queue ahead of the older local prompt.
+/// With Steer, an older local row moves to the server queue ahead of the new prompt.
+/// Newer Enter must not interject or jump ahead of the older local prompt.
 #[test]
 fn send_while_running_with_pending_local_and_steer_preserves_fifo() {
     struct ResetFollowUp(crate::appearance::FollowUpBehavior);
@@ -1159,21 +1165,23 @@ fn send_while_running_with_pending_local_and_steer_preserves_fifo() {
     assert!(
         effects
             .iter()
-            .all(|e| !matches!(e, Effect::SendInterject { .. } | Effect::SendPrompt { .. })),
-        "Steer must not bypass empty-local-queue gate, got {effects:?}"
+            .all(|e| !matches!(e, Effect::SendInterject { .. })),
+        "Steer must not interject mid-turn, got {effects:?}"
     );
-    let order: Vec<&str> = agent_ref(&app, id)
-        .session
-        .pending_prompts
+    let order: Vec<&str> = effects
         .iter()
-        .map(|p| p.text.as_str())
+        .filter_map(|e| match e {
+            Effect::SendPrompt { text, .. } => Some(text.as_str()),
+            _ => None,
+        })
         .collect();
     assert_eq!(order, vec!["two", "three"]);
+    assert!(agent_ref(&app, id).session.pending_prompts.is_empty());
 }
 
-/// Images never ride server-immediate; with Steer they still join the local queue (no interject-on-Enter with attachments).
+/// With Steer, an image prompt goes to the server queue with its image. Enter never interjects it.
 #[test]
-fn send_prompt_with_images_while_running_and_steer_stays_local() {
+fn send_prompt_with_images_while_running_and_steer_queues_on_server() {
     struct ResetFollowUp(crate::appearance::FollowUpBehavior);
     impl Drop for ResetFollowUp {
         fn drop(&mut self) {
@@ -1208,12 +1216,14 @@ fn send_prompt_with_images_while_running_and_steer_stays_local() {
 
     let effects = dispatch(Action::SendPrompt("with image".into()), &mut app);
     assert!(
-        effects
-            .iter()
-            .all(|e| !matches!(e, Effect::SendInterject { .. } | Effect::SendPrompt { .. })),
-        "images + Steer must not interject or server-send, got {effects:?}"
+        matches!(
+            effects.as_slice(),
+            [Effect::SendPromptBlocks { blocks, .. }]
+                if blocks.iter().any(|b| matches!(b, acp::ContentBlock::Image(_)))
+        ),
+        "images + Steer must server-queue with the image, got {effects:?}"
     );
-    assert_eq!(agent_ref(&app, id).session.queue_len(), 1);
+    assert_eq!(agent_ref(&app, id).session.queue_len(), 0);
 }
 
 /// Regression (queue reorder race): a plain prompt typed while a turn is

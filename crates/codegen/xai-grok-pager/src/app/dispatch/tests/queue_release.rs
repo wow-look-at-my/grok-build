@@ -34,6 +34,16 @@ fn sent_texts(effects: &[Effect]) -> Vec<String> {
         .collect()
 }
 
+fn server_queued_texts(effects: &[Effect]) -> Vec<&str> {
+    effects
+        .iter()
+        .filter_map(|e| match e {
+            Effect::SendPrompt { text, .. } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect()
+}
+
 fn sent_interjects(effects: &[Effect]) -> Vec<(String, String)> {
     effects
         .iter()
@@ -224,7 +234,7 @@ fn send_while_waiting_flushes_held_follow_ups_then_the_new_prompt() {
 }
 
 #[test]
-fn queue_mode_send_while_waiting_with_empty_queue_stays_queued() {
+fn queue_mode_send_while_waiting_with_empty_queue_goes_to_server_queue() {
     let mut app = running_turn_app();
     let _mode = LocalFollowUp::queue(&mut app);
     {
@@ -239,14 +249,12 @@ fn queue_mode_send_while_waiting_with_empty_queue_stays_queued() {
         sent_texts(&effects).is_empty(),
         "Queue must not wait-interject even with an empty pile, got {effects:?}"
     );
-    assert_eq!(
+    assert_eq!(server_queued_texts(&effects), vec!["just typed"]);
+    assert!(
         agent_ref(&app, AgentId(0))
             .session
             .pending_prompts
-            .iter()
-            .map(|p| p.text.as_str())
-            .collect::<Vec<_>>(),
-        vec!["just typed"]
+            .is_empty()
     );
 }
 
@@ -663,9 +671,8 @@ fn send_now_does_not_interject_held_follow_ups_into_cancelled_turn() {
     );
 }
 
-/// A thinking turn (running, but not parked / watching) still queues.
 #[test]
-fn send_while_thinking_stays_queued() {
+fn send_while_thinking_goes_to_server_queue() {
     let mut app = running_turn_app();
     let _mode = LocalFollowUp::queue(&mut app);
 
@@ -675,5 +682,11 @@ fn send_while_thinking_stays_queued() {
         sent_texts(&effects).is_empty(),
         "a thinking turn must not interject, got {effects:?}"
     );
-    assert_eq!(agent_ref(&app, AgentId(0)).session.pending_prompts.len(), 1);
+    assert_eq!(server_queued_texts(&effects), vec!["later"]);
+    assert!(
+        agent_ref(&app, AgentId(0))
+            .session
+            .pending_prompts
+            .is_empty()
+    );
 }
