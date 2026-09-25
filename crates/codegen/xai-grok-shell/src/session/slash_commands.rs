@@ -280,7 +280,9 @@ pub(super) const BUILTIN_COMMANDS: &[BuiltinCommand] = &[
     BuiltinCommand {
         name: "goal",
         description: "Set, manage, or check an autonomous goal",
-        argument_hint: Some("<objective> [--budget <tokens>] | status | pause | resume | clear"),
+        argument_hint: Some(
+            "[--lite|--full] <objective> [--budget <tokens>] | status | pause | resume | clear",
+        ),
         aliases: &[],
         gate: BuiltinGate::Goal,
         resolve: |args| {
@@ -291,16 +293,66 @@ pub(super) const BUILTIN_COMMANDS: &[BuiltinCommand] = &[
                 "resume" => BuiltinAction::GoalResume,
                 "clear" => BuiltinAction::GoalClear,
                 _ => {
-                    let (objective, token_budget) = parse_goal_budget(trimmed);
+                    let (objective, token_budget, mode) = parse_goal_args(trimmed);
                     BuiltinAction::GoalSet {
                         objective,
                         token_budget,
+                        mode,
                     }
                 }
             }
         },
     },
 ];
+/// Split the `/goal` flags off an objective: a `--lite` or `--full` token
+/// at either end, and a trailing `--budget <tokens>`. A mode flag must be
+/// its own token, and text must remain after it.
+fn parse_goal_args(
+    trimmed: &str,
+) -> (
+    String,
+    Option<i64>,
+    Option<crate::session::goal_tracker::GoalMode>,
+) {
+    let (leading, rest) = take_goal_mode_flag(trimmed, true);
+    let (trailing, rest) = take_goal_mode_flag(rest, false);
+    let (objective, budget) = parse_goal_budget(rest);
+    // `--lite` may also sit before a trailing `--budget N`.
+    let (before_budget, objective) = match (trailing, budget) {
+        (None, Some(_)) => {
+            let (mode, rest) = take_goal_mode_flag(&objective, false);
+            (mode, rest.to_string())
+        }
+        _ => (None, objective),
+    };
+    (objective, budget, leading.or(trailing).or(before_budget))
+}
+
+fn take_goal_mode_flag(
+    text: &str,
+    leading: bool,
+) -> (Option<crate::session::goal_tracker::GoalMode>, &str) {
+    use crate::session::goal_tracker::GoalMode;
+    let split = if leading {
+        text.split_once(char::is_whitespace)
+            .map(|(flag, rest)| (flag, rest.trim_start()))
+    } else {
+        text.rsplit_once(char::is_whitespace)
+            .map(|(rest, flag)| (flag, rest.trim_end()))
+    };
+    let Some((flag, rest)) = split else {
+        return (None, text);
+    };
+    let mode = match flag {
+        "--lite" => GoalMode::Lite,
+        "--full" => GoalMode::Full,
+        _ => return (None, text),
+    };
+    if rest.is_empty() {
+        return (None, text);
+    }
+    (Some(mode), rest)
+}
 /// Split a trailing `--budget <tokens>` flag off a `/goal` objective.
 ///
 /// Only a TRAILING, standalone flag is consumed: the flag must be its own
@@ -1226,6 +1278,7 @@ pub(super) enum BuiltinAction {
     GoalSet {
         objective: String,
         token_budget: Option<i64>,
+        mode: Option<crate::session::goal_tracker::GoalMode>,
     },
     GoalStatus,
     GoalPause,
@@ -3364,6 +3417,7 @@ mod tests {
             BuiltinAction::GoalSet {
                 objective,
                 token_budget,
+                ..
             } => {
                 assert_eq!(objective, "implement auth module");
                 assert_eq!(token_budget, None);
@@ -3386,6 +3440,7 @@ mod tests {
             BuiltinAction::GoalSet {
                 objective,
                 token_budget,
+                ..
             } => {
                 assert_eq!(objective, "implement X");
                 assert_eq!(token_budget, Some(500_000));
@@ -3404,6 +3459,7 @@ mod tests {
                 BuiltinAction::GoalSet {
                     objective: o,
                     token_budget,
+                    ..
                 } => {
                     assert_eq!(o, objective);
                     assert_eq!(token_budget, Some(budget), "for {text:?}");
@@ -3431,9 +3487,70 @@ mod tests {
                 BuiltinAction::GoalSet {
                     objective,
                     token_budget,
+                    ..
                 } => {
                     assert_eq!(objective, text, "objective must be preserved verbatim");
                     assert_eq!(token_budget, None, "no budget must be parsed from {text:?}");
+                }
+                other => panic!("expected GoalSet, got {}", other.command_name()),
+            }
+        }
+    }
+    #[test]
+    fn goal_set_mode_flag_parses_at_either_end() {
+        use crate::session::goal_tracker::GoalMode;
+        for (text, objective, budget, mode) in [
+            ("--lite fix it", "fix it", None, Some(GoalMode::Lite)),
+            ("fix it --lite", "fix it", None, Some(GoalMode::Lite)),
+            ("--full fix it", "fix it", None, Some(GoalMode::Full)),
+            (
+                "--lite fix it --budget 9",
+                "fix it",
+                Some(9),
+                Some(GoalMode::Lite),
+            ),
+            (
+                "fix it --lite --budget 9",
+                "fix it",
+                Some(9),
+                Some(GoalMode::Lite),
+            ),
+            (
+                "fix it --budget 9 --lite",
+                "fix it",
+                Some(9),
+                Some(GoalMode::Lite),
+            ),
+            ("fix it", "fix it", None, None),
+        ] {
+            match resolve_goal(text) {
+                BuiltinAction::GoalSet {
+                    objective: o,
+                    token_budget,
+                    mode: m,
+                } => {
+                    assert_eq!(o, objective, "for {text:?}");
+                    assert_eq!(token_budget, budget, "for {text:?}");
+                    assert_eq!(m, mode, "for {text:?}");
+                }
+                other => panic!("expected GoalSet, got {}", other.command_name()),
+            }
+        }
+    }
+    #[test]
+    fn goal_set_mode_flag_needs_its_own_token_and_an_objective() {
+        for text in [
+            "--lite",
+            "fix the --lite flag",
+            "fix it--lite",
+            "--lighter fix it",
+        ] {
+            match resolve_goal(text) {
+                BuiltinAction::GoalSet {
+                    objective, mode, ..
+                } => {
+                    assert_eq!(objective, text, "objective must be preserved verbatim");
+                    assert_eq!(mode, None, "no mode must be parsed from {text:?}");
                 }
                 other => panic!("expected GoalSet, got {}", other.command_name()),
             }
@@ -3449,6 +3566,7 @@ mod tests {
             BuiltinAction::GoalSet {
                 objective: "x".into(),
                 token_budget: None,
+                mode: None,
             }
             .command_name(),
             "goal"
@@ -3460,6 +3578,7 @@ mod tests {
             BuiltinAction::GoalSet {
                 objective: "x".into(),
                 token_budget: None,
+                mode: None,
             }
             .args_provided()
         );
