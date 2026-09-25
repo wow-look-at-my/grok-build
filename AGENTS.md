@@ -186,6 +186,13 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - A `## Verification plan` step reads back what the goal built. It is not a permit. The implementer read "do X to confirm Y" as an instruction to do X. A planner-invented check then became an action on a system nobody put in scope. Every place that demands verification says so now. Those are the planner prompt's `## Verification plan` contract, `goal_rules.md`'s VERIFY AS YOU GO, `goal_plan_block.md`, and the per-turn continuation directive.
 - The planner is told to prefer reading what the work already produced over operating anything. Files, logs, hashes, build output and source are what it reads. That is the whole mechanism. There is no label grammar and no validator. An earlier attempt added a reach DSL, a keyword list and a reject-and-retry loop to a planner prompt that is already long. That buys rigidity rather than scope discipline.
 
+## Lite `/goal` mode
+
+- `/goal --lite <objective>` (the flag may also be the last token) runs no planner and no skeptic panel. `GoalOrchestration::mode` holds the choice. A snapshot with no `mode` field reads as `Full`.
+- The per-round evaluator (`goal_evaluator.rs`) is the whole check. Its `candidate_complete` ends the goal (`complete_lite_goal`). Any other verdict sends the model back. And the directive carries the evaluator's evidence as the reason. The evaluator prompt changes with the mode, because a lite verdict is final.
+- Every planner entry and plan-path read goes through `goal_planner_on()`, which is false for a lite goal. That includes the load-time reconcile, which otherwise pauses an active goal that has no plan.
+- On the legacy driver, a lite `update_goal(completed: true)` makes one evaluator call and is refused with `LiteCheckNotMet` unless the verdict is `candidate_complete`.
+
 ## `/todo` capture feature notes
 
 - `/todo <request>` rides the `/btw` path, not the prompt queue: `Action::SendTodo` → `x.ai/todo` → `SessionCommand::TodoCapture`, spawned on the session's LocalSet (`session/acp_session_impl/todo_capture.rs`). The running turn is never interrupted. And the parent conversation is never mutated — the capture agent works from a snapshot of it.

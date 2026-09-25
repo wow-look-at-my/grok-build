@@ -36,6 +36,29 @@ const GOAL_HISTORY_MAX: usize = 64;
 
 // Phase / Status enums
 
+/// How a goal decides that it is done.
+///
+/// `Full` runs the planner and sends a completion candidate to the
+/// skeptic panel. `Lite` runs neither.
+/// only check: its `candidate_complete` ends the goal, and any other
+/// verdict sends the model back with the evaluator's reason.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GoalMode {
+    #[default]
+    Full,
+    Lite,
+}
+
+impl GoalMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Full => "full",
+            Self::Lite => "lite",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum GoalPhase {
     Idle,
@@ -425,6 +448,10 @@ pub struct GoalOrchestration {
     pub status: GoalStatus,
     pub phase: GoalPhase,
     pub token_budget: Option<i64>,
+    /// How the goal is checked. A snapshot from an older shell has no
+    /// mode and reads as `Full`, which is what it ran under.
+    #[serde(default)]
+    pub mode: GoalMode,
     pub elapsed_ms: u64,
     pub created_at: String,
     pub current_subagent_id: Option<String>,
@@ -863,6 +890,13 @@ impl GoalTracker {
         self.orchestration.as_ref().map(|o| o.status)
     }
 
+    /// The current goal's mode. No goal reads as `Full`.
+    pub fn mode(&self) -> GoalMode {
+        self.orchestration
+            .as_ref()
+            .map_or(GoalMode::Full, |o| o.mode)
+    }
+
     pub fn current_subagent_id(&self) -> Option<&str> {
         self.orchestration
             .as_ref()
@@ -1006,6 +1040,7 @@ impl GoalTracker {
             status: GoalStatus::Active,
             phase: GoalPhase::Executing,
             token_budget,
+            mode: GoalMode::Full,
             elapsed_ms: 0,
             created_at,
             current_subagent_id: None,
@@ -1435,6 +1470,7 @@ pub(crate) fn make_base_orchestration() -> GoalOrchestration {
         status: GoalStatus::Active,
         phase: GoalPhase::Idle,
         token_budget: None,
+        mode: GoalMode::Full,
         elapsed_ms: 0,
         created_at: "2026-01-01T00:00:00Z".into(),
         current_subagent_id: None,
