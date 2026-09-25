@@ -158,6 +158,12 @@ async fn salvage_test_actor_on_backend(
     actor
 }
 async fn run_prompt(actor: &Arc<SessionActor>, prompt_id: &str) -> PromptTurnResult {
+    // The run loop sets this before a turn. Without it every streamed chunk
+    // restarts the capture that a length cut reads its partial text from.
+    *actor
+        .current_prompt_id
+        .lock()
+        .expect("current_prompt_id mutex poisoned") = Some(prompt_id.to_string());
     let prompt_blocks = vec![acp::ContentBlock::Text(acp::TextContent::new(
         "write out the numbers".to_string(),
     ))];
