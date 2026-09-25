@@ -42,14 +42,13 @@ pub struct DoomLoopRecoverySettings {
     /// kill-switch; absent ⇒ client default (ON).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enabled: Option<bool>,
-    /// CLIENT-side filter over the trigger labels the server returns —
-    /// the server emits every fired
-    /// threshold; this is never sent as a request parameter.
+    /// Highest `tail_repetition` threshold considered confident. A CLIENT-side
+    /// filter over the trigger labels the server returns. The server emits
+    /// every fired threshold, and this is never sent as a request parameter.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_threshold: Option<u32>,
     /// Resample budget per turn. `-1` or `"unlimited"` never runs out.
-    /// [serde(with = "retry_budget", skip_serializing_if =
-    #"Option::is_none")]
+    #[serde(with = "retry_budget", skip_serializing_if = "Option::is_none")]
     pub max_retries: Option<u32>,
 }
 /// Advanced knobs for the output-rate floor: the `[output_rate_floor]` TOML
@@ -63,12 +62,11 @@ pub struct DoomLoopRecoverySettings {
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct OutputRateFloorSettings {
-    /// [serde(skip_serializing_if =
-    #"Option::is_none")]
+    /// Trailing window the rate is measured over, in seconds.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub window_secs: Option<u64>,
     /// Reissue budget per model call. `-1` or `"unlimited"` never runs out.
-    /// [serde(with = "retry_budget", skip_serializing_if =
-    #"Option::is_none")]
+    #[serde(with = "retry_budget", skip_serializing_if = "Option::is_none")]
     pub max_retries: Option<u32>,
 }
 
