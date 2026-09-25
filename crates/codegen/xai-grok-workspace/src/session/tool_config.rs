@@ -157,19 +157,11 @@ pub(crate) fn resolve_session_toolset_rebuild(
         ctx.notification_handle = handle;
     }
     let toolset = builder
-        .finalize_with_trunc_config(finalize_config, ctx, truncation.clone(), viewer_ctx)
+        .finalize_with_trunc_config(finalize_config, ctx, truncation, viewer_ctx)
         .map_err(|errs| {
             let summary: Vec<String> = errs.iter().map(|e| e.summary()).collect();
             WorkspaceError::Finalize(summary.join("; "))
         })?;
-    if !truncation.per_tool_max_output_bytes.is_empty() {
-        let Ok(mut resources) = toolset.resources.try_lock() else {
-            return Err(WorkspaceError::Finalize(
-                "TruncationCfg not installed: toolset resource lock was already held".into(),
-            ));
-        };
-        resources.insert(xai_grok_tools::types::resources::TruncationCfg(truncation));
-    }
     Ok((effective_tool_config, Arc::new(toolset)))
 }
 /// Backfill `kind: None` baseline entries from the binary's own registry (`kinds` maps fully-qualified id to declared [`ToolKind`]).

@@ -1271,6 +1271,10 @@ impl ToolRegistryBuilder {
                 );
                 (Some(scheduler_cmd_rx), Some(cancel_token))
             };
+        // Installed before the scheduler actor below can hold the shared lock.
+        if !truncation_config.per_tool_max_output_bytes.is_empty() {
+            resources.insert(crate::types::resources::TruncationCfg(truncation_config));
+        }
         let shared_resources = resources.into_shared();
         if let (Some(cmd_rx), Some(cancel_token)) = (scheduler_cmd_rx, &scheduler_cancel_token) {
             let actor = crate::implementations::grok_build::scheduler::actor::SchedulerActor {
