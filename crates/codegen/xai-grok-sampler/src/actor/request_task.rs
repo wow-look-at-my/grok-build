@@ -2081,7 +2081,6 @@ mod tests {
         let outcome = drive_length_event(
             length_completed_event("partial"),
             xai_grok_sampling_types::LengthPolicy::Fail,
-            None,
         )
         .await;
         assert!(matches!(
