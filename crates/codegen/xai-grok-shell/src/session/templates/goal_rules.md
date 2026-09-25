@@ -41,9 +41,7 @@ scratch dir is deleted when the goal ends. The plan's `{SCRATCH}` placeholder
 resolves to it.
 
 TEST PROACTIVELY: run targeted tests after every change, not just at the end.
-The harness evaluates completion automatically after every model round. When the
-work appears complete it runs the adversarial verification panel itself and
-continues with any concrete gaps. Do not stop merely to announce completion.
+The harness evaluates completion automatically after every model round. {COMPLETION_CHECK} Do not stop merely to announce completion.
 If a real external blocker remains after repeated attempts, explain the exact
 evidence and user action needed in your final response; the harness applies the
 repeated-blocker policy automatically.
