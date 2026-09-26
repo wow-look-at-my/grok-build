@@ -5,6 +5,7 @@
 
 use super::support::*;
 use super::*;
+use crate::session::goal_tracker::GoalMode;
 use serial_test::serial;
 use std::sync::Arc as StdArc;
 use std::sync::atomic::{AtomicUsize, Ordering as SeqOrd};
@@ -439,13 +440,13 @@ const PLANNER_TODOS: &[&str] = &[
     "cover it with an end-to-end test",
 ];
 
-/// A plan whose `## Task checklist` names those same three steps, the way the
+/// A plan whose `## Task steps` names those same three steps, the way the
 /// planner prompt asks a real planner to write it.
 const CHECKLIST_PLAN: &[u8] = b"# Plan: ship the exporter\n\n## Goal kind\ncode-change\n\n\
-## Task checklist\n\
-- [ ] add the plan parser\n\
-- [ ] wire it into the publish path\n\
-- [ ] cover it with an end-to-end test\n";
+## Task steps\n\
+1. add the plan parser\n\
+2. wire it into the publish path\n\
+3. cover it with an end-to-end test\n";
 
 /// The scripted planner the seeding tests drive: it writes [`CHECKLIST_PLAN`]
 /// and reports the same steps on ITS OWN list with `todo_write`, which is what
@@ -519,7 +520,9 @@ async fn the_seed_reaches_the_client_as_a_plan_update() {
             let (actor, _tmp, mut event_rx) = make_planner_actor_with_events(Some(tx), true).await;
             arm_todo_writes(&actor).await;
 
-            let _ = actor.setup_goal("ship the exporter", None).await;
+            let _ = actor
+                .setup_goal("ship the exporter", None, GoalMode::Full)
+                .await;
 
             let plans = plan_updates(&mut event_rx);
             let entries = plans
@@ -543,7 +546,36 @@ async fn the_seed_reaches_the_client_as_a_plan_update() {
         .await;
 }
 
-/// The gate for criterion 2's "the run's tool calls include it": the real spawn
+#[tokio::test(flavor = "current_thread")]
+#[serial]
+async fn a_lite_goal_never_spawns_the_planner() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (tx, _count, capture) =
+                spawn_planner_coordinator_capturing(scripted_planner_with_todos());
+            let (actor, _tmp) = make_planner_actor(Some(tx), true).await;
+
+            let reminder = actor.setup_goal("ship it", None, GoalMode::Lite).await;
+            assert!(!reminder.contains("Plan:"), "no plan block: {reminder}");
+            actor
+                .goal_tracker
+                .lock()
+                .pause(crate::session::goal_tracker::GoalPauseReason::User);
+            let _ = actor.resume_goal().await;
+
+            assert!(
+                capture.prompt.lock().unwrap().is_empty(),
+                "a lite goal must not spawn the planner"
+            );
+            let tracker = actor.goal_tracker.lock();
+            let o = tracker.snapshot().expect("goal exists");
+            assert_eq!(o.status, crate::session::goal_tracker::GoalStatus::Active);
+            assert!(o.plan_file.is_none());
+        })
+        .await;
+}
+
 /// path hands the planner a prompt that tells it to list the plan's work with
 /// the session's own todo tool — the instruction the whole feature rests on,
 /// asserted on the prompt the coordinator was actually given rather than on a
@@ -559,7 +591,9 @@ async fn the_planner_is_spawned_with_the_todo_instruction() {
             let (actor, _tmp) = make_planner_actor(Some(tx), true).await;
             arm_todo_writes(&actor).await;
 
-            let _ = actor.setup_goal("ship the exporter", None).await;
+            let _ = actor
+                .setup_goal("ship the exporter", None, GoalMode::Full)
+                .await;
 
             let prompts = capture.prompt.lock().unwrap().clone();
             assert_eq!(prompts.len(), 1, "one planner spawn for one goal");
@@ -575,7 +609,7 @@ async fn the_planner_is_spawned_with_the_todo_instruction() {
                  bridge: {prompt}",
             );
             assert!(
-                prompt.contains("one item per `## Task checklist` line"),
+                prompt.contains("one item per `## Task steps` entry"),
                 "one item per plan step, in order",
             );
             assert!(
@@ -640,7 +674,9 @@ async fn setup_goal_seeds_the_planners_own_items_without_a_model_turn() {
 
             // The whole point: `setup_goal` returns the reminder, so no model
             // turn has run — and the list is already populated when it does.
-            let reminder = actor.setup_goal("ship the exporter", None).await;
+            let reminder = actor
+                .setup_goal("ship the exporter", None, GoalMode::Full)
+                .await;
 
             let snap = actor.goal_tracker.lock().snapshot().cloned().unwrap();
             assert!(
@@ -692,13 +728,13 @@ async fn the_planner_childs_own_items_are_the_source_not_the_plan_prose() {
     local
         .run_until(async {
             let (tx, _c) = spawn_planner_coordinator(SpawnBehaviour::WritePlanThenDoneWithTodos {
-                body: b"# Plan\n\n## Task checklist\n- [ ] a step the plan body names\n",
+                body: b"# Plan\n\n## Task steps\n1. a step the plan body names\n",
                 todos: &["the child's first step", "the child's second step"],
             });
             let (actor, _tmp) = make_planner_actor(Some(tx), true).await;
             arm_todo_writes(&actor).await;
 
-            let _ = actor.setup_goal("ship it", None).await;
+            let _ = actor.setup_goal("ship it", None, GoalMode::Full).await;
 
             let landed = live_todo_contents(&actor).await;
             println!(
@@ -733,7 +769,9 @@ async fn a_planner_that_named_no_items_leaves_the_list_untouched() {
             let (actor, _tmp) = make_planner_actor(Some(tx), true).await;
             arm_todo_writes(&actor).await;
 
-            let _ = actor.setup_goal("ship the exporter", None).await;
+            let _ = actor
+                .setup_goal("ship the exporter", None, GoalMode::Full)
+                .await;
 
             let snap = actor.goal_tracker.lock().snapshot().cloned().unwrap();
             assert!(snap.plan_file.is_some(), "the plan was still published");
@@ -772,7 +810,9 @@ async fn goal_seeding_is_append_only_and_idempotent() {
                 live_todos(&actor).await
             );
 
-            let _ = actor.setup_goal("ship the exporter", None).await;
+            let _ = actor
+                .setup_goal("ship the exporter", None, GoalMode::Full)
+                .await;
             let after_publish = live_todos(&actor).await;
             println!("=== todo list AFTER planning ===\n{after_publish:?}\n");
 
@@ -853,7 +893,9 @@ async fn a_failed_planner_leaves_the_todo_list_untouched() {
             arm_todo_writes(&actor).await;
             write_existing_todo(&actor, "t1", "the user's own item").await;
 
-            let _ = actor.setup_goal("ship the exporter", None).await;
+            let _ = actor
+                .setup_goal("ship the exporter", None, GoalMode::Full)
+                .await;
 
             let snap = actor.goal_tracker.lock().snapshot().cloned().unwrap();
             assert!(snap.plan_file.is_none(), "fail-closed publishes no plan");
@@ -907,7 +949,9 @@ async fn send_now_queues_planner_context_without_restart() {
 
             let planner = {
                 let actor = StdArc::clone(&actor);
-                tokio::task::spawn_local(async move { actor.setup_goal("do X", None).await })
+                tokio::task::spawn_local(async move {
+                    actor.setup_goal("do X", None, GoalMode::Full).await
+                })
             };
 
             assert_eq!(
@@ -1955,9 +1999,10 @@ async fn lifecycle_resume_with_plan_does_not_re_fire_planner() {
 
 /// End-to-end gate (enabled side): when the planner is on and writes a
 /// plan, `setup_goal`'s reminder folds in the plan-aware block carrying
-/// the actual `plan_path()` pointer, the "already on your list" statement
-/// (NOT a manual seed directive), the `## Deviations` instruction, and the
-/// legacy discipline intact.
+/// the actual `plan_path()` pointer, the `## Deviations` instruction, and the
+/// legacy discipline intact. This planner lists no todo items, so nothing is
+/// seeded: the reminder must tell the implementer to put the steps on the
+/// list, and must never claim they are already there.
 #[tokio::test(flavor = "current_thread")]
 #[serial]
 async fn setup_goal_reminder_is_plan_aware_when_planner_enabled() {
@@ -1970,7 +2015,7 @@ async fn setup_goal_reminder_is_plan_aware_when_planner_enabled() {
             let (actor, _tmp) = make_planner_actor(Some(tx), true).await;
             let plan_path = actor.goal_tracker.lock().plan_path();
 
-            let reminder = actor.setup_goal("ship it", None).await;
+            let reminder = actor.setup_goal("ship it", None, GoalMode::Full).await;
             // Printed so `cargo test -- --nocapture` captures the exact reminder
             // text for review: the assertions below are the gate, this is the
             // artifact a reader (or the goal's verification) reads.
@@ -1988,9 +2033,14 @@ async fn setup_goal_reminder_is_plan_aware_when_planner_enabled() {
                 "the manual seed-todos directive must be gone — the harness \
                  populates the list itself:\n{reminder}"
             );
+            assert!(!snap.plan_todos_seeded, "this planner seeds nothing");
             assert!(
-                reminder.contains(PLAN_TODOS_ALREADY_SEEDED_PHRASE),
-                "the reminder must say the plan's steps are already on the list:\n{reminder}"
+                !reminder.contains(PLAN_TODOS_ALREADY_SEEDED_PHRASE),
+                "an unseeded goal must not be told its steps are on the list:\n{reminder}"
+            );
+            assert!(
+                reminder.contains(PLAN_TODOS_TO_ADD_PHRASE),
+                "an unseeded goal must be told to put the steps on the list:\n{reminder}"
             );
             assert!(
                 reminder.contains("append a bullet to the plan's single"),
@@ -2017,7 +2067,7 @@ async fn setup_goal_reminder_is_no_plan_when_planner_disabled() {
         .run_until(async {
             let (actor, _tmp) = make_planner_actor(None, false).await;
 
-            let reminder = actor.setup_goal("ship it", None).await;
+            let reminder = actor.setup_goal("ship it", None, GoalMode::Full).await;
             println!("=== no-plan setup_goal reminder ===\n{reminder}\n=== end ===\n");
 
             let snap = actor.goal_tracker.lock().snapshot().cloned().unwrap();
@@ -2086,8 +2136,12 @@ async fn goal_resume_reminder_is_plan_aware_when_planner_enabled() {
                 "resume reminder must not re-issue the manual seed directive:\n{reminder}"
             );
             assert!(
-                reminder.contains(PLAN_TODOS_ALREADY_SEEDED_PHRASE),
-                "resume reminder must say the plan's steps are already on the list:\n{reminder}"
+                !reminder.contains(PLAN_TODOS_ALREADY_SEEDED_PHRASE),
+                "nothing was seeded, so resume must not claim the steps are on the list:\n{reminder}"
+            );
+            assert!(
+                reminder.contains(PLAN_TODOS_TO_ADD_PHRASE),
+                "resume must tell the implementer to put the steps on the list:\n{reminder}"
             );
         })
         .await;

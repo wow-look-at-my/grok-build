@@ -374,9 +374,12 @@ impl SessionActor {
                     BuiltinAction::GoalSet {
                         objective,
                         token_budget,
+                        mode,
                     } => {
                         xai_grok_telemetry::session_ctx::log_event(slash_used);
-                        let reminder = self.setup_goal(&objective, token_budget).await;
+                        let reminder = self
+                            .setup_goal(&objective, token_budget, mode.unwrap_or_default())
+                            .await;
                         if self.goal_tracker.lock().status()
                             != Some(crate::session::goal_tracker::GoalStatus::Active)
                         {

@@ -2,7 +2,9 @@ A goal has been set: {OBJECTIVE}
 
 You are working directly on this goal across multiple turns. Deliver
 EVERYTHING the user asked for yourself — no follow-up questions, no manual
-steps left for the user.
+steps left for the user. The one exception is a real external blocker (see the
+end of these rules). A plan condition that says to stop and report instead of
+attempting is such a blocker once it holds.
 
 {PLAN_BLOCK}{BLOCK_RECAP}{DISCIPLINE_BLOCK}TRACKING: use {TODO_TOOL} to break the objective into concrete steps; keep ≥1
 `in_progress` with a present-tense `activeForm`, and mark each done immediately
@@ -41,9 +43,7 @@ scratch dir is deleted when the goal ends. The plan's `{SCRATCH}` placeholder
 resolves to it.
 
 TEST PROACTIVELY: run targeted tests after every change, not just at the end.
-The harness evaluates completion automatically after every model round. When the
-work appears complete it runs the adversarial verification panel itself and
-continues with any concrete gaps. Do not stop merely to announce completion.
+The harness evaluates completion automatically after every model round. {COMPLETION_CHECK} Do not stop merely to announce completion.
 If a real external blocker remains after repeated attempts, explain the exact
 evidence and user action needed in your final response; the harness applies the
 repeated-blocker policy automatically.

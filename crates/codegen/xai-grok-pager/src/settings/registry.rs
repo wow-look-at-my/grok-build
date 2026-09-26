@@ -701,9 +701,11 @@ pub fn current_value_for(
         "output_rate_window_secs" => Some(SettingValue::Int(i64::from(
             ui.output_rate_window_secs_value(),
         ))),
-        "output_rate_max_retries" => Some(SettingValue::Int(i64::from(
-            ui.output_rate_max_retries_value(),
-        ))),
+        "output_rate_max_retries" => Some(SettingValue::Int(
+            xai_grok_shell::util::config::output_rate_max_retries_to_setting(
+                ui.output_rate_max_retries_value(),
+            ),
+        )),
         "ttft_timeout_secs" => Some(SettingValue::Int(i64::from(ui.ttft_timeout_secs_value()))),
         // coding_data_sharing: inverts the `_opt_out` bool.
         "coding_data_sharing" => Some(SettingValue::Enum(if pager.coding_data_sharing_opt_out {

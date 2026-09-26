@@ -96,8 +96,12 @@ pub struct UiConfig {
     /// How many times one model call is reissued for slow output before the
     /// response is accepted at whatever rate it runs. `None` = 2. A legacy
     /// `[output_rate_floor].max_retries` applies when this is unset.
-    /// (`[ui].output_rate_max_retries`.)
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// (`[ui].output_rate_max_retries`.) `-1` or `"unlimited"` never runs out.
+    #[serde(
+        default,
+        with = "xai_grok_config_types::retry_budget",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub output_rate_max_retries: Option<u32>,
     /// Reissue a model call that has produced no output this many seconds
     /// after the request was sent. `None` = 120 seconds, `0` = off. It shares
@@ -453,13 +457,9 @@ impl UiConfig {
     /// token and under the 300 s stream idle timeout.
     pub const TTFT_TIMEOUT_SECS_DEFAULT: u32 = 120;
 
-    /// Upper clamp for [`Self::ttft_timeout_secs`].
-    pub const TTFT_TIMEOUT_SECS_MAX: u32 = 1800;
-
     pub fn ttft_timeout_secs_value(&self) -> u32 {
         self.ttft_timeout_secs
             .unwrap_or(Self::TTFT_TIMEOUT_SECS_DEFAULT)
-            .min(Self::TTFT_TIMEOUT_SECS_MAX)
     }
 
     /// Fill the `[ui]` window and retry budget from a legacy
