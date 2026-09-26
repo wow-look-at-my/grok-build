@@ -975,9 +975,139 @@
         assert!(child_view.session.tracker.output_rate().is_none());
     }
 
+    /// The active agent's status row, rendered from what its tracker holds,
+    /// the same two fields `agent_view/render.rs` hands the renderer.
+    fn active_row_text(app: &AppView) -> String {
+        let agent = &app.agents[&AgentId(0)];
+        let activity = agent.resolve_turn_activity();
+        crate::views::turn_status::render_running_row(&activity, agent.session.tracker.output_rate())
+    }
+
+    /// A rate describes the stream that published it. When one model call
+    /// closes, its reading closes with it: carrying it into the next call's
+    /// pre-first-token wait puts a stale number, and after a slow call a
+    /// yellow or red one, under a row that says it is waiting for a response.
     #[test]
-    fn child_output_rate_without_view_returns_false() {
+    fn a_closed_model_call_takes_its_rate_with_it() {
+        let mut app = make_app_with_agent("sess-rate-close");
+        {
+            let agent = app.agents.get_mut(&AgentId(0)).unwrap();
+            agent.session.start_turn(&mut agent.scrollback);
+            agent.session.current_prompt_id = Some("pid-a".into());
+        }
+        // The call is streaming, which is all a rate can ever describe.
+        let _ = handle(make_agent_chunk_message("sess-rate-close", "the answer"), &mut app);
+        let _ = handle_ext_notification(
+            &xai_output_rate_notif("sess-rate-close", 3.4, Some(10.0), Some(41_000)),
+            &mut app,
+        );
+        let row = active_row_text(&app);
+        assert!(
+            row.contains("3.4 tok/s (slow 41s)"),
+            "a slow live stream shows its reading: {row:?}"
+        );
+
+        // The call closes, the shape of every turn that then runs a client
+        // tool. Nothing is streaming until the next call's first byte.
+        let _ = handle_ext_notification(
+            &xai_response_completed_notif_with_cost("sess-rate-close", None, None),
+            &mut app,
+        );
+        let row = active_row_text(&app);
+        assert!(
+            !row.contains("tok/s"),
+            "a closed call's reading must not outlive it: {row:?}"
+        );
+
+        // The next call's output brings the number back.
+        let _ = handle_ext_notification(
+            &xai_output_rate_notif("sess-rate-close", 88.0, Some(10.0), None),
+            &mut app,
+        );
+        assert!(active_row_text(&app).contains("88 tok/s"));
+    }
+
+    /// A retried attempt has no stream either, and the backoff that follows is
+    /// a wait rather than a slow response. Both root and subagent sessions
+    /// reach the rate through this one arm.
+    #[test]
+    fn a_retry_state_ends_the_rate_too() {
+        let mut session = make_session(Some("s1"));
+        let mut scrollback = ScrollbackState::new();
+        assert!(session.tracker.set_output_rate(crate::acp::tracker::OutputRate {
+            tokens_per_sec: 4.0,
+            window_secs: 10,
+            floor_tokens_per_sec: Some(10.0),
+            slow_for: Some(std::time::Duration::from_secs(12)),
+        }));
+        apply_session_event(
+            &XaiSessionUpdate::RetryState(RetryState::Retrying {
+                attempt: 1,
+                max_retries: 3,
+                reason: "error decoding response body".into(),
+                retry_in_ms: Some(27_000),
+            }),
+            &mut session,
+            &mut scrollback,
+            false,
+        );
+        assert!(
+            session.tracker.output_rate().is_none(),
+            "the retried attempt's rate must not sit under the backoff"
+        );
+    }
+
+    /// A subagent's view draws the same row, so its call closing clears its rate
+    /// as well.
+    #[test]
+    fn a_child_response_completed_clears_the_childs_rate() {
         let mut agent = make_agent(Some("root-sess"));
+        let child_sid = "child-sess-rate-close";
+        agent
+            .subagent_views
+            .insert(child_sid.into(), Box::new(make_agent(Some(child_sid))));
+        let _ = handle_child_session_notification(
+            XaiSessionUpdate::OutputRate {
+                tokens_per_sec: 6.0,
+                window_secs: 10,
+                floor_tokens_per_sec: Some(10.0),
+                slow_for_ms: None,
+            },
+            child_sid,
+            &mut agent,
+            false,
+        );
+        assert!(agent.subagent_views[child_sid]
+            .session
+            .tracker
+            .output_rate()
+            .is_some());
+        let _ = handle_child_session_notification(
+            XaiSessionUpdate::ResponseCompleted {
+                message_id: None,
+                stop_reason: Some("tool_use".into()),
+                usage: None,
+                signature: None,
+                stop_sequence: None,
+                cost_usd_ticks: None,
+                session_cost_usd_ticks: None,
+            },
+            child_sid,
+            &mut agent,
+            false,
+        );
+        assert!(
+            agent.subagent_views[child_sid]
+                .session
+                .tracker
+                .output_rate()
+                .is_none(),
+            "the child's row must not keep a reading across its model calls"
+        );
+    }
+
+    #[test]
+    fn child_output_rate_without_view_returns_false() {        let mut agent = make_agent(Some("root-sess"));
         let update = XaiSessionUpdate::OutputRate {
             tokens_per_sec: 42.0,
             window_secs: 10,
