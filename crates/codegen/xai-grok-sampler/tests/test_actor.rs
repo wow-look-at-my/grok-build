@@ -981,507 +981,768 @@ async fn responses_confident_doom_loop_signal_resamples_once() {
 // Output-rate floor
 // ---------------------------------------------------------------------------
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-/// A collapsed stream gets a backup generation beside it. The original never
-/// finishes and the backup answers at the same time, so the backup's answer wins.
-async fn a_collapsed_stream_loses_to_a_backup_that_finishes_first() {
-    let counter = Arc::new(AtomicU32::new(0));
-    let counter_handler = Arc::clone(&counter);
-    let app = Router::new().route(
-        "/v1/chat/completions",
-        post(move || {
-            let counter = Arc::clone(&counter_handler);
-            async move {
-                let attempt = counter.fetch_add(1, Ordering::SeqCst);
-                if attempt == 0 {
-                    // 60 chunks at 200 ms outlasts the breach by far; the
-                    // client drops the stream partway through.
-                    let events: Vec<Event> =
-                        (0..60).map(|_| text_chunk_event("x", false)).collect();
-                    let slow = stream::iter(events).then(|event| async move {
-                        tokio::time::sleep(Duration::from_millis(200)).await;
-                        Ok::<_, std::convert::Infallible>(event)
+/// The output-rate floor's coverage, in one module so `cargo test --test
+/// test_actor output_rate` runs the whole of it, the new cases and the
+/// existing ones together, since what a widened hold must not do is break the
+/// detection the floor exists for.
+mod output_rate {
+    use super::*;
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    /// A collapsed stream gets a backup generation beside it. The original never
+    /// finishes and the backup answers at the same time, so the backup's answer wins.
+    async fn a_collapsed_stream_loses_to_a_backup_that_finishes_first() {
+        let counter = Arc::new(AtomicU32::new(0));
+        let counter_handler = Arc::clone(&counter);
+        let app = Router::new().route(
+            "/v1/chat/completions",
+            post(move || {
+                let counter = Arc::clone(&counter_handler);
+                async move {
+                    let attempt = counter.fetch_add(1, Ordering::SeqCst);
+                    if attempt == 0 {
+                        // 60 chunks at 200 ms outlasts the breach by far; the
+                        // client drops the stream partway through.
+                        let events: Vec<Event> =
+                            (0..60).map(|_| text_chunk_event("x", false)).collect();
+                        let slow = stream::iter(events).then(|event| async move {
+                            tokio::time::sleep(Duration::from_millis(200)).await;
+                            Ok::<_, std::convert::Infallible>(event)
+                        });
+                        return Sse::new(slow.boxed());
+                    }
+                    let events = vec![text_chunk_event("clean answer", true)];
+                    Sse::new(
+                        stream::iter(events.into_iter().map(Ok::<_, std::convert::Infallible>))
+                            .boxed(),
+                    )
+                }
+            }),
+        );
+        let server = MockServer::spawn(app).await;
+        let (event_tx, mut event_rx) = mpsc::unbounded_channel();
+        let mut cfg = test_config(server.base_url(), "test-model");
+        cfg.output_rate_floor = Some(OutputRateFloorPolicy {
+            min_tokens_per_sec: 100.0,
+            window_secs: 2,
+            sustained_secs: 1,
+            max_retries: 2,
+            ttft_timeout_secs: 0,
+        });
+        let handle = SamplerActor::spawn(cfg, RetryPolicy::default(), event_tx);
+
+        let result = handle
+            .submit_and_collect(RequestId::from("req-rate-floor"), user_request("hi"))
+            .await;
+        server.shutdown();
+
+        let (response, _metrics) = result.expect("the backup answers");
+        assert_eq!(counter.load(Ordering::SeqCst), 2, "exactly one backup");
+        assert_eq!(response.assistant_text(), "clean answer");
+
+        let mut saw_rate_retry = false;
+        let mut saw_rate_event = false;
+        while let Ok(event) = event_rx.try_recv() {
+            match event {
+                SamplingEvent::Retrying { kind, .. } => {
+                    if kind == SamplingErrorKind::OutputRateCollapsed {
+                        saw_rate_retry = true;
+                    }
+                }
+                SamplingEvent::OutputRate {
+                    tokens_per_sec,
+                    floor_tokens_per_sec,
+                    ..
+                } => {
+                    saw_rate_event = true;
+                    assert!(
+                        tokens_per_sec < 100.0,
+                        "the collapsed stream's rate was {tokens_per_sec}"
+                    );
+                    assert_eq!(floor_tokens_per_sec, Some(100.0));
+                }
+                _ => {}
+            }
+        }
+        assert!(
+            saw_rate_retry,
+            "the reissue must be attributed to the rate floor, not to a transport retry"
+        );
+        assert!(
+            saw_rate_event,
+            "the rate the gate measured must also reach the client"
+        );
+    }
+
+    /// When the server dropped a response body, which a cancelled request causes.
+    struct DropStamp(Arc<std::sync::Mutex<Option<std::time::Instant>>>);
+
+    impl Drop for DropStamp {
+        fn drop(&mut self) {
+            *self.0.lock().unwrap() = Some(std::time::Instant::now());
+        }
+    }
+
+    fn floor_policy_100() -> OutputRateFloorPolicy {
+        OutputRateFloorPolicy {
+            min_tokens_per_sec: 100.0,
+            window_secs: 2,
+            sustained_secs: 1,
+            max_retries: 2,
+            ttft_timeout_secs: 0,
+        }
+    }
+
+    /// Every event the actor sends, with the instant it arrived.
+    fn collect_timed(
+        mut event_rx: mpsc::UnboundedReceiver<SamplingEvent>,
+    ) -> Arc<std::sync::Mutex<Vec<(std::time::Instant, SamplingEvent)>>> {
+        let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = Arc::clone(&seen);
+        tokio::spawn(async move {
+            while let Some(event) = event_rx.recv().await {
+                sink.lock()
+                    .unwrap()
+                    .push((std::time::Instant::now(), event));
+            }
+        });
+        seen
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    /// A slow original that speeds back up keeps its answer and cancels its backup.
+    async fn a_recovered_stream_cancels_its_backup_and_keeps_its_answer() {
+        let counter = Arc::new(AtomicU32::new(0));
+        let backup_dropped = Arc::new(std::sync::Mutex::new(None));
+        let counter_handler = Arc::clone(&counter);
+        let dropped_handler = Arc::clone(&backup_dropped);
+        let app = Router::new().route(
+            "/v1/chat/completions",
+            post(move || {
+                let counter = Arc::clone(&counter_handler);
+                let dropped = Arc::clone(&dropped_handler);
+                async move {
+                    let attempt = counter.fetch_add(1, Ordering::SeqCst);
+                    if attempt == 0 {
+                        let fast = "f".repeat(40);
+                        let mut events: Vec<(u64, Event)> = (0..20)
+                            .map(|_| (200, text_chunk_event("x", false)))
+                            .collect();
+                        events.extend((0..120).map(|_| (25, text_chunk_event(&fast, false))));
+                        events.push((25, text_chunk_event("", true)));
+                        let paced = stream::iter(events).then(|(delay, event)| async move {
+                            tokio::time::sleep(Duration::from_millis(delay)).await;
+                            Ok::<_, std::convert::Infallible>(event)
+                        });
+                        return Sse::new(paced.boxed());
+                    }
+                    let stamp = DropStamp(dropped);
+                    let mut events: Vec<Event> =
+                        (0..200).map(|_| text_chunk_event("", false)).collect();
+                    events.push(text_chunk_event("late", true));
+                    let idle = stream::iter(events).then(move |event| {
+                        let _ = &stamp;
+                        async move {
+                            tokio::time::sleep(Duration::from_millis(100)).await;
+                            Ok::<_, std::convert::Infallible>(event)
+                        }
                     });
-                    return Sse::new(slow.boxed());
+                    Sse::new(idle.boxed())
                 }
-                let events = vec![text_chunk_event("clean answer", true)];
-                Sse::new(
-                    stream::iter(events.into_iter().map(Ok::<_, std::convert::Infallible>)).boxed(),
-                )
-            }
-        }),
-    );
-    let server = MockServer::spawn(app).await;
-    let (event_tx, mut event_rx) = mpsc::unbounded_channel();
-    let mut cfg = test_config(server.base_url(), "test-model");
-    cfg.output_rate_floor = Some(OutputRateFloorPolicy {
-        min_tokens_per_sec: 100.0,
-        window_secs: 2,
-        sustained_secs: 1,
-        max_retries: 2,
-        ttft_timeout_secs: 0,
-    });
-    let handle = SamplerActor::spawn(cfg, RetryPolicy::default(), event_tx);
+            }),
+        );
+        let server = MockServer::spawn(app).await;
+        let (event_tx, event_rx) = mpsc::unbounded_channel();
+        let mut cfg = test_config(server.base_url(), "test-model");
+        cfg.output_rate_floor = Some(floor_policy_100());
+        let handle = SamplerActor::spawn(cfg, RetryPolicy::default(), event_tx);
+        let events = collect_timed(event_rx);
 
-    let result = handle
-        .submit_and_collect(RequestId::from("req-rate-floor"), user_request("hi"))
-        .await;
-    server.shutdown();
+        let result = handle
+            .submit_and_collect(RequestId::from("req-rate-recover"), user_request("hi"))
+            .await;
+        let finished_at = std::time::Instant::now();
+        server.shutdown();
 
-    let (response, _metrics) = result.expect("the backup answers");
-    assert_eq!(counter.load(Ordering::SeqCst), 2, "exactly one backup");
-    assert_eq!(response.assistant_text(), "clean answer");
-
-    let mut saw_rate_retry = false;
-    let mut saw_rate_event = false;
-    while let Ok(event) = event_rx.try_recv() {
-        match event {
-            SamplingEvent::Retrying { kind, .. } => {
-                if kind == SamplingErrorKind::OutputRateCollapsed {
-                    saw_rate_retry = true;
-                }
-            }
-            SamplingEvent::OutputRate {
-                tokens_per_sec,
-                floor_tokens_per_sec,
-                ..
-            } => {
-                saw_rate_event = true;
-                assert!(
-                    tokens_per_sec < 100.0,
-                    "the collapsed stream's rate was {tokens_per_sec}"
-                );
-                assert_eq!(floor_tokens_per_sec, Some(100.0));
-            }
-            _ => {}
-        }
+        let (response, _metrics) = result.expect("the recovered original answers");
+        assert_eq!(counter.load(Ordering::SeqCst), 2, "one backup was started");
+        assert_eq!(
+            response.assistant_text(),
+            format!("{}{}", "x".repeat(20), "f".repeat(40 * 120)),
+            "the original's answer, never the backup's"
+        );
+        let dropped_at = backup_dropped
+            .lock()
+            .unwrap()
+            .expect("the backup's request was cancelled");
+        assert!(
+            dropped_at + Duration::from_secs(1) < finished_at,
+            "the recovery cancels the backup, not the original's end: dropped {:?} before the end",
+            finished_at.saturating_duration_since(dropped_at)
+        );
+        let retried = events.lock().unwrap().iter().any(|(_, e)| {
+		matches!(e, SamplingEvent::Retrying { kind, .. } if *kind == SamplingErrorKind::OutputRateCollapsed)
+	});
+        assert!(!retried, "the caller never switched streams");
     }
-    assert!(
-        saw_rate_retry,
-        "the reissue must be attributed to the rate floor, not to a transport retry"
-    );
-    assert!(
-        saw_rate_event,
-        "the rate the gate measured must also reach the client"
-    );
-}
 
-/// When the server dropped a response body, which a cancelled request causes.
-struct DropStamp(Arc<std::sync::Mutex<Option<std::time::Instant>>>);
-
-impl Drop for DropStamp {
-    fn drop(&mut self) {
-        *self.0.lock().unwrap() = Some(std::time::Instant::now());
-    }
-}
-
-fn floor_policy_100() -> OutputRateFloorPolicy {
-    OutputRateFloorPolicy {
-        min_tokens_per_sec: 100.0,
-        window_secs: 2,
-        sustained_secs: 1,
-        max_retries: 2,
-        ttft_timeout_secs: 0,
-    }
-}
-
-/// Every event the actor sends, with the instant it arrived.
-fn collect_timed(
-    mut event_rx: mpsc::UnboundedReceiver<SamplingEvent>,
-) -> Arc<std::sync::Mutex<Vec<(std::time::Instant, SamplingEvent)>>> {
-    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let sink = Arc::clone(&seen);
-    tokio::spawn(async move {
-        while let Some(event) = event_rx.recv().await {
-            sink.lock()
-                .unwrap()
-                .push((std::time::Instant::now(), event));
-        }
-    });
-    seen
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-/// A slow original that speeds back up keeps its answer and cancels its backup.
-async fn a_recovered_stream_cancels_its_backup_and_keeps_its_answer() {
-    let counter = Arc::new(AtomicU32::new(0));
-    let backup_dropped = Arc::new(std::sync::Mutex::new(None));
-    let counter_handler = Arc::clone(&counter);
-    let dropped_handler = Arc::clone(&backup_dropped);
-    let app = Router::new().route(
-        "/v1/chat/completions",
-        post(move || {
-            let counter = Arc::clone(&counter_handler);
-            let dropped = Arc::clone(&dropped_handler);
-            async move {
-                let attempt = counter.fetch_add(1, Ordering::SeqCst);
-                if attempt == 0 {
-                    let fast = "f".repeat(40);
-                    let mut events: Vec<(u64, Event)> = (0..20)
-                        .map(|_| (200, text_chunk_event("x", false)))
-                        .collect();
-                    events.extend((0..120).map(|_| (25, text_chunk_event(&fast, false))));
-                    events.push((25, text_chunk_event("", true)));
-                    let paced = stream::iter(events).then(|(delay, event)| async move {
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    /// A backup that gets ahead replaces the slow original while it still streams.
+    async fn a_backup_that_overtakes_replaces_the_slow_stream_mid_response() {
+        let counter = Arc::new(AtomicU32::new(0));
+        let counter_handler = Arc::clone(&counter);
+        let app = Router::new().route(
+            "/v1/chat/completions",
+            post(move || {
+                let counter = Arc::clone(&counter_handler);
+                async move {
+                    let attempt = counter.fetch_add(1, Ordering::SeqCst);
+                    let (text, count, delay, finish) = if attempt == 0 {
+                        ("x", 60, 200, false)
+                    } else {
+                        ("yy", 50, 50, true)
+                    };
+                    let mut events: Vec<Event> =
+                        (0..count).map(|_| text_chunk_event(text, false)).collect();
+                    if finish {
+                        events.push(text_chunk_event("", true));
+                    }
+                    let paced = stream::iter(events).then(move |event| async move {
                         tokio::time::sleep(Duration::from_millis(delay)).await;
                         Ok::<_, std::convert::Infallible>(event)
                     });
-                    return Sse::new(paced.boxed());
+                    Sse::new(paced.boxed())
                 }
-                let stamp = DropStamp(dropped);
-                let mut events: Vec<Event> =
-                    (0..200).map(|_| text_chunk_event("", false)).collect();
-                events.push(text_chunk_event("late", true));
-                let idle = stream::iter(events).then(move |event| {
-                    let _ = &stamp;
-                    async move {
-                        tokio::time::sleep(Duration::from_millis(100)).await;
-                        Ok::<_, std::convert::Infallible>(event)
-                    }
-                });
-                Sse::new(idle.boxed())
-            }
-        }),
-    );
-    let server = MockServer::spawn(app).await;
-    let (event_tx, event_rx) = mpsc::unbounded_channel();
-    let mut cfg = test_config(server.base_url(), "test-model");
-    cfg.output_rate_floor = Some(floor_policy_100());
-    let handle = SamplerActor::spawn(cfg, RetryPolicy::default(), event_tx);
-    let events = collect_timed(event_rx);
+            }),
+        );
+        let server = MockServer::spawn(app).await;
+        let (event_tx, event_rx) = mpsc::unbounded_channel();
+        let mut cfg = test_config(server.base_url(), "test-model");
+        cfg.output_rate_floor = Some(floor_policy_100());
+        let handle = SamplerActor::spawn(cfg, RetryPolicy::default(), event_tx);
+        let events = collect_timed(event_rx);
 
-    let result = handle
-        .submit_and_collect(RequestId::from("req-rate-recover"), user_request("hi"))
-        .await;
-    let finished_at = std::time::Instant::now();
-    server.shutdown();
+        let result = handle
+            .submit_and_collect(RequestId::from("req-rate-overtake"), user_request("hi"))
+            .await;
+        let finished_at = std::time::Instant::now();
+        server.shutdown();
 
-    let (response, _metrics) = result.expect("the recovered original answers");
-    assert_eq!(counter.load(Ordering::SeqCst), 2, "one backup was started");
-    assert_eq!(
-        response.assistant_text(),
-        format!("{}{}", "x".repeat(20), "f".repeat(40 * 120)),
-        "the original's answer, never the backup's"
-    );
-    let dropped_at = backup_dropped
-        .lock()
-        .unwrap()
-        .expect("the backup's request was cancelled");
-    assert!(
-        dropped_at + Duration::from_secs(1) < finished_at,
-        "the recovery cancels the backup, not the original's end: dropped {:?} before the end",
-        finished_at.saturating_duration_since(dropped_at)
-    );
-    let retried = events.lock().unwrap().iter().any(|(_, e)| {
-		matches!(e, SamplingEvent::Retrying { kind, .. } if *kind == SamplingErrorKind::OutputRateCollapsed)
-	});
-    assert!(!retried, "the caller never switched streams");
-}
+        let (response, _metrics) = result.expect("the backup answers");
+        assert_eq!(counter.load(Ordering::SeqCst), 2, "one backup, no reissue");
+        assert_eq!(response.assistant_text(), "y".repeat(100));
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-/// A backup that gets ahead replaces the slow original while it still streams.
-async fn a_backup_that_overtakes_replaces_the_slow_stream_mid_response() {
-    let counter = Arc::new(AtomicU32::new(0));
-    let counter_handler = Arc::clone(&counter);
-    let app = Router::new().route(
-        "/v1/chat/completions",
-        post(move || {
-            let counter = Arc::clone(&counter_handler);
-            async move {
-                let attempt = counter.fetch_add(1, Ordering::SeqCst);
-                let (text, count, delay, finish) = if attempt == 0 {
-                    ("x", 60, 200, false)
-                } else {
-                    ("yy", 50, 50, true)
-                };
-                let mut events: Vec<Event> =
-                    (0..count).map(|_| text_chunk_event(text, false)).collect();
-                if finish {
-                    events.push(text_chunk_event("", true));
-                }
-                let paced = stream::iter(events).then(move |event| async move {
-                    tokio::time::sleep(Duration::from_millis(delay)).await;
-                    Ok::<_, std::convert::Infallible>(event)
-                });
-                Sse::new(paced.boxed())
-            }
-        }),
-    );
-    let server = MockServer::spawn(app).await;
-    let (event_tx, event_rx) = mpsc::unbounded_channel();
-    let mut cfg = test_config(server.base_url(), "test-model");
-    cfg.output_rate_floor = Some(floor_policy_100());
-    let handle = SamplerActor::spawn(cfg, RetryPolicy::default(), event_tx);
-    let events = collect_timed(event_rx);
-
-    let result = handle
-        .submit_and_collect(RequestId::from("req-rate-overtake"), user_request("hi"))
-        .await;
-    let finished_at = std::time::Instant::now();
-    server.shutdown();
-
-    let (response, _metrics) = result.expect("the backup answers");
-    assert_eq!(counter.load(Ordering::SeqCst), 2, "one backup, no reissue");
-    assert_eq!(response.assistant_text(), "y".repeat(100));
-
-    let events = events.lock().unwrap();
-    let switch = events
+        let events = events.lock().unwrap();
+        let switch = events
 		.iter()
 		.position(|(_, e)| {
 			matches!(e, SamplingEvent::Retrying { kind, .. } if *kind == SamplingErrorKind::OutputRateCollapsed)
 		})
 		.expect("the switch is reported as a rate-floor retry");
-    let switched_at = events[switch].0;
-    assert!(
-        switched_at + Duration::from_secs(1) < finished_at,
-        "the backup took over while it was still streaming, {:?} before its end",
-        finished_at.saturating_duration_since(switched_at)
-    );
-    let after: Vec<&SamplingEvent> = events[switch + 1..].iter().map(|(_, e)| e).collect();
-    assert!(
-        matches!(after.first(), Some(SamplingEvent::StreamStarted { .. })),
-        "the backup's stream is replayed from its start: {:?}",
-        after.first()
-    );
-    let slow_text_after_switch = after
-        .iter()
-        .any(|e| matches!(e, SamplingEvent::ChannelToken { text, .. } if text.contains('x')));
-    assert!(
-        !slow_text_after_switch,
-        "nothing from the slow stream reaches the caller after the switch"
-    );
-}
+        let switched_at = events[switch].0;
+        assert!(
+            switched_at + Duration::from_secs(1) < finished_at,
+            "the backup took over while it was still streaming, {:?} before its end",
+            finished_at.saturating_duration_since(switched_at)
+        );
+        let after: Vec<&SamplingEvent> = events[switch + 1..].iter().map(|(_, e)| e).collect();
+        assert!(
+            matches!(after.first(), Some(SamplingEvent::StreamStarted { .. })),
+            "the backup's stream is replayed from its start: {:?}",
+            after.first()
+        );
+        let slow_text_after_switch = after
+            .iter()
+            .any(|e| matches!(e, SamplingEvent::ChannelToken { text, .. } if text.contains('x')));
+        assert!(
+            !slow_text_after_switch,
+            "nothing from the slow stream reaches the caller after the switch"
+        );
+    }
 
-/// nothing was asked for, so nothing is reissued.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn an_ungated_session_never_reissues_a_slow_stream() {
-    let counter = Arc::new(AtomicU32::new(0));
-    let counter_handler = Arc::clone(&counter);
-    let app = Router::new().route(
-        "/v1/chat/completions",
-        post(move || {
-            let counter = Arc::clone(&counter_handler);
-            async move {
-                counter.fetch_add(1, Ordering::SeqCst);
-                let mut events: Vec<Event> =
-                    (0..12).map(|_| text_chunk_event("x", false)).collect();
-                events.push(text_chunk_event("", true));
-                let slow = stream::iter(events).then(|event| async move {
-                    tokio::time::sleep(Duration::from_millis(200)).await;
-                    Ok::<_, std::convert::Infallible>(event)
-                });
-                Sse::new(slow.boxed())
-            }
-        }),
-    );
-    let server = MockServer::spawn(app).await;
-    let (event_tx, _event_rx) = mpsc::unbounded_channel();
-    let handle = SamplerActor::spawn(
-        test_config(server.base_url(), "test-model"),
-        RetryPolicy::default(),
-        event_tx,
-    );
-
-    let result = handle
-        .submit_and_collect(RequestId::from("req-no-floor"), user_request("hi"))
-        .await;
-    server.shutdown();
-
-    let (response, _metrics) = result.expect("a slow stream still answers");
-    assert_eq!(counter.load(Ordering::SeqCst), 1, "no reissue");
-    assert_eq!(response.assistant_text(), "xxxxxxxxxxxx");
-}
-
-/// A server-side web search delivers nothing while it runs. The model is not
-/// generating during it, so the gap is the server's time and not a collapsed
-/// stream: a response that searches for longer than the sustained duration is
-/// answered, not reissued.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_hosted_search_gap_is_not_a_collapsed_stream() {
-    let counter = Arc::new(AtomicU32::new(0));
-    let counter_handler = Arc::clone(&counter);
-    let app = Router::new().route(
-        "/v1/responses",
-        post(move || {
-            let counter = Arc::clone(&counter_handler);
-            async move {
-                counter.fetch_add(1, Ordering::SeqCst);
-                // One 39-byte word plus its space is 40 bytes, and 40 bytes
-                // every 100 ms is 100 tok/s: five times the floor below, for
-                // two seconds before the search.
-                let word = "0".repeat(39);
-                let fast = vec![word; 20].join(" ");
-                let mut script = sse::responses_api_script_exact(&fast, "test-model");
-                // `response.created` first, then the healthy burst, then the
-                // search, then `response.completed` last.
-                let created = script.remove(0);
-                let completed = script.pop().expect("the terminal event");
-                let mut events = vec![Delayed::now(created)];
-                for event in script {
-                    events.push(Delayed::after(100, event));
+    /// nothing was asked for, so nothing is reissued.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn an_ungated_session_never_reissues_a_slow_stream() {
+        let counter = Arc::new(AtomicU32::new(0));
+        let counter_handler = Arc::clone(&counter);
+        let app = Router::new().route(
+            "/v1/chat/completions",
+            post(move || {
+                let counter = Arc::clone(&counter_handler);
+                async move {
+                    counter.fetch_add(1, Ordering::SeqCst);
+                    let mut events: Vec<Event> =
+                        (0..12).map(|_| text_chunk_event("x", false)).collect();
+                    events.push(text_chunk_event("", true));
+                    let slow = stream::iter(events).then(|event| async move {
+                        tokio::time::sleep(Duration::from_millis(200)).await;
+                        Ok::<_, std::convert::Infallible>(event)
+                    });
+                    Sse::new(slow.boxed())
                 }
-                events.push(Delayed::now(SseEvent::data(
-                    json!({
-                        "type": "response.web_search_call.in_progress",
-                        "sequence_number": 900,
-                        "output_index": 0,
-                        "item_id": "ws_1"
-                    })
-                    .to_string(),
-                )));
-                // The search runs for three seconds: longer than the window
-                // and the sustained duration together.
-                events.push(Delayed::after(
-                    3000,
-                    SseEvent::data(
+            }),
+        );
+        let server = MockServer::spawn(app).await;
+        let (event_tx, _event_rx) = mpsc::unbounded_channel();
+        let handle = SamplerActor::spawn(
+            test_config(server.base_url(), "test-model"),
+            RetryPolicy::default(),
+            event_tx,
+        );
+
+        let result = handle
+            .submit_and_collect(RequestId::from("req-no-floor"), user_request("hi"))
+            .await;
+        server.shutdown();
+
+        let (response, _metrics) = result.expect("a slow stream still answers");
+        assert_eq!(counter.load(Ordering::SeqCst), 1, "no reissue");
+        assert_eq!(response.assistant_text(), "xxxxxxxxxxxx");
+    }
+
+    /// A server-side web search delivers nothing while it runs. The model is not
+    /// generating during it, so the gap is the server's time and not a collapsed
+    /// stream: a response that searches for longer than the sustained duration is
+    /// answered, not reissued.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_hosted_search_gap_is_not_a_collapsed_stream() {
+        let counter = Arc::new(AtomicU32::new(0));
+        let counter_handler = Arc::clone(&counter);
+        let app = Router::new().route(
+            "/v1/responses",
+            post(move || {
+                let counter = Arc::clone(&counter_handler);
+                async move {
+                    counter.fetch_add(1, Ordering::SeqCst);
+                    // One 39-byte word plus its space is 40 bytes, and 40 bytes
+                    // every 100 ms is 100 tok/s: five times the floor below, for
+                    // two seconds before the search.
+                    let word = "0".repeat(39);
+                    let fast = vec![word; 20].join(" ");
+                    let mut script = sse::responses_api_script_exact(&fast, "test-model");
+                    // `response.created` first, then the healthy burst, then the
+                    // search, then `response.completed` last.
+                    let created = script.remove(0);
+                    let completed = script.pop().expect("the terminal event");
+                    let mut events = vec![Delayed::now(created)];
+                    for event in script {
+                        events.push(Delayed::after(100, event));
+                    }
+                    events.push(Delayed::now(SseEvent::data(
                         json!({
-                            "type": "response.output_item.done",
-                            "sequence_number": 901,
+                            "type": "response.web_search_call.in_progress",
+                            "sequence_number": 900,
                             "output_index": 0,
-                            "item": {
-                                "type": "web_search_call",
-                                "id": "ws_1",
-                                "status": "completed",
-                                "action": { "type": "search", "query": "q", "sources": [] }
-                            }
+                            "item_id": "ws_1"
                         })
                         .to_string(),
-                    ),
-                ));
-                events.push(Delayed::after(100, completed));
-                Sse::new(delayed_stream(events))
-            }
-        }),
-    );
-    let server = MockServer::spawn(app).await;
-    let (event_tx, _event_rx) = mpsc::unbounded_channel();
-    let mut cfg = responses_config(server.base_url(), None);
-    cfg.output_rate_floor = Some(OutputRateFloorPolicy {
-        min_tokens_per_sec: 20.0,
-        window_secs: 2,
-        sustained_secs: 1,
-        max_retries: 2,
-        ttft_timeout_secs: 0,
-    });
-    let handle = SamplerActor::spawn(cfg, RetryPolicy::default(), event_tx);
-
-    let result = handle
-        .submit_and_collect(RequestId::from("req-hosted-search"), user_request("hi"))
-        .await;
-    server.shutdown();
-
-    let (response, _metrics) = result.expect("the searching response answers");
-    assert_eq!(
-        counter.load(Ordering::SeqCst),
-        1,
-        "the search must not be read as a collapse and reissued"
-    );
-    assert!(!response.assistant_text().is_empty());
-}
-
-/// `stream_tool_calls` is off by default, so the upstream writes a whole tool
-/// call before it says anything about it. The client sees the call open and
-/// then nothing at all while the model generates its arguments. That span is
-/// generation nobody streamed, not a stalled engine, so the response is
-/// answered rather than reissued.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn an_unstreamed_tool_call_is_not_a_collapsed_stream() {
-    let counter = Arc::new(AtomicU32::new(0));
-    let counter_handler = Arc::clone(&counter);
-    let app = Router::new().route(
-        "/v1/responses",
-        post(move || {
-            let counter = Arc::clone(&counter_handler);
-            async move {
-                counter.fetch_add(1, Ordering::SeqCst);
-                let word = "0".repeat(39);
-                let fast = vec![word; 20].join(" ");
-                let mut script = sse::responses_api_script_exact(&fast, "test-model");
-                let created = script.remove(0);
-                script.pop();
-                let mut events = vec![Delayed::now(created)];
-                for event in script {
-                    events.push(Delayed::after(100, event));
-                }
-                let call = json!({
-                    "type": "function_call",
-                    "id": "fc_1",
-                    "call_id": "call_1",
-                    "name": "read_file",
-                    "arguments": "{\"path\":\"a\"}",
-                    "status": "completed"
-                });
-                events.push(Delayed::now(SseEvent::data(
-                    json!({
-                        "type": "response.output_item.added",
-                        "sequence_number": 900,
-                        "output_index": 1,
-                        "item": {
-                            "type": "function_call",
-                            "id": "fc_1",
-                            "call_id": "call_1",
-                            "name": "read_file",
-                            "arguments": "",
-                            "status": "in_progress"
-                        }
-                    })
-                    .to_string(),
-                )));
-                // Three seconds of writing the call upstream, which outlasts
-                // the window and the sustained duration together.
-                events.push(Delayed::after(
-                    3000,
-                    SseEvent::data(
-                        json!({
-                            "type": "response.completed",
-                            "sequence_number": 901,
-                            "response": {
-                                "id": "resp_test",
-                                "object": "response",
-                                "created_at": 1234567890,
-                                "model": "test-model",
-                                "status": "completed",
-                                "output": [call],
-                                "usage": {
-                                    "input_tokens": 10,
-                                    "output_tokens": 5,
-                                    "total_tokens": 15,
-                                    "input_tokens_details": { "cached_tokens": 0 },
-                                    "output_tokens_details": { "reasoning_tokens": 0 }
+                    )));
+                    // The search runs for three seconds: longer than the window
+                    // and the sustained duration together.
+                    events.push(Delayed::after(
+                        3000,
+                        SseEvent::data(
+                            json!({
+                                "type": "response.output_item.done",
+                                "sequence_number": 901,
+                                "output_index": 0,
+                                "item": {
+                                    "type": "web_search_call",
+                                    "id": "ws_1",
+                                    "status": "completed",
+                                    "action": { "type": "search", "query": "q", "sources": [] }
                                 }
+                            })
+                            .to_string(),
+                        ),
+                    ));
+                    events.push(Delayed::after(100, completed));
+                    Sse::new(delayed_stream(events))
+                }
+            }),
+        );
+        let server = MockServer::spawn(app).await;
+        let (event_tx, _event_rx) = mpsc::unbounded_channel();
+        let mut cfg = responses_config(server.base_url(), None);
+        cfg.output_rate_floor = Some(OutputRateFloorPolicy {
+            min_tokens_per_sec: 20.0,
+            window_secs: 2,
+            sustained_secs: 1,
+            max_retries: 2,
+            ttft_timeout_secs: 0,
+        });
+        let handle = SamplerActor::spawn(cfg, RetryPolicy::default(), event_tx);
+
+        let result = handle
+            .submit_and_collect(RequestId::from("req-hosted-search"), user_request("hi"))
+            .await;
+        server.shutdown();
+
+        let (response, _metrics) = result.expect("the searching response answers");
+        assert_eq!(
+            counter.load(Ordering::SeqCst),
+            1,
+            "the search must not be read as a collapse and reissued"
+        );
+        assert!(!response.assistant_text().is_empty());
+    }
+
+    /// `stream_tool_calls` is off by default, so the upstream writes a whole tool
+    /// call before it says anything about it. The client sees the call open and
+    /// then nothing at all while the model generates its arguments. That span is
+    /// generation nobody streamed, not a stalled engine, so the response is
+    /// answered rather than reissued.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn an_unstreamed_tool_call_is_not_a_collapsed_stream() {
+        let counter = Arc::new(AtomicU32::new(0));
+        let counter_handler = Arc::clone(&counter);
+        let app = Router::new().route(
+            "/v1/responses",
+            post(move || {
+                let counter = Arc::clone(&counter_handler);
+                async move {
+                    counter.fetch_add(1, Ordering::SeqCst);
+                    let word = "0".repeat(39);
+                    let fast = vec![word; 20].join(" ");
+                    let mut script = sse::responses_api_script_exact(&fast, "test-model");
+                    let created = script.remove(0);
+                    script.pop();
+                    let mut events = vec![Delayed::now(created)];
+                    for event in script {
+                        events.push(Delayed::after(100, event));
+                    }
+                    let call = json!({
+                        "type": "function_call",
+                        "id": "fc_1",
+                        "call_id": "call_1",
+                        "name": "read_file",
+                        "arguments": "{\"path\":\"a\"}",
+                        "status": "completed"
+                    });
+                    events.push(Delayed::now(SseEvent::data(
+                        json!({
+                            "type": "response.output_item.added",
+                            "sequence_number": 900,
+                            "output_index": 1,
+                            "item": {
+                                "type": "function_call",
+                                "id": "fc_1",
+                                "call_id": "call_1",
+                                "name": "read_file",
+                                "arguments": "",
+                                "status": "in_progress"
                             }
                         })
                         .to_string(),
-                    ),
-                ));
-                Sse::new(delayed_stream(events))
+                    )));
+                    // Three seconds of writing the call upstream, which outlasts
+                    // the window and the sustained duration together.
+                    events.push(Delayed::after(
+                        3000,
+                        SseEvent::data(
+                            json!({
+                                "type": "response.completed",
+                                "sequence_number": 901,
+                                "response": {
+                                    "id": "resp_test",
+                                    "object": "response",
+                                    "created_at": 1234567890,
+                                    "model": "test-model",
+                                    "status": "completed",
+                                    "output": [call],
+                                    "usage": {
+                                        "input_tokens": 10,
+                                        "output_tokens": 5,
+                                        "total_tokens": 15,
+                                        "input_tokens_details": { "cached_tokens": 0 },
+                                        "output_tokens_details": { "reasoning_tokens": 0 }
+                                    }
+                                }
+                            })
+                            .to_string(),
+                        ),
+                    ));
+                    Sse::new(delayed_stream(events))
+                }
+            }),
+        );
+        let server = MockServer::spawn(app).await;
+        let (event_tx, _event_rx) = mpsc::unbounded_channel();
+        let mut cfg = responses_config(server.base_url(), None);
+        cfg.output_rate_floor = Some(OutputRateFloorPolicy {
+            min_tokens_per_sec: 20.0,
+            window_secs: 2,
+            sustained_secs: 1,
+            max_retries: 2,
+            ttft_timeout_secs: 0,
+        });
+        let handle = SamplerActor::spawn(cfg, RetryPolicy::default(), event_tx);
+
+        let result = handle
+            .submit_and_collect(RequestId::from("req-unstreamed-call"), user_request("hi"))
+            .await;
+        server.shutdown();
+
+        let (response, _metrics) = result.expect("the tool-calling response answers");
+        assert_eq!(
+            counter.load(Ordering::SeqCst),
+            1,
+            "writing a tool call must not be read as a collapse and reissued"
+        );
+        assert_eq!(response.tool_calls().len(), 1);
+    }
+
+    /// One `delta.tool_calls[]` fragment of a Chat Completions stream. An omitted
+    /// field is genuinely absent from the JSON, which is how several upstreams say
+    /// "this call is open and I am still writing it".
+    fn tool_call_chunk(id: Option<&str>, name: Option<&str>, arguments: Option<&str>) -> Event {
+        let mut call = serde_json::Map::new();
+        call.insert("index".to_string(), json!(0));
+        if let Some(id) = id {
+            call.insert("id".to_string(), json!(id));
+            call.insert("type".to_string(), json!("function"));
+        }
+        if name.is_some() || arguments.is_some() {
+            let mut function = serde_json::Map::new();
+            if let Some(name) = name {
+                function.insert("name".to_string(), json!(name));
             }
-        }),
-    );
-    let server = MockServer::spawn(app).await;
-    let (event_tx, _event_rx) = mpsc::unbounded_channel();
-    let mut cfg = responses_config(server.base_url(), None);
-    cfg.output_rate_floor = Some(OutputRateFloorPolicy {
-        min_tokens_per_sec: 20.0,
-        window_secs: 2,
-        sustained_secs: 1,
-        max_retries: 2,
-        ttft_timeout_secs: 0,
-    });
-    let handle = SamplerActor::spawn(cfg, RetryPolicy::default(), event_tx);
+            if let Some(arguments) = arguments {
+                function.insert("arguments".to_string(), json!(arguments));
+            }
+            call.insert("function".to_string(), serde_json::Value::Object(function));
+        }
+        let chunk = json!({
+            "id": "chatcmpl-test",
+            "object": "chat.completion.chunk",
+            "created": 0,
+            "model": "test-model",
+            "choices": [{
+                "index": 0,
+                "delta": { "tool_calls": [serde_json::Value::Object(call)] },
+                "finish_reason": null
+            }]
+        });
+        Event::default().data(chunk.to_string())
+    }
 
-    let result = handle
-        .submit_and_collect(RequestId::from("req-unstreamed-call"), user_request("hi"))
-        .await;
-    server.shutdown();
+    /// The terminal chunk of a response that called a tool.
+    fn tool_call_stop_event() -> Event {
+        let chunk = json!({
+            "id": "chatcmpl-test",
+            "object": "chat.completion.chunk",
+            "created": 0,
+            "model": "test-model",
+            "choices": [{
+                "index": 0,
+                "delta": {},
+                "finish_reason": "tool_calls"
+            }]
+        });
+        Event::default().data(chunk.to_string())
+    }
 
-    let (response, _metrics) = result.expect("the tool-calling response answers");
-    assert_eq!(
-        counter.load(Ordering::SeqCst),
-        1,
-        "writing a tool call must not be read as a collapse and reissued"
-    );
-    assert_eq!(response.tool_calls().len(), 1);
+    /// The same failure on the wire that most providers serve. It reaches the gate
+    /// three ways: an opener with no `arguments` field, an opener whose
+    /// `arguments` is the empty string, and a continuation that repeats neither an
+    /// id nor a name — and each one holds the call open for longer than the
+    /// sustained duration, so a span the gate reads as silence breaches over a
+    /// response that was busy writing.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn an_unstreamed_chat_completions_tool_call_is_not_a_collapsed_stream() {
+        let arguments = json!({ "path": "a.rs" }).to_string();
+        let cases: &[(&str, Vec<Event>)] = &[
+            (
+                "an opener with an id and a name and no arguments field",
+                vec![tool_call_chunk(Some("call_1"), Some("read_file"), None)],
+            ),
+            (
+                "an opener whose arguments are the empty string",
+                vec![tool_call_chunk(Some("call_1"), Some("read_file"), Some(""))],
+            ),
+            (
+                "a continuation with neither id, name nor arguments",
+                vec![
+                    tool_call_chunk(Some("call_1"), Some("read_file"), None),
+                    tool_call_chunk(None, None, None),
+                ],
+            ),
+        ];
+
+        for (what, opening) in cases {
+            let counter = Arc::new(AtomicU32::new(0));
+            let counter_handler = Arc::clone(&counter);
+            let opening = (*opening).clone();
+            let arguments = arguments.clone();
+            let expected_arguments = arguments.clone();
+            let app = Router::new().route(
+                "/v1/chat/completions",
+                post(move || {
+                    let counter = Arc::clone(&counter_handler);
+                    let opening = opening.clone();
+                    let arguments = arguments.clone();
+                    async move {
+                        counter.fetch_add(1, Ordering::SeqCst);
+                        // 39 bytes every 100 ms is 97 tok/s, near five times the
+                        // floor below, for the two seconds before the call opens.
+                        let word = "0".repeat(39);
+                        let mut events: Vec<(u64, Event)> = (0..20)
+                            .map(|_| (100, text_chunk_event(&word, false)))
+                            .collect();
+                        for fragment in opening {
+                            events.push((0, fragment));
+                        }
+                        // Three seconds writing the call, which outlasts the
+                        // window and the sustained duration together, then the
+                        // whole body in one fragment.
+                        events.push((3000, tool_call_chunk(None, None, Some(&arguments))));
+                        events.push((0, tool_call_stop_event()));
+                        let paced = stream::iter(events).then(|(delay, event)| async move {
+                            tokio::time::sleep(Duration::from_millis(delay)).await;
+                            Ok::<_, std::convert::Infallible>(event)
+                        });
+                        Sse::new(paced.boxed())
+                    }
+                }),
+            );
+            let server = MockServer::spawn(app).await;
+            let (event_tx, event_rx) = mpsc::unbounded_channel();
+            let mut cfg = test_config(server.base_url(), "test-model");
+            cfg.output_rate_floor = Some(OutputRateFloorPolicy {
+                min_tokens_per_sec: 20.0,
+                window_secs: 2,
+                sustained_secs: 1,
+                max_retries: 2,
+                ttft_timeout_secs: 0,
+            });
+            let handle = SamplerActor::spawn(cfg, RetryPolicy::default(), event_tx);
+            let events = collect_timed(event_rx);
+
+            let result = handle
+                .submit_and_collect(
+                    RequestId::from("req-unstreamed-chat-call"),
+                    user_request("hi"),
+                )
+                .await;
+            server.shutdown();
+
+            let (response, _metrics) =
+                result.unwrap_or_else(|e| panic!("{what}: no answer: {e:?}"));
+            assert_eq!(
+                counter.load(Ordering::SeqCst),
+                1,
+                "{what}: writing a tool call must not reissue the request"
+            );
+            let call = response
+                .tool_calls()
+                .first()
+                .unwrap_or_else(|| panic!("{what}: the tool call did not land"));
+            assert_eq!(call.name, "read_file", "{what}: the call's name");
+            assert_eq!(
+                call.arguments.as_ref(),
+                expected_arguments.as_str(),
+                "{what}: the arguments arrived whole"
+            );
+
+            let events = events.lock().unwrap();
+            let retried = events.iter().any(|(_, e)| {
+                matches!(e, SamplingEvent::Retrying { kind, .. }
+                if *kind == SamplingErrorKind::OutputRateCollapsed)
+            });
+            assert!(!retried, "{what}: no rate-floor retry: {events:?}");
+            for (_, event) in events.iter() {
+                if let SamplingEvent::OutputRate {
+                    tokens_per_sec,
+                    floor_tokens_per_sec,
+                    ..
+                } = event
+                {
+                    assert!(
+                        Some(*tokens_per_sec) >= *floor_tokens_per_sec,
+                        "{what}: a reading of {tokens_per_sec} tok/s went out under a \
+                     floor of {floor_tokens_per_sec:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// The hold is not somewhere a collapsed engine can hide. Once the call lands
+    /// the stream is judged again, and a response that keeps its connection open
+    /// while delivering almost nothing still gets its backup.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_collapse_after_an_unstreamed_tool_call_still_breaches() {
+        let counter = Arc::new(AtomicU32::new(0));
+        let counter_handler = Arc::clone(&counter);
+        let app = Router::new().route(
+            "/v1/chat/completions",
+            post(move || {
+                let counter = Arc::clone(&counter_handler);
+                async move {
+                    let attempt = counter.fetch_add(1, Ordering::SeqCst);
+                    if attempt > 0 {
+                        let events = vec![text_chunk_event("clean answer", true)];
+                        return Sse::new(
+                            stream::iter(events.into_iter().map(Ok::<_, std::convert::Infallible>))
+                                .boxed(),
+                        );
+                    }
+                    let word = "0".repeat(39);
+                    let mut events: Vec<(u64, Event)> = (0..20)
+                        .map(|_| (100, text_chunk_event(&word, false)))
+                        .collect();
+                    events.push((0, tool_call_chunk(Some("call_1"), Some("read_file"), None)));
+                    events.push((500, tool_call_chunk(None, None, Some(r#"{"path":"a.rs"}"#))));
+                    // The call landed and the engine did not come back: one byte a
+                    // chunk, chunks still arriving so the idle timeout stays quiet.
+                    events.extend((0..200).map(|_| (200, text_chunk_event("x", false))));
+                    let paced = stream::iter(events).then(|(delay, event)| async move {
+                        tokio::time::sleep(Duration::from_millis(delay)).await;
+                        Ok::<_, std::convert::Infallible>(event)
+                    });
+                    Sse::new(paced.boxed())
+                }
+            }),
+        );
+        let server = MockServer::spawn(app).await;
+        let (event_tx, mut event_rx) = mpsc::unbounded_channel();
+        let mut cfg = test_config(server.base_url(), "test-model");
+        cfg.output_rate_floor = Some(OutputRateFloorPolicy {
+            min_tokens_per_sec: 20.0,
+            window_secs: 2,
+            sustained_secs: 1,
+            max_retries: 2,
+            ttft_timeout_secs: 0,
+        });
+        let handle = SamplerActor::spawn(cfg, RetryPolicy::default(), event_tx);
+
+        let result = handle
+            .submit_and_collect(
+                RequestId::from("req-collapse-after-call"),
+                user_request("hi"),
+            )
+            .await;
+        server.shutdown();
+
+        let (response, _metrics) = result.expect("the backup answers");
+        assert_eq!(response.assistant_text(), "clean answer");
+        assert_eq!(counter.load(Ordering::SeqCst), 2, "exactly one backup");
+
+        let mut saw_rate_retry = false;
+        while let Ok(event) = event_rx.try_recv() {
+            if matches!(
+                &event,
+                SamplingEvent::Retrying { kind, .. }
+                    if *kind == SamplingErrorKind::OutputRateCollapsed
+            ) {
+                saw_rate_retry = true;
+            }
+        }
+        assert!(
+            saw_rate_retry,
+            "the collapse after the call is attributed to the rate floor"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------

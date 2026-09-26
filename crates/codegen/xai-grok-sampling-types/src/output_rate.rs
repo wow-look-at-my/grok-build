@@ -142,6 +142,31 @@ impl OutputRateFloorPolicy {
     }
 }
 
+/// One streamed tool-call fragment, as far as the output rate is concerned:
+/// what it says about the call's arguments.
+///
+/// A fragment exists only because a tool call is open, so which name the
+/// provider chose to repeat on it, or whether it repeated one at all, says
+/// nothing. The arguments field does.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ToolCallFragment<'a> {
+    /// The fragment's slice of the call's arguments.
+    pub arguments: Option<&'a str>,
+}
+
+impl ToolCallFragment<'_> {
+    /// Whether this fragment leaves the call's arguments unwritten.
+    ///
+    /// Providers spell "the call is open and I am writing it" several ways: an
+    /// opener with no arguments field at all, an opener whose arguments are the
+    /// empty string, and a continuation that repeats neither an id nor any
+    /// bytes. All three mean the model is generating a body this stream will
+    /// never show, which is not the same thing as a stalled engine.
+    pub fn writes_no_arguments(&self) -> bool {
+        self.arguments.is_none_or(str::is_empty)
+    }
+}
+
 /// How the measured rate stands against the configured floor. One reduction
 /// so the indicator's color, the slowdown log and the abort cannot disagree
 /// about what "slow" means.
@@ -385,6 +410,17 @@ impl OutputRateGate {
         self.paused_depth = self.paused_depth.saturating_sub(1);
         if self.paused_depth == 0 {
             self.end_pause(at);
+        }
+    }
+
+    /// A streamed tool-call fragment landed. One that carries no argument
+    /// bytes is the model writing a call this stream will never show, so the
+    /// measurement holds exactly as it does for a hosted call. A fragment that
+    /// does carry arguments is generation like any other: the caller records
+    /// its bytes, which is what closes the hold.
+    pub fn tool_call_fragment(&mut self, at: Instant, fragment: ToolCallFragment<'_>) {
+        if fragment.writes_no_arguments() {
+            self.pause(at);
         }
     }
 
@@ -812,6 +848,88 @@ mod tests {
             seen.iter().any(|t| matches!(t, RateTick::Breached { .. })),
             "a collapse after the search still breaches: {seen:?}"
         );
+    }
+
+    /// A tool call whose arguments the provider does not stream is the model
+    /// generating, just invisibly. Every fragment shape that says "this call is
+    /// open and no argument bytes have arrived" holds the measurement for as
+    /// long as the call takes to write, and the arguments arriving in one burst
+    /// afterwards are credited rather than averaged in as silence.
+    #[test]
+    fn an_unstreamed_tool_call_holds_the_measurement() {
+        let policy = collapsed_policy();
+        let start = Instant::now();
+
+        // The three fragment shapes a provider uses to say this differ in the
+        // id and name they repeat, which is not what the rule reads, so they
+        // reduce to these two arguments fields. The event-level spellings are
+        // covered end to end in `xai-grok-sampler`'s actor tests.
+        let spellings: &[(&str, ToolCallFragment)] = &[
+            (
+                "a fragment with no arguments field",
+                ToolCallFragment { arguments: None },
+            ),
+            (
+                "a fragment whose arguments are the empty string",
+                ToolCallFragment {
+                    arguments: Some(""),
+                },
+            ),
+        ];
+
+        for (what, fragment) in spellings {
+            let mut gate = OutputRateGate::new(Some(policy));
+            let before = drive(&mut gate, start, 8 * 4, |_| 400);
+            assert!(
+                before.is_empty(),
+                "{what}: the opening burst is quiet: {before:?}"
+            );
+            let healthy = gate
+                .rate(start + Duration::from_secs(8))
+                .expect("eight seconds of stream");
+
+            // The call opens, and the provider spends a minute writing it.
+            let opened = start + Duration::from_secs(8);
+            gate.tool_call_fragment(opened, *fragment);
+            assert!(gate.is_paused(), "{what}: a call with no arguments holds");
+            for i in 0..240 {
+                let now = opened + Duration::from_millis(i * 250);
+                assert_eq!(
+                    gate.tick(now),
+                    RateTick::Quiet,
+                    "{what}: writing a tool call must not move the gate"
+                );
+                assert_eq!(
+                    gate.rate(now),
+                    Some(healthy),
+                    "{what}: the rendered rate holds at what the stream was doing"
+                );
+            }
+
+            // The whole call lands at once. The minute that just passed was
+            // generation, so the average does not carry it.
+            let landed = opened + Duration::from_secs(60);
+            gate.record(landed, 400);
+            assert!(!gate.is_paused(), "{what}: the arguments end the hold");
+            let after = drive(&mut gate, landed, 8 * 4, |_| 400);
+            assert!(
+                after.is_empty(),
+                "{what}: healthy output either side of the call is quiet: {after:?}"
+            );
+
+            // The hold is not a place for a collapsed engine to hide. Once the
+            // arguments land, the stream is judged again and a collapse from
+            // there breaches on schedule.
+            let collapsed = drive(&mut gate, landed + Duration::from_secs(8), 60 * 4, |i| {
+                if i == 0 { 400 } else { 1 }
+            });
+            assert!(
+                collapsed
+                    .iter()
+                    .any(|t| matches!(t, RateTick::Breached { .. })),
+                "{what}: a collapse after the call must still breach: {collapsed:?}"
+            );
+        }
     }
 
     /// An unbalanced resume — one the gate never saw a matching start for —
