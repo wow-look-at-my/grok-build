@@ -2069,14 +2069,16 @@ fn int_stepper_buffer(s: &SettingsModalState) -> String {
 fn int_step_sizes_table_pins_range_policy() {
     // (min, max, expected_small, expected_large)
     let cases = [
-        (1, 10, 1, 1),    // scroll_lines (span 9)
-        (1, 100, 1, 5),   // scroll_speed (span 99)
-        (40, 500, 5, 10), // max_thoughts_width (span 460)
-        (0, 0, 1, 1),     // degenerate span
-        (1, 21, 1, 4),    // span 20 still narrow: large = span/5
-        (1, 22, 1, 5),    // span 21 → mid band
-        (1, 101, 1, 5),   // span 100 still mid
-        (1, 102, 5, 10),  // span 101 → wide band
+        (1, 10, 1, 1),                       // scroll_lines (span 9)
+        (1, 100, 1, 5),                      // scroll_speed (span 99)
+        (40, 500, 5, 10),                    // max_thoughts_width (span 460)
+        (0, 0, 1, 1),                        // degenerate span
+        (1, 21, 1, 4),                       // span 20 still narrow: large = span/5
+        (1, 22, 1, 5),                       // span 21 → mid band
+        (1, 101, 1, 5),                      // span 100 still mid
+        (1, 102, 5, 10),                     // span 101 → wide band
+        (1, 1_000_001, 5, 10),               // span 1_000_000 still wide
+        (-1, i64::from(u32::MAX) - 1, 1, 5), // an uncapped field keeps unit steps
     ];
     for (min, max, want_small, want_large) in cases {
         assert_eq!(
