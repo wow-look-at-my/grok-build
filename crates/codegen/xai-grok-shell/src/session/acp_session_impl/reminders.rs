@@ -80,11 +80,6 @@ impl CollectedTodoGateInput {
         }
     }
 }
-<<<<<<< HEAD
-/// All fields deliberately borrow data the gate's call site owns, so the helper is a pure function.
-/// The struct itself is `pub` (with `#[doc(hidden)]`) only for the replay-trace integration test in `tests/trace_replay.rs`.
-/// Fields stay crate-private: the test never constructs the struct directly; it obtains an instance via `CollectedTodoGateInput::as_input()`.
-=======
 /// One actionable todo as `(id, content)`. The gate reminder tells the model
 /// to cancel items by id, so it must print the id.
 pub(super) type GateTodo<'a> = (&'a str, &'a str);
@@ -97,7 +92,6 @@ pub(super) type GateTodo<'a> = (&'a str, &'a str);
 /// the type as `&TodoGateInput<'_>` when calling `evaluate_todo_gate`.
 /// Fields stay crate-private — the test never constructs the struct
 /// directly; it obtains an instance via `CollectedTodoGateInput::as_input()`.
->>>>>>> origin/master
 #[doc(hidden)]
 pub struct TodoGateInput<'a> {
     pub(super) pending: Vec<GateTodo<'a>>,
@@ -127,11 +121,6 @@ pub fn evaluate_todo_gate(input: &TodoGateInput<'_>) -> TodoGateDecision {
     }
 }
 /// Build the in-flight TodoGate reminder text.
-<<<<<<< HEAD
-/// Uses the doubled-`${{{{ tools.by_kind.* }}}}` convention, so the caller's `format!` pass leaves a single `${{ tools.by_kind.* }}`.
-/// `TemplateRenderer` / `render_prompt` then resolves that into the model-facing tool name.
-pub(super) fn build_todo_gate_reminder(pending: &[&str], unbacked_in_progress: &[&str]) -> String {
-=======
 ///
 /// Uses the doubled-`${{{{ tools.by_kind.* }}}}` convention so the
 /// caller's `format!` pass leaves a single `${{ tools.by_kind.* }}`
@@ -141,7 +130,6 @@ pub(super) fn build_todo_gate_reminder(
     pending: &[GateTodo<'_>],
     unbacked_in_progress: &[GateTodo<'_>],
 ) -> String {
->>>>>>> origin/master
     use std::fmt::Write as _;
     let mut buf =
         String::from("You have outstanding todos but ended your turn without a tool call.\n\n");

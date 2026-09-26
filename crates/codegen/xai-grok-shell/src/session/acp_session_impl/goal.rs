@@ -1307,8 +1307,8 @@ impl SessionActor {
     }
 
     /// Summarizer pin so multi-compact cannot drop the objective.
-    pub(crate) fn goal_compaction_user_context(&self) -> Option<String> {
-        let (objective, plan_path) = {
+    pub(crate) async fn goal_compaction_user_context(&self) -> Option<String> {
+        let objective = {
             let tracker = self.goal_tracker.lock();
             let o = tracker.snapshot()?;
             if o.status != crate::session::goal_tracker::GoalStatus::Active {
@@ -1317,28 +1317,36 @@ impl SessionActor {
             if o.objective.trim().is_empty() {
                 return None;
             }
-            (
-                o.objective.clone(),
-                goal_reminder_plan_path(self.goal_planner_on(), o)
-                    .map(std::path::Path::to_path_buf),
-            )
+            o.objective.clone()
         };
         let mut ctx = format!(
             "Objective: {objective}\nDo not restart this goal or revive a prior unrelated task. Continue from the current next step."
         );
-        if let Some(step) = resolve_goal_next_step(plan_path.as_deref()) {
+        if let Some(step) = self.goal_next_step_from_todos().await {
             ctx.push_str("\nNext step: ");
             ctx.push_str(&step);
         }
         Some(ctx)
     }
 
+    /// The continuation next step read off the live todo list, or `None` when the list resource is missing.
+    async fn goal_next_step_from_todos(&self) -> Option<String> {
+        let todo_tool = self.resolve_goal_tool_names().await.todo;
+        let todos = self.goal_todo_snapshot().await?;
+        Some(next_step_from_todos(
+            todos
+                .iter()
+                .map(|(id, content, status)| (id.as_str(), content.as_str(), *status)),
+            &todo_tool,
+        ))
+    }
+
     /// Preserves caller `/compact <text>` when folding in the goal pin.
-    pub(crate) fn merge_goal_compaction_user_context(
+    pub(crate) async fn merge_goal_compaction_user_context(
         &self,
         user_context: Option<String>,
     ) -> Option<String> {
-        let Some(goal_ctx) = self.goal_compaction_user_context() else {
+        let Some(goal_ctx) = self.goal_compaction_user_context().await else {
             return user_context;
         };
         match user_context {
@@ -1358,8 +1366,7 @@ impl SessionActor {
         let names = self.resolve_goal_tool_names().await;
         let current_tokens = self.chat_state_handle.get_total_tokens().await as i64;
         let (tokens_used, _) = self.goal_tokens(current_tokens);
-        let planner_enabled = self.goal_planner_on();
-        let (objective, status, elapsed, plan_path, is_active) = {
+        let (objective, status, elapsed, is_active) = {
             let mut tracker = self.goal_tracker.lock();
             tracker.account_elapsed();
             let o = tracker.snapshot()?;
@@ -1378,11 +1385,11 @@ impl SessionActor {
                 GoalStatus::BudgetLimited => "Budget limited",
                 GoalStatus::Complete => unreachable!("complete goals are omitted above"),
             };
-            let plan_path =
-                goal_reminder_plan_path(planner_enabled, o).map(std::path::Path::to_path_buf);
-            (o.objective.clone(), status, elapsed, plan_path, is_active)
+            (o.objective.clone(), status, elapsed, is_active)
         };
-        let next_step = resolve_goal_next_step(plan_path.as_deref())
+        let next_step = self
+            .goal_next_step_from_todos()
+            .await
             .unwrap_or_else(|| format!("Check your `{}` list for next steps.", names.todo));
         let body = if is_active {
             format!(

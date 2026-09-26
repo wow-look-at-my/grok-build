@@ -38,13 +38,7 @@ Degradation MUST be honest, never fabricated: if the launch tool itself fails fo
 
 ## Output contract — STRICT
 
-<<<<<<< HEAD
-Use your `{WRITE_TOOL}` tool to write Markdown to `{PLAN_FILE}` with these sections, in order. `## Implementation approach` and `## Task checklist` are `code-change` only; include `## Risks / Contradictions` only when one exists.
-=======
-Use your `{WRITE_TOOL}` tool to write Markdown to `{PLAN_FILE}` with these
-sections, in order. `## Implementation approach` and `## Task steps` are
-`code-change` only; include `## Risks / Contradictions` only when one exists.
->>>>>>> origin/master
+Use your `{WRITE_TOOL}` tool to write Markdown to `{PLAN_FILE}` with these sections, in order. `## Implementation approach` and `## Task steps` are `code-change` only; include `## Risks / Contradictions` only when one exists.
 
 ```
 # Plan: <one-sentence headline paraphrasing OBJECTIVE>
@@ -85,7 +79,7 @@ sections, in order. `## Implementation approach` and `## Task steps` are
 - Fit every check to what can RUN in the CURRENT environment. If it cannot run here, specify a runnable substitute OR record the limit under `## Risks / Contradictions` (EXEMPT: an objective-named external oracle keeps its gating step per the rule above — never a silent substitute). Never accept generated/mocked artifacts as proof.
 - A step is a command to run plus what its OUTPUT must show. The harness records every command the implementer runs, with its output. The verifiers read that record. So never require saving output, a log, a report, or an "evidence file" — that is busywork nobody reads. The one file a step may name is an image (a screenshot) the verifier must look at. Write it under the literal `{SCRATCH}` placeholder (e.g. `{SCRATCH}/page.png`), never a hardcoded `/tmp/...` — it resolves to a private per-runner dir.
 
-The plan also tells the IMPLEMENTER what to RUN, because the verifiers audit the recorded runs rather than build their own. Require real in-repo tests that drive the shipped functions (no hardcoded expected values, no mocking the unit under test, no starting past it, no asserting against a re-implementation), RUN after the last change. A gating criterion proven only by prose, or whose test was never run, will be refuted. For `code-change`, inspect how this repo already tests similar changes and put one `gating` step in `## Verification plan` that adds or updates that kind of test. It asserts the new behavior. Re-running a suite that never checks the change is not that step. Do not bury it only in `## Implementation approach` or `## Task checklist`.
+The plan also tells the IMPLEMENTER what to RUN, because the verifiers audit the recorded runs rather than build their own. Require real in-repo tests that drive the shipped functions (no hardcoded expected values, no mocking the unit under test, no starting past it, no asserting against a re-implementation), RUN after the last change. A gating criterion proven only by prose, or whose test was never run, will be refuted. For `code-change`, inspect how this repo already tests similar changes and put one `gating` step in `## Verification plan` that adds or updates that kind of test. It asserts the new behavior. Re-running a suite that never checks the change is not that step. Do not bury it only in `## Implementation approach` or `## Task steps`.
 
 **Non-goals** — items not asked for that a reader can assume in scope. Write `- none` when there are none.
 

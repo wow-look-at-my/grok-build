@@ -186,14 +186,9 @@ fn todo_gate_empty_state_no_compaction_passes() {
 #[test]
 fn todo_gate_reminder_omits_empty_sections() {
     // Only the populated sections render; empty buckets are dropped.
-<<<<<<< HEAD
-    // The backed-in-progress bucket is never listed: the gate already decided not to nudge on those
-    let r = build_todo_gate_reminder(&["only-pending"], &[]);
-=======
     // The backed-in-progress bucket is never listed (deliberately
     // removed — the gate already decided not to nudge on those).
     let r = build_todo_gate_reminder(&[("t1", "only-pending")], &[]);
->>>>>>> origin/master
     assert!(r.contains("Pending:"));
     assert!(!r.contains("In-progress (no backing"));
     assert!(!r.contains("backed by a live background task"));
@@ -241,13 +236,8 @@ fn as_input_marks_all_backed_when_backing_count_ge_in_progress() {
         5,
     );
     let input = c.as_input();
-<<<<<<< HEAD
-    // Insertion order is preserved: alpha before bravo
-    assert_eq!(input.in_progress_backed, vec!["alpha", "bravo"]);
-=======
     // Insertion order preserved: alpha before bravo.
     assert_eq!(contents(&input.in_progress_backed), vec!["alpha", "bravo"]);
->>>>>>> origin/master
     assert!(input.in_progress_unbacked.is_empty());
 }
 
@@ -264,13 +254,8 @@ fn as_input_partitions_first_n_as_backed() {
         1,
     );
     let input = c.as_input();
-<<<<<<< HEAD
-    // Insertion order: pr-1 is backed; pr-2 and pr-3 are unbacked
-    assert_eq!(input.in_progress_backed, vec!["pr-1:ci-green"]);
-=======
     // Insertion order: pr-1 is backed; pr-2 / pr-3 are unbacked.
     assert_eq!(contents(&input.in_progress_backed), vec!["pr-1:ci-green"]);
->>>>>>> origin/master
     assert_eq!(
         contents(&input.in_progress_unbacked),
         vec!["pr-2:ci-green", "pr-3:ci-green"]
@@ -288,11 +273,6 @@ fn as_input_pending_never_backed_even_with_high_backing_count() {
         100,
     );
     let input = c.as_input();
-<<<<<<< HEAD
-    assert_eq!(input.pending, vec!["pending-task"]);
-    // The single in-progress item is backed, and the pending item does NOT appear in either in_progress bucket
-    assert_eq!(input.in_progress_backed, vec!["in-progress-task"]);
-=======
     // Pending bucket carries the pending item.
     assert_eq!(contents(&input.pending), vec!["pending-task"]);
     // The single in-progress item is backed (count >= 1) but the
@@ -301,7 +281,6 @@ fn as_input_pending_never_backed_even_with_high_backing_count() {
         contents(&input.in_progress_backed),
         vec!["in-progress-task"]
     );
->>>>>>> origin/master
     assert!(input.in_progress_unbacked.is_empty());
 }
 
@@ -320,16 +299,9 @@ fn as_input_completed_and_cancelled_are_dropped() {
     );
     let input = c.as_input();
     assert!(input.pending.is_empty());
-<<<<<<< HEAD
-    // The insertion-order partition is computed AFTER completed and cancelled items are filtered out
-    // `first-ip` (which appears before `second-ip` in `todos`) takes the one backed slot
-    assert_eq!(input.in_progress_backed, vec!["first-ip"]);
-    assert_eq!(input.in_progress_unbacked, vec!["second-ip"]);
-=======
     // Insertion-order partition is computed AFTER completed /
     // cancelled are filtered out: `first-ip` (which appears
     // before `second-ip` in `todos`) is the one backed slot.
     assert_eq!(contents(&input.in_progress_backed), vec!["first-ip"]);
     assert_eq!(contents(&input.in_progress_unbacked), vec!["second-ip"]);
->>>>>>> origin/master
 }

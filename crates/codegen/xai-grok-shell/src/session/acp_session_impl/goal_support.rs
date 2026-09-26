@@ -207,12 +207,6 @@ pub(super) fn render_goal_task_discipline(names: &GoalToolNames) -> String {
     GOAL_TASK_DISCIPLINE_TEMPLATE.replace("{TODO_TOOL}", &names.todo)
 }
 
-<<<<<<< HEAD
-/// Render the plan-aware reminder block.
-/// `Plan: <abs path>` renders on its own column-0 line.
-/// It is a pointer the model and any downstream consumer (debug log scraper, support tooling) can extract reliably, so keep the format stable.
-pub(super) fn render_goal_plan_block(plan_path: &std::path::Path, names: &GoalToolNames) -> String {
-=======
 /// Render the plan-aware reminder block. `Plan: <abs path>` renders
 /// on its own column-0 line — a single line-delimited pointer the
 /// model and any downstream consumer (debug log scraper, support
@@ -226,23 +220,18 @@ pub(super) fn render_goal_plan_block(
     names: &GoalToolNames,
     plan_todos_seeded: bool,
 ) -> String {
->>>>>>> origin/master
     debug_assert!(
         !plan_path.as_os_str().is_empty(),
         "render_goal_plan_block requires a non-empty plan_path; an \
          empty path renders a dangling `Plan:` line that the model \
          cannot follow",
     );
-<<<<<<< HEAD
-    // Column-0 single-line `Plan: <abs>` contract; see the fn docs
-=======
     let checklist = if plan_todos_seeded {
         GOAL_PLAN_CHECKLIST_ON_TODOS
     } else {
         GOAL_PLAN_CHECKLIST_IN_PLAN
     };
     // Column-0 single-line `Plan: <abs>` contract — see fn docs.
->>>>>>> origin/master
     GOAL_PLAN_BLOCK_TEMPLATE
         .replace("{CHECKLIST_BULLET}", checklist)
         .replace("{PLAN_PATH}", &plan_path.display().to_string())
@@ -658,17 +647,6 @@ pub(super) fn render_verifier_gaps_block_legacy(gaps: &str, goal_tool: &str) -> 
     )
 }
 
-<<<<<<< HEAD
-/// `char` cap on the model-authored next-step line mined from the plan.
-/// One checklist item never legitimately needs more, while a single plan line can run to the reader's 8 KiB cap.
-/// Applied BEFORE tag neutralization, which may add a zero-width break per broken tag (plus the `…` cap suffix).
-pub(super) const GOAL_NEXT_STEP_MAX_CHARS: usize = 400;
-
-/// The plan item is model-authored: it is `char`-capped to [`GOAL_NEXT_STEP_MAX_CHARS`].
-/// Reminder-frame tags are then zero-width-broken so the item cannot close the `<system-reminder>` frame it is inlined into.
-/// A `NotAchieved` verdict's findings render separately via [`render_verifier_gaps_block`] (persisted in `last_classifier_gaps`).
-pub(super) fn resolve_goal_next_step(plan_path: Option<&Path>) -> Option<String> {
-=======
 /// `char` cap on the model-authored todo text inlined as the next step.
 /// Applied BEFORE tag neutralization, which may add a zero-width break per
 /// broken tag (plus the `…` cap suffix).
@@ -686,7 +664,6 @@ pub(super) fn next_step_from_todos<'a>(
     todos: impl IntoIterator<Item = (&'a str, &'a str, crate::tools::todo::TodoStatus)>,
     todo_tool: &str,
 ) -> String {
->>>>>>> origin/master
     use crate::session::goal_classifier::{cap_chars, neutralize_reminder_tags};
     use crate::tools::todo::TodoStatus;
     let todos: Vec<_> = todos.into_iter().collect();

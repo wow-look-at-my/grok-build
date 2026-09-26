@@ -945,14 +945,9 @@ mod tests {
         assert!(log.lock().unwrap().iter().any(|t| t == "failed:aborted"));
     }
 
-<<<<<<< HEAD
-    /// A strategist edit to plan.md is reverted byte-for-byte: the WHOLE file, including a non-contract `## Task checklist` block.
-    /// The rationale is on `GoalTracker::strategy_path`.
-=======
     /// A strategist edit to plan.md is reverted byte-for-byte — the WHOLE
     /// file, including a non-contract `## Task steps` block (rationale on
     /// `GoalTracker::strategy_path`).
->>>>>>> origin/master
     #[tokio::test]
     async fn strategist_edit_to_plan_md_is_reverted() {
         let dir = tmp_dir("plan-guard");

@@ -127,12 +127,14 @@ async fn summarizer_user_context_pins_objective() {
 
             let ctx = actor
                 .merge_goal_compaction_user_context(None)
+                .await
                 .expect("active goal must produce summarizer context");
             assert!(ctx.contains(DEVICE_TEST_OBJECTIVE), "{ctx}");
             assert!(ctx.contains("Do not restart this goal"), "{ctx}");
 
             let merged = actor
                 .merge_goal_compaction_user_context(Some("keep auth".into()))
+                .await
                 .expect("merge keeps caller text");
             assert!(merged.contains("keep auth"), "{merged}");
             assert!(merged.contains(DEVICE_TEST_OBJECTIVE), "{merged}");
@@ -282,7 +284,7 @@ async fn paused_goal_does_not_override_later_human_query() {
             );
 
             assert_eq!(actor.goal_objective_for_compaction(), None);
-            assert_eq!(actor.merge_goal_compaction_user_context(None), None);
+            assert_eq!(actor.merge_goal_compaction_user_context(None).await, None);
 
             let conversation = stale_pre_goal_conversation();
             let ctx = CompactionStateContext::build(
