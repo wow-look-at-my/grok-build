@@ -70,7 +70,10 @@ mod tests {
         assert_eq!(read(r#"{}"#).unwrap(), None);
         assert_eq!(read(r#"{"max_retries": 0}"#).unwrap(), Some(0));
         assert_eq!(read(r#"{"max_retries": 250}"#).unwrap(), Some(250));
-        assert_eq!(read(r#"{"max_retries": -1}"#).unwrap(), Some(super::UNLIMITED));
+        assert_eq!(
+            read(r#"{"max_retries": -1}"#).unwrap(),
+            Some(super::UNLIMITED)
+        );
         assert_eq!(
             read(r#"{"max_retries": "Unlimited"}"#).unwrap(),
             Some(super::UNLIMITED)
