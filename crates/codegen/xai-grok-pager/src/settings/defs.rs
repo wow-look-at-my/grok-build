@@ -1256,9 +1256,10 @@ pub fn default_settings() -> Vec<SettingMeta> {
             hidden_in_minimal: false,
         },
         // SHARED: `[ui].thinking_summaries`. The shell resolves it when a session
-        // is spawned, so a change applies to the next one. Last in Appearance:
-        // the rows above are pinned into one chain by the order tests. The one
-        // home for the default is UiConfig::thinking_summaries_enabled.
+        // is spawned, so a change applies to the next one. Sits immediately below
+        // collapsed_edit_blocks: the four rows above are pinned into one
+        // adjacency chain by the order tests. The one home for the default is
+        // UiConfig::thinking_summaries_enabled.
         SettingMeta {
             key: "thinking_summaries",
             category: SettingCategory::Appearance,

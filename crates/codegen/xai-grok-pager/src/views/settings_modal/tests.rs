@@ -787,8 +787,8 @@ fn rows_contain_categories_and_settings_through_pr_14() {
         // SHELL-owned collapsed_edit_blocks (Appearance; live cache,
         // default OFF rollout flag).
         "collapsed_edit_blocks",
-        // SHARED-owned thinking_summaries (Appearance; last in the category,
-        // because the rows above are pinned into one chain by order asserts).
+        // SHARED-owned thinking_summaries (Appearance; below collapsed_edit_blocks,
+        // because the four rows above it are pinned into one adjacency chain).
         "thinking_summaries",
         // SHELL-owned display_refresh_auto_cadence (Appearance).
         "display_refresh_auto_cadence",

@@ -7808,6 +7808,67 @@ fn show_thinking_blocks_cache_on_dispatches_off() {
 }
 
 #[test]
+fn thinking_summaries_space_dispatches_typed_setter() {
+    // The shipped modal key handler, driven on the row by key. `thinking_summaries`
+    // has no process cache, so the value the row reads is the `[ui]` mirror.
+    let mut s = make_state();
+    navigate_to(&mut s, "thinking_summaries");
+    let outcome = handle_settings_key(&mut s, &press(KeyCode::Char(' ')));
+    assert_set_bool_action(outcome, "thinking_summaries", false);
+}
+
+#[test]
+fn thinking_summaries_enter_dispatches_typed_setter() {
+    let mut s = make_state();
+    navigate_to(&mut s, "thinking_summaries");
+    let outcome = handle_settings_key(&mut s, &press(KeyCode::Enter));
+    assert_set_bool_action(outcome, "thinking_summaries", false);
+}
+
+#[test]
+fn thinking_summaries_renders_under_appearance_category_shared_owned_restart_required() {
+    let reg = SettingsRegistry::defaults();
+    let meta = reg
+        .find("thinking_summaries")
+        .expect("thinking_summaries must be registered");
+    assert_eq!(meta.category, SettingCategory::Appearance);
+    // Shared: the pager writes it and the shell resolves it when a session spawns.
+    assert_eq!(meta.owner, SettingOwner::Shared);
+    assert!(
+        meta.restart_required,
+        "a session reads the switch once, so the row must say a restart is needed"
+    );
+    match &meta.kind {
+        SettingKind::Bool { default } => assert!(*default, "default must be true"),
+        other => panic!("expected Bool kind for thinking_summaries, got {other:?}"),
+    }
+    // Sits directly below collapsed_edit_blocks. The four rows above it are
+    // pinned into one adjacency chain by their own order asserts
+    // (show_thinking_blocks / respect_manual_folds / group_tool_verbs /
+    // collapsed_edit_blocks), so a new Appearance row cannot go between them.
+    let keys: Vec<&str> = reg
+        .all()
+        .iter()
+        .filter(|m| m.category == SettingCategory::Appearance)
+        .map(|m| m.key)
+        .collect();
+    let mine = keys
+        .iter()
+        .position(|k| *k == "thinking_summaries")
+        .expect("thinking_summaries in Appearance");
+    let edits = keys
+        .iter()
+        .position(|k| *k == "collapsed_edit_blocks")
+        .expect("collapsed_edit_blocks in Appearance");
+    assert_eq!(
+        mine,
+        edits + 1,
+        "thinking_summaries must sit immediately below collapsed_edit_blocks; \
+         Appearance order: {keys:?}"
+    );
+}
+
+#[test]
 fn show_thinking_blocks_renders_under_appearance_category_shell_owned() {
     let reg = SettingsRegistry::defaults();
     let meta = reg
