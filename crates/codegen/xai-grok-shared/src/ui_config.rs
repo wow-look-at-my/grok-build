@@ -542,6 +542,16 @@ mod tests {
     }
 
     #[test]
+    fn thinking_summaries_defaults_on() {
+        assert!(UiConfig::default().thinking_summaries_enabled());
+        let off = UiConfig {
+            thinking_summaries: Some(false),
+            ..Default::default()
+        };
+        assert!(!off.thinking_summaries_enabled());
+    }
+
+    #[test]
     fn keep_text_selection_enabled_precedence() {
         let mut ui = UiConfig::default();
         assert!(!ui.keep_text_selection_enabled());
