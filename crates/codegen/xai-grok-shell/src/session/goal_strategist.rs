@@ -998,7 +998,7 @@ mod tests {
     }
 
     /// A strategist edit to plan.md is reverted byte-for-byte — the WHOLE
-    /// file, including a non-contract `## Task checklist` block (rationale on
+    /// file, including a non-contract `## Task steps` block (rationale on
     /// `GoalTracker::strategy_path`).
     #[tokio::test]
     async fn strategist_edit_to_plan_md_is_reverted() {
@@ -1006,7 +1006,7 @@ mod tests {
         let plan = dir.join("plan.md");
         let strategy = dir.join("strategy.md");
         const CONTRACT: &[u8] =
-            b"# Plan\n\n## Acceptance criteria\n\n1. ship it\n\n## Verification plan\n\n1. run tests\n\n## Task checklist\n\n- [x] step one\n";
+            b"# Plan\n\n## Acceptance criteria\n\n1. ship it\n\n## Verification plan\n\n1. run tests\n\n## Task steps\n\n1. step one\n";
         std::fs::write(&plan, CONTRACT).unwrap();
         let spawner = Arc::new(
             MockSpawner::ok_writes(&strategy, &plan, b"## Diagnosis\n\nrewrite subsystem\n")

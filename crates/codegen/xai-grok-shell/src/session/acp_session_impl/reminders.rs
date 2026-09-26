@@ -32,11 +32,12 @@ impl CollectedTodoGateInput {
     pub fn as_input(&self) -> TodoGateInput<'_> {
         use crate::tools::todo::TodoStatus;
         let mut pending = Vec::new();
-        let mut in_progress: Vec<&str> = Vec::new();
-        for (_, content, status) in &self.todos {
+        let mut in_progress: Vec<GateTodo<'_>> = Vec::new();
+        for (id, content, status) in &self.todos {
+            let item = (id.as_str(), content.as_str());
             match status {
-                TodoStatus::Pending => pending.push(content.as_str()),
-                TodoStatus::InProgress => in_progress.push(content.as_str()),
+                TodoStatus::Pending => pending.push(item),
+                TodoStatus::InProgress => in_progress.push(item),
                 TodoStatus::Completed | TodoStatus::Cancelled => {}
             }
         }
@@ -51,6 +52,10 @@ impl CollectedTodoGateInput {
         }
     }
 }
+/// One actionable todo as `(id, content)`. The gate reminder tells the model
+/// to cancel items by id, so it must print the id.
+pub(super) type GateTodo<'a> = (&'a str, &'a str);
+
 /// Inputs to `evaluate_todo_gate`. All fields are deliberately owned
 /// borrows from the gate's call-site so the helper is a pure function.
 ///
@@ -61,9 +66,9 @@ impl CollectedTodoGateInput {
 /// directly; it obtains an instance via `CollectedTodoGateInput::as_input()`.
 #[doc(hidden)]
 pub struct TodoGateInput<'a> {
-    pub(super) pending: Vec<&'a str>,
-    pub(super) in_progress_unbacked: Vec<&'a str>,
-    pub(super) in_progress_backed: Vec<&'a str>,
+    pub(super) pending: Vec<GateTodo<'a>>,
+    pub(super) in_progress_unbacked: Vec<GateTodo<'a>>,
+    pub(super) in_progress_backed: Vec<GateTodo<'a>>,
     pub(super) backing_task_count: usize,
 }
 impl TodoGateReason {
@@ -100,21 +105,24 @@ pub fn evaluate_todo_gate(input: &TodoGateInput<'_>) -> TodoGateDecision {
 /// caller's `format!` pass leaves a single `${{ tools.by_kind.* }}`
 /// for `TemplateRenderer` / `render_prompt` to resolve into the
 /// model-facing tool name.
-pub(super) fn build_todo_gate_reminder(pending: &[&str], unbacked_in_progress: &[&str]) -> String {
+pub(super) fn build_todo_gate_reminder(
+    pending: &[GateTodo<'_>],
+    unbacked_in_progress: &[GateTodo<'_>],
+) -> String {
     use std::fmt::Write as _;
     let mut buf =
         String::from("You have outstanding todos but ended your turn without a tool call.\n\n");
     if !unbacked_in_progress.is_empty() {
         buf.push_str("In-progress (no backing background task):\n");
-        for c in unbacked_in_progress {
-            let _ = writeln!(buf, "- {c}");
+        for (id, c) in unbacked_in_progress {
+            let _ = writeln!(buf, "- {id}: {c}");
         }
         buf.push('\n');
     }
     if !pending.is_empty() {
         buf.push_str("Pending:\n");
-        for c in pending {
-            let _ = writeln!(buf, "- {c}");
+        for (id, c) in pending {
+            let _ = writeln!(buf, "- {id}: {c}");
         }
         buf.push('\n');
     }
@@ -124,7 +132,9 @@ pub(super) fn build_todo_gate_reminder(pending: &[&str], unbacked_in_progress: &
          with the appropriate tool call NOW. If you have a genuine external \
          blocker (missing credential, denied permission, network unreachable), \
          state it explicitly AND mark the affected todos `cancelled` via \
-         ${{{{ tools.by_kind.plan }}}} with a reason in the same turn."
+         ${{{{ tools.by_kind.plan }}}} with a reason in the same turn. Mark an \
+         item the user no longer wants `cancelled` the same way. One call can \
+         set the status of several ids."
     );
     buf
 }

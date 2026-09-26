@@ -323,7 +323,9 @@ impl crate::types::tool_metadata::ToolMetadata for TodoWriteTool {
 
 Add as many items as the work needs — a small task may be one or two, a large one many more. Do not pad a small job into a fake checklist, and do not crush a large job into a handful of vague items. Skip for trivial single-step work. Check items off as you go; keep roughly one in_progress.
 
-Writes merge by id, so send only the items you are changing. An item you leave out is kept exactly as it was: there is no way to remove one. Work leaves the list by status only — completed when it is done, cancelled when it will not be done. Reword an item by sending its id with new content."#
+Writes merge by id, so send only the items you are changing. An item you leave out is kept exactly as it was: there is no way to remove one. Work leaves the list by status only — completed when it is done, cancelled when it will not be done. Reword an item by sending its id with new content.
+
+Every call returns the whole list with each item's id. Items can appear that you did not write (the user and the goal planner add them), so call with an empty `todos` array to read the current list and its ids before you update them."#
     }
 
     fn requires_expr(&self) -> Expr<ToolRequirement> {
@@ -623,6 +625,44 @@ mod tests {
         );
         assert!(output.summary_for_prompt.contains("No tasks"));
         assert!(output.todos.is_empty());
+    }
+
+    /// The description promises an empty call as the read. It must change
+    /// nothing and must return every item with an id the model did not mint.
+    #[tokio::test]
+    async fn an_empty_write_reads_the_list_back_with_ids() {
+        let tool = TodoWriteTool;
+        let shared = Resources::new().into_shared();
+        let seed = TodoWriteInput {
+            merge: true,
+            prepend: false,
+            todos: vec![make_update(
+                "plan-3f9a2c",
+                Some("Write the migration"),
+                Some(TodoStatus::Pending),
+            )],
+        };
+        xai_tool_runtime::Tool::run(&tool, test_ctx(shared.clone()), seed)
+            .await
+            .unwrap();
+
+        let read = TodoWriteInput {
+            merge: true,
+            prepend: false,
+            todos: vec![],
+        };
+        let output = expect_success(
+            xai_tool_runtime::Tool::run(&tool, test_ctx(shared), read)
+                .await
+                .unwrap(),
+        );
+        assert_eq!(
+            output.summary_for_prompt,
+            "- [pending] plan-3f9a2c: Write the migration\n"
+        );
+        assert_eq!(output.todos.len(), 1);
+        let desc = crate::types::tool_metadata::ToolMetadata::description_template(&tool);
+        assert!(desc.contains("empty `todos` array to read"), "{desc}");
     }
 
     #[tokio::test]
