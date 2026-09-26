@@ -19,6 +19,8 @@ pub(crate) fn allow_endpoint(url: &str, tool: &str) -> Result<(), xai_tool_runti
     })
 }
 
+#[path = "app_builder_stub.rs"]
+pub mod app_builder;
 pub mod ask_user_question;
 pub mod bash;
 pub mod ci;
@@ -30,14 +32,19 @@ pub mod exit_plan_mode;
 pub mod grep;
 pub mod image_edit;
 pub mod image_gen;
+#[path = "init_or_update_app_stub.rs"]
+pub mod init_or_update_app;
 pub mod kill_task;
 pub mod list_dir;
 pub mod lsp;
+pub mod media_bearer;
 pub mod monitor;
 pub mod read_file;
 pub mod scheduler;
 pub mod search_replace;
+pub mod send_feedback;
 pub mod send_message;
+pub mod send_subagent_message;
 pub(crate) mod storage;
 pub mod task;
 pub mod task_output;
@@ -47,11 +54,12 @@ pub mod video_gen;
 pub mod web_fetch;
 pub mod web_search;
 pub mod workflow;
+pub use app_builder::AppBuilderDeployerConfig;
 pub use ask_user_question::AskUserQuestionTool;
 pub use bash::BashTool;
 pub use ci::{CI_TOOL_NAME, CiTool};
 pub use copy_move::{CopyFileTool, MoveFileTool};
-pub use deploy_app::{AppBuilderDeployerConfig, DEPLOY_APP_TOOL_NAME};
+pub use deploy_app::DEPLOY_APP_TOOL_NAME;
 pub use enter_plan_mode::EnterPlanModeTool;
 pub use exit_plan_mode::ExitPlanModeTool;
 pub use grep::GrepTool;
@@ -60,22 +68,26 @@ pub use image_gen::{
     IMAGE_GEN_TOOL_NAME, IMAGINE_COMMAND_NAME, ImageGenTool, imagine_instruction,
     imagine_usage_message,
 };
+pub use init_or_update_app::INIT_OR_UPDATE_APP_TOOL_NAME;
 pub use kill_task::{KillTaskTool, KillTerminalCommandTool};
 pub use list_dir::ListDirTool;
 pub use lsp::LspTool;
 pub use monitor::tool::MonitorTool;
 pub use read_file::ReadFileTool;
 pub use scheduler::create::{
-    LoopFireMode, SCHEDULER_CREATE_TOOL_NAME, SchedulerCreateTool, loop_schedule_instruction,
-    loop_usage_message,
+    SCHEDULER_CREATE_TOOL_NAME, SchedulerCreateTool, loop_schedule_instruction, loop_usage_message,
 };
 pub use scheduler::delete::{SCHEDULER_DELETE_TOOL_NAME, SchedulerDeleteTool};
 pub use scheduler::list::SchedulerListTool;
 pub use search_replace::SearchReplaceTool;
+pub use send_feedback::{SEND_FEEDBACK_TOOL_NAME, SendFeedbackTool};
 pub use send_message::{
     ParentMessenger, SEND_MESSAGE_TOOL_NAME, SendMessageTool, render_subagent_message,
 };
-pub use task::TaskTool;
+pub use send_subagent_message::{
+    SEND_SUBAGENT_MESSAGE_TOOL_NAME, SendSubagentMessageDisposition, SendSubagentMessageTool,
+};
+pub use task::{TaskTool, is_task_tool_id};
 pub use task_output::{GetTerminalCommandOutputTool, TaskOutputTool, WaitTasksTool};
 pub use todo::TodoWriteTool;
 pub use update_goal::{UPDATE_GOAL_TOOL_NAME, UpdateGoalTool};
@@ -86,4 +98,7 @@ pub use video_gen::{
 };
 pub use web_fetch::{WebFetchClient, WebFetchConfig, WebFetchParams, WebFetchTool};
 pub use web_search::WebSearchTool;
-pub use workflow::{WORKFLOW_TOOL_NAME, WorkflowTool};
+pub use workflow::{
+    WORKFLOW_TOOL_NAME, WorkflowTool, is_workflow_tool, is_workflow_tool_id,
+    workflow_tool_short_name,
+};

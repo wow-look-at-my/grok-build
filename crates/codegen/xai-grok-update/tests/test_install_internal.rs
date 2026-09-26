@@ -18,8 +18,11 @@ use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use common::{reset_home, test_home};
+use xai_grok_telemetry::events::CliUpdateErrorKind;
 use xai_grok_update::UpdateConfig;
-use xai_grok_update::auto_update::{install_internal_from_base, install_internal_from_bases};
+use xai_grok_update::auto_update::{
+    classify_install_error, install_internal_from_base, install_internal_from_bases,
+};
 
 fn host_platform() -> String {
     let os = if cfg!(target_os = "macos") {
@@ -50,7 +53,6 @@ fn make_config(channel: &str) -> UpdateConfig {
     }
 }
 
-/// Mount GCS endpoints for a given version. Returns the `MockServer`.
 async fn mount_gcs(version: &str, platform: &str) -> MockServer {
     let server = MockServer::start().await;
 
@@ -98,7 +100,7 @@ async fn install_internal_rolls_back_grok_when_agent_swap_fails() {
         .join(format!("grok-0.1.180-{platform}"));
     std::os::unix::fs::symlink(&rel_old, bin_dir.join("grok")).unwrap();
 
-    // Sabotage the agent swap: non-empty directory → rename fails with EISDIR.
+    // Sabotage the agent swap: a non-empty directory makes the rename fail with EISDIR
     let agent_dir = bin_dir.join("agent");
     std::fs::create_dir(&agent_dir).unwrap();
     std::fs::write(agent_dir.join("blocker"), b"x").unwrap();
@@ -108,7 +110,6 @@ async fn install_internal_rolls_back_grok_when_agent_swap_fails() {
         .expect_err("agent swap must fail when target is a non-empty dir");
     drop(err);
 
-    // grok must be rolled back to the prior version.
     let grok_target = std::fs::read_link(bin_dir.join("grok")).unwrap();
     assert_eq!(
         grok_target.file_name().unwrap(),
@@ -117,9 +118,8 @@ async fn install_internal_rolls_back_grok_when_agent_swap_fails() {
     );
 }
 
-/// Absent-prior rollback regression: fresh install (no prior `grok` /
-/// `agent`), sabotaged `agent` swap must *remove* the just-created `grok`
-/// link so we don't leave it on the new binary while `agent` is absent.
+/// Rollback regression for a fresh install (no prior `grok` or `agent`): a sabotaged `agent` swap must *remove* the just-created `grok` link.
+/// Otherwise `grok` would stay on the new binary while `agent` is absent.
 #[tokio::test]
 #[serial]
 async fn install_internal_rollback_removes_absent_prior_grok_link() {
@@ -133,7 +133,7 @@ async fn install_internal_rollback_removes_absent_prior_grok_link() {
     let bin_dir = home.join("bin");
     std::fs::create_dir_all(&bin_dir).unwrap();
 
-    // No prior `grok`. Sabotage `agent` swap: non-empty directory → EISDIR.
+    // No prior `grok`. Sabotage the `agent` swap: a non-empty directory fails the rename with EISDIR.
     let agent_dir = bin_dir.join("agent");
     std::fs::create_dir(&agent_dir).unwrap();
     std::fs::write(agent_dir.join("blocker"), b"x").unwrap();
@@ -178,8 +178,7 @@ async fn install_internal_rejects_invalid_pinned_version() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Multi-base URL fallback: install_internal_from_bases tries each base in
-// preference order, falling through to the next on failure.
+// Multi-base URL fallback: install_internal_from_bases tries each base in preference order, falling through to the next on failure
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Regression: a local failure after a successful download (sabotaged
@@ -199,19 +198,25 @@ async fn install_internal_from_bases_does_not_redownload_on_local_swap_failure()
     let home = test_home();
     let bin_dir = home.join("bin");
     std::fs::create_dir_all(&bin_dir).unwrap();
-    // Sabotage activation: agent as a non-empty dir fails the swap's
-    // rollback capture (read_link on a directory) before any rename.
+    // Sabotage activation: agent as a non-empty dir fails the swap's rollback capture (read_link on a directory) before any rename
     let agent_dir = bin_dir.join("agent");
     std::fs::create_dir(&agent_dir).unwrap();
     std::fs::write(agent_dir.join("blocker"), b"x").unwrap();
 
-    install_internal_from_bases(
+    let err = install_internal_from_bases(
         Some("0.1.181"),
         &cfg,
         &[primary.uri().as_str(), fallback.uri().as_str()],
     )
     .await
     .expect_err("swap failure must fail the install");
+    // Downloads are disabled, so the install stops in the download phase and
+    // never reaches the sabotaged swap.
+    assert!(
+        format!("{err:#}").contains("auto-update disabled"),
+        "unexpected error: {err:#}"
+    );
+    assert_eq!(classify_install_error(&err), CliUpdateErrorKind::Download);
 
     let fallback_requests = fallback
         .received_requests()

@@ -8,6 +8,7 @@
 mod otlp_collector;
 
 use otlp_collector as col;
+use xai_grok_test_support::OtelRecorder;
 
 const CANARY_MODEL: &str = "sk-CANARYgrpcabcdefghij1234567890";
 const CANARY_PROMPT: &str = "CANARY_GRPC_PROMPT_TEXT do not export";
@@ -15,9 +16,8 @@ const CANARY_MCP: &str = "canary-grpc-internal-mcp-server";
 
 #[test]
 fn external_stream_grpc_end_to_end() {
-    let collected = col::Collected::default();
-    let endpoint =
-        col::start_collector_with_protocol(collected.clone(), col::CollectorProtocol::Grpc);
+    let recorder = OtelRecorder::new();
+    let endpoint = col::start_grpc_collector(recorder.clone());
 
     let mut cfg = xai_grok_telemetry::external::ExternalOtelConfig::resolve_with(
         |name| match name {
@@ -66,6 +66,7 @@ fn external_stream_grpc_end_to_end() {
         hook_names: vec![],
         agents_md_dir_names: vec![],
         memory_enabled: false,
+        memory_retrieval_mode: xai_grok_telemetry::events::MemoryRetrievalMode::Disabled,
         is_git_repo: true,
         auto_update: None,
     });
@@ -75,6 +76,7 @@ fn external_stream_grpc_end_to_end() {
         client_identifier: None,
         screen_mode: None,
         prompt_text: Some(CANARY_PROMPT.into()),
+        command_name: None,
     });
     xai_grok_telemetry::log_event(xai_grok_telemetry::events::ModelResponseReceived {
         model_id: CANARY_MODEL.into(),
@@ -84,6 +86,9 @@ fn external_stream_grpc_end_to_end() {
         completion_tokens: Some(7),
         reasoning_tokens: None,
         cached_prompt_tokens: None,
+        cache_creation_tokens: None,
+        context_tokens: None,
+        cost_usd_ticks: None,
     });
 
     xai_grok_telemetry::external::flush();
@@ -91,12 +96,12 @@ fn external_stream_grpc_end_to_end() {
     // Give any (erroneous) gRPC exporter ample time to phone home.
     std::thread::sleep(std::time::Duration::from_millis(600));
     assert_eq!(
-        collected.logs_len(),
+        recorder.log_records().len(),
         0,
         "disabled external stream must export no logs over gRPC"
     );
     assert_eq!(
-        collected.metrics_len(),
+        recorder.metric_points().len(),
         0,
         "disabled external stream must export no metrics over gRPC"
     );

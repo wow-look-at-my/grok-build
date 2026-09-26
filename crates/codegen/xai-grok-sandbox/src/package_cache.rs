@@ -235,7 +235,7 @@ mod tests {
 
         for (name, value) in &vars {
             let path = Path::new(value);
-            if let Some(home) = dirs::home_dir() {
+            if let Some(home) = xai_dirs::home_dir() {
                 assert!(
                     !path.starts_with(&home),
                     "{} must not point into $HOME ({}): {}",

@@ -84,7 +84,7 @@ fn ollama_think_value(req: &ConversationRequest) -> Option<serde_json::Value> {
     Some(match effort {
         // Ollama has no "off" level: a bool is how thinking is disabled.
         crate::ReasoningEffort::None => serde_json::Value::Bool(false),
-        other => serde_json::Value::String(other.as_str().to_owned()),
+        other => serde_json::Value::String(other.as_ref().to_owned()),
     })
 }
 

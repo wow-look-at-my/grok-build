@@ -1,5 +1,4 @@
-A structured plan for this goal is on disk — the source of truth for "done".
-Read it first and keep it open.
+A structured plan for this goal is on disk — the source of truth for "done". Read it first and keep it open.
 
 Plan: {PLAN_PATH}
 

@@ -5,6 +5,8 @@
 //!
 //! Only the `track` API is implemented since that's all we use.
 
+#![deny(clippy::indexing_slicing)]
+
 use base64::Engine;
 use std::collections::HashMap;
 
@@ -13,6 +15,7 @@ use std::collections::HashMap;
 pub struct Mixpanel {
     token: String,
     client: reqwest::Client,
+    base_url: String,
 }
 
 /// Error type for Mixpanel operations.
@@ -22,14 +25,21 @@ pub enum Error {
     Http(#[from] reqwest::Error),
     #[error("JSON serialization failed: {0}")]
     Json(#[from] serde_json::Error),
+    #[error("mixpanel rejected the request: {0}")]
+    Rejected(String),
 }
+
+const API_BASE_URL: &str = "https://api.mixpanel.com";
+const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
 impl Mixpanel {
     /// Create a new Mixpanel client with the given project token.
+    #[allow(clippy::disallowed_methods)] // transport-neutral crate; the grok CLI injects a policy client via with_client
     pub fn new(token: impl Into<String>) -> Self {
         Self {
             token: token.into(),
             client: reqwest::Client::new(),
+            base_url: API_BASE_URL.to_owned(),
         }
     }
 
@@ -38,7 +48,14 @@ impl Mixpanel {
         Self {
             token: token.into(),
             client,
+            base_url: API_BASE_URL.to_owned(),
         }
+    }
+
+    #[cfg(test)]
+    fn with_base_url(mut self, base_url: impl Into<String>) -> Self {
+        self.base_url = base_url.into();
+        self
     }
 
     /// Scrub property string values in place, then inject the project
@@ -73,16 +90,7 @@ impl Mixpanel {
             "properties": props,
         }]);
 
-        let json_bytes = serde_json::to_vec(&payload)?;
-        let encoded = base64::engine::general_purpose::STANDARD.encode(&json_bytes);
-
-        self.client
-            .post("https://api.mixpanel.com/track")
-            .form(&[("data", &encoded)])
-            .send()
-            .await?;
-
-        Ok(())
+        self.post("/track", &payload).await
     }
 
     /// Create or update a user profile via Mixpanel's Engage API.
@@ -107,22 +115,56 @@ impl Mixpanel {
             "$set": scrubbed,
         }]);
 
-        let json_bytes = serde_json::to_vec(&payload)?;
+        self.post("/engage", &payload).await
+    }
+
+    /// Mixpanel answers a rejected payload with HTTP 200; `verbose=1` makes the
+    /// body `{"status": 0|1, "error": ...}` instead of a bare `0`/`1`.
+    async fn post(&self, path: &str, payload: &serde_json::Value) -> Result<(), Error> {
+        let json_bytes = serde_json::to_vec(payload)?;
         let encoded = base64::engine::general_purpose::STANDARD.encode(&json_bytes);
 
-        self.client
-            .post("https://api.mixpanel.com/engage")
+        let body = self
+            .client
+            .post(format!("{}{path}", self.base_url))
+            .query(&[("verbose", "1")])
+            .timeout(REQUEST_TIMEOUT)
             .form(&[("data", &encoded)])
             .send()
+            .await?
+            .error_for_status()?
+            .text()
             .await?;
 
-        Ok(())
+        check_reply(&body)
     }
+}
+
+fn check_reply(body: &str) -> Result<(), Error> {
+    let reply: serde_json::Value = serde_json::from_str(body).unwrap_or_default();
+    if reply.get("status").and_then(serde_json::Value::as_i64) == Some(1) {
+        return Ok(());
+    }
+    let reason = reply
+        .get("error")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or(body);
+    Err(Error::Rejected(reason.to_owned()))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn check_reply_reads_verbose_status() {
+        check_reply(r#"{"error":null,"status":1}"#).unwrap();
+        let err = check_reply(r#"{"error":"token, missing or empty","status":0}"#).unwrap_err();
+        assert!(
+            matches!(err, Error::Rejected(ref reason) if reason == "token, missing or empty"),
+            "{err:?}"
+        );
+    }
 
     /// Client whose every request would fail: all traffic is routed through a
     /// proxy at an unroutable address. If [`Mixpanel::track`] or
@@ -191,8 +233,14 @@ mod tests {
 
         let prepared = mp.prepare_properties(props);
 
-        assert_eq!(prepared["token"], project_token, "project token redacted");
-        let error = prepared["error"].as_str().unwrap();
+        assert_eq!(
+            prepared.get("token"),
+            Some(&serde_json::json!(project_token)),
+            "project token redacted"
+        );
+        let Some(error) = prepared.get("error").and_then(|v| v.as_str()) else {
+            panic!("missing json key error: {prepared:?}");
+        };
         assert!(
             !error.contains("abcdef0123456789abcdef"),
             "secret leaked: {error}"

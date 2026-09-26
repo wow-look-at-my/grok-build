@@ -15,6 +15,7 @@ fn catalog_entry(model: &str, user_selectable: bool) -> ModelEntry {
         env_key: None,
         auth_provider: None,
         api_base_url: None,
+        mtls_cert_dir: None,
     }
 }
 

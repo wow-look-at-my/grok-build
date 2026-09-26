@@ -1,3 +1,4 @@
+#![allow(clippy::disallowed_methods)] // test clients hit localhost mocks
 //! Wire test pinning the **build-baseline disabled contract** for product
 //! events. `client::track` is hard-disabled in this build (returns before any
 //! routing), so `log_event(ManualAuth)` must NOT POST to the product events
@@ -11,6 +12,10 @@ use std::time::Duration;
 use xai_grok_telemetry::client;
 use xai_grok_telemetry::config::{TelemetryConfig, TelemetryMode};
 use xai_grok_telemetry::events::{AuthTokenKind, ManualAuth, ManualAuthReason, ManualAuthSurface};
+use xai_grok_telemetry::process_info::{
+    Entrypoint, Interactivity, LeaderMode, ProcessIdentity, ReleaseChannel, set_identity,
+    set_release_channel,
+};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn manual_auth_does_not_post_when_product_telemetry_disabled() {
@@ -32,6 +37,13 @@ async fn manual_auth_does_not_post_when_product_telemetry_disabled() {
 
     // Fully configured, explicitly Enabled — the disable happens downstream in
     // `client::track`, not in configuration.
+    set_identity(ProcessIdentity {
+        entrypoint: Entrypoint::Cli,
+        leader: LeaderMode::Standalone,
+        interactivity: Interactivity::Unattended,
+    });
+    set_release_channel(ReleaseChannel::Alpha);
+
     client::init(
         TelemetryConfig {
             events_url: Some(url),
@@ -64,6 +76,5 @@ async fn manual_auth_does_not_post_when_product_telemetry_disabled() {
         count, 0,
         "product events are hard-disabled: no POST may reach the events endpoint"
     );
-
     server.abort();
 }

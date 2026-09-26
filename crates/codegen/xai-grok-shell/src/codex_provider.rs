@@ -249,7 +249,7 @@ impl HeaderInjector for CodexHeaderInjector {
         {
             headers.insert(HeaderName::from_static("x-codex-installation-id"), value);
         }
-        if let Some(traceparent) = xai_file_utils::trace_context::current_traceparent()
+        if let Some(traceparent) = xai_grok_otel::current_traceparent()
             && let Ok(value) = HeaderValue::from_str(&traceparent)
         {
             headers.insert(HeaderName::from_static("traceparent"), value);
@@ -319,7 +319,7 @@ fn validate_auth_file(path: &Path) -> anyhow::Result<()> {
 fn codex_home() -> PathBuf {
     std::env::var_os("CODEX_HOME")
         .map(PathBuf::from)
-        .or_else(|| dirs::home_dir().map(|home| home.join(".codex")))
+        .or_else(|| xai_dirs::home_dir().map(|home| home.join(".codex")))
         .unwrap_or_else(|| PathBuf::from(".codex"))
 }
 
@@ -432,6 +432,7 @@ fn model_entry(key: String, model: CodexModel) -> ModelEntry {
     info.hidden = false;
     ModelEntry {
         info,
+        mtls_cert_dir: None,
         // Marks this entry as provider-owned so credential resolution never
         // inherits an xAI session token. The live resolver replaces it before
         // every HTTP request.

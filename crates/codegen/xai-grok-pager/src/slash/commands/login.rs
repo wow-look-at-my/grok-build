@@ -1,21 +1,13 @@
-//! `/login` -- log in or re-authenticate with your account.
-
 use crate::app::actions::Action;
-use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand};
+use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand, slash_meta};
 
 pub struct LoginCommand;
 
 impl SlashCommand for LoginCommand {
-    fn name(&self) -> &str {
-        "login"
-    }
-
-    fn description(&self) -> &str {
-        "Log in to Grok or add a Codex account"
-    }
-
-    fn usage(&self) -> &str {
-        "/login [codex]"
+    slash_meta! {
+        name: "login",
+        description: "Log in to Grok or add a Codex account",
+        usage: "/login [codex]",
     }
 
     fn takes_args(&self) -> bool {

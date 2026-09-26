@@ -230,15 +230,13 @@ async fn hitting_the_output_budget_is_a_truncation_not_a_clean_stop() {
     ])
     .await;
 
-    assert!(
-        events.iter().any(|e| matches!(
-            e,
-            SamplingEvent::Failed { error, .. }
-                if error.message.to_lowercase().contains("max")
-                    || error.message.to_lowercase().contains("truncat")
-        )),
-        "events: {events:#?}"
-    );
+    match events.last() {
+        Some(SamplingEvent::Completed { response, .. }) => {
+            assert_eq!(response.stop_reason, Some(StopReason::Length));
+            assert_eq!(response.assistant_text(), "cut off here");
+        }
+        other => panic!("expected Completed(Length), got {other:?}; events: {events:#?}"),
+    }
 }
 
 #[tokio::test]

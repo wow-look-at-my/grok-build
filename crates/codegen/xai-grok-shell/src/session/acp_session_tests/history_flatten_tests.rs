@@ -18,6 +18,7 @@ fn encrypted_content_error() -> xai_grok_sampler::SamplingErrorInfo {
         is_retryable: false,
         retry_after_secs: None,
         should_retry: None,
+        error_code: None,
         model_metadata: None,
         empty_response_context: None,
         doom_loop_triggers: None,
@@ -72,7 +73,13 @@ async fn an_encrypted_content_rejection_flattens_and_resubmits() {
                 .replace_conversation(history_with_provider_state());
 
             let result = actor
-                .handle_sampling_failure(encrypted_content_error())
+                .handle_sampling_failure(
+                    encrypted_content_error(),
+                    0,
+                    transient_state(0, true),
+                    false,
+                    TurnParkState::Fresh,
+                )
                 .await;
 
             assert!(
@@ -128,7 +135,13 @@ async fn a_rejection_with_nothing_left_to_convert_is_terminal() {
             ]);
 
             let result = actor
-                .handle_sampling_failure(encrypted_content_error())
+                .handle_sampling_failure(
+                    encrypted_content_error(),
+                    0,
+                    transient_state(0, true),
+                    false,
+                    TurnParkState::Fresh,
+                )
                 .await;
 
             assert!(

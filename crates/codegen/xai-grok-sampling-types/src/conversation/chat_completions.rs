@@ -1,5 +1,3 @@
-//! Chat Completions wire format.
-
 use super::*;
 
 impl From<ChatRequestMessage> for ConversationItem {
@@ -7,6 +5,7 @@ impl From<ChatRequestMessage> for ConversationItem {
         match msg.role {
             Role::System => ConversationItem::System(SystemItem {
                 content: Arc::<str>::from(msg.text_content()),
+                synthetic_reason: SyntheticReason::Primary,
             }),
             Role::User => {
                 let parts = msg
@@ -24,13 +23,14 @@ impl From<ChatRequestMessage> for ConversationItem {
                     .collect();
                 ConversationItem::User(UserItem {
                     content: parts,
-                    synthetic_reason: None,
-                    ..Default::default()
+                    synthetic_reason: SyntheticReason::Human,
+                    cwd_generation: None,
+                    prior_turn_interrupt: None,
+                    prompt_index: None,
                 })
             }
             Role::Assistant => {
-                // Reasoning is a sibling item, which a single-item conversion
-                // cannot emit, so it is dropped here.
+                // Reasoning is a sibling item, which a single-item conversion cannot emit, so it is dropped here
                 let content = msg.text_content();
                 let model_id = msg.model_id;
 
@@ -65,10 +65,9 @@ impl From<ChatRequestMessage> for ConversationItem {
     }
 }
 
-/// Convert a single non-`Reasoning` [`ConversationItem`]. The wire format
-/// carries `reasoning_content` on the *following* assistant message, which a
-/// single item cannot see, so use [`conversation_to_chat_messages`] instead
-/// when reasoning must survive.
+/// Convert a single non-`Reasoning` [`ConversationItem`].
+/// The wire format carries `reasoning_content` on the *following* assistant message, which a single item cannot see.
+/// Use [`conversation_to_chat_messages`] instead when reasoning must survive.
 ///
 /// Permissive profile: both `model_id` and `reasoning_content` are emitted,
 /// which is what this crate sent before profiles existed. Use
@@ -100,8 +99,7 @@ pub fn conversation_item_to_chat_message_with_profile(
                 .content
                 .iter()
                 .any(|p| matches!(p, ContentPart::Image { .. }));
-            // Collapse to a single text block when there are no images, as
-            // the pre-blocks behavior did.
+            // Collapse to a single text block when there are no images, matching the behavior from before content blocks existed
             let content = if !has_images {
                 let text = u
                     .content
@@ -194,8 +192,7 @@ pub fn conversation_item_to_chat_message_with_profile(
             }
         }
         // Backend tool calls have no Chat Completions equivalent.
-        // Emit a synthetic assistant message so the model sees context
-        // about what was searched, without breaking the message sequence.
+        // Emit a synthetic assistant message so the model sees context about what was searched, without breaking the message sequence
         ConversationItem::BackendToolCall(b) => ChatRequestMessage {
             role: Role::Assistant,
             content: MessageContent::Text(b.text_summary()),
@@ -213,10 +210,8 @@ pub fn conversation_item_to_chat_message_with_profile(
     }
 }
 
-/// The canonical conversion. Each run of `Reasoning` siblings folds into the
-/// `reasoning_content` of the following `Assistant`; a `BackendToolCall` in
-/// between does not break the fold, any other item clears it, and reasoning
-/// with no following assistant is dropped.
+/// The canonical conversion: each run of `Reasoning` siblings folds into the `reasoning_content` of the following `Assistant`.
+/// A `BackendToolCall` in between does not break the fold, any other item clears it, and reasoning with no following assistant is dropped.
 ///
 /// Permissive profile — see [`conversation_to_chat_messages_with_profile`].
 pub fn conversation_to_chat_messages(items: Vec<ConversationItem>) -> Vec<ChatRequestMessage> {
@@ -281,8 +276,7 @@ pub fn conversation_to_chat_messages_with_profile(
 
 impl From<ChatResponseMessage> for ConversationItem {
     fn from(msg: ChatResponseMessage) -> Self {
-        // Reasoning is dropped: the streaming consumer synthesizes the
-        // sibling item instead.
+        // Reasoning is dropped: the streaming consumer synthesizes the sibling item instead
         let content = msg.content.unwrap_or_default();
 
         let tool_calls: Vec<ToolCall> = msg
@@ -369,10 +363,12 @@ impl From<ConversationRequest> for ChatCompletionRequest {
             x_grok_req_id: req.x_grok_req_id,
             x_grok_session_id: req.x_grok_session_id,
             x_grok_turn_idx: req.x_grok_turn_idx,
+            x_grok_transient_retry: req.x_grok_transient_retry,
             x_grok_agent_id: req.x_grok_agent_id,
             x_grok_deployment_id: req.x_grok_deployment_id,
             x_grok_user_id: req.x_grok_user_id,
             trace: None,
+            traceparent: req.traceparent,
         }
     }
 }

@@ -302,10 +302,8 @@ pub struct TodoWriteInput {
     pub prepend: bool,
 }
 
-/// New-architecture `TodoWrite` tool.
-///
-/// State: `State<TodoState>` — persisted across calls via Resources serde.
-/// Params: `()` — no per-tool configuration.
+/// New-architecture `TodoWrite` tool. State: `State<TodoState>` — persisted across calls via
+/// Resources serde. Params: `()` — no per-tool configuration.
 #[derive(Debug, Default)]
 pub struct TodoWriteTool;
 
@@ -431,10 +429,9 @@ mod tests {
 
     #[test]
     fn name_and_description() {
-        use crate::types::tool_metadata::ToolMetadata;
         let tool = TodoWriteTool;
         assert_eq!(xai_tool_runtime::Tool::id(&tool).as_str(), "todo_write");
-        let desc = ToolMetadata::description_template(&tool);
+        let desc = crate::types::tool_metadata::ToolMetadata::description_template(&tool);
         assert!(desc.contains("task list"));
         assert!(
             desc.contains("as many items as the work needs"),
@@ -580,10 +577,12 @@ mod tests {
                 .await
                 .unwrap(),
         );
-        assert_eq!(output.todos.len(), 1);
+        let [todo] = output.todos.as_slice() else {
+            panic!("expected exactly one todo, got {}", output.todos.len());
+        };
         // Id used as fallback content
-        assert_eq!(output.todos[0].content, "explore");
-        assert_eq!(output.todos[0].status, TodoStatus::Completed);
+        assert_eq!(todo.content, "explore");
+        assert_eq!(todo.status, TodoStatus::Completed);
     }
 
     #[tokio::test]
@@ -728,10 +727,13 @@ mod tests {
         let restored = resources2.get::<State<TodoState>>().unwrap();
         assert_eq!(restored.0.todo_items().count(), 2);
         let items: Vec<_> = restored.0.todo_items().collect();
-        assert_eq!(items[0].content, "First");
-        assert_eq!(items[0].status, TodoStatus::Completed);
-        assert_eq!(items[1].content, "Second");
-        assert_eq!(items[1].status, TodoStatus::InProgress);
+        let [first, second] = items.as_slice() else {
+            panic!("expected two items: {items:?}");
+        };
+        assert_eq!(first.content, "First");
+        assert_eq!(first.status, TodoStatus::Completed);
+        assert_eq!(second.content, "Second");
+        assert_eq!(second.status, TodoStatus::InProgress);
     }
 
     fn seed_state(items: &[(&str, &str, TodoStatus)]) -> TodoState {
@@ -1084,13 +1086,15 @@ mod tests {
         );
 
         // Content must be preserved, not replaced with id fallback.
-        assert_eq!(output.todos.len(), 3);
-        assert_eq!(output.todos[0].content, "Explore codebase");
-        assert_eq!(output.todos[0].status, TodoStatus::Completed);
-        assert_eq!(output.todos[1].content, "Review tools");
-        assert_eq!(output.todos[1].status, TodoStatus::Completed);
-        assert_eq!(output.todos[2].content, "Write tests");
-        assert_eq!(output.todos[2].status, TodoStatus::InProgress);
+        let [first, second, third] = output.todos.as_slice() else {
+            panic!("expected three todos: {:?}", output.todos);
+        };
+        assert_eq!(first.content, "Explore codebase");
+        assert_eq!(first.status, TodoStatus::Completed);
+        assert_eq!(second.content, "Review tools");
+        assert_eq!(second.status, TodoStatus::Completed);
+        assert_eq!(third.content, "Write tests");
+        assert_eq!(third.status, TodoStatus::InProgress);
     }
 
     // ── regression: merge with null content should never error ────────

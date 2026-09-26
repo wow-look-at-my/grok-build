@@ -5,30 +5,19 @@
 //! build, the stream never activates: emissions inside the ctx are no-ops and
 //! the in-process OTLP collector receives nothing.
 
-mod otlp_collector;
-
 use std::sync::Arc;
+use std::time::Duration;
 
-use otlp_collector as col;
 use xai_grok_telemetry::external;
+use xai_grok_test_support::MockOtelServer;
 
-#[test]
-fn ambient_ctx_injects_session_turn_and_prompt_id() {
-    let collected = col::Collected::default();
-    let endpoint = col::start_collector(collected.clone());
+#[tokio::test]
+async fn ambient_ctx_injects_session_turn_and_prompt_id() {
+    let server = MockOtelServer::start().await.unwrap();
 
-    let mut cfg = external::ExternalOtelConfig::resolve_with(
-        |name| match name {
-            "GROK_EXTERNAL_OTEL" => Some("1".into()),
-            "OTEL_LOGS_EXPORTER" | "OTEL_METRICS_EXPORTER" => Some("otlp".into()),
-            "OTEL_EXPORTER_OTLP_ENDPOINT" => Some(endpoint.clone()),
-            "OTEL_METRIC_EXPORT_INTERVAL" => Some("150".into()),
-            "OTEL_BLRP_SCHEDULE_DELAY" => Some("100".into()),
-            _ => None,
-        },
-        None,
-    )
-    .expect("double opt-in must resolve");
+    let env = server.exporter_env();
+    let mut cfg = external::ExternalOtelConfig::resolve_with(|name| env.get(name).cloned(), None)
+        .expect("double opt-in must resolve");
     cfg.client = external::config::ExternalClientInfo {
         service_version: "0.0.0-test".into(),
         client_version: "0.0.0-test".into(),
@@ -46,10 +35,7 @@ fn ambient_ctx_injects_session_turn_and_prompt_id() {
         "sess-ctx".to_owned(),
         Arc::new(tokio::sync::Mutex::new(3usize)),
     );
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .build()
-        .expect("current-thread runtime");
-    rt.block_on(xai_grok_telemetry::with_session_ctx(ctx, async {
+    xai_grok_telemetry::with_session_ctx(ctx, async {
         xai_grok_telemetry::session_ctx::begin_prompt_id();
         xai_grok_telemetry::log_event(xai_grok_telemetry::events::PromptSubmitted {
             prompt_length: 42,
@@ -57,6 +43,7 @@ fn ambient_ctx_injects_session_turn_and_prompt_id() {
             client_identifier: None,
             screen_mode: None,
             prompt_text: None,
+            command_name: None,
         });
         xai_grok_telemetry::log_event(xai_grok_telemetry::events::ModelResponseReceived {
             model_id: "grok-4".into(),
@@ -66,24 +53,27 @@ fn ambient_ctx_injects_session_turn_and_prompt_id() {
             completion_tokens: None,
             reasoning_tokens: None,
             cached_prompt_tokens: None,
+            cache_creation_tokens: None,
+            context_tokens: None,
+            cost_usd_ticks: None,
         });
-    }));
+    })
+    .await;
 
-    external::flush();
-
+    tokio::task::spawn_blocking(external::flush).await.unwrap();
     // Give any (erroneous) exporter ample time to phone home.
-    std::thread::sleep(std::time::Duration::from_millis(600));
-    assert_eq!(
-        collected.logs_len(),
-        0,
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    assert!(
+        server.recorder().log_records().is_empty(),
         "disabled external stream must export no logs from a session ctx"
     );
-    assert_eq!(
-        collected.metrics_len(),
-        0,
+    assert!(
+        server.recorder().metric_points().is_empty(),
         "disabled external stream must export no metrics from a session ctx"
     );
 
-    external::shutdown();
+    tokio::task::spawn_blocking(external::shutdown)
+        .await
+        .unwrap();
     assert!(!external::is_active());
 }
