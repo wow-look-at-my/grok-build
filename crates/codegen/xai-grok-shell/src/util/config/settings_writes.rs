@@ -217,6 +217,7 @@ pub(crate) fn apply_harness_model(
         "compaction" => m.compaction = value,
         "recap" => m.recap = value,
         "turn_summary" => m.turn_summary = value,
+        "thinking_summary" => m.thinking_summary = value,
         "side_note" => m.side_note = value,
         "todo_capture" => m.todo_capture = value,
         "memory_flush" => m.memory_flush = value,
@@ -340,6 +341,12 @@ pub async fn set_remember_tool_approvals(value: bool) -> Result<()> {
 /// Persist `[ui].show_thinking_blocks` via `update_config`.
 pub async fn set_show_thinking_blocks(value: bool) -> Result<()> {
     update_config(|cfg| cfg.ui.show_thinking_blocks = Some(value)).await
+}
+
+/// Persist `[ui].thinking_summaries` via `update_config`. A session resolves it
+/// once at spawn, so the change reaches the next session.
+pub async fn set_thinking_summaries(value: bool) -> Result<()> {
+    update_config(|cfg| cfg.ui.thinking_summaries = Some(value)).await
 }
 
 /// Persist `[ui].prompt_suggestions` via `update_config`.

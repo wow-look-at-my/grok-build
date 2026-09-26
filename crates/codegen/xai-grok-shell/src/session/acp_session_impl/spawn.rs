@@ -1812,6 +1812,7 @@ pub(crate) async fn spawn_session_actor(
         turn_summary_task: std::cell::RefCell::new(None),
         turn_summary_generation: std::cell::Cell::new(0),
         turn_summary_enabled: effective_config.is_turn_summary_enabled(),
+        thinking_summaries_enabled: effective_config.ui.thinking_summaries_enabled(),
         session_turn_active: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         streaming_turn_capture: parking_lot::Mutex::new(StreamingTurnCapture::default()),
         streaming_tool_titles: parking_lot::Mutex::new(std::collections::HashMap::new()),

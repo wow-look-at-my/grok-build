@@ -1255,6 +1255,33 @@ pub fn default_settings() -> Vec<SettingMeta> {
             restart_required: false,
             hidden_in_minimal: false,
         },
+        // SHARED: `[ui].thinking_summaries`. The shell resolves it when a session
+        // is spawned, so a change applies to the next one. Last in Appearance:
+        // the rows above are pinned into one chain by the order tests. The one
+        // home for the default is UiConfig::thinking_summaries_enabled.
+        SettingMeta {
+            key: "thinking_summaries",
+            category: SettingCategory::Appearance,
+            owner: SettingOwner::Shared,
+            label: "Summarize long thinking",
+            description: "Under a long collapsed thinking block, show a one-or-two-sentence \
+                          summary of what the model worked out. Uses a model call per long \
+                          thinking block. Restart required: a session picks the setting up \
+                          when it starts.",
+            keywords: &[
+                "thinking",
+                "reasoning",
+                "thought",
+                "summary",
+                "summarize",
+                "collapsed",
+            ],
+            kind: SettingKind::Bool {
+                default: ui_default.thinking_summaries_enabled(),
+            },
+            restart_required: true,
+            hidden_in_minimal: false,
+        },
         // SHELL-owned: `[ui.display_refresh].auto_cadence_enabled`. Restart-
         // required (cadence pinned at startup); hidden in minimal.
         SettingMeta {

@@ -513,6 +513,11 @@ pub enum Action {
     /// process-wide cache mirror and persists to `[ui].show_thinking_blocks`
     /// via `Effect::PersistSetting`.
     SetShowThinkingBlocks(bool),
+    /// Set whether a long thinking block gains a one-or-two-sentence summary
+    /// under its collapsed header. SHARED-owned: updates the `[ui]` mirror and
+    /// persists to `[ui].thinking_summaries` via `Effect::PersistSetting`. A
+    /// session resolves it once at spawn, so it takes effect next session.
+    SetThinkingSummaries(bool),
     /// Set whether runs of consecutive non-destructive tool calls and
     /// subagent rows are grouped into one row. SHELL-owned: updates the
     /// process-wide cache mirror and persists to `[ui].group_tool_verbs`

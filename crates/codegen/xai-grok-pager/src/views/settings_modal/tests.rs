@@ -787,6 +787,9 @@ fn rows_contain_categories_and_settings_through_pr_14() {
         // SHELL-owned collapsed_edit_blocks (Appearance; live cache,
         // default OFF rollout flag).
         "collapsed_edit_blocks",
+        // SHARED-owned thinking_summaries (Appearance; last in the category,
+        // because the rows above are pinned into one chain by order asserts).
+        "thinking_summaries",
         // SHELL-owned display_refresh_auto_cadence (Appearance).
         "display_refresh_auto_cadence",
         // Mouse — scroll + drag selection. The scroll
