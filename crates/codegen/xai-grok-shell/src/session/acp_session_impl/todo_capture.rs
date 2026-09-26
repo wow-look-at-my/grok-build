@@ -212,13 +212,11 @@ fn captured_todos_reminder(urgent: bool, todo_tool: &str, added: &[String]) -> S
         return text;
     }
     let todos = if one { "a new todo" } else { "new todos" };
-    // `merge: true` is load-bearing, not decoration: an empty `todos` array
-    // without it takes the replace path, which clears the list first.
     format!(
         "The user has assigned {todos}, with the explicit intention that you handle them \
          *after* you've finished what you're currently working on (if they wanted it done now, \
          they would've said so instead of using the todo system). Check out the todo list with \
-         `{todo_tool}` (`merge: true`, empty `todos`) when you have a moment."
+         `{todo_tool}` (empty `todos`) when you have a moment."
     )
 }
 
@@ -1156,19 +1154,15 @@ mod tests {
         );
     }
 
-    /// The read-back the calm notice asks for must not be the one that erases
-    /// the list. An empty `todos` array is a REPLACE unless `merge` is set,
-    /// and replace clears the state before writing — so a notice that names
-    /// the tool without naming `merge` tells the agent to wipe the todos the
-    /// user just captured.
+    /// The read-back the calm notice asks for is an empty `todos` array. It
+    /// must not name `merge`: the schema leaves that field out, so the model
+    /// cannot see it and must not be told to send it.
     #[test]
-    fn the_calm_read_back_cannot_be_read_as_a_wipe() {
+    fn the_calm_read_back_names_only_advertised_arguments() {
         let calm = captured_todos_reminder(false, TODO_WRITE, &["only one".to_owned()]);
         let tool_at = calm.find(TODO_WRITE).expect("names the tool");
-        assert!(
-            calm[tool_at..].contains("`merge: true`"),
-            "the read-back must carry merge: true or it clears the list: {calm}"
-        );
+        assert!(calm[tool_at..].contains("empty `todos`"), "{calm}");
+        assert!(!calm.contains("merge"), "{calm}");
     }
 
     /// The items ride along on `/TODO` (it is the next thing the agent does,
