@@ -2621,8 +2621,8 @@ impl Config {
     /// `GROK_DOOM_LOOP_RECOVERY` > TOML `enabled` > remote `enabled` >
     /// default ON — each layer's `false` is an independent kill switch, and
     /// `None` IS the off state, so disabled has exactly one spelling.
-    /// Tunables have no env layer (TOML > remote > default) and are clamped
-    /// to their documented ranges. Returns the composite runtime policy
+    /// Tunables have no env layer (TOML > remote > default). The threshold is
+    /// raised to its minimum and has no upper cap. Returns the composite runtime policy
     /// rather than `Resolved` because each knob resolves from its own
     /// source (the `resolve_reminder_policy` pattern).
     pub(crate) fn resolve_doom_loop_recovery(
@@ -2649,7 +2649,7 @@ impl Config {
                 .doom_loop_recovery
                 .max_retries
                 .or(remote.and_then(|s| s.max_retries))
-                .map_or(Policy::DEFAULT_MAX_RETRIES, Policy::clamp_max_retries),
+                .unwrap_or(Policy::DEFAULT_MAX_RETRIES),
         })
     }
     /// The output-rate floor and time-to-first-token limit for `model_id`, or
@@ -2663,7 +2663,7 @@ impl Config {
     /// without touching the session value.
     ///
     /// The timing is shared: `[ui].output_rate_sustained_secs` plus the
-    /// `[output_rate_floor]` window and budget, each clamped to its range.
+    /// `[output_rate_floor]` window and budget, each raised to its minimum.
     pub(crate) fn resolve_output_rate_floor(
         &self,
         model_id: &str,
@@ -10174,7 +10174,7 @@ reasoning_effort = "low"
         );
     }
     /// The time-to-first-token limit ships on, takes `[ui]`, then the
-    /// provider, then the model. Zero turns it off and a huge value clamps.
+    /// provider, then the model. Zero turns it off and a large value is kept.
     #[test]
     fn resolve_output_rate_floor_layers_the_ttft_limit() {
         use xai_grok_shared::ui_config::UiConfig;
@@ -10238,8 +10238,8 @@ reasoning_effort = "low"
         cfg.ui.ttft_timeout_secs = Some(99_999);
         assert_eq!(
             ttft(&cfg, "any-model"),
-            Some(*xai_grok_sampling_types::OutputRateFloorPolicy::TTFT_TIMEOUT_SECS_RANGE.end()),
-            "an out-of-range value clamps"
+            Some(99_999),
+            "a large value is kept"
         );
     }
     /// The retry budget and the window resolve `[ui]` first, then the legacy
@@ -10287,7 +10287,19 @@ reasoning_effort = "low"
             over.resolve_output_rate_floor("any-model")
                 .unwrap()
                 .max_retries,
-            *Policy::MAX_RETRIES_RANGE.end(),
+            99,
+            "a large budget is kept"
+        );
+
+        let mut unlimited = Config::default();
+        unlimited.ui.output_rate_max_retries = Some(Policy::UNLIMITED_RETRIES);
+        assert_eq!(
+            unlimited
+                .resolve_output_rate_floor("any-model")
+                .unwrap()
+                .max_retries,
+            Policy::UNLIMITED_RETRIES,
+            "the unlimited budget reaches the policy"
         );
     }
     /// Gate precedence: env > `[doom_loop_recovery]` > remote settings >
@@ -10456,10 +10468,10 @@ reasoning_effort = "low"
             Some(&None)
         );
     }
-    /// Out-of-range tunables clamp instead of being honored or dropped.
+    /// Large tunables are kept. A threshold below its minimum is raised.
     #[test]
     #[serial]
-    fn resolve_doom_loop_recovery_clamps_tunables() {
+    fn resolve_doom_loop_recovery_keeps_large_tunables() {
         use crate::util::config::DoomLoopRecoverySettings;
         unsafe { std::env::remove_var("GROK_DOOM_LOOP_RECOVERY") };
         let cfg = Config {
@@ -10471,8 +10483,8 @@ reasoning_effort = "low"
             ..Default::default()
         };
         let p = cfg.resolve_doom_loop_recovery().expect("enabled");
-        assert_eq!(p.max_threshold, 64);
-        assert_eq!(p.max_retries, 5);
+        assert_eq!(p.max_threshold, 1_000);
+        assert_eq!(p.max_retries, 99);
         let cfg = Config {
             doom_loop_recovery: DoomLoopRecoverySettings {
                 enabled: Some(true),

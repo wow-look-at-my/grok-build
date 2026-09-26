@@ -1541,12 +1541,18 @@ const INT_STEPPER_ADORNMENT_MIN_WIDTH: u16 = 8;
 /// Wide-range Int stepper defaults (span > 100): Up/Down small, Left/Right large.
 const INT_STEPPER_WIDE_SMALL_STEP: i64 = 5;
 const INT_STEPPER_WIDE_LARGE_STEP: i64 = 10;
+/// A span past this is a field with no real upper cap.
+const INT_STEPPER_UNCAPPED_SPAN: i64 = 1_000_000;
 
 /// Derive (small, large) step sizes from an Int setting's `[min, max]` span.
 /// Narrow dials use unit fine-steps so every in-range value is reachable;
 /// wide ranges keep the original ±5 / ±10 feel.
 pub(super) fn int_step_sizes(min: i64, max: i64) -> (i64, i64) {
     let span = max.saturating_sub(min).max(0);
+    // A field with no real upper cap keeps unit steps, so a small budget stays reachable.
+    if span > INT_STEPPER_UNCAPPED_SPAN {
+        return (1, 5);
+    }
     if span <= 20 {
         // scroll_lines 1..=10 (span 9): unit steps on both small and large.
         (1, (span / 5).max(1))

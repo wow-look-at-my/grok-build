@@ -76,30 +76,23 @@ fn default_max_retries() -> u32 {
 pub const THINKING_CHANNEL: &str = "thinking";
 
 impl DoomLoopRecoveryPolicy {
-    /// Clamp range for `max_threshold`.
-    pub const MAX_THRESHOLD_RANGE: std::ops::RangeInclusive<u32> = 2..=64;
-    /// Clamp range for `max_retries`.
-    pub const MAX_RETRIES_RANGE: std::ops::RangeInclusive<u32> = 0..=5;
-    /// Default `max_threshold` (lowest common threshold across the backtest
-    /// corpus of confirmed loops).
+    /// The detector reports no threshold under this, so a lower value never
+    /// matches a trigger.
+    pub const MIN_MAX_THRESHOLD: u32 = 2;
+    /// Lowest common threshold across the backtest corpus of confirmed loops.
     pub const DEFAULT_MAX_THRESHOLD: u32 = 8;
-    /// Default `max_retries`.
     pub const DEFAULT_MAX_RETRIES: u32 = 2;
+    /// A `max_retries` of this value never runs out.
+    pub const UNLIMITED_RETRIES: u32 = u32::MAX;
 
-    /// Clamp a configured `max_threshold` into [`Self::MAX_THRESHOLD_RANGE`].
+    /// Raises a configured `max_threshold` to [`Self::MIN_MAX_THRESHOLD`].
     pub fn clamp_max_threshold(value: u32) -> u32 {
-        value.clamp(
-            *Self::MAX_THRESHOLD_RANGE.start(),
-            *Self::MAX_THRESHOLD_RANGE.end(),
-        )
+        value.max(Self::MIN_MAX_THRESHOLD)
     }
 
-    /// Clamp a configured `max_retries` into [`Self::MAX_RETRIES_RANGE`].
-    pub fn clamp_max_retries(value: u32) -> u32 {
-        value.clamp(
-            *Self::MAX_RETRIES_RANGE.start(),
-            *Self::MAX_RETRIES_RANGE.end(),
-        )
+    /// Whether `spent` resamples leave any of this policy's budget.
+    pub fn has_retries_left(&self, spent: u32) -> bool {
+        self.max_retries == Self::UNLIMITED_RETRIES || spent < self.max_retries
     }
 
     /// A signal this policy treats as a real loop worth acting on: tail

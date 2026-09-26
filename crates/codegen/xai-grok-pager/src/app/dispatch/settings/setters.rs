@@ -2226,14 +2226,20 @@ pub(in crate::app::dispatch) fn set_output_rate_window_secs(
 }
 
 pub(super) fn set_output_rate_max_retries_inner(app: &mut AppView, value: i64) {
-    app.current_ui.output_rate_max_retries = Some(clamp_output_rate_max_retries(value) as u32);
+    app.current_ui.output_rate_max_retries = Some(
+        xai_grok_shell::util::config::output_rate_max_retries_from_setting(
+            clamp_output_rate_max_retries(value),
+        ),
+    );
 }
 
 pub(in crate::app::dispatch) fn set_output_rate_max_retries(
     app: &mut AppView,
     new: i64,
 ) -> Vec<Effect> {
-    let prev = i64::from(app.current_ui.output_rate_max_retries_value());
+    let prev = xai_grok_shell::util::config::output_rate_max_retries_to_setting(
+        app.current_ui.output_rate_max_retries_value(),
+    );
     let clamped = clamp_output_rate_max_retries(new);
     if prev == clamped {
         return vec![];
@@ -2248,6 +2254,8 @@ pub(in crate::app::dispatch) fn set_output_rate_max_retries(
     );
     if clamped == 0 {
         app.show_toast("\u{2713} Slow-output retries: off");
+    } else if clamped < 0 {
+        app.show_toast("\u{2713} Slow-output retries: unlimited");
     } else {
         app.show_toast(&format!("\u{2713} Slow-output retries: {clamped}"));
     }
