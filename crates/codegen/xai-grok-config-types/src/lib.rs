@@ -18,6 +18,7 @@ mod permission;
 pub use permission::*;
 mod auth_provider;
 pub use auth_provider::*;
+pub mod retry_budget;
 use serde::{Deserialize, Serialize};
 use xai_grok_announcements::RemoteAnnouncement;
 pub use xai_grok_config::DisplayRefreshSettings;
