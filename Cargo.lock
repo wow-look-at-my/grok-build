@@ -14524,6 +14524,7 @@ dependencies = [
  "wl-clipboard-rs",
  "xai-dirs",
  "xai-grok-config",
+ "xai-grok-config-types",
  "xai-grok-image",
  "xai-grok-models",
  "xai-grok-status-line",

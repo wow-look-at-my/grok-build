@@ -22,6 +22,7 @@ urlencoding = { workspace = true }
 xai-grok-models = { workspace = true }
 xai-grok-status-line = { workspace = true }
 xai-grok-config = { workspace = true }
+xai-grok-config-types = { workspace = true }
 xai-grok-image = { workspace = true }
 xai-tty-utils = { workspace = true }
 
