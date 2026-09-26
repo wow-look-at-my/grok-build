@@ -57,8 +57,7 @@ Plan mode is the interactive version of the `/goal` planner, and the plan uses t
 - `# Plan:` with a single sentence
 - **Acceptance criteria**: the outcomes the work must reach
 - **Verification plan**: the commands to run, and what their output must show
-- **Non-goals**, **Assumed scope**, **Implementation approach** and numbered **Task steps**
-  (the steps you check off live on the todo list, not in the plan file)
+- **Non-goals**, **Assumed scope**, **Implementation approach** and a **Task checklist**
 
 ---
 

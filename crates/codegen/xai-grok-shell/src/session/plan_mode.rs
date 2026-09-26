@@ -398,8 +398,7 @@ its output must show, tagged `gating` or `evidence`.
 - `## Non-goals`: what is out of scope, or `- none`.
 - `## Assumed scope`: the files and modules the work touches.
 - `## Implementation approach`: how to build it. This is guidance, not a criterion.
-- `## Task steps`: ordered, numbered steps. Write no `- [ ]` checkboxes: \
-the todo list is the only checklist.
+- `## Task checklist`: ordered `- [ ]` steps.
 ${%- if goal_contract %}
 
 When the user approves the plan, it becomes a goal with this plan as its contract. \
@@ -744,11 +743,10 @@ mod tests {
             "## Non-goals",
             "## Assumed scope",
             "## Implementation approach",
-            "## Task steps",
+            "## Task checklist",
         ] {
             assert!(text.contains(section), "missing {section}: {text}");
         }
-        assert!(!text.contains("ordered `- [ ]`"), "{text}");
     }
     #[test]
     fn full_reminder_names_the_goal_contract_only_when_approval_makes_a_goal() {

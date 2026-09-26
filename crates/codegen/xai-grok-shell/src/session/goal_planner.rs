@@ -818,7 +818,7 @@ mod tests {
             "the todo-list section must stay in the planner prompt",
         );
         assert!(
-            template.contains("one item per `## Task steps` entry"),
+            template.contains("one item per `## Task checklist` line"),
             "the planner must be told to list one todo per checklist line",
         );
         assert!(template.contains("{TODO_TOOL}"));
@@ -1076,7 +1076,7 @@ mod tests {
         let spawner = Arc::new(
             MockSpawner::ok_writes(
                 &plan_file,
-                b"# Plan: foo\n\n## Task steps\n1. first step\n2. second step\n",
+                b"# Plan: foo\n\n## Task checklist\n- [ ] first step\n- [ ] second step\n",
             )
             .with_todos(&["first step", "second step"]),
         );
@@ -1115,7 +1115,7 @@ mod tests {
         let plan_file = tmp_plan_file("planner-no-todos");
         let spawner = Arc::new(MockSpawner::ok_writes(
             &plan_file,
-            b"# Plan: foo\n\n## Task steps\n1. first step\n",
+            b"# Plan: foo\n\n## Task checklist\n- [ ] first step\n",
         ));
         let (_log, emit) = collect_events();
 
@@ -1488,16 +1488,14 @@ mod tests {
         assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("NOT an acceptance criterion"));
     }
 
-    /// Pin the `## Task steps` contract: the planner writes numbered steps
-    /// (code-change only) and no checkboxes, because the todo list is the
-    /// only checklist. The steps are HOW guidance, never part of the judged
-    /// contract.
+    /// Pin the `## Task checklist` contract: the planner emits `- [ ]`
+    /// checkbox steps (code-change only) that `goal_next_step` mines for
+    /// the per-turn nudge, and the checklist is HOW guidance, never part
+    /// of the judged contract.
     #[test]
-    fn planner_prompt_requires_task_steps_without_checkboxes() {
-        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("## Task steps"));
-        assert!(!GOAL_PLANNER_PROMPT_TEMPLATE.contains("## Task checklist"));
-        assert!(!GOAL_PLANNER_PROMPT_TEMPLATE.contains("\n- [ ]"));
-        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("Write no `- [ ]` checkboxes"));
+    fn planner_prompt_requires_task_checklist_section() {
+        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("## Task checklist"));
+        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("unchecked box"));
         assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("never part of the judged contract"),);
         assert!(
             GOAL_PLANNER_PROMPT_TEMPLATE.contains("as many ordered"),

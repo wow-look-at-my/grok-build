@@ -18,7 +18,7 @@ use xai_grok_tools::types::tool::ToolKind;
 #[test]
 fn todo_gate_fires_when_pending_remains() {
     let input = TodoGateInput {
-        pending: vec![("t1", "fix-round-1")],
+        pending: vec!["fix-round-1"],
         in_progress_unbacked: vec![],
         in_progress_backed: vec![],
         backing_task_count: 0,
@@ -30,24 +30,12 @@ fn todo_gate_fires_when_pending_remains() {
 }
 
 #[test]
-fn todo_gate_reminder_names_each_item_by_id() {
-    // The reminder asks for a status change by id. An id the model cannot
-    // see is an instruction it cannot carry out.
-    let r = build_todo_gate_reminder(
-        &[("plan-3f9a2c", "write the migration")],
-        &[("t7", "run the suite")],
-    );
-    assert!(r.contains("- plan-3f9a2c: write the migration"), "{r}");
-    assert!(r.contains("- t7: run the suite"), "{r}");
-}
-
-#[test]
 fn todo_gate_passes_when_in_progress_count_le_backing_count() {
     // One in-progress item, one live backing task → backed → no nudge.
     let input = TodoGateInput {
         pending: vec![],
         in_progress_unbacked: vec![],
-        in_progress_backed: vec![("r2", "review-round-2")],
+        in_progress_backed: vec!["review-round-2"],
         backing_task_count: 1,
     };
     assert!(matches!(
@@ -62,8 +50,8 @@ fn todo_gate_fires_when_in_progress_exceeds_backing_count() {
     // in_progress but only 1 polling subagent → 2 unbacked.
     let input = TodoGateInput {
         pending: vec![],
-        in_progress_unbacked: vec![("pr-2", "pr-2:ci-green"), ("pr-3", "pr-3:ci-green")],
-        in_progress_backed: vec![("pr-1", "pr-1:ci-green")],
+        in_progress_unbacked: vec!["pr-2:ci-green", "pr-3:ci-green"],
+        in_progress_backed: vec!["pr-1:ci-green"],
         backing_task_count: 1,
     };
     let decision = evaluate_todo_gate(&input);
@@ -83,7 +71,7 @@ fn todo_gate_fires_when_in_progress_exceeds_backing_count() {
 
 #[test]
 fn todo_gate_reminder_renders_plan_tool_name() {
-    let raw = build_todo_gate_reminder(&[("t1", "fix-round-1")], &[]);
+    let raw = build_todo_gate_reminder(&["fix-round-1"], &[]);
     let renderer = TemplateRenderer::new(
         HashMap::from([(ToolKind::Plan, "todo_write".to_string())]),
         HashMap::new(),
@@ -109,7 +97,7 @@ fn todo_gate_reminder_renders_plan_tool_name() {
 // nudge's signature phrase must not leak in).
 #[test]
 fn todo_gate_has_its_own_vocabulary() {
-    let gate = build_todo_gate_reminder(&[("t1", "only-pending")], &[]);
+    let gate = build_todo_gate_reminder(&["only-pending"], &[]);
     // Gate's signature phrase — distinguishes it from the periodic
     // TodoNudge ("hasn't been used recently") in dashboards and
     // model-side debugging.
@@ -196,7 +184,7 @@ fn todo_gate_reminder_omits_empty_sections() {
     // Only the populated sections render; empty buckets are dropped.
     // The backed-in-progress bucket is never listed (deliberately
     // removed — the gate already decided not to nudge on those).
-    let r = build_todo_gate_reminder(&[("t1", "only-pending")], &[]);
+    let r = build_todo_gate_reminder(&["only-pending"], &[]);
     assert!(r.contains("Pending:"));
     assert!(!r.contains("In-progress (no backing"));
     assert!(!r.contains("backed by a live background task"));
@@ -223,17 +211,13 @@ fn collected(
     }
 }
 
-fn contents<'a>(items: &[(&'a str, &'a str)]) -> Vec<&'a str> {
-    items.iter().map(|(_, content)| *content).collect()
-}
-
 #[test]
 fn as_input_marks_everything_unbacked_when_no_backing_tasks() {
     // (a) backing_count = 0 with one in_progress → all unbacked.
     let c = collected(&[("ip", "do work", TodoStatus::InProgress)], 0);
     let input = c.as_input();
-    assert!(input.in_progress_backed.is_empty());
-    assert_eq!(input.in_progress_unbacked, vec![("ip", "do work")]);
+    assert_eq!(input.in_progress_backed, Vec::<&str>::new());
+    assert_eq!(input.in_progress_unbacked, vec!["do work"]);
     assert!(input.pending.is_empty());
 }
 
@@ -249,7 +233,7 @@ fn as_input_marks_all_backed_when_backing_count_ge_in_progress() {
     );
     let input = c.as_input();
     // Insertion order preserved: alpha before bravo.
-    assert_eq!(contents(&input.in_progress_backed), vec!["alpha", "bravo"]);
+    assert_eq!(input.in_progress_backed, vec!["alpha", "bravo"]);
     assert!(input.in_progress_unbacked.is_empty());
 }
 
@@ -267,9 +251,9 @@ fn as_input_partitions_first_n_as_backed() {
     );
     let input = c.as_input();
     // Insertion order: pr-1 is backed; pr-2 / pr-3 are unbacked.
-    assert_eq!(contents(&input.in_progress_backed), vec!["pr-1:ci-green"]);
+    assert_eq!(input.in_progress_backed, vec!["pr-1:ci-green"]);
     assert_eq!(
-        contents(&input.in_progress_unbacked),
+        input.in_progress_unbacked,
         vec!["pr-2:ci-green", "pr-3:ci-green"]
     );
 }
@@ -286,13 +270,10 @@ fn as_input_pending_never_backed_even_with_high_backing_count() {
     );
     let input = c.as_input();
     // Pending bucket carries the pending item.
-    assert_eq!(contents(&input.pending), vec!["pending-task"]);
+    assert_eq!(input.pending, vec!["pending-task"]);
     // The single in-progress item is backed (count >= 1) but the
     // pending item does NOT appear in either in_progress bucket.
-    assert_eq!(
-        contents(&input.in_progress_backed),
-        vec!["in-progress-task"]
-    );
+    assert_eq!(input.in_progress_backed, vec!["in-progress-task"]);
     assert!(input.in_progress_unbacked.is_empty());
 }
 
@@ -315,6 +296,6 @@ fn as_input_completed_and_cancelled_are_dropped() {
     // Insertion-order partition is computed AFTER completed /
     // cancelled are filtered out: `first-ip` (which appears
     // before `second-ip` in `todos`) is the one backed slot.
-    assert_eq!(contents(&input.in_progress_backed), vec!["first-ip"]);
-    assert_eq!(contents(&input.in_progress_unbacked), vec!["second-ip"]);
+    assert_eq!(input.in_progress_backed, vec!["first-ip"]);
+    assert_eq!(input.in_progress_unbacked, vec!["second-ip"]);
 }

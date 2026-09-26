@@ -215,44 +215,18 @@ pub(super) fn render_goal_task_discipline(names: &GoalToolNames) -> String {
 /// on its own column-0 line — a single line-delimited pointer the
 /// model and any downstream consumer (debug log scraper, support
 /// tooling) can extract reliably, so keep the format stable.
-///
-/// The todo list is the only checklist; the plan file carries no boxes.
-/// `plan_todos_seeded` says whether the planner's steps are already on it, or
-/// whether the implementer must put them there.
-pub(super) fn render_goal_plan_block(
-    plan_path: &std::path::Path,
-    names: &GoalToolNames,
-    plan_todos_seeded: bool,
-) -> String {
+pub(super) fn render_goal_plan_block(plan_path: &std::path::Path, names: &GoalToolNames) -> String {
     debug_assert!(
         !plan_path.as_os_str().is_empty(),
         "render_goal_plan_block requires a non-empty plan_path; an \
          empty path renders a dangling `Plan:` line that the model \
          cannot follow",
     );
-    let checklist = if plan_todos_seeded {
-        GOAL_PLAN_CHECKLIST_ON_TODOS
-    } else {
-        GOAL_PLAN_CHECKLIST_IN_PLAN
-    };
     // Column-0 single-line `Plan: <abs>` contract — see fn docs.
     GOAL_PLAN_BLOCK_TEMPLATE
-        .replace("{CHECKLIST_BULLET}", checklist)
         .replace("{PLAN_PATH}", &plan_path.display().to_string())
         .replace("{TODO_TOOL}", &names.todo)
 }
-
-const GOAL_PLAN_CHECKLIST_ON_TODOS: &str = "\
-- The plan's steps are ALREADY on your todo list — the goal planner added one
-  item per step, in order, with ids that start with `plan-`. That list is your
-  checklist: work the items in order and keep each status current through
-  `{TODO_TOOL}`. Call `{TODO_TOOL}` with an empty `todos` array to read the
-  ids. The next-step nudge reads the list.";
-
-const GOAL_PLAN_CHECKLIST_IN_PLAN: &str = "\
-- Put the plan's `## Task steps` on your todo list through `{TODO_TOOL}`, one
-  item per step, in order, and keep each status current. That list is your
-  only checklist: the user watches it, and the next-step nudge reads it.";
 
 /// Plan path for the goal-mode reminder, or `None` on the legacy path.
 /// `Some` only when the planner is enabled (`GROK_GOAL_PLANNER`) and a plan
@@ -319,13 +293,12 @@ pub(super) fn render_goal_rules(
     block_recap: &str,
     goal_state: &str,
     plan_path: Option<&std::path::Path>,
-    plan_todos_seeded: bool,
     scratch_dir: &str,
     scratch_ready: bool,
 ) -> String {
     let discipline = render_goal_task_discipline(names);
     let plan_block = match plan_path {
-        Some(path) => render_goal_plan_block(path, names, plan_todos_seeded),
+        Some(path) => render_goal_plan_block(path, names),
         None => String::new(),
     };
     GOAL_RULES_TEMPLATE
@@ -357,13 +330,12 @@ pub(super) fn render_goal_rules_legacy(
     block_recap: &str,
     goal_state: &str,
     plan_path: Option<&std::path::Path>,
-    plan_todos_seeded: bool,
     scratch_dir: &str,
     scratch_ready: bool,
 ) -> String {
     let discipline = render_goal_task_discipline(names);
     let plan_block = match plan_path {
-        Some(path) => render_goal_plan_block(path, names, plan_todos_seeded),
+        Some(path) => render_goal_plan_block(path, names),
         None => String::new(),
     };
     GOAL_RULES_TEMPLATE_LEGACY
@@ -717,37 +689,35 @@ pub(super) fn render_verifier_gaps_block_legacy(gaps: &str, goal_tool: &str) -> 
     )
 }
 
-/// `char` cap on the model-authored todo text inlined as the next step.
-/// Applied BEFORE tag neutralization, which may add a zero-width break per
-/// broken tag (plus the `…` cap suffix).
+/// `char` cap on the (model-authored) plan-mined next-step line — one
+/// checklist item never legitimately needs more, while a single plan
+/// line can run to the reader's 8 KiB cap. Applied BEFORE tag
+/// neutralization, which may add a zero-width break per broken tag
+/// (plus the `…` cap suffix).
 pub(super) const GOAL_NEXT_STEP_MAX_CHARS: usize = 400;
 
-/// The next step for the continuation nudge. The todo list is the only
-/// checklist, so the nudge reads it: the first `in_progress` item, else the
-/// first `pending` one. It names the id, so the model can update the item
-/// without a read first.
+/// Resolve the inlined "next concrete step" for the continuation
+/// nudge from the planner-emitted plan file. The read is 8 KiB-capped
+/// and best-effort — any I/O or parse failure yields `None`, leaving
+/// the caller to substitute a generic "check your todo list" fallback.
 ///
-/// The item text is capped and its reminder-frame tags are broken, so it
-/// cannot close the `<system-reminder>` it is inlined into. Verifier gaps are
-/// NOT consulted here: [`render_verifier_gaps_block`] carries them.
-pub(super) fn next_step_from_todos<'a>(
-    todos: impl IntoIterator<Item = (&'a str, &'a str, crate::tools::todo::TodoStatus)>,
-    todo_tool: &str,
-) -> String {
+/// The plan item is model-authored: `char`-capped to
+/// [`GOAL_NEXT_STEP_MAX_CHARS`], then reminder-frame tags are
+/// zero-width-broken so it cannot close the `<system-reminder>` frame
+/// it is inlined into.
+///
+/// Verifier gaps are NOT consulted here: a `NotAchieved` verdict's
+/// findings are surfaced separately and prominently via
+/// [`render_verifier_gaps_block`] (persisted in `last_classifier_gaps`),
+/// so this slot carries only the plan's next item to avoid duplicating
+/// the top gap.
+pub(super) fn resolve_goal_next_step(plan_path: Option<&Path>) -> Option<String> {
     use crate::session::goal_classifier::{cap_chars, neutralize_reminder_tags};
-    use crate::tools::todo::TodoStatus;
-    let todos: Vec<_> = todos.into_iter().collect();
-    let first = |want: TodoStatus| todos.iter().find(|(_, _, status)| *status == want);
-    match first(TodoStatus::InProgress).or_else(|| first(TodoStatus::Pending)) {
-        Some((id, content, _)) => format!(
-            "`{id}`: {}",
-            neutralize_reminder_tags(cap_chars(content, GOAL_NEXT_STEP_MAX_CHARS))
-        ),
-        None => format!(
-            "Your `{todo_tool}` list has no open item. Put the plan's remaining steps \
-             on it, and add an item for each acceptance criterion that does not hold yet."
-        ),
-    }
+    use crate::session::goal_next_step::first_unchecked_plan_item;
+
+    plan_path
+        .and_then(first_unchecked_plan_item)
+        .map(|item| neutralize_reminder_tags(cap_chars(&item, GOAL_NEXT_STEP_MAX_CHARS)))
 }
 
 pub(super) fn format_blocked_chat_notification(reason: &str, detail: Option<&str>) -> String {
@@ -2065,72 +2035,11 @@ mod verification_scope_tests {
     /// anything the objective did not ask for.
     #[test]
     fn the_plan_block_keeps_verification_inside_the_objective() {
-        for seeded in [true, false] {
-            let block =
-                render_goal_plan_block(std::path::Path::new("/tmp/plan.md"), &names(), seeded);
-            assert!(
-                block.contains("Checking is not doing"),
-                "running the verification plan must not widen the work: {block}"
-            );
-            assert!(!block.contains("{PLAN_PATH}"), "{block}");
-            assert!(!block.contains("{CHECKLIST_BULLET}"), "{block}");
-            assert!(!block.contains("{TODO_TOOL}"), "{block}");
-        }
-    }
-
-    /// The todo list is the only checklist. A seeded goal is told its steps are
-    /// on it. An unseeded goal is told to put them there, and is never told
-    /// they are already on a list that does not hold them. Neither is asked
-    /// to tick a box in the plan file.
-    #[test]
-    fn the_plan_block_keeps_the_checklist_on_the_todo_list() {
-        let path = std::path::Path::new("/tmp/plan.md");
-        let seeded = render_goal_plan_block(path, &names(), true);
-        assert!(seeded.contains("ALREADY on your todo list"), "{seeded}");
-
-        let unseeded = render_goal_plan_block(path, &names(), false);
+        let block = render_goal_plan_block(std::path::Path::new("/tmp/plan.md"), &names());
         assert!(
-            !unseeded.contains("ALREADY on your todo list"),
-            "{unseeded}"
+            block.contains("Checking is not doing"),
+            "running the verification plan must not widen the work: {block}"
         );
-        assert!(
-            unseeded.contains("Put the plan's `## Task steps`"),
-            "{unseeded}"
-        );
-
-        for block in [seeded, unseeded] {
-            assert!(!block.contains("- [ ]"), "{block}");
-            assert!(!block.contains("- [x]"), "{block}");
-        }
-    }
-
-    #[test]
-    fn the_todo_next_step_names_the_item_by_id() {
-        use crate::tools::todo::TodoStatus;
-        let todos = [
-            ("plan-a", "done already", TodoStatus::Completed),
-            ("plan-b", "write the parser", TodoStatus::Pending),
-            ("plan-c", "fix the build", TodoStatus::InProgress),
-        ];
-        assert_eq!(
-            next_step_from_todos(todos, "todo_write"),
-            "`plan-c`: fix the build",
-            "in_progress wins over an earlier pending item"
-        );
-        let only_pending = [
-            ("plan-a", "done already", TodoStatus::Cancelled),
-            ("plan-b", "write the parser", TodoStatus::Pending),
-        ];
-        assert_eq!(
-            next_step_from_todos(only_pending, "todo_write"),
-            "`plan-b`: write the parser"
-        );
-        let closed = next_step_from_todos(
-            [("plan-a", "done already", TodoStatus::Completed)],
-            "todo_write",
-        );
-        assert!(closed.contains("no open item"), "{closed}");
-        let empty = next_step_from_todos([], "todo_write");
-        assert!(empty.contains("Put the plan's remaining steps"), "{empty}");
+        assert!(!block.contains("{PLAN_PATH}"), "{block}");
     }
 }
