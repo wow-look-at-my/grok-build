@@ -67,6 +67,7 @@ const ALL_SETTINGS_EXERCISED: &[&str] = &[
     "auto_update",
     "fork_secondary_model",
     "show_thinking_blocks",
+    "thinking_summaries",
     "prompt_suggestions",
     "group_tool_verbs",
     "collapsed_edit_blocks",
@@ -305,6 +306,12 @@ fn assert_set_bool_action(outcome: SettingsKeyOutcome, key: &str, expected: bool
             assert_eq!(
                 b, expected,
                 "SetShowThinkingBlocks value differs from expected"
+            )
+        }
+        ("thinking_summaries", Action::SetThinkingSummaries(b)) => {
+            assert_eq!(
+                b, expected,
+                "SetThinkingSummaries value differs from expected"
             )
         }
         ("prompt_suggestions", Action::SetPromptSuggestions(b)) => {
@@ -1972,6 +1979,7 @@ fn registry_kind_membership_through_pr_14() {
             "prompt_suggestions",
             "respect_manual_folds",
             "show_thinking_blocks",
+            "thinking_summaries",
             "show_timeline",
             "show_timestamps",
             "page_flip_on_send",
@@ -2188,6 +2196,7 @@ fn defaults_round_trip_through_registry() {
             "auto_update" => SettingValue::Bool(true),
             "fork_secondary_model" => SettingValue::String(String::new()),
             "show_thinking_blocks" => SettingValue::Bool(true),
+            "thinking_summaries" => SettingValue::Bool(true),
             "prompt_suggestions" => SettingValue::Bool(true),
             "group_tool_verbs" => SettingValue::Bool(true),
             "collapsed_edit_blocks" => SettingValue::Bool(false),
@@ -2276,6 +2285,7 @@ fn settings_value_payload_matches_kind() {
             | SettingsKeyOutcome::Action(Action::SetAutoUpdate(_))
             | SettingsKeyOutcome::Action(Action::SetRespectManualFolds(_))
             | SettingsKeyOutcome::Action(Action::SetShowThinkingBlocks(_))
+            | SettingsKeyOutcome::Action(Action::SetThinkingSummaries(_))
             | SettingsKeyOutcome::Action(Action::SetPromptSuggestions(_))
             | SettingsKeyOutcome::Action(Action::SetGroupToolVerbs(_))
             | SettingsKeyOutcome::Action(Action::SetCollapsedEditBlocks(_))
