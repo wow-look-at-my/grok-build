@@ -155,14 +155,21 @@ async fn a_long_thinking_block_is_summarized_keyed_to_its_own_call() {
             }
             assert!(persisted, "the summary must be persisted for a reload");
 
-            // The reasoning under summary went to the endpoint verbatim enough
-            // for the model to answer about it, and nothing else did.
+            // The summary is exactly one model call, and that call carried the
+            // reasoning it was asked to summarize. The paired off-position test
+            // asserts this same counter at zero, so the count measured here is
+            // what makes that zero mean something.
+            let bodies = server.request_bodies();
+            assert_eq!(
+                bodies.len(),
+                1,
+                "one long thinking block is one summary call: {}",
+                server.request_log_summary()
+            );
             assert!(
-                server
-                    .request_bodies()
-                    .iter()
-                    .any(|body| body.to_string().contains("<reasoning>")),
-                "the request must carry the reasoning it is asked to summarize"
+                bodies[0].to_string().contains("Read the parser first."),
+                "the request must carry the reasoning it is asked to summarize: {}",
+                server.request_log_summary()
             );
         })
         .await;
