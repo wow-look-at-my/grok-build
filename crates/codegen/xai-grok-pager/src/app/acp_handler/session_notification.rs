@@ -1230,7 +1230,13 @@ pub(super) fn handle_session_notification(notif: &acp::ExtNotification, app: &mu
                     .session
                     .tracker
                     .set_reported_session_cost(session_cost_usd_ticks);
-            priced || cache_hit_set || total_changed
+            // The call that was streaming is over. Whatever it last measured is
+            // not a rate anything is producing now, and carrying it into the
+            // gap before the next call (a client tool, a retry backoff, the
+            // pre-first-token wait) puts a stale number under a row that says
+            // it is waiting.
+            let rate_cleared = agent.session.tracker.clear_output_rate();
+            priced || cache_hit_set || total_changed || rate_cleared
         }
         XaiSessionUpdate::OutputRate {
             tokens_per_sec,
@@ -1370,7 +1376,10 @@ pub(super) fn handle_child_session_notification(
                     .session
                     .tracker
                     .set_reported_session_cost(session_cost_usd_ticks);
-            priced || cache_hit_set || total_changed
+            // The child's view draws the same row as the parent's, so it needs
+            // the same end-of-call boundary.
+            let rate_cleared = child_view.session.tracker.clear_output_rate();
+            priced || cache_hit_set || total_changed || rate_cleared
         }
         XaiSessionUpdate::OutputRate {
             tokens_per_sec,
@@ -1549,6 +1558,10 @@ pub(super) fn apply_retry_state(
     scrollback: &mut crate::scrollback::state::ScrollbackState,
     is_api_key_auth: bool,
 ) {
+    // Every retry state means the attempt that was streaming has ended, so the
+    // reading it last reported describes a stream nothing is producing. The
+    // backoff that follows is a wait, not a slow response.
+    session.tracker.clear_output_rate();
     let mut is_credit_limit = false;
     let mut is_reauth = false;
     use xai_grok_shell::extensions::notification::RetryState;

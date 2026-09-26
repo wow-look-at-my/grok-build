@@ -192,6 +192,8 @@ mod side_call;
 #[path = "acp_session_impl/todo_capture.rs"]
 mod todo_capture;
 pub use todo_capture::{TodoCaptureError, TodoCaptureOutcome};
+#[path = "acp_session_impl/thinking_summary.rs"]
+mod thinking_summary;
 #[path = "acp_session_impl/turn_end.rs"]
 mod turn_end;
 #[path = "acp_session_impl/turn_summary.rs"]
@@ -1046,6 +1048,8 @@ pub(crate) struct SessionActor {
     /// Turn-summary gate, resolved once at spawn (env / config / remote
     /// settings — see `Config::resolve_turn_summary`).
     pub(crate) turn_summary_enabled: bool,
+    /// `[ui].thinking_summaries`, resolved a single time at spawn.
+    pub(crate) thinking_summaries_enabled: bool,
     /// True while THIS session has a prompt turn in flight (RAII-guarded in
     /// `handle_prompt`, like `tool_context.is_turn_active` — which is the
     /// agent-wide coordinator flag shared by all sessions and so unusable

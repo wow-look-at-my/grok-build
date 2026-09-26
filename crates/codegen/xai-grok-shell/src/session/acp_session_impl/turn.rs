@@ -2627,6 +2627,12 @@ impl SessionActor {
                 .and_then(|l| l.totals.cost_usd_ticks);
             let response_completed =
                 self.response_completed_update(&response, response_cost_ticks, session_cost_ticks);
+            let stream_start_ms = self
+                .chat_state_handle
+                .get_notification_meta()
+                .await
+                .and_then(|m| m.stream_start_ms);
+            self.spawn_thinking_summary(&response, stream_start_ms);
             if let Some(pt) = prompt_timing.take() {
                 let mcp_count = self.mcp_state.lock().await.configs.len() as u32;
                 let mcp_tools = self

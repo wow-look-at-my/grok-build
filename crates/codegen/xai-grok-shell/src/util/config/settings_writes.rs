@@ -217,6 +217,7 @@ pub(crate) fn apply_harness_model(
         "compaction" => m.compaction = value,
         "recap" => m.recap = value,
         "turn_summary" => m.turn_summary = value,
+        "thinking_summary" => m.thinking_summary = value,
         "side_note" => m.side_note = value,
         "todo_capture" => m.todo_capture = value,
         "memory_flush" => m.memory_flush = value,
