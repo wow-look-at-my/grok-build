@@ -29,20 +29,20 @@ pub(crate) const MAX_THOUGHTS_WIDTH_MAX: i64 = 500;
 pub(crate) const MAX_THOUGHTS_WIDTH_KEY: &str = "max_thoughts_width";
 
 // ---------------------------------------------------------------------------
-// Int bounds for the output-rate floor. `pub(crate)` so the dispatcher's
-// clamp and the shell helper's defensive clamp share them, and mirrored from
-// `OutputRateFloorPolicy`'s own ranges so the settings modal cannot offer a
-// value the policy would clamp away underneath it.
+// Int bounds for the output-rate floor.
+const U32_FIELD_MAX: i64 = u32::MAX as i64;
+pub(crate) const OUTPUT_RATE_MAX_RETRIES_MIN: i64 = -1;
 pub(crate) const MIN_OUTPUT_TOKENS_PER_SEC_MIN: i64 = 0;
-pub(crate) const MIN_OUTPUT_TOKENS_PER_SEC_MAX: i64 = 500;
-pub(crate) const OUTPUT_RATE_SUSTAINED_SECS_MIN: i64 = 1;
-pub(crate) const OUTPUT_RATE_SUSTAINED_SECS_MAX: i64 = 600;
-pub(crate) const OUTPUT_RATE_WINDOW_SECS_MIN: i64 = 2;
-pub(crate) const OUTPUT_RATE_WINDOW_SECS_MAX: i64 = 120;
-pub(crate) const OUTPUT_RATE_MAX_RETRIES_MIN: i64 = 0;
-pub(crate) const OUTPUT_RATE_MAX_RETRIES_MAX: i64 = 5;
+pub(crate) const MIN_OUTPUT_TOKENS_PER_SEC_MAX: i64 = U32_FIELD_MAX;
+pub(crate) const OUTPUT_RATE_SUSTAINED_SECS_MIN: i64 =
+    xai_grok_sampling_types::OutputRateFloorPolicy::MIN_SUSTAINED_SECS as i64;
+pub(crate) const OUTPUT_RATE_SUSTAINED_SECS_MAX: i64 = U32_FIELD_MAX;
+pub(crate) const OUTPUT_RATE_WINDOW_SECS_MIN: i64 =
+    xai_grok_sampling_types::OutputRateFloorPolicy::MIN_WINDOW_SECS as i64;
+pub(crate) const OUTPUT_RATE_WINDOW_SECS_MAX: i64 = U32_FIELD_MAX;
+pub(crate) const OUTPUT_RATE_MAX_RETRIES_MAX: i64 = U32_FIELD_MAX - 1;
 pub(crate) const TTFT_TIMEOUT_SECS_MIN: i64 = 0;
-pub(crate) const TTFT_TIMEOUT_SECS_MAX: i64 = 1800;
+pub(crate) const TTFT_TIMEOUT_SECS_MAX: i64 = U32_FIELD_MAX;
 
 /// The rows of the "Slow output" sub-screen: how slow output is detected and
 /// what is done about it.
@@ -816,14 +816,17 @@ pub fn default_settings() -> Vec<SettingMeta> {
             description: "How many backups one model call can start because its output \
                           stayed under the floor. The slow call keeps streaming, and the \
                           faster of the two is kept. When the budget is spent, the response \
-                          is accepted at whatever rate it runs. 0 starts none. This budget \
-                          is separate from the one for network and server errors.",
+                          is accepted at whatever rate it runs. 0 starts none, -1 never \
+                          stops. This budget is separate from the one for network and \
+                          server errors.",
             keywords: &[
                 "tokens", "rate", "slow", "retry", "retries", "reissue", "backup", "hedge",
                 "attempts", "budget", "tok/s",
             ],
             kind: SettingKind::Int {
-                default: i64::from(ui_default.output_rate_max_retries_value()),
+                default: xai_grok_shell::util::config::output_rate_max_retries_to_setting(
+                    ui_default.output_rate_max_retries_value(),
+                ),
                 min: OUTPUT_RATE_MAX_RETRIES_MIN,
                 max: OUTPUT_RATE_MAX_RETRIES_MAX,
             },

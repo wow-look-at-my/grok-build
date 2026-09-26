@@ -79,51 +79,33 @@ impl Default for OutputRateFloorPolicy {
 }
 
 impl OutputRateFloorPolicy {
-    /// Clamp range for `min_tokens_per_sec`. The ceiling is well under any
-    /// healthy rate: a floor above what the model ever reaches resamples every
-    /// response forever.
-    pub const MIN_TOKENS_PER_SEC_RANGE: std::ops::RangeInclusive<f64> = 0.0..=500.0;
-    /// Clamp range for `window_secs`. Under a second the measurement is chunk
-    /// jitter; over two minutes a collapse is waited out rather than caught.
-    pub const WINDOW_SECS_RANGE: std::ops::RangeInclusive<u64> = 2..=120;
-    /// Clamp range for `sustained_secs`.
-    pub const SUSTAINED_SECS_RANGE: std::ops::RangeInclusive<u64> = 1..=600;
-    /// Clamp range for `max_retries`.
-    pub const MAX_RETRIES_RANGE: std::ops::RangeInclusive<u32> = 0..=5;
-    /// Default resample budget.
+    /// The meter reports no rate until [`MIN_DISPLAY_SPAN`] of stream, so a
+    /// shorter window never reads and the gate never fires.
+    pub const MIN_WINDOW_SECS: u64 = 2;
+    pub const MIN_SUSTAINED_SECS: u64 = 1;
     pub const DEFAULT_MAX_RETRIES: u32 = 2;
-    /// Clamp range for `ttft_timeout_secs`. Zero is the off switch.
-    pub const TTFT_TIMEOUT_SECS_RANGE: std::ops::RangeInclusive<u64> = 0..=1800;
+    /// A `max_retries` of this value never runs out.
+    pub const UNLIMITED_RETRIES: u32 = u32::MAX;
 
-    /// The policy with every tunable clamped into range.
+    /// The policy with each tunable raised to the least value that still
+    /// works. There is no upper limit.
     pub fn clamped(self) -> Self {
         let min_tokens_per_sec = if self.min_tokens_per_sec.is_finite() {
-            self.min_tokens_per_sec.clamp(
-                *Self::MIN_TOKENS_PER_SEC_RANGE.start(),
-                *Self::MIN_TOKENS_PER_SEC_RANGE.end(),
-            )
+            self.min_tokens_per_sec.max(0.0)
         } else {
             0.0
         };
         Self {
             min_tokens_per_sec,
-            window_secs: self.window_secs.clamp(
-                *Self::WINDOW_SECS_RANGE.start(),
-                *Self::WINDOW_SECS_RANGE.end(),
-            ),
-            sustained_secs: self.sustained_secs.clamp(
-                *Self::SUSTAINED_SECS_RANGE.start(),
-                *Self::SUSTAINED_SECS_RANGE.end(),
-            ),
-            max_retries: self.max_retries.clamp(
-                *Self::MAX_RETRIES_RANGE.start(),
-                *Self::MAX_RETRIES_RANGE.end(),
-            ),
-            ttft_timeout_secs: self.ttft_timeout_secs.clamp(
-                *Self::TTFT_TIMEOUT_SECS_RANGE.start(),
-                *Self::TTFT_TIMEOUT_SECS_RANGE.end(),
-            ),
+            window_secs: self.window_secs.max(Self::MIN_WINDOW_SECS),
+            sustained_secs: self.sustained_secs.max(Self::MIN_SUSTAINED_SECS),
+            ..self
         }
+    }
+
+    /// Whether `spent` reissues leave any of this policy's budget.
+    pub fn has_retries_left(&self, spent: u32) -> bool {
+        self.max_retries == Self::UNLIMITED_RETRIES || spent < self.max_retries
     }
 
     /// Whether this policy gates anything: the rate floor, the
@@ -877,7 +859,7 @@ mod tests {
     }
 
     #[test]
-    fn clamped_bounds_every_tunable() {
+    fn clamped_raises_unusable_values_and_caps_nothing() {
         let clamped = OutputRateFloorPolicy {
             min_tokens_per_sec: 9_000.0,
             window_secs: 0,
@@ -886,11 +868,30 @@ mod tests {
             ttft_timeout_secs: 99_999,
         }
         .clamped();
-        assert_eq!(clamped.min_tokens_per_sec, 500.0);
-        assert_eq!(clamped.window_secs, 2);
-        assert_eq!(clamped.sustained_secs, 1);
-        assert_eq!(clamped.max_retries, 5);
-        assert_eq!(clamped.ttft_timeout_secs, 1800);
+        assert_eq!(clamped.min_tokens_per_sec, 9_000.0);
+        assert_eq!(clamped.window_secs, OutputRateFloorPolicy::MIN_WINDOW_SECS);
+        assert_eq!(
+            clamped.sustained_secs,
+            OutputRateFloorPolicy::MIN_SUSTAINED_SECS
+        );
+        assert_eq!(clamped.max_retries, 99);
+        assert_eq!(clamped.ttft_timeout_secs, 99_999);
+
+        let large = OutputRateFloorPolicy {
+            window_secs: 3_600,
+            sustained_secs: 3_600,
+            ..Default::default()
+        }
+        .clamped();
+        assert_eq!(large.window_secs, 3_600);
+        assert_eq!(large.sustained_secs, 3_600);
+
+        let negative = OutputRateFloorPolicy {
+            min_tokens_per_sec: -3.0,
+            ..Default::default()
+        }
+        .clamped();
+        assert_eq!(negative.min_tokens_per_sec, 0.0);
 
         let nan = OutputRateFloorPolicy {
             min_tokens_per_sec: f64::NAN,
@@ -920,6 +921,29 @@ mod tests {
         let mut gate = OutputRateGate::new(Some(policy));
         assert_eq!(gate.floor(), None, "no floor to publish or breach");
         assert!(drive(&mut gate, start, 60 * 4, |_| 1).is_empty());
+    }
+
+    #[test]
+    fn an_unlimited_budget_never_runs_out() {
+        let unlimited = OutputRateFloorPolicy {
+            max_retries: OutputRateFloorPolicy::UNLIMITED_RETRIES,
+            ..Default::default()
+        };
+        assert!(unlimited.has_retries_left(0));
+        assert!(unlimited.has_retries_left(u32::MAX));
+
+        let two = OutputRateFloorPolicy {
+            max_retries: 2,
+            ..Default::default()
+        };
+        assert!(two.has_retries_left(1));
+        assert!(!two.has_retries_left(2));
+
+        let none = OutputRateFloorPolicy {
+            max_retries: 0,
+            ..Default::default()
+        };
+        assert!(!none.has_retries_left(0));
     }
 
     #[test]
