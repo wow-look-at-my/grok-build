@@ -105,7 +105,7 @@ about a run is not evidence. Do NOT modify the workspace; your only writes are
    PLAN_FILE is a derived checklist: its numbered criteria may clarify but never narrow or override
    OBJECTIVE or named artifacts; its `## Verification plan` is the procedure —
    follow that observable bar, don't invent your own.
-   The plan's `## Implementation approach` and `## Task checklist` sections are
+   The plan's `## Implementation approach` and `## Task steps` sections are
    design GUIDANCE for the implementer, NOT part of the contract: diverging
    from them is NEVER by itself grounds to refute working code.
    Corroborate every criterion against the **current workspace** (CHANGED_FILES)
