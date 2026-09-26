@@ -420,7 +420,10 @@ impl UiConfig {
             .unwrap_or(Self::THINKING_SUMMARIES_DEFAULT)
     }
 
-    /// Default for [`Self::min_output_tokens_per_sec`] when unset.
+    /// Default for [`Self::min_output_tokens_per_sec`] when unset. Well under
+    /// what any endpoint here reaches in health, so an ordinary stream never
+    /// approaches it and a collapsed engine is still caught. A zero here ships
+    /// the gate dead, which is the same as not having it.
     pub const MIN_OUTPUT_TOKENS_PER_SEC_DEFAULT: u32 = 15;
 
     /// Default for [`Self::output_rate_sustained_secs`] when unset.
