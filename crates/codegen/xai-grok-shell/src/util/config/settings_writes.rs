@@ -441,51 +441,59 @@ pub async fn set_max_thoughts_width(value: i64) -> Result<()> {
     update_config(|cfg| cfg.ui.max_thoughts_width = clamped).await
 }
 
-/// Bounds for the output-rate floor settings. Mirrored from the pager's
-/// registry consts, which mirror `OutputRateFloorPolicy`'s own ranges.
-const MIN_OUTPUT_TOKENS_PER_SEC_SHELL_MAX: i64 = 500;
-const OUTPUT_RATE_SUSTAINED_SECS_SHELL_MIN: i64 = 1;
-const OUTPUT_RATE_SUSTAINED_SECS_SHELL_MAX: i64 = 600;
+/// `value` raised to `min` and held inside `u32`. There is no other limit.
+fn to_u32_at_least(value: i64, min: u32) -> u32 {
+    value.clamp(i64::from(min), i64::from(u32::MAX)) as u32
+}
 
-/// Persist `[ui].min_output_tokens_per_sec` via `update_config`.
-/// Defensively clamps to `[0, 500]` at the shell boundary; `0` is off.
+/// Persist `[ui].min_output_tokens_per_sec`; `0` is off.
 pub async fn set_min_output_tokens_per_sec(value: i64) -> Result<()> {
-    let clamped = value.clamp(0, MIN_OUTPUT_TOKENS_PER_SEC_SHELL_MAX) as u32;
-    update_config(|cfg| cfg.ui.min_output_tokens_per_sec = Some(clamped)).await
+    let value = to_u32_at_least(value, 0);
+    update_config(|cfg| cfg.ui.min_output_tokens_per_sec = Some(value)).await
 }
 
-/// Persist `[ui].output_rate_sustained_secs` via `update_config`.
-/// Defensively clamps to `[1, 600]` at the shell boundary.
+/// Persist `[ui].output_rate_sustained_secs`.
 pub async fn set_output_rate_sustained_secs(value: i64) -> Result<()> {
-    let clamped = value.clamp(
-        OUTPUT_RATE_SUSTAINED_SECS_SHELL_MIN,
-        OUTPUT_RATE_SUSTAINED_SECS_SHELL_MAX,
-    ) as u32;
-    update_config(|cfg| cfg.ui.output_rate_sustained_secs = Some(clamped)).await
+    use xai_grok_sampling_types::OutputRateFloorPolicy as Policy;
+    let min = Policy::MIN_SUSTAINED_SECS as u32;
+    let value = to_u32_at_least(value, min);
+    update_config(|cfg| cfg.ui.output_rate_sustained_secs = Some(value)).await
 }
 
-/// Persist `[ui].output_rate_window_secs`, clamped to the policy's range.
+/// Persist `[ui].output_rate_window_secs`.
 pub async fn set_output_rate_window_secs(value: i64) -> Result<()> {
     use xai_grok_sampling_types::OutputRateFloorPolicy as Policy;
-    let range = Policy::WINDOW_SECS_RANGE;
-    let clamped = value.clamp(*range.start() as i64, *range.end() as i64) as u32;
-    update_config(|cfg| cfg.ui.output_rate_window_secs = Some(clamped)).await
+    let value = to_u32_at_least(value, Policy::MIN_WINDOW_SECS as u32);
+    update_config(|cfg| cfg.ui.output_rate_window_secs = Some(value)).await
 }
 
-/// Persist `[ui].output_rate_max_retries`, clamped to the policy's range.
+/// Persist `[ui].output_rate_max_retries`; a negative value is unlimited
 pub async fn set_output_rate_max_retries(value: i64) -> Result<()> {
-    use xai_grok_sampling_types::OutputRateFloorPolicy as Policy;
-    let range = Policy::MAX_RETRIES_RANGE;
-    let clamped = value.clamp(i64::from(*range.start()), i64::from(*range.end())) as u32;
-    update_config(|cfg| cfg.ui.output_rate_max_retries = Some(clamped)).await
+    let value = output_rate_max_retries_from_setting(value);
+    update_config(|cfg| cfg.ui.output_rate_max_retries = Some(value)).await
 }
 
-/// Persist `[ui].ttft_timeout_secs`, clamped to the policy's range; `0` is off.
+/// The settings modal's integer for the retry budget: `-1` is unlimited.
+pub fn output_rate_max_retries_from_setting(value: i64) -> u32 {
+    use xai_grok_config_types::retry_budget::UNLIMITED;
+    if value < 0 {
+        return UNLIMITED;
+    }
+    value.min(i64::from(UNLIMITED - 1)) as u32
+}
+
+/// The inverse of [`output_rate_max_retries_from_setting`].
+pub fn output_rate_max_retries_to_setting(value: u32) -> i64 {
+    if value == xai_grok_config_types::retry_budget::UNLIMITED {
+        return -1;
+    }
+    i64::from(value)
+}
+
+/// Persist `[ui].ttft_timeout_secs`; `0` is off.
 pub async fn set_ttft_timeout_secs(value: i64) -> Result<()> {
-    use xai_grok_sampling_types::OutputRateFloorPolicy as Policy;
-    let range = Policy::TTFT_TIMEOUT_SECS_RANGE;
-    let clamped = value.clamp(*range.start() as i64, *range.end() as i64) as u32;
-    update_config(|cfg| cfg.ui.ttft_timeout_secs = Some(clamped)).await
+    let value = to_u32_at_least(value, 0);
+    update_config(|cfg| cfg.ui.ttft_timeout_secs = Some(value)).await
 }
 
 /// Persist `[ui].scroll_speed` via `update_config`.

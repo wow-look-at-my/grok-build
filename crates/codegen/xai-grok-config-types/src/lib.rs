@@ -42,13 +42,13 @@ pub struct DoomLoopRecoverySettings {
     /// `Some(false)` is a kill-switch; absent uses the client default (on).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enabled: Option<bool>,
-    /// Highest `tail_repetition` threshold considered confident (clamped to 2..=64); absent uses the client default (64).
-    /// The server emits every fired threshold, and the client filters the returned trigger labels with this.
-    /// It is never sent as a request parameter.
+    /// Highest `tail_repetition` threshold considered confident. A CLIENT-side
+    /// filter over the trigger labels the server returns. The server emits
+    /// every fired threshold, and this is never sent as a request parameter.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_threshold: Option<u32>,
-    /// Resample budget per turn (clamped to 0..=5); absent uses the client default (2).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Resample budget per turn. `-1` or `"unlimited"` never runs out.
+    #[serde(with = "retry_budget", skip_serializing_if = "Option::is_none")]
     pub max_retries: Option<u32>,
     /// Detector window sent as the value of `x-grok-doom-loop-check` (honored in 512..=4096, otherwise 4096; absent uses the client default, 1024).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -79,13 +79,11 @@ pub struct LongReasoningReminderSettings {
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct OutputRateFloorSettings {
-    /// Trailing window the rate is measured over (clamped to 2..=120).
-    /// Absent ⇒ client default (10).
+    /// Trailing window the rate is measured over, in seconds.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub window_secs: Option<u64>,
-    /// Reissue budget per model call (clamped to 0..=5). Absent ⇒ client
-    /// default (2).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Reissue budget per model call. `-1` or `"unlimited"` never runs out.
+    #[serde(with = "retry_budget", skip_serializing_if = "Option::is_none")]
     pub max_retries: Option<u32>,
 }
 

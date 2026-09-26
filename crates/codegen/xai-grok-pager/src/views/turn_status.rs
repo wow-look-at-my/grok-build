@@ -658,9 +658,14 @@ const RETRY_REASON_MAX: usize = 80;
 /// neither.
 fn retry_label(attempt: u32, max_retries: u32, reason: &str, waiting_secs: Option<u64>) -> String {
     let reason = reason.trim();
+    let budget = if max_retries == u32::MAX {
+        "∞".to_string()
+    } else {
+        max_retries.to_string()
+    };
     let mut label = match waiting_secs {
-        Some(secs) if secs > 0 => format!("Retrying in {secs}s ({attempt}/{max_retries})"),
-        _ => format!("Retrying ({attempt}/{max_retries})"),
+        Some(secs) if secs > 0 => format!("Retrying in {secs}s ({attempt}/{budget})"),
+        _ => format!("Retrying ({attempt}/{budget})"),
     };
     if reason.is_empty() {
         label.push('…');
@@ -939,6 +944,7 @@ mod tests {
     #[test]
     fn a_retry_with_no_reason_still_reads_as_one() {
         assert_eq!(retry_label(3, 5, "   ", Some(4)), "Retrying in 4s (3/5)…");
+        assert_eq!(retry_label(40, u32::MAX, "", None), "Retrying (40/∞)…");
     }
 
     /// Sendable waits = exactly the wait reasons the shell aborts on a queued
