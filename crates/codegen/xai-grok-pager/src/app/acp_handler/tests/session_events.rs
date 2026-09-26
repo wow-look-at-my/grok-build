@@ -988,7 +988,7 @@
     /// pre-first-token wait puts a stale number, and after a slow call a
     /// yellow or red one, under a row that says it is waiting for a response.
     #[test]
-    fn a_closed_model_call_takes_its_rate_with_it() {
+    fn output_rate_ends_with_the_model_call_that_published_it() {
         let mut app = make_app_with_agent("sess-rate-close");
         {
             let agent = app.agents.get_mut(&AgentId(0)).unwrap();
@@ -1041,7 +1041,7 @@
     /// a wait rather than a slow response. Both root and subagent sessions
     /// reach the rate through this one arm.
     #[test]
-    fn a_retry_state_ends_the_rate_too() {
+    fn output_rate_ends_with_a_retried_attempt() {
         let mut session = make_session(Some("s1"));
         let mut scrollback = ScrollbackState::new();
         assert!(session.tracker.set_output_rate(crate::acp::tracker::OutputRate {
@@ -1070,7 +1070,7 @@
     /// A subagent's view draws the same row, so its call closing clears its rate
     /// as well.
     #[test]
-    fn a_child_response_completed_clears_the_childs_rate() {
+    fn child_output_rate_ends_with_the_childs_model_call() {
         let mut agent = make_agent(Some("root-sess"));
         let child_sid = "child-sess-rate-close";
         agent

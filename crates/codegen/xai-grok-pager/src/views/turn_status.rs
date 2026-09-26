@@ -1563,7 +1563,7 @@ mod tests {
     /// it. Least of all one that had gone yellow or red, which reads as the
     /// wait itself being slow.
     #[test]
-    fn a_row_waiting_for_the_model_shows_no_rate() {
+    fn a_waiting_row_shows_no_output_rate_segment() {
         let slow = crate::acp::tracker::OutputRate {
             tokens_per_sec: 3.4,
             window_secs: 10,
