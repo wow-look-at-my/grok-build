@@ -1018,6 +1018,16 @@
             !row.contains("tok/s"),
             "a closed call's reading must not outlive it: {row:?}"
         );
+        let rate_gone = app.agents[&AgentId(0)]
+            .session
+            .tracker
+            .output_rate()
+            .is_none();
+        assert!(
+            rate_gone,
+            "the row must be empty because the reading was dropped, not because \
+             an activity hid it"
+        );
 
         // The next call's output brings the number back.
         let _ = handle_ext_notification(
