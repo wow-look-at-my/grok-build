@@ -39,7 +39,6 @@ impl AgentView {
             self.last_seen_event_id = None;
             self.last_applied_event_seq = None;
             self.last_applied_xai_event_seq = None;
-            self.clear_minimal_btw_lifecycle();
         }
         self.session.session_id = Some(session_id);
     }
@@ -47,7 +46,6 @@ impl AgentView {
     pub(crate) fn unbind_session_id(&mut self) {
         if self.session.session_id.take().is_some() {
             self.session_binding_epoch = self.session_binding_epoch.wrapping_add(1);
-            self.clear_minimal_btw_lifecycle();
         }
     }
     /// Record a prompt id this client originated (sent to the agent as the turn
@@ -276,7 +274,6 @@ impl AgentView {
             agents_modal: None,
             persona_detail: None,
             btw_state: None,
-            minimal_btw_lifecycle: None,
             btw_focused: false,
             hit_btw_close: Default::default(),
             toast: None,
@@ -434,10 +431,6 @@ impl AgentView {
         self.turn_paused_wall +=
             wall_since_ms(qv.opened_at_wall_ms, chrono::Utc::now().timestamp_millis());
     }
-    /// Invalidate and clear a minimal `/btw` lifecycle at a session boundary.
-    pub(crate) fn clear_minimal_btw_lifecycle(&mut self) {
-        crate::minimal_api::clear_minimal_btw(self);
-    }
     /// Accept leftover `isReplay` after `loading_replay` clears. Long enough
     /// for FIFO drain of a foreign ACP head after the Unrelated firehose timeout.
     pub(crate) const LATE_REPLAY_GRACE: std::time::Duration = std::time::Duration::from_secs(30);
@@ -450,7 +443,6 @@ impl AgentView {
     /// replay-window entry: the fresh/restore load ctor paths and the
     /// reconnect/fork reuse paths.
     pub(crate) fn begin_replay_window(&mut self) {
-        self.clear_minimal_btw_lifecycle();
         self.session.loading_replay = true;
         self.replayed_terminal_prompts.clear();
         self.unexpected_replay_drops = 0;
@@ -1138,7 +1130,6 @@ impl AgentView {
         billing_surface_visible: bool,
         usage_command_visible: bool,
         chat_mode: bool,
-        screen_mode: crate::app::ScreenMode,
         announcements: &[xai_grok_announcements::RemoteAnnouncement],
         restricted_commands: &[String],
     ) {
@@ -1146,7 +1137,6 @@ impl AgentView {
         self.set_billing_surface_visible(billing_surface_visible);
         self.set_usage_command_visible(usage_command_visible);
         self.app_chat_mode = chat_mode;
-        self.prompt.set_screen_mode(screen_mode);
         self.set_dashboard_visible(crate::views::dashboard::dashboard_enabled());
         self.set_has_session_announcements(crate::views::announcements::has_session_announcements(
             announcements,
@@ -1802,31 +1792,6 @@ mod status_window_tests {
         agent.adopt_running_prompt("p-run".into());
         assert!(agent.front_message_committed);
         assert!(agent.expects_send_now_cancel());
-    }
-    #[test]
-    fn session_rebind_and_replay_invalidate_minimal_btw() {
-        let mut agent = test_agent_view(Some("s1"), std::path::PathBuf::from("/tmp"));
-        let old_request = crate::minimal_api::start_minimal_btw(&mut agent, "old question".into());
-        agent.bind_session_id(agent_client_protocol::SessionId::new("s2"));
-        assert!(agent.btw_state.is_none());
-        assert!(agent.minimal_btw_lifecycle.is_none());
-        assert!(!crate::minimal_api::finish_minimal_btw(
-            &mut agent,
-            old_request,
-            Ok("old answer".into())
-        ));
-        assert!(agent.btw_state.is_none());
-        let replay_request =
-            crate::minimal_api::start_minimal_btw(&mut agent, "pre-replay question".into());
-        agent.begin_replay_window();
-        assert!(agent.btw_state.is_none());
-        assert!(agent.minimal_btw_lifecycle.is_none());
-        assert!(!crate::minimal_api::finish_minimal_btw(
-            &mut agent,
-            replay_request,
-            Ok("pre-replay answer".into())
-        ));
-        assert!(agent.btw_state.is_none());
     }
 }
 #[cfg(test)]

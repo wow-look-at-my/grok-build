@@ -173,13 +173,6 @@ pub fn resolve_initial_theme() -> ThemeKind {
     resolve_initial_theme_from(env_theme_name().as_deref(), load_from_disk(), true)
 }
 
-/// Variant of [`resolve_initial_theme`] without the OSC 11 startup
-/// fallback, for resolution after the terminal is initialized.
-#[must_use]
-pub fn resolve_initial_theme_no_osc11() -> ThemeKind {
-    resolve_initial_theme_from(env_theme_name().as_deref(), load_from_disk(), false)
-}
-
 fn env_theme_name() -> Option<String> {
     env_theme_name_from(&crate::host::collect_unicode_env()).map(str::to_owned)
 }

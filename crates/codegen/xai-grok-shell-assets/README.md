@@ -71,11 +71,7 @@ Verify installation:
 grok --version
 ```
 
-Update to the latest version:
-
-```bash
-grok update
-```
+To update, run the installer again. Grok does not update itself.
 
 ---
 
@@ -1334,9 +1330,6 @@ Each feature section below documents its own config. This section covers the gen
 ### General Settings
 
 ```toml
-[cli]
-auto_update = true                     # check for updates on launch
-
 [models]
 default = "grok-4.5"                   # model used for new sessions
 web_search = "grok-4.5"                # model used by the web_search tool
@@ -1522,9 +1515,6 @@ Examples:
 A complete `config.toml` for an enterprise deployment with external auth, corporate proxy, and telemetry disabled:
 
 ```toml
-[cli]
-auto_update = false
-
 [auth]
 auth_provider_command = "/usr/local/bin/my-company-auth-provider"
 auth_provider_label = "Acme Corp"

@@ -995,6 +995,7 @@ pub struct CompactionConfig {
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct CliConfig {
+    /// No effect: the built-in updater is gone. The key is kept so old files load.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub auto_update: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1013,18 +1014,14 @@ pub struct CliConfig {
     pub worktree_type: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_registry: Option<bool>,
-    /// Env `GROK_MINIMUM_VERSION`. See [`crate::util::config::VersionPolicy`] for
-    /// the version-policy knobs. (Unrelated to
-    /// `version_overrides[].maximum_version`, which gates config patches.)
+    /// No effect: the updater that read this and the three keys below is gone.
+    /// (Unrelated to `version_overrides[].maximum_version`, which gates config patches.)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub minimum_version: Option<String>,
-    /// Env `GROK_MAXIMUM_VERSION`. See [`crate::util::config::VersionPolicy`].
     #[serde(skip_serializing_if = "Option::is_none")]
     pub maximum_version: Option<String>,
-    /// Env `GROK_REQUIRED_MINIMUM_VERSION`. See [`crate::util::config::VersionPolicy`].
     #[serde(skip_serializing_if = "Option::is_none")]
     pub required_minimum_version: Option<String>,
-    /// Env `GROK_REQUIRED_MAXIMUM_VERSION`. See [`crate::util::config::VersionPolicy`].
     #[serde(skip_serializing_if = "Option::is_none")]
     pub required_maximum_version: Option<String>,
     /// Group sessions by repo in the picker and CLI listings.

@@ -801,28 +801,15 @@ mod mouse_reporting_registry_tests {
         Event::Key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL))
     }
     #[test]
-    fn mouse_toggle_chord_follows_live_mode_registry() {
-        for mode in [
-            crate::app::ScreenMode::Fullscreen,
-            crate::app::ScreenMode::Inline,
-        ] {
-            let mut agent = make_agent();
-            agent.set_active_pane(AgentPane::Scrollback, true);
-            let registry = ActionRegistry::defaults_with_config_for(mode, true);
-            assert!(matches!(
-                agent.handle_input(&ctrl_r(), &registry),
-                InputOutcome::Action(Action::ToggleMouseCapture)
-            ));
-        }
+    fn mouse_toggle_chord_follows_the_config_gate() {
         let mut agent = make_agent();
         agent.set_active_pane(AgentPane::Scrollback, true);
-        let registry =
-            ActionRegistry::defaults_with_config_for(crate::app::ScreenMode::Minimal, true);
-        assert!(
-            registry
-                .find(crate::actions::ActionId::ToggleMouseCapture)
-                .is_none()
-        );
+        let registry = ActionRegistry::defaults_with_config(true);
+        assert!(matches!(
+            agent.handle_input(&ctrl_r(), &registry),
+            InputOutcome::Action(Action::ToggleMouseCapture)
+        ));
+        let registry = ActionRegistry::defaults_with_config(false);
         assert!(!matches!(
             agent.handle_input(&ctrl_r(), &registry),
             InputOutcome::Action(Action::ToggleMouseCapture)

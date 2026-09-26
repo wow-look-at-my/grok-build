@@ -1156,48 +1156,6 @@ fn resume_conversation_does_not_focus_build_id_collision() {
     )));
     assert!(!app.agents[&agent_0].chat_kind);
 }
-#[test]
-fn duplicate_load_unbind_invalidates_old_minimal_btw_response() {
-    let mut app = test_app();
-    app.screen_mode = crate::app::ScreenMode::Minimal;
-    dispatch(Action::NewSession, &mut app);
-    let old_owner = AgentId(0);
-    dispatch(
-        Action::TaskComplete(TaskResult::SessionCreated {
-            agent_id: old_owner,
-            session_id: "shared-id".into(),
-            models: None,
-            scheduler_background_loops: None,
-        }),
-        &mut app,
-    );
-    let request_id = match dispatch(Action::SendBtw("old question".into()), &mut app).as_slice() {
-        [
-            Effect::SendBtw {
-                minimal_request_id: Some(id),
-                ..
-            },
-        ] => *id,
-        other => panic!("expected correlated minimal /btw effect, got {other:?}"),
-    };
-    dispatch(
-        Action::LoadSession("shared-id".into(), None, true),
-        &mut app,
-    );
-    assert!(app.agents[&old_owner].session.session_id.is_none());
-    assert!(app.agents[&old_owner].btw_state.is_none());
-    assert!(app.agents[&old_owner].minimal_btw_lifecycle.is_none());
-    dispatch(
-        Action::TaskComplete(TaskResult::BtwResponse {
-            agent_id: old_owner,
-            result: Ok("old answer".into()),
-            minimal_request_id: Some(request_id),
-        }),
-        &mut app,
-    );
-    assert!(app.agents[&old_owner].btw_state.is_none());
-    assert!(app.agents[&old_owner].minimal_btw_lifecycle.is_none());
-}
 /// Under sticky `--chat`, agents stamp `chat_kind=true` even for build loads;
 /// resume with conversation-entry false must still focus the open agent.
 #[test]
@@ -1350,26 +1308,6 @@ fn session_restored_clears_stale_session_id() {
     assert_eq!(
         app.agents[&AgentId(1)].session.session_id,
         Some(acp::SessionId::new("remote-sess"))
-    );
-}
-#[test]
-fn minimal_new_session_queues_welcome_card() {
-    let mut app = test_app();
-    app.screen_mode = crate::app::ScreenMode::Minimal;
-    let _ = dispatch(Action::NewSession, &mut app);
-    assert!(
-        app.minimal_state.welcome_pending,
-        "a fresh minimal session should queue the welcome card"
-    );
-}
-#[test]
-fn non_minimal_new_session_does_not_queue_welcome_card() {
-    let mut app = test_app();
-    app.screen_mode = crate::app::ScreenMode::Inline;
-    let _ = dispatch(Action::NewSession, &mut app);
-    assert!(
-        !app.minimal_state.welcome_pending,
-        "the welcome card is minimal-only"
     );
 }
 /// Picking a conversation row dispatches a direct chat load — never local

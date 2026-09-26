@@ -51,7 +51,6 @@ pub(super) fn ensure_dashboard_state(app: &mut AppView) {
     state.gc_stale_refs(&dashboard_alive_fn(&app.agents));
     state.adopt_slash_mru(app.slash_mru.clone());
     state.adopt_command_tags(app.command_tags.clone());
-    state.set_screen_mode(app.screen_mode);
     state.set_recap_visible(app.session_recap_available);
     state.set_voice_visible(app.voice_mode_enabled);
     state.set_restricted_commands(&app.tier_restricted_commands);
@@ -1304,7 +1303,6 @@ pub(super) fn dispatch_dashboard_dispatch_slash(app: &mut AppView, text: String)
     let coding_data_sharing_opt_out_from_app = app.coding_data_retention_opt_out;
     let coding_data_sharing_lock_from_app = app.coding_data_sharing_lock();
     let show_tips_from_app = app.show_tips;
-    let auto_update_from_app = app.auto_update;
     let respect_manual_folds_from_app = app.appearance.scrollback.scroll.respect_manual_folds;
     let auto_mode_gate_from_app = app.auto_mode_gate;
     let ask_user_question_timeout_enabled_from_app = app.ask_user_question_timeout_enabled;
@@ -1397,7 +1395,6 @@ pub(super) fn dispatch_dashboard_dispatch_slash(app: &mut AppView, text: String)
             models: &app.models,
             session_id: None,
             bundle_state: &app.bundle_state,
-            screen_mode: app.screen_mode,
             billing_surface_visible: app.usage_visible,
             usage_command_visible: !app.has_external_auth_provider,
             pager_state: crate::settings::PagerLocalSnapshot {
@@ -1416,7 +1413,6 @@ pub(super) fn dispatch_dashboard_dispatch_slash(app: &mut AppView, text: String)
                 coding_data_sharing_lock: coding_data_sharing_lock_from_app,
                 plan_mode_active: false,
                 show_tips: show_tips_from_app,
-                auto_update: auto_update_from_app,
                 vim_mode: crate::appearance::cache::load_vim_mode(),
                 scroll_speed: crate::appearance::cache::load_scroll_speed(),
                 respect_manual_folds: respect_manual_folds_from_app,

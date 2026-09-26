@@ -10,7 +10,6 @@ mod system_prompt;
 mod tool_approvals;
 mod toolset;
 mod ui;
-mod version;
 
 pub use auto_mode::*;
 pub use compaction::*;
@@ -22,7 +21,6 @@ pub use system_prompt::*;
 pub use tool_approvals::*;
 pub use toolset::*;
 pub use ui::*;
-pub use version::*;
 
 // Single crate-wide env-mutation mutex; `permissions.rs` tests name it via this module's path.
 #[cfg(test)]

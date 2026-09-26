@@ -42,7 +42,7 @@ const LEADER_READY_TIMEOUT: Duration = crate::http::MIN_CLIENT_CONNECT_TIMEOUT;
 pub enum DisconnectReason {
     /// Connection is still alive (initial state).
     Connected,
-    /// Server sent an explicit `Shutdown` message (planned shutdown, e.g., auto-update).
+    /// Server sent an explicit `Shutdown` message (planned shutdown).
     LeaderShutdown,
     /// Connection closed without a shutdown message (crash, kill, network error).
     ConnectionLost,
@@ -56,15 +56,6 @@ pub struct LeaderRegistration {
     pub leader_protocol_version: Option<u32>,
     pub leader_binary_version: Option<String>,
     pub leader_capabilities: Option<LeaderCapabilities>,
-}
-
-impl LeaderRegistration {
-    /// Whether the connected leader advertises the `RelaunchForUpdate` control.
-    pub fn supports_relaunch(&self) -> bool {
-        self.leader_capabilities
-            .as_ref()
-            .is_some_and(|c| c.relaunch_v1)
-    }
 }
 
 type ControlResponse = Result<ControlPayload, ControlError>;
@@ -169,8 +160,6 @@ impl LeaderClient {
     /// - `None` — no `ShuttingDown` message has been received yet (still connected, or
     ///   the server closed the connection without a planned shutdown announcement).
     /// - `Some(reason)` — the server announced a planned shutdown with this reason.
-    ///   Use this to distinguish e.g. `AutoUpdate` (safe to reconnect immediately) from
-    ///   `Manual` (may indicate a deliberate stop).
     pub fn shutting_down_reason(&self) -> watch::Receiver<Option<super::protocol::ShutdownReason>> {
         self.shutting_down_rx.clone()
     }
@@ -455,8 +444,7 @@ async fn register(
                         }
                         Ok(ServerMessage::ShuttingDown { reason, delay_ms }) => {
                             warn!(?reason, delay_ms, "Leader server shutting down (advance notice)");
-                            // Cache the reason so callers can distinguish AutoUpdate from
-                            // Manual shutdowns without inspecting the ACP message stream.
+                            // Cache the reason so callers can read it without the ACP stream.
                             let _ = shutting_down_tx.send(Some(reason));
                             // Don't break yet — wait for the actual Shutdown message.
                             // Callers watching disconnect_rx will see LeaderShutdown
@@ -685,7 +673,7 @@ mod tests {
                     protocol_version: Some(999),
                     binary_version: Some(xai_grok_version::version().to_string()),
                 },
-                caps: fake_caps(true, false),
+                caps: fake_caps(true),
             },
         )
         .await;

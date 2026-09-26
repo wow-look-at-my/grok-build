@@ -1807,20 +1807,6 @@ pub fn mcp_server_defined_at(path: &std::path::Path, server_name: &str) -> bool 
         .is_some_and(|servers| servers.contains_key(server_name))
 }
 
-/// Synchronously load `[cli] npm_registry` from config.toml.
-pub fn load_npm_registry_sync() -> Option<String> {
-    let root: TomlValue = crate::config::load_effective_config().ok()?;
-    if let TomlValue::Table(table) = root
-        && let Some(TomlValue::Table(cli)) = table.get("cli")
-    {
-        cli.get("npm_registry")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string())
-    } else {
-        None
-    }
-}
-
 /// Synchronously load the gcs_service_account_key from the config file.
 /// This is intended for use in contexts where async is not available.
 pub(crate) fn load_gcs_service_account_key_sync() -> Option<String> {

@@ -126,7 +126,6 @@ mod tests {
             models,
             session_id: None,
             bundle_state: &DEFAULT_BUNDLE_STATE,
-            screen_mode: crate::app::ScreenMode::Inline,
             billing_surface_visible: true,
             usage_command_visible: true,
             pager_state: crate::settings::PagerLocalSnapshot {
@@ -219,7 +218,6 @@ mod tests {
             billing_surface_visible: true,
             usage_command_visible: true,
             workflows_available: true,
-            screen_mode: crate::app::ScreenMode::Fullscreen,
         };
         let items = DocsCommand.suggest_args(&ctx, "").expect("suggestions");
         assert!(items.iter().any(|i| i.insert_text == "web"));

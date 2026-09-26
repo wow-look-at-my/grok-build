@@ -39,14 +39,8 @@ pub enum SwitchModelError {
 pub enum Action {
     /// Quit the application.
     Quit,
-    /// Restart the binary to pick up a downloaded update.
-    QuitForUpdate,
     /// Resume the recent foreign session offered on the launch welcome screen.
     ResumeForeignSession,
-    /// Re-exec into the other screen mode (`true` = minimal).
-    RelaunchInScreenMode {
-        minimal: bool,
-    },
     /// Quit without double-press confirmation (e.g., from command palette or pre-login screens).
     QuitConfirmed,
     /// Create a new session from the welcome screen.
@@ -362,12 +356,6 @@ pub enum Action {
     /// duration. The dispatch handler renders + writes the file and arms
     /// `AppView::pending_pager_path`; the event loop does the suspend/restore.
     OpenTranscriptPager,
-    /// Minimal mode (`grok --minimal`): re-print the most-recently committed
-    /// folded block (collapsed reasoning / truncated tool output) into native
-    /// scrollback, fully expanded, below the conversation (design decision K10).
-    /// Bound to `Ctrl+E` and the `/expand` command. No-op outside minimal mode
-    /// or when nothing folded remains to expand.
-    MinimalExpandLast,
     /// Copy selected block's metadata (e.g., command for execute blocks).
     CopyBlockMeta,
     /// Open the selected block in the fullscreen viewer.
@@ -537,8 +525,6 @@ pub enum Action {
     SetDefaultSelectedPermission(String),
     /// Set the hunk-tracker mode. Payload is the registry canonical string.
     SetHunkTrackerMode(String),
-    /// Set default screen mode (`fullscreen` | `minimal`); restart-required.
-    SetScreenMode(String),
     /// Enable/disable the Ctrl+Space / F8 voice-dictation shortcut. SHELL-owned;
     /// persisted to `[ui].voice_keybind_enabled`. Takes effect on the next
     /// keypress; `/voice` is unaffected.
@@ -637,9 +623,6 @@ pub enum Action {
     /// Commit the `show_tips` preference. Persisted to `[cli].show_tips`.
     /// Restart-required — tips are resolved once at startup.
     SetShowTips(bool),
-    /// Commit the `auto_update` preference. Persisted to `[cli].auto_update`.
-    /// Restart-required — auto-update check fires once at startup.
-    SetAutoUpdate(bool),
     /// Commit `[ui.display_refresh].auto_cadence_enabled`. Restart-required —
     /// cadence is pinned once at startup.
     SetDisplayRefreshAutoCadence(bool),
@@ -1041,8 +1024,6 @@ pub enum Action {
         /// Reload `/config-agents` list after the editor exits (when set).
         refresh_agents_modal: Option<crate::views::agents_modal::AgentsTab>,
     },
-    /// Edit the current minimal-mode composer draft in an external editor.
-    EditPromptExternal,
     /// Toggle the expanded goal detail overlay.
     ToggleGoalDetail,
     ToggleWorkflows,
@@ -2035,8 +2016,6 @@ pub enum Effect {
         agent_id: AgentId,
         session_id: acp::SessionId,
         question: String,
-        /// Correlates minimal responses; fullscreen leaves this unset.
-        minimal_request_id: Option<uuid::Uuid>,
     },
     /// Fire a /todo capture via the x.ai/todo ext method.
     SendTodo {
@@ -2830,8 +2809,6 @@ pub enum TaskResult {
     BtwResponse {
         agent_id: AgentId,
         result: Result<String, String>,
-        /// Correlates minimal responses; fullscreen leaves this unset.
-        minimal_request_id: Option<uuid::Uuid>,
     },
     /// `/todo` capture finished: the items it appended, or why it appended none.
     TodoCaptured {

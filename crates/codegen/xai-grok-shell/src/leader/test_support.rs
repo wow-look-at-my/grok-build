@@ -30,13 +30,12 @@ impl FakeVersions {
 }
 /// `LeaderCapabilities` has no `Default` (serde-only defaults), so fakes build
 /// their capability shape through this helper.
-pub(crate) fn fake_caps(control_v1: bool, relaunch_v1: bool) -> LeaderCapabilities {
+pub(crate) fn fake_caps(control_v1: bool) -> LeaderCapabilities {
     LeaderCapabilities {
         control_v1,
         runtime_cpu_profile: false,
         profile_formats: Vec::new(),
         workspace_exposure: false,
-        relaunch_v1,
     }
 }
 /// Wire behavior of a [`spawn_fake_leader`] instance.
@@ -158,7 +157,7 @@ async fn serve_client(
             }
             let _ = write_message(
                 &mut writer,
-                &registered(false, &FakeVersions::current(), &fake_caps(true, false)),
+                &registered(false, &FakeVersions::current(), &fake_caps(true)),
             )
             .await;
             cancel.cancelled().await;
@@ -170,7 +169,7 @@ async fn serve_client(
             }
             let _ = write_message(
                 &mut writer,
-                &registered(true, &FakeVersions::current(), &fake_caps(true, false)),
+                &registered(true, &FakeVersions::current(), &fake_caps(true)),
             )
             .await;
         }

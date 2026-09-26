@@ -1444,11 +1444,6 @@ impl DashboardState {
         self.peek_reply.adopt_command_tags(command_tags);
     }
 
-    pub(crate) fn set_screen_mode(&mut self, mode: crate::app::ScreenMode) {
-        self.dispatch.set_screen_mode(mode);
-        self.peek_reply.set_screen_mode(mode);
-    }
-
     pub(crate) fn set_recap_visible(&mut self, visible: bool) {
         self.dispatch.set_recap_visible(visible);
         self.peek_reply.set_recap_visible(visible);
@@ -4612,7 +4607,6 @@ fn dashboard_action_for_id(
         | ActionId::OpenPrevLink
         | ActionId::ToggleTodos
         | ActionId::ToggleTasks
-        | ActionId::EditPromptExternal
         | ActionId::ToggleQueue
         | ActionId::OpenSessions
         | ActionId::OpenExtensions

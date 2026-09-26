@@ -101,7 +101,7 @@ fn assert_title_styled(harness: &mut PtyHarness, title: &str) {
 }
 
 /// Graceful quit via the full-TUI chord: double Ctrl+Q, 200ms apart (the
-/// prompt owns plain keys and Ctrl+C is a no-op outside minimal mode — see
+/// prompt owns plain keys and Ctrl+C is a no-op here — see
 /// `continue_resumes_session_with_history`), then reap and assert exit 0 so
 /// the shell finishes teardown before a respawn reuses the same HOME.
 fn quit_gracefully(mut harness: PtyHarness) {

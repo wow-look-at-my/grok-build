@@ -270,21 +270,6 @@ pub(super) fn do_cancel_turn(app: &mut AppView, cancel_subagents: bool) -> Vec<E
     // restores the FRONT queued prompt to the input instead (handled after the
     // cleanup below). So skip the in-flight rewind in that case — the user wants
     // the queued prompt back, not the in-flight one.
-    //
-    // Minimal mode prints each committed block once into the terminal's native
-    // scrollback, and that print can't be "un-printed". A user-prompt block
-    // commits immediately (it is never `is_running`), so a just-promoted queued
-    // prompt's block is already in native scrollback by the time the user can
-    // cancel it. Rewinding then `remove_entry`s it from scrollback *state* while
-    // the printed copy stays on screen AND restores the text into the input —
-    // showing the prompt twice (dogfood bug: double-Esc on a queued prompt). Skip
-    // the rewind when the in-flight block has already committed and fall back to
-    // the standard cancel. `committed` is always false in alt-screen / inline, so
-    // this is a no-op outside minimal.
-    let in_flight_committed = match agent.session.in_flight_prompt.as_ref() {
-        Some(stashed) => agent.scrollback.is_committed(stashed.scrollback_entry),
-        None => false,
-    };
     // The rewind REPLACES the composer with the stashed in-flight prompt.
     // Esc (and the mouse stop / palette cancel) fire with the draft intact —
     // unlike keyboard Ctrl+C, which only cancels on an empty prompt — so a
@@ -295,7 +280,6 @@ pub(super) fn do_cancel_turn(app: &mut AppView, cancel_subagents: bool) -> Vec<E
         && app.cancel_rewind_enabled
         && agent.session.in_flight_prompt.is_some()
         && agent.session.pending_prompts.is_empty()
-        && !in_flight_committed
         && !composer_has_draft;
     if rewinding && let Some(stashed) = agent.session.in_flight_prompt.take() {
         if let Some(pid) = agent.session.current_prompt_id.clone() {

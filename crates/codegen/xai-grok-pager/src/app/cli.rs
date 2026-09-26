@@ -88,30 +88,6 @@ See ~/.grok/README.md for more information.
     Export(crate::export_cmd::ExportArgs),
     /// Export or upload session trace data
     Trace(crate::trace_cmd::TraceArgs),
-    /// Check for updates or install a specific version
-    Update {
-        /// Check for updates without installing.
-        #[arg(long)]
-        check: bool,
-        /// Emit machine-readable JSON output (for --check).
-        #[arg(long)]
-        json: bool,
-        /// Force re-download and install even if already up to date.
-        #[arg(long)]
-        force_reinstall: bool,
-        /// Install a specific version (e.g. 0.1.150 or 0.1.151-alpha.2).
-        #[arg(long)]
-        version: Option<String>,
-        /// Switch to the alpha release channel (faster updates, may have bugs).
-        #[arg(long, conflicts_with_all = ["stable", "enterprise"])]
-        alpha: bool,
-        /// Switch to the stable release channel (default, weekly releases).
-        #[arg(long, conflicts_with_all = ["alpha", "enterprise"])]
-        stable: bool,
-        /// Switch to the enterprise release channel.
-        #[arg(long, conflicts_with_all = ["alpha", "stable"], hide = true)]
-        enterprise: bool,
-    },
     /// Print version information
     #[command(visible_alias = "v")]
     Version {
@@ -392,9 +368,6 @@ pub struct LeaderArgs {
     /// headless client appears.
     #[arg(long)]
     pub relay_on_demand: bool,
-    /// Disable periodic auto-update checks for the leader.
-    #[arg(long)]
-    pub no_auto_update: bool,
     /// All environment URL overrides (passed from follower process)
     #[command(flatten)]
     pub headless: HeadlessArgs,
@@ -751,9 +724,6 @@ pub struct PagerArgs {
     /// Enable client-side file writes.
     #[arg(long = "fs-write", hide = true)]
     pub fs_write: bool,
-    /// Disable automatic updates for this session.
-    #[arg(long = "no-auto-update", hide = true)]
-    pub no_auto_update: bool,
     /// Enable the runtime turn-end TodoGate for this session.
     ///
     /// Session-scoped (not persisted). Highest precedence —
@@ -767,19 +737,6 @@ pub struct PagerArgs {
     /// Run inline instead of using the terminal alternate screen.
     #[arg(long = "no-alt-screen")]
     pub no_alt_screen: bool,
-    /// Experimental: scrollback-native rendering. Finalized blocks are printed
-    /// into the terminal's native scrollback (use the terminal's own scroll /
-    /// selection); a small pinned region holds the prompt + running turn.
-    /// Session-scoped only — does not write config. To default plain `grok` to
-    /// minimal, set `[ui] screen_mode = "minimal"` in ~/.grok/config.toml.
-    #[arg(long = "minimal")]
-    pub minimal: bool,
-    /// Open in the standard fullscreen TUI for this session, overriding a
-    /// config `[ui] screen_mode = "minimal"` preference. Session-scoped only —
-    /// does not write config. Fullscreen-vs-inline still follows the alt-screen
-    /// policy (--no-alt-screen, [terminal] alt_screen, terminal auto-detection).
-    #[arg(long = "fullscreen", conflicts_with = "minimal")]
-    pub fullscreen: bool,
     /// Write sampling events to ~/.grok/logs/sampling.jsonl.
     #[arg(long = "log-sampling", env = "GROK_LOG_SAMPLING", hide = true)]
     pub log_sampling: bool,
@@ -1205,17 +1162,27 @@ mod tests {
             ResumeTarget::SessionId("old".to_string())
         );
     }
-    /// The screen-mode flags are mutually exclusive: the pair exists so one
-    /// can override the other's sticky config value, so accepting both in one
-    /// invocation would be ambiguous.
     #[test]
-    fn minimal_and_fullscreen_flags_conflict() {
-        let args = PagerArgs::try_parse_from(["grok", "--minimal"]).unwrap();
-        assert!(args.minimal && !args.fullscreen);
-        let args = PagerArgs::try_parse_from(["grok", "--fullscreen"]).unwrap();
-        assert!(args.fullscreen && !args.minimal);
-        let err = PagerArgs::try_parse_from(["grok", "--minimal", "--fullscreen"]).unwrap_err();
-        assert_eq!(err.kind(), clap::error::ErrorKind::ArgumentConflict);
+    fn removed_screen_mode_and_update_flags_are_rejected() {
+        for flag in ["--minimal", "--fullscreen", "--no-auto-update"] {
+            let err = PagerArgs::try_parse_from(["grok", flag]).unwrap_err();
+            assert_eq!(
+                err.kind(),
+                clap::error::ErrorKind::UnknownArgument,
+                "{flag}"
+            );
+        }
+        let err = PagerArgs::try_parse_from(["grok", "update"]);
+        assert!(
+            !matches!(
+                err,
+                Ok(PagerArgs {
+                    command: Some(_),
+                    ..
+                })
+            ),
+            "`grok update` must not parse as a subcommand"
+        );
     }
     #[test]
     fn agent_plugin_dir_repeatable_and_canonicalized() {

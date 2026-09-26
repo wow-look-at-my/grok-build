@@ -35,8 +35,8 @@ impl SlashCommand for PrivacyCommand {
 mod tests {
     use super::*;
 
-    /// Run `/privacy <args>` in `mode`.
-    fn run_privacy(args: &str, mode: crate::app::ScreenMode) -> CommandResult {
+    /// Run `/privacy <args>`.
+    fn run_privacy(args: &str) -> CommandResult {
         use crate::acp::model_state::ModelState;
         use crate::app::bundle::BundleState;
 
@@ -46,7 +46,6 @@ mod tests {
             models: &models,
             session_id: None,
             bundle_state: &bundle,
-            screen_mode: mode,
             billing_surface_visible: true,
             usage_command_visible: true,
             pager_state: crate::settings::PagerLocalSnapshot::default(),
@@ -63,29 +62,19 @@ mod tests {
         )
     }
 
-    /// Minimal suppresses the privacy banner, so `/privacy` is the only
-    /// route to the page there — no mode may fall back to something else.
     #[test]
-    fn privacy_opens_settings_row_in_every_screen_mode() {
-        use crate::app::ScreenMode;
-        for mode in [
-            ScreenMode::Fullscreen,
-            ScreenMode::Inline,
-            ScreenMode::Minimal,
-        ] {
-            let result = run_privacy("", mode);
-            assert!(
-                opens_settings_row(&result),
-                "`/privacy` in {mode:?} must open the settings row, got {result:?}",
-            );
-        }
+    fn privacy_opens_settings_row() {
+        let result = run_privacy("");
+        assert!(
+            opens_settings_row(&result),
+            "`/privacy` must open the settings row, got {result:?}",
+        );
     }
 
     /// The arguments this used to accept must not linger as hidden aliases
     /// that change a privacy preference straight from the prompt.
     #[test]
     fn arguments_are_ignored_not_honored() {
-        use crate::app::ScreenMode;
         assert!(
             !PrivacyCommand.takes_args(),
             "the dropdown must not offer an argument slot"
@@ -94,7 +83,7 @@ mod tests {
             "   ", "opt-in", "opt-out", "in", "out", "share", "private", "status", "info",
             "garbage",
         ] {
-            let result = run_privacy(args, ScreenMode::Inline);
+            let result = run_privacy(args);
             assert!(
                 opens_settings_row(&result),
                 "`/privacy {args}` must just open the page, got {result:?}",

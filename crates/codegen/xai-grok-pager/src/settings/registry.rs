@@ -211,9 +211,6 @@ pub struct SettingMeta {
     /// When `true`, the value takes effect only on next session start.
     /// Renders a "restart" pill on the row while it is expanded.
     pub restart_required: bool,
-    /// When `true`, the row is hidden in minimal mode (the setting still
-    /// exists and applies to the full TUI).
-    pub hidden_in_minimal: bool,
 }
 
 /// A typed value carried by `Action::Set*` payloads, modal preview state,
@@ -279,8 +276,6 @@ pub struct PagerLocalSnapshot {
     pub plan_mode_active: bool,
     /// `[cli].show_tips` mirror. `None` = no TOML override → default `true`.
     pub show_tips: Option<bool>,
-    /// `[cli].auto_update` mirror. `None` = no TOML override → default `true`.
-    pub auto_update: Option<bool>,
     /// Process-wide vim-mode scrollback flag. Mirrors
     /// `appearance::cache::load_vim_mode()` at snapshot time.
     pub vim_mode: bool,
@@ -320,7 +315,6 @@ impl Default for PagerLocalSnapshot {
             coding_data_sharing_lock: None,
             plan_mode_active: false,
             show_tips: None,
-            auto_update: None,
             vim_mode: false,
             // Matches the registry default and
             // `appearance::cache::SCROLL_SPEED_DEFAULT`. Bare `u8::default()`
@@ -366,16 +360,6 @@ pub fn canonical_hunk_tracker_mode(value: Option<&str>) -> &'static str {
         "off"
     } else {
         "agent_only"
-    }
-}
-
-/// `minimal` stays; everything else (including unset / legacy `default`) → `fullscreen`.
-pub fn canonical_screen_mode(value: Option<&str>) -> &'static str {
-    let raw = value.unwrap_or_default().trim();
-    if raw.eq_ignore_ascii_case("minimal") {
-        "minimal"
-    } else {
-        "fullscreen"
     }
 }
 
@@ -597,9 +581,6 @@ pub fn current_value_for(
         "hunk_tracker_mode" => Some(SettingValue::Enum(canonical_hunk_tracker_mode(
             ui.hunk_tracker_mode.as_deref(),
         ))),
-        "screen_mode" => Some(SettingValue::Enum(canonical_screen_mode(
-            ui.screen_mode.as_deref(),
-        ))),
         // SHELL — whether the Ctrl+Space / F8 chord is active; None → true.
         "voice_keybind_enabled" => {
             Some(SettingValue::Bool(ui.voice_keybind_enabled.unwrap_or(true)))
@@ -719,7 +700,6 @@ pub fn current_value_for(
         )),
         // CLI batch: snapshot mirrors; `None` → effective default `true`.
         "show_tips" => Some(SettingValue::Bool(pager.show_tips.unwrap_or(true))),
-        "auto_update" => Some(SettingValue::Bool(pager.auto_update.unwrap_or(true))),
         // fork_secondary_model: baseline value folds to empty string. The
         // mirror persists the ModelId slug but the DynamicEnum canonicals
         // are catalog display names, so resolve via the snapshot; a stale
@@ -1044,13 +1024,6 @@ mod tests {
                 ("show_tips", SettingKind::Bool { default }) => {
                     assert!(*default, "show_tips registry default must be true");
                 }
-                ("auto_update", SettingKind::Bool { default }) => {
-                    assert!(
-                        *default,
-                        "auto_update registry default must be true \
-                         (matches auto_update.rs's `.unwrap_or(true)`)"
-                    );
-                }
                 // vim_mode: Option<bool>; None → false.
                 ("vim_mode", SettingKind::Bool { default }) => {
                     assert_eq!(
@@ -1162,18 +1135,6 @@ mod tests {
                         canonical_hunk_tracker_mode(ui.hunk_tracker_mode.as_deref()),
                         "hunk_tracker_mode default drifts from UiConfig::default()",
                     );
-                }
-                ("screen_mode", SettingKind::Enum { default, .. }) => {
-                    assert_eq!(
-                        ui.screen_mode, None,
-                        "test assumes UiConfig::default().screen_mode is None",
-                    );
-                    assert_eq!(
-                        *default,
-                        canonical_screen_mode(ui.screen_mode.as_deref()),
-                        "screen_mode default drifts from UiConfig::default()",
-                    );
-                    assert_eq!(*default, "fullscreen");
                 }
                 // render_mermaid: Option<String>; None → "auto".
                 ("render_mermaid", SettingKind::Enum { default, .. }) => {
@@ -1507,19 +1468,6 @@ mod tests {
         assert_eq!(canonical_hunk_tracker_mode(None), "agent_only");
     }
 
-    #[test]
-    fn canonical_screen_mode_maps_aliases_and_unknowns() {
-        assert_eq!(canonical_screen_mode(Some("minimal")), "minimal");
-        assert_eq!(canonical_screen_mode(Some("fullscreen")), "fullscreen");
-        assert_eq!(canonical_screen_mode(Some("full")), "fullscreen");
-        assert_eq!(canonical_screen_mode(Some("  MINIMAL ")), "minimal");
-        assert_eq!(canonical_screen_mode(Some("default")), "fullscreen");
-        assert_eq!(canonical_screen_mode(Some("auto")), "fullscreen");
-        assert_eq!(canonical_screen_mode(Some("bogus")), "fullscreen");
-        assert_eq!(canonical_screen_mode(Some("")), "fullscreen");
-        assert_eq!(canonical_screen_mode(None), "fullscreen");
-    }
-
     /// Corrupted `auto_dark_theme = "auto"` (would cause circular ref)
     /// falls back to canonical default.
     #[test]
@@ -1727,7 +1675,6 @@ mod tests {
                 max: 200,
             },
             restart_required: false,
-            hidden_in_minimal: false,
         };
         // Same key registered twice → panic.
         let _ = SettingsRegistry::from_entries(vec![dup_meta.clone(), dup_meta]);

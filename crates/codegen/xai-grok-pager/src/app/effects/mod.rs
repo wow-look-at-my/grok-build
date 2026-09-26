@@ -3639,7 +3639,7 @@ pub(crate) fn execute(
                     }
                 });
         }
-        Effect::SendBtw { agent_id, session_id, question, minimal_request_id } => {
+        Effect::SendBtw { agent_id, session_id, question } => {
             let tx = acp_tx.clone();
             let is_api_key_auth = session_flags.is_api_key_auth;
             tasks
@@ -3670,14 +3670,12 @@ pub(crate) fn execute(
                             TaskResult::BtwResponse {
                                 agent_id,
                                 result: Ok(answer),
-                                minimal_request_id,
                             }
                         }
                         Err(e) => {
                             TaskResult::BtwResponse {
                                 agent_id,
                                 result: Err(format_acp_error(&e, is_api_key_auth)),
-                                minimal_request_id,
                             }
                         }
                     }
@@ -4653,9 +4651,7 @@ fn format_session_info(
         .filter(|id| !id.is_empty())
         .map(|id| format!("\n  Conversation ID: {id}"))
         .unwrap_or_default();
-    let version_display = xai_grok_version::display_version(
-        xai_grok_update::channel_label(),
-    );
+    let version_display = xai_grok_version::version();
     let auth_lines = format_auth_lines(is_api_key_auth, api_key_env_set);
     format!(
         "{title_line}  Shell version: {version_display}\n{auth_lines}  Session ID: {session_id}{conversation_line}\n  Working directory: {cwd}\n  Model: {model_display}{model_hash_line}{backend_line}{sandbox_line}{turn_line}\n  Context: {used} / {total} tokens ({pct}%)"

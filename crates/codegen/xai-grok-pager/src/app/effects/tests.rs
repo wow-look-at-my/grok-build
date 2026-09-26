@@ -97,10 +97,10 @@ fn plain_prompt_block_no_meta_when_ranges_empty() {
 /// (the shell threads the latter into `prompt_submitted.screen_mode`).
 #[test]
 fn prompt_request_meta_stamps_screen_mode() {
-    let meta = prompt_request_meta("p-1", Some("minimal"));
+    let meta = prompt_request_meta("p-1", Some("inline"));
     assert_eq!(
             meta,
-            serde_json::json!({ "promptId": "p-1", "screenMode": "minimal" })
+            serde_json::json!({ "promptId": "p-1", "screenMode": "inline" })
         );
 }
 /// Without a screen mode (`SessionFlags::default()` in tests), the key is

@@ -257,8 +257,7 @@ impl JsonlStorageAdapter {
     /// Append one JSONL record, healing a torn tail before writing.
     ///
     /// Appends are not crash-atomic: a process kill / `ENOSPC` mid-`write_all`
-    /// (e.g. the auto-update leader relaunch aborting a persistence actor
-    /// mid-append) leaves the file ending in a *partial* record with no
+    /// (e.g. a leader SIGTERM aborting a persistence actor mid-append) leaves the file ending in a *partial* record with no
     /// trailing newline. Because append failures are logged-and-continued by
     /// the persistence actor, a plain `O_APPEND` write of the next record
     /// would concatenate it onto that partial line, producing a merged line
@@ -772,7 +771,7 @@ impl JsonlStorageAdapter {
     /// ## Corruption tolerance (torn / interleaved appends)
     ///
     /// Appends to `chat_history.jsonl` are not crash-atomic: a process kill
-    /// mid-append (auto-update leader relaunch), `ENOSPC`, or two writers
+    /// mid-append (a leader SIGTERM), `ENOSPC`, or two writers
     /// racing (a second persistence actor on reconnect) can leave a torn or
     /// merged line — the classic symptom is a serde error like
     /// ``expected `,` or `}` at line 1 column 571``. Failing the whole load on

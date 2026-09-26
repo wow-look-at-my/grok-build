@@ -570,9 +570,6 @@ default = "my-model"
 A complete config for an enterprise deployment with custom models:
 
 ```toml
-[cli]
-auto_update = false
-
 [auth]
 auth_provider_command = "/usr/local/bin/my-company-auth-provider"
 auth_provider_label = "Acme Corp"

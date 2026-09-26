@@ -44,7 +44,7 @@ use super::modes::{
     permission_mode_toast,
 };
 use super::permissions::drain_permission_queue;
-use super::prompt::{dispatch_doctor, dispatch_send_prompt, dispatch_send_prompt_inner};
+use super::prompt::{dispatch_doctor, dispatch_send_prompt_inner};
 use super::session::fork::build_child_fork_marker;
 use super::session::lifecycle::{dispatch_new_session_inner, drain_startup_actions, finish_trust};
 use super::session::load::{dispatch_load_session_with_restore, reanchor_grouped_selection};
@@ -112,7 +112,6 @@ fn test_app() -> AppView {
         auto_mode_gate: true,
         yolo_policy_block: None,
         yolo_launch_block_notice: None,
-        screen_mode_switch_hint: None,
         require_plan_approval: false,
         plan_mode: false,
         chat_mode: false,
@@ -171,7 +170,6 @@ fn test_app() -> AppView {
         privacy_banner_opt_in_inflight: false,
         coding_data_write_seq: 0,
         show_tips: None,
-        auto_update: None,
         ask_user_question_timeout_enabled: None,
         zdr_access_enabled: false,
         usage_billing_redirect_url: None,
@@ -246,19 +244,14 @@ fn test_app() -> AppView {
         welcome_shimmer_frame: 0,
         startup_warnings: Vec::new(),
         is_api_key_auth: false,
-        pending_update_version: None,
         foreign_resume_launch_generation: 0,
         foreign_resume_launch: None,
-        quit_for_update: false,
-        relaunch: None,
         import_claude_modal: None,
         welcome_doc_viewer: None,
         screen_mode: crate::app::ScreenMode::Inline,
         pending_effects: Vec::new(),
         pending_editor: None,
         pending_pager_path: None,
-        pending_pager_ansi: false,
-        minimal_state: crate::minimal_api::MinimalState::default(),
         reconnect_pending: false,
         show_resolved_model: true,
         sharing_enabled: false,

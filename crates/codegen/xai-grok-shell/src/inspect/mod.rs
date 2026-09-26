@@ -55,7 +55,6 @@ impl std::fmt::Display for Scope {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct InspectReport {
     pub grok_version: String,
-    pub channel: String,
     pub cwd: String,
     pub project_root: Option<String>,
     /// Folder-trust verdict for `cwd`: when false, repo-local project hooks,
@@ -396,9 +395,6 @@ async fn build_report(cwd: &Path) -> InspectReport {
 
     InspectReport {
         grok_version: xai_grok_version::version().to_string(),
-        channel: crate::util::config::channel_name_from_cache()
-            .unwrap_or("unknown")
-            .to_string(),
         cwd: cwd.display().to_string(),
         project_root: git_root.map(|p| p.display().to_string()),
         project_trusted,
@@ -1346,7 +1342,7 @@ fn render_harness_compatibility(report: &ExternalCompatReport) -> String {
 fn print_human(r: &InspectReport) {
     println!();
     println!("  Environment");
-    println!("  {TREE} Version: {} [{}]", r.grok_version, r.channel);
+    println!("  {TREE} Version: {}", r.grok_version);
     println!("  {TREE} CWD: {}", r.cwd);
     if let Some(ref root) = r.project_root {
         println!("  {TREE} Git root: {}", root);

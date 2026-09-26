@@ -390,8 +390,7 @@ pub(crate) fn block_lines_containing(harness: &PtyHarness, text: &str) -> usize 
 pub(crate) const CTRL_L: &[u8] = b"\x0c";
 
 /// Ctrl+O (C0 0x0F). On Apple Terminal this is the InterjectPrompt / send-now
-/// chord; in minimal mode it also doubles as the transcript-pager remap when
-/// interject would no-op.
+/// chord.
 pub(crate) const CTRL_O: &[u8] = b"\x0f";
 
 /// Suffix of the mid-turn send-now tip: `Queued · Enter to interrupt & send`
@@ -911,27 +910,6 @@ pub(crate) fn seed_read_file_tool_call(
     turn
 }
 
-// ── Minimal (scrollback-native) mode e2e helpers ────────────────────────
-
-/// Args that launch the pager in the experimental scrollback-native minimal
-/// mode, standalone — minimal is single-session (K14: no leader/multi-client),
-/// so `--no-leader` keeps the test off the shared-daemon path.
-pub(crate) const MINIMAL_ARGS: &[&str] = &["--minimal", "--no-leader"];
-
-/// Idle status-line text minimal renders at the prompt (see
-/// `crate::minimal::live::render_status`). Distinct from the running status
-/// (`working…`), so it doubles as a "ready / turn finished" sentinel.
-pub(crate) const MINIMAL_IDLE_SENTINEL: &str = "minimal · /help";
-
-/// Idle status after a slash `/minimal` re-exec (switch-back cue present).
-/// Distinct from [`MINIMAL_IDLE_SENTINEL`] — cold `--minimal` starts omit the
-/// reverse-command segment.
-pub(crate) const MINIMAL_SWITCH_BACK_IDLE_SENTINEL: &str =
-    "minimal · /fullscreen to go back · /help";
-
-/// Header of minimal's parked plan-approval controls strip.
-pub(crate) const PLAN_PARKED_SENTINEL: &str = "Plan ready for review";
-
 /// A plan body the `exit_plan_mode` tool will read off disk. Every step carries
 /// a unique `{tag}{NNN}` sentinel, because a truncated plan still contains its
 /// head and would pass a plain substring check.
@@ -941,27 +919,6 @@ pub(crate) fn plan_body(tag: &str, lines: usize) -> String {
         s.push_str(&format!("- {tag}{i:03} step of the plan\n"));
     }
     s
-}
-
-/// Steps of a [`plan_body`] missing from everything the user could reach by
-/// scrolling: native scrollback plus the visible screen.
-pub(crate) fn plan_lines_missing(harness: &mut PtyHarness, tag: &str, lines: usize) -> Vec<usize> {
-    let full = harness.full_text();
-    (0..lines)
-        .filter(|i| !full.contains(&format!("{tag}{i:03}")))
-        .collect()
-}
-
-/// Steps of a [`plan_body`] that appear more than once — the print-once guard.
-pub(crate) fn plan_lines_duplicated(
-    harness: &mut PtyHarness,
-    tag: &str,
-    lines: usize,
-) -> Vec<usize> {
-    let full = harness.full_text();
-    (0..lines)
-        .filter(|i| full.matches(&format!("{tag}{i:03}")).count() > 1)
-        .collect()
 }
 
 /// Locate `<grok_home>/sessions/<encoded cwd>/<session id>/`, where the shell
@@ -984,110 +941,6 @@ pub(crate) fn session_dir(content: &ContentController, harness: &mut PtyHarness)
         harness.update(Duration::from_millis(100));
     }
     panic!("no session dir under {}", sessions.display());
-}
-
-/// Spawn the pager in minimal mode against `content` at the default size.
-pub(crate) fn spawn_minimal(content: &ContentController) -> PtyHarness {
-    spawn_minimal_sized(content, DEFAULT_ROWS, DEFAULT_COLS)
-}
-
-/// Spawn minimal at an explicit terminal size. A short terminal forces
-/// committed blocks into native scrollback sooner (less static space above the
-/// pinned live region).
-///
-/// Response forwarding is enabled so the inline viewport's startup
-/// cursor-position query is answered — without it, `--minimal` silently
-/// downgrades to full-screen inline (the probe times out) and these tests would
-/// assert against the wrong render path.
-pub(crate) fn spawn_minimal_sized(content: &ContentController, rows: u16, cols: u16) -> PtyHarness {
-    let binary = pager_binary().expect("resolve pager binary");
-    let mut harness = PtyHarness::spawn_with_content(&binary, rows, cols, content, MINIMAL_ARGS)
-        .expect("spawn minimal pager");
-    harness.set_respond_to_queries(true);
-    harness
-}
-
-/// Spawn minimal in an explicit project dir, appending `extra_args` to
-/// [`MINIMAL_ARGS`] (e.g. `--continue`). Sessions are keyed by cwd, so
-/// resume / new-session tests need a stable directory across runs. Query
-/// forwarding is enabled (as in [`spawn_minimal_sized`]) so the inline-viewport
-/// probe completes and minimal does not silently downgrade to full-screen inline.
-pub(crate) fn spawn_minimal_in_dir(
-    content: &ContentController,
-    rows: u16,
-    cols: u16,
-    extra_args: &[&str],
-    cwd: &Path,
-) -> PtyHarness {
-    let binary = pager_binary().expect("resolve pager binary");
-    let mut args = MINIMAL_ARGS.to_vec();
-    args.extend_from_slice(extra_args);
-    let mut harness =
-        PtyHarness::spawn_with_content_in_dir(&binary, rows, cols, content, &args, Some(cwd))
-            .expect("spawn minimal pager in dir");
-    harness.set_respond_to_queries(true);
-    harness
-}
-
-/// Block until minimal is idle at the prompt (the `minimal · /help` status line
-/// is showing). Minimal has no welcome screen, so this — not
-/// [`WELCOME_SCREEN_SENTINEL`] — is the readiness gate.
-///
-/// This is PROMPT chrome, and it says nothing about the session. `session/new`
-/// is an async round-trip fired at startup, and the prompt renders without
-/// waiting for it, so a test that needs a bound session must follow this with
-/// [`wait_session_bound`]. Assuming otherwise is a race: it usually holds,
-/// because creation is fast, and it inverts under load.
-pub(crate) fn wait_minimal_ready(harness: &mut PtyHarness) {
-    harness
-        .wait_for_text(MINIMAL_IDLE_SENTINEL, WELCOME_TIMEOUT)
-        .unwrap_or_else(|e| {
-            panic!(
-                "minimal never cold-started to an idle prompt: {e}\nscreen:\n{}",
-                harness.screen_contents()
-            )
-        });
-}
-
-/// Block until the agent has bound a session, which is what gates every
-/// `session_id`-dependent surface.
-///
-/// A completed turn is the signal. The screen carries no direct one, and the
-/// shell's on-disk `summary.json` is NOT a substitute -- it lands while the
-/// pager's `session_id` is still `None`, so polling for it returns early and
-/// the caller races on anyway. A rendered response cannot: the turn it answers
-/// had to be routed to a bound session.
-pub(crate) fn wait_session_bound(harness: &mut PtyHarness) {
-    harness
-        .inject_keys(format!("{PROMPT}\r").as_bytes())
-        .expect("submit prompt to bind a session");
-    harness
-        .wait_for_text(MOCK_RESPONSE_SENTINEL, Duration::from_secs(30))
-        .unwrap_or_else(|e| {
-            panic!(
-                "no response, so no session was ever bound: {e}\nscreen:\n{}",
-                harness.screen_contents()
-            )
-        });
-}
-
-/// Quit minimal cleanly. The prompt is always focused (a bare `q` would type
-/// into it), so quit is Ctrl+Q pressed twice (it requires confirmation). Falls
-/// back to the harness kill path if the chord doesn't take. Give the confirm
-/// chord and process exit enough time under suite load so a SIGKILL does not
-/// cut off the agent mid-`updates.jsonl` flush (which breaks a subsequent
-/// `--continue` resume).
-pub(crate) fn quit_minimal(harness: &mut PtyHarness) {
-    let _ = harness.inject_keys(b"\x11"); // Ctrl+Q — arms the confirm
-    harness.update(Duration::from_millis(200));
-    let _ = harness.inject_keys(b"\x11"); // Ctrl+Q — confirms
-    match harness
-        .wait_exit_code(Duration::from_secs(15))
-        .expect("wait for minimal pager exit")
-    {
-        PtyExitPoll::Running => harness.quit().expect("kill minimal pager after timeout"),
-        PtyExitPoll::Exited(_) | PtyExitPoll::PendingStatus => {}
-    }
 }
 
 const EXIT_STATUS_POLL_INTERVAL: Duration = Duration::from_millis(50);

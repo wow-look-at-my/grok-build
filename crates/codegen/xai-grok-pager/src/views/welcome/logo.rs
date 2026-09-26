@@ -196,24 +196,6 @@ pub fn render_full_logo(area: Rect, buf: &mut Buffer, theme: &Theme) {
     }
 }
 
-/// Line count of the small logo used in minimal's committed welcome card
-/// (0 on a legacy Windows console, where the braille art is suppressed).
-pub fn compact_logo_line_count() -> u16 {
-    if logo_hidden() {
-        0
-    } else {
-        count_lines(LOGO_SMALL)
-    }
-}
-
-/// Render the small braille logo (centered) into `area` for minimal's welcome
-/// card. No-op when the logo is hidden.
-pub fn render_compact_logo(area: Rect, buf: &mut Buffer, theme: &Theme) {
-    if !logo_hidden() {
-        render_into(area, buf, theme, LOGO_SMALL);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -255,20 +237,6 @@ mod tests {
     fn full_logo_helpers_collapse_when_hidden() {
         assert_eq!(full_logo_line_count_for(true), 0);
         assert_eq!(full_logo_visual_width_for(true), 0);
-    }
-
-    #[test]
-    fn compact_logo_line_count_matches_small_logo_when_visible() {
-        // The minimal welcome card budgets exactly the small logo's rows. When
-        // the logo isn't hidden, the count equals the small art's line count and
-        // is strictly shorter than the full logo.
-        if !logo_hidden() {
-            assert_eq!(compact_logo_line_count(), count_lines(LOGO_SMALL));
-            assert!(compact_logo_line_count() < count_lines(LOGO));
-            assert!(compact_logo_line_count() > 0);
-        } else {
-            assert_eq!(compact_logo_line_count(), 0);
-        }
     }
 
     #[test]

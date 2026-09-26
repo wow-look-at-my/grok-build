@@ -6,7 +6,6 @@
 
 use crate::app::actions::Action;
 use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand};
-use crate::slash::{ModeSupport, Remedy};
 
 /// Open scrollback search via `/find`.
 pub struct FindCommand;
@@ -34,12 +33,6 @@ impl SlashCommand for FindCommand {
 
     fn arg_placeholder(&self) -> Option<&str> {
         Some("[text]")
-    }
-
-    fn mode_support(&self) -> ModeSupport {
-        ModeSupport::FullscreenOnly(Remedy::SwitchMode {
-            why: "minimal has no scrollback pane — use your terminal's own search",
-        })
     }
 
     fn run(&self, _ctx: &mut CommandExecCtx, args: &str) -> CommandResult {
@@ -72,7 +65,6 @@ mod tests {
             models,
             session_id: None,
             bundle_state: &DEFAULT_BUNDLE_STATE,
-            screen_mode: crate::app::ScreenMode::Inline,
             billing_surface_visible: true,
             usage_command_visible: true,
             pager_state: crate::settings::PagerLocalSnapshot::default(),

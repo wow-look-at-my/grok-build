@@ -835,20 +835,18 @@ impl AgentView {
             return Some(InputOutcome::Changed);
         }
 
-        // Mid-turn running, fullscreen vim mode: swallow Esc (do not cancel or
-        // arm clear/rewind — Ctrl+C stays the cancel gesture there).
-        // `is_minimal_mode` is the per-agent injected screen mode, not the
-        // process global, so tests stay race-free. A streaming wake turn
+        // Mid-turn running, vim mode: swallow Esc (do not cancel or arm
+        // clear/rewind — Ctrl+C stays the cancel gesture there). A streaming wake turn
         // follows the same policy as a running turn (the pane state is Idle
         // only because wake turns are not adopted); once its cancel was sent
         // it follows the cancelling retry below instead, in every mode.
         if (self.session.state.is_turn_running()
             || (self.wake_turn_active() && !self.wake_turn_cancelling()))
-            && !crate::app::esc_cancels_turn(self.is_minimal_mode(), self.vim_mode)
+            && !crate::app::esc_cancels_turn(self.vim_mode)
         {
             return Some(InputOutcome::Changed);
         }
-        // Mid-turn (minimal / non-vim): cancel immediately from prompt or
+        // Mid-turn (non-vim): cancel immediately from prompt or
         // scrollback, even with a draft. Also — in every mode — while already
         // cancelling, so a lost cancel notification is re-sent (Ctrl+C
         // escalates to Quit instead). Push the grace deadline out so an Esc
@@ -1150,24 +1148,13 @@ mod shift_tab_cycle_mode_tests {
     #[test]
     fn plain_tab_follows_focus_scrollback_registration() {
         let tab = KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE);
-        for mode in [
-            crate::app::ScreenMode::Fullscreen,
-            crate::app::ScreenMode::Inline,
-        ] {
-            let mut agent = super::test_fixtures::make_agent();
-            let registry = ActionRegistry::defaults_for(mode);
-            let outcome = agent.handle_prompt_key_with_registry_for_test(&tab, &registry);
-            assert!(
-                matches!(outcome, InputOutcome::Action(Action::FocusScrollback)),
-                "{mode:?} plain Tab must focus scrollback, got {outcome:?}",
-            );
-        }
-
-        let mut minimal = super::test_fixtures::make_agent();
-        let registry = ActionRegistry::defaults_for(crate::app::ScreenMode::Minimal);
-        let outcome = minimal.handle_prompt_key_with_registry_for_test(&tab, &registry);
-        assert!(matches!(outcome, InputOutcome::Unchanged));
-        assert_eq!(minimal.active_pane, AgentPane::Prompt);
+        let mut agent = super::test_fixtures::make_agent();
+        let registry = ActionRegistry::defaults();
+        let outcome = agent.handle_prompt_key_with_registry_for_test(&tab, &registry);
+        assert!(
+            matches!(outcome, InputOutcome::Action(Action::FocusScrollback)),
+            "plain Tab must focus scrollback, got {outcome:?}",
+        );
     }
 
     #[test]
@@ -1192,7 +1179,7 @@ mod shift_tab_cycle_mode_tests {
     }
 
     #[test]
-    fn minimal_slash_dropdown_still_consumes_tab() {
+    fn slash_dropdown_consumes_tab() {
         let mut agent = super::test_fixtures::make_agent();
         agent.prompt.set_text("/");
         agent.prompt.refresh_slash(&agent.session.models);
@@ -1201,7 +1188,7 @@ mod shift_tab_cycle_mode_tests {
             "precondition: slash dropdown open"
         );
 
-        let registry = ActionRegistry::defaults_for(crate::app::ScreenMode::Minimal);
+        let registry = ActionRegistry::defaults();
         let outcome = agent.handle_prompt_key_with_registry_for_test(
             &KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE),
             &registry,

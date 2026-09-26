@@ -1,6 +1,6 @@
 //! Send-safe view of the agent's in-flight work, shared with the leader's
-//! auto-update checker and `RelaunchForUpdate` drain (`tokio::spawn` tasks
-//! that cannot read the `!Send` `MvpAgent` state on the `LocalSet`).
+//! `tokio::spawn` tasks, which cannot read the `!Send` `MvpAgent` state on the
+//! `LocalSet`.
 //!
 //! The leader's `agent_busy` flag only counts IPC (Unix-socket) requests;
 //! relay (grok.com WebSocket) traffic is bridged straight into the agent's
@@ -36,8 +36,8 @@ use crate::session::{SessionCommand, SessionHandle, ShutdownKind};
 const FLUSH_POLL: Duration = Duration::from_millis(50);
 
 /// Default bound on a process-exit session flush ([`AgentActivity::flush_all_sessions`]):
-/// leader auto-update shutdown and the in-process agent's `/exit` / headless-quit
-/// path both use it, so one wedged actor delays exit by the same amount everywhere.
+/// every exit path uses it, so one wedged actor delays exit by the same amount
+/// everywhere.
 /// Sessions are normally idle by then and the flush completes in milliseconds.
 ///
 /// Known gap: a `SessionEnd` hook configured with a longer `timeout` than this
@@ -142,8 +142,7 @@ impl AgentActivity {
     /// with a fresh actor gets its own signal), all against one deadline —
     /// `grace` bounds the **total** shutdown delay.
     ///
-    /// Callers: the leader's auto-update / `RelaunchForUpdate` shutdown, and
-    /// the in-process agent worker on `/exit` / headless quit. In the leader
+    /// Callers: the in-process agent worker on `/exit` / headless quit. In the leader
     /// case, call **before** cancelling the root token; in the in-process case,
     /// **after** the cancel that ends the worker's run loop but before its
     /// `LocalSet` drops — either way, session state must be durable before the
@@ -189,8 +188,8 @@ impl AgentActivity {
 
     /// Lock the session list, dropping entries whose actor has exited.
     ///
-    /// Purging happens only here, so in modes with no periodic reader (no
-    /// auto-update checker) a dead entry lingers until the next register —
+    /// Purging happens only here, so with no periodic reader a dead entry
+    /// lingers until the next register —
     /// bounded and tiny (a sender handle + two `Arc`s per entry).
     fn lock_live_sessions(&self) -> std::sync::MutexGuard<'_, Vec<SessionActivityEntry>> {
         let mut guard = self

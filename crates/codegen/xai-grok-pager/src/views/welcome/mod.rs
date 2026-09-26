@@ -397,9 +397,9 @@ impl WelcomeLayout {
 
 /// Controls what the version badge renders.
 pub(super) enum VersionBadgeMode<'a> {
-    /// Full badge: team | tier | api_key | **Grok Build** VERSION+channel (right-aligned).
+    /// Full badge: team | tier | api_key | **Grok Build** VERSION (right-aligned).
     Full { subscription_tier: Option<&'a str> },
-    /// Hero footer: team | api_key | channel (right-aligned, gray).
+    /// Hero footer: team | api_key (right-aligned, gray).
     HeroFooter,
     /// Hero inline: **Grok Build**  VERSION (left-aligned).
     HeroInline,
@@ -454,8 +454,6 @@ pub(super) fn render_version_badge(
         spans.push(sep.clone());
     }
 
-    let channel = xai_grok_update::channel_label();
-
     // The build-commit short hash, displayed after the version string so the
     // welcome screen shows exactly which commit the binary was built from.
     // The full hash (BUILD_COMMIT) is used as the OSC 8 link target via the
@@ -474,18 +472,11 @@ pub(super) fn render_version_badge(
                     .add_modifier(Modifier::BOLD),
             ));
             spans.push(Span::styled(
-                format!("{}{}", xai_grok_version::version(), channel),
+                xai_grok_version::version(),
                 Style::default().fg(theme.gray),
             ));
         }
-        VersionBadgeMode::HeroFooter => {
-            if !channel.is_empty() {
-                spans.push(Span::styled(
-                    channel.trim(),
-                    Style::default().fg(theme.gray),
-                ));
-            }
-        }
+        VersionBadgeMode::HeroFooter => {}
         VersionBadgeMode::HeroInline => {
             spans.push(Span::styled(
                 "Grok Build  ",
@@ -513,7 +504,7 @@ pub(super) fn render_version_badge(
         ));
     }
 
-    // Only alpha and beta builds print a channel, so on stable the spans can end on a separator.
+    // The hero footer carries no version, so its spans can end on a separator.
     if spans.last().is_some_and(|s| s.content == SEP) {
         spans.pop();
     }
@@ -685,8 +676,7 @@ pub struct WelcomeRenderParams<'a> {
     pub compact: bool,
     pub pending_hint: Option<crate::views::shortcuts_bar::PendingHint>,
     pub startup_warnings: &'a [StartupWarning],
-    pub pending_update_version: Option<&'a str>,
-    /// Recent foreign session offered on ctrl+u, suppressed by a pending update.
+    /// Recent foreign session offered on ctrl+u.
     pub foreign_resume_hint: Option<&'a xai_grok_workspace::foreign_sessions::RecentForeignSession>,
     pub is_api_key_auth: bool,
     pub session_picker_content_results:
@@ -1763,16 +1753,11 @@ fn render_welcome_done(
         let action_line = if w.action.is_some() { 1 } else { 0 };
         msg_lines + action_line + 1 // +1 for buffer spacing
     });
-    let has_update_tip = p.pending_update_version.is_some();
-    let has_resume_tip = !has_update_tip && p.foreign_resume_hint.is_some();
-    // Tip slot precedence: pending update > privacy banner (wraps, so its
-    // height depends on width) > resume hint > random tip. The update
-    // outranks the upsell so a ready update is never invisible; the banner
-    // takes the slot back once it's applied.
+    let has_resume_tip = p.foreign_resume_hint.is_some();
+    // Tip slot precedence: privacy banner (wraps, so its height depends on
+    // width) > resume hint > random tip.
     let tip_height = if !show_picker {
-        if has_update_tip {
-            1u16
-        } else if p.privacy_banner {
+        if p.privacy_banner {
             // Same inset the banner paint below uses, so the reserved rows
             // and the wrapped row count can't drift.
             let inset = prompt::prompt_inset(p.compact);
@@ -2157,9 +2142,8 @@ fn render_welcome_done(
         .map(|r| commit_hash_link_rect = Some(r));
         (None, None)
     } else {
-        // Privacy banner owns the tip slot when visible (above the prompt),
-        // except a pending-update notification, which outranks it.
-        if p.privacy_banner && p.pending_update_version.is_none() && layout.tip.height > 0 {
+        // Privacy banner owns the tip slot when visible (above the prompt).
+        if p.privacy_banner && layout.tip.height > 0 {
             let [_, tip_centered, _] = Layout::horizontal([
                 Constraint::Min(0),
                 Constraint::Length(content_area.width),
@@ -2179,46 +2163,10 @@ fn render_welcome_done(
             privacy_banner_opt_out_rect = Some(rects.opt_out);
             privacy_banner_terms_rect = Some(rects.terms);
             privacy_banner_policy_rect = Some(rects.policy);
-        } else if let Some(ver) = p.pending_update_version
-            && layout.tip.height > 0
-        {
-            // Background update notification in the tip area.
-            let [_, tip_centered, _] = Layout::horizontal([
-                Constraint::Min(0),
-                Constraint::Length(content_area.width),
-                Constraint::Min(0),
-            ])
-            .flex(Flex::Center)
-            .areas(layout.tip);
-            let inset = prompt::prompt_inset(p.compact);
-            let tip_inset = Rect {
-                x: tip_centered.x + inset,
-                y: tip_centered.y,
-                width: tip_centered.width.saturating_sub(inset * 2),
-                height: tip_centered.height,
-            };
-            let key_name = "ctrl+u";
-            let line = Line::from(vec![
-                Span::styled(
-                    "Update: ",
-                    Style::default()
-                        .fg(theme.accent_user)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(
-                    format!("v{ver} available \u{2014} press {key_name} to restart"),
-                    Style::default().fg(theme.accent_user),
-                ),
-            ]);
-            Paragraph::new(line)
-                .style(Style::default().bg(theme.bg_base))
-                .render(tip_inset, buf);
         }
 
-        // Recent foreign session: offer a one-click resume in the tip area
-        // (only when no update is pending — the update shares ctrl+u and wins).
+        // Recent foreign session: offer a one-click resume in the tip area.
         if !p.privacy_banner
-            && p.pending_update_version.is_none()
             && let Some(hint) = p.foreign_resume_hint
             && layout.tip.height > 0
         {
@@ -2279,11 +2227,8 @@ fn render_welcome_done(
             p.prompt_focus,
             prompt,
             &usage_info,
-            if p.privacy_banner
-                || p.pending_update_version.is_some()
-                || p.foreign_resume_hint.is_some()
-            {
-                // Banner/update/resume tip already rendered above with custom styling.
+            if p.privacy_banner || p.foreign_resume_hint.is_some() {
+                // Banner/resume tip already rendered above with custom styling.
                 None
             } else {
                 p.tip
@@ -3081,7 +3026,6 @@ mod tests {
             compact: false,
             pending_hint: None,
             startup_warnings: &[],
-            pending_update_version: None,
             foreign_resume_hint: None,
             is_api_key_auth: false,
             session_picker_content_results: None,
@@ -3144,24 +3088,6 @@ mod tests {
             assert!(text.contains("2m ago"), "{text}");
             assert!(text.contains("ctrl+u"), "{text}");
         }
-    }
-
-    #[test]
-    fn pending_update_suppresses_foreign_resume_tip() {
-        let auth = AuthState::Done;
-        let trust = TrustState::Done;
-        let hint = xai_grok_workspace::foreign_sessions::RecentForeignSession {
-            tool: xai_grok_workspace::foreign_sessions::ForeignSessionTool::Cursor,
-            native_id: "native-id".into(),
-            age: std::time::Duration::from_secs(30),
-        };
-        let mut params = render_params(&auth, &trust, None);
-        params.foreign_resume_hint = Some(&hint);
-        params.pending_update_version = Some("9.9.9");
-
-        let text = render_done_text(&params);
-        assert!(text.contains("v9.9.9 available"), "{text}");
-        assert!(!text.contains("Coming from Cursor?"), "{text}");
     }
 
     fn png() -> [u8; 8] {

@@ -1,6 +1,5 @@
 use crate::app::actions::Action;
 use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand};
-use crate::slash::{ModeSupport, Remedy};
 
 pub struct JumpCommand;
 
@@ -15,12 +14,6 @@ impl SlashCommand for JumpCommand {
 
     fn session_scoped(&self) -> bool {
         true
-    }
-
-    fn mode_support(&self) -> ModeSupport {
-        ModeSupport::FullscreenOnly(Remedy::SwitchMode {
-            why: "minimal scrolls with your terminal's native scrollback",
-        })
     }
 
     fn usage(&self) -> &str {
@@ -57,7 +50,6 @@ mod tests {
             models: &models,
             session_id: None,
             bundle_state: &DEFAULT_BUNDLE_STATE,
-            screen_mode: crate::app::ScreenMode::Fullscreen,
             billing_surface_visible: true,
             usage_command_visible: true,
             pager_state: PagerLocalSnapshot::default(),

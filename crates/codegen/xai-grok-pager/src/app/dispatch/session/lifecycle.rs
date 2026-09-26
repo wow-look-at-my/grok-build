@@ -420,7 +420,6 @@ pub(in crate::app::dispatch) fn dispatch_new_session_inner_with_id(
             app.usage_visible,
             !app.has_external_auth_provider,
             app.chat_mode,
-            app.screen_mode,
             &app.active_announcements,
             &app.tier_restricted_commands,
         );
@@ -433,9 +432,6 @@ pub(in crate::app::dispatch) fn dispatch_new_session_inner_with_id(
         agent.active_pane = ActivePane::Prompt;
     }
     switch_to_agent(app, agent_id, SwitchCause::New);
-    if app.screen_mode.is_minimal() {
-        app.minimal_state.welcome_pending = true;
-    }
     let chat_kind = consume_chat_kind(app);
     if let Some(agent) = app.agents.get_mut(&agent_id) {
         agent.chat_kind = chat_kind;
@@ -945,7 +941,6 @@ pub(in crate::app::dispatch) fn dispatch_new_worktree_session(
             app.usage_visible,
             !app.has_external_auth_provider,
             app.chat_mode,
-            app.screen_mode,
             &app.active_announcements,
             &app.tier_restricted_commands,
         );
@@ -1043,8 +1038,7 @@ pub(in crate::app::dispatch) fn handle_session_created(
     scheduler_background_loops: Option<bool>,
 ) -> Vec<Effect> {
     let agent_count = app.agents.len();
-    let switch_hint =
-        crate::views::dashboard::session_switch_hint_command(app.screen_mode.is_minimal());
+    let switch_hint = crate::views::dashboard::session_switch_hint_command();
     if let Some(agent) = app.agents.get_mut(&agent_id) {
         let session_id_clone = session_id.clone();
         if agent.session.created_via_new

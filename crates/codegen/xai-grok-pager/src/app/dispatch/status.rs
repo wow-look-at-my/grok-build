@@ -3,7 +3,6 @@
 use agent_client_protocol as acp;
 
 use super::ctx::get_active_agent;
-use super::queue::push_and_page_flip;
 use super::settings::ui::refresh_open_settings_modals;
 use crate::app::actions::Effect;
 use crate::app::agent::AgentId;
@@ -112,30 +111,9 @@ pub(super) fn open_usage_info_modal(
     effects
 }
 
-/// `/session-info` — open the usage modal on its "Session info" tab, or
-/// fetch-and-show in scrollback in minimal mode.
+/// `/session-info` — open the usage modal on its "Session info" tab.
 pub(super) fn dispatch_show_session_info(app: &mut AppView) -> Vec<Effect> {
-    if !app.screen_mode.is_minimal() {
-        return open_usage_info_modal(app, crate::views::usage_modal::UsageInfoTab::SessionInfo);
-    }
-    let ActiveView::Agent(id) = app.active_view else {
-        return vec![];
-    };
-    let Some(agent) = app.agents.get_mut(&id) else {
-        return vec![];
-    };
-    let Some(session_id) = agent.session.session_id.clone() else {
-        // No active session — error should have been caught by slash command,
-        // but guard here just in case.
-        return vec![];
-    };
-
-    vec![Effect::ShowSessionInfo {
-        agent_id: id,
-        session_id,
-        show_resolved_model: app.show_resolved_model,
-        nonce: 0,
-    }]
+    open_usage_info_modal(app, crate::views::usage_modal::UsageInfoTab::SessionInfo)
 }
 
 /// State-only mutation for `coding_data_sharing`. SHELL-owned.
@@ -264,65 +242,18 @@ pub(super) fn scrub_error_for_toast(error: &str) -> String {
 }
 
 /// `/context` and the context-bar click — open the usage modal on its
-/// "Context usage" tab, or fetch-and-show in scrollback in minimal mode.
+/// "Context usage" tab.
 pub(super) fn dispatch_show_context_info(app: &mut AppView) -> Vec<Effect> {
-    if !app.screen_mode.is_minimal() {
-        return open_usage_info_modal(app, crate::views::usage_modal::UsageInfoTab::ContextUsage);
-    }
-    let ActiveView::Agent(id) = app.active_view else {
-        return vec![];
-    };
-    let Some(agent) = app.agents.get_mut(&id) else {
-        return vec![];
-    };
-    let Some(session_id) = agent.session.session_id.clone() else {
-        return vec![];
-    };
-
-    vec![Effect::ShowContextInfo {
-        agent_id: id,
-        session_id,
-        nonce: 0,
-    }]
+    open_usage_info_modal(app, crate::views::usage_modal::UsageInfoTab::ContextUsage)
 }
 
-/// `/usage` — open the usage modal on its "Usage limit" tab. Minimal mode
-/// keeps the scrollback flow: session token/cost, then consumer credits.
+/// `/usage` — open the usage modal on its "Usage limit" tab.
 pub(super) fn dispatch_show_usage(app: &mut AppView) -> Vec<Effect> {
-    if !app.screen_mode.is_minimal() {
-        return open_usage_info_modal(app, crate::views::usage_modal::UsageInfoTab::UsageLimit);
-    }
-    let ActiveView::Agent(id) = app.active_view else {
-        return vec![];
-    };
-    let session_id = {
-        let Some(agent) = app.agents.get_mut(&id) else {
-            return vec![];
-        };
-        agent.session.session_id.clone()
-    };
-    match session_id {
-        Some(session_id) => vec![Effect::FetchSessionUsage {
-            agent_id: id,
-            session_id,
-            nonce: 0,
-        }],
-        None => {
-            if let Some(agent) = app.agents.get_mut(&id) {
-                push_and_page_flip(
-                    &mut agent.scrollback,
-                    RenderBlock::system(
-                        "Session usage is unavailable until the session starts.".to_string(),
-                    ),
-                );
-            }
-            append_consumer_billing_surface(app, id)
-        }
-    }
+    open_usage_info_modal(app, crate::views::usage_modal::UsageInfoTab::UsageLimit)
 }
 
 /// Route a session-usage result (success or failure text) into the open
-/// usage modal, or into scrollback in minimal mode. Stale results are dropped.
+/// usage modal. Stale results are dropped.
 pub(super) fn handle_session_usage_result(
     app: &mut AppView,
     agent_id: AgentId,
@@ -330,66 +261,17 @@ pub(super) fn handle_session_usage_result(
     text: String,
     nonce: u64,
 ) -> Vec<Effect> {
-    if !app.screen_mode.is_minimal() {
-        if let Some(agent) = app.agents.get_mut(&agent_id) {
-            if agent.session.session_id.as_ref() != Some(session_id) {
-                return vec![];
-            }
-            if let Some(state) = usage_modal_state_mut(agent)
-                && state.fetch_nonce == nonce
-            {
-                state.session_usage_text = Some(text);
-            }
+    if let Some(agent) = app.agents.get_mut(&agent_id) {
+        if agent.session.session_id.as_ref() != Some(session_id) {
+            return vec![];
         }
-        return vec![];
-    }
-    commit_session_usage_block(app, agent_id, session_id, text)
-}
-
-/// Commit a session-usage block if still on `session_id`, then consumer credits.
-pub(super) fn commit_session_usage_block(
-    app: &mut AppView,
-    agent_id: AgentId,
-    session_id: &acp::SessionId,
-    text: String,
-) -> Vec<Effect> {
-    let Some(agent) = app.agents.get_mut(&agent_id) else {
-        return vec![];
-    };
-    if agent.session.session_id.as_ref() != Some(session_id) {
-        return vec![];
-    }
-    push_and_page_flip(&mut agent.scrollback, RenderBlock::system(text));
-    append_consumer_billing_surface(app, agent_id)
-}
-
-/// Consumer credit follow-up for `/usage` (redirect or non-silent billing fetch).
-pub(super) fn append_consumer_billing_surface(app: &mut AppView, agent_id: AgentId) -> Vec<Effect> {
-    if !app.usage_visible {
-        return vec![];
-    }
-    // Remote-settings kill switch (`grok_build_usage_redirect_url`): link out
-    // instead of fetching billing from the backend.
-    if let Some(url) = app.usage_billing_redirect_url.clone() {
-        if let Some(agent) = app.agents.get_mut(&agent_id) {
-            agent.scrollback.push_block(RenderBlock::System(
-                crate::scrollback::blocks::SystemMessageBlock::new(format!(
-                    "Please check your usage on {url}"
-                )),
-            ));
+        if let Some(state) = usage_modal_state_mut(agent)
+            && state.fetch_nonce == nonce
+        {
+            state.session_usage_text = Some(text);
         }
-        return vec![];
     }
-    if !app.agents.contains_key(&agent_id) {
-        return vec![];
-    }
-    // Non-silent: the effect also pulls the auto top-up rule so the summary
-    // renders usage, prepaid credits, and auto top-up together.
-    vec![Effect::FetchBilling {
-        agent_id,
-        silent: false,
-        nonce: 0,
-    }]
+    vec![]
 }
 
 /// `/usage manage` — open consumer billing. No-op when the surface is hidden.
@@ -403,24 +285,9 @@ pub(super) fn dispatch_manage_billing(app: &mut AppView) -> Vec<Effect> {
     )
 }
 
-/// Commit a one-line "update available" notice into the active agent's
-/// scrollback. Minimal mode has no welcome screen (the full TUI's update
-/// surface), so the background update check's result is shown here instead
-/// No-op when there is no active agent.
-pub(crate) fn commit_minimal_update_notice(app: &mut AppView, latest_version: &str) {
-    if let ActiveView::Agent(id) = app.active_view
-        && let Some(agent) = app.agents.get_mut(&id)
-    {
-        agent.scrollback.push_block(RenderBlock::system(format!(
-            "Update available: v{latest_version} — restart to apply."
-        )));
-    }
-}
-
 /// `/queue` — commit a read-only list of the queued prompts as a system block.
 /// The text is built by [`crate::app::status_blocks::queue_block_text`]; this
-/// just resolves the active agent and pushes it. Works in every render mode; the
-/// primary inspection surface in minimal, which has no interactive `QueuePane`.
+/// just resolves the active agent and pushes it.
 pub(super) fn dispatch_show_queue(app: &mut AppView) -> Vec<Effect> {
     if let ActiveView::Agent(id) = app.active_view
         && let Some(agent) = app.agents.get_mut(&id)
@@ -629,7 +496,6 @@ pub(super) fn handle_context_info_complete(
     info: Box<xai_grok_shell::session::SessionInfoResponse>,
     nonce: u64,
 ) -> Vec<Effect> {
-    let minimal = app.screen_mode.is_minimal();
     if let Some(agent) = app.agents.get_mut(&agent_id) {
         if agent.session.session_id.as_ref() != Some(session_id) {
             return vec![];
@@ -649,13 +515,8 @@ pub(super) fn handle_context_info_complete(
                 snapshot, model,
             ));
             state.context_error = None;
-        } else if minimal {
-            push_and_page_flip(
-                &mut agent.scrollback,
-                crate::scrollback::block::RenderBlock::context_info(snapshot, model),
-            );
         }
-        // Full mode with the modal closed: result arrived after dismissal — drop.
+        // The modal is closed: the result arrived after dismissal, so drop it.
     }
     vec![]
 }
@@ -694,11 +555,6 @@ pub(super) fn dispatch_copy_session_id(app: &mut AppView, index: usize) -> Vec<E
 /// the welcome screen and an agent session). Toggles: dispatching while
 /// open closes instead of stacking.
 pub(super) fn dispatch_open_tutorial(app: &mut AppView) -> Vec<Effect> {
-    // Minimal mode has no modal host: the overlay would render nothing
-    // while the app-level intercept swallowed all input.
-    if app.screen_mode.is_minimal() {
-        return vec![];
-    }
     if app.tutorial.is_some() {
         app.tutorial = None;
         return vec![];

@@ -5,7 +5,6 @@
 
 use crate::app::actions::Action;
 use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand};
-use crate::slash::{ModeSupport, Remedy};
 
 /// Open the onboarding tutorial.
 pub struct TutorialCommand;
@@ -25,14 +24,6 @@ impl SlashCommand for TutorialCommand {
 
     fn usage(&self) -> &str {
         "/tutorial"
-    }
-
-    /// Gated off rather than merely hidden: minimal has no modal host, so the
-    /// overlay's input intercept would freeze the session invisibly.
-    fn mode_support(&self) -> ModeSupport {
-        ModeSupport::FullscreenOnly(Remedy::SwitchMode {
-            why: "the tutorial overlay needs fullscreen",
-        })
     }
 
     fn run(&self, _ctx: &mut CommandExecCtx, _args: &str) -> CommandResult {
@@ -65,7 +56,6 @@ mod tests {
             models: &models,
             session_id: None,
             bundle_state: &DEFAULT_BUNDLE_STATE,
-            screen_mode: crate::app::ScreenMode::Fullscreen,
             billing_surface_visible: true,
             usage_command_visible: true,
             pager_state: PagerLocalSnapshot::default(),

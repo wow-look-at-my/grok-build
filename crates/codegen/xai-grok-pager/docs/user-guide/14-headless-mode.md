@@ -41,7 +41,6 @@ Grok processes the prompt, runs any necessary tools, and prints the result to st
 | `--prompt-json <JSON>`  | Prompt as JSON content blocks                         |
 | `--prompt-file <PATH>`  | Prompt from a file                                    |
 | `--verbatim`            | Send prompt exactly as given                          |
-| `--no-auto-update`      | Disable update checks for this session                |
 | `--sandbox <PROFILE>`   | Sandbox profile for filesystem/network access         |
 
 > **Note:** `--tools`, `--disallowed-tools`, `--max-turns`, and `--agents` are headless-only flags. If used in the interactive TUI, a warning is printed and the flag is ignored. `--reasoning-effort`/`--effort`, `--permission-mode`, `--allow`, and `--deny` work in both modes. For more flags (agents and worktrees), see [Additional Headless Flags](#additional-headless-flags).
@@ -609,7 +608,6 @@ Grok stores data in `~/.grok` (override with `GROK_HOME`; see [Environment Varia
 | ------------------------ | ------------------------------------- |
 | `config.toml`            | User configuration                    |
 | `auth.json`              | Cached OAuth2/API credentials         |
-| `version.json`           | Version cache for update checks       |
 | `sessions/`              | Session transcripts (SQLite)          |
 | `memory/`                | Cross-session memory store            |
 | `logs/`                  | Internal log files (for example `unified.jsonl`) |
@@ -626,38 +624,19 @@ For containers or CI, mount `~/.grok` read-only:
 
 - Pre-populate `auth.json` or use `XAI_API_KEY`
 - Session persistence fails silently (ephemeral)
-- Update checks log a warning and skip
 
 ```bash
 export XAI_API_KEY="xai-..."
-export GROK_DISABLE_AUTOUPDATER=1
-grok -p "..." --no-auto-update
+grok -p "..."
 ```
 
----
-
-## Update Check Suppression
-
-| Method                          | Scope     |
-| ------------------------------- | --------- |
-| `--no-auto-update`              | Session   |
-| `GROK_DISABLE_AUTOUPDATER=1`    | Process   |
-| Non-TTY stderr (auto-detected)  | Automatic |
-| `[cli] auto_update = false`     | Persistent|
-
-`GROK_DISABLE_AUTOUPDATER` set to a falsy value (`0`, `false`, `off`, `no`, or empty, any
-case) counts as not set. The agent SDKs
-inject `GROK_DISABLE_AUTOUPDATER=1` for the non-leader agents they spawn (a falsy value in
-the SDK's isolation env keeps updates on), and the stdio agent skips its background update
-unless it runs from the managed install (`$GROK_HOME/bin/grok`).
-
-Update messages go to **stderr**. Stdout stays clean for `--output-format json`. See also [Environment Variables for Headless](#environment-variables-for-headless).
+Grok never checks for or installs updates, so a headless run makes no update request.
 
 ---
 
 ## Additional Headless Flags
 
-These flags supplement the [Command-Line Options](#command-line-options) table above. Flags already listed there (`--prompt-json`, `--prompt-file`, `--verbatim`, `--sandbox`, `--no-auto-update`) are not repeated here.
+These flags supplement the [Command-Line Options](#command-line-options) table above. Flags already listed there (`--prompt-json`, `--prompt-file`, `--verbatim`, `--sandbox`) are not repeated here.
 
 | Flag                          | Description                                       |
 | ----------------------------- | ------------------------------------------------- |

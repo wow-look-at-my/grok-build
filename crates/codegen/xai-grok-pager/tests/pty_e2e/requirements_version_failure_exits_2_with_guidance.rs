@@ -22,7 +22,7 @@ async fn requirements_version_failure_exits_2_with_guidance() {
         &binary,
         DEFAULT_ROWS,
         DEFAULT_COLS,
-        &["--no-auto-update"],
+        &[],
         &sandbox,
         &[EnvOp::set("NO_COLOR", "1")],
         None,

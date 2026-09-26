@@ -506,9 +506,6 @@ pub(super) fn handle_session_notification(notif: &acp::ExtNotification, app: &mu
             child_view.set_has_session_announcements(
                 agent.prompt.slash_controller.has_session_announcements(),
             );
-            child_view
-                .prompt
-                .set_screen_mode(agent.prompt.slash_controller.screen_mode());
             child_view.app_chat_mode = agent.app_chat_mode;
             let recap_visible = agent
                 .prompt

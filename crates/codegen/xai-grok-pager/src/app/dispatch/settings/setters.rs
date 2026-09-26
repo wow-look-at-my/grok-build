@@ -94,46 +94,6 @@ pub(super) fn set_hunk_tracker_mode_inner(app: &mut AppView, canonical: &str) {
     app.current_ui.hunk_tracker_mode = Some(canonical.to_string());
 }
 
-pub(super) fn set_screen_mode_inner(app: &mut AppView, canonical: &str) {
-    app.current_ui.screen_mode = Some(canonical.to_string());
-}
-
-/// Persist `[ui].screen_mode` (`fullscreen` | `minimal`). Restart-required.
-///
-/// Unset is *displayed* as Fullscreen but is not an explicit on-disk value —
-/// choosing Fullscreen when missing must still write, or legacy pager.toml /
-/// leaky-terminal paths can keep applying after the user confirmed Fullscreen.
-pub(in crate::app::dispatch) fn set_screen_mode(app: &mut AppView, value: String) -> Vec<Effect> {
-    let canonical = crate::settings::canonical_screen_mode(Some(&value));
-    let prev_raw = app.current_ui.screen_mode.as_deref();
-    let prev = crate::settings::canonical_screen_mode(prev_raw);
-    if screen_mode_raw_matches_canonical(prev_raw, canonical) {
-        return vec![];
-    }
-    set_screen_mode_inner(app, canonical);
-    refresh_open_settings_modals(app);
-    tracing::info!(target: "settings", key = "screen_mode", value = canonical, "setting changed");
-    app.show_toast(&format!(
-        "\u{2713} Screen mode: {canonical} (restart to apply)"
-    ));
-    vec![Effect::PersistSetting {
-        key: "screen_mode",
-        value: crate::settings::SettingValue::Enum(canonical),
-        rollback_value: crate::settings::SettingValue::Enum(prev),
-    }]
-}
-
-fn screen_mode_raw_matches_canonical(raw: Option<&str>, canonical: &str) -> bool {
-    let Some(raw) = raw.map(str::trim).filter(|s| !s.is_empty()) else {
-        return false;
-    };
-    match canonical {
-        "minimal" => raw.eq_ignore_ascii_case("minimal"),
-        "fullscreen" => raw.eq_ignore_ascii_case("fullscreen") || raw.eq_ignore_ascii_case("full"),
-        _ => false,
-    }
-}
-
 /// Set the hunk-tracker mode (registry-driven path).
 ///
 /// SHELL-owned, restart-required: persists to `[ui].hunk_tracker_mode` via
@@ -2347,7 +2307,7 @@ pub(in crate::app::dispatch) fn set_ttft_timeout_secs(app: &mut AppView, new: i6
 // mirror field stays for compat.
 
 // ---------------------------------------------------------------------------
-// show_tips, auto_update — SHELL-OWNED `Option<bool>` setters.
+// show_tips — SHELL-OWNED `Option<bool>` setters.
 // Changes take effect on next session start (restart_required: true).
 // Standard inner/outer split. First commit of the default value
 // persists (so the resolver sees user intent vs managed default).
@@ -2356,13 +2316,12 @@ pub(in crate::app::dispatch) fn set_ttft_timeout_secs(app: &mut AppView, new: i6
 // ---------------------------------------------------------------------------
 
 /// Effective-default lookup for the `Option<bool>` AppView mirrors
-/// (`show_tips`, `auto_update`, ask_user_question timeout).
+/// (`show_tips`, ask_user_question timeout).
 /// Matches the consumer's `.unwrap_or(...)` fallback.
 pub(super) fn pr13_effective_default(key: &str) -> Option<bool> {
     use xai_grok_tools::implementations::grok_build::ask_user_question;
     match key {
         "show_tips" => Some(true),
-        "auto_update" => Some(true),
         "toolset.ask_user_question.timeout_enabled" => {
             Some(ask_user_question::DEFAULT_ASK_USER_QUESTION_TIMEOUT_ENABLED)
         }
@@ -2394,32 +2353,6 @@ pub(in crate::app::dispatch) fn set_show_tips(app: &mut AppView, new: bool) -> V
     ));
     vec![Effect::PersistSetting {
         key: "show_tips",
-        value: crate::settings::SettingValue::Bool(new),
-        rollback_value: crate::settings::SettingValue::Bool(prev_effective),
-    }]
-}
-
-/// State-only mutation for `auto_update`.
-pub(super) fn set_auto_update_inner(app: &mut AppView, value: bool) {
-    app.auto_update = Some(value);
-}
-
-/// Outer dispatcher for `Action::SetAutoUpdate`.
-pub(in crate::app::dispatch) fn set_auto_update(app: &mut AppView, new: bool) -> Vec<Effect> {
-    let prev_state = app.auto_update;
-    let prev_effective = prev_state.unwrap_or(true);
-    if prev_effective == new && prev_state.is_some() {
-        return vec![];
-    }
-    set_auto_update_inner(app, new);
-    refresh_open_settings_modals(app);
-    tracing::info!(target: "settings", key = "auto_update", value = new, "setting changed");
-    app.show_toast(&format!(
-        "{} (restart to apply)",
-        save_success_toast("Auto-update", new),
-    ));
-    vec![Effect::PersistSetting {
-        key: "auto_update",
         value: crate::settings::SettingValue::Bool(new),
         rollback_value: crate::settings::SettingValue::Bool(prev_effective),
     }]

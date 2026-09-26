@@ -120,7 +120,7 @@ struct ClientState {
     patch_initialize_model: bool,
     /// Whether this client has completed IPC registration. Used to keep `client_count`
     /// accurate — only registered clients are counted, so pre-registration connections
-    /// (which may time out) don't inflate the count and block auto-updates.
+    /// (which may time out) don't inflate the count.
     registered: bool,
 }
 #[derive(Debug, Clone)]
@@ -156,7 +156,6 @@ impl LeaderServerControlState {
             runtime_cpu_profile: manager.runtime_cpu_profile(),
             profile_formats: manager.profile_formats().to_vec(),
             workspace_exposure: true,
-            relaunch_v1: true,
         }
     }
 }
@@ -1288,9 +1287,6 @@ fn handle_control_command(
         | ControlCommand::WorkspaceStatus => {
             unreachable!("workspace control commands are handled asynchronously")
         }
-        ControlCommand::RelaunchForUpdate { .. } => {
-            unreachable!("RelaunchForUpdate must be handled asynchronously")
-        }
     }
 }
 async fn handle_stop_cpu_profile(
@@ -1370,95 +1366,6 @@ async fn finalize_cpu_profile_on_shutdown(control_state: LeaderServerControlStat
         }
     }
 }
-/// Bounded grace the leader waits for in-flight turns to finish before a
-/// `RelaunchForUpdate` relaunch. If the agent is still busy when this elapses,
-/// the leader exits anyway — the in-flight turn ends and the session reloads
-/// cleanly (truncated at the last persisted boundary).
-const RELAUNCH_GRACE: Duration = Duration::from_secs(5);
-/// Bound on the post-drain session flush ([`AgentActivity::flush_all_sessions`]).
-const RELAUNCH_FLUSH_GRACE: Duration = Duration::from_secs(5);
-/// Total shutdown budget advertised to clients in the `Relaunching` ack:
-/// idle-drain plus session flush.
-const RELAUNCH_TOTAL_GRACE: Duration =
-    Duration::from_millis((RELAUNCH_GRACE.as_millis() + RELAUNCH_FLUSH_GRACE.as_millis()) as u64);
-/// Poll cadence while waiting for the agent to go idle during the grace period.
-const RELAUNCH_GRACE_POLL: Duration = Duration::from_millis(100);
-/// Decide whether a [`ControlCommand::RelaunchForUpdate`] is accepted (the
-/// synchronous half — kept separate from arming the drain so the caller can send
-/// the `Relaunching` ack BEFORE the leader begins shutting down; otherwise an
-/// idle leader can race the ack and the client sees a dropped control response).
-///
-/// Declines unless the target is strictly newer (directional guard) and no
-/// relaunch is already in progress (idempotent across multiple clients). On
-/// accept it sets `relaunching` so duplicate requests are declined.
-fn decide_relaunch_for_update(
-    control_state: &LeaderServerControlState,
-    to_version: String,
-    relaunching: &AtomicBool,
-) -> Result<ControlPayload, ControlError> {
-    let leader_version = control_state.metadata.leader_binary_version.clone();
-    if !super::leader_is_older_than(&leader_version, &to_version) {
-        debug!(
-            from_version = %leader_version,
-            to_version = %to_version,
-            "RelaunchForUpdate declined: target is not strictly newer (or unparseable)"
-        );
-        return Ok(ControlPayload::RelaunchDeclined {
-            reason: format!("leader version {leader_version} is not older than {to_version}"),
-        });
-    }
-    if relaunching.swap(true, Ordering::SeqCst) {
-        return Ok(ControlPayload::RelaunchDeclined {
-            reason: "a relaunch is already in progress".to_string(),
-        });
-    }
-    info!(
-        from_version = %leader_version,
-        to_version = %to_version,
-        grace_ms = RELAUNCH_TOTAL_GRACE.as_millis() as u64,
-        "RelaunchForUpdate accepted; draining before relaunch onto new binary"
-    );
-    Ok(ControlPayload::Relaunching {
-        from_version: leader_version,
-        to_version,
-        grace_ms: RELAUNCH_TOTAL_GRACE.as_millis() as u64,
-    })
-}
-/// Arm the bounded-grace drain for an accepted relaunch: wait up to
-/// [`RELAUNCH_GRACE`] for the agent to go idle (`agent_busy` for IPC traffic
-/// AND [`AgentActivity::is_busy`] for relay-driven turns / subagents), flush
-/// every session actor, then set [`ShutdownReason::AutoUpdate`] and cancel —
-/// the same exit path the auto-update checker uses. Must be called *after*
-/// the `Relaunching` ack has been sent so the ack is delivered before
-/// `ShuttingDown`.
-fn spawn_relaunch_drain(
-    shutdown_tx: watch::Sender<super::protocol::ShutdownReason>,
-    cancel: CancellationToken,
-    agent_busy: Arc<AtomicBool>,
-    agent_activity: AgentActivity,
-) {
-    tokio::spawn(async move {
-        let deadline = tokio::time::Instant::now() + RELAUNCH_GRACE;
-        while agent_busy.load(Ordering::Relaxed) || agent_activity.is_busy() {
-            if tokio::time::Instant::now() >= deadline {
-                warn!(
-                    "RelaunchForUpdate grace elapsed while agent busy; relaunching anyway (in-flight turn ends)"
-                );
-                break;
-            }
-            tokio::select! {
-                // Another path already triggered shutdown — let it own the exit.
-                _ = cancel.cancelled() => return,
-                _ = tokio::time::sleep(RELAUNCH_GRACE_POLL) => {}
-            }
-        }
-        agent_activity
-            .flush_all_sessions(RELAUNCH_FLUSH_GRACE)
-            .await;
-        let _ = shutdown_tx.send(super::protocol::ShutdownReason::AutoUpdate);
-        cancel.cancel();
-    });
-}
 #[derive(Debug, thiserror::Error)]
 pub enum ServerError {
     #[error("Failed to acquire leader lock: {0}")]
@@ -1529,8 +1436,7 @@ fn make_version_mismatch_notification(
 /// * `agent_busy` - Atomic flag set while the agent has in-flight **IPC**
 ///   requests; relay-driven traffic never sets it
 /// * `agent_activity` - Agent-derived activity view (running turns, parked
-///   interactions, live subagents) consulted by the `RelaunchForUpdate` drain
-///   alongside `agent_busy`, plus the pre-shutdown session flush
+///   interactions, live subagents), used for the pre-shutdown session flush
 /// * `ready_rx` - Watch receiver; ACP forwarding is gated until this is `true`
 /// * `relay_demand_tx` - Watch sender flipped to `true` when the first
 ///   [`ClientMode::Headless`] client registers. `run_leader` defers starting the
@@ -1540,10 +1446,8 @@ fn make_version_mismatch_notification(
 ///   clients are driven remotely *through* the relay.
 /// * `shutdown_tx` - Watch sender for the shutdown reason. The server subscribes
 ///   its own receiver and reads it once when `cancel` fires (defaults to
-///   [`ShutdownReason::Manual`]). The auto-update checker and the
-///   [`ControlCommand::RelaunchForUpdate`] handler send [`ShutdownReason::AutoUpdate`]
-///   before cancelling so clients see the real reason; senders must write before
-///   cancelling.
+///   [`ShutdownReason::Manual`]). A sender that wants clients to see another
+///   reason must write it before it cancels.
 /// * `leader_version_override` - If `Some`, overrides [`leader_version`] for version
 ///   mismatch detection. Pass `None` in production; pass a test version string in
 ///   integration tests, where both sides otherwise report the same version and the
@@ -1582,7 +1486,6 @@ pub async fn run_leader_server(
     let mut last_active_client: Option<ClientId> = None;
     let mut had_clients = false;
     let mut pending_requests: usize = 0;
-    let relaunching = Arc::new(AtomicBool::new(false));
     loop {
         let poll = tokio::select! {
             biased;
@@ -1759,10 +1662,6 @@ pub async fn run_leader_server(
                         let client_tx = client.tx.clone();
                         let control_state = control_state.clone();
                         let cancel = cancel.clone();
-                        let shutdown_tx = shutdown_tx.clone();
-                        let agent_busy = agent_busy.clone();
-                        let agent_activity = agent_activity.clone();
-                        let relaunching = relaunching.clone();
                         tokio::spawn(async move {
                             let result = match command {
                                 ControlCommand::StopCpuProfile => {
@@ -1789,30 +1688,13 @@ pub async fn run_leader_server(
                                 ControlCommand::WorkspaceStatus => {
                                     handle_workspace_status(control_state).await
                                 }
-                                ControlCommand::RelaunchForUpdate { to_version } => {
-                                    decide_relaunch_for_update(
-                                        &control_state,
-                                        to_version,
-                                        &relaunching,
-                                    )
-                                }
                                 other => handle_control_command(&control_state, other),
                             };
-                            let arm_relaunch =
-                                matches!(result, Ok(ControlPayload::Relaunching { .. }));
                             if let Err(e) = client_tx
                                 .send(ServerMessage::ControlResult { request_id, result }.into())
                                 .await
                             {
                                 warn!(client_id = id.0, error = %e, "Failed to send control response to client");
-                            }
-                            if arm_relaunch {
-                                spawn_relaunch_drain(
-                                    shutdown_tx,
-                                    cancel,
-                                    agent_busy,
-                                    agent_activity,
-                                );
                             }
                         });
                     }
@@ -2612,8 +2494,7 @@ pub struct ServerHandle {
     /// (catalog/settings are no longer prefetched; they refresh in the background).
     pub ready_tx: watch::Sender<bool>,
     /// Set the shutdown reason before cancelling so clients receive the correct `ShuttingDown`
-    /// reason. The default value is [`ShutdownReason::Manual`]; send
-    /// [`ShutdownReason::AutoUpdate`] before cancelling for auto-update shutdowns.
+    /// reason. The default value is [`ShutdownReason::Manual`].
     pub shutdown_tx: watch::Sender<super::protocol::ShutdownReason>,
     /// Observe relay demand: flips to `true` when the first headless client
     /// registers (see `relay_demand_tx` on [`run_leader_server`]).
@@ -2691,42 +2572,6 @@ mod tests {
     fn pv(payload: &str) -> serde_json::Value {
         serde_json::from_str(payload).expect("test payload must be valid JSON")
     }
-    /// The relaunch drain must wait on the agent-derived activity signal —
-    /// not just the IPC `agent_busy` flag, which relay-driven turns never set
-    /// — and must flush registered session actors before cancelling.
-    #[tokio::test]
-    async fn relaunch_drain_waits_for_agent_activity_and_flushes_sessions() {
-        let (shutdown_tx, _shutdown_rx) =
-            watch::channel(super::super::protocol::ShutdownReason::Manual);
-        let cancel = CancellationToken::new();
-        let agent_busy = Arc::new(AtomicBool::new(false));
-        let activity = AgentActivity::default();
-        let (mut cmd_rx, prompt_id, _pending) = activity.register_for_test("s1");
-        *prompt_id.lock().unwrap() = Some("prompt-1".to_string());
-        let cancel_for_actor = cancel.clone();
-        let actor = tokio::spawn(async move {
-            while let Some(cmd) = cmd_rx.recv().await {
-                if matches!(cmd, crate::session::SessionCommand::Shutdown(_)) {
-                    assert!(
-                        !cancel_for_actor.is_cancelled(),
-                        "flush must run before the leader cancels"
-                    );
-                    return;
-                }
-            }
-        });
-        spawn_relaunch_drain(shutdown_tx, cancel.clone(), agent_busy, activity);
-        tokio::time::sleep(Duration::from_millis(300)).await;
-        assert!(
-            !cancel.is_cancelled(),
-            "drain must not cancel while a relay-driven turn is running"
-        );
-        *prompt_id.lock().unwrap() = None;
-        tokio::time::timeout(Duration::from_secs(5), cancel.cancelled())
-            .await
-            .expect("drain should cancel once the agent goes idle");
-        actor.await.expect("session actor should get Shutdown");
-    }
     /// `ServerMessageRef::Acp` (the borrowed serialize-only mirror the client
     /// writer uses for shared payloads) must stay byte-identical on the wire
     /// to `ServerMessage::Acp`, or clients would fail to decode ACP frames.
@@ -2786,42 +2631,6 @@ mod tests {
             out, original,
             "non-JSON payloads must pass through verbatim"
         );
-    }
-    #[test]
-    fn decide_relaunch_is_idempotent_and_directional() {
-        let temp = TempDir::new().unwrap();
-        let sock = temp.path().join("leader.sock");
-        let control_state = LeaderServerControlState::new(LeaderServerMetadata {
-            pid: std::process::id(),
-            socket_path: sock.clone(),
-            lock_path: sock.with_extension("lock"),
-            ws_url_suffix: String::new(),
-            leader_binary_version: "0.1.100".to_string(),
-        });
-        let relaunching = AtomicBool::new(false);
-        assert!(matches!(
-            decide_relaunch_for_update(&control_state, "0.1.100".to_string(), &relaunching),
-            Ok(ControlPayload::RelaunchDeclined { .. })
-        ));
-        assert!(!relaunching.load(Ordering::SeqCst));
-        assert!(matches!(
-            decide_relaunch_for_update(&control_state, "0.1.0".to_string(), &relaunching),
-            Ok(ControlPayload::RelaunchDeclined { .. })
-        ));
-        assert!(matches!(
-            decide_relaunch_for_update(&control_state, "unknown".to_string(), &relaunching),
-            Ok(ControlPayload::RelaunchDeclined { .. })
-        ));
-        assert!(!relaunching.load(Ordering::SeqCst));
-        assert!(matches!(
-            decide_relaunch_for_update(&control_state, "0.2.0".to_string(), &relaunching),
-            Ok(ControlPayload::Relaunching { .. })
-        ));
-        assert!(relaunching.load(Ordering::SeqCst));
-        assert!(matches!(
-            decide_relaunch_for_update(&control_state, "0.3.0".to_string(), &relaunching),
-            Ok(ControlPayload::RelaunchDeclined { .. })
-        ));
     }
     #[derive(Debug)]
     struct TestAuth;

@@ -937,15 +937,6 @@ fn dispatch_confirm_reset_setting_reset_dispatches_typed_setter_for_shared_enum(
     });
 }
 
-fn seed_scrolled_up(app: &mut AppView) {
-    let sb = &mut app.agents.get_mut(&AgentId(0)).unwrap().scrollback;
-    for i in 0..40 {
-        sb.push_block(RenderBlock::agent_message(format!("seed {i}")));
-    }
-    sb.prepare_layout(80, 8);
-    sb.goto_top();
-}
-
 fn current_usage_nonce(app: &AppView) -> u64 {
     match app.agents[&AgentId(0)].active_modal.as_ref() {
         Some(crate::views::modal::ActiveModal::UsageInfo { state }) => state.fetch_nonce,
@@ -1021,36 +1012,6 @@ fn stale_context_info_results_do_not_update_replaced_session() {
 }
 
 #[test]
-fn session_usage_page_flips_info_to_top() {
-    crate::appearance::cache::set_page_flip_on_send(true);
-    let mut app = test_app_with_agent();
-    // Scrollback flow is minimal-only.
-    app.screen_mode = crate::app::ScreenMode::Minimal;
-    app.usage_visible = false;
-    seed_scrolled_up(&mut app);
-    complete_session_usage(&mut app);
-    let sb = &mut app.agents.get_mut(&AgentId(0)).unwrap().scrollback;
-    sb.prepare_layout(80, 8);
-    assert!(sb.is_follow_preserve_scroll());
-    let pinned = sb.scroll_offset();
-    sb.scroll_to_entry_top(sb.len() - 1);
-    assert_eq!(sb.scroll_offset(), pinned);
-}
-
-#[test]
-fn session_usage_keeps_scroll_when_page_flip_off() {
-    let prev = crate::appearance::cache::load_page_flip_on_send();
-    crate::appearance::cache::set_page_flip_on_send(false);
-    let mut app = test_app_with_agent();
-    app.screen_mode = crate::app::ScreenMode::Minimal;
-    app.usage_visible = false;
-    seed_scrolled_up(&mut app);
-    complete_session_usage(&mut app);
-    assert_eq!(app.agents[&AgentId(0)].scrollback.scroll_offset(), 0);
-    crate::appearance::cache::set_page_flip_on_send(prev);
-}
-
-#[test]
 fn show_usage_on_welcome_screen_is_noop() {
     let mut app = test_app();
     let effects = dispatch(Action::ShowUsage, &mut app);
@@ -1058,44 +1019,6 @@ fn show_usage_on_welcome_screen_is_noop() {
         effects.is_empty(),
         "ShowUsage with no active agent should be a no-op"
     );
-}
-
-#[test]
-fn show_usage_with_redirect_url_fetches_session_only() {
-    // Redirect link is deferred until SessionUsageComplete (see billing tests).
-    let mut app = test_app_with_agent();
-    app.screen_mode = crate::app::ScreenMode::Minimal;
-    app.usage_billing_redirect_url = Some("https://billing.example.com/me".to_string());
-    let before = agent_scrollback_len(&app);
-    let effects = dispatch(Action::ShowUsage, &mut app);
-    assert!(
-        matches!(
-            effects.as_slice(),
-            [Effect::FetchSessionUsage { agent_id, .. }] if *agent_id == AgentId(0)
-        ),
-        "got: {effects:?}"
-    );
-    assert_eq!(agent_scrollback_len(&app), before);
-}
-
-// ── Minimal update-notice tests ──────────────────────────────────────
-
-#[test]
-fn minimal_update_notice_commits_a_system_block() {
-    let mut app = test_app_with_agent();
-    let before = agent_scrollback_len(&app);
-    commit_minimal_update_notice(&mut app, "9.9.9");
-    assert_eq!(agent_scrollback_len(&app), before + 1);
-    let text = last_system_text(&app, AgentId(0));
-    assert!(text.contains("Update available: v9.9.9"), "got: {text:?}");
-    assert!(text.contains("restart to apply"), "got: {text:?}");
-}
-
-#[test]
-fn minimal_update_notice_no_active_agent_is_noop() {
-    let mut app = test_app();
-    // Must not panic and must not require an agent.
-    commit_minimal_update_notice(&mut app, "9.9.9");
 }
 
 // ── Tutorial dispatch tests ──────────────────────────────────────────

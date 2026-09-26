@@ -11,7 +11,6 @@
 
 use crate::app::actions::Action;
 use crate::slash::command::{AppCtx, ArgItem, CommandExecCtx, CommandResult, SlashCommand};
-use crate::slash::{ModeSupport, Remedy};
 use crate::theme::{Theme, ThemeKind, cache as theme_cache};
 
 /// Switch the pager color theme.
@@ -28,12 +27,6 @@ impl SlashCommand for ThemeCommand {
 
     fn description(&self) -> &str {
         "Switch the color theme"
-    }
-
-    fn mode_support(&self) -> ModeSupport {
-        ModeSupport::FullscreenOnly(Remedy::SwitchMode {
-            why: "minimal renders with your terminal's own palette",
-        })
     }
 
     fn usage(&self) -> &str {
@@ -181,7 +174,6 @@ mod tests {
                 billing_surface_visible: true,
                 usage_command_visible: true,
                 workflows_available: true,
-                screen_mode: crate::app::ScreenMode::Fullscreen,
             };
             let items = cmd.suggest_args(&ctx, "").expect("should return items");
             assert_eq!(items[0].insert_text, "auto");
@@ -204,7 +196,6 @@ mod tests {
                 billing_surface_visible: true,
                 usage_command_visible: true,
                 workflows_available: true,
-                screen_mode: crate::app::ScreenMode::Fullscreen,
             };
             let items = cmd.suggest_args(&ctx, "").expect("should return items");
             assert!(
@@ -228,7 +219,6 @@ mod tests {
                 billing_surface_visible: true,
                 usage_command_visible: true,
                 workflows_available: true,
-                screen_mode: crate::app::ScreenMode::Fullscreen,
             };
             let items = cmd.suggest_args(&ctx, "").expect("should return items");
             assert!(
@@ -253,7 +243,6 @@ mod tests {
                 billing_surface_visible: true,
                 usage_command_visible: true,
                 workflows_available: true,
-                screen_mode: crate::app::ScreenMode::Fullscreen,
             };
             let items = cmd.suggest_args(&ctx, "").expect("should return items");
             let groknight = items
@@ -282,7 +271,6 @@ mod tests {
                 billing_surface_visible: true,
                 usage_command_visible: true,
                 workflows_available: true,
-                screen_mode: crate::app::ScreenMode::Fullscreen,
             };
             let items = cmd.suggest_args(&ctx, "").expect("should return items");
             // No concrete theme should show "(active)" in auto mode.
@@ -310,7 +298,6 @@ mod tests {
                 models: &models,
                 session_id: None,
                 bundle_state: &bundle,
-                screen_mode: crate::app::ScreenMode::Inline,
                 billing_surface_visible: true,
                 usage_command_visible: true,
                 pager_state: crate::settings::PagerLocalSnapshot {
@@ -353,7 +340,6 @@ mod tests {
                 models: &models,
                 session_id: None,
                 bundle_state: &bundle,
-                screen_mode: crate::app::ScreenMode::Inline,
                 billing_surface_visible: true,
                 usage_command_visible: true,
                 pager_state: crate::settings::PagerLocalSnapshot {
@@ -385,7 +371,6 @@ mod tests {
                 models: &models,
                 session_id: None,
                 bundle_state: &bundle,
-                screen_mode: crate::app::ScreenMode::Inline,
                 billing_surface_visible: true,
                 usage_command_visible: true,
                 pager_state: crate::settings::PagerLocalSnapshot {
@@ -415,7 +400,6 @@ mod tests {
                 models: &models,
                 session_id: None,
                 bundle_state: &bundle,
-                screen_mode: crate::app::ScreenMode::Inline,
                 billing_surface_visible: true,
                 usage_command_visible: true,
                 pager_state: crate::settings::PagerLocalSnapshot {
@@ -523,7 +507,6 @@ mod tests {
                 models: &models,
                 session_id: None,
                 bundle_state: &bundle,
-                screen_mode: crate::app::ScreenMode::Inline,
                 billing_surface_visible: true,
                 usage_command_visible: true,
                 pager_state: crate::settings::PagerLocalSnapshot {
@@ -552,7 +535,6 @@ mod tests {
                 models: &models,
                 session_id: None,
                 bundle_state: &bundle,
-                screen_mode: crate::app::ScreenMode::Inline,
                 billing_surface_visible: true,
                 usage_command_visible: true,
                 pager_state: crate::settings::PagerLocalSnapshot {

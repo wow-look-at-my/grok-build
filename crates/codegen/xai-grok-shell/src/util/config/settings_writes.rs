@@ -427,22 +427,8 @@ pub async fn set_cancel_subagents_on_turn_cancel(value: String) -> Result<()> {
     .await
 }
 
-/// Persist `[ui].screen_mode` (`fullscreen` | `minimal`). Empty clears the key.
-pub async fn set_screen_mode(value: String) -> Result<()> {
-    update_config(|cfg| {
-        cfg.ui.screen_mode = if value.is_empty() { None } else { Some(value) };
-    })
-    .await
-}
-
 /// Persist `[cli].show_tips` via `update_config`.
 /// Restart-required: `resolve_tips` reads this once at startup.
 pub async fn set_show_tips(value: bool) -> Result<()> {
     update_config(|cfg| cfg.cli.show_tips = Some(value)).await
-}
-
-/// Persist `[cli].auto_update` via `update_config`.
-/// Restart-required: auto-update check fires once on startup.
-pub async fn set_auto_update(value: bool) -> Result<()> {
-    update_config(|cfg| cfg.cli.auto_update = Some(value)).await
 }

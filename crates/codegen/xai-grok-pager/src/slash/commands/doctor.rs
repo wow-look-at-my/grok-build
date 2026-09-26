@@ -130,7 +130,6 @@ mod tests {
             models: &models,
             session_id: None,
             bundle_state: &bundle,
-            screen_mode: crate::app::ScreenMode::Inline,
             billing_surface_visible: true,
             usage_command_visible: true,
             pager_state: crate::settings::PagerLocalSnapshot::default(),
@@ -194,7 +193,6 @@ mod tests {
             billing_surface_visible: true,
             usage_command_visible: true,
             workflows_available: false,
-            screen_mode: crate::app::ScreenMode::Inline,
         };
         let command = DoctorCommand;
         assert!(command.suggest_args(&context, "").is_none());

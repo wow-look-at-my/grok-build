@@ -1,6 +1,5 @@
 use crate::app::actions::Action;
 use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand};
-use crate::slash::{ModeSupport, Remedy};
 
 pub struct WorkflowsCommand;
 
@@ -19,15 +18,6 @@ impl SlashCommand for WorkflowsCommand {
 
     fn visible(&self, _ctx: &crate::slash::command::AppCtx) -> bool {
         true
-    }
-
-    /// The run pane is drawn from `AgentView::show_workflows` on the full-TUI
-    /// path only; minimal never reads it, so the toggle would flip a flag
-    /// nothing renders.
-    fn mode_support(&self) -> ModeSupport {
-        ModeSupport::FullscreenOnly(Remedy::SwitchMode {
-            why: "the workflow run pane needs fullscreen",
-        })
     }
 
     fn run(&self, _ctx: &mut CommandExecCtx, _args: &str) -> CommandResult {
@@ -64,7 +54,6 @@ mod tests {
                 billing_surface_visible: true,
                 usage_command_visible: true,
                 workflows_available: available,
-                screen_mode: crate::app::ScreenMode::Fullscreen,
             };
             assert!(WorkflowsCommand.visible(&ctx));
         }
@@ -77,7 +66,6 @@ mod tests {
             models: &models,
             session_id: None,
             bundle_state: &DEFAULT_BUNDLE_STATE,
-            screen_mode: crate::app::ScreenMode::Minimal,
             billing_surface_visible: true,
             usage_command_visible: true,
             pager_state: PagerLocalSnapshot::default(),

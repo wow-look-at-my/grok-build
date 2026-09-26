@@ -1955,19 +1955,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "console"
-version = "0.16.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b430743a6eb14e9764d4260d4c0d8123087d504eeb9c48f2b2a5e810dd369df4"
-dependencies = [
- "encode_unicode",
- "libc",
- "once_cell",
- "unicode-width 0.2.0",
- "windows-sys 0.61.2",
-]
-
-[[package]]
 name = "const-hex"
 version = "1.18.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2304,15 +2291,6 @@ name = "crunchy"
 version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "460fbee9c2c2f33933d720630a6a0bac33ba7053db5344fac858d4b8952d77d5"
-
-[[package]]
-name = "cryptify"
-version = "3.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fa6bda41d3e8e4337cfa18a178e69f4404802a208fe59abc23075a81a7d373df"
-dependencies = [
- "labyrinth_macros",
-]
 
 [[package]]
 name = "crypto-bigint"
@@ -5405,19 +5383,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "indicatif"
-version = "0.18.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9375e112e4b463ec1b1c6c011953545c65a30164fbab5b581df32b3abf0dcb88"
-dependencies = [
- "console 0.16.1",
- "portable-atomic",
- "unicode-width 0.2.0",
- "unit-prefix",
- "web-time",
-]
-
-[[package]]
 name = "indoc"
 version = "2.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5489,7 +5454,7 @@ version = "1.43.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "46fdb647ebde000f43b5b53f773c30cf9b0cb4300453208713fa38b2c70935a0"
 dependencies = [
- "console 0.15.11",
+ "console",
  "once_cell",
  "similar",
 ]
@@ -5834,18 +5799,6 @@ name = "lab"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bf36173d4167ed999940f804952e6b08197cae5ad5d572eb4db150ce8ad5d58f"
-
-[[package]]
-name = "labyrinth_macros"
-version = "3.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "108484a425d5e622b63194be3fb8fbf88823271912d8b63cc12917be292329b2"
-dependencies = [
- "proc-macro2",
- "quote",
- "rand 0.8.5",
- "syn 2.0.117",
-]
 
 [[package]]
 name = "landlock"
@@ -11605,12 +11558,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
 
 [[package]]
-name = "unit-prefix"
-version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "323402cff2dd658f39ca17c789b502021b3f18707c91cdf22e3838e1b4023817"
-
-[[package]]
 name = "unsafe-libyaml"
 version = "0.2.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -13674,7 +13621,6 @@ dependencies = [
  "uuid",
  "wait-timeout",
  "walkdir",
- "windows-sys 0.59.0",
  "xai-acp-lib",
  "xai-crash-handler",
  "xai-fast-worktree",
@@ -13694,7 +13640,6 @@ dependencies = [
  "xai-grok-telemetry",
  "xai-grok-test-support",
  "xai-grok-tools",
- "xai-grok-update",
  "xai-grok-version",
  "xai-grok-voice",
  "xai-grok-workspace",
@@ -13712,12 +13657,9 @@ version = "1.0.0"
 dependencies = [
  "anyhow",
  "clap",
- "cryptify",
  "dunce",
  "libc",
- "obfstr",
  "rustls",
- "semver",
  "serde_json",
  "serial_test",
  "tikv-jemalloc-ctl",
@@ -13731,31 +13673,12 @@ dependencies = [
  "xai-crash-handler",
  "xai-grok-config",
  "xai-grok-pager",
- "xai-grok-pager-minimal",
  "xai-grok-sandbox",
  "xai-grok-shell",
  "xai-grok-telemetry",
- "xai-grok-update",
  "xai-grok-version",
  "xai-grok-workspace",
  "xai-tty-utils",
-]
-
-[[package]]
-name = "xai-grok-pager-minimal"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "crossterm",
- "ratatui",
- "similar",
- "tracing",
- "uuid",
- "xai-grok-pager",
- "xai-grok-shell",
- "xai-grok-version",
- "xai-ratatui-inline",
- "xai-token-estimation",
 ]
 
 [[package]]
@@ -14391,31 +14314,6 @@ dependencies = [
  "tonic-prost",
  "xai-proto-build",
  "xai-tool-protocol",
-]
-
-[[package]]
-name = "xai-grok-update"
-version = "0.1.220-alpha.4"
-dependencies = [
- "anyhow",
- "dunce",
- "futures",
- "indicatif",
- "reqwest 0.12.24",
- "semver",
- "serde",
- "serde_json",
- "serial_test",
- "tempfile",
- "thiserror 2.0.18",
- "time",
- "tokio",
- "tracing",
- "wiremock",
- "xai-grok-extra-ca",
- "xai-grok-shell",
- "xai-grok-tools",
- "xai-grok-version",
 ]
 
 [[package]]
