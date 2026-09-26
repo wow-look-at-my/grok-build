@@ -1086,6 +1086,9 @@ pub struct ModelsConfig {
     /// Per-turn one-line summary.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub turn_summary: Option<String>,
+    /// Short summary of a long thinking block.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thinking_summary: Option<String>,
     /// `/btw` side note.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub side_note: Option<String>,
@@ -3211,6 +3214,7 @@ impl Config {
             "compaction" => m.compaction.clone(),
             "recap" => m.recap.clone(),
             "turn_summary" => m.turn_summary.clone(),
+            "thinking_summary" => m.thinking_summary.clone(),
             "side_note" => m.side_note.clone(),
             "todo_capture" => m.todo_capture.clone(),
             "memory_flush" => m.memory_flush.clone(),
