@@ -1095,6 +1095,7 @@ impl SessionActor {
                 block_recap,
                 goal_state,
                 plan_path,
+                o.plan_todos_seeded,
                 &scratch,
                 o.scratch_dir_ready,
             );
@@ -1105,6 +1106,7 @@ impl SessionActor {
             block_recap,
             goal_state,
             plan_path,
+            o.plan_todos_seeded,
             &scratch,
             o.scratch_dir_ready,
         )
@@ -1566,8 +1568,15 @@ impl SessionActor {
                 refuted,
             )
         };
-        let next_step = resolve_goal_next_step(plan_path.as_deref())
-            .unwrap_or_else(|| format!("Check your `{todo_tool}` list for next steps."));
+        let next_step = match self.goal_todo_snapshot().await {
+            Some(todos) => next_step_from_todos(
+                todos
+                    .iter()
+                    .map(|(id, content, status)| (id.as_str(), content.as_str(), *status)),
+                todo_tool,
+            ),
+            None => format!("Check your `{todo_tool}` list for next steps."),
+        };
         let tokens = u64::try_from(tokens_used).unwrap_or(0);
         let bail_preface = if stop_pattern.is_some() {
             GOAL_CONTINUATION_BAIL_PREFACE
@@ -1980,6 +1989,24 @@ impl SessionActor {
                 true
             }
         }
+    }
+
+    /// The live todo list as `(id, content, status)`, in list order. `None`
+    /// when the resource is missing, which is not the same as an empty list.
+    async fn goal_todo_snapshot(
+        &self,
+    ) -> Option<Vec<(String, String, crate::tools::todo::TodoStatus)>> {
+        use crate::tools::todo::TodoState;
+        use xai_grok_tools::types::resources::State;
+        let bridge = self.tool_bridge_handle();
+        let state = bridge.read_resource::<State<TodoState>>().await?;
+        Some(
+            state
+                .0
+                .todo_items_with_ids()
+                .map(|(id, item)| (id.clone(), item.content.clone(), item.status))
+                .collect(),
+        )
     }
 }
 

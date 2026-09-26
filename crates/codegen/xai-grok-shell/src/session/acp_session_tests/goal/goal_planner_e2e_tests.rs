@@ -456,13 +456,13 @@ const PLANNER_TODOS: &[&str] = &[
     "cover it with an end-to-end test",
 ];
 
-/// A plan whose `## Task checklist` names those same three steps, the way the
+/// A plan whose `## Task steps` names those same three steps, the way the
 /// planner prompt asks a real planner to write it.
 const CHECKLIST_PLAN: &[u8] = b"# Plan: ship the exporter\n\n## Goal kind\ncode-change\n\n\
-## Task checklist\n\
-- [ ] add the plan parser\n\
-- [ ] wire it into the publish path\n\
-- [ ] cover it with an end-to-end test\n";
+## Task steps\n\
+1. add the plan parser\n\
+2. wire it into the publish path\n\
+3. cover it with an end-to-end test\n";
 
 /// The scripted planner the seeding tests drive: it writes [`CHECKLIST_PLAN`]
 /// and reports the same steps on ITS OWN list with `todo_write`, which is what
@@ -627,7 +627,7 @@ async fn the_planner_is_spawned_with_the_todo_instruction() {
                  bridge: {prompt}",
             );
             assert!(
-                prompt.contains("one item per `## Task checklist` line"),
+                prompt.contains("one item per `## Task steps` entry"),
                 "one item per plan step, in order",
             );
             assert!(
@@ -746,7 +746,7 @@ async fn the_planner_childs_own_items_are_the_source_not_the_plan_prose() {
     local
         .run_until(async {
             let (tx, _c) = spawn_planner_coordinator(SpawnBehaviour::WritePlanThenDoneWithTodos {
-                body: b"# Plan\n\n## Task checklist\n- [ ] a step the plan body names\n",
+                body: b"# Plan\n\n## Task steps\n1. a step the plan body names\n",
                 todos: &["the child's first step", "the child's second step"],
             });
             let (actor, _tmp) = make_planner_actor(Some(tx), true).await;
@@ -2159,9 +2159,10 @@ async fn stop_then_slash_goal_resume_reopens_spawn_admission_before_planner_retr
 
 /// End-to-end gate (enabled side): when the planner is on and writes a
 /// plan, `setup_goal`'s reminder folds in the plan-aware block carrying
-/// the actual `plan_path()` pointer, the "already on your list" statement
-/// (NOT a manual seed directive), the `## Deviations` instruction, and the
-/// legacy discipline intact.
+/// the actual `plan_path()` pointer, the `## Deviations` instruction, and the
+/// legacy discipline intact. This planner lists no todo items, so nothing is
+/// seeded: the reminder must tell the implementer to put the steps on the
+/// list, and must never claim they are already there.
 #[tokio::test(flavor = "current_thread")]
 async fn setup_goal_reminder_is_plan_aware_when_planner_enabled() {
     let local = tokio::task::LocalSet::new();
@@ -2195,9 +2196,14 @@ async fn setup_goal_reminder_is_plan_aware_when_planner_enabled() {
                 "the manual seed-todos directive must be gone — the harness \
                  populates the list itself:\n{reminder}"
             );
+            assert!(!snap.plan_todos_seeded, "this planner seeds nothing");
             assert!(
-                reminder.contains(PLAN_TODOS_ALREADY_SEEDED_PHRASE),
-                "the reminder must say the plan's steps are already on the list:\n{reminder}"
+                !reminder.contains(PLAN_TODOS_ALREADY_SEEDED_PHRASE),
+                "an unseeded goal must not be told its steps are on the list:\n{reminder}"
+            );
+            assert!(
+                reminder.contains(PLAN_TODOS_TO_ADD_PHRASE),
+                "an unseeded goal must be told to put the steps on the list:\n{reminder}"
             );
         })
         .await;
@@ -2272,8 +2278,12 @@ async fn goal_resume_reminder_is_plan_aware_when_planner_enabled() {
                 "resume reminder must not re-issue the manual seed directive:\n{reminder}"
             );
             assert!(
-                reminder.contains(PLAN_TODOS_ALREADY_SEEDED_PHRASE),
-                "resume reminder must say the plan's steps are already on the list:\n{reminder}"
+                !reminder.contains(PLAN_TODOS_ALREADY_SEEDED_PHRASE),
+                "nothing was seeded, so resume must not claim the steps are on the list:\n{reminder}"
+            );
+            assert!(
+                reminder.contains(PLAN_TODOS_TO_ADD_PHRASE),
+                "resume must tell the implementer to put the steps on the list:\n{reminder}"
             );
         })
         .await;

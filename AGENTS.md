@@ -25,7 +25,8 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - `cargo check -p <touched-crate>` before pushing.
 - `cargo test -p <touched-crate>` for the crate you changed.
 - Prefer committing real tests that drive the shipped code (not mocks of the unit under test, not hand-built expected objects).
-- **A web session cannot link the workspace.** `target/` reaches ~16 GB after a `cargo check` of the pager, against a ~12 GB session disk allowance, so `cargo build -p xai-grok-pager-bin` runs the container out of space. Check the crate, run that crate's tests, push, and let CI produce the binary.
+- **A web session cannot link the workspace.** `target/` reaches ~16 GB after a `cargo check` of the pager, against a ~12 GB session disk allowance. So `cargo build -p xai-grok-pager-bin` runs the container out of space. Check the crate, run that crate's tests, push, and let CI produce the binary.
+- **Do not run `cargo test -p xai-grok-shell` in a web session.** Its test binary runs the disk out the same way. Run `cargo check -p xai-grok-shell --tests`, push, and read the shell tests' result from CI's `Build & test`.
 - `protoc` is missing from the image and the `bin/protoc` dotslash shim cannot run either, so any build that reaches `xai-grok-tools-api` dies in its build script. Run `apt-get install -y protobuf-compiler` first.
 - `mold` is missing too, and the repo's cargo config passes `-fuse-ld=mold`. Every build script then fails to link with `collect2: fatal error: cannot find 'ld'`, on `proc-macro2` and `libc` — which reads as a broken C toolchain and is not one. Run `apt-get install -y mold`.
 
@@ -170,7 +171,7 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - Once per goal, append-only. `GoalOrchestration::plan_todos_seeded` is claimed under the tracker lock before any I/O, and the append is deduped against the live list by content. Existing items keep their id, text and status; a retry, a resume or a direct re-entry adds nothing.
 - The append goes through the session's own todo path (`append_capture_todos`, `add_only_todo_args_with_prefix` with a `plan-` id prefix), so the persisted state and the client's `Plan` update move exactly as a model-written `todo_write` does. Seeding is best-effort: no append-capable todo tool, or a failed append, logs and returns, and never fails the goal.
 - The child's list is read through the shared workspace handle (`WorkspaceOps::workspace_handle` → the session's `toolset().resources`), so it needs LOCAL mode. A proxied session (the workspace server owns sessions) has no handle here, the read returns empty, and the feature degrades to the main agent keeping its own list. Nothing breaks; nothing is populated either.
-- `Plan: <path>` still renders on every plan-aware reminder — only the manual seed-todos directive is gone, replaced by a statement that the steps are already on the list.
+- `Plan: <path>` still renders on every plan-aware reminder. The plan file carries numbered `## Task steps` and no checkboxes: the todo list, which the user watches, is the only checklist, and the continuation nudge names its first open item by id (`next_step_from_todos`). `render_goal_plan_block` reads `plan_todos_seeded`. Seeded: the block says the steps are on the list. Unseeded: it tells the implementer to put them there. Claiming the steps are on the list when seeding never ran sends the implementer to an empty list.
 - A fail-closed planner publishes no plan, so nothing is seeded. Red/unseeded is the honest state there.
 
 ## The run log is the goal verifier's runtime evidence

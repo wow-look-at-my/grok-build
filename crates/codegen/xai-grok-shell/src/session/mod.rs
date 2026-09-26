@@ -528,7 +528,6 @@ pub mod fork;
 pub(crate) mod fs_watch;
 pub(crate) mod goal_classifier;
 pub(crate) mod goal_evaluator;
-pub(crate) mod goal_next_step;
 pub(crate) mod goal_orchestrator;
 pub(crate) mod goal_planner;
 pub(crate) mod goal_role_tools;
