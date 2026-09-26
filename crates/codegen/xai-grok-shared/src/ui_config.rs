@@ -192,6 +192,9 @@ pub struct UiConfig {
     /// `None` = on (client default). Written by the pager's settings modal.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub show_thinking_blocks: Option<bool>,
+    /// Summarize a long thinking block and show the summary under its collapsed
+    /// header. `None` = on (client default). Written by the pager's settings
+    /// modal; resolved once per session, so a change takes effect next session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thinking_summaries: Option<bool>,
     /// Fold runs of consecutive non-destructive tool calls (reads, searches,
@@ -413,6 +416,9 @@ impl UiConfig {
             .unwrap_or(Self::STOP_GATE_CI_FAILING_DEFAULT)
     }
 
+    /// Default for [`Self::thinking_summaries`] when unset. This is the one home
+    /// for it: a session resolves the switch through
+    /// [`Self::thinking_summaries_enabled`], never by reading the table by hand.
     pub const THINKING_SUMMARIES_DEFAULT: bool = true;
 
     pub fn thinking_summaries_enabled(&self) -> bool {
@@ -420,7 +426,10 @@ impl UiConfig {
             .unwrap_or(Self::THINKING_SUMMARIES_DEFAULT)
     }
 
-    /// Default for [`Self::min_output_tokens_per_sec`] when unset.
+    /// Default for [`Self::min_output_tokens_per_sec`] when unset. Well under
+    /// what any endpoint here reaches in health, so an ordinary stream never
+    /// approaches it and a collapsed engine is still caught. A zero here ships
+    /// the gate dead, which is the same as not having it.
     pub const MIN_OUTPUT_TOKENS_PER_SEC_DEFAULT: u32 = 15;
 
     /// Default for [`Self::output_rate_sustained_secs`] when unset.

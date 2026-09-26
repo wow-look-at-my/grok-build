@@ -1048,7 +1048,8 @@ pub(crate) struct SessionActor {
     /// Turn-summary gate, resolved once at spawn (env / config / remote
     /// settings — see `Config::resolve_turn_summary`).
     pub(crate) turn_summary_enabled: bool,
-    /// `[ui].thinking_summaries`, resolved a single time at spawn.
+    /// `[ui].thinking_summaries` (`UiConfig::thinking_summaries_enabled`),
+    /// resolved a single time at spawn.
     pub(crate) thinking_summaries_enabled: bool,
     /// True while THIS session has a prompt turn in flight (RAII-guarded in
     /// `handle_prompt`, like `tool_context.is_turn_active` — which is the
@@ -2217,3 +2218,6 @@ mod recap_display_only_tests;
 #[cfg(test)]
 #[path = "acp_session_tests/reminder_policy_tests.rs"]
 mod reminder_policy_tests;
+#[cfg(test)]
+#[path = "acp_session_tests/thinking_summary_tests.rs"]
+mod thinking_summary_tests;

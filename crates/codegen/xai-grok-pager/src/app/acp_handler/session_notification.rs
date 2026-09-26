@@ -1253,6 +1253,21 @@ pub(super) fn handle_session_notification(notif: &acp::ExtNotification, app: &mu
                     slow_for: slow_for_ms.map(std::time::Duration::from_millis),
                 })
         }
+        XaiSessionUpdate::ThinkingSummary {
+            stream_start_ms,
+            summary,
+        } => {
+            // Written by a side call that starts when its model call ends, so
+            // this arrives after the thinking block it describes has stopped
+            // running, and on a reload it is replayed right behind that block's
+            // own persisted chunks. It finds its block by the call's stream
+            // start, which is why it is not attached to whatever is current.
+            agent.session.tracker.set_thinking_summary(
+                &mut agent.scrollback,
+                stream_start_ms,
+                &summary,
+            )
+        }
         _ => {
             tracing::trace!(
                 "Ignoring {}: {:?}",
