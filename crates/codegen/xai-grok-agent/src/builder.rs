@@ -1348,11 +1348,18 @@ pub(crate) fn build_task_description(
         .collect();
     let mut description = xai_tool_types::build_task_description(&descriptors, &TASK_TOOL_NAMING);
     description.push_str(&task_model_guidance(model_slugs));
+    description.push_str(TASK_PERMISSION_NOTE);
     if let Some(note) = usage_frequency.task_tool_note() {
         description.push_str(note);
     }
     description
 }
+/// A sub-agent shares the session's permission actor (rules, approvals and
+/// denials). Without this line a model that was refused a command spends
+/// attempts on a sub-agent to find out whether the refusal carries over.
+const TASK_PERMISSION_NOTE: &str = "\n\nA sub-agent runs under this session's permission \
+     rules, approvals and denials. A command denied to you is denied to it too, so do not \
+     delegate a denied action.";
 /// Resolve the shell name for the system prompt.
 ///
 /// Unix: `$SHELL` env var (e.g. `/bin/zsh`).
@@ -1605,6 +1612,20 @@ mod tests {
             "child description should be compact, got {} chars",
             CHILD_TASK_DESCRIPTION.len()
         );
+    }
+    #[test]
+    fn build_task_description_says_permissions_carry_over() {
+        let subagents = vec![entry(
+            "general-purpose",
+            "GP agent.",
+            SubagentSource::Builtin(BuiltinAgentName::GeneralPurpose),
+        )];
+        let desc = build_task_description(
+            &subagents,
+            &[],
+            xai_tool_types::AgentUsageFrequency::default(),
+        );
+        assert!(desc.contains("denied to it too"), "{desc}");
     }
     #[test]
     fn build_task_description_contains_resume_from_guidance() {
