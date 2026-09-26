@@ -1440,13 +1440,46 @@ pub(crate) fn task_tool_description(
     model_slugs: &[String],
     usage_frequency: xai_tool_types::AgentUsageFrequency,
 ) -> String {
+<<<<<<< HEAD
     let mut description = xai_tool_types::build_task_description(&TASK_TOOL_NAMING);
     description.push_str(&task_model_guidance(selection, model_slugs));
+=======
+    let descriptors: Vec<xai_tool_types::SubagentDescriptor> = subagents
+        .iter()
+        .map(|entry| {
+            let tools = match &entry.source {
+                SubagentSource::Builtin(b) => Some(builtin_tools_fragment(*b)),
+                SubagentSource::UserDefined { .. } => None,
+            };
+            xai_tool_types::SubagentDescriptor {
+                name: entry.name.clone(),
+                description: entry.description.clone(),
+                tools,
+            }
+        })
+        .collect();
+    let mut description = xai_tool_types::build_task_description(&descriptors, &TASK_TOOL_NAMING);
+    description.push_str(&task_model_guidance(model_slugs));
+    description.push_str(TASK_PERMISSION_NOTE);
+>>>>>>> origin/master
     if let Some(note) = usage_frequency.task_tool_note() {
         description.push_str(note);
     }
     description
 }
+<<<<<<< HEAD
+=======
+/// A sub-agent shares the session's permission actor (rules, approvals and
+/// denials). Without this line a model that was refused a command spends
+/// attempts on a sub-agent to find out whether the refusal carries over.
+const TASK_PERMISSION_NOTE: &str = "\n\nA sub-agent runs under this session's permission \
+     rules, approvals and denials. A command denied to you is denied to it too, so do not \
+     delegate a denied action.";
+/// Resolve the shell name for the system prompt.
+///
+/// Unix: `$SHELL` env var (e.g. `/bin/zsh`).
+/// Windows: detected shell from the `detect_windows_shell` cascade.
+>>>>>>> origin/master
 fn resolve_shell_for_prompt() -> String {
     #[cfg(unix)]
     {
@@ -1788,6 +1821,20 @@ mod tests {
             "child description should be compact, got {} chars",
             CHILD_TASK_DESCRIPTION.len()
         );
+    }
+    #[test]
+    fn build_task_description_says_permissions_carry_over() {
+        let subagents = vec![entry(
+            "general-purpose",
+            "GP agent.",
+            SubagentSource::Builtin(BuiltinAgentName::GeneralPurpose),
+        )];
+        let desc = build_task_description(
+            &subagents,
+            &[],
+            xai_tool_types::AgentUsageFrequency::default(),
+        );
+        assert!(desc.contains("denied to it too"), "{desc}");
     }
     #[test]
     fn build_task_description_contains_resume_from_guidance() {

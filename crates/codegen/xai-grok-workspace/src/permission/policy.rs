@@ -142,8 +142,51 @@ impl CompiledPolicy {
         self.evaluate_bash_command_segments(cmd, MAX_INLINE_SHELL_DEPTH)
     }
 
+<<<<<<< HEAD
     /// Rule-check ONE decomposed command's argv: raw and wrapper-normalized forms, with inline `-c` and packed `env -S` recursion.
     /// Escalation only.
+=======
+    fn evaluate_bash_command_segments(
+        &self,
+        cmd: &str,
+        inline_depth_remaining: usize,
+    ) -> Option<GateDecision> {
+        let Some(segments) = all_commands_from_script(cmd) else {
+            return Some(self.undecomposed_script_gate(cmd));
+        };
+        let mut decision = None;
+        for parsed in &segments {
+            decision = combine_gate_decisions(
+                decision,
+                self.evaluate_command_words(parsed.words(), inline_depth_remaining),
+            );
+        }
+        decision
+    }
+
+    /// The gate for a script the parser cannot split, such as one with
+    /// `$(...)`, a loop or a subshell. That Ask is fail-closed, and auto mode
+    /// gives a fail-closed Ask to the classifier. A rough split on shell
+    /// operators still finds a command that a deny or ask rule names. Such a
+    /// match makes the Ask binding, so the user sees a denied command even
+    /// when it sits inside `$(...)`.
+    fn undecomposed_script_gate(&self, cmd: &str) -> GateDecision {
+        let names_a_rule = rough_command_pieces(cmd).any(|words| {
+            matches!(
+                self.evaluate_command_words(&words, 0),
+                Some(GateDecision::Reject(_) | GateDecision::AskRuleMatch)
+            )
+        });
+        if names_a_rule {
+            GateDecision::AskRuleMatch
+        } else {
+            GateDecision::AskFailClosed
+        }
+    }
+
+    /// Rule-check ONE decomposed command's argv: raw and wrapper-normalized
+    /// forms, with inline `-c` and packed `env -S` recursion. Escalation only.
+>>>>>>> origin/master
     fn evaluate_command_words(
         &self,
         raw_words: &[String],
@@ -1033,6 +1076,37 @@ pub(crate) fn rule_is_catchall(rule: &PermissionRule) -> bool {
     }
 }
 
+/// The rough command pieces of a script the parser could not split. A piece
+/// is the words between two shell operators, less any leading keyword or
+/// variable assignment. Quoted text can split into extra pieces. So a match
+/// on a piece may only make the gate ask; it must never deny.
+fn rough_command_pieces(cmd: &str) -> impl Iterator<Item = Vec<String>> + '_ {
+    const KEYWORDS: &[&str] = &[
+        "do", "then", "else", "elif", "if", "while", "until", "!", "time",
+    ];
+    cmd.split(|c: char| {
+        matches!(
+            c,
+            ';' | '|' | '&' | '(' | ')' | '`' | '$' | '{' | '}' | '\n' | '<' | '>' | '"' | '\''
+        )
+    })
+    .map(|piece| {
+        piece
+            .split_whitespace()
+            .skip_while(|word| KEYWORDS.contains(word) || is_variable_assignment(word))
+            .map(str::to_owned)
+            .collect::<Vec<_>>()
+    })
+    .filter(|words| !words.is_empty())
+}
+
+fn is_variable_assignment(word: &str) -> bool {
+    word.split_once('=').is_some_and(|(name, _)| {
+        name.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
+            && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1664,6 +1738,78 @@ mod tests {
         assert_eq!(combine_gate_decisions(None, None), None);
     }
 
+<<<<<<< HEAD
+=======
+    #[test]
+    fn bash_command_gate_distinguishes_ask_provenance() {
+        let policy = CompiledPolicy::new(PermissionConfig::new(vec![
+            bash_rule(RuleAction::Ask, "git push*"),
+            bash_rule(RuleAction::Deny, "rm -rf*"),
+        ]));
+        // Rule-match Ask: a decomposed segment hits the ask rule.
+        assert_eq!(
+            policy.evaluate_bash_command_gate("echo hi && git push origin main"),
+            Some(GateDecision::AskRuleMatch)
+        );
+        // Fail-closed Ask: substitution defeats word-only decomposition.
+        assert_eq!(
+            policy.evaluate_bash_command_gate("echo \"$(date)\""),
+            Some(GateDecision::AskFailClosed)
+        );
+        // A rule match outranks a fail-closed floor in the same script.
+        assert_eq!(
+            policy.evaluate_bash_command_gate("env -S 'echo hi' && git push origin main"),
+            Some(GateDecision::AskRuleMatch)
+        );
+        // Deny keeps rejecting with provenance preserved.
+        assert!(matches!(
+            policy.evaluate_bash_command_gate("echo hi && rm -rf /tmp/x"),
+            Some(GateDecision::Reject(_))
+        ));
+        assert!(policy.evaluate_bash_command_gate("echo hi").is_none());
+    }
+
+    /// A denied command inside a construct the parser cannot split must not
+    /// reach the auto-mode classifier. Only an Ask with no rule behind it may.
+    #[test]
+    fn an_undecomposed_script_that_names_a_denied_command_asks_the_user() {
+        let policy = CompiledPolicy::new(PermissionConfig::new(vec![
+            bash_rule(RuleAction::Deny, "sed"),
+            bash_rule(RuleAction::Ask, "git push*"),
+        ]));
+        for cmd in [
+            "x=$(cat f | sed -n '1,40p')",
+            "for f in *; do sed -n 1p \"$f\"; done",
+            "echo \"$(timeout 5 sed -n 1p f)\"",
+            "(FOO=1 sed -i s/a/b/ f)",
+            "echo `git push origin main`",
+        ] {
+            assert_eq!(
+                policy.evaluate_bash_command_gate(cmd),
+                Some(GateDecision::AskRuleMatch),
+                "{cmd}"
+            );
+        }
+        for cmd in ["echo \"$(date)\"", "for f in *; do wc -l \"$f\"; done"] {
+            assert_eq!(
+                policy.evaluate_bash_command_gate(cmd),
+                Some(GateDecision::AskFailClosed),
+                "{cmd}"
+            );
+        }
+    }
+
+    #[test]
+    fn rough_command_pieces_drop_keywords_and_assignments() {
+        let pieces: Vec<Vec<String>> =
+            rough_command_pieces("if true; then X=1 sed -n 1p f; fi").collect();
+        assert!(
+            pieces.contains(&vec!["sed".into(), "-n".into(), "1p".into(), "f".into()]),
+            "{pieces:?}"
+        );
+    }
+
+>>>>>>> origin/master
     // ── Deny bypass via shell operators ──────────────────────────────────
 
     #[test]

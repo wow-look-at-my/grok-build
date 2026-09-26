@@ -40,6 +40,7 @@ pub(crate) const PLAN_SEED_TODOS_PHRASE: &str =
 /// The replacement instruction: the plan's steps are already on the list.
 pub(crate) const PLAN_TODOS_ALREADY_SEEDED_PHRASE: &str =
     "The plan's steps are ALREADY on your todo list";
+<<<<<<< HEAD
 /// True when `events.jsonl` text `log` has a line of `type == ty` whose parsed JSON satisfies `predicate`.
 pub(crate) fn has_event_with(
     log: &str,
@@ -53,6 +54,12 @@ pub(crate) fn has_event_with(
         v.get("type").and_then(|t| t.as_str()) == Some(ty) && predicate(&v)
     })
 }
+=======
+/// The instruction for a goal whose planner seeded nothing: put the steps on
+/// the list. The todo list is the only checklist either way.
+pub(crate) const PLAN_TODOS_TO_ADD_PHRASE: &str =
+    "Put the plan's `## Task steps` on your todo list";
+>>>>>>> origin/master
 #[cfg(test)]
 pub(crate) fn noop_observability_bridge() -> xai_computer_hub_sdk::ObservabilityBridge {
     xai_computer_hub_sdk::ObservabilityBridge::new(

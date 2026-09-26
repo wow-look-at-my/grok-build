@@ -1,6 +1,14 @@
 A goal has been set: {OBJECTIVE}
 
+<<<<<<< HEAD
 You are working directly on this goal across multiple turns. Deliver EVERYTHING the user asked for yourself — no follow-up questions, no manual steps left for the user.
+=======
+You are working directly on this goal across multiple turns. Deliver
+EVERYTHING the user asked for yourself — no follow-up questions, no manual
+steps left for the user. The one exception is a real external blocker, which
+`blocked_reason` below reports. A plan condition that says to stop and report
+instead of attempting is such a blocker once it holds.
+>>>>>>> origin/master
 
 {PLAN_BLOCK}{BLOCK_RECAP}{DISCIPLINE_BLOCK}TRACKING: use {TODO_TOOL} to break the objective into concrete steps; keep ≥1 `in_progress` with a present-tense `activeForm`, and mark each done immediately (do not batch).
 
