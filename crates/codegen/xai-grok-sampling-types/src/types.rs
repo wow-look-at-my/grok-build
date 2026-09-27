@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::num::NonZeroU64;
+use xai_tool_types::Aliases;
 
 // ============================================================================
 // TraceContext — cloneable, type-erased context for request tracing
@@ -785,17 +786,20 @@ pub struct ToolCallFunctionDelta {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[serde(try_from = "ChatChunkDeltaWire")]
 pub struct ChatChunkDelta {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub role: Option<Role>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
-    /// Thinking/chain-of-thought text streamed by the model. Deserializes from
-    /// either `reasoning_content` (OpenAI/xAI naming) or `reasoning`
-    /// (synthetic.new's OpenAI-compatible naming) so both wire shapes feed the
-    /// same accumulator; serializes as `reasoning_content` (the shape the
-    /// resend path / providers accept).
-    #[serde(skip_serializing_if = "Option::is_none", alias = "reasoning")]
+    /// Thinking/chain-of-thought text streamed by the model. Reads from either
+    /// `reasoning_content` (OpenAI/xAI naming) or `reasoning` (synthetic.new's
+    /// OpenAI-compatible naming) so both wire shapes feed the same accumulator;
+    /// serializes as `reasoning_content` (the shape the resend path / providers
+    /// accept). A gateway that sends the same text under BOTH keys says one
+    /// thing twice, so [`ChatChunkDelta::REASONING_KEYS`] folds them rather than
+    /// failing the chunk; text that disagrees between them is an error.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_content: Option<String>,
     /// Tool call deltas. Handles `null` in JSON as empty vec.
     #[serde(
@@ -806,6 +810,47 @@ pub struct ChatChunkDelta {
     pub tool_calls: Vec<ToolCallDelta>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_call_id: Option<String>,
+}
+
+impl ChatChunkDelta {
+    /// The keys [`reasoning_content`](Self::reasoning_content) is read under.
+    /// The first is what this type writes; the rest are accepted on input only.
+    pub const REASONING_KEYS: Aliases = Aliases::new("reasoning_content", &["reasoning"]);
+}
+
+/// `ChatChunkDelta` as it arrives on the wire, with each key spelling its own
+/// field. It exists so a chunk naming both reasoning keys folds them under
+/// [`ChatChunkDelta::REASONING_KEYS`] instead of tripping serde's
+/// duplicate-field check, which rejects a second key whatever its value.
+#[derive(Debug, Default, Deserialize)]
+struct ChatChunkDeltaWire {
+    #[serde(default)]
+    role: Option<Role>,
+    #[serde(default)]
+    content: Option<String>,
+    #[serde(default)]
+    reasoning_content: Option<String>,
+    #[serde(default)]
+    reasoning: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_null_default")]
+    tool_calls: Vec<ToolCallDelta>,
+    #[serde(default)]
+    tool_call_id: Option<String>,
+}
+
+impl TryFrom<ChatChunkDeltaWire> for ChatChunkDelta {
+    type Error = xai_tool_types::AliasConflict;
+
+    fn try_from(wire: ChatChunkDeltaWire) -> Result<Self, Self::Error> {
+        Ok(Self {
+            role: wire.role,
+            content: wire.content,
+            reasoning_content: ChatChunkDelta::REASONING_KEYS
+                .fold(vec![wire.reasoning_content, wire.reasoning])?,
+            tool_calls: wire.tool_calls,
+            tool_call_id: wire.tool_call_id,
+        })
+    }
 }
 
 /// Parameters to control realtime data.
@@ -2049,5 +2094,71 @@ mod tests {
         let inner: &dyn TraceContext = &*cloned_trace;
         let downcast = inner.as_any().downcast_ref::<TestTrace>().unwrap();
         assert_eq!(downcast.0, "trace-data");
+    }
+
+    /// A translating gateway puts the same reasoning text on both spellings in
+    /// every delta. Two copies of one string must not cost the reply.
+    #[test]
+    fn delta_carrying_both_reasoning_spellings_parses_to_one_value() {
+        let delta: ChatChunkDelta =
+            serde_json::from_str(r#"{"reasoning":"We","reasoning_content":"We"}"#)
+                .expect("both spellings, same text");
+        assert_eq!(delta.reasoning_content.as_deref(), Some("We"));
+    }
+
+    #[test]
+    fn delta_reading_either_reasoning_spelling_alone_still_works() {
+        let only_alias: ChatChunkDelta = serde_json::from_str(r#"{"reasoning":"alpha"}"#).unwrap();
+        assert_eq!(only_alias.reasoning_content.as_deref(), Some("alpha"));
+
+        let only_canonical: ChatChunkDelta =
+            serde_json::from_str(r#"{"reasoning_content":"beta"}"#).unwrap();
+        assert_eq!(only_canonical.reasoning_content.as_deref(), Some("beta"));
+    }
+
+    /// Equal text is a duplicate. Different text is a contradiction, and picking
+    /// one side in silence is how a wrong answer reaches the transcript.
+    #[test]
+    fn delta_whose_reasoning_spellings_disagree_is_an_error_naming_the_field() {
+        let err = serde_json::from_str::<ChatChunkDelta>(
+            r#"{"reasoning":"one","reasoning_content":"two"}"#,
+        )
+        .expect_err("conflicting spellings must not parse");
+        let message = err.to_string();
+        assert!(message.contains("reasoning_content"), "{message}");
+        assert!(message.contains("reasoning"), "{message}");
+    }
+
+    /// The chunk shape reported against a real gateway: `reasoning`,
+    /// `reasoning_details` and `reasoning_content` together. The details key is
+    /// the provider's own and is nobody else's business.
+    #[test]
+    fn gateway_chunk_carrying_reasoning_details_and_both_spellings_parses() {
+        let chunk: ChatCompletionChunk = serde_json::from_str(
+            r#"{"id":"chatcmpl-1","object":"chat.completion.chunk","created":1,
+                "model":"m","choices":[{"index":0,"finish_reason":null,"delta":{
+                    "role":"assistant","reasoning":"We",
+                    "reasoning_details":[{"format":"text","text":"We"}],
+                    "reasoning_content":"We"}}]}"#,
+        )
+        .expect("the reported gateway chunk must parse");
+        assert_eq!(
+            chunk.choices[0].delta.reasoning_content.as_deref(),
+            Some("We")
+        );
+    }
+
+    #[test]
+    fn delta_serializes_the_canonical_reasoning_key_and_never_the_alias() {
+        let json = serde_json::to_value(ChatChunkDelta {
+            reasoning_content: Some("We".into()),
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(
+            json.get("reasoning_content").and_then(|v| v.as_str()),
+            Some("We")
+        );
+        assert!(json.get("reasoning").is_none(), "{json}");
     }
 }

@@ -1,10 +1,12 @@
 //! Canonical, extensible tool types.
+mod alias;
 mod ext;
 mod schema_utils;
 pub mod serde_lenient;
 mod task;
 mod types;
 
+pub use alias::{AliasConflict, Aliases, WIRED, WireAlias};
 pub use ext::Extensions;
 pub use schema_utils::parse_arguments_from_schema_lossy;
 pub use serde_lenient::{

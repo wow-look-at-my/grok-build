@@ -13892,6 +13892,7 @@ dependencies = [
  "xai-grok-compaction",
  "xai-grok-tools",
  "xai-token-estimation",
+ "xai-tool-types",
 ]
 
 [[package]]
