@@ -1,5 +1,11 @@
 # Changelog
 
+# Unreleased
+
+## Features
+
+- Worktrees grok creates now live inside the repository, under `.grok/worktrees/<name>`, instead of under `~/.grok/worktrees`; checkouts made by earlier releases stay where they are and keep working
+
 # 1.0.0 — 2026-08-07
 
 ## Features
