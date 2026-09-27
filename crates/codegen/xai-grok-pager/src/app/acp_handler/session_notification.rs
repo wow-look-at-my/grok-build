@@ -1259,6 +1259,21 @@ pub(super) fn handle_session_notification(notif: &acp::ExtNotification, app: &mu
                     slow_for: slow_for_ms.map(std::time::Duration::from_millis),
                 })
         }
+        XaiSessionUpdate::ThinkingSummary {
+            stream_start_ms,
+            summary,
+        } => {
+            // Written by a side call that starts when its model call ends, so
+            // this arrives after the thinking block it describes has stopped
+            // running, and on a reload it is replayed right behind that block's
+            // own persisted chunks. It finds its block by the call's stream
+            // start, which is why it is not attached to whatever is current.
+            agent.session.tracker.set_thinking_summary(
+                &mut agent.scrollback,
+                stream_start_ms,
+                &summary,
+            )
+        }
         _ => {
             tracing::trace!(
                 "Ignoring {}: {:?}",
@@ -1462,21 +1477,28 @@ pub(super) fn apply_session_event(
             tokens_before,
             tokens_after,
             elapsed_ms,
+            breakdown,
+            report_path,
             ..
         } => {
             tracing::info!("Auto-compact completed: {tokens_after} tokens after");
             session.set_compaction_activity(None);
             session.compact_held_prompt = None;
+            let detail = crate::scrollback::blocks::CompactionDetail {
+                breakdown: breakdown.clone(),
+                report_path: report_path.clone(),
+            };
             if session.loading_replay {
                 scrollback.push_block(RenderBlock::session_event(
                     SessionEvent::CompactionCompleted {
                         tokens_before: *tokens_before,
                         tokens_after: *tokens_after,
                         elapsed_ms: *elapsed_ms,
+                        detail,
                     },
                 ));
             } else {
-                session.defer_compaction(*tokens_before, *tokens_after, *elapsed_ms);
+                session.defer_compaction(*tokens_before, *tokens_after, *elapsed_ms, detail);
             }
             true
         }

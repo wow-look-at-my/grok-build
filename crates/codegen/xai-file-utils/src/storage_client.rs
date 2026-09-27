@@ -369,32 +369,22 @@ mod retry_status_tests {
 /// routing + obfstr-protected literals only live in the shell impl.
 pub struct StaticGrokAuth {
     pub user_token: Option<String>,
-    pub deployment_key: Option<String>,
 }
 
 impl StaticGrokAuth {
     pub fn new(user_token: Option<String>) -> Self {
-        Self {
-            user_token,
-            deployment_key: None,
-        }
+        Self { user_token }
     }
 
-    /// Returns the bearer that `apply` will put on the wire (deployment_key
-    /// first, else user_token). Used by callers that need to wire the same
-    /// bearer into a `StaticAuthCredentialProvider` snapshot for attribution.
+    /// Returns the bearer that `apply` will put on the wire.
     pub fn wire_bearer(&self) -> Option<String> {
-        self.deployment_key
-            .clone()
-            .or_else(|| self.user_token.clone())
+        self.user_token.clone()
     }
 }
 
 impl xai_grok_auth::HttpAuth for StaticGrokAuth {
     fn apply(&self, builder: reqwest::RequestBuilder, _base_url: &str) -> reqwest::RequestBuilder {
-        if let Some(ref key) = self.deployment_key {
-            builder.header("Authorization", format!("Bearer {}", key))
-        } else if let Some(ref token) = self.user_token {
+        if let Some(ref token) = self.user_token {
             builder
                 .header("Authorization", format!("Bearer {}", token))
                 .header("X-XAI-Token-Auth", "xai-grok-cli")
@@ -408,14 +398,8 @@ impl xai_grok_auth::HttpAuth for StaticGrokAuth {
 mod static_grok_auth_tests {
     use super::StaticGrokAuth;
 
-    /// Deployment key must win over the user token (incl. the empty one the
-    /// deployment-key path supplies); falls back to the user token otherwise.
     #[test]
-    fn wire_bearer_prefers_deployment_key_then_falls_back_to_user_token() {
-        let mut deployment = StaticGrokAuth::new(Some(String::new()));
-        deployment.deployment_key = Some("deploy-key".to_string());
-        assert_eq!(deployment.wire_bearer().as_deref(), Some("deploy-key"));
-
+    fn wire_bearer_is_the_user_token() {
         let oauth = StaticGrokAuth::new(Some("oauth-token".to_string()));
         assert_eq!(oauth.wire_bearer().as_deref(), Some("oauth-token"));
     }

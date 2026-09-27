@@ -2276,4 +2276,5 @@ mod background_tasks;
 mod models;
 mod mcp;
 mod git_head;
+mod thinking_summary;
 mod version_mismatch;

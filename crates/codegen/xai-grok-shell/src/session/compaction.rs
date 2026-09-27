@@ -484,6 +484,12 @@ const COMPACT_FAILURE_DETAIL_LIMIT: usize = 400;
 /// Join the fixed advice for a [`SuppressReason`] to what the provider said.
 /// The advice states what to DO. The detail states what went wrong, and it is
 /// the only half that names the field, the item or the id that has to be fixed.
+/// Where a finished compaction's report went, and its one-line breakdown.
+#[derive(Debug, Default)]
+pub(crate) struct CompactionReportRef {
+    pub report_path: Option<String>,
+    pub breakdown: Option<String>,
+}
 fn compose_compact_failure(advice: &str, detail: &str) -> String {
     let detail = detail.trim();
     if detail.is_empty() {
@@ -643,7 +649,7 @@ impl SessionActor {
             .unwrap_or(DEFAULT_CONTEXT_WINDOW);
         self.maybe_pre_compaction_flush(total_tokens, context_window, "pre_compaction")
             .await;
-        if let Err(e) = self
+        let report = match self
             .run_compact_inner(
                 user_context,
                 None,
@@ -651,11 +657,14 @@ impl SessionActor {
             )
             .await
         {
-            let span = tracing::Span::current();
-            span.record("success", false);
-            span.record("error", e.to_string().as_str());
-            return Err(e);
-        }
+            Ok(report) => report,
+            Err(e) => {
+                let span = tracing::Span::current();
+                span.record("success", false);
+                span.record("error", e.to_string().as_str());
+                return Err(e);
+            }
+        };
         use crate::extensions::notification::SessionUpdate as XaiSessionUpdate;
         let tokens_after = self.chat_state_handle.get_total_tokens().await;
         let span = tracing::Span::current();
@@ -666,6 +675,8 @@ impl SessionActor {
             tokens_after,
             elapsed_ms: None,
             summary_preview: None,
+            breakdown: report.breakdown,
+            report_path: report.report_path,
         })
         .await;
         Ok(())
@@ -1033,7 +1044,7 @@ impl SessionActor {
         user_context: Option<String>,
         auto_continue: Option<crate::extensions::notification::AutoContinueInfo>,
         trigger: xai_grok_telemetry::events::CompactionTrigger,
-    ) -> Result<(), acp::Error> {
+    ) -> Result<CompactionReportRef, acp::Error> {
         let (cancel, _cancel_scope) = self.compaction.cancel.enter();
         let tokens_before = self.chat_state_handle.get_total_tokens().await;
         tracing::Span::current().record("compaction_tokens_before", tokens_before as i64);
@@ -1301,7 +1312,10 @@ impl SessionActor {
                             crate::session::helpers::session_compact::COMPACT_CANCELLED_MSG,
                         )
                     {
-                        return self.emit_compact_cancelled(auto_trigger).await;
+                        return self
+                            .emit_compact_cancelled(auto_trigger)
+                            .await
+                            .map(|()| CompactionReportRef::default());
                     }
                     if context_overflow {
                         let next_stage = match input_stage {
@@ -1448,6 +1462,7 @@ impl SessionActor {
                 started_at,
             );
         }
+        let two_pass_used = two_pass_output.is_some();
         let compact_output = match compact_summary {
             Some(_) => match two_pass_output {
                 Some(tp) => tp,
@@ -1844,12 +1859,15 @@ impl SessionActor {
                 _ => None,
             });
         if cancel.is_cancelled() {
-            return self.emit_compact_cancelled(auto_trigger).await;
+            return self
+                .emit_compact_cancelled(auto_trigger)
+                .await
+                .map(|()| CompactionReportRef::default());
         }
         self.persist_compaction_segment(&segment_messages, &generate_session_compact);
         self.chat_state_handle
             .record_compaction_at(prompt_index_at_compaction);
-        self.persist_compaction_checkpoint(
+        let checkpoint_file = self.persist_compaction_checkpoint(
             &compacted_history,
             prompt_index_at_compaction,
             auto_continue,
@@ -1876,6 +1894,15 @@ impl SessionActor {
             .await
         };
         let new_len = compacted_history.len();
+        // The reseed divides by `estimate_at_last_response`. The report shows
+        // that arithmetic, so read it before the replace resets it.
+        let estimate_at_last_response = self
+            .chat_state_handle
+            .snapshot()
+            .await
+            .map_or(0, |s| s.estimate_at_last_response);
+        let pre_conversation_estimate = xai_chat_state::estimate_conversation_tokens(&conversation);
+        let report_history = compacted_history.clone();
         self.chat_state_handle
             .replace_conversation_for_compaction(compacted_history);
         if self.startup_hints.inherited_prefix_len.is_some() {
@@ -1985,7 +2012,63 @@ impl SessionActor {
             }
         }
         compaction.complete(tokens_after);
-        Ok(())
+        let input_stage_str = if two_pass_used {
+            "two_pass"
+        } else {
+            input_stage.as_str()
+        };
+        let report = crate::session::helpers::compaction_report::render_compaction_report(
+            &crate::session::helpers::compaction_report::CompactionReportInput {
+                trigger: trigger_str,
+                model: &sampling_config.model,
+                input_stage: input_stage_str,
+                tokens_before,
+                estimate_at_last_response,
+                pre_conversation_estimate,
+                history: &report_history,
+                tokens_after,
+                summary: &generate_session_compact,
+                checkpoint_file: Some(&checkpoint_file),
+            },
+        );
+        Ok(self.write_compaction_report(&checkpoint_file, report).await)
+    }
+    /// Write `compaction_reports/<checkpoint id>.md`. A failed write logs an
+    /// error and still returns the breakdown for the scrollback line.
+    async fn write_compaction_report(
+        &self,
+        checkpoint_file: &str,
+        report: crate::session::helpers::compaction_report::CompactionReport,
+    ) -> CompactionReportRef {
+        let dir = crate::session::persistence::session_dir(&self.session_info);
+        // One report per checkpoint, named for it, in a directory of its own.
+        let stem = std::path::Path::new(checkpoint_file)
+            .file_stem()
+            .map_or_else(|| "compaction".into(), |s| s.to_string_lossy().into_owned());
+        let path = dir.join("compaction_reports").join(format!("{stem}.md"));
+        let written = async {
+            if let Some(parent) = path.parent() {
+                tokio::fs::create_dir_all(parent).await?;
+            }
+            tokio::fs::write(&path, report.markdown.as_bytes()).await
+        }
+        .await;
+        let report_path = match written {
+            Ok(()) => Some(path.to_string_lossy().into_owned()),
+            Err(e) => {
+                tracing::error!(
+                    session_id = %self.session_info.id.0,
+                    path = %path.display(),
+                    error = %e,
+                    "compaction: could not write the compaction report"
+                );
+                None
+            }
+        };
+        CompactionReportRef {
+            report_path,
+            breakdown: Some(report.breakdown),
+        }
     }
     /// Check if auto-compact should be triggered based on context window usage.
     /// Returns Some(AutoCompactTriggerInfo) if threshold is reached, None otherwise.
@@ -2260,7 +2343,7 @@ impl SessionActor {
             .await;
         let elapsed_ms = compact_start.elapsed().as_millis() as i64;
         match result {
-            Ok(()) => {
+            Ok(report) => {
                 let tokens_after = self.chat_state_handle.get_total_tokens().await;
                 let span = tracing::Span::current();
                 span.record("post_tokens", tokens_after as i64);
@@ -2270,6 +2353,8 @@ impl SessionActor {
                     tokens_after,
                     elapsed_ms: Some(elapsed_ms),
                     summary_preview: None,
+                    breakdown: report.breakdown,
+                    report_path: report.report_path,
                 })
                 .await;
                 Ok(())
@@ -2392,7 +2477,7 @@ impl SessionActor {
         prompt_index_at_compaction: usize,
         auto_continue: Option<crate::extensions::notification::AutoContinueInfo>,
         original_user_info: Option<String>,
-    ) {
+    ) -> String {
         use crate::extensions::notification::{
             CompactionCheckpointFile, CompactionCheckpointInfo, SessionUpdate as XaiSessionUpdate,
         };
@@ -2419,7 +2504,7 @@ impl SessionActor {
         let info = CompactionCheckpointInfo {
             checkpoint_id,
             prompt_index_at_compaction,
-            checkpoint_file,
+            checkpoint_file: checkpoint_file.clone(),
             auto_continue,
             schema_version: 1,
             created_at,
@@ -2429,6 +2514,7 @@ impl SessionActor {
             prompt_index_at_compaction,
             "Persisted compaction checkpoint"
         );
+        checkpoint_file
     }
 }
 #[cfg(test)]

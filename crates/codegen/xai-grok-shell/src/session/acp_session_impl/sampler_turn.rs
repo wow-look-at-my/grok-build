@@ -503,13 +503,7 @@ impl SessionActor {
             stream_tool_calls: cfg.stream_tool_calls.unwrap_or(false),
             idle_timeout_secs: None,
             client_identifier: self.client_identifier.clone(),
-            deployment_id: if codex_backend {
-                None
-            } else {
-                crate::managed_config::resolve_deployment_id(
-                    crate::managed_config::resolve_deployment_key().as_deref(),
-                )
-            },
+            deployment_id: None,
             user_id: if codex_backend {
                 None
             } else {
@@ -684,7 +678,7 @@ impl SessionActor {
     }
     /// Resolve a standalone aux-model `SamplerConfig` for `slug` via the shared
     /// catalog routing (Tier-1 catalog creds / Tier-2 xAI-proxy via session token
-    /// / `XAI_API_KEY` / deployment key), gathering the session-local auth context
+    /// / `XAI_API_KEY`), gathering the session-local auth context
     /// once. Shared by image-describe and the classifier so the gather can't
     /// drift. `None` ⇒ caller falls back to the session model.
     pub(super) async fn resolve_aux_sampler_config(

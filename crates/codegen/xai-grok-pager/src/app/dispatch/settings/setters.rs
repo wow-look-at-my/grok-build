@@ -448,6 +448,34 @@ pub(in crate::app::dispatch) fn set_show_thinking_blocks(
     }]
 }
 
+pub(super) fn set_thinking_summaries_inner(app: &mut AppView, new: bool) {
+    app.current_ui.thinking_summaries = Some(new);
+}
+
+/// SHARED: `[ui].thinking_summaries` via `Effect::PersistSetting`.
+///
+/// Restart-relevant: a session resolves the switch once when it is spawned, so
+/// this changes what the next session does. Summaries already drawn stay where
+/// they are: they are part of the transcript, not a live view of the setting.
+pub(in crate::app::dispatch) fn set_thinking_summaries(
+    app: &mut AppView,
+    new: bool,
+) -> Vec<Effect> {
+    let prev = app.current_ui.thinking_summaries_enabled();
+    if prev == new {
+        return vec![];
+    }
+    set_thinking_summaries_inner(app, new);
+    refresh_open_settings_modals(app);
+    tracing::info!(target: "settings", key = "thinking_summaries", value = new, "setting changed");
+    app.show_toast(&save_success_toast("Thinking summaries", new));
+    vec![Effect::PersistSetting {
+        key: "thinking_summaries",
+        value: crate::settings::SettingValue::Bool(new),
+        rollback_value: crate::settings::SettingValue::Bool(prev),
+    }]
+}
+
 pub(super) fn set_group_tool_verbs_inner(app: &mut AppView, new: bool) {
     crate::appearance::cache::set_group_tool_verbs(new);
     // Expansion ids describe the OLD grouping shape; drop them so stale ids

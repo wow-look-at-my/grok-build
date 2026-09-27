@@ -215,15 +215,14 @@ impl RefreshableSpanExporter {
         })
     }
 }
-/// Stamp `deployment.id`/`api_key.id`/`organization.id`/`team.id`/`user.id`
-/// per-export (they're only known after auth is wired, post-init — stamping at
+/// Stamp `api_key.id`/`organization.id`/`team.id`/`user.id` per-export (they're
+/// only known after auth is wired.
 /// init would leave them blank for a session that authenticates mid-run).
 fn resource_with_tenant_id(
     base: opentelemetry_sdk::Resource,
     snapshot: &xai_grok_auth::CredentialSnapshot,
 ) -> opentelemetry_sdk::Resource {
     let tenant_attrs: Vec<opentelemetry::KeyValue> = [
-        ("deployment.id", &snapshot.deployment_id),
         ("api_key.id", &snapshot.api_key_id),
         ("organization.id", &snapshot.organization_id),
         ("team.id", &snapshot.team_id),
@@ -605,21 +604,7 @@ mod tests {
             .with_attributes([opentelemetry::KeyValue::new("user.id", "")])
             .build();
         let plain = resource_with_tenant_id(base.clone(), &CredentialSnapshot::default());
-        assert!(plain.get(&Key::from("deployment.id")).is_none());
         assert!(plain.get(&Key::from("api_key.id")).is_none());
-        let snap = CredentialSnapshot {
-            deployment_id: Some("dep-7b97".into()),
-            ..Default::default()
-        };
-        let r = resource_with_tenant_id(base.clone(), &snap);
-        assert_eq!(
-            r.get(&Key::from("deployment.id")).map(|v| v.to_string()),
-            Some("dep-7b97".to_string())
-        );
-        assert!(
-            r.get(&Key::from("user.id")).is_some(),
-            "base attrs preserved"
-        );
         let snap = CredentialSnapshot {
             api_key_id: Some("ak-0c2b".into()),
             ..Default::default()
@@ -628,6 +613,10 @@ mod tests {
         assert_eq!(
             r.get(&Key::from("api_key.id")).map(|v| v.to_string()),
             Some("ak-0c2b".to_string())
+        );
+        assert!(
+            r.get(&Key::from("user.id")).is_some(),
+            "base attrs preserved"
         );
         let snap = CredentialSnapshot {
             organization_id: Some("org-abc".into()),
@@ -648,7 +637,7 @@ mod tests {
             Some("user-42".to_string())
         );
         let snap = CredentialSnapshot {
-            deployment_id: Some("dep-9".into()),
+            api_key_id: Some("ak-9".into()),
             user_id: Some(String::new()),
             organization_id: Some(String::new()),
             team_id: Some(String::new()),
@@ -660,8 +649,8 @@ mod tests {
         assert!(r.get(&Key::from("organization.id")).is_none());
         assert!(r.get(&Key::from("team.id")).is_none());
         assert_eq!(
-            r.get(&Key::from("deployment.id")).map(|v| v.to_string()),
-            Some("dep-9".to_string())
+            r.get(&Key::from("api_key.id")).map(|v| v.to_string()),
+            Some("ak-9".to_string())
         );
     }
     #[test]

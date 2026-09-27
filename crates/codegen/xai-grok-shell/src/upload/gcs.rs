@@ -64,17 +64,11 @@ impl StorageConfig for TraceExportConfigWithAuth {
     }
     fn proxy_credentials(&self) -> Option<Arc<dyn AuthCredentialProvider>> {
         let am = self.auth_manager.as_ref()?;
-        let UploadMethod::Proxy {
-            deployment_key,
-            alpha_test_key,
-            ..
-        } = &self.inner.upload_method
-        else {
+        let UploadMethod::Proxy { alpha_test_key, .. } = &self.inner.upload_method else {
             return None;
         };
         Some(Arc::new(ShellAuthCredentialProvider::new(
             am.clone(),
-            deployment_key.clone(),
             alpha_test_key.clone(),
         )))
     }

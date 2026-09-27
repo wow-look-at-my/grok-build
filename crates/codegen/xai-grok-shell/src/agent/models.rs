@@ -25,19 +25,16 @@ use xai_grok_sampling_types::{ReasoningEffort, ReasoningEffortOption};
 pub(crate) enum ModelFetchAuth {
     Session,
     ApiKey,
-    Deployment,
     CustomEndpoint,
 }
 
 impl ModelFetchAuth {
-    /// custom_endpoint > session > deployment > API key.
+    /// custom_endpoint > session > API key.
     pub(crate) fn resolve(endpoints: &config::EndpointsConfig, has_cached_session: bool) -> Self {
         if endpoints.has_custom_endpoint() {
             Self::CustomEndpoint
         } else if has_cached_session {
             Self::Session
-        } else if endpoints.deployment_key.is_some() {
-            Self::Deployment
         } else if crate::agent::auth_method::has_xai_api_key_env() {
             Self::ApiKey
         } else {
@@ -49,7 +46,6 @@ impl ModelFetchAuth {
         match self {
             Self::CustomEndpoint | Self::ApiKey => CacheAuthMethod::ApiKey,
             Self::Session => CacheAuthMethod::Session,
-            Self::Deployment => CacheAuthMethod::Deployment,
         }
     }
 }
@@ -59,7 +55,6 @@ impl ModelFetchAuth {
 pub(crate) enum CacheAuthMethod {
     Session,
     ApiKey,
-    Deployment,
 }
 
 pub(crate) fn task_model_error_for_catalog(
@@ -1174,9 +1169,6 @@ impl ModelsManager {
             credentials,
             config.endpoints.alpha_test_key.clone(),
             config.client_version.clone(),
-            crate::managed_config::resolve_deployment_id(
-                config.endpoints.deployment_key.as_deref(),
-            ),
             None,
         )
     }

@@ -1,5 +1,6 @@
 pub mod chat;
 pub mod compaction_context;
+pub mod compaction_report;
 pub mod full_replace_compaction;
 pub mod memory_context;
 pub mod memory_flush;

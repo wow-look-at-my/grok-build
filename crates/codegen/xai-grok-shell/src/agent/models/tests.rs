@@ -371,10 +371,10 @@ async fn etag_refresh_is_bounded_and_single_flighted() {
 
 #[tokio::test(start_paused = true)]
 async fn first_catalog_wait_unblocks_on_fetch_and_skips_dead_dwell() {
-    // Deployment auth: a fetch can succeed without a session, so the wait
-    // dwells regardless of ambient API-key env.
+    // A custom models endpoint: a fetch can succeed without a session, so
+    // the wait dwells regardless of ambient API-key env.
     let mgr = cold_manager(
-        config_from_toml("[endpoints]\ndeployment_key = \"deploy-key\""),
+        config_from_toml("[endpoints]\nmodels_base_url = \"https://models.example/v1\""),
         Arc::new(SlowEndpoint {
             catalog: make_prefetched(&["grok-4"]),
             delay: crate::http::STARTUP_FETCH_TIMEOUT / 2,
@@ -418,7 +418,7 @@ async fn first_catalog_wait_unblocks_on_fetch_and_skips_dead_dwell() {
 #[tokio::test(start_paused = true)]
 async fn first_catalog_wait_unblocks_on_failed_fetch() {
     let mgr = cold_manager(
-        config_from_toml("[endpoints]\ndeployment_key = \"deploy-key\""),
+        config_from_toml("[endpoints]\nmodels_base_url = \"https://models.example/v1\""),
         Arc::new(FailingEndpoint),
     );
     let budget = crate::http::STARTUP_AUTH_REFRESH_TIMEOUT + crate::http::STARTUP_FETCH_TIMEOUT;
@@ -434,7 +434,7 @@ async fn first_catalog_wait_unblocks_on_failed_fetch() {
 #[tokio::test(start_paused = true)]
 async fn first_catalog_wait_is_bounded() {
     let mgr = cold_manager(
-        config_from_toml("[endpoints]\ndeployment_key = \"deploy-key\""),
+        config_from_toml("[endpoints]\nmodels_base_url = \"https://models.example/v1\""),
         Arc::new(HangingEndpoint),
     );
     let budget = crate::http::STARTUP_AUTH_REFRESH_TIMEOUT + crate::http::STARTUP_FETCH_TIMEOUT;
@@ -465,7 +465,7 @@ async fn first_catalog_wait_skips_doomed_signed_out_fetch() {
 #[tokio::test(start_paused = true)]
 async fn first_catalog_wait_observes_inline_fetch() {
     let mgr = cold_manager(
-        config_from_toml("[endpoints]\ndeployment_key = \"deploy-key\""),
+        config_from_toml("[endpoints]\nmodels_base_url = \"https://models.example/v1\""),
         Arc::new(SlowEndpoint {
             catalog: make_prefetched(&["grok-4"]),
             delay: crate::http::STARTUP_FETCH_TIMEOUT / 2,
@@ -482,7 +482,7 @@ async fn first_catalog_wait_observes_inline_fetch() {
 #[tokio::test(start_paused = true)]
 async fn new_fetch_attempt_supersedes_failed_latch() {
     let mgr = cold_manager(
-        config_from_toml("[endpoints]\ndeployment_key = \"deploy-key\""),
+        config_from_toml("[endpoints]\nmodels_base_url = \"https://models.example/v1\""),
         Arc::new(FailingEndpoint),
     );
     mgr.fetch_and_apply_inner(/*remote_fetch_enabled*/ true)
@@ -2121,41 +2121,6 @@ fn resolve_falls_back_to_session_when_nothing_set() {
     );
 }
 
-#[test]
-#[serial]
-fn resolve_deployment_key_when_no_session_or_api_key() {
-    let _unset = EnvGuard::unset("XAI_API_KEY");
-    let _unset_legacy = EnvGuard::unset("GROK_CODE_XAI_API_KEY");
-    let endpoints = config::EndpointsConfig {
-        deployment_key: Some("deploy-key".to_owned()),
-        ..config::EndpointsConfig::default()
-    };
-    assert_eq!(
-        ModelFetchAuth::resolve(&endpoints, false),
-        ModelFetchAuth::Deployment,
-    );
-}
-
-#[test]
-#[serial]
-fn resolve_deployment_key_outranks_ambient_api_key() {
-    let _key = EnvGuard::set("XAI_API_KEY", "stray-env-key");
-    let endpoints = config::EndpointsConfig {
-        deployment_key: Some("deploy-key".to_owned()),
-        ..config::EndpointsConfig::default()
-    };
-    assert_eq!(
-        ModelFetchAuth::resolve(&endpoints, false),
-        ModelFetchAuth::Deployment,
-        "managed deployment_key should outrank an ambient XAI_API_KEY",
-    );
-    assert_eq!(
-        ModelFetchAuth::resolve(&endpoints, true),
-        ModelFetchAuth::Session,
-        "an active session should still win over a managed deployment",
-    );
-}
-
 // ── remote_fetch gate: resolve_prefetch_env_from_parts ───────────
 
 #[test]
@@ -2163,7 +2128,6 @@ fn resolve_deployment_key_outranks_ambient_api_key() {
 fn prefetch_env_none_when_remote_fetch_disabled_despite_credentials() {
     let _key = EnvGuard::set("XAI_API_KEY", "stray-env-key");
     let endpoints = config::EndpointsConfig {
-        deployment_key: Some("deploy-key".to_owned()),
         models_base_url: Some("https://custom.example.com".to_owned()),
         ..config::EndpointsConfig::default()
     };
@@ -2174,7 +2138,7 @@ fn prefetch_env_none_when_remote_fetch_disabled_despite_credentials() {
     );
     assert!(
         resolve_prefetch_env_from_parts(None, endpoints, false).is_none(),
-        "API key / deployment key / custom endpoint must not re-arm it either",
+        "API key / custom endpoint must not re-arm it either",
     );
 }
 
@@ -2184,7 +2148,7 @@ fn prefetch_env_resolves_when_remote_fetch_enabled() {
     let _unset = EnvGuard::unset("XAI_API_KEY");
     let _unset_legacy = EnvGuard::unset("GROK_CODE_XAI_API_KEY");
     let endpoints = config::EndpointsConfig {
-        deployment_key: Some("deploy-key".to_owned()),
+        models_base_url: Some("https://custom.example.com".to_owned()),
         ..config::EndpointsConfig::default()
     };
     assert!(resolve_prefetch_env_from_parts(None, endpoints, true).is_some());
@@ -2784,7 +2748,6 @@ fn resolve_context_window_drives_auto_compaction_threshold() {
         None,
         None,
         None,
-        None,
     );
     assert_eq!(sc.context_window, 1_000_000);
 
@@ -2876,7 +2839,6 @@ fn production_resolve_model_list_backfills_window_per_slugs_into_compaction() {
             auth_type: xai_chat_state::AuthType::ApiKey,
             auth_scheme: xai_grok_sampler::AuthScheme::None,
         },
-        None,
         None,
         None,
         None,
