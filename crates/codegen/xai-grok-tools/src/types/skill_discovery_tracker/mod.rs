@@ -1383,6 +1383,30 @@ mod tests {
         assert!(text.contains("desc for review"));
     }
 
+    /// A window with no `usize` char count budgets at the default rather than
+    /// at a saturated count. A saturated budget truncates nothing, so the
+    /// listing would carry every description the session has.
+    #[test]
+    fn budget_cap_falls_back_to_the_default_for_an_unrepresentable_window() {
+        let mut mgr = SkillManager::new();
+        let skills: Vec<SkillInfo> = (0..2_000)
+            .map(|i| {
+                let mut s = make_skill(&format!("skill-{i}"), &format!("/s/{i}/SKILL.md"));
+                s.description = "A".repeat(500);
+                s
+            })
+            .collect();
+        mgr.seed(None, None, skills, None, Some(u64::MAX), None);
+        let r = mgr.take_pending_reconciliation().unwrap();
+        let text = r.effects.system_reminder.unwrap();
+        let default_budget = listing::DEFAULT_CHAR_BUDGET;
+        assert!(
+            text.len() <= default_budget + 100,
+            "listing should be near the default budget ({default_budget}), got {} chars",
+            text.len()
+        );
+    }
+
     // ── XML format mode tests ───────────────────────────────────
 
     #[test]

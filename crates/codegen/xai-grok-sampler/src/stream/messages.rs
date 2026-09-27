@@ -61,14 +61,15 @@ fn wire_cost_ticks(
     cost: Option<&xai_grok_sampling_types::UsageCost>,
 ) -> Option<i64> {
     xai_grok_sampling_types::reported_cost_ticks(ticks).or_else(|| {
-        xai_grok_sampling_types::usd_float_to_ticks(cost.map(|c| c.as_usd_float()))
-            .unwrap_or_else(|err| {
+        xai_grok_sampling_types::usd_float_to_ticks(cost.map(|c| c.as_usd_float())).unwrap_or_else(
+            |err| {
                 tracing::error!(
                     error = %err,
                     "gateway reported a usage cost with no tick form; leaving the call unpriced"
                 );
                 None
-            })
+            },
+        )
     })
 }
 

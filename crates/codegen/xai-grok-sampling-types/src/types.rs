@@ -2051,15 +2051,9 @@ mod tests {
     #[test]
     fn usd_float_to_ticks_converts_correctly() {
         // $0.0000416 -> round(0.0000416 * 1e10) = 416_000
-        assert_eq!(
-            usd_float_to_ticks(Some(0.0000416)).unwrap(),
-            Some(416_000)
-        );
+        assert_eq!(usd_float_to_ticks(Some(0.0000416)).unwrap(), Some(416_000));
         // $1.00 -> 1e10 ticks
-        assert_eq!(
-            usd_float_to_ticks(Some(1.0)).unwrap(),
-            Some(10_000_000_000)
-        );
+        assert_eq!(usd_float_to_ticks(Some(1.0)).unwrap(), Some(10_000_000_000));
     }
 
     #[test]
@@ -2113,8 +2107,8 @@ mod tests {
 
     #[test]
     fn ticks_from_usd_errors_naming_the_field_and_value() {
-        let err = ticks_from_usd("model_pricing", 1e18)
-            .expect_err("1e18 USD has no i64 tick count");
+        let err =
+            ticks_from_usd("model_pricing", 1e18).expect_err("1e18 USD has no i64 tick count");
         assert_eq!(
             err,
             CostTicksOverflow {
