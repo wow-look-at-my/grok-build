@@ -126,7 +126,7 @@ impl ChatStateActor {
                         debug!("ChatStateActor shutting down: all handles dropped");
                         break;
                     };
-                    self.handle_command(cmd).await;
+                    self.run_command(cmd).await;
                 }
             }
         }
@@ -134,10 +134,10 @@ impl ChatStateActor {
 
     /// Process one command, so a round that unwinds does not end the actor.
     ///
-    /// The actor is the only writer of the session's conversation, and every
-    /// handle's ack is answered by it. A command whose round panicked took the
-    /// actor with it: the round's own ack closed, and so did every ack after
-    /// it, for the rest of the session.
+    /// The actor is the only writer of the session's conversation and the only
+    /// answerer of a handle's ack, so an actor lost to one command closes every
+    /// ack after it for the rest of the session. The panicked round's own ack
+    /// still closes: the sender unwinds with the command.
     async fn run_command(&mut self, cmd: ChatStateCommand) {
         match AssertUnwindSafe(self.handle_command(cmd))
             .catch_unwind()

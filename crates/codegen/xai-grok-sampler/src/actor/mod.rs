@@ -9,6 +9,7 @@ pub(crate) mod request_task;
 pub(crate) mod state;
 
 use std::any::Any;
+use std::future::Future;
 use std::panic::AssertUnwindSafe;
 
 use futures_util::FutureExt;
@@ -39,6 +40,33 @@ pub struct SamplerActor {
     tasks: JoinSet<RequestId>,
 }
 
+/// Spawn one request round onto the actor's set, reporting its id even when the
+/// round unwinds.
+///
+/// The actor clears `active_requests` from the id a finished round returns, and
+/// a `JoinError` carries none. Spawned bare, a round that panicked would leave
+/// `IsActive` answering true and `ActiveCount` counting a request that stopped
+/// existing, for the rest of the sampler's life.
+fn spawn_tracked_round(
+    tasks: &mut JoinSet<RequestId>,
+    tracked_id: RequestId,
+    task: impl Future<Output = RequestId> + Send + 'static,
+) {
+    tasks.spawn(async move {
+        match AssertUnwindSafe(task).catch_unwind().await {
+            Ok(request_id) => request_id,
+            Err(panic) => {
+                tracing::error!(
+                    request_id = tracked_id.as_str(),
+                    panic = %panic_payload(&*panic),
+                    "sampling request task panicked; its completion is answered as a dropped sender"
+                );
+                tracked_id
+            }
+        }
+    });
+}
+
 /// Text describing what a panic carried, for a log line.
 ///
 /// The two payloads `panic!` itself produces are a `&'static str` (a literal)
@@ -52,6 +80,54 @@ fn panic_payload(panic: &(dyn Any + Send)) -> String {
         return text.clone();
     }
     "panicked with a payload that is not a message".to_string()
+}
+
+#[cfg(test)]
+mod round_tests {
+    use super::*;
+
+    /// A round that unwinds is reported by the set as a finished id, not as a
+    /// join failure. That is what lets the actor drop the request from
+    /// `active_requests`: `JoinError` carries no id to remove.
+    #[tokio::test]
+    async fn a_panicking_round_still_reports_its_id() {
+        let mut tasks: JoinSet<RequestId> = JoinSet::new();
+        let id = RequestId::random();
+        let expected = id.clone();
+        spawn_tracked_round(&mut tasks, id, async {
+            tokio::task::yield_now().await;
+            panic!("the request round died");
+        });
+
+        let joined = tokio::time::timeout(std::time::Duration::from_secs(5), tasks.join_next())
+            .await
+            .expect("the round must finish, one way or another")
+            .expect("a round was in the set");
+        let reported = joined.expect("a panicked round must report its id, not fail its join");
+        assert_eq!(reported, expected);
+    }
+
+    /// The success path hands back whatever the round returned.
+    #[tokio::test]
+    async fn a_completed_round_reports_its_own_id() {
+        let mut tasks: JoinSet<RequestId> = JoinSet::new();
+        let tracked = RequestId::random();
+        let returned = RequestId::random();
+        let expected = returned.clone();
+        spawn_tracked_round(&mut tasks, tracked, async move {
+            tokio::task::yield_now().await;
+            returned
+        });
+
+        let joined = tokio::time::timeout(std::time::Duration::from_secs(5), tasks.join_next())
+            .await
+            .expect("the round must finish")
+            .expect("a round was in the set");
+        assert_eq!(
+            joined.expect("the round completed").as_str(),
+            expected.as_str()
+        );
+    }
 }
 
 impl SamplerActor {
@@ -157,14 +233,13 @@ impl SamplerActor {
                 image_input_rejections
                     .strip_if_rejected(&effective_config.model, &mut request_inner);
                 // The id is what the actor needs back to clear
-                // `active_requests`. A bare spawn of a round that unwound fails
-                // its join, and a `JoinError` carries no id, so the entry would
-                // stay: `IsActive` and `ActiveCount` keep reporting a request
-                // that stopped existing. Guarded, the round always returns its
-                // id, and the panic is named with it.
+                // `active_requests`, so the round is spawned through
+                // `spawn_tracked_round` rather than bare.
                 let tracked_id = request_id.clone();
-                self.tasks.spawn(async move {
-                    let task = request_task::run_request_task(
+                spawn_tracked_round(
+                    &mut self.tasks,
+                    tracked_id,
+                    request_task::run_request_task(
                         request_id,
                         request_inner,
                         effective_config,
@@ -173,19 +248,8 @@ impl SamplerActor {
                         cancel_token,
                         completion_tx,
                         image_input_rejections,
-                    );
-                    match AssertUnwindSafe(task).catch_unwind().await {
-                        Ok(request_id) => request_id,
-                        Err(panic) => {
-                            tracing::error!(
-                                request_id = tracked_id.as_str(),
-                                panic = %crate::actor::panic_payload(&*panic),
-                                "sampling request task panicked; its completion is answered as a dropped sender"
-                            );
-                            tracked_id
-                        }
-                    }
-                });
+                    ),
+                );
             }
             SamplerCommand::Cancel { request_id } => {
                 self.state.cancel(&request_id);

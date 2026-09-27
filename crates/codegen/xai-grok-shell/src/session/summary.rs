@@ -83,28 +83,30 @@ impl SummaryGenerator {
                     "session title generation",
                     async move {
                         let mut title = match sampling_client {
-                        Some(client) => {
-                            generate_session_summary(content.clone(), client, &model).await
-                        }
-                        None => String::new(),
-                    };
-                    if title.trim().is_empty() {
-                        title =
+                            Some(client) => {
+                                generate_session_summary(content.clone(), client, &model).await
+                            }
+                            None => String::new(),
+                        };
+                        if title.trim().is_empty() {
+                            title =
                             crate::session::helpers::session_summary::title_fallback_from_user_text(
                                 &content,
                             );
-                    }
-
-                    // Route the result through the persistence channel. The
-                    // actor persists it (only if the session has no title yet)
-                    // and notifies the client there, so a title rejected for
-                    // racing a manual `/rename` never reaches the client.
-                    match persistence_tx.upgrade() {
-                        Some(tx) => {
-                            let _ = tx.send(PersistenceMsg::GeneratedTitle(title));
                         }
-                        None => tracing::debug!("session closed before its title was generated"),
-                    }
+
+                        // Route the result through the persistence channel. The
+                        // actor persists it (only if the session has no title yet)
+                        // and notifies the client there, so a title rejected for
+                        // racing a manual `/rename` never reaches the client.
+                        match persistence_tx.upgrade() {
+                            Some(tx) => {
+                                let _ = tx.send(PersistenceMsg::GeneratedTitle(title));
+                            }
+                            None => {
+                                tracing::debug!("session closed before its title was generated")
+                            }
+                        }
                     },
                 ));
             }

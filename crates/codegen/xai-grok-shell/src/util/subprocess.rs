@@ -213,27 +213,27 @@ where
     tokio::spawn(xai_grok_tools::util::detached::fire_and_forget(
         "hook child pipe reader",
         async move {
-        let mut sent = 0usize;
-        let mut chunk = [0u8; READ_CHUNK_SIZE];
-        loop {
-            let n = tokio::select! {
-                biased;
-                () = tx.closed() => break,
-                result = pipe.read(&mut chunk) => match result {
-                    Ok(0) | Err(_) => break,
-                    Ok(n) => n,
-                },
-            };
-            let keep = n.min(MAX_CAPTURE_BYTES.saturating_sub(sent));
-            if keep > 0 {
-                if tx.send(chunk[..keep].to_vec()).is_err() {
-                    break;
+            let mut sent = 0usize;
+            let mut chunk = [0u8; READ_CHUNK_SIZE];
+            loop {
+                let n = tokio::select! {
+                    biased;
+                    () = tx.closed() => break,
+                    result = pipe.read(&mut chunk) => match result {
+                        Ok(0) | Err(_) => break,
+                        Ok(n) => n,
+                    },
+                };
+                let keep = n.min(MAX_CAPTURE_BYTES.saturating_sub(sent));
+                if keep > 0 {
+                    if tx.send(chunk[..keep].to_vec()).is_err() {
+                        break;
+                    }
+                    sent += keep;
                 }
-                sent += keep;
+                // Past the cap: keep reading to drain the pipe (never block the child),
+                // discarding the excess.
             }
-            // Past the cap: keep reading to drain the pipe (never block the child),
-            // discarding the excess.
-        }
         },
     ));
     rx
