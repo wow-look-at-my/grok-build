@@ -37,11 +37,9 @@ pub fn truncate_line(line: &str, max_chars: usize) -> Cow<'_, str> {
         .nth(max_chars)
         .map(|(i, _)| i)
         .unwrap_or(line.len());
-    Cow::Owned(format!(
-        "{} [... truncated ({} chars total)]",
-        &line[..end_byte],
-        char_count
-    ))
+    #[allow(clippy::string_slice)] // `char_indices().nth` yields a char boundary
+    let head = &line[..end_byte];
+    Cow::Owned(format!("{head} [... truncated ({char_count} chars total)]"))
 }
 
 /// Soft-wrap a long line by inserting newlines every `wrap_width` characters.
@@ -76,20 +74,47 @@ pub fn soft_wrap_line(line: &str, wrap_width: usize) -> Cow<'_, str> {
     Cow::Owned(result)
 }
 
+/// The longest prefix of `s` that fits in `max_bytes`, cut at a char boundary.
+///
+/// This is the entry point for capping text whose bytes the program did not
+/// produce — model output, tool output, subprocess output, commit messages,
+/// prompt text. It never panics and never returns a slice that splits a
+/// multi-byte character: an offset landing inside one moves down to the
+/// boundary before it. Every edge case is handled here so the call site just
+/// passes the budget it has: `max_bytes == 0` yields `""`, a budget at or past
+/// `s.len()` yields all of `s`, and a budget past the end is clamped rather
+/// than rejected.
+///
+/// The budget counts bytes. For a character budget, see [`truncate_line`]; for
+/// a display-cell budget, see the pager's width-aware helpers.
+///
+/// [`truncate_line`]: crate::util::truncate_line
+#[allow(clippy::string_slice)] // the index is `floor_char_boundary`'s output
+pub fn truncate_bytes(s: &str, max_bytes: usize) -> &str {
+    let end = s.floor_char_boundary(max_bytes);
+    &s[..end]
+}
+
 /// Truncate a string to at most `max_bytes` bytes at a valid UTF-8 boundary.
 /// Returns the original string if it fits. No truncation marker is added.
 ///
-/// Walks back from `max_bytes` until a char boundary is found. At most 3
-/// steps back since UTF-8 multibyte sequences are at most 4 bytes.
+/// Delegates to [`truncate_bytes`], which owns the boundary math.
 pub fn truncate_str(s: &str, max_bytes: usize) -> &str {
-    if s.len() <= max_bytes {
-        return s;
-    }
-    let mut end = max_bytes;
-    while !s.is_char_boundary(end) {
-        end -= 1;
-    }
-    &s[..end]
+    truncate_bytes(s, max_bytes)
+}
+
+/// The longest suffix of `s` that fits in `max_bytes`, cut at a char boundary.
+///
+/// The mirror of [`truncate_bytes`] for the sites that keep the END of an
+/// output — the tail of a log, the last lines of a subprocess. Same contract:
+/// never panics, never splits a character, no special-casing at the call site.
+/// An offset landing inside a character moves UP to the boundary after it, so
+/// the returned suffix is never larger than the budget. A budget of `0` yields
+/// `""`, a budget at or past `s.len()` yields all of `s`.
+#[allow(clippy::string_slice)] // the index is `ceil_char_boundary`'s output
+pub fn tail_bytes(s: &str, max_bytes: usize) -> &str {
+    let start = s.ceil_char_boundary(s.len().saturating_sub(max_bytes));
+    &s[start..]
 }
 
 /// Text on hand, and the size of the output it came from. The two differ when
@@ -186,43 +211,28 @@ pub fn truncate_str_with_marker(s: &str, max_bytes: usize) -> Cow<'_, str> {
             marker_len = TRUNCATION_MARKER.len(),
             "truncate_str_with_marker: budget too small for marker; truncation will be silent",
         );
-        return Cow::Borrowed(truncate_str(s, max_bytes));
+        return Cow::Borrowed(truncate_bytes(s, max_bytes));
     }
-    let mut end = max_bytes - TRUNCATION_MARKER.len();
-    while !s.is_char_boundary(end) {
-        end -= 1;
-    }
-    Cow::Owned(format!("{}{}", &s[..end], TRUNCATION_MARKER))
+    let head = truncate_bytes(s, max_bytes - TRUNCATION_MARKER.len());
+    Cow::Owned(format!("{head}{TRUNCATION_MARKER}"))
 }
 
 /// Find the largest byte index `<= index` that is a char boundary in `s`.
 ///
-/// Polyfill for [`str::floor_char_boundary`] (stabilized in Rust 1.91; repo
-/// toolchain is 1.90). Remove once the toolchain is bumped.
+/// An `index` past the end of `s` returns `s.len()`. Alias for
+/// [`str::floor_char_boundary`] (stable since Rust 1.91) so every call site in
+/// the workspace names one helper.
 pub fn floor_char_boundary(s: &str, index: usize) -> usize {
-    if index >= s.len() {
-        return s.len();
-    }
-    let mut i = index;
-    while i > 0 && !s.is_char_boundary(i) {
-        i -= 1;
-    }
-    i
+    s.floor_char_boundary(index)
 }
 
 /// Find the smallest byte index `>= index` that is a char boundary in `s`.
 ///
-/// Polyfill for [`str::ceil_char_boundary`] (stabilized in Rust 1.91; repo
-/// toolchain is 1.90). Remove once the toolchain is bumped.
+/// An `index` past the end of `s` returns `s.len()`. Alias for
+/// [`str::ceil_char_boundary`] (stable since Rust 1.91) so every call site in
+/// the workspace names one helper.
 pub fn ceil_char_boundary(s: &str, index: usize) -> usize {
-    if index >= s.len() {
-        return s.len();
-    }
-    let mut i = index;
-    while i < s.len() && !s.is_char_boundary(i) {
-        i += 1;
-    }
-    i
+    s.ceil_char_boundary(index)
 }
 
 /// Estimate the number of tokens in a string using the bytes/4 heuristic.
@@ -305,10 +315,12 @@ pub fn truncate_front_and_back(s: &str, max_chars: usize) -> (String, bool) {
         }
     };
     let ellipsis = FRONT_BACK_TRUNCATION_MARKER;
+    #[allow(clippy::string_slice)] // both offsets come from `char_indices().nth`
+    let (head, tail) = (&s[..front_end], &s[back_start..]);
     let mut result = String::with_capacity(front_end + ellipsis.len() + (s.len() - back_start));
-    result.push_str(&s[..front_end]);
+    result.push_str(head);
     result.push_str(ellipsis);
-    result.push_str(&s[back_start..]);
+    result.push_str(tail);
     (result, true)
 }
 
@@ -349,10 +361,12 @@ pub fn truncate_middle(s: &str, max_chars: usize) -> String {
             .map(|(i, _)| i)
             .unwrap_or(0)
     };
+    #[allow(clippy::string_slice)] // both offsets come from `char_indices().nth`
+    let (head, tail) = (&s[..front_end], &s[back_start..]);
     let mut result = String::with_capacity(front_end + MARKER_LEN + (s.len() - back_start));
-    result.push_str(&s[..front_end]);
+    result.push_str(head);
     result.push_str(MARKER);
-    result.push_str(&s[back_start..]);
+    result.push_str(tail);
     result
 }
 
@@ -366,17 +380,16 @@ pub fn truncate_lines_to_char_budget(content: &str, budget: usize) -> (String, b
     if trimmed.len() <= budget {
         return (trimmed.to_string(), false);
     }
-    // Find a valid UTF-8 char boundary at or before `budget` to avoid
-    // panicking on multi-byte characters.
-    let byte_end = budget.min(trimmed.len());
-    let safe_end = (0..=byte_end)
-        .rev()
-        .find(|&i| trimmed.is_char_boundary(i))
-        .unwrap_or(0);
-    let truncated = &trimmed[..safe_end];
+    // Cut the budget down to a char boundary before looking for the last
+    // complete line, so a multi-byte char at the edge is never split.
+    let truncated = truncate_bytes(trimmed, budget);
     let last_nl = truncated.rfind('\n');
     match last_nl {
-        Some(idx) => (trimmed[..idx].trim().to_string(), true),
+        Some(idx) => {
+            #[allow(clippy::string_slice)] // a '\n' byte offset is a char boundary
+            let head = &truncated[..idx];
+            (head.trim().to_string(), true)
+        }
         None => (
             "... [First line would be too large to fit within character budget] ...".to_string(),
             true,
@@ -727,6 +740,159 @@ mod tests {
         let (result, truncated) = truncate_lines_to_char_budget(&content, 50);
         assert!(truncated);
         assert!(result.contains("character budget"));
+    }
+
+    // ---- truncate_bytes ----
+
+    /// The crash this function exists to prevent: `&msg[..200]` where byte 200
+    /// is the middle of an em dash in a commit message. The budget lands inside
+    /// the character; the prefix must stop before it.
+    #[test]
+    fn truncate_bytes_em_dash_straddling_the_offset() {
+        let msg = format!("{}—{}", "a".repeat(199), "b".repeat(20));
+        // "—" is 3 bytes (E2 80 94) at bytes 199..202, so 200 is mid-character:
+        // the raw `&msg[..200]` this replaces panicked here.
+        assert!(!msg.is_char_boundary(200), "budget must land mid-em-dash");
+
+        let prefix = truncate_bytes(&msg, 200);
+
+        assert_eq!(prefix, "a".repeat(199));
+        assert!(std::str::from_utf8(prefix.as_bytes()).is_ok());
+        assert!(msg.is_char_boundary(prefix.len()));
+    }
+
+    /// Same shape, one CJK character straddling the budget.
+    #[test]
+    fn truncate_bytes_cjk_straddling_the_offset() {
+        let text = format!("{}日本{}", "a".repeat(199), "b".repeat(20));
+        assert!(!text.is_char_boundary(200), "budget must land mid-日");
+
+        let prefix = truncate_bytes(&text, 200);
+
+        assert_eq!(prefix, "a".repeat(199));
+        assert!(std::str::from_utf8(prefix.as_bytes()).is_ok());
+        assert!(text.is_char_boundary(prefix.len()));
+    }
+
+    /// Every offset across a string holding one character of each UTF-8 width:
+    /// 1-byte ASCII, a 3-byte em dash, a 3-byte CJK ideograph, a 4-byte emoji.
+    #[test]
+    fn truncate_bytes_table_of_offsets_across_multibyte_chars() {
+        let s = "a—b日🚀c";
+        let cases: &[(usize, &str)] = &[
+            (0, ""),
+            (1, "a"),
+            (2, "a"), // mid —
+            (3, "a"), // mid —
+            (4, "a—"),
+            (5, "a—b"),
+            (6, "a—b"), // mid 日
+            (7, "a—b"), // mid 日
+            (8, "a—b日"),
+            (9, "a—b日"),  // mid 🚀
+            (10, "a—b日"), // mid 🚀
+            (11, "a—b日"), // mid 🚀
+            (12, "a—b日🚀"),
+            (13, "a—b日🚀c"),
+        ];
+        for &(budget, expected) in cases {
+            let prefix = truncate_bytes(s, budget);
+            assert_eq!(prefix, expected, "budget {budget}");
+            assert!(std::str::from_utf8(prefix.as_bytes()).is_ok());
+            assert!(
+                s.is_char_boundary(prefix.len()),
+                "budget {budget} cut a char"
+            );
+        }
+    }
+
+    /// Offsets from 0 past the end, including well past it: none may panic, and
+    /// each result must be a real prefix ending on a boundary.
+    #[test]
+    fn truncate_bytes_never_panics_for_any_offset() {
+        let s = "a—b日🚀c".repeat(20);
+        for budget in 0..=s.len() + 64 {
+            let prefix = truncate_bytes(&s, budget);
+            assert!(s.starts_with(prefix), "budget {budget} is not a prefix");
+            assert!(
+                s.is_char_boundary(prefix.len()),
+                "budget {budget} cut a char"
+            );
+            assert!(prefix.len() <= budget.min(s.len()));
+        }
+    }
+
+    #[test]
+    fn truncate_bytes_whole_and_short_cases() {
+        assert_eq!(truncate_bytes("hello", 10), "hello");
+        assert_eq!(truncate_bytes("hello", 5), "hello");
+        assert_eq!(truncate_bytes("hello", 0), "");
+        assert_eq!(truncate_bytes("", 0), "");
+        assert_eq!(truncate_bytes("", 100), "");
+        assert_eq!(truncate_bytes("日本語", 1000), "日本語");
+        assert_eq!(truncate_bytes("日本語", 2), "");
+        assert_eq!(truncate_bytes("日本語", 3), "日");
+        assert_eq!(truncate_bytes("🚀🦀", 7), "🚀");
+    }
+
+    // ---- tail_bytes ----
+
+    /// The same crash seen from the other end: the last 20 bytes of a string
+    /// whose character straddles the cut.
+    #[test]
+    fn tail_bytes_em_dash_straddling_the_offset() {
+        let text = format!("{}—{}", "a".repeat(20), "b".repeat(20));
+        // `—` occupies bytes 20..23; the last 22 bytes start inside it.
+        assert!(
+            !text.is_char_boundary(text.len() - 22),
+            "cut lands mid-em-dash"
+        );
+
+        let suffix = tail_bytes(&text, 22);
+
+        assert_eq!(suffix, "b".repeat(20));
+        assert!(suffix.len() <= 22);
+        assert!(std::str::from_utf8(suffix.as_bytes()).is_ok());
+    }
+
+    #[test]
+    fn tail_bytes_cjk_straddling_the_offset() {
+        let text = format!("{}日本{}", "a".repeat(10), "b".repeat(4));
+        // 日 spans bytes 10..13, so the last 9 bytes start inside it.
+        assert!(!text.is_char_boundary(text.len() - 9), "cut lands mid-日");
+
+        let suffix = tail_bytes(&text, 9);
+
+        assert_eq!(suffix, format!("本{}", "b".repeat(4)));
+        assert!(text.ends_with(suffix));
+        assert!(suffix.len() <= 9);
+        assert!(std::str::from_utf8(suffix.as_bytes()).is_ok());
+    }
+
+    #[test]
+    fn tail_bytes_never_panics_for_any_budget() {
+        let s = "a—b日🚀c".repeat(8);
+        for budget in 0..=s.len() + 64 {
+            let suffix = tail_bytes(&s, budget);
+            assert!(s.ends_with(suffix), "budget {budget} is not a suffix");
+            assert!(s.is_char_boundary(s.len() - suffix.len()));
+            assert!(suffix.len() <= budget);
+        }
+    }
+
+    #[test]
+    fn tail_bytes_whole_and_short_cases() {
+        assert_eq!(tail_bytes("hello", 10), "hello");
+        assert_eq!(tail_bytes("hello", 5), "hello");
+        assert_eq!(tail_bytes("hello", 0), "");
+        assert_eq!(tail_bytes("", 0), "");
+        assert_eq!(tail_bytes("hello", 2), "lo");
+        assert_eq!(tail_bytes("日本", 3), "本");
+        assert_eq!(tail_bytes("日本", 1), "");
+        // 🚀 is 4 bytes: it does not fit a 3-byte tail, and the boundary snaps
+        // past it rather than over the budget.
+        assert_eq!(tail_bytes("a🚀", 3), "");
+        assert_eq!(tail_bytes("a🚀", 4), "🚀");
     }
 
     // ---- floor_char_boundary / ceil_char_boundary ----

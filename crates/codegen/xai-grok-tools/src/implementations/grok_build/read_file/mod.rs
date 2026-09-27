@@ -1301,7 +1301,7 @@ mod tests {
                 .content
                 .contains("[image content will be provided separately]"),
             "expected capture placeholder; got: {}",
-            &extracted.content[..extracted.content.len().min(300)]
+            crate::util::truncate_bytes(&extracted.content, 300)
         );
         assert!(
             !extracted.content.contains("AAAAAAAAAAAA"),

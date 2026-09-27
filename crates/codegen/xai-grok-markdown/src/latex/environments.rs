@@ -27,12 +27,12 @@ pub(super) fn render_environment(
     let mut nest = 0usize;
     let mut search = cursor.pos;
     while search < cursor.src.len() {
-        let rest = &cursor.src[search..];
+        let rest = cursor.bytes(search, cursor.src.len());
         let Some(rel) = rest.find('\\') else {
             break;
         };
         let bs_pos = search + rel;
-        let after_bs = &cursor.src[bs_pos + 1..];
+        let after_bs = cursor.bytes(bs_pos + 1, cursor.src.len());
         let kw_len = if command_at(after_bs, "begin") {
             "begin".len()
         } else if command_at(after_bs, "end") {
@@ -64,7 +64,7 @@ pub(super) fn render_environment(
         search = probe.pos.max(bs_pos + 1 + kw_len);
     }
     cursor.pos = resume;
-    let mut body = &cursor.src[body_start..body_end.min(cursor.src.len())];
+    let mut body = cursor.bytes(body_start, body_end.min(cursor.src.len()));
 
     // Optional column spec for array environments: `\begin{array}{ll}`.
     if env_name == "array" || env_name == "alignat" {
@@ -73,7 +73,7 @@ pub(super) fn render_environment(
         if probe.peek() == Some('{') {
             probe.bump();
             let _ = probe.read_group_body();
-            body = &body[probe.pos..];
+            body = probe.bytes(probe.pos, body.len());
         }
     }
     let rows = env_rows_to_strings(body, env_name, out.flat, depth, mode);
@@ -83,11 +83,10 @@ pub(super) fn render_environment(
 /// `true` if `rest` starts with command word `word` NOT followed by another
 /// ASCII letter (so `\endx` is not mistaken for `\end`).
 fn command_at(rest: &str, word: &str) -> bool {
-    rest.starts_with(word)
-        && !rest[word.len()..]
-            .chars()
-            .next()
-            .is_some_and(|c| c.is_ascii_alphabetic())
+    let Some(tail) = rest.strip_prefix(word) else {
+        return false;
+    };
+    !tail.chars().next().is_some_and(|c| c.is_ascii_alphabetic())
 }
 
 /// Split an environment body into rows (`\\`) and cells (`&`) at brace and
@@ -114,6 +113,9 @@ fn env_rows_to_strings(
             b'\\' => {
                 if bytes.get(i + 1) == Some(&b'\\') {
                     if brace_depth == 0 && env_depth == 0 {
+                        // Every split point here is an ASCII byte of valid
+                        // UTF-8, so it names a char boundary.
+                        #[allow(clippy::string_slice)]
                         row.push(body[cell_start..i].to_string());
                         rows.push(std::mem::take(&mut row));
                         i += 2;
@@ -123,6 +125,8 @@ fn env_rows_to_strings(
                     i += 2;
                     continue;
                 }
+                // `i` names the ASCII backslash, so `i + 1` is a boundary.
+                #[allow(clippy::string_slice)]
                 let rest = &body[i + 1..];
                 if command_at(rest, "begin") {
                     env_depth += 1;
@@ -138,6 +142,8 @@ fn env_rows_to_strings(
             b'{' => brace_depth += 1,
             b'}' => brace_depth = brace_depth.saturating_sub(1),
             b'&' if brace_depth == 0 && env_depth == 0 => {
+                // `i` names the ASCII `&`; `cell_start` follows one.
+                #[allow(clippy::string_slice)]
                 row.push(body[cell_start..i].to_string());
                 cell_start = i + 1;
             }
@@ -145,6 +151,8 @@ fn env_rows_to_strings(
         }
         i += 1;
     }
+    // `cell_start` names an ASCII byte (or 0); the range runs to the end.
+    #[allow(clippy::string_slice)]
     row.push(body[cell_start.min(bytes.len())..].to_string());
     rows.push(row);
 

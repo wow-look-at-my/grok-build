@@ -326,6 +326,9 @@ pub(crate) fn cell_word_separator<'a>(
         let mut ranges = Vec::new();
         let mut pos = 0;
         for token in line.split_whitespace() {
+            // `token` is a whole subslice of `line`, so `find` locates it at a
+            // char boundary; `pos` only ever takes that boundary or `end`.
+            #[allow(clippy::string_slice)]
             let start = line[pos..].find(token).unwrap() + pos;
             let end = start + token.len();
             if url::Url::parse(token).is_ok() {
@@ -346,6 +349,10 @@ pub(crate) fn cell_word_separator<'a>(
     let mut split_positions: Vec<usize> = Vec::with_capacity(breaks.len());
     {
         let len = line.len();
+        // Pass 1 derives every break position from `line.char_indices()`, so
+        // each offset built from them names a char boundary.
+        #[allow(clippy::string_slice)]
+        let width_between = |from: usize, to: usize| unicode_display_width(&line[from..to]);
         for (i, &(attach_left, attach_right)) in breaks.iter().enumerate() {
             if attach_left == attach_right {
                 // Whitespace break — no choice.
@@ -361,12 +368,12 @@ pub(crate) fn cell_word_separator<'a>(
                     len
                 };
 
-                let left_if_attach_left = unicode_display_width(&line[seg_start..attach_left]);
-                let right_if_attach_left = unicode_display_width(&line[attach_left..seg_end]);
+                let left_if_attach_left = width_between(seg_start, attach_left);
+                let right_if_attach_left = width_between(attach_left, seg_end);
                 let max_attach_left = left_if_attach_left.max(right_if_attach_left);
 
-                let left_if_attach_right = unicode_display_width(&line[seg_start..attach_right]);
-                let right_if_attach_right = unicode_display_width(&line[attach_right..seg_end]);
+                let left_if_attach_right = width_between(seg_start, attach_right);
+                let right_if_attach_right = width_between(attach_right, seg_end);
                 let max_attach_right = left_if_attach_right.max(right_if_attach_right);
 
                 if max_attach_right < max_attach_left {
@@ -392,6 +399,9 @@ pub(crate) fn cell_word_separator<'a>(
         } else {
             line.len()
         };
+        // `end` is either a break position from pass 1's `char_indices()` scan
+        // or `line.len()`; `pos` is the previous `end`. Both are boundaries.
+        #[allow(clippy::string_slice)]
         let word = textwrap::core::Word::from(&line[pos..end]);
         pos = end;
         Some(word)

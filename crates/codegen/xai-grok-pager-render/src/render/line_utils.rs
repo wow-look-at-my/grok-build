@@ -49,16 +49,11 @@ pub fn is_unsafe_display_char(c: char) -> bool {
         )
 }
 
-/// Polyfill for nightly-only [`str::floor_char_boundary`].
-/// Snaps a byte index down to the nearest char boundary.
-pub fn floor_char_boundary(s: &str, index: usize) -> usize {
-    let index = index.min(s.len());
-    let mut i = index;
-    while i > 0 && !s.is_char_boundary(i) {
-        i -= 1;
-    }
-    i
-}
+/// Largest byte index `<= index` that is a char boundary in `s`.
+///
+/// Re-exported from `xai_grok_tools::util` so the whole workspace shares one
+/// implementation of the boundary math.
+pub use xai_grok_tools::util::floor_char_boundary;
 
 /// `String`-owning delegate of [`crate::util::truncate_to_width`].
 pub fn truncate_str(s: &str, max_width: usize) -> String {

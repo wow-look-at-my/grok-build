@@ -342,6 +342,9 @@ impl ProcessState {
     /// 2. Keep only the last `half` chars in `output_buffer`.
     ///
     /// The two halves are re-joined by `to_result()` with a separator.
+    // `front_end` and `tail_start_byte` come from `char_indices().nth`, which
+    // reports the byte a character starts at.
+    #[allow(clippy::string_slice)]
     fn maybe_truncate(&mut self) {
         let s = String::from_utf8_lossy(&self.output_buffer);
         let char_count = s.chars().count();

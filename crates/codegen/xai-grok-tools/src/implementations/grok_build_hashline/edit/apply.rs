@@ -976,7 +976,7 @@ mod tests {
                 assert!(
                     result.snippet.contains("lines not shown"),
                     "Snippet should have gap markers between distant edits, got:\n{}",
-                    &result.snippet[..result.snippet.len().min(500)]
+                    crate::util::truncate_bytes(&result.snippet, 500)
                 );
                 // The snippet should be MUCH smaller than the full span.
                 let snippet_lines = result.snippet.lines().count();

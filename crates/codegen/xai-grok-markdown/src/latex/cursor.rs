@@ -11,8 +11,18 @@ impl<'a> Cursor<'a> {
         Self { src, pos: 0 }
     }
 
+    /// `src[from..to]`.
+    ///
+    /// Every index passed here is derived from `pos`, and `pos` only ever
+    /// advances by the `len_utf8()` of the char read at `pos` (`bump`), so it
+    /// names a char boundary; so does one byte back from an ASCII delimiter.
+    #[allow(clippy::string_slice)] // both ends are char boundaries
+    pub(super) fn bytes(&self, from: usize, to: usize) -> &'a str {
+        &self.src[from..to]
+    }
+
     pub(super) fn peek(&self) -> Option<char> {
-        self.src[self.pos..].chars().next()
+        self.bytes(self.pos, self.src.len()).chars().next()
     }
 
     pub(super) fn bump(&mut self) -> Option<char> {
@@ -33,11 +43,11 @@ impl<'a> Cursor<'a> {
                 while matches!(self.peek(), Some(c) if c.is_ascii_alphabetic()) {
                     self.bump();
                 }
-                &self.src[start..self.pos]
+                self.bytes(start, self.pos)
             }
             Some(_) => {
                 self.bump();
-                &self.src[start..self.pos]
+                self.bytes(start, self.pos)
             }
             None => "",
         }
@@ -66,13 +76,13 @@ impl<'a> Cursor<'a> {
                 '}' => {
                     depth -= 1;
                     if depth == 0 {
-                        return &self.src[start..self.pos - 1];
+                        return self.bytes(start, self.pos - 1);
                     }
                 }
                 _ => {}
             }
         }
-        &self.src[start..self.pos]
+        self.bytes(start, self.pos)
     }
 
     /// Read the next "atom": a `{...}` group body, a `\command` (returned
@@ -88,11 +98,11 @@ impl<'a> Cursor<'a> {
             '\\' => {
                 self.bump();
                 self.read_command_name();
-                Some(&self.src[start..self.pos])
+                Some(self.bytes(start, self.pos))
             }
             _ => {
                 self.bump();
-                Some(&self.src[start..self.pos])
+                Some(self.bytes(start, self.pos))
             }
         }
     }

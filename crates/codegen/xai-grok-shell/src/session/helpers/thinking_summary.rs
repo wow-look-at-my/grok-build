@@ -2,6 +2,7 @@
 
 use crate::sampling::ConversationResponse;
 use crate::session::helpers::chat::floor_char_boundary;
+use xai_grok_tools::util::{ceil_char_boundary, truncate_bytes};
 
 pub(crate) const THINKING_SUMMARY_MIN_CHARS: usize = 800;
 pub(crate) const THINKING_SUMMARY_MAX_CHARS: usize = 320;
@@ -27,15 +28,12 @@ pub(crate) fn summarizable_thinking(thinking: &str) -> Option<String> {
     if thinking.len() <= INPUT_HEAD_CHARS + INPUT_TAIL_CHARS {
         return Some(thinking.to_string());
     }
-    let head_end = floor_char_boundary(thinking, INPUT_HEAD_CHARS);
-    let mut tail_start = thinking.len() - INPUT_TAIL_CHARS;
-    while !thinking.is_char_boundary(tail_start) {
-        tail_start += 1;
-    }
+    let head = truncate_bytes(thinking, INPUT_HEAD_CHARS);
+    let tail_start = ceil_char_boundary(thinking, thinking.len() - INPUT_TAIL_CHARS);
+    #[allow(clippy::string_slice)] // `ceil_char_boundary` returns a char boundary
+    let tail = &thinking[tail_start..];
     Some(format!(
-        "{}\n\n[... middle of the reasoning omitted ...]\n\n{}",
-        &thinking[..head_end],
-        &thinking[tail_start..]
+        "{head}\n\n[... middle of the reasoning omitted ...]\n\n{tail}"
     ))
 }
 

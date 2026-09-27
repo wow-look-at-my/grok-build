@@ -11,6 +11,7 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 
 use xai_grok_sampling_types::{ConversationItem, SyntheticReason};
+use xai_grok_tools::util::{ceil_char_boundary, truncate_bytes};
 
 use super::evidence::sanitize_final_response;
 
@@ -175,11 +176,11 @@ fn cap_args(args: &str) -> Cow<'_, str> {
     if clean.len() <= RUN_LOG_ARGS_MAX_BYTES {
         return clean;
     }
-    let cut = floor_char_boundary(&clean, RUN_LOG_ARGS_MAX_BYTES);
+    let head = truncate_bytes(&clean, RUN_LOG_ARGS_MAX_BYTES);
     Cow::Owned(format!(
         "{}… ({} bytes elided)",
-        &clean[..cut],
-        clean.len() - cut
+        head,
+        clean.len() - head.len()
     ))
 }
 
@@ -190,28 +191,16 @@ fn head_tail(s: &str) -> Cow<'_, str> {
     if s.len() <= RUN_LOG_RESULT_HEAD_BYTES + RUN_LOG_RESULT_TAIL_BYTES {
         return Cow::Borrowed(s);
     }
-    let head_end = floor_char_boundary(s, RUN_LOG_RESULT_HEAD_BYTES);
+    let head = truncate_bytes(s, RUN_LOG_RESULT_HEAD_BYTES);
     let tail_start = ceil_char_boundary(s, s.len() - RUN_LOG_RESULT_TAIL_BYTES);
+    #[allow(clippy::string_slice)] // `ceil_char_boundary` returns a char boundary
+    let tail = &s[tail_start..];
     Cow::Owned(format!(
         "{}\n... ({} bytes elided) ...\n{}",
-        &s[..head_end],
-        tail_start - head_end,
-        &s[tail_start..]
+        head,
+        tail_start - head.len(),
+        tail
     ))
-}
-
-fn floor_char_boundary(s: &str, mut i: usize) -> usize {
-    while i > 0 && !s.is_char_boundary(i) {
-        i -= 1;
-    }
-    i
-}
-
-fn ceil_char_boundary(s: &str, mut i: usize) -> usize {
-    while i < s.len() && !s.is_char_boundary(i) {
-        i += 1;
-    }
-    i
 }
 
 #[cfg(test)]

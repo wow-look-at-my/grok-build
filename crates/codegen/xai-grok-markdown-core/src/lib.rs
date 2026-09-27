@@ -59,11 +59,15 @@ fn strike_delim_text<'a>(
     let delim = if opening {
         let end = range.start + 1;
         debug_assert!(text.is_char_boundary(end) && end <= text.len());
-        (range.start..end, &text[range.start..end])
+        #[allow(clippy::string_slice)] // a `~` delimiter is one byte, so `end` is a boundary
+        let slice = &text[range.start..end];
+        (range.start..end, slice)
     } else {
         let start = range.end - 1;
         debug_assert!(text.is_char_boundary(start) && start < text.len());
-        (start..range.end, &text[start..range.end])
+        #[allow(clippy::string_slice)] // a `~` delimiter is one byte, so `start` is a boundary
+        let slice = &text[start..range.end];
+        (start..range.end, slice)
     };
     (Event::Text(delim.1.into()), delim.0)
 }
@@ -312,7 +316,9 @@ pub fn analyze(text: &str) -> MarkdownAnalysis {
             // The range spans the opening fence through the close (or to EOF when unterminated).
             Event::Start(Tag::CodeBlock(kind)) => {
                 if matches!(kind, CodeBlockKind::Fenced(_))
-                    && fenced_block_is_unterminated(&text[range.clone()])
+                    && text
+                        .get(range.clone())
+                        .is_some_and(fenced_block_is_unterminated)
                 {
                     issues.push(StructuralIssue::UnterminatedCodeBlock);
                 }

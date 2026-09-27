@@ -766,8 +766,8 @@ pub fn parse_skill_files(skill_files: Vec<(PathBuf, SkillScope)>) -> Vec<SkillIn
                 if let Ok(full) = std::fs::read_to_string(&path) {
                     let body = extract_skill_body(&full);
                     let peek = if body.len() > MAX_BODY_PEEK_BYTES {
-                        let end = crate::util::floor_char_boundary(&body, MAX_BODY_PEEK_BYTES);
-                        &body[..end]
+                        let end = crate::util::truncate_bytes(&body, MAX_BODY_PEEK_BYTES);
+                        end
                     } else {
                         &body
                     };
