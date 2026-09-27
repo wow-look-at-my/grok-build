@@ -1166,4 +1166,94 @@ pub struct Late {
             .expect("crates/common/xai-tool-types sits three levels under the workspace root")
             .to_path_buf()
     }
+
+    /// The `[model.<id>]` table resolves a both-keys config in
+    /// `config_model_override_parse::dedupe_aliases` before serde sees it, so
+    /// that function's `ALIASES` list and this module's tables describe one
+    /// set of keys twice. Two lists that can be edited apart is the failure
+    /// that file's own comment warns about, so this asserts they name the same
+    /// pairs: every pair in `ALIASES` appears here against `ConfigModelOverride`,
+    /// and every pair this module claims for that type appears there.
+    #[test]
+    fn the_override_dedupe_list_and_these_tables_name_the_same_pairs() {
+        let root = workspace_root();
+        let parse_file = "crates/codegen/xai-grok-shell/src/agent/config_model_override_parse.rs";
+        let source = read_table_file(&root, parse_file);
+        let declared = table_pairs_for("ConfigModelOverride");
+
+        let start = source
+            .find("const ALIASES: &[(&str, &str)] = &[")
+            .expect("config_model_override_parse declares its alias pairs in an ALIASES const");
+        let body = &source[start..];
+        let body = &body[..body
+            .find("];")
+            .expect("`ALIASES` is a closed array literal")];
+        let there: Vec<(String, String)> = quoted_pairs(body);
+
+        assert!(
+            !there.is_empty(),
+            "`ALIASES` in {parse_file} names no pair, so nothing here is being cross-checked"
+        );
+        for (canonical, legacy) in &there {
+            assert!(
+                declared.iter().any(|(c, l)| c == canonical && l == legacy),
+                "{parse_file} dedupes `{canonical}` against `{legacy}`, which no entry in \
+                 WIRED or LOCAL declares - the two lists have been edited apart"
+            );
+        }
+        for (canonical, legacy) in &declared {
+            assert!(
+                there.iter().any(|(c, l)| c == canonical && l == legacy),
+                "this module declares `{canonical}`/`{legacy}` for ConfigModelOverride, which \
+                 {parse_file}'s `ALIASES` does not dedupe - serde would see a duplicate field \
+                 before any fold ran"
+            );
+        }
+    }
+
+    /// `(canonical, alias)` pairs this module claims for a type, across both
+    /// tables.
+    fn table_pairs_for(ty: &str) -> Vec<(String, String)> {
+        let mut out: Vec<(String, String)> = WIRED
+            .iter()
+            .filter(|entry| entry.ty == ty)
+            .flat_map(|entry| {
+                entry
+                    .aliases
+                    .iter()
+                    .map(move |alias| (entry.canonical.to_owned(), (*alias).to_owned()))
+            })
+            .collect();
+        out.extend(
+            LOCAL
+                .iter()
+                .filter(|entry| entry.ty == ty)
+                .flat_map(|entry| {
+                    entry
+                        .aliases
+                        .iter()
+                        .map(move |alias| (entry.canonical.to_owned(), (*alias).to_owned()))
+                }),
+        );
+        out.sort();
+        out
+    }
+
+    /// The string literals inside an array of `("a", "b")` tuples, taken two at
+    /// a time in the order they appear.
+    fn quoted_pairs(body: &str) -> Vec<(String, String)> {
+        let words: Vec<String> = body
+            .split('"')
+            .skip(1)
+            .step_by(2)
+            .map(|field| (*field).to_owned())
+            .collect();
+        let mut pairs = Vec::new();
+        for pair in words.chunks(2) {
+            if pair.len() == 2 {
+                pairs.push((pair[0].clone(), pair[1].clone()));
+            }
+        }
+        pairs
+    }
 }
