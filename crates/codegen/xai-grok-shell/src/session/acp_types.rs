@@ -1137,7 +1137,7 @@ mod wire_alias_tests {
 
     #[test]
     fn feedback_input_reads_the_turn_number_under_either_spelling() {
-        let base = r#""session_id":"s1","client_type":"generic""#;
+        let base = r#""session_id":"s1","client_type":"tui""#;
         let snake: ClientFeedbackInput =
             serde_json::from_str(&format!("{{{base},\"turn_number\":4}}")).unwrap();
         let camel: ClientFeedbackInput =

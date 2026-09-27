@@ -1443,18 +1443,25 @@ mod tests {
 
 #[cfg(test)]
 mod wire_alias_tests {
+    use super::super::test_helpers::ensure_crypto_provider;
     use super::{IdTokenClaims, peek_access_token_principal, peek_access_token_principal_id};
-    use base64::Engine as _;
 
-    /// An unsigned, unverified token whose payload names one claim under each
-    /// spelling. `insecure_decode` reads the body and checks nothing, so the
-    /// claim names the idp wrote are exactly what the reader sees.
+    /// A token carrying exactly the claims given, signed with a throwaway
+    /// secret. `insecure_decode` reads the body and checks nothing about the
+    /// signature, so the claim names in `claims` are what the reader sees. The
+    /// header names a real algorithm because a `Header` whose `alg` is not one
+    /// of `jsonwebtoken::Algorithm`'s variants fails to parse, and the reader
+    /// gives up before it looks at any claim.
     fn token_with(claims: &str) -> String {
-        let engine = base64::engine::general_purpose::URL_SAFE_NO_PAD;
-        let header = engine.encode(r#"{"alg":"none"}"#).into_bytes();
-        let body = engine.encode(claims).into_bytes();
-        let signature = engine.encode(b"signature-not-checked").into_bytes();
-        String::from_utf8([header, vec![b'.'], body, vec![b'.'], signature].concat()).unwrap()
+        ensure_crypto_provider();
+        let value: serde_json::Value =
+            serde_json::from_str(claims).expect("test claims are a JSON object");
+        jsonwebtoken::encode(
+            &jsonwebtoken::Header::new(jsonwebtoken::Algorithm::HS256),
+            &value,
+            &jsonwebtoken::EncodingKey::from_secret(b"token-shaped-test-material"),
+        )
+        .expect("a claims object encodes")
     }
 
     /// An idp that writes both the snake_case and the camelCase principal key —

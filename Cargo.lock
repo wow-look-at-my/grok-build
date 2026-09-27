@@ -14244,6 +14244,7 @@ dependencies = [
  "xai-grok-secrets",
  "xai-mixpanel",
  "xai-token-estimation",
+ "xai-tool-types",
 ]
 
 [[package]]

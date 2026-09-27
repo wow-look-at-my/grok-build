@@ -157,6 +157,20 @@ pub const WIRED: &[WireAlias] = &[
         aliases: &["reasoning"],
     },
     WireAlias {
+        // A campaign patch is merged into the same TOML value `Config` is read
+        // from and names any field, so this table is not only the user's file.
+        file: "crates/codegen/xai-grok-telemetry/src/config.rs",
+        ty: "TelemetryConfig",
+        canonical: "otel_protocol",
+        aliases: &["otel_transport"],
+    },
+    WireAlias {
+        file: "crates/codegen/xai-grok-shell/src/agent/config.rs",
+        ty: "EndpointsConfig",
+        canonical: "models_list_url",
+        aliases: &["models_endpoint"],
+    },
+    WireAlias {
         file: "crates/codegen/xai-grok-sampling-types/src/messages.rs",
         ty: "MessagesUsage",
         canonical: "cost_in_usd_ticks",
@@ -386,14 +400,6 @@ pub struct LocalAlias {
 pub const LOCAL: &[LocalAlias] = &[
     LocalAlias {
         file: "crates/codegen/xai-grok-shell/src/agent/config.rs",
-        ty: "EndpointsConfig",
-        canonical: "models_list_url",
-        aliases: &["models_endpoint"],
-        why: "the `[endpoints]` table of config.toml; the remote settings and \
-              campaign shapes are separate types",
-    },
-    LocalAlias {
-        file: "crates/codegen/xai-grok-shell/src/agent/config.rs",
         ty: "ConfigModelOverride",
         canonical: "compactions_remaining",
         aliases: &["send_compactions_remaining"],
@@ -490,15 +496,6 @@ pub const LOCAL: &[LocalAlias] = &[
         aliases: &["maxRestarts"],
         why: "`lsp.json` / `.lsp.json`, a config file this program reads from \
               disk and never receives",
-    },
-    LocalAlias {
-        file: "crates/codegen/xai-grok-telemetry/src/config.rs",
-        ty: "TelemetryConfig",
-        canonical: "otel_protocol",
-        aliases: &["otel_transport"],
-        why: "the `[telemetry]` table of config.toml and requirements.toml; the \
-              shell reads both spellings off the TOML value by hand in \
-              `agent/config.rs`",
     },
     LocalAlias {
         file: "crates/codegen/xai-fast-worktree/src/overlay/snapshot.rs",
