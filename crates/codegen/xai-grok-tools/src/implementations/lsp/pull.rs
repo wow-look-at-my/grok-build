@@ -121,7 +121,7 @@ pub struct PullDiagnostics {
     documents: Documents,
     notify: DiagnosticsNotify,
     support: Arc<SupportFlag>,
-    in_flight: Arc<std::sync::Mutex<InFlight>>,
+    in_flight: Arc<parking_lot::Mutex<InFlight>>,
     /// Whether this server has ever answered a pull.
     ///
     /// Until it has, we do not know what kind of server it is. It may be
@@ -162,7 +162,7 @@ impl PullDiagnostics {
             documents,
             notify,
             support: Arc::new(SupportFlag::new()),
-            in_flight: Arc::new(std::sync::Mutex::new(InFlight::default())),
+            in_flight: Arc::new(parking_lot::Mutex::new(InFlight::default())),
             answered_a_pull: Arc::new(AtomicBool::new(false)),
             generation: Arc::new(AtomicU64::new(0)),
         }
@@ -197,8 +197,18 @@ impl PullDiagnostics {
         let pull = self.clone();
         tokio::spawn(async move {
             loop {
-                pull.resolve(&uri, &key).await;
-                if !pull.finish(&key) {
+                // Guarded so the slot cannot outlive its task: `begin` reports
+                // a pull running until `finish` says otherwise, so a round that
+                // died mid-flight would keep every later question about this
+                // document answered as "already running" by work that no longer
+                // exists. `finish` releases the slot either way.
+                let round = crate::util::detached::guarded(
+                    "lsp pull diagnostics",
+                    pull.resolve(&uri, &key),
+                )
+                .await;
+                let asked_again = pull.finish(&key);
+                if round.is_err() || !asked_again {
                     break;
                 }
             }
@@ -488,7 +498,7 @@ impl PullDiagnostics {
     /// Claim the pull slot for `key`. `false` means one is already running, and
     /// has been told to run again when it finishes.
     fn begin(&self, key: &str) -> bool {
-        let mut in_flight = self.in_flight.lock().unwrap_or_else(|e| e.into_inner());
+        let mut in_flight = self.in_flight.lock();
         if in_flight.running.contains(key) {
             in_flight.superseded.insert(key.to_string());
             return false;
@@ -500,7 +510,7 @@ impl PullDiagnostics {
     /// Release the pull slot. `true` means the document was edited again while
     /// the pull ran, so it is worth one more round.
     fn finish(&self, key: &str) -> bool {
-        let mut in_flight = self.in_flight.lock().unwrap_or_else(|e| e.into_inner());
+        let mut in_flight = self.in_flight.lock();
         if in_flight.superseded.remove(key) {
             return true;
         }

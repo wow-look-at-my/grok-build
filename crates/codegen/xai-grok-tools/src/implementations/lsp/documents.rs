@@ -9,7 +9,9 @@
 //! versions live behind a shared handle rather than inside `LspClient`.
 
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::sync::Arc;
+
+use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use async_lsp::lsp_types::Position;
 
@@ -53,9 +55,9 @@ impl Update {
 
 /// Open documents for one server connection.
 ///
-/// Cheap to clone (shared handle). Lock poisoning is recovered from in one
-/// place: a panicking writer leaves the map structurally intact, and a stale
-/// version beats no version at all.
+/// Cheap to clone (shared handle). The lock is `parking_lot`'s, so it never
+/// poisons: a writer that panics leaves the map open to the next acquirer, and
+/// a stale version beats no version at all.
 #[derive(Debug, Clone, Default)]
 pub struct Documents {
     inner: Arc<RwLock<HashMap<String, Tracked>>>,
@@ -165,11 +167,11 @@ impl Documents {
     }
 
     fn read(&self) -> RwLockReadGuard<'_, HashMap<String, Tracked>> {
-        self.inner.read().unwrap_or_else(|e| e.into_inner())
+        self.inner.read()
     }
 
     fn write(&self) -> RwLockWriteGuard<'_, HashMap<String, Tracked>> {
-        self.inner.write().unwrap_or_else(|e| e.into_inner())
+        self.inner.write()
     }
 }
 
@@ -206,6 +208,44 @@ mod tests {
             }
         );
         assert_eq!(documents.version(A), None);
+    }
+
+    /// A writer that dies holding the lock holds it for nobody afterwards.
+    ///
+    /// The guard type is spelled out here rather than inferred: it is
+    /// `parking_lot`'s, which is the one that cannot report a poisoned lock at
+    /// all. A fallible acquisition would let a panic in one code path make
+    /// every later reader of the document versions fail.
+    #[test]
+    fn a_panicking_writer_leaves_the_map_open_to_the_next_acquirer() {
+        let documents = Documents::new();
+        documents.commit(A, 1, "csharp", end_position("one"));
+
+        let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let mut tracked = documents.write();
+            tracked.insert(
+                A.to_string(),
+                Tracked {
+                    version: 2,
+                    language_id: "csharp".to_string(),
+                    end: end_position("one\ntwo"),
+                },
+            );
+            panic!("the writer died holding the document map");
+        }));
+        assert!(
+            panicked.is_err(),
+            "the test must actually have panicked while holding the lock"
+        );
+
+        let guard: parking_lot::RwLockReadGuard<'_, HashMap<String, Tracked>> = documents.read();
+        assert_eq!(
+            guard.get(A).map(|tracked| tracked.version),
+            Some(2),
+            "the next acquirer gets the map, with what the panicked writer had written"
+        );
+        drop(guard);
+        assert_eq!(documents.version(A), Some(2));
     }
 
     #[test]

@@ -62,7 +62,19 @@ impl LspBackendAdapter {
         startup: Arc<StartupCoordinator>,
     ) {
         tokio::spawn(async move {
-            let result = bootstrap_lsp(lsp_manager, startup.clone()).await;
+            // Guarded, because the state below is what a waiter is waiting on:
+            // `ensure_ready` parks on `notify` for as long as the state reads
+            // `Starting`, so a bootstrap that dies mid-flight has to move the
+            // state anyway and say why.
+            let result = match crate::util::detached::guarded(
+                "lsp bootstrap",
+                bootstrap_lsp(lsp_manager, startup.clone()),
+            )
+            .await
+            {
+                Ok(result) => result,
+                Err(panic) => Err(format!("the LSP bootstrap task panicked: {panic}")),
+            };
             let mut state = startup.state.lock().await;
             *state = match result {
                 Ok(()) => StartupState::Ready,
@@ -558,5 +570,35 @@ fn workspace_symbol_to_info(ws: lsp_types::WorkspaceSymbol) -> SymbolInformation
         deprecated: None,
         location: loc,
         container_name: ws.container_name,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::implementations::lsp::LspBackend;
+    use std::time::Duration;
+
+    /// A bootstrap that ends in failure still answers whoever is waiting.
+    ///
+    /// `ensure_ready` parks on the coordinator's `notify` for as long as the
+    /// state reads `Starting`, so a bootstrap that stopped without moving the
+    /// state leaves every later LSP tool call waiting on a task that already
+    /// ended. A manager with no servers configured is that ending, with nothing
+    /// injected.
+    #[tokio::test]
+    async fn a_failed_bootstrap_answers_the_waiter_instead_of_stranding_it() {
+        let manager = Arc::new(TokioMutex::new(LspManager::default()));
+        let adapter = LspBackendAdapter::new(manager);
+
+        let outcome = tokio::time::timeout(Duration::from_secs(30), adapter.ensure_ready())
+            .await
+            .expect("the waiter must be answered, not left parked on a bootstrap that ended");
+        let error = outcome.expect_err("a manager with no language servers is not ready");
+        assert!(
+            error.contains("No LSP servers"),
+            "the failure must reach the caller as its own reason, got {error}"
+        );
+        assert!(!adapter.is_ready());
     }
 }

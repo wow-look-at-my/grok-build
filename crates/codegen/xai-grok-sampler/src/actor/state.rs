@@ -25,18 +25,24 @@ use crate::types::RequestId;
 pub(crate) struct ImageInputRejections(Arc<Mutex<HashSet<String>>>);
 
 impl ImageInputRejections {
-    pub(crate) fn mark(&self, model: &str) {
+    /// The set, taken back from a holder that died holding it.
+    ///
+    /// `expect`ing here would turn one request task's panic into a panic on
+    /// every later turn: the actor loop reads this set before each request, and
+    /// a `HashSet<String>` a panic walked out of is no less usable than one it
+    /// did not.
+    fn rejections(&self) -> std::sync::MutexGuard<'_, HashSet<String>> {
         self.0
             .lock()
-            .expect("image-input rejection set poisoned")
-            .insert(model.to_owned());
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    pub(crate) fn mark(&self, model: &str) {
+        self.rejections().insert(model.to_owned());
     }
 
     pub(crate) fn contains(&self, model: &str) -> bool {
-        self.0
-            .lock()
-            .expect("image-input rejection set poisoned")
-            .contains(model)
+        self.rejections().contains(model)
     }
 
     /// Strip images up front when `model` is known to reject them. Returns how
