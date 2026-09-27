@@ -188,10 +188,6 @@ pub struct EndpointsConfig {
     /// Env: `GROK_TRACE_UPLOAD_ENDPOINT_URL`. Custom S3-compatible endpoint.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub trace_upload_endpoint_url: Option<String>,
-    /// Env: `GROK_DEPLOYMENT_KEY`. Management API key for enterprise deployments.
-    /// Sent on telemetry and service requests for deployment-level attribution.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub deployment_key: Option<String>,
     /// Env: `GROK_MANAGED_CONFIG_URL`. Override the managed config endpoint.
     /// Defaults to `{proxy_url()}/deployment/config`.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -335,7 +331,7 @@ impl EndpointsConfig {
     }
     /// Managed deployment-config URL (`grok setup`): explicit `managed_config_url`,
     /// else `proxy_url` + `/deployment/config`. Never `xai_api_base_url`, so the
-    /// deployment key reaches the proxy, not the inference host.
+    /// team token reaches the proxy, not the inference host.
     pub(crate) fn resolve_managed_config_url(&self) -> String {
         blank_as_unset(&self.managed_config_url)
             .unwrap_or_else(|| self.proxy_join("/deployment/config"))
@@ -493,9 +489,9 @@ impl EndpointsConfig {
     }
     /// Whether trace upload can authenticate without an interactive login.
     pub fn has_noninteractive_upload_auth(&self) -> bool {
-        self.deployment_key.is_some() || self.resolve_direct_upload_method().is_some()
+        self.resolve_direct_upload_method().is_some()
     }
-    /// Direct bucket → proxy (if `auth_token` or `deployment_key`) → ambient GCS → `None`.
+    /// Direct bucket → proxy (if `auth_token`) → ambient GCS → `None`.
     pub fn resolve_upload_method(
         &self,
         auth_token: Option<String>,
@@ -503,11 +499,10 @@ impl EndpointsConfig {
         if let Some(method) = self.resolve_direct_upload_method() {
             return Some(method);
         }
-        if auth_token.is_some() || self.deployment_key.is_some() {
+        if let Some(user_token) = auth_token {
             return Some(crate::session::repo_changes::UploadMethod::Proxy {
                 proxy_base_url: self.resolve_trace_upload_url(),
-                user_token: auth_token.unwrap_or_default(),
-                deployment_key: self.deployment_key.clone(),
+                user_token,
                 alpha_test_key: self.alpha_test_key.clone(),
             });
         }
@@ -564,7 +559,6 @@ impl Default for EndpointsConfig {
             trace_upload_credentials_file: env_string("GROK_TRACE_UPLOAD_CREDENTIALS_FILE"),
             trace_upload_credentials: None,
             trace_upload_endpoint_url: env_string("GROK_TRACE_UPLOAD_ENDPOINT_URL"),
-            deployment_key: env_string("GROK_DEPLOYMENT_KEY"),
             managed_config_url: env_string("GROK_MANAGED_CONFIG_URL"),
             otel_exporter_otlp_endpoint: env_string("OTEL_EXPORTER_OTLP_ENDPOINT"),
             otel_exporter_otlp_traces_endpoint: env_string("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"),
@@ -677,7 +671,6 @@ pub(crate) const FIRST_PARTY_CREDENTIAL_ENV_VARS: &[&str] = &[
     crate::agent::auth_method::LEGACY_XAI_API_KEY_ENV_VAR,
     "GROK_AUTH",
     "GROK_AUTH_PATH",
-    "GROK_DEPLOYMENT_KEY",
     "GROK_EXTRA_AUTH_KEY",
     "GROK_TRACE_UPLOAD_CREDENTIALS_FILE",
     "OTEL_EXPORTER_OTLP_HEADERS",
@@ -5614,7 +5607,6 @@ fn resolve_credentials_enforced(
     enforce_disable_api_key_auth(&mut credentials, disable_api_key_auth, session_key);
     credentials
 }
-pub use xai_grok_telemetry::config::deployment_id_from_key;
 /// Try to resolve credentials for a model by loading the effective config.
 /// Returns `None` (with a warning) if config loading, parsing, or model
 /// lookup fails. `session_key` should only be passed when `auth_type` is
@@ -5793,7 +5785,6 @@ pub(crate) fn resolve_aux_model_sampling_config(
             alpha_test_key.clone(),
             client_version.clone(),
             None,
-            None,
         );
         if sampler.api_key.is_some() {
             return Some(sampler);
@@ -5808,8 +5799,7 @@ pub(crate) fn resolve_aux_model_sampling_config(
     }
     let xai_bearer = session_key
         .map(|s| s.to_owned())
-        .or_else(|| crate::agent::auth_method::read_xai_api_key_env().ok())
-        .or_else(|| endpoints.deployment_key.clone());
+        .or_else(|| crate::agent::auth_method::read_xai_api_key_env().ok());
     if let Some(bearer) = xai_bearer {
         let entry = ModelEntry {
             info: ModelInfo {
@@ -5863,14 +5853,8 @@ pub(crate) fn resolve_aux_model_sampling_config(
             api_base_url: None,
         };
         let credentials = resolve_credentials_enforced(&entry, session_key, disable_api_key_auth);
-        let sampler = sampling_config_for_model(
-            &entry,
-            credentials,
-            alpha_test_key,
-            client_version,
-            None,
-            None,
-        );
+        let sampler =
+            sampling_config_for_model(&entry, credentials, alpha_test_key, client_version, None);
         return Some(sampler);
     }
     tracing::warn!(
@@ -5948,7 +5932,6 @@ pub(crate) fn sampling_config_for_model(
     credentials: ResolvedCredentials,
     alpha_test_key: Option<String>,
     client_version: Option<String>,
-    deployment_id: Option<String>,
     user_id: Option<String>,
 ) -> SamplerConfig {
     let info = model.info();
@@ -5989,7 +5972,7 @@ pub(crate) fn sampling_config_for_model(
         stream_tool_calls: info.stream_tool_calls.unwrap_or(false),
         idle_timeout_secs: None,
         client_identifier: None,
-        deployment_id,
+        deployment_id: None,
         user_id,
         origin_client: None,
         attribution_callback: None,
@@ -6094,14 +6077,7 @@ fn resolve_hidden_default_web_search_sampling_config(
         api_base_url: None,
     };
     let credentials = resolve_credentials_enforced(&entry, session_key, disable_api_key_auth);
-    sampling_config_for_model(
-        &entry,
-        credentials,
-        alpha_test_key,
-        client_version,
-        None,
-        None,
-    )
+    sampling_config_for_model(&entry, credentials, alpha_test_key, client_version, None)
 }
 pub(crate) fn resolve_web_search_sampling_config(
     model_id: &str,
@@ -6126,7 +6102,6 @@ pub(crate) fn resolve_web_search_sampling_config(
             credentials,
             alpha_test_key,
             client_version,
-            None,
             None,
         ))
     } else if model_id == crate::models::default_web_search_model() {
@@ -7388,14 +7363,8 @@ reasoning_effort = "low"
             None,
             None,
         );
-        let sampling_config = sampling_config_for_model(
-            &model,
-            resolve_credentials(&model, None),
-            None,
-            None,
-            None,
-            None,
-        );
+        let sampling_config =
+            sampling_config_for_model(&model, resolve_credentials(&model, None), None, None, None);
         assert_eq!(
             sampling_config.api_key,
             Some("model-specific-key".to_string())
@@ -7413,7 +7382,6 @@ reasoning_effort = "low"
                 auth_type: xai_chat_state::AuthType::ApiKey,
                 auth_scheme: AuthScheme::Bearer,
             },
-            None,
             None,
             None,
             None,
@@ -7697,7 +7665,6 @@ reasoning_effort = "low"
             None,
             None,
             None,
-            None,
         );
         assert_eq!(config.api_backend, ApiBackend::Messages);
         assert_eq!(config.auth_scheme, AuthScheme::Bearer);
@@ -7812,7 +7779,7 @@ reasoning_effort = "low"
         assert_eq!(creds.auth_scheme, AuthScheme::XApiKey);
         assert_eq!(creds.auth_type, xai_chat_state::AuthType::ApiKey);
         assert_eq!(creds.api_key, Some("sk-ant-test-key".to_string()));
-        let config = sampling_config_for_model(&model, creds, None, None, None, None);
+        let config = sampling_config_for_model(&model, creds, None, None, None);
         assert_eq!(config.auth_scheme, AuthScheme::XApiKey);
         assert_eq!(config.api_backend, ApiBackend::Messages);
         let client = xai_grok_sampler::SamplingClient::new(config).expect("client should build");
@@ -7831,7 +7798,7 @@ reasoning_effort = "low"
         assert_eq!(model.info.auth_scheme, AuthScheme::Bearer);
         let creds = resolve_credentials(&model, None);
         assert_eq!(creds.auth_scheme, AuthScheme::Bearer);
-        let config = sampling_config_for_model(&model, creds, None, None, None, None);
+        let config = sampling_config_for_model(&model, creds, None, None, None);
         assert_eq!(config.auth_scheme, AuthScheme::Bearer);
         let client = xai_grok_sampler::SamplingClient::new(config).expect("client should build");
         let info = client.auth_info();
@@ -8163,25 +8130,13 @@ reasoning_effort = "low"
     #[test]
     fn sampling_config_context_window_from_entry_or_default() {
         let model = test_model_entry("any-model", "https://api.x.ai/v1", None, None, None);
-        let config = sampling_config_for_model(
-            &model,
-            resolve_credentials(&model, None),
-            None,
-            None,
-            None,
-            None,
-        );
+        let config =
+            sampling_config_for_model(&model, resolve_credentials(&model, None), None, None, None);
         assert_eq!(config.context_window, 200_000);
         let mut model = test_model_entry("any-model", "https://api.x.ai/v1", None, None, None);
         model.info.context_window = NonZeroU64::new(256_000).unwrap();
-        let config = sampling_config_for_model(
-            &model,
-            resolve_credentials(&model, None),
-            None,
-            None,
-            None,
-            None,
-        );
+        let config =
+            sampling_config_for_model(&model, resolve_credentials(&model, None), None, None, None);
         assert_eq!(config.context_window, 256_000);
     }
     #[test]
@@ -8309,14 +8264,8 @@ reasoning_effort = "low"
         let mut model =
             test_model_entry("test-model", "https://api.example.com/v1", None, None, None);
         model.info.api_backend = ApiBackend::Responses;
-        let sampling_config = sampling_config_for_model(
-            &model,
-            resolve_credentials(&model, None),
-            None,
-            None,
-            None,
-            None,
-        );
+        let sampling_config =
+            sampling_config_for_model(&model, resolve_credentials(&model, None), None, None, None);
         assert_eq!(sampling_config.api_backend, ApiBackend::Responses);
     }
     #[test]
@@ -9280,7 +9229,7 @@ reasoning_effort = "low"
     }
     fn resolve_sampling(model: &ModelEntry, session_key: Option<&str>) -> SamplerConfig {
         let credentials = resolve_credentials(model, session_key);
-        sampling_config_for_model(model, credentials, None, None, None, None)
+        sampling_config_for_model(model, credentials, None, None, None)
     }
 
     /// A Cerebras-slugged entry must resolve — through the real `config.toml`
@@ -9888,7 +9837,7 @@ reasoning_effort = "low"
     }
     /// REGRESSION: the managed-config URL never follows `xai_api_base_url`
     /// through the full loader `Config::new_from_toml_cfg` — a distinct construction
-    /// path from `from_config_value`, so the deployment key never reaches the
+    /// path from `from_config_value`, so the team token never reaches the
     /// inference host on either.
     #[test]
     #[serial]
@@ -9908,7 +9857,7 @@ reasoning_effort = "low"
             !cfg.endpoints
                 .resolve_managed_config_url()
                 .contains("inference.acme-corp.example"),
-            "deployment key would be sent to the inference host"
+            "the team token would be sent to the inference host"
         );
     }
     #[test]
@@ -11953,16 +11902,16 @@ agent_type = "cursor"
         let raw: toml::Value = toml::from_str(
             r#"
             [endpoint]
-            deployment_key = "xai-token-test"
+            alpha_test_key = "xai-token-test"
         "#,
         )
         .unwrap();
         let config = Config::new_from_toml_cfg(&raw).expect("should parse");
-        assert!(config.endpoints.deployment_key.is_none());
+        assert!(config.endpoints.alpha_test_key.is_none());
         let unused = unused_keys_from_toml(
             r#"
             [endpoint]
-            deployment_key = "xai-token-test"
+            alpha_test_key = "xai-token-test"
         "#,
         );
         assert!(unused.iter().any(|k| k == "endpoint"), "got: {unused:?}");
@@ -11996,7 +11945,7 @@ agent_type = "cursor"
         let unused = unused_keys_from_toml(
             r#"
             [endpoints]
-            deplomyent_key = "test"
+            alpah_test_key = "test"
             [ui]
             yoloo = true
             [features]
@@ -12004,7 +11953,7 @@ agent_type = "cursor"
         "#,
         );
         assert!(
-            unused.iter().any(|k| k == "endpoints.deplomyent_key"),
+            unused.iter().any(|k| k == "endpoints.alpah_test_key"),
             "got: {unused:?}"
         );
         assert!(unused.iter().any(|k| k == "ui.yoloo"), "got: {unused:?}");
@@ -12023,7 +11972,6 @@ agent_type = "cursor"
             [features]
             feedback = true
             [endpoints]
-            deployment_key = "test"
             management_api_key = "mgmt-key"
             gcs_service_account_key = "gcs-key"
             [models]
@@ -12206,26 +12154,6 @@ agent_type = "cursor"
             vec!["ui.yollo".to_string()],
             "exactly the typo'd key must be flagged"
         );
-    }
-    /// Regression: a deployment key with no OAuth token must resolve to Proxy.
-    #[test]
-    fn resolve_upload_method_accepts_deployment_key_without_oauth() {
-        use crate::session::repo_changes::UploadMethod;
-        let endpoints = EndpointsConfig {
-            deployment_key: Some("enterprise-key".to_string()),
-            ..Default::default()
-        };
-        match endpoints.resolve_upload_method(None) {
-            Some(UploadMethod::Proxy {
-                deployment_key,
-                user_token,
-                ..
-            }) => {
-                assert_eq!(deployment_key.as_deref(), Some("enterprise-key"));
-                assert_eq!(user_token, "");
-            }
-            other => panic!("expected Proxy upload method, got {other:?}"),
-        }
     }
     #[test]
     fn otlp_traces_endpoint_precedence() {

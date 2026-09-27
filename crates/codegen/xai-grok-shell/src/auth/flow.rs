@@ -1072,14 +1072,8 @@ async fn run_cli_login_steps(
 /// config was actually applied; `grok setup` reports the no-config case.
 async fn apply_post_login_config(authenticated: GrokAuth) -> anyhow::Result<()> {
     let outcome = crate::managed_config::post_login_sync(Some(authenticated)).await;
-    match outcome {
-        crate::managed_config::ManagedConfigSync::Updated { is_team: true } => {
-            eprintln!("Applied your team's managed configuration.");
-        }
-        crate::managed_config::ManagedConfigSync::Updated { is_team: false } => {
-            eprintln!("Applied your deployment's managed configuration.");
-        }
-        _ => {}
+    if outcome == crate::managed_config::ManagedConfigSync::Updated {
+        eprintln!("Applied your team's managed configuration.");
     }
     Ok(())
 }
@@ -1138,7 +1132,7 @@ pub fn perform_logout(
             auth_manager.clear()?;
         }
         // Clear the synced files if no principal remains to own them. A scoped
-        // logout that leaves a team (or a deployment key) signed in keeps them.
+        // logout that leaves a team signed in keeps them.
         crate::managed_config::clear_orphan();
     }
     Ok(LogoutResult {

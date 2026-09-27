@@ -138,7 +138,6 @@ fn proxy_handles(server: &MockInferenceServer, auth: Arc<AuthManager>) -> HeapPr
         UploadMethod::Proxy {
             proxy_base_url: server.url(),
             user_token: String::new(),
-            deployment_key: None,
             alpha_test_key: None,
         },
     )

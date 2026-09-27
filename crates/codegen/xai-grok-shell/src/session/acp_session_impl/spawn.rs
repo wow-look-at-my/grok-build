@@ -242,7 +242,6 @@ pub(crate) async fn spawn_session_actor(
     feedback_proxy_url: Option<String>,
     feedback_user_token: Option<String>,
     feedback_alpha_test_key: Option<String>,
-    deployment_key: Option<String>,
     client_terminal_capable: bool,
     client_fs_capable: bool,
     gateway_enabled: std::sync::Arc<std::sync::atomic::AtomicBool>,
@@ -773,12 +772,6 @@ pub(crate) async fn spawn_session_actor(
         .and_then(|ui| ui.get("stop_gate_ci_failing"))
         .and_then(toml::Value::as_bool)
         .unwrap_or(true);
-    let thinking_summaries_enabled = effective_cfg
-        .as_ref()
-        .and_then(|cfg| cfg.get("ui"))
-        .and_then(|ui| ui.get("thinking_summaries"))
-        .and_then(toml::Value::as_bool)
-        .unwrap_or(crate::agent::config::UiConfig::THINKING_SUMMARIES_DEFAULT);
     let (user_question_tx, user_question_rx) = tokio::sync::mpsc::unbounded_channel::<
         xai_grok_tools::implementations::grok_build::ask_user_question::types::UserQuestionRequest,
     >();
@@ -1172,8 +1165,7 @@ pub(crate) async fn spawn_session_actor(
     let feedback_client = feedback_proxy_url.map(|base_url| {
         let mut client =
             crate::agent::feedback_client::FeedbackClient::new(base_url, feedback_user_token)
-                .with_alpha_test_key(feedback_alpha_test_key)
-                .with_deployment_key(deployment_key);
+                .with_alpha_test_key(feedback_alpha_test_key);
         if let Some(am) = auth_manager.as_ref() {
             client = client.with_auth_manager(am.clone());
         }
@@ -1818,7 +1810,7 @@ pub(crate) async fn spawn_session_actor(
         turn_summary_task: std::cell::RefCell::new(None),
         turn_summary_generation: std::cell::Cell::new(0),
         turn_summary_enabled: effective_config.is_turn_summary_enabled(),
-        thinking_summaries_enabled,
+        thinking_summaries_enabled: effective_config.ui.thinking_summaries_enabled(),
         session_turn_active: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         streaming_turn_capture: parking_lot::Mutex::new(StreamingTurnCapture::default()),
         streaming_tool_titles: parking_lot::Mutex::new(std::collections::HashMap::new()),
@@ -2262,7 +2254,6 @@ pub(crate) async fn spawn_session_on_thread(
     feedback_proxy_url: Option<String>,
     feedback_user_token: Option<String>,
     feedback_alpha_test_key: Option<String>,
-    deployment_key: Option<String>,
     client_terminal_capable: bool,
     client_fs_capable: bool,
     gateway_enabled: std::sync::Arc<std::sync::atomic::AtomicBool>,
@@ -2437,7 +2428,6 @@ pub(crate) async fn spawn_session_on_thread(
                         feedback_proxy_url,
                         feedback_user_token,
                         feedback_alpha_test_key,
-                        deployment_key,
                         client_terminal_capable,
                         client_fs_capable,
                         gateway_enabled,

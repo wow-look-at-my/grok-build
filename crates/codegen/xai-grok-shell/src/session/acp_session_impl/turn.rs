@@ -2291,11 +2291,6 @@ impl SessionActor {
             request.x_grok_turn_idx =
                 Some(self.chat_state_handle.get_prompt_index().await.to_string());
             request.x_grok_agent_id = Some(xai_grok_telemetry::id::agent_id());
-            if request.x_grok_deployment_id.is_none() {
-                request.x_grok_deployment_id = crate::managed_config::resolve_deployment_id(
-                    crate::managed_config::resolve_deployment_key().as_deref(),
-                );
-            }
             if structured_output_native {
                 request.json_schema = json_schema.clone();
             }

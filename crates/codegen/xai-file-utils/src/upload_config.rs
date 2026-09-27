@@ -14,7 +14,6 @@ pub enum UploadMethod {
     Proxy {
         proxy_base_url: String,
         user_token: String,
-        deployment_key: Option<String>,
         alpha_test_key: Option<String>,
     },
     S3 {

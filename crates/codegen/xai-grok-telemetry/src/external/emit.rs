@@ -190,7 +190,6 @@ pub(crate) fn emit_record(ext: &ExternalTelemetry, mut record: ExternalRecord) {
                 identity.organization_id.as_deref(),
             ),
             (ExternalKey::TeamId, identity.team_id.as_deref()),
-            (ExternalKey::DeploymentId, identity.deployment_id.as_deref()),
         ] {
             if let Some(v) = value.filter(|v| !v.is_empty()) {
                 log_record.add_attribute(key.as_str(), v.to_owned());
@@ -234,7 +233,6 @@ fn add_increment(
         ("user.id", identity.user_id.as_deref()),
         ("organization.id", identity.organization_id.as_deref()),
         ("team.id", identity.team_id.as_deref()),
-        ("deployment.id", identity.deployment_id.as_deref()),
     ] {
         if let Some(v) = value.filter(|v| !v.is_empty()) {
             attrs.push(KeyValue::new(key, v.to_owned()));

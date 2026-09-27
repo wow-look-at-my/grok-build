@@ -270,7 +270,7 @@ fn format_consumer(kind: ConsumerKind, op: &str) -> String {
 ///
 /// `sent_bearer` may be either a full bearer (passed by the
 /// non-sampler call sites listed above, which read directly from the
-/// client's `user_token` / `deployment_key` snapshot) or a 12-char
+/// client's `user_token` snapshot) or a 12-char
 /// prefix (passed by the sampler-side
 /// [`Auth401AttributionCallback`] boundary; the sampler scrubs to a
 /// prefix before crossing the crate boundary). The truncation inside

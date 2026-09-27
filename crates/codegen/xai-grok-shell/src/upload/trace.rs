@@ -1109,13 +1109,6 @@ impl TraceExportSource for DynamicResolver {
         xai_file_utils::gcs::StorageConfig::proxy_http_client(&self.with_auth())
     }
     fn has_usable_credential(&self) -> bool {
-        if let crate::session::repo_changes::UploadMethod::Proxy {
-            deployment_key: Some(_),
-            ..
-        } = &self.base_config.upload_method
-        {
-            return true;
-        }
         self.auth_manager.has_usable_token()
     }
     /// Defers to the `AuthManager` token-rotation notifier (same mechanism
@@ -1130,13 +1123,7 @@ impl TraceExportSource for DynamicResolver {
         if self.auth_manager.has_permanent_failure() {
             return None;
         }
-        let current_wire = match &self.base_config.upload_method {
-            crate::session::repo_changes::UploadMethod::Proxy {
-                deployment_key: Some(dk),
-                ..
-            } => Some(dk.clone()),
-            _ => self.auth_manager.current_or_expired().map(|a| a.key),
-        };
+        let current_wire = self.auth_manager.current_or_expired().map(|a| a.key);
         if let (Some(failed), Some(current)) = (failed_bearer, current_wire)
             && current != failed
         {
@@ -1705,7 +1692,6 @@ mod tests {
             upload_method: UploadMethod::Proxy {
                 proxy_base_url: "https://proxy.example.com".into(),
                 user_token: "stale-token".into(),
-                deployment_key: None,
                 alpha_test_key: None,
             },
         };
@@ -1778,7 +1764,6 @@ mod tests {
                 upload_method: UploadMethod::Proxy {
                     proxy_base_url: "https://proxy.example.com".into(),
                     user_token: "stale-base-token".into(),
-                    deployment_key: None,
                     alpha_test_key: None,
                 },
             },
@@ -1836,7 +1821,6 @@ mod tests {
                 upload_method: UploadMethod::Proxy {
                     proxy_base_url: "https://proxy.example.com".into(),
                     user_token: "stale-base-token".into(),
-                    deployment_key: None,
                     alpha_test_key: None,
                 },
             },
@@ -1882,7 +1866,6 @@ mod tests {
                 upload_method: UploadMethod::Proxy {
                     proxy_base_url: "https://proxy.example.com".into(),
                     user_token: "stale-base-token".into(),
-                    deployment_key: None,
                     alpha_test_key: None,
                 },
             },
@@ -1950,7 +1933,6 @@ mod tests {
                 upload_method: UploadMethod::Proxy {
                     proxy_base_url: "https://proxy.example.com".into(),
                     user_token: "stale-base-token".into(),
-                    deployment_key: None,
                     alpha_test_key: None,
                 },
             },
@@ -2023,7 +2005,6 @@ mod tests {
                 upload_method: UploadMethod::Proxy {
                     proxy_base_url: "https://proxy.example.com".into(),
                     user_token: "stale".into(),
-                    deployment_key: None,
                     alpha_test_key: None,
                 },
             },
@@ -2061,7 +2042,6 @@ mod tests {
             upload_method: UploadMethod::Proxy {
                 proxy_base_url: "https://proxy.example.com".into(),
                 user_token: "original-token".into(),
-                deployment_key: None,
                 alpha_test_key: None,
             },
         };
@@ -2145,7 +2125,6 @@ mod tests {
             upload_method: UploadMethod::Proxy {
                 proxy_base_url: "https://proxy.example.com".into(),
                 user_token: "snapshot".into(),
-                deployment_key: None,
                 alpha_test_key: None,
             },
         };
@@ -2194,7 +2173,6 @@ mod tests {
                 upload_method: UploadMethod::Proxy {
                     proxy_base_url: "https://proxy.example.com".into(),
                     user_token: "snapshot".into(),
-                    deployment_key: None,
                     alpha_test_key: None,
                 },
             },
@@ -2207,48 +2185,6 @@ mod tests {
             .wait_for_auth_recovery(Some("fresh-token"), std::time::Duration::from_millis(10))
             .expect("recovery hook available");
         assert!(!wait.await, "unchanged token falls through to the notifier");
-    }
-    /// With a deployment key on the wire, the session token in `AuthManager`
-    /// always differs from `failed_bearer` — the wake comparison must use the
-    /// deployment key (wire precedence) or parking becomes a hot retry loop.
-    #[tokio::test]
-    async fn dynamic_resolver_auth_recovery_ignores_session_token_for_deployment_key() {
-        use crate::session::repo_changes::UploadMethod;
-        use xai_file_utils::queue::TraceExportSource;
-        let dir = tempfile::tempdir().unwrap();
-        let auth_manager = Arc::new(crate::auth::AuthManager::new(
-            dir.path(),
-            crate::auth::GrokComConfig::default(),
-        ));
-        auth_manager.hot_swap(crate::auth::GrokAuth {
-            key: "session-token".into(),
-            expires_at: Some(chrono::Utc::now() + chrono::Duration::hours(1)),
-            ..crate::auth::GrokAuth::test_default()
-        });
-        let resolver = DynamicResolver {
-            auth_manager,
-            base_config: TraceExportConfig {
-                bucket_url: None,
-                service_account_key: None,
-                prefix_dir: None,
-                gcs_prefix: None,
-                absolute_paths: false,
-                archive_name_override: None,
-                upload_method: UploadMethod::Proxy {
-                    proxy_base_url: "https://proxy.example.com".into(),
-                    user_token: "snapshot".into(),
-                    deployment_key: Some("deployment-key".into()),
-                    alpha_test_key: None,
-                },
-            },
-        };
-        let wait = resolver
-            .wait_for_auth_recovery(Some("deployment-key"), std::time::Duration::from_millis(10))
-            .expect("recovery hook available");
-        assert!(
-            !wait.await,
-            "static deployment key never satisfies the immediate-wake check"
-        );
     }
     #[tokio::test]
     async fn spawn_upload_queue_uses_dynamic_resolver_when_auth_manager_provided() {
@@ -2266,7 +2202,6 @@ mod tests {
             upload_method: UploadMethod::Proxy {
                 proxy_base_url: "https://proxy.example.com".into(),
                 user_token: "token".into(),
-                deployment_key: None,
                 alpha_test_key: None,
             },
         };
@@ -2469,7 +2404,6 @@ mod tests {
         let proxy = UploadMethod::Proxy {
             proxy_base_url: "https://proxy.example/v1".into(),
             user_token: "token".into(),
-            deployment_key: None,
             alpha_test_key: None,
         };
         let gcs = UploadMethod::Direct {

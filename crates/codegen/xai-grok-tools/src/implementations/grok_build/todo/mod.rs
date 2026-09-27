@@ -82,13 +82,28 @@ pub(crate) fn apply_merge(
     Ok(())
 }
 
+/// A finished item's echo is cut to this many characters of its first line.
+const FINISHED_ITEM_ECHO_CHARS: usize = 100;
+
+/// Every write echoes the whole list, and the list never shrinks. So a
+/// finished item echoes only its first line. The state keeps the full text.
 pub(crate) fn summarize_todo_state(state: &TodoState) -> String {
     if state.is_empty() {
         "No tasks currently tracked.".into()
     } else {
         let mut out = String::new();
         for (id, t) in state.todo_items_with_ids() {
-            writeln!(&mut out, "- {} {id}: {}", t.status.tag(), t.content).ok();
+            let finished = matches!(t.status, TodoStatus::Completed | TodoStatus::Cancelled);
+            if finished {
+                let first = t.content.lines().next().unwrap_or("");
+                let mut head: String = first.chars().take(FINISHED_ITEM_ECHO_CHARS).collect();
+                if head.len() < t.content.trim_end().len() {
+                    head.push('…');
+                }
+                writeln!(&mut out, "- {} {id}: {head}", t.status.tag()).ok();
+            } else {
+                writeln!(&mut out, "- {} {id}: {}", t.status.tag(), t.content).ok();
+            }
         }
         out
     }
@@ -748,6 +763,38 @@ mod tests {
             );
         }
         state
+    }
+
+    #[test]
+    fn a_finished_item_echoes_only_its_first_line() {
+        let long_open = format!("open task\n{}", "detail ".repeat(40));
+        let long_done = format!("shipped the parser\n{}", "detail ".repeat(40));
+        let state = seed_state(&[
+            ("1", &long_open, TodoStatus::InProgress),
+            ("2", &long_done, TodoStatus::Completed),
+            ("3", "dropped", TodoStatus::Cancelled),
+            ("4", &"x".repeat(300), TodoStatus::Completed),
+        ]);
+        let echo = summarize_todo_state(&state);
+        assert!(
+            echo.contains(&long_open),
+            "an open item keeps its text:\n{echo}"
+        );
+        assert!(
+            echo.contains("- [completed] 2: shipped the parser…\n"),
+            "{echo}"
+        );
+        assert!(!echo.contains(&long_done), "{echo}");
+        assert!(echo.contains("- [cancelled] 3: dropped\n"), "{echo}");
+        assert!(
+            echo.contains(&format!("- [completed] 4: {}…\n", "x".repeat(100))),
+            "{echo}"
+        );
+        assert_eq!(
+            get_item(&state, "2").content,
+            long_done,
+            "the state keeps the full text"
+        );
     }
 
     fn get_item<'a>(state: &'a TodoState, id: &str) -> &'a TodoItem {

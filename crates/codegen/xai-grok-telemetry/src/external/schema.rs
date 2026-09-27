@@ -90,7 +90,6 @@ pub enum ExternalKey {
     UserId,
     OrganizationId,
     TeamId,
-    DeploymentId,
     // Session lifecycle
     Model,
     PermissionMode,
@@ -175,7 +174,6 @@ impl ExternalKey {
             Self::UserId => "user.id",
             Self::OrganizationId => "organization.id",
             Self::TeamId => "team.id",
-            Self::DeploymentId => "deployment.id",
             Self::Model => "model",
             Self::PermissionMode => "permission_mode",
             Self::McpServerCount => "mcp_server_count",
@@ -249,7 +247,6 @@ pub(crate) const ALL_KEYS: &[ExternalKey] = &[
     ExternalKey::UserId,
     ExternalKey::OrganizationId,
     ExternalKey::TeamId,
-    ExternalKey::DeploymentId,
     ExternalKey::Model,
     ExternalKey::PermissionMode,
     ExternalKey::McpServerCount,
@@ -539,7 +536,6 @@ pub(crate) const METRIC_ALLOWED_ATTR_KEYS: &[&str] = &[
     "user.id",
     "organization.id",
     "team.id",
-    "deployment.id",
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────

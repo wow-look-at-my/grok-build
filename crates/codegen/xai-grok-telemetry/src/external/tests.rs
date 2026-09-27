@@ -93,7 +93,6 @@ fn external_allowed_keys_are_pinned() {
         "user.id",
         "organization.id",
         "team.id",
-        "deployment.id",
         "model",
         "permission_mode",
         "mcp_server_count",
@@ -188,7 +187,6 @@ fn metric_attr_keys_are_pinned() {
         "user.id",
         "organization.id",
         "team.id",
-        "deployment.id",
     ];
     assert_eq!(
         schema::METRIC_ALLOWED_ATTR_KEYS,
@@ -391,7 +389,7 @@ fn agent_connect_timeout_emits_phase_histogram_and_timeout_counter() {
             elapsed_ms: 30_000,
             timeout_secs: Some(30),
             embedded_fallback: false,
-            auth_mode: crate::startup::AuthMode::Deployment,
+            auth_mode: crate::startup::AuthMode::Team,
         },
     );
     assert!(exported_events(&stream).is_empty());
@@ -894,14 +892,12 @@ fn identity_attrs_attached_when_set_and_blank_ids_never_export() {
             user_id: Some("user-42".into()),
             organization_id: Some(String::new()), // blank: must not export
             team_id: None,
-            deployment_id: Some("dep-7".into()),
         },
     );
     emit_event_into(&stream, &sentinel_session_harness());
     let events = exported_events(&stream);
     let ev = &events[0];
     assert_eq!(attr(ev, "user.id").as_deref(), Some("user-42"));
-    assert_eq!(attr(ev, "deployment.id").as_deref(), Some("dep-7"));
     assert_eq!(attr(ev, "organization.id"), None, "blank ids never export");
     assert_eq!(attr(ev, "team.id"), None);
 }

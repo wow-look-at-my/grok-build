@@ -239,7 +239,6 @@ pub fn update_telemetry_config(config: &AgentConfig, auth_manager: &AuthManager)
         config.resolve_telemetry_mode().value,
         user_id,
         team_id,
-        config.endpoints.deployment_key.clone(),
         crate::http::origin_client_info_from_env(),
         xai_grok_version::version().to_owned(),
         subscription_tier,
