@@ -43,7 +43,6 @@ async fn manual_auth_does_not_post_when_product_telemetry_disabled() {
         Some("user-xyz".into()),
         None,
         None,
-        None,
         "0.0.0-test".into(),
         None,
         reqwest::Client::new(),

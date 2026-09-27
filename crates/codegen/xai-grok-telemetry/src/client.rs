@@ -444,7 +444,6 @@ mod tests {
             Some("user-1".into()),
             None,
             None,
-            None,
             "0.0.0-test".into(),
             None,
             reqwest::Client::new(),
