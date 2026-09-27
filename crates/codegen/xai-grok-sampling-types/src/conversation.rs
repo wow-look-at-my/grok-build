@@ -1067,9 +1067,10 @@ impl ModelPricing {
 
 /// Derive cost in USD ticks (1e10 per USD) from reported token usage and a
 /// model's per-token pricing. Returns `None` when `pricing` is unusable
-/// (all tiers zero) or `usage` is absent, so the caller can fall back to the
-/// honest-absence behavior. Pure integer-arithmetic-at-the-f64 level then
-/// rounded to the nearest tick; deterministic and exactly assertable.
+/// (all tiers zero), `usage` is absent, or the derived tick count does not fit
+/// `i64`, so the caller can fall back to the honest-absence behavior. Pure
+/// integer-arithmetic-at-the-f64 level then rounded to the nearest tick;
+/// deterministic and exactly assertable.
 ///
 /// Billing tiers (mirroring [`TokenUsage`]):
 /// - uncached input = `prompt_tokens − cached_prompt_tokens − cache_creation`
@@ -1095,7 +1096,16 @@ pub fn compute_cost_ticks(usage: Option<&TokenUsage>, pricing: &ModelPricing) ->
         + cached * pricing.cached_read_per_token_usd
         + cache_creation * pricing.cache_creation_per_token_usd
         + f64::from(usage.completion_tokens) * pricing.output_per_token_usd;
-    let ticks = (usd * 1e10).round() as i64;
+    // Pricing the catalog or config carries can be wrong by orders of
+    // magnitude, and a tick count outside `i64` has no representation at all:
+    // the turn is reported as unpriced rather than as a saturated price.
+    let ticks = match crate::types::ticks_from_usd("computed cost (usage x pricing)", usd) {
+        Ok(ticks) => ticks,
+        Err(err) => {
+            tracing::error!(error = %err, "derived cost has no tick form; reporting the turn as unpriced");
+            return None;
+        }
+    };
     // A configured-but-zero-usage turn yields 0 ticks; the capture site
     // normalizes non-positive to `None` via `reported_cost_ticks`, which is
     // the correct honest-absence outcome for a turn that billed nothing.
@@ -5981,6 +5991,18 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(compute_cost_ticks(None, &pricing), None);
+    }
+
+    /// Pricing large enough that the tick count leaves `i64` leaves the turn
+    /// unpriced. A saturated `i64::MAX` would be a price the model never had.
+    #[test]
+    fn compute_cost_ticks_none_when_the_tick_count_does_not_fit_i64() {
+        let pricing = ModelPricing {
+            input_per_token_usd: 1e18,
+            ..Default::default()
+        };
+        let usage = usage_with(1_000, 0, 0, 0);
+        assert_eq!(compute_cost_ticks(Some(&usage), &pricing), None);
     }
 
     /// A misreported cache split (cached > prompt) must not produce a negative

@@ -35,7 +35,7 @@ pub fn panic_payload(panic: &(dyn Any + Send)) -> String {
 /// `what` names the work in the log line, so a panic in detached work is
 /// attributable without a backtrace. The panic hook still runs; this adds the
 /// caller's view of the same failure.
-pub(crate) async fn guarded<F: Future>(what: &'static str, task: F) -> Result<F::Output, String> {
+pub async fn guarded<F: Future>(what: &'static str, task: F) -> Result<F::Output, String> {
     match AssertUnwindSafe(task).catch_unwind().await {
         Ok(output) => Ok(output),
         Err(panic) => {
@@ -44,6 +44,17 @@ pub(crate) async fn guarded<F: Future>(what: &'static str, task: F) -> Result<F:
             Err(detail)
         }
     }
+}
+
+/// Run work that nobody awaits, so its panic is named instead of lost.
+///
+/// A [`guarded`] caller can still act on the `Err`. A detached task with no
+/// waiting caller cannot: nothing reads a value it could return, and the
+/// alternative is a task that simply stops being there. The future ends after
+/// the error is logged under the task's own name, and whoever spawned it is
+/// answered normally rather than with a join failure.
+pub async fn fire_and_forget(what: &'static str, task: impl Future) {
+    let _ = guarded(what, task).await;
 }
 
 #[cfg(test)]
@@ -126,5 +137,23 @@ mod tests {
         );
         let outcome = guarded("test detached work", async { "finished" }).await;
         assert_eq!(outcome.map(str::to_string), Ok("finished".to_string()));
+    }
+
+    /// The point of [`fire_and_forget`] is that the panic stops at the task: a
+    /// bare `tokio::spawn` of the same work answers its spawner with a join
+    /// failure, which is the loss this whole file exists to prevent.
+    #[tokio::test]
+    async fn a_panicking_fire_and_forget_task_ends_without_a_join_failure() {
+        let survived = tokio::time::timeout(
+            Duration::from_secs(5),
+            tokio::spawn(fire_and_forget("test fire and forget", async {
+                tokio::task::yield_now().await;
+                panic!("the detached work died");
+            })),
+        )
+        .await
+        .expect("the wrapper must finish the task rather than hang")
+        .expect("a panicked fire-and-forget task must not fail its join handle");
+        assert_eq!(survived, ());
     }
 }

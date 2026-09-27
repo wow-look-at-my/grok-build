@@ -401,15 +401,21 @@ impl LspClient {
 
         let stderr_task = child.stderr.take().map(|stderr| {
             let name = server_name.to_string();
-            tokio::spawn(async move {
-                use tokio::io::AsyncBufReadExt;
-                let stderr = tokio::process::ChildStderr::from_std(stderr);
-                let Ok(stderr) = stderr else { return };
-                let mut lines = tokio::io::BufReader::new(stderr).lines();
-                while let Ok(Some(line)) = lines.next_line().await {
-                    tracing::debug!(server = %name, "stderr: {line}");
-                }
-            })
+            // Nobody joins with this pump: the server's stderr is a log, not a
+            // result. Guarded so the loss of that log says which pump died, and
+            // the child's own exit path is unaffected either way.
+            tokio::spawn(crate::util::detached::fire_and_forget(
+                "lsp server stderr pump",
+                async move {
+                    use tokio::io::AsyncBufReadExt;
+                    let stderr = tokio::process::ChildStderr::from_std(stderr);
+                    let Ok(stderr) = stderr else { return };
+                    let mut lines = tokio::io::BufReader::new(stderr).lines();
+                    while let Ok(Some(line)) = lines.next_line().await {
+                        tracing::debug!(server = %name, "stderr: {line}");
+                    }
+                },
+            ))
         });
 
         tracing::debug!(server = %server_name, pid = ?child.id(), "LSP server spawned (stdio)");

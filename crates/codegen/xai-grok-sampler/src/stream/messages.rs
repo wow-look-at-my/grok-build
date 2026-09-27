@@ -53,12 +53,23 @@ pub(crate) fn messages_event_has_meaningful_content(event: &MessageStreamEvent) 
 /// The price a gateway put on this call, in USD ticks. Integer ticks are
 /// authoritative when both shapes arrive, and a reported zero is unbilled
 /// rather than free — the same precedence the Chat Completions path applies.
+///
+/// A USD float with no `i64` tick form is reported and treated as unpriced:
+/// the call stores no price that this arithmetic could not represent.
 fn wire_cost_ticks(
     ticks: Option<i64>,
     cost: Option<&xai_grok_sampling_types::UsageCost>,
 ) -> Option<i64> {
-    xai_grok_sampling_types::reported_cost_ticks(ticks)
-        .or_else(|| xai_grok_sampling_types::usd_float_to_ticks(cost.map(|c| c.as_usd_float())))
+    xai_grok_sampling_types::reported_cost_ticks(ticks).or_else(|| {
+        xai_grok_sampling_types::usd_float_to_ticks(cost.map(|c| c.as_usd_float()))
+            .unwrap_or_else(|err| {
+                tracing::error!(
+                    error = %err,
+                    "gateway reported a usage cost with no tick form; leaving the call unpriced"
+                );
+                None
+            })
+    })
 }
 
 /// Per-block streaming accumulator. The Anthropic Messages API reports

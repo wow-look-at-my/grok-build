@@ -126,7 +126,13 @@ async fn bootstrap_lsp(
         // Hand the monitor a `Weak` so it never keeps the manager (and its
         // language-server children) alive past the owning session.
         let mgr_weak = Arc::downgrade(&lsp_manager);
-        tokio::spawn(crate::implementations::lsp::restart_monitor(mgr_weak, name));
+        // Nothing polls this monitor: a server that dies with no monitor left
+        // simply stops being diagnosed, so the round runs where a panic is
+        // named rather than where it would end the task quietly.
+        tokio::spawn(crate::util::detached::fire_and_forget(
+            "lsp restart monitor",
+            crate::implementations::lsp::restart_monitor(mgr_weak, name),
+        ));
     }
     Ok(())
 }
@@ -149,7 +155,21 @@ impl super::LspBackend for LspBackendAdapter {
         let lsp_manager = self.lsp_manager.clone();
         let startup = self.startup.clone();
         tokio::spawn(async move {
-            LspBackendAdapter::ensure_started_with_state(lsp_manager, startup).await;
+            // Guarded, because this is the round that leaves the state
+            // `Starting` for the bootstrap to replace: a `Starting` nobody
+            // moves is the one state `ensure_ready` parks on forever, so the
+            // failure has to move it too.
+            let started = crate::util::detached::guarded(
+                "lsp start",
+                LspBackendAdapter::ensure_started_with_state(lsp_manager, startup.clone()),
+            )
+            .await;
+            if let Err(panic) = started {
+                let mut state = startup.state.lock().await;
+                *state = StartupState::Failed(format!("the LSP start task panicked: {panic}"));
+                drop(state);
+                startup.notify.notify_waiters();
+            }
         });
     }
 

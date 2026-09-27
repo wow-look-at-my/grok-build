@@ -1249,7 +1249,14 @@ impl ToolRegistryBuilder {
                 pending_removal: None,
                 blocked_expiries: Default::default(),
             };
-            tokio::spawn(actor.run());
+            // The scheduler answers the create/list/delete tool calls over
+            // `cmd_rx`, so its death closes that channel; what a dropped
+            // JoinHandle adds to that is nothing anyone can read. Guarded so
+            // the panic itself, and which task it was, is on the record.
+            tokio::spawn(crate::util::detached::fire_and_forget(
+                "scheduler actor",
+                actor.run(),
+            ));
         }
         Ok(FinalizedToolset {
             tools: parking_lot::RwLock::new(tools),

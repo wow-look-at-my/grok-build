@@ -2059,15 +2059,21 @@ impl SessionActor {
             let tool_defs = tool_definitions.clone();
             let manifest_clone = artifact_tracker.cloned();
             let auth_manager = self.auth_manager.clone();
-            tokio::spawn(async move {
-                crate::upload::trace::upload_tool_definitions(
-                    gcs_cfg,
-                    auth_manager,
-                    &tool_defs,
-                    manifest_clone.as_ref(),
-                )
-                .await;
-            });
+            // Fire-and-forget with the panic reported: nothing waits on this
+            // upload, and the crate's other uploads go through the same
+            // wrapper for that reason.
+            crate::upload::turn::spawn_upload_task(
+                "tool definitions",
+                async move {
+                    crate::upload::trace::upload_tool_definitions(
+                        gcs_cfg,
+                        auth_manager,
+                        &tool_defs,
+                        manifest_clone.as_ref(),
+                    )
+                    .await;
+                },
+            );
         }
         self.record_turn_model().await;
         let mut metrics_drop_guard = TurnMetrics::new();

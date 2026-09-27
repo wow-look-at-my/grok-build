@@ -228,6 +228,8 @@ fn parse_graph(src: &str) -> Option<Graph> {
                 if graph.groups.len() >= MAX_GROUPS || stack.len() >= MAX_GROUP_DEPTH {
                     return None;
                 }
+                // The first word matched is the 8-byte ASCII keyword `subgraph`.
+                #[allow(clippy::string_slice)] // one past a matched ASCII keyword
                 let (id, label) = parse_subgraph_decl(st["subgraph".len()..].trim());
                 graph.groups.push(Group {
                     id,
@@ -265,7 +267,11 @@ fn parse_subgraph_decl(rest: &str) -> (String, String) {
         return (label.to_string(), decode_html_entities(label));
     }
     if let Some(open) = rest.find('[') {
+        // `open` is the offset of an ASCII '[' byte, so `open` and `open + 1`
+        // are both char boundaries.
+        #[allow(clippy::string_slice)] // split at a matched ASCII '['
         let id = rest[..open].trim();
+        #[allow(clippy::string_slice)] // one past a matched ASCII '['
         let label = rest[open + 1..].trim_end_matches(']').trim();
         let label = clean_label(label);
         if !id.is_empty() && !label.is_empty() {
@@ -811,6 +817,8 @@ fn parse_state(src: &str) -> Option<Graph> {
 }
 
 fn parse_state_decl(st: &str, graph: &mut Graph) -> Option<()> {
+    // The caller matched the 5-byte ASCII keyword `state` as the first word.
+    #[allow(clippy::string_slice)] // one past a matched ASCII keyword
     let rest = st["state".len()..].trim().trim_end_matches('{').trim();
     if rest.is_empty() {
         return Some(());
@@ -829,10 +837,14 @@ fn parse_state_decl(st: &str, graph: &mut Graph) -> Option<()> {
     let mut id = rest;
     let mut stereotyped = false;
     if let Some(pos) = rest.find("<<") {
+        // `pos` is the offset of the two ASCII '<' bytes of "<<", so `pos` and
+        // `pos + 2` are char boundaries.
+        #[allow(clippy::string_slice)] // two past a matched ASCII "<<"
         let stereo = rest[pos + 2..].trim_end_matches(">>").trim();
         if stereo == "choice" {
             shape = Shape::Diamond;
         }
+        #[allow(clippy::string_slice)] // up to a matched ASCII "<<"
         id = rest[..pos].trim();
         stereotyped = true;
     }
@@ -1005,6 +1017,8 @@ fn parse_class(src: &str) -> Option<(Graph, Vec<ClassInfo>)> {
             "note" | "callback" | "click" | "link" | "style" | "cssclass" | "classdef"
             | "namespace" | "}" => continue,
             "class" => {
+                // The caller matched the 5-byte ASCII keyword `class`.
+                #[allow(clippy::string_slice)] // one past a matched ASCII keyword
                 let rest = st["class".len()..].trim();
                 let (name, open) = match rest.strip_suffix('{') {
                     Some(n) => (n.trim(), true),
@@ -1105,6 +1119,9 @@ fn parse_class_relation(
     let mut found: Option<(usize, &str, Head, Head, LineKind)> = None;
     'outer: for pos in 0..chars.len() {
         for &(op, hf, ht, line) in CLASS_OPS {
+            // `char_byte` turns a char index into its byte offset, so it names
+            // a char boundary.
+            #[allow(clippy::string_slice)] // the offset is `char_byte`'s output
             if st[char_byte(st, pos)..].starts_with(op) {
                 if op.starts_with('o') && pos > 0 && is_id_char(chars[pos - 1]) {
                     continue;
@@ -1122,7 +1139,11 @@ fn parse_class_relation(
         }
     }
     let (pos, op, head_from, head_to, line) = found?;
+    // Both offsets are char-aligned: `char_byte` returns the byte offset of a
+    // char, and every `CLASS_OPS` operator is pure ASCII.
+    #[allow(clippy::string_slice)] // the offset is `char_byte`'s output
     let lhs = st[..char_byte(st, pos)].trim();
+    #[allow(clippy::string_slice)] // `char_byte` offset advanced past an ASCII operator
     let rhs = st[char_byte(st, pos) + op.len()..].trim();
 
     let (lhs, card_from) = strip_cardinality_suffix(lhs);
@@ -1168,7 +1189,13 @@ fn strip_cardinality_suffix(s: &str) -> (&str, String) {
     if let Some(rest) = t.strip_suffix('"')
         && let Some(q) = rest.rfind('"')
     {
-        return (rest[..q].trim_end(), rest[q + 1..].to_string());
+        // `q` is the offset of an ASCII '"' byte, so `q` and `q + 1` are
+        // char boundaries.
+        #[allow(clippy::string_slice)] // up to a matched ASCII '"'
+        let name = rest[..q].trim_end();
+        #[allow(clippy::string_slice)] // one past a matched ASCII '"'
+        let card = rest[q + 1..].to_string();
+        return (name, card);
     }
     (t, String::new())
 }
@@ -1178,7 +1205,13 @@ fn strip_cardinality_prefix(s: &str) -> (&str, String) {
     if let Some(rest) = t.strip_prefix('"')
         && let Some(q) = rest.find('"')
     {
-        return (rest[q + 1..].trim_start(), rest[..q].to_string());
+        // `q` is the offset of an ASCII '"' byte, so `q` and `q + 1` are
+        // char boundaries.
+        #[allow(clippy::string_slice)] // up to a matched ASCII '"'
+        let card = rest[..q].to_string();
+        #[allow(clippy::string_slice)] // one past a matched ASCII '"'
+        let name = rest[q + 1..].trim_start();
+        return (name, card);
     }
     (t, String::new())
 }
