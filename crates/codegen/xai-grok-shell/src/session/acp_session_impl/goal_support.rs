@@ -8,12 +8,6 @@ use super::*;
 /// Compile-time constant for v1; remote tunability is a deferred follow-up.
 pub(super) const GOAL_CONTINUATION_BACKOFF_THRESHOLD: u32 = 3;
 
-/// Upper bound on planner attempts per `maybe_run_goal_planner` call. A plan
-/// attempt now runs once — Send Now steers the live planner instead of
-/// replanning, and a cancel is terminal — so this is the backstop that keeps
-/// any future retry path from spinning the loop.
-pub(super) const GOAL_PLANNER_MAX_ATTEMPTS: u32 = 5;
-
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct GoalClassifierPolicy {
     pub enabled: bool,
@@ -1161,34 +1155,18 @@ impl SessionActor {
         // subagent is ever created — a fail-closed at latency 0 that repeats
         // for every message the session has left.
         self.open_subagent_spawn_admission();
-        let mut attempt = 0u32;
-        loop {
-            // Exhausting the retry cap pauses the goal with the canonical
-            // message (like any other planner failure), never leaving it Active
-            // with no plan.
-            if attempt >= GOAL_PLANNER_MAX_ATTEMPTS {
-                tracing::debug!(
-                    "goal planner: reached max attempts ({GOAL_PLANNER_MAX_ATTEMPTS}); \
-                     pausing goal"
-                );
-                if let Some(goal_id) = run_goal_id.as_deref() {
-                    let _ = self
-                        .auto_pause_goal_if_matches_with_message(
-                            goal_id,
-                            crate::session::goal_tracker::GoalPauseReason::User,
-                            planner_failure_pause_message(),
-                        )
-                        .await;
-                }
-                break;
-            }
-            attempt += 1;
+        // One planner attempt per call. Send Now steers the live planner rather
+        // than starting a second one, and a cancel is terminal, so nothing here
+        // loops; the block is a label so every early exit still reaches the
+        // catch-all latch reset below.
+        'planner_attempt: {
+            let attempt = 1u32;
 
             let (goal_id, plan_file, attempt_file, outcome) = match self
                 .run_goal_planner_attempt(&objective, run_goal_id.as_deref(), attempt)
                 .await
             {
-                PlannerAttemptStep::Stop => break,
+                PlannerAttemptStep::Stop => break 'planner_attempt,
                 PlannerAttemptStep::Ran {
                     goal_id,
                     plan_file,
@@ -1215,7 +1193,7 @@ impl SessionActor {
                         .snapshot()
                         .is_some_and(|goal| same_active_goal(goal) && goal.plan_file.is_none());
                     if !can_publish {
-                        break;
+                        break 'planner_attempt;
                     }
                     // The subagent produced a plan and we are committing to
                     // publish it. `run_goal_planner_attempt` already took the
@@ -1240,7 +1218,7 @@ impl SessionActor {
                                 )
                                 .await;
                         }
-                        break;
+                        break 'planner_attempt;
                     }
                     // Record `plan_file`, then snapshot the planner's ORIGINAL
                     // plan as the immutable baseline the verifier diffs later
@@ -1255,7 +1233,7 @@ impl SessionActor {
                             .snapshot_mut()
                             .filter(|goal| same_active_goal(goal) && goal.plan_file.is_none())
                         else {
-                            break;
+                            break 'planner_attempt;
                         };
                         let need_baseline = goal.plan_baseline_file.is_none();
                         goal.plan_file = Some(plan_file);
@@ -1277,7 +1255,7 @@ impl SessionActor {
                                     "goal planner: could not stage plan baseline path; \
                                      PLAN_CHANGES will render (none)"
                                 );
-                                break;
+                                break 'planner_attempt;
                             }
                         };
                         match tokio::fs::copy(&src, &tmp).await {
@@ -1332,7 +1310,7 @@ impl SessionActor {
                         .await;
                 }
             }
-            break;
+            break 'planner_attempt;
         }
 
         // Catch-all latch reset for every exit path that did NOT already clear
