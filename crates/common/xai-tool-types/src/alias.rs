@@ -957,6 +957,44 @@ pub struct Late {
         );
     }
 
+    /// A `#[cfg(test)]` and its `mod` on one line introduces a module just as
+    /// surely as the two-line spelling, and skipping it depends on finding the
+    /// braces from the attribute's own line.
+    #[test]
+    fn the_scan_skips_a_test_module_opened_on_the_attribute_line() {
+        let source = r#"
+pub struct Early {
+    #[serde(default, alias = "before_tests")]
+    pub before: Option<String>,
+}
+
+#[cfg(test)]
+mod inline_tests {
+    #[derive(serde::Deserialize)]
+    struct Fixture {
+        #[serde(default, alias = "in_a_test_module")]
+        pub field: String,
+    }
+}
+
+pub struct Late {
+    #[serde(default, alias = "after_tests")]
+    pub after: Option<String>,
+}
+"#;
+        let one_line = "#[cfg(test)] mod inline_tests {";
+        let folded = source.replace("#[cfg(test)]\nmod inline_tests {", one_line);
+        let aliases: Vec<String> = alias_sites_in_source("f.rs", &shipped_source(&folded))
+            .into_iter()
+            .map(|(_, alias)| alias)
+            .collect();
+        assert_eq!(
+            aliases,
+            vec!["before_tests", "after_tests"],
+            "the same-line spelling opens a module too, and its fixture alias is not shipped"
+        );
+    }
+
     /// A wire-facing field that goes back to a bare `#[serde(alias)]` is the
     /// regression the tables exist to catch: the file still folds nothing, and
     /// the alias is still there to be read.
@@ -1021,25 +1059,31 @@ pub struct Late {
     ///
     /// A `#[cfg(test)]` that carries one attribute of an otherwise-shipped item
     /// must not cut the rest of the file, so the skip is brace-matched over the
-    /// module the attribute introduces rather than everything after it.
+    /// module the attribute introduces rather than everything after it. That
+    /// module's `mod` keyword sits either on the attribute's own line or on the
+    /// next non-blank one, and both spellings are skipped.
     fn shipped_source(source: &str) -> String {
         let lines: Vec<&str> = source.lines().collect();
         let mut kept = String::new();
         let mut index = 0;
         while index < lines.len() {
             let line = lines[index].trim();
-            let opens_test_mod = line == "#[cfg(test)]"
-                || (line.starts_with("#[cfg(test)]")
-                    && line.ends_with('{')
-                    && line.contains("mod "));
-            if opens_test_mod {
-                let mut module = index + 1;
-                while module < lines.len() && lines[module].trim().is_empty() {
-                    module += 1;
+            let attribute_alone = line == "#[cfg(test)]";
+            let attribute_with_module =
+                line.starts_with("#[cfg(test)]") && line.ends_with('{') && line.contains("mod ");
+            if attribute_alone || attribute_with_module {
+                let mut body = index;
+                if attribute_alone {
+                    body += 1;
+                    while body < lines.len() && lines[body].trim().is_empty() {
+                        body += 1;
+                    }
                 }
-                if module < lines.len() && lines[module].trim_start().starts_with("mod ") {
+                if attribute_with_module
+                    || (body < lines.len() && lines[body].trim_start().starts_with("mod "))
+                {
                     let mut depth = 0isize;
-                    let mut end = module;
+                    let mut end = body;
                     loop {
                         depth += lines[end].matches('{').count() as isize;
                         depth -= lines[end].matches('}').count() as isize;
