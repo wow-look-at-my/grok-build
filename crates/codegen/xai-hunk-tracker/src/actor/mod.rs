@@ -206,8 +206,19 @@ impl HunkTrackerActor {
             cancellation_token,
         );
 
-        // Spawn the actor task
-        tokio::spawn(actor.run());
+        // The actor is the only reader of the command channel and the only
+        // writer of the hunk state behind the handle, so its death is reported
+        // by name rather than discovered by the next send.
+        let run = tokio::spawn(actor.run());
+        tokio::spawn(async move {
+            if let Err(error) = run.await {
+                tracing::error!(
+                    task = "hunk tracker actor",
+                    error = %error,
+                    "hunk tracker actor is no longer processing commands"
+                );
+            }
+        });
 
         HunkTrackerHandle::new(cmd_tx)
     }

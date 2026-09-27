@@ -126,7 +126,7 @@ impl ChatStateActor {
                         debug!("ChatStateActor shutting down: all handles dropped");
                         break;
                     };
-                    self.run_command(cmd).await;
+                    self.handle_command(cmd).await;
                 }
             }
         }

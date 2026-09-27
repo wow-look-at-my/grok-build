@@ -206,7 +206,13 @@ where
     R: AsyncRead + Unpin + Send + 'static,
 {
     let (tx, rx) = mpsc::unbounded_channel();
-    tokio::spawn(async move {
+    // The reader owns the sending half, so its death closes the channel and the
+    // drain sees end-of-stream: a truncated capture rather than a hang. It says
+    // so, because the truncated capture is otherwise indistinguishable from a
+    // child that produced that much output.
+    tokio::spawn(xai_grok_tools::util::detached::fire_and_forget(
+        "hook child pipe reader",
+        async move {
         let mut sent = 0usize;
         let mut chunk = [0u8; READ_CHUNK_SIZE];
         loop {
@@ -228,7 +234,8 @@ where
             // Past the cap: keep reading to drain the pipe (never block the child),
             // discarding the excess.
         }
-    });
+        },
+    ));
     rx
 }
 

@@ -79,8 +79,10 @@ impl SummaryGenerator {
                 // Spawn title generation as a background task so the
                 // persistence actor can continue processing messages
                 // (updates, flushes) without waiting for the LLM call.
-                tokio::spawn(async move {
-                    let mut title = match sampling_client {
+                tokio::spawn(xai_grok_tools::util::detached::fire_and_forget(
+                    "session title generation",
+                    async move {
+                        let mut title = match sampling_client {
                         Some(client) => {
                             generate_session_summary(content.clone(), client, &model).await
                         }
@@ -103,7 +105,8 @@ impl SummaryGenerator {
                         }
                         None => tracing::debug!("session closed before its title was generated"),
                     }
-                });
+                    },
+                ));
             }
         }
     }
