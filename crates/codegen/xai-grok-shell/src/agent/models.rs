@@ -1170,7 +1170,6 @@ impl ModelsManager {
             config.endpoints.alpha_test_key.clone(),
             config.client_version.clone(),
             None,
-            None,
         )
     }
 

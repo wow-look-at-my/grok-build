@@ -2748,7 +2748,6 @@ fn resolve_context_window_drives_auto_compaction_threshold() {
         None,
         None,
         None,
-        None,
     );
     assert_eq!(sc.context_window, 1_000_000);
 
@@ -2840,7 +2839,6 @@ fn production_resolve_model_list_backfills_window_per_slugs_into_compaction() {
             auth_type: xai_chat_state::AuthType::ApiKey,
             auth_scheme: xai_grok_sampler::AuthScheme::None,
         },
-        None,
         None,
         None,
         None,

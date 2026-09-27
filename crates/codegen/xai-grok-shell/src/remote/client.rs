@@ -314,7 +314,6 @@ impl BackendClient {
                 crate::auth::credential_provider::ShellAuthCredentialProvider::new(
                     manager.clone(),
                     None,
-                    None,
                 ),
             );
         self.client = crate::http::with_auth_retry(self.reqwest_client.clone(), credentials);

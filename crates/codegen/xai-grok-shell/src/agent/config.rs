@@ -5853,13 +5853,8 @@ pub(crate) fn resolve_aux_model_sampling_config(
             api_base_url: None,
         };
         let credentials = resolve_credentials_enforced(&entry, session_key, disable_api_key_auth);
-        let sampler = sampling_config_for_model(
-            &entry,
-            credentials,
-            alpha_test_key,
-            client_version,
-            None,
-        );
+        let sampler =
+            sampling_config_for_model(&entry, credentials, alpha_test_key, client_version, None);
         return Some(sampler);
     }
     tracing::warn!(
@@ -6082,13 +6077,7 @@ fn resolve_hidden_default_web_search_sampling_config(
         api_base_url: None,
     };
     let credentials = resolve_credentials_enforced(&entry, session_key, disable_api_key_auth);
-    sampling_config_for_model(
-        &entry,
-        credentials,
-        alpha_test_key,
-        client_version,
-        None,
-    )
+    sampling_config_for_model(&entry, credentials, alpha_test_key, client_version, None)
 }
 pub(crate) fn resolve_web_search_sampling_config(
     model_id: &str,
@@ -7372,14 +7361,10 @@ reasoning_effort = "low"
             "https://test.api/v1",
             Some("model-specific-key"),
             None,
-        );
-        let sampling_config = sampling_config_for_model(
-            &model,
-            resolve_credentials(&model, None),
-            None,
-            None,
             None,
         );
+        let sampling_config =
+            sampling_config_for_model(&model, resolve_credentials(&model, None), None, None, None);
         assert_eq!(
             sampling_config.api_key,
             Some("model-specific-key".to_string())
@@ -7671,6 +7656,7 @@ reasoning_effort = "low"
             crate::env::PROD_CLI_CHAT_PROXY_BASE_URL,
             None,
             None,
+            None,
         );
         model.info.api_backend = ApiBackend::Messages;
         let config = sampling_config_for_model(
@@ -7750,6 +7736,7 @@ reasoning_effort = "low"
             "https://api.x.ai/v1",
             Some("xai-model-key"),
             None,
+            None,
         );
         let mut creds = resolve_credentials(&entry, Some("session-jwt"));
         assert_eq!(
@@ -7770,6 +7757,7 @@ reasoning_effort = "low"
             "https://api.example.com/v1",
             Some("sk-byok"),
             None,
+            None,
         );
         let mut byok_creds = resolve_credentials(&byok, Some("session-jwt"));
         enforce_disable_api_key_auth(&mut byok_creds, true, Some("session-jwt"));
@@ -7782,6 +7770,7 @@ reasoning_effort = "low"
             "messages-compatible-model",
             "https://messages.example.com/v1",
             Some("sk-ant-test-key"),
+            None,
             None,
         );
         model.info.api_backend = ApiBackend::Messages;
@@ -7803,6 +7792,7 @@ reasoning_effort = "low"
             "grok-4.5",
             "https://api.example.com/v1",
             Some("sk-openai-test"),
+            None,
             None,
         );
         assert_eq!(model.info.auth_scheme, AuthScheme::Bearer);
@@ -7827,6 +7817,7 @@ reasoning_effort = "low"
             "my-model",
             "https://api.example.com/v1",
             Some("sk-external"),
+            None,
             None,
         );
         assert!(config_model.has_own_credentials());
@@ -7856,6 +7847,7 @@ reasoning_effort = "low"
             "m",
             "https://api.example.com/v1",
             Some("sk-ext"),
+            None,
             None,
         );
         assert_eq!(
@@ -8138,23 +8130,13 @@ reasoning_effort = "low"
     #[test]
     fn sampling_config_context_window_from_entry_or_default() {
         let model = test_model_entry("any-model", "https://api.x.ai/v1", None, None, None);
-        let config = sampling_config_for_model(
-            &model,
-            resolve_credentials(&model, None),
-            None,
-            None,
-            None,
-        );
+        let config =
+            sampling_config_for_model(&model, resolve_credentials(&model, None), None, None, None);
         assert_eq!(config.context_window, 200_000);
         let mut model = test_model_entry("any-model", "https://api.x.ai/v1", None, None, None);
         model.info.context_window = NonZeroU64::new(256_000).unwrap();
-        let config = sampling_config_for_model(
-            &model,
-            resolve_credentials(&model, None),
-            None,
-            None,
-            None,
-        );
+        let config =
+            sampling_config_for_model(&model, resolve_credentials(&model, None), None, None, None);
         assert_eq!(config.context_window, 256_000);
     }
     #[test]
@@ -8282,13 +8264,8 @@ reasoning_effort = "low"
         let mut model =
             test_model_entry("test-model", "https://api.example.com/v1", None, None, None);
         model.info.api_backend = ApiBackend::Responses;
-        let sampling_config = sampling_config_for_model(
-            &model,
-            resolve_credentials(&model, None),
-            None,
-            None,
-            None,
-        );
+        let sampling_config =
+            sampling_config_for_model(&model, resolve_credentials(&model, None), None, None, None);
         assert_eq!(sampling_config.api_backend, ApiBackend::Responses);
     }
     #[test]
@@ -9556,6 +9533,7 @@ reasoning_effort = "low"
             "test",
             "https://custom.api/v1",
             Some("model-key"),
+            None,
             None,
         );
         unsafe { std::env::set_var("XAI_API_KEY", "env-key") };
@@ -13259,6 +13237,7 @@ default = "grok-4.5"
             "https://inference.example.com/v1",
             None,
             None,
+            None,
         );
         entry.info.context_window = NonZeroU64::new(default_cw).unwrap();
         prefetched.insert("grok-4.5".to_owned(), entry);
@@ -13348,6 +13327,7 @@ default = "grok-4.5"
         let mut entry = test_model_entry(
             "some-unknown-model",
             "https://test.example.com/v1",
+            None,
             None,
             None,
         );
