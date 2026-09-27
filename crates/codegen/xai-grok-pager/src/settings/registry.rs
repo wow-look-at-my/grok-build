@@ -527,6 +527,9 @@ pub fn current_value_for(
             Some(SettingValue::Bool(ui.stop_gate_unfinished_todos_enabled()))
         }
         "stop_gate_ci_failing" => Some(SettingValue::Bool(ui.stop_gate_ci_failing_enabled())),
+        // Resolved once per session in the shell; the pager keeps the `[ui]`
+        // mirror so the row reads back what the next session will do.
+        "thinking_summaries" => Some(SettingValue::Bool(ui.thinking_summaries_enabled())),
         "simple_mode" => Some(SettingValue::Bool(ui.simple_mode.unwrap_or(true))),
         // Per-tip contextual hints — `None` (inherit) reads as the default ON.
         "contextual_hints.undo" => {
@@ -1084,6 +1087,16 @@ mod tests {
                         ui.show_thinking_blocks.unwrap_or(true),
                         "show_thinking_blocks default drifts from UiConfig::default()"
                     );
+                }
+                // thinking_summaries: Option<bool>; None = on (the resolver
+                // const is the only home for that default).
+                ("thinking_summaries", SettingKind::Bool { default }) => {
+                    assert_eq!(
+                        *default,
+                        ui.thinking_summaries_enabled(),
+                        "thinking_summaries default drifts from UiConfig::default()"
+                    );
+                    assert!(*default, "thinking_summaries must default ON");
                 }
                 // group_tool_verbs: Option<bool>; None → true (client default).
                 ("group_tool_verbs", SettingKind::Bool { default }) => {

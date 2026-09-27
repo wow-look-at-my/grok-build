@@ -1582,6 +1582,10 @@ fn move_setting_away_from_default(app: &mut AppView, key: crate::settings::Setti
             let away = !app.current_ui.stop_gate_ci_failing_enabled();
             let _ = dispatch(Action::SetStopGateCiFailing(away), app);
         }
+        "thinking_summaries" => {
+            let away = !app.current_ui.thinking_summaries_enabled();
+            let _ = dispatch(Action::SetThinkingSummaries(away), app);
+        }
         "combine_queued_prompts" => {
             let away = !crate::appearance::cache::load_combine_queued_prompts();
             let _ = dispatch(Action::SetCombineQueuedPrompts(away), app);
@@ -2323,6 +2327,47 @@ fn set_show_thinking_blocks_applies_persists_and_rolls_back() {
         "rollback must restore cache",
     );
 }
+#[test]
+fn set_thinking_summaries_persists_the_ui_key_and_rolls_back() {
+    // The row's only state is `[ui].thinking_summaries`: the shell resolves it
+    // when a session spawns, so there is no live cache to update and nothing to
+    // re-render. What must be right is the persisted value and the rollback.
+    let mut app = test_app_with_agent();
+    let shipped = app.current_ui.thinking_summaries_enabled();
+    assert!(shipped, "the feature ships ON");
+
+    let effects = dispatch(Action::SetThinkingSummaries(!shipped), &mut app);
+    assert!(
+        matches!(
+            effects.as_slice(),
+            [Effect::PersistSetting {
+                key: "thinking_summaries",
+                value: crate::settings::SettingValue::Bool(false),
+                rollback_value: crate::settings::SettingValue::Bool(true),
+            }]
+        ),
+        "expected exactly one PersistSetting effect for thinking_summaries, \
+         got {effects:?}",
+    );
+    assert!(
+        !app.current_ui.thinking_summaries_enabled(),
+        "the [ui] mirror must read back the new value"
+    );
+
+    let redundant = dispatch(Action::SetThinkingSummaries(!shipped), &mut app);
+    assert!(redundant.is_empty(), "a redundant set must persist nothing");
+
+    let _ = apply_setting_rollback(
+        &mut app,
+        "thinking_summaries",
+        &crate::settings::SettingValue::Bool(shipped),
+    );
+    assert!(
+        app.current_ui.thinking_summaries_enabled(),
+        "a failed write must restore the value the user had",
+    );
+}
+
 #[test]
 fn set_group_tool_verbs_applies_persists_and_rolls_back() {
     crate::appearance::cache::set_group_tool_verbs(true);

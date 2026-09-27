@@ -296,6 +296,18 @@ pub struct AcpUpdateTracker {
     /// finish any in-flight thinking/agent-message entries so the next
     /// chunks create fresh ones instead of appending to stale entries.
     last_stream_start_ms: Option<i64>,
+    /// `(streamStartMs, entry)` for each thinking block still drawn, oldest
+    /// first.
+    ///
+    /// The summary of a call's reasoning is written by an asynchronous side
+    /// call, so it arrives after that block stopped running and possibly after
+    /// later calls opened their own blocks; which block is *current* cannot
+    /// find it. `streamStartMs` is the key the shell stamps on that call's own
+    /// chunks and persists alongside them, so a replayed transcript records
+    /// the same pairs and the join holds across a reload. An entry leaves with
+    /// its block, which keeps the list as small as the scrollback's thinking
+    /// rows and drops nothing that is still attachable.
+    thinking_keys: Vec<(i64, EntryId)>,
     /// Monotonic count of live parent-agent updates that changed scrollback.
     agent_output_epoch: u64,
     epoch_at_last_finish: u64,
@@ -1232,6 +1244,74 @@ impl AcpUpdateTracker {
         self.output_rate = Some(rate);
         changed
     }
+    /// Note which model call a thinking block holds the reasoning of, so a
+    /// summary that arrives later can find it. Repeated chunks of one call
+    /// collapse into a single record.
+    fn record_thinking_key(
+        &mut self,
+        stream_start_ms: Option<i64>,
+        id: EntryId,
+        scrollback: &ScrollbackState,
+    ) {
+        let Some(key) = stream_start_ms else {
+            return;
+        };
+        if self
+            .thinking_keys
+            .last()
+            .is_some_and(|(k, e)| *k == key && *e == id)
+        {
+            return;
+        }
+        // A block that left the scrollback, an empty pre-created one or a
+        // rewind's doing, can never receive a summary again. It leaves here, so
+        // the list is bounded by what is on screen rather than by a count that
+        // would also drop a summary arriving late but correctly.
+        self.thinking_keys
+            .retain(|(_, entry)| scrollback.get_by_id(*entry).is_some());
+        self.thinking_keys.push((key, id));
+    }
+    /// Attach a summary to the thinking block whose model call carried
+    /// `stream_start_ms`. Returns whether the screen changed, so the caller
+    /// repaints the row that gained a line rather than the whole transcript.
+    ///
+    /// A key naming no drawn block (the call streamed no thinking, its block
+    /// was removed by a rewind, or the transcript predates the key) changes
+    /// nothing: the summary has no block to describe, and attaching it to a
+    /// neighbouring one would put words under the wrong reasoning.
+    pub fn set_thinking_summary(
+        &mut self,
+        scrollback: &mut ScrollbackState,
+        stream_start_ms: i64,
+        summary: &str,
+    ) -> bool {
+        let Some(id) = self
+            .thinking_keys
+            .iter()
+            .rev()
+            .find(|(key, _)| *key == stream_start_ms)
+            .map(|(_, id)| *id)
+        else {
+            return false;
+        };
+        let applied = scrollback
+            .get_by_id_mut(id)
+            .and_then(|entry| match &mut entry.block {
+                RenderBlock::Thinking(block) => Some(block),
+                _ => None,
+            })
+            .is_some_and(|block| block.set_summary(summary.to_string()));
+        if !applied {
+            return false;
+        }
+        if let Some(entry) = scrollback.get_by_id_mut(id) {
+            entry.invalidate_cache();
+        }
+        // The summary adds rows under the header, so this is a height change
+        // and not merely a repaint of the same number of rows.
+        scrollback.mark_structurally_dirty(id);
+        true
+    }
 
     /// Forget the current rate. The turn ended, so there is no stream to
     /// describe; the indicator goes away rather than freezing at its last
@@ -1373,6 +1453,7 @@ impl AcpUpdateTracker {
             scrollback.set_last_running(true);
             entry_id
         });
+        self.record_thinking_key(meta.stream_start_ms, id, scrollback);
         if let (Some(agent_ts), Some(stream_start)) =
             (meta.agent_timestamp_ms, meta.stream_start_ms)
         {
