@@ -8,6 +8,10 @@
 pub(crate) mod request_task;
 pub(crate) mod state;
 
+use std::any::Any;
+use std::panic::AssertUnwindSafe;
+
+use futures_util::FutureExt;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
@@ -35,6 +39,21 @@ pub struct SamplerActor {
     tasks: JoinSet<RequestId>,
 }
 
+/// Text describing what a panic carried, for a log line.
+///
+/// The two payloads `panic!` itself produces are a `&'static str` (a literal)
+/// and a `String` (a formatted one). Anything else is named as a non-message
+/// rather than reported as nothing.
+fn panic_payload(panic: &(dyn Any + Send)) -> String {
+    if let Some(text) = panic.downcast_ref::<&'static str>() {
+        return (*text).to_string();
+    }
+    if let Some(text) = panic.downcast_ref::<String>() {
+        return text.clone();
+    }
+    "panicked with a payload that is not a message".to_string()
+}
+
 impl SamplerActor {
     /// Spawn the actor on the current tokio runtime and return a
     /// handle. The actor stops when the returned handle (and all its
@@ -51,7 +70,20 @@ impl SamplerActor {
             state: ActorState::new(config, retry_policy),
             tasks: JoinSet::new(),
         };
-        tokio::spawn(actor.run());
+        // The actor owns the command half every `SamplerHandle` sends to and
+        // every in-flight request reports through. Its death is reported here,
+        // by name, rather than surfacing later as a closed channel in
+        // whichever caller happens to send next.
+        let run = tokio::spawn(actor.run());
+        tokio::spawn(async move {
+            if let Err(error) = run.await {
+                tracing::error!(
+                    task = "sampler actor",
+                    error = %error,
+                    "sampler actor is no longer serving requests"
+                );
+            }
+        });
         SamplerHandle::new(cmd_tx)
     }
 
@@ -124,16 +156,36 @@ impl SamplerActor {
                 // blobs for the same rejection on every turn.
                 image_input_rejections
                     .strip_if_rejected(&effective_config.model, &mut request_inner);
-                self.tasks.spawn(request_task::run_request_task(
-                    request_id,
-                    request_inner,
-                    effective_config,
-                    retry_policy,
-                    event_tx,
-                    cancel_token,
-                    completion_tx,
-                    image_input_rejections,
-                ));
+                // The id is what the actor needs back to clear
+                // `active_requests`. A bare spawn of a round that unwound fails
+                // its join, and a `JoinError` carries no id, so the entry would
+                // stay: `IsActive` and `ActiveCount` keep reporting a request
+                // that stopped existing. Guarded, the round always returns its
+                // id, and the panic is named with it.
+                let tracked_id = request_id.clone();
+                self.tasks.spawn(async move {
+                    let task = request_task::run_request_task(
+                        request_id,
+                        request_inner,
+                        effective_config,
+                        retry_policy,
+                        event_tx,
+                        cancel_token,
+                        completion_tx,
+                        image_input_rejections,
+                    );
+                    match AssertUnwindSafe(task).catch_unwind().await {
+                        Ok(request_id) => request_id,
+                        Err(panic) => {
+                            tracing::error!(
+                                request_id = tracked_id.as_str(),
+                                panic = %crate::actor::panic_payload(&*panic),
+                                "sampling request task panicked; its completion is answered as a dropped sender"
+                            );
+                            tracked_id
+                        }
+                    }
+                });
             }
             SamplerCommand::Cancel { request_id } => {
                 self.state.cancel(&request_id);

@@ -635,12 +635,9 @@ pub(crate) async fn run_shell_child(
         let bucket = bucket_url.clone();
         let method = upload_method.clone();
         let auth_for_spawn = ctx.auth_manager.clone();
-        crate::upload::turn::spawn_upload_task(
-            "subagent metadata",
-            async move {
-                upload_subagent_metadata(&gcs_meta, &bucket, method, auth_for_spawn).await;
-            },
-        );
+        crate::upload::turn::spawn_upload_task("subagent metadata", async move {
+            upload_subagent_metadata(&gcs_meta, &bucket, method, auth_for_spawn).await;
+        });
     }
     let gcs_upload_ctx = GcsUploadContext {
         bucket_url: ctx.gcs_bucket_url.clone(),

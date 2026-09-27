@@ -13044,6 +13044,7 @@ dependencies = [
 name = "xai-chat-state"
 version = "0.1.0"
 dependencies = [
+ "futures-util",
  "indexmap",
  "regex",
  "serde",
