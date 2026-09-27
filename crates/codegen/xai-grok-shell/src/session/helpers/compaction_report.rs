@@ -221,11 +221,7 @@ fn preview(item: &ConversationItem) -> String {
             .collect::<Vec<_>>()
             .join(" "),
         ConversationItem::Assistant(a) => {
-            let calls: Vec<&str> = a
-                .tool_calls
-                .iter()
-                .map(|c| c.function.name.as_str())
-                .collect();
+            let calls: Vec<&str> = a.tool_calls.iter().map(|c| c.name.as_str()).collect();
             if calls.is_empty() {
                 a.content.to_string()
             } else {
