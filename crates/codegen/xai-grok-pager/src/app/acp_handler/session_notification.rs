@@ -1477,21 +1477,28 @@ pub(super) fn apply_session_event(
             tokens_before,
             tokens_after,
             elapsed_ms,
+            breakdown,
+            report_path,
             ..
         } => {
             tracing::info!("Auto-compact completed: {tokens_after} tokens after");
             session.set_compaction_activity(None);
             session.compact_held_prompt = None;
+            let detail = crate::scrollback::blocks::CompactionDetail {
+                breakdown: breakdown.clone(),
+                report_path: report_path.clone(),
+            };
             if session.loading_replay {
                 scrollback.push_block(RenderBlock::session_event(
                     SessionEvent::CompactionCompleted {
                         tokens_before: *tokens_before,
                         tokens_after: *tokens_after,
                         elapsed_ms: *elapsed_ms,
+                        detail,
                     },
                 ));
             } else {
-                session.defer_compaction(*tokens_before, *tokens_after, *elapsed_ms);
+                session.defer_compaction(*tokens_before, *tokens_after, *elapsed_ms, detail);
             }
             true
         }
