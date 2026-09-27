@@ -26,9 +26,17 @@ const USIZE_CEILING: f64 = 18_446_744_073_709_551_616.0;
 /// read from config or a model catalog is not bounded by anything this crate
 /// checks, and a saturated budget would truncate nothing at all.
 pub(super) fn listing_budget_chars(tokens: u64, percent: f64) -> Option<usize> {
-    // PRE-FIX PROBE: the unchecked narrowing cast, saturating on a large window.
-    #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
-    Some((tokens as f64 * 4.0 * percent) as usize)
+    // A context window is counted at f64 precision, which is exact below
+    // 2^53 tokens; every real window is far under that.
+    #[allow(clippy::cast_precision_loss)]
+    let chars = (tokens as f64) * 4.0 * percent;
+    if !chars.is_finite() || chars >= USIZE_CEILING {
+        return None;
+    }
+    // `chars` is below the ceiling above, so this keeps its whole value.
+    #[allow(clippy::cast_possible_truncation)]
+    let budget = chars as usize;
+    Some(budget)
 }
 /// Per-entry cap on description + when_to_use combined. Discovery only — the
 /// full skill body is loaded on invocation, so the listing stays terse. Split
