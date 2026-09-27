@@ -969,7 +969,8 @@ impl<'a, 'b, 'syn, 'oc> MarkdownParser<'a, 'b, 'syn, 'oc> {
                 // code blocks are not fences and report no span.
                 self.pending_code_block = match code {
                     CodeBlockKind::Fenced(lang) => {
-                        let body_start = self.source_from(range.start)
+                        let body_start = self
+                            .source_from(range.start)
                             .find('\n')
                             .map_or(range.end, |nl| range.start + nl + 1);
                         Some(PendingCodeBlock {
@@ -994,7 +995,10 @@ impl<'a, 'b, 'syn, 'oc> MarkdownParser<'a, 'b, 'syn, 'oc> {
                 // closing fence for an opening one and emitting a spurious
                 // blank line. Only extend when the prefix is pure whitespace so
                 // structural prefixes (e.g. a blockquote `> `) are left intact.
-                let line_start = self.source_before(range.start).rfind('\n').map_or(0, |p| p + 1);
+                let line_start = self
+                    .source_before(range.start)
+                    .rfind('\n')
+                    .map_or(0, |p| p + 1);
                 #[allow(clippy::string_slice)] // `line_start` is one past a '\n' or 0
                 let fence_start = if self.text[line_start..range.start]
                     .bytes()
@@ -1010,7 +1014,8 @@ impl<'a, 'b, 'syn, 'oc> MarkdownParser<'a, 'b, 'syn, 'oc> {
                 });
                 match code {
                     CodeBlockKind::Fenced(lang) if !lang.is_empty() => {
-                        if let Some(r) = find_substring(self.source(range.clone()), lang, true, false)
+                        if let Some(r) =
+                            find_substring(self.source(range.clone()), lang, true, false)
                         {
                             let range = (r.start + range.start)..(r.end + range.start);
                             more.push(Highlight {
@@ -1172,8 +1177,7 @@ impl<'a, 'b, 'syn, 'oc> MarkdownParser<'a, 'b, 'syn, 'oc> {
                 // byte, so the prefix cut lands on a char boundary.
                 #[allow(clippy::string_slice)]
                 let url_prefix = url_rel_opt.as_ref().map(|r| &tag_str[..r.start]);
-                let bracket_pos_opt =
-                    url_prefix.and_then(|pre| pre.rfind("](").map(|p| p..p + 2));
+                let bracket_pos_opt = url_prefix.and_then(|pre| pre.rfind("](").map(|p| p..p + 2));
                 if let Some(bracket_pos) = bracket_pos_opt {
                     let open_bracket = if tag_str.starts_with("![") { 1 } else { 0 };
                     if open_bracket > 0 {
@@ -1564,7 +1568,8 @@ impl<'a, 'b, 'syn, 'oc> MarkdownParser<'a, 'b, 'syn, 'oc> {
             range.end += 1;
         }
         let style: ratatui::style::Style = self.ms.math.style_into();
-        let src_newlines = self.source(range.clone())
+        let src_newlines = self
+            .source(range.clone())
             .bytes()
             .filter(|&b| b == b'\n')
             .count();

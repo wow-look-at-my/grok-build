@@ -85,6 +85,17 @@ pub fn filter_turns_for_inter_compaction<T: CompactionItemBuilder>(turns: &[T]) 
 /// Returns `(all_user_messages_sections, rest)`.
 /// Extracts **all** `<grok_user_queries>...</grok_user_queries>` blocks
 /// (there may be multiple after chained compactions) and concatenates them.
+/// `text[from..to]` for the block scan below.
+///
+/// Every index is an offset at which `<grok_user_queries>` or
+/// `</grok_user_queries>` was matched, or the running cursor set to such an
+/// offset plus the literal's byte length. Both tags are pure ASCII, and an
+/// ASCII byte is always a char boundary, so both ends align.
+#[allow(clippy::string_slice)] // both ends are ASCII tag offsets
+fn span(text: &str, from: usize, to: usize) -> &str {
+    &text[from..to]
+}
+
 /// Everything outside these blocks is returned as `rest`.
 /// If no blocks are found, returns `(None, full_text)`.
 pub fn split_prior_compaction_text(text: &str) -> (Option<String>, String) {
@@ -96,9 +107,9 @@ pub fn split_prior_compaction_text(text: &str) -> (Option<String>, String) {
     let mut cursor = 0;
 
     loop {
-        let Some(start) = text[cursor..].find(start_tag) else {
+        let Some(start) = span(text, cursor, text.len()).find(start_tag) else {
             // No more blocks — append remaining text to rest.
-            let remaining = text[cursor..].trim();
+            let remaining = span(text, cursor, text.len()).trim();
             if !remaining.is_empty() {
                 if !rest.is_empty() {
                     rest.push('\n');
@@ -109,9 +120,9 @@ pub fn split_prior_compaction_text(text: &str) -> (Option<String>, String) {
         };
         let abs_start = cursor + start;
 
-        let Some(end) = text[abs_start..].find(end_tag) else {
+        let Some(end) = span(text, abs_start, text.len()).find(end_tag) else {
             // Malformed: opening tag without closing tag. Treat rest as non-user content.
-            let remaining = text[cursor..].trim();
+            let remaining = span(text, cursor, text.len()).trim();
             if !remaining.is_empty() {
                 if !rest.is_empty() {
                     rest.push('\n');
@@ -123,7 +134,7 @@ pub fn split_prior_compaction_text(text: &str) -> (Option<String>, String) {
         let abs_end = abs_start + end + end_tag.len();
 
         // Text before this block → rest.
-        let before = text[cursor..abs_start].trim();
+        let before = span(text, cursor, abs_start).trim();
         if !before.is_empty() {
             if !rest.is_empty() {
                 rest.push('\n');
@@ -132,7 +143,7 @@ pub fn split_prior_compaction_text(text: &str) -> (Option<String>, String) {
         }
 
         // The block itself → user_sections.
-        user_sections.push(&text[abs_start..abs_end]);
+        user_sections.push(span(text, abs_start, abs_end));
 
         cursor = abs_end;
     }

@@ -185,7 +185,8 @@ impl<'a, 'b> ParsedMarkdown<'a, 'b> {
         } else {
             // Copy remaining text
             if pos < end {
-                #[allow(clippy::string_slice)] // `pos` is a transform range end, relative to `start`
+                #[allow(clippy::string_slice)]
+                // `pos` is a transform range end, relative to `start`
                 result.push_str(&text[(pos - start)..]);
             }
             Cow::Owned(result)
