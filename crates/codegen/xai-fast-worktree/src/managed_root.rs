@@ -89,12 +89,6 @@ pub fn managed_worktrees_boundary(path: &Path, legacy_root: &Path) -> Option<Pat
     enclosing_repo_worktrees_root(path)
 }
 
-/// True when `path` is at or below a grok-managed worktrees directory, in
-/// either layout.
-pub fn path_in_managed_worktrees(path: &Path, legacy_root: &Path) -> bool {
-    managed_worktrees_boundary(path, legacy_root).is_some()
-}
-
 /// Keeps the managed worktrees directory out of `main_root`'s `git status`.
 ///
 /// The entry goes in the repository's own exclude data (`.git/info/exclude`),

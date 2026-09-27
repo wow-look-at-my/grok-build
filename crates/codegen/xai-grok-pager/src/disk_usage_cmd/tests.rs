@@ -136,6 +136,47 @@ fn collect_report_joins_registry_and_flags_untracked() {
 
 #[cfg(unix)]
 #[test]
+fn repo_local_worktree_is_sized_not_written_off() {
+    // A checkout made inside its own repository is grok-managed, so it gets a
+    // sized row. Reading only `<grok home>/worktrees` here would count every
+    // worktree created since the layout moved as "outside the managed dirs" and
+    // show none of them.
+    let tmp = tempfile::TempDir::new().unwrap();
+    let base = dunce::canonicalize(tmp.path()).unwrap();
+    let home = base.join("grok-home");
+    let repo = base.join("thing");
+    let wt = repo.join(".grok").join("worktrees").join("my-feature");
+    std::fs::create_dir_all(&wt).unwrap();
+    std::fs::write(wt.join("big.bin"), vec![b'x'; 65536]).unwrap();
+
+    let db = WorktreeDb::open(&home).unwrap();
+    db.register(&make_record("repo-local", &wt, "my-feature"))
+        .unwrap();
+
+    let report = collect_report(&home).unwrap();
+    assert_eq!(
+        report.worktrees_outside_managed_roots, 0,
+        "a worktree under <repo>/.grok/worktrees is not outside the managed dirs"
+    );
+    assert_eq!(
+        report.worktrees,
+        vec![WorktreeUsage {
+            last_modified_at: modified(&wt),
+            path: wt.to_string_lossy().into_owned(),
+            ..tracked_row(
+                measured(&wt).unwrap(),
+                TrackedRow {
+                    label: Some("my-feature".into()),
+                    ..record("repo-local", 0)
+                },
+            )
+        }],
+        "the repo-local worktree must appear with its size"
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn record_registered_via_symlinked_home_joins_as_one_row() {
     let tmp = tempfile::TempDir::new().unwrap();
     let base = dunce::canonicalize(tmp.path()).unwrap();

@@ -75,7 +75,7 @@ pub use git::{
 pub use managed_root::{
     REPO_DOT_DIR, WORKTREES_DIR, WORKTREES_EXCLUDE_LINE, enclosing_repo_worktrees_root,
     exclude_managed_worktrees_dir, is_repo_worktrees_root, main_root_for_managed_path,
-    managed_worktrees_boundary, path_in_managed_worktrees, repo_worktrees_root,
+    managed_worktrees_boundary, repo_worktrees_root,
 };
 pub use sync::{SourceDirtyState, SyncReport, WorktreeSync, collect_source_dirty_state};
 #[cfg(target_os = "linux")]
