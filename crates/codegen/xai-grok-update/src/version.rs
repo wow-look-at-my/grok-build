@@ -37,8 +37,6 @@ pub struct UpdateConfig {
     pub proxy_base_url: String,
     /// Auth scope key for `~/.grok/auth.json`.
     pub auth_scope: String,
-    /// Enterprise deployment key (GROK_DEPLOYMENT_KEY).
-    pub deployment_key: Option<String>,
     /// Optional extra auth material forwarded with requests when present.
     pub alpha_test_key: Option<String>,
     /// Release channel: "stable" or "alpha". Loaded from config.
@@ -52,7 +50,6 @@ impl UpdateConfig {
         Self {
             proxy_base_url: env.cli_chat_proxy_base_url(),
             auth_scope: xai_grok_shell::auth::GrokComConfig::default().auth_scope(),
-            deployment_key: None,
             alpha_test_key: None,
             channel: "stable".to_string(),
             npm_registry: None,

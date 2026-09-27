@@ -22,11 +22,9 @@ pub struct CredentialSnapshot {
     /// Team identifier from OAuth. `None` for personal accounts or when
     /// no auth is configured.
     pub team_id: Option<String>,
-    /// `uuidv5(NAMESPACE_OID, deployment_key)`, set only for deployment-key auth.
-    pub deployment_id: Option<String>,
     /// `uuidv5(NAMESPACE_OID, api_key)`, set only for `AuthMode::ApiKey`.
     pub api_key_id: Option<String>,
-    /// Org id from the OIDC `organizationId` claim; `None` for personal / deployment-key auth.
+    /// Org id from the OIDC `organizationId` claim; `None` for personal auth.
     pub organization_id: Option<String>,
 }
 

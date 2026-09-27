@@ -24,7 +24,6 @@ async fn version_lookups_refuse() {
     let config = UpdateConfig {
         proxy_base_url: "http://test.invalid/v1".to_string(),
         auth_scope: "test".to_string(),
-        deployment_key: None,
         alpha_test_key: None,
         channel: "stable".to_string(),
         npm_registry: None,

@@ -43,7 +43,6 @@ fn make_config(channel: &str) -> UpdateConfig {
     UpdateConfig {
         proxy_base_url: "http://test.invalid/v1".to_string(),
         auth_scope: "test".to_string(),
-        deployment_key: None,
         alpha_test_key: None,
         channel: channel.to_string(),
         npm_registry: None,

@@ -22,21 +22,17 @@ pub const MULTIPART_UPLOAD_THRESHOLD: u64 = 50 * 1024 * 1024;
 
 /// Construct a `StorageClient` for proxy-mode uploads. Uses the caller-provided
 /// refresh-aware credentials when present, otherwise falls back to a
-/// `StaticGrokAuth` carrying the inline user / deployment keys from
-/// `UploadMethod::Proxy`. The optional `http_client` lets the caller pass a
-/// shell-tuned client (HTTP/2 keep-alive, conn pool tuning); when `None` we
-/// fall back to `reqwest::Client::new()`.
+/// `StaticGrokAuth` carrying the inline user token from
+/// `UploadMethod::Proxy`.
 fn build_proxy_client_with_fallback(
     proxy_base_url: &str,
     user_token: &str,
-    deployment_key: Option<String>,
     credentials: Option<Arc<dyn AuthCredentialProvider>>,
     attribution: Option<Arc<dyn Auth401AttributionCallback>>,
     http_client: Option<reqwest::Client>,
 ) -> StorageClient {
     let provider = credentials.unwrap_or_else(|| {
-        let mut creds = StaticGrokAuth::new(Some(user_token.to_owned()));
-        creds.deployment_key = deployment_key;
+        let creds = StaticGrokAuth::new(Some(user_token.to_owned()));
         let bearer = creds.wire_bearer();
         Arc::new(StaticAuthCredentialProvider::new(Box::new(creds), bearer))
     });
@@ -136,7 +132,6 @@ pub async fn upload_bytes<C: StorageConfig>(
         UploadMethod::Proxy {
             proxy_base_url,
             user_token,
-            deployment_key,
             alpha_test_key: _,
         } => {
             // For proxy mode, bucket is determined by proxy from user ACLs
@@ -148,7 +143,6 @@ pub async fn upload_bytes<C: StorageConfig>(
             upload_bytes_via_proxy(
                 proxy_base_url,
                 user_token,
-                deployment_key.as_deref(),
                 object_path,
                 content,
                 content_type,
@@ -203,7 +197,6 @@ pub async fn upload_bytes_signed<C: StorageConfig>(
         UploadMethod::Proxy {
             proxy_base_url,
             user_token,
-            deployment_key,
             alpha_test_key: _,
         } => {
             tracing::debug!(
@@ -215,7 +208,6 @@ pub async fn upload_bytes_signed<C: StorageConfig>(
             upload_bytes_via_signed_url(
                 proxy_base_url,
                 user_token,
-                deployment_key.as_deref(),
                 object_path,
                 content,
                 content_type,
@@ -272,13 +264,11 @@ pub async fn upload_file<C: StorageConfig>(
         UploadMethod::Proxy {
             proxy_base_url,
             user_token,
-            deployment_key,
             alpha_test_key: _,
         } => {
             upload_file_via_proxy(
                 proxy_base_url,
                 user_token,
-                deployment_key.as_deref(),
                 object_path,
                 file_path,
                 content_type,
@@ -352,13 +342,11 @@ where
         UploadMethod::Proxy {
             proxy_base_url,
             user_token,
-            deployment_key,
             alpha_test_key: _,
         } => {
             let storage_client = build_proxy_client_with_fallback(
                 proxy_base_url,
                 user_token,
-                deployment_key.as_deref().map(|s| s.to_owned()),
                 config.proxy_credentials(),
                 config.proxy_attribution(),
                 config.proxy_http_client(),
@@ -429,7 +417,6 @@ async fn upload_stream_direct<R: tokio::io::AsyncRead + Send + Sync + 'static>(
 async fn upload_file_via_proxy(
     proxy_base_url: &str,
     user_token: &str,
-    deployment_key: Option<&str>,
     object_path: &str,
     file_path: &Path,
     content_type: &str,
@@ -442,7 +429,6 @@ async fn upload_file_via_proxy(
     let storage_client = build_proxy_client_with_fallback(
         proxy_base_url,
         user_token,
-        deployment_key.map(|s| s.to_owned()),
         credentials,
         attribution,
         http_client,
@@ -580,7 +566,6 @@ async fn upload_bytes_direct(
 async fn upload_bytes_via_proxy(
     proxy_base_url: &str,
     user_token: &str,
-    deployment_key: Option<&str>,
     object_path: &str,
     content: &[u8],
     content_type: &str,
@@ -594,7 +579,6 @@ async fn upload_bytes_via_proxy(
     let storage_client = build_proxy_client_with_fallback(
         proxy_base_url,
         user_token,
-        deployment_key.map(|s| s.to_owned()),
         credentials,
         attribution,
         http_client,
@@ -627,7 +611,6 @@ async fn upload_bytes_via_proxy(
 pub async fn upload_bytes_via_signed_url(
     proxy_base_url: &str,
     user_token: &str,
-    deployment_key: Option<&str>,
     object_path: &str,
     content: &[u8],
     content_type: &str,
@@ -638,7 +621,6 @@ pub async fn upload_bytes_via_signed_url(
     let storage_client = build_proxy_client_with_fallback(
         proxy_base_url,
         user_token,
-        deployment_key.map(|s| s.to_owned()),
         credentials,
         attribution,
         http_client,
@@ -677,7 +659,6 @@ mod tests {
             upload_method: UploadMethod::Proxy {
                 proxy_base_url: base_url,
                 user_token: "tok".to_string(),
-                deployment_key: None,
                 alpha_test_key: None,
             },
             prefix_dir: None,

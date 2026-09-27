@@ -2620,8 +2620,8 @@ pub async fn run_update(
     Ok(Some(target_version.to_string()))
 }
 
-/// Refresh managed config post-update (best-effort, staleness-gated), for
-/// deployment-key and team principals alike.
+/// Refresh managed config post-update (best-effort, staleness-gated) for a
+/// team principal.
 async fn refresh_deployment_config() {
     if !xai_grok_shell::managed_config::has_principal() {
         return;

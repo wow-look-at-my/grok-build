@@ -456,7 +456,6 @@ mod tests {
                     // 127.0.0.1:1 is never listening.
                     proxy_base_url: "http://127.0.0.1:1/v1".to_string(),
                     user_token: String::new(),
-                    deployment_key: None,
                     alpha_test_key: None,
                 },
                 prefix_dir: None,

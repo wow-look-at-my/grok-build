@@ -65,7 +65,6 @@ fn external_stream_gates_on_end_to_end() {
         user_id: Some("user-x".into()),
         organization_id: Some("org-acme".into()),
         team_id: Some("team-7".into()),
-        deployment_id: Some("deploy-eu".into()),
     });
     assert!(
         !external::is_active(),

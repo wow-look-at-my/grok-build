@@ -12,7 +12,7 @@ use chrono::{Local, SecondsFormat};
 use serde_json::json;
 use xai_mixpanel::Mixpanel;
 
-use crate::config::{TelemetryConfig, TelemetryMode, deployment_id_from_key};
+use crate::config::{TelemetryConfig, TelemetryMode};
 use crate::http::OriginClientInfo;
 use crate::session_ctx::EmitterOrigin;
 
@@ -52,7 +52,6 @@ pub struct TelemetryClient {
     mixpanel: Option<Arc<Mixpanel>>,
     user_id: Option<String>,
     team_id: Option<String>,
-    deployment_id: Option<String>,
     shell_version: String,
     client_type: Option<String>,
     client_version: Option<String>,
@@ -79,7 +78,6 @@ impl TelemetryClient {
         mode: TelemetryMode,
         user_id: Option<String>,
         team_id: Option<String>,
-        deployment_key: Option<String>,
         origin_client: Option<OriginClientInfo>,
         shell_version: String,
         subscription_tier: Option<String>,
@@ -93,9 +91,6 @@ impl TelemetryClient {
         } else {
             None
         };
-        let deployment_id = deployment_key
-            .filter(|s| !s.is_empty())
-            .map(|k| deployment_id_from_key(&k));
         let (client_type, client_version) = match origin_client {
             Some(o) => (Some(o.product), o.version),
             None => (None, None),
@@ -108,7 +103,6 @@ impl TelemetryClient {
             mixpanel,
             user_id,
             team_id,
-            deployment_id,
             shell_version,
             client_type,
             client_version,
@@ -199,9 +193,6 @@ pub async fn track(event_name: &str, request_id: &str, ctx: &UserContext, mut me
     metadata.insert("agent_id".into(), json!(agent_id));
     if let Some(ref team_id) = client.team_id {
         metadata.insert("team_id".into(), json!(team_id));
-    }
-    if let Some(ref deployment_id) = client.deployment_id {
-        metadata.insert("deployment_id".into(), json!(deployment_id));
     }
     metadata.insert("shell_version".into(), json!(client.shell_version));
     if let Some(ref client_type) = client.client_type {
@@ -311,9 +302,6 @@ pub fn sync_profile() {
         if let Some(ref client_version) = client.client_version {
             props.insert("client_version".into(), json!(client_version));
         }
-        if let Some(ref deployment_id) = client.deployment_id {
-            props.insert("deployment_id".into(), json!(deployment_id));
-        }
         if let Some(ref team_id) = client.team_id {
             props.insert("team_id".into(), json!(team_id));
         }
@@ -340,7 +328,6 @@ pub fn init(
     mode: TelemetryMode,
     user_id: Option<String>,
     team_id: Option<String>,
-    deployment_key: Option<String>,
     origin_client: Option<OriginClientInfo>,
     shell_version: String,
     subscription_tier: Option<String>,
@@ -356,7 +343,6 @@ pub fn init(
             mode,
             user_id,
             team_id,
-            deployment_key,
             origin_client,
             shell_version,
             subscription_tier,
@@ -375,7 +361,6 @@ pub fn init_if_needed(
     mode: TelemetryMode,
     user_id: Option<String>,
     team_id: Option<String>,
-    deployment_key: Option<String>,
     origin_client: Option<OriginClientInfo>,
     shell_version: String,
     subscription_tier: Option<String>,
@@ -392,7 +377,6 @@ pub fn init_if_needed(
             mode,
             user_id,
             team_id,
-            deployment_key,
             origin_client,
             shell_version,
             subscription_tier,
