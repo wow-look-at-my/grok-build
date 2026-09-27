@@ -776,7 +776,10 @@ mod tests {
             ("4", &"x".repeat(300), TodoStatus::Completed),
         ]);
         let echo = summarize_todo_state(&state);
-        assert!(echo.contains(&long_open), "an open item keeps its text:\n{echo}");
+        assert!(
+            echo.contains(&long_open),
+            "an open item keeps its text:\n{echo}"
+        );
         assert!(
             echo.contains("- [completed] 2: shipped the parser…\n"),
             "{echo}"
@@ -787,7 +790,11 @@ mod tests {
             echo.contains(&format!("- [completed] 4: {}…\n", "x".repeat(100))),
             "{echo}"
         );
-        assert_eq!(get_item(&state, "2").content, long_done, "the state keeps the full text");
+        assert_eq!(
+            get_item(&state, "2").content,
+            long_done,
+            "the state keeps the full text"
+        );
     }
 
     fn get_item<'a>(state: &'a TodoState, id: &str) -> &'a TodoItem {

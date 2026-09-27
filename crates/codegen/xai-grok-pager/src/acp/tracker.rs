@@ -5,8 +5,8 @@
 //! Each `handle_update()` call processes one event and mutates the scrollback.
 use crate::acp::meta::{NotificationMeta, user_message_chunk_meta, user_prompt_meta};
 use crate::scrollback::block::RenderBlock;
-use crate::scrollback::blocks::SessionEvent;
 use crate::scrollback::blocks::CompactionDetail;
+use crate::scrollback::blocks::SessionEvent;
 use crate::scrollback::blocks::tool::list_dir::ListDirToolCallBlock;
 use crate::scrollback::blocks::tool::search::{
     SearchFileMatch, SearchInputMeta, SearchLineMatch, SearchOutputMode, SearchToolCallBlock,
