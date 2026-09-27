@@ -644,6 +644,13 @@ pub enum SessionUpdate {
         #[serde(default)]
         prompt_id: Option<String>,
     },
+    /// A short summary of the thinking in a single model call. Persisted,
+    /// so a reload keeps it.
+    ThinkingSummary {
+        /// `streamStartMs` of the model call whose thinking this summarizes.
+        stream_start_ms: i64,
+        summary: String,
+    },
     /// A compaction checkpoint marker written to `updates.jsonl`.
     ///
     /// This is **persist-only** — it is never sent to the gateway/UI. It records
