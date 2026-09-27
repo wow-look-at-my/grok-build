@@ -72,7 +72,11 @@ impl TaskOutputTokenBudget {
         (state.spent, state.incomplete)
     }
 }
-pub struct BlockingWaitState(std::sync::Mutex<BlockingWaitInner>);
+/// Depth counter for a subagent's foreground wait. Its guard releases the
+/// counter in `Drop`, so the lock must be one that a panic elsewhere cannot
+/// turn into a permanent failure: a poisoned lock would make every later
+/// `Drop` of an in-flight guard panic as well.
+pub struct BlockingWaitState(parking_lot::Mutex<BlockingWaitInner>);
 #[derive(Default)]
 struct BlockingWaitInner {
     depth: usize,
@@ -80,23 +84,17 @@ struct BlockingWaitInner {
 }
 impl BlockingWaitState {
     pub(crate) fn new() -> Self {
-        Self(std::sync::Mutex::new(BlockingWaitInner::default()))
+        Self(parking_lot::Mutex::new(BlockingWaitInner::default()))
     }
     pub(crate) fn depth(&self) -> usize {
-        self.0
-            .lock()
-            .expect("blocking wait state mutex poisoned")
-            .depth
+        self.0.lock().depth
     }
     #[cfg(test)]
     pub(crate) fn set_depth_for_test(&self, depth: usize) {
-        self.0
-            .lock()
-            .expect("blocking wait state mutex poisoned")
-            .depth = depth;
+        self.0.lock().depth = depth;
     }
     pub(crate) fn reset(&self) {
-        let mut state = self.0.lock().expect("blocking wait state mutex poisoned");
+        let mut state = self.0.lock();
         state.generation = state.generation.wrapping_add(1);
         state.depth = 0;
     }
@@ -108,7 +106,7 @@ pub(crate) struct BlockingWaitGuard {
 impl BlockingWaitGuard {
     pub(crate) fn enter(state: Arc<BlockingWaitState>) -> Self {
         let generation = {
-            let mut inner = state.0.lock().expect("blocking wait state mutex poisoned");
+            let mut inner = state.0.lock();
             inner.depth = inner.depth.saturating_add(1);
             inner.generation
         };
@@ -117,11 +115,7 @@ impl BlockingWaitGuard {
 }
 impl Drop for BlockingWaitGuard {
     fn drop(&mut self) {
-        let mut inner = self
-            .state
-            .0
-            .lock()
-            .expect("blocking wait state mutex poisoned");
+        let mut inner = self.state.0.lock();
         if inner.generation == self.generation {
             inner.depth = inner.depth.saturating_sub(1);
         }
@@ -400,5 +394,34 @@ mod tests {
                 process_scope: None,
             }
         }
+    }
+}
+/// The depth counter is released from a `Drop`, where a panic has nowhere to
+/// go, so what the lock does after somebody else panicked while holding it is
+/// load-bearing rather than academic.
+#[cfg(test)]
+mod blocking_wait_lock_tests {
+    use super::{BlockingWaitGuard, BlockingWaitState};
+    use std::sync::Arc;
+
+    #[test]
+    fn a_panic_while_the_depth_is_held_leaves_it_acquirable() {
+        let state = Arc::new(BlockingWaitState::new());
+        let writer = {
+            let state = Arc::clone(&state);
+            std::thread::spawn(move || {
+                let _held = state.0.lock();
+                panic!("panic while the blocking wait depth is held");
+            })
+        };
+        assert!(
+            writer.join().is_err(),
+            "the writer thread is expected to panic while holding the depth"
+        );
+        state.reset();
+        let guard = BlockingWaitGuard::enter(Arc::clone(&state));
+        assert_eq!(state.depth(), 1, "a guard still counts the wait");
+        drop(guard);
+        assert_eq!(state.depth(), 0, "and its Drop still releases the wait");
     }
 }
