@@ -29,7 +29,7 @@ pub use self::error::{
 };
 pub use self::output_rate::{
     OutputRateFloorPolicy, OutputRateGate, OutputRateHealth, OutputRateMeter, RateTick,
-    classify_rate,
+    ToolCallFragment, classify_rate,
 };
 pub use self::tool_overrides::{
     ClearableField, SearchDateBound, SearchDateBoundError, ToolOverrides, ToolOverridesUpdate,

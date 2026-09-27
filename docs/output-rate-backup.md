@@ -21,6 +21,8 @@ A takeover sends `SamplingEvent::Retrying` with kind `OutputRateCollapsed` and n
 
 Output bytes count text deltas and tool-call argument deltas. A takeover on overtake therefore never shows the user less output than the slow stream had.
 
+Two spans are not judged at all, because the model is generating in one and waiting for the server in the other. A backend-hosted tool call pauses the gate. So does a streamed tool-call fragment that carries no argument bytes, which is how a provider says it is writing the call without showing that work. The reading holds where it was, and the gap leaves the timeline when the arguments land. See "Output-rate floor notes" in `AGENTS.md`.
+
 ## Budget
 
 Each backup spends one unit of the rate budget (`output_rate_max_retries`). The transport retry budget is separate. When the budget is spent, a breach keeps the slow response and logs `output_rate_backup_budget_spent`.
