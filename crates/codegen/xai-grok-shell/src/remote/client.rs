@@ -47,7 +47,6 @@ async fn parse_json_response<T: serde::de::DeserializeOwned>(
 async fn add_bundle_fetch_headers(
     builder: reqwest::RequestBuilder,
     auth_manager: Option<&std::sync::Arc<crate::auth::AuthManager>>,
-    deployment_key: Option<&str>,
     alpha_test_key: Option<&str>,
     url: &str,
 ) -> reqwest::RequestBuilder {
@@ -58,14 +57,11 @@ async fn add_bundle_fetch_headers(
     let mut credentials = crate::util::grok_auth_credentials::GrokAuthCredentials::new(
         resolved_auth.as_ref().map(|auth| auth.key.clone()),
     );
-    credentials.deployment_key = deployment_key.map(str::to_owned);
     credentials.alpha_test_key = alpha_test_key.map(str::to_owned);
     let mut builder = credentials
         .apply(builder, url)
         .header("x-grok-client-version", xai_grok_version::version());
-    if deployment_key.is_none()
-        && let Some(auth) = &resolved_auth
-    {
+    if let Some(auth) = &resolved_auth {
         builder = builder.header("x-userid", &auth.user_id);
         if let Some(email) = &auth.email {
             builder = builder.header("x-email", email);
@@ -84,12 +80,10 @@ async fn add_bundle_fetch_headers(
 }
 /// Fetch the bundled subagent cache payload from cli-chat-proxy `GET /v1/subagents/bundle`.
 ///
-/// Uses the shell's standard proxy-backed auth model: deployment key auth takes
-/// precedence when configured; otherwise user-session token auth is used.
+/// Uses the shell's standard proxy-backed user-session token auth.
 pub async fn fetch_subagent_bundle(
     cli_chat_proxy_base_url: &str,
     auth_manager: Option<&std::sync::Arc<crate::auth::AuthManager>>,
-    deployment_key: Option<&str>,
     alpha_test_key: Option<&str>,
 ) -> Result<SubagentBundle, BackendError> {
     let url = format!("{}/subagents/bundle", cli_chat_proxy_base_url);
@@ -98,7 +92,6 @@ pub async fn fetch_subagent_bundle(
             .get(&url)
             .timeout(std::time::Duration::from_secs(10)),
         auth_manager,
-        deployment_key,
         alpha_test_key,
         &url,
     )
@@ -132,21 +125,13 @@ pub enum FetchedBundle {
 pub async fn fetch_bundle(
     cli_chat_proxy_base_url: &str,
     auth_manager: Option<&std::sync::Arc<crate::auth::AuthManager>>,
-    deployment_key: Option<&str>,
     alpha_test_key: Option<&str>,
 ) -> Result<FetchedBundle, BackendError> {
-    fetch_bundle_inner(
-        cli_chat_proxy_base_url,
-        auth_manager,
-        deployment_key,
-        alpha_test_key,
-    )
-    .await
+    fetch_bundle_inner(cli_chat_proxy_base_url, auth_manager, alpha_test_key).await
 }
 async fn fetch_bundle_inner(
     cli_chat_proxy_base_url: &str,
     auth_manager: Option<&std::sync::Arc<crate::auth::AuthManager>>,
-    deployment_key: Option<&str>,
     alpha_test_key: Option<&str>,
 ) -> Result<FetchedBundle, BackendError> {
     let archive_url = format!("{}/bundle/archive", cli_chat_proxy_base_url);
@@ -156,7 +141,6 @@ async fn fetch_bundle_inner(
             std::sync::Arc::new(
                 crate::auth::credential_provider::ShellAuthCredentialProvider::new(
                     am.clone(),
-                    deployment_key.map(str::to_owned),
                     alpha_test_key.map(str::to_owned),
                 ),
             );
@@ -172,8 +156,7 @@ async fn fetch_bundle_inner(
             crate::http::CLIENT_MODE_HEADER,
             crate::http::process_client_mode(),
         );
-    if deployment_key.is_none()
-        && let Some(am) = auth_manager
+    if let Some(am) = auth_manager
         && let Some(auth) = am.current()
     {
         request = request.header("x-userid", &auth.user_id);
@@ -197,13 +180,8 @@ async fn fetch_bundle_inner(
         status = %archive_response.status(),
         "archive endpoint unavailable, falling back to legacy JSON"
     );
-    let bundle = fetch_subagent_bundle(
-        cli_chat_proxy_base_url,
-        auth_manager,
-        deployment_key,
-        alpha_test_key,
-    )
-    .await?;
+    let bundle =
+        fetch_subagent_bundle(cli_chat_proxy_base_url, auth_manager, alpha_test_key).await?;
     Ok(FetchedBundle::Legacy(bundle))
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1547,7 +1525,7 @@ mod tests {
         let (proxy_base_url, seen_headers, server) =
             start_bundle_server(axum::http::StatusCode::OK, body).await;
         let am = test_auth_manager();
-        let bundle = fetch_subagent_bundle(&proxy_base_url, Some(&am), None, None)
+        let bundle = fetch_subagent_bundle(&proxy_base_url, Some(&am), None)
             .await
             .unwrap();
         assert_eq!(bundle.version, "bundle-v1");
@@ -1568,29 +1546,6 @@ mod tests {
         server.abort();
     }
     #[tokio::test(flavor = "current_thread")]
-    async fn fetch_subagent_bundle_uses_deployment_key_without_user_headers() {
-        let body = serde_json::json!({
-            "version": "bundle-v1",
-            "personas": {},
-            "roles": {},
-            "agents": {}
-        });
-        let (proxy_base_url, seen_headers, server) =
-            start_bundle_server(axum::http::StatusCode::OK, body).await;
-        let am = test_auth_manager();
-        let bundle = fetch_subagent_bundle(&proxy_base_url, Some(&am), Some("deploy-key"), None)
-            .await
-            .unwrap();
-        assert_eq!(bundle.version, "bundle-v1");
-        let headers = seen_headers.lock().unwrap();
-        let headers = headers.last().unwrap();
-        assert_eq!(headers.authorization.as_deref(), Some("Bearer deploy-key"));
-        assert_eq!(headers.token_auth, None);
-        assert_eq!(headers.user_id, None);
-        assert_eq!(headers.email, None);
-        server.abort();
-    }
-    #[tokio::test(flavor = "current_thread")]
     async fn fetch_subagent_bundle_http_failure() {
         let (proxy_base_url, _seen_headers, server) = start_bundle_server(
             axum::http::StatusCode::UNAUTHORIZED,
@@ -1598,7 +1553,7 @@ mod tests {
         )
         .await;
         let am = test_auth_manager();
-        let error = fetch_subagent_bundle(&proxy_base_url, Some(&am), None, None)
+        let error = fetch_subagent_bundle(&proxy_base_url, Some(&am), None)
             .await
             .unwrap_err();
         assert!(matches!(
@@ -1615,7 +1570,7 @@ mod tests {
         )
         .await;
         let am = test_auth_manager();
-        let error = fetch_subagent_bundle(&proxy_base_url, Some(&am), None, None)
+        let error = fetch_subagent_bundle(&proxy_base_url, Some(&am), None)
             .await
             .unwrap_err();
         assert!(matches!(error, BackendError::Serialization(_)));
@@ -2199,7 +2154,7 @@ mod tests {
         );
     }
     /// INVARIANT: the `/models` fetch URL + auth scheme match the auth mode —
-    /// Session/Deployment → cli-chat-proxy (Session auth), never the inference host;
+    /// Session → cli-chat-proxy (Session auth), never the inference host;
     /// ApiKey → `xai_api_base_url` (ApiKey, public default when unset); a custom
     /// models endpoint → that URL verbatim.
     #[test]
@@ -2275,9 +2230,6 @@ mod tests {
         let session = ListModelsEndpoint::from_endpoints(&cfg, ModelFetchAuth::Session);
         assert_eq!(session.url, "", "no proxy configured, so no listing URL");
         assert_eq!(session.auth, EndpointAuth::Session);
-        let deployment = ListModelsEndpoint::from_endpoints(&cfg, ModelFetchAuth::Deployment);
-        assert_eq!(deployment.url, "");
-        assert_eq!(deployment.auth, EndpointAuth::Session);
         let api = ListModelsEndpoint::from_endpoints(&cfg, ModelFetchAuth::ApiKey);
         assert_eq!(api.url, "https://inference.acme-corp.example/xai/v1/models");
         assert_eq!(api.auth, EndpointAuth::ApiKey);
@@ -2298,8 +2250,7 @@ mod tests {
         assert_eq!(ep.url, "https://models.acme.com/v1/models");
         assert_eq!(ep.auth, EndpointAuth::ApiKey);
     }
-    /// REGRESSION: `grok setup` must send the deployment key to
-    /// the proxy, never the inference endpoint.
+    /// REGRESSION: `grok setup` must send the team token to the proxy, never the inference endpoint.
     #[test]
     #[serial_test::serial]
     fn deployment_config_url_uses_cli_chat_proxy_when_not_overridden() {
@@ -2311,18 +2262,16 @@ mod tests {
         ] {
             unsafe { std::env::remove_var(k) };
         }
-        unsafe { std::env::set_var("GROK_DEPLOYMENT_KEY", "xai-token-ENTERPRISE") };
         let managed: toml::Value = toml::from_str(
             r#"[endpoints]
-            deployment_key = "xai-token-ENTERPRISE"
             xai_api_base_url = "https://inference.acme-corp.example/xai/v1""#,
         )
         .unwrap();
         let url = EndpointsConfig::from_config_value(&managed).resolve_managed_config_url();
-        assert_eq!(url, "", "no proxy configured, so the key goes nowhere");
+        assert_eq!(url, "", "no proxy configured, so the token goes nowhere");
         assert!(
             !url.contains("acme-corp"),
-            "deployment key would be sent to the inference host: {url}"
+            "the token would be sent to the inference host: {url}"
         );
         let pinned: toml::Value = toml::from_str(
             r#"[endpoints]
@@ -2334,7 +2283,6 @@ mod tests {
             EndpointsConfig::from_config_value(&pinned).resolve_managed_config_url(),
             "https://proxy.acme-corp.example/v1/deployment/config"
         );
-        unsafe { std::env::remove_var("GROK_DEPLOYMENT_KEY") };
     }
     #[derive(Clone)]
     struct DualBundleServerState {
@@ -2378,7 +2326,7 @@ mod tests {
         })
         .await;
         let am = test_auth_manager();
-        let result = fetch_bundle(&proxy_base_url, Some(&am), None, None)
+        let result = fetch_bundle(&proxy_base_url, Some(&am), None)
             .await
             .unwrap();
         match result {
@@ -2402,7 +2350,7 @@ mod tests {
         })
         .await;
         let am = test_auth_manager();
-        let result = fetch_bundle(&proxy_base_url, Some(&am), None, None)
+        let result = fetch_bundle(&proxy_base_url, Some(&am), None)
             .await
             .unwrap();
         match result {
@@ -2426,7 +2374,7 @@ mod tests {
         })
         .await;
         let am = test_auth_manager();
-        let result = fetch_bundle(&proxy_base_url, Some(&am), None, None)
+        let result = fetch_bundle(&proxy_base_url, Some(&am), None)
             .await
             .unwrap();
         match &result {
@@ -2479,7 +2427,7 @@ mod tests {
         })
         .await;
         let am = test_auth_manager();
-        let error = fetch_bundle(&proxy_base_url, Some(&am), None, None)
+        let error = fetch_bundle(&proxy_base_url, Some(&am), None)
             .await
             .unwrap_err();
         assert!(matches!(

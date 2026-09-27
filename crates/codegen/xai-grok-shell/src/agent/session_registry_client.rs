@@ -159,11 +159,6 @@ impl SessionRegistryClient {
         }
     }
 
-    pub fn with_deployment_key(mut self, key: Option<String>) -> Self {
-        self.credentials.deployment_key = key;
-        self
-    }
-
     pub fn with_alpha_test_key(mut self, key: Option<String>) -> Self {
         self.credentials.alpha_test_key = key;
         self
@@ -181,7 +176,6 @@ impl SessionRegistryClient {
             std::sync::Arc::new(
                 crate::auth::credential_provider::ShellAuthCredentialProvider::new(
                     auth_manager.clone(),
-                    self.credentials.deployment_key.clone(),
                     self.credentials.alpha_test_key.clone(),
                 ),
             );

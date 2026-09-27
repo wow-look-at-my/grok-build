@@ -80,7 +80,7 @@ pub enum TraceUploadReason {
     ZdrTeam,
     /// `[telemetry] trace_upload = false` in config.
     FeatureOff,
-    /// No grok.com auth or deployment key.
+    /// No grok.com auth.
     NoCredentials,
     /// Direct-to-bucket S3 upload.
     DirectS3,

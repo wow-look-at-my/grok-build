@@ -242,7 +242,6 @@ pub(crate) async fn spawn_session_actor(
     feedback_proxy_url: Option<String>,
     feedback_user_token: Option<String>,
     feedback_alpha_test_key: Option<String>,
-    deployment_key: Option<String>,
     client_terminal_capable: bool,
     client_fs_capable: bool,
     gateway_enabled: std::sync::Arc<std::sync::atomic::AtomicBool>,
@@ -1166,8 +1165,7 @@ pub(crate) async fn spawn_session_actor(
     let feedback_client = feedback_proxy_url.map(|base_url| {
         let mut client =
             crate::agent::feedback_client::FeedbackClient::new(base_url, feedback_user_token)
-                .with_alpha_test_key(feedback_alpha_test_key)
-                .with_deployment_key(deployment_key);
+                .with_alpha_test_key(feedback_alpha_test_key);
         if let Some(am) = auth_manager.as_ref() {
             client = client.with_auth_manager(am.clone());
         }
@@ -2256,7 +2254,6 @@ pub(crate) async fn spawn_session_on_thread(
     feedback_proxy_url: Option<String>,
     feedback_user_token: Option<String>,
     feedback_alpha_test_key: Option<String>,
-    deployment_key: Option<String>,
     client_terminal_capable: bool,
     client_fs_capable: bool,
     gateway_enabled: std::sync::Arc<std::sync::atomic::AtomicBool>,
@@ -2431,7 +2428,6 @@ pub(crate) async fn spawn_session_on_thread(
                         feedback_proxy_url,
                         feedback_user_token,
                         feedback_alpha_test_key,
-                        deployment_key,
                         client_terminal_capable,
                         client_fs_capable,
                         gateway_enabled,

@@ -87,9 +87,6 @@ impl AuthCredentialProvider for ShellAuthCredentialProvider {
             .try_recover_unauthorized(crate::auth::recovery::RecoverySource::Background)
             .await
     }
-    fn needs_token_auth_header(&self) -> bool {
-        true
-    }
 }
 /// Resolves the embedding credentials for `embed_base_url`, attaching the xAI
 /// session credential only to xAI-operated endpoints over `https`.
@@ -302,9 +299,6 @@ impl AuthCredentialProvider for OtelAuthCredentialProvider {
         }
         am.try_recover_unauthorized(crate::auth::recovery::RecoverySource::Background)
             .await
-    }
-    fn needs_token_auth_header(&self) -> bool {
-        true
     }
 }
 /// Process-wide OTel credential provider handle.

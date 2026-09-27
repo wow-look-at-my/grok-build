@@ -389,7 +389,7 @@ fn agent_connect_timeout_emits_phase_histogram_and_timeout_counter() {
             elapsed_ms: 30_000,
             timeout_secs: Some(30),
             embedded_fallback: false,
-            auth_mode: crate::startup::AuthMode::Deployment,
+            auth_mode: crate::startup::AuthMode::Team,
         },
     );
     assert!(exported_events(&stream).is_empty());
