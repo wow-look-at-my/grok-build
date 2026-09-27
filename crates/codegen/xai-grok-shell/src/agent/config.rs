@@ -5785,7 +5785,6 @@ pub(crate) fn resolve_aux_model_sampling_config(
             alpha_test_key.clone(),
             client_version.clone(),
             None,
-            None,
         );
         if sampler.api_key.is_some() {
             return Some(sampler);
@@ -5859,7 +5858,6 @@ pub(crate) fn resolve_aux_model_sampling_config(
             credentials,
             alpha_test_key,
             client_version,
-            None,
             None,
         );
         return Some(sampler);
@@ -6090,7 +6088,6 @@ fn resolve_hidden_default_web_search_sampling_config(
         alpha_test_key,
         client_version,
         None,
-        None,
     )
 }
 pub(crate) fn resolve_web_search_sampling_config(
@@ -6116,7 +6113,6 @@ pub(crate) fn resolve_web_search_sampling_config(
             credentials,
             alpha_test_key,
             client_version,
-            None,
             None,
         ))
     } else if model_id == crate::models::default_web_search_model() {
@@ -7376,12 +7372,10 @@ reasoning_effort = "low"
             "https://test.api/v1",
             Some("model-specific-key"),
             None,
-            None,
         );
         let sampling_config = sampling_config_for_model(
             &model,
             resolve_credentials(&model, None),
-            None,
             None,
             None,
             None,
@@ -7403,7 +7397,6 @@ reasoning_effort = "low"
                 auth_type: xai_chat_state::AuthType::ApiKey,
                 auth_scheme: AuthScheme::Bearer,
             },
-            None,
             None,
             None,
             None,
@@ -7678,13 +7671,11 @@ reasoning_effort = "low"
             crate::env::PROD_CLI_CHAT_PROXY_BASE_URL,
             None,
             None,
-            None,
         );
         model.info.api_backend = ApiBackend::Messages;
         let config = sampling_config_for_model(
             &model,
             resolve_credentials(&model, Some("tok")),
-            None,
             None,
             None,
             None,
@@ -7759,7 +7750,6 @@ reasoning_effort = "low"
             "https://api.x.ai/v1",
             Some("xai-model-key"),
             None,
-            None,
         );
         let mut creds = resolve_credentials(&entry, Some("session-jwt"));
         assert_eq!(
@@ -7780,7 +7770,6 @@ reasoning_effort = "low"
             "https://api.example.com/v1",
             Some("sk-byok"),
             None,
-            None,
         );
         let mut byok_creds = resolve_credentials(&byok, Some("session-jwt"));
         enforce_disable_api_key_auth(&mut byok_creds, true, Some("session-jwt"));
@@ -7794,7 +7783,6 @@ reasoning_effort = "low"
             "https://messages.example.com/v1",
             Some("sk-ant-test-key"),
             None,
-            None,
         );
         model.info.api_backend = ApiBackend::Messages;
         model.info.auth_scheme = AuthScheme::XApiKey;
@@ -7802,7 +7790,7 @@ reasoning_effort = "low"
         assert_eq!(creds.auth_scheme, AuthScheme::XApiKey);
         assert_eq!(creds.auth_type, xai_chat_state::AuthType::ApiKey);
         assert_eq!(creds.api_key, Some("sk-ant-test-key".to_string()));
-        let config = sampling_config_for_model(&model, creds, None, None, None, None);
+        let config = sampling_config_for_model(&model, creds, None, None, None);
         assert_eq!(config.auth_scheme, AuthScheme::XApiKey);
         assert_eq!(config.api_backend, ApiBackend::Messages);
         let client = xai_grok_sampler::SamplingClient::new(config).expect("client should build");
@@ -7816,12 +7804,11 @@ reasoning_effort = "low"
             "https://api.example.com/v1",
             Some("sk-openai-test"),
             None,
-            None,
         );
         assert_eq!(model.info.auth_scheme, AuthScheme::Bearer);
         let creds = resolve_credentials(&model, None);
         assert_eq!(creds.auth_scheme, AuthScheme::Bearer);
-        let config = sampling_config_for_model(&model, creds, None, None, None, None);
+        let config = sampling_config_for_model(&model, creds, None, None, None);
         assert_eq!(config.auth_scheme, AuthScheme::Bearer);
         let client = xai_grok_sampler::SamplingClient::new(config).expect("client should build");
         let info = client.auth_info();
@@ -7840,7 +7827,6 @@ reasoning_effort = "low"
             "my-model",
             "https://api.example.com/v1",
             Some("sk-external"),
-            None,
             None,
         );
         assert!(config_model.has_own_credentials());
@@ -7870,7 +7856,6 @@ reasoning_effort = "low"
             "m",
             "https://api.example.com/v1",
             Some("sk-ext"),
-            None,
             None,
         );
         assert_eq!(
@@ -8159,7 +8144,6 @@ reasoning_effort = "low"
             None,
             None,
             None,
-            None,
         );
         assert_eq!(config.context_window, 200_000);
         let mut model = test_model_entry("any-model", "https://api.x.ai/v1", None, None, None);
@@ -8167,7 +8151,6 @@ reasoning_effort = "low"
         let config = sampling_config_for_model(
             &model,
             resolve_credentials(&model, None),
-            None,
             None,
             None,
             None,
@@ -8302,7 +8285,6 @@ reasoning_effort = "low"
         let sampling_config = sampling_config_for_model(
             &model,
             resolve_credentials(&model, None),
-            None,
             None,
             None,
             None,
@@ -9270,7 +9252,7 @@ reasoning_effort = "low"
     }
     fn resolve_sampling(model: &ModelEntry, session_key: Option<&str>) -> SamplerConfig {
         let credentials = resolve_credentials(model, session_key);
-        sampling_config_for_model(model, credentials, None, None, None, None)
+        sampling_config_for_model(model, credentials, None, None, None)
     }
 
     /// A Cerebras-slugged entry must resolve — through the real `config.toml`
@@ -9574,7 +9556,6 @@ reasoning_effort = "low"
             "test",
             "https://custom.api/v1",
             Some("model-key"),
-            None,
             None,
         );
         unsafe { std::env::set_var("XAI_API_KEY", "env-key") };
@@ -13278,7 +13259,6 @@ default = "grok-4.5"
             "https://inference.example.com/v1",
             None,
             None,
-            None,
         );
         entry.info.context_window = NonZeroU64::new(default_cw).unwrap();
         prefetched.insert("grok-4.5".to_owned(), entry);
@@ -13368,7 +13348,6 @@ default = "grok-4.5"
         let mut entry = test_model_entry(
             "some-unknown-model",
             "https://test.example.com/v1",
-            None,
             None,
             None,
         );
