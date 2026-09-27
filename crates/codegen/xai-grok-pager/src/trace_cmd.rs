@@ -176,7 +176,6 @@ struct TraceConfigSnapshot {
     has_custom_endpoint: bool,
     has_credentials_file: bool,
     has_inline_credentials: bool,
-    has_deployment_key: bool,
 }
 
 fn build_trace_config_snapshot(agent_config: &AgentConfig) -> TraceConfigSnapshot {
@@ -200,7 +199,6 @@ fn build_trace_config_snapshot(agent_config: &AgentConfig) -> TraceConfigSnapsho
             .trace_upload_credentials_file
             .is_some(),
         has_inline_credentials: agent_config.endpoints.trace_upload_credentials.is_some(),
-        has_deployment_key: agent_config.endpoints.deployment_key.is_some(),
     }
 }
 
@@ -267,18 +265,6 @@ fn add_directory_to_tar<W: std::io::Write>(
 // Upload method diagnostics
 // ---------------------------------------------------------------------------
 
-/// Show first and last `n` chars with `***` in between. Char-safe (no byte-boundary panics).
-/// Returns the full string if it's short enough that redacting would be pointless.
-fn redact_middle(s: &str, n: usize) -> String {
-    let chars: Vec<char> = s.chars().collect();
-    if chars.len() <= n * 2 + 3 {
-        return s.to_owned();
-    }
-    let prefix: String = chars[..n].iter().collect();
-    let suffix: String = chars[chars.len() - n..].iter().collect();
-    format!("{prefix}***{suffix}")
-}
-
 pub struct UploadMethodDisplay<'a> {
     pub method: &'a UploadMethod,
     pub bucket_url: &'a str,
@@ -299,18 +285,9 @@ impl std::fmt::Display for UploadMethodDisplay<'_> {
                 writeln!(f, "  Bucket:   {}", self.bucket_url)?;
                 write!(f, "  Auth:     {auth}")
             }
-            UploadMethod::Proxy {
-                proxy_base_url,
-                deployment_key,
-                ..
-            } => {
-                let deploy = deployment_key
-                    .as_deref()
-                    .map(|k| redact_middle(k, 4))
-                    .unwrap_or_else(|| "none".to_string());
+            UploadMethod::Proxy { proxy_base_url, .. } => {
                 writeln!(f, "  Method:   Proxy")?;
-                writeln!(f, "  Proxy:    {proxy_base_url}")?;
-                write!(f, "  Deploy:   {deploy}")
+                write!(f, "  Proxy:    {proxy_base_url}")
             }
             UploadMethod::S3 {
                 bucket,
@@ -442,7 +419,7 @@ async fn run_upload(
                 "trace_cmd: no upload credentials available"
             );
             anyhow::bail!(
-                "No upload credentials. Run `grok login` or set a deployment key. \
+                "No upload credentials. Run `grok login`. \
                  See {} for upload overrides.",
                 crate::util::display_user_grok_path("docs/user-guide")
             );

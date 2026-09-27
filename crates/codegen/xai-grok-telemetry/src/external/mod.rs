@@ -53,7 +53,6 @@ pub struct IdentityAttrs {
     pub user_id: Option<String>,
     pub organization_id: Option<String>,
     pub team_id: Option<String>,
-    pub deployment_id: Option<String>,
 }
 
 impl IdentityAttrs {
@@ -62,7 +61,6 @@ impl IdentityAttrs {
             user_id: snapshot.user_id.clone(),
             organization_id: snapshot.organization_id.clone(),
             team_id: snapshot.team_id.clone(),
-            deployment_id: snapshot.deployment_id.clone(),
         }
     }
 }

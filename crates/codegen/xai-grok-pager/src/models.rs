@@ -54,9 +54,6 @@ fn auth_status_lines(primary: AuthStatus, has_codex: bool) -> Vec<String> {
         AuthStatus::ModelCredentials(model) => {
             lines.push(format!("Model '{model}' is using its own API key."));
         }
-        AuthStatus::DeploymentKey => {
-            lines.push("You are authenticated via deployment key.".to_string());
-        }
         AuthStatus::NotAuthenticated if !has_codex => {
             lines.push("You are not authenticated.".to_string());
         }

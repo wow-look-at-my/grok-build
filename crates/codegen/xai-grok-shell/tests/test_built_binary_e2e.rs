@@ -1632,7 +1632,6 @@ async fn test_headless_managed_config_byok_sends_authorized_requests() {
         format!(
             r#"
 [endpoints]
-deployment_key = "test-deployment-key"
 xai_api_base_url = "{url}"
 
 [model."grok-4.5"]

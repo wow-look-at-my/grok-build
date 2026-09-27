@@ -469,11 +469,7 @@ impl SessionActor {
         };
         let _ = am.auth().await;
         let provider: Arc<dyn xai_grok_auth::AuthCredentialProvider> = Arc::new(
-            crate::auth::credential_provider::ShellAuthCredentialProvider::new(
-                am.clone(),
-                None,
-                None,
-            ),
+            crate::auth::credential_provider::ShellAuthCredentialProvider::new(am.clone(), None),
         );
         let middleware_client =
             crate::http::with_auth_retry(crate::http::shared_client(), provider);

@@ -299,7 +299,6 @@ pub mod share {
 pub(crate) struct RegistryConfig {
     pub base_url: String,
     pub user_token: String,
-    pub deployment_key: Option<String>,
     pub alpha_test_key: Option<String>,
 }
 pub mod acp_conversion;

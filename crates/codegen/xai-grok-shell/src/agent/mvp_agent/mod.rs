@@ -2004,8 +2004,7 @@ impl MvpAgent {
         };
         use std::sync::atomic::Ordering;
         let am = self.auth_manager.clone();
-        let deployment_key = self.deployment_key();
-        if !has_bundle_credentials(Some(&am), deployment_key.as_deref()) {
+        if !has_bundle_credentials(Some(&am)) {
             return;
         }
         let root = crate::bundle::bundled_root();
@@ -2029,7 +2028,6 @@ impl MvpAgent {
                     &root,
                     &proxy_base_url,
                     Some(&am),
-                    deployment_key.as_deref(),
                     alpha_test_key.as_deref(),
                     force,
                     BUNDLE_SYNC_TTL,

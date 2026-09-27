@@ -828,7 +828,6 @@ A refused request is never sent. Its error names the entry to add. Grok has no b
 | `GROK_TELEMETRY_MIXPANEL_ENABLED` | Enable/disable Mixpanel specifically |
 | `GROK_EXTERNAL_OTEL` | External OTEL to your collector (see [24-monitoring-usage.md](24-monitoring-usage.md)) |
 | `GROK_FEEDBACK_ENABLED` | Enable/disable feedback system |
-| `GROK_DEPLOYMENT_KEY` | Management API key for enterprise |
 
 ---
 

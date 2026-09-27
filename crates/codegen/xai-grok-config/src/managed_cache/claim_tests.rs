@@ -21,7 +21,6 @@ fn claim_refuses_stripped_sidecar_even_with_forged_marker() {
         managed_policy_compromised_decision(
             SignedVerdict::NoAuthenticSidecar,
             || true,
-            false,
             Some(&forged),
             home,
             &team("team-007")
@@ -32,7 +31,6 @@ fn claim_refuses_stripped_sidecar_even_with_forged_marker() {
         !managed_policy_compromised_decision(
             SignedVerdict::NoAuthenticSidecar,
             || false,
-            false,
             Some(&forged),
             home,
             &team("team-007")
@@ -59,7 +57,6 @@ fn claim_not_consulted_on_sidecar_read_blip() {
         !managed_policy_compromised_decision(
             SignedVerdict::SidecarUnreadable,
             || true,
-            false,
             Some(&served),
             home,
             &team("team-007")
@@ -80,7 +77,6 @@ fn garbage_claim_without_fail_closed_is_not_imposing() {
             principal: Some("team-a"),
             had_managed_config: false,
             had_requirements: false,
-            key_fingerprint: None,
             fail_closed: false,
         },
     );
@@ -112,7 +108,6 @@ fn claim_paths_are_inert_in_dark_build() {
                 principal: Some("team-a"),
                 had_managed_config: false,
                 had_requirements: false,
-                key_fingerprint: None,
                 fail_closed: false,
             },
         );

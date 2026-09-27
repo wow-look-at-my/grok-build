@@ -153,26 +153,14 @@ fn init_tracing_simple(app_entrypoint: &'static str) {
 async fn run_setup_command(json: bool) {
     use xai_grok_shell::managed_config::{self, SetupOutcome};
     if !managed_config::has_principal() {
-        eprintln!("No deployment key or team sign-in found.");
+        eprintln!("No team sign-in found.");
         eprintln!();
-        eprintln!("To install managed configuration, sign in with a team using `grok login`,");
-        eprintln!("or set a deployment key:");
+        eprintln!("To install managed configuration, sign in with a team, then run setup:");
         eprintln!();
-        if cfg!(unix) {
-            eprintln!("  export GROK_DEPLOYMENT_KEY=<your-key>");
-        } else {
-            eprintln!("  $env:GROK_DEPLOYMENT_KEY=\"<your-key>\"");
-        }
+        eprintln!("  grok login");
         eprintln!("  grok setup");
         eprintln!();
-        eprintln!("Or add the key to ~/.grok/config.toml:");
-        eprintln!();
-        eprintln!("  [endpoints]");
-        eprintln!("  deployment_key = \"<your-key>\"");
-        eprintln!();
-        eprintln!(
-            "If you don't have a deployment key, contact your organization's Grok administrator."
-        );
+        eprintln!("If you don't belong to a team, contact your organization's Grok administrator.");
         std::process::exit(1);
     }
     if json {
