@@ -986,6 +986,8 @@
                     tokens_after: 25_000,
                     elapsed_ms: Some(300),
                     summary_preview: None,
+                    breakdown: None,
+                    report_path: None,
                 },
             ),
             &mut app,

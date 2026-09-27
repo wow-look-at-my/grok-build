@@ -6,6 +6,7 @@
 use crate::acp::meta::{NotificationMeta, user_message_chunk_meta, user_prompt_meta};
 use crate::scrollback::block::RenderBlock;
 use crate::scrollback::blocks::SessionEvent;
+use crate::scrollback::blocks::CompactionDetail;
 use crate::scrollback::blocks::tool::list_dir::ListDirToolCallBlock;
 use crate::scrollback::blocks::tool::search::{
     SearchFileMatch, SearchInputMeta, SearchLineMatch, SearchOutputMode, SearchToolCallBlock,
@@ -211,6 +212,7 @@ pub struct PendingCompaction {
     pub estimate_after: u64,
     pub elapsed_ms: Option<i64>,
     pub last_used: Option<u64>,
+    pub detail: CompactionDetail,
 }
 /// How many recent prompts the cost-attribution maps keep. A `TurnCompleted`
 /// can only lag its turn by a notification or two, so a handful of turns is
@@ -1020,6 +1022,7 @@ impl AcpUpdateTracker {
                     tokens_before: pending.tokens_before,
                     tokens_after: pending.last_used.unwrap_or(pending.estimate_after),
                     elapsed_ms: pending.elapsed_ms,
+                    detail: pending.detail,
                 },
             ));
         }

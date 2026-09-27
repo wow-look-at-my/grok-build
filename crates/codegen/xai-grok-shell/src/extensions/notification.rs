@@ -484,8 +484,13 @@ pub enum SessionUpdate {
         /// How long the compaction took (milliseconds)
         #[serde(skip_serializing_if = "Option::is_none")]
         elapsed_ms: Option<i64>,
-        /// Summary preview (first ~100 chars of summary)
         summary_preview: Option<String>,
+        /// What the compacted history holds, in one line: the summary's size.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        breakdown: Option<String>,
+        /// The Markdown report with every kept item and the summary text.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        report_path: Option<String>,
     },
     /// Auto-compact failed
     AutoCompactFailed {

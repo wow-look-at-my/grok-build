@@ -102,6 +102,12 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - The gate is off for a subagent. A subagent does not own the branch. Sending one back over a failure its parent pushed has it fixing work it cannot see.
 - The switch is the persisted `[ui].stop_gate_ci_failing` toggle, default ON. The gate reads it before the `gh` call. So a session that turns the gate off spends nothing on it per turn end.
 
+## Compaction report
+
+- Every successful compaction writes `{session_dir}/compaction_reports/<checkpoint id>.md` (`helpers/compaction_report.rs`). It lists every item of the compacted history with its kind, bytes/4 estimate and a preview. It also holds the largest items, the full summary text, and the reseed arithmetic.
+- "Tokens after" is a projection, not a measurement. `replace_conversation` scales the new history's estimate by `tokens_before ÷ estimate_at_last_response` and caps it at `tokens_before`. The report prints each factor. As a result, an inflated scale reads apart from a history that really stayed large.
+- `AutoCompactCompleted` carries a one-line `breakdown` and the `report_path`. The pager draws both under "Context compacted".
+
 ## Compaction-failure reporting and mid-turn `/compact`
 
 - A schema rejection (`invalid_request_error`) suppresses auto-compaction for ONE turn, like `other`. Only `size` is sticky. The next turn changes the history and the replay ladder rewrites it. So the next attempt is a different request. A sticky schema scope turned one rejected thinking block into a session with no compaction.
@@ -226,6 +232,7 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - Every `todo_write` is a merge, and an item the call omits survives with its status untouched. `merge: false` used to clear the list and keep only what the call resent, which is how a status update that forgot the flag erased the user's list.
 - `merge` is still accepted on the wire and ignored, and is `#[schemars(skip)]` now that both values behave the same — advertising it will describe a choice the tool no longer offers.
 - `TodoState` has no `clear` and no remove of any shape. The guarantee lives in the data structure so a later caller cannot reach around it.
+- The list only grows, and every `todo_write` echoes all of it. So `summarize_todo_state` echoes a completed or cancelled item as its first line, cut at characters. The state keeps the full text. The post-compaction reminder already collapses finished items to counts.
 - opencode's `todowrite` sends a whole list with no ids, so it merges by ITEM TEXT, not by position. Position is not identity: keying on it let a reordered or shorter list write one row's text over another's, which loses work as surely as a delete.
 
 ## Cost-indicator feature notes
