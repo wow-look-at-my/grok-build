@@ -722,9 +722,10 @@ pub fn label_from_path(worktree_path: &str) -> String {
 ///
 /// Shared resolver for [`lookup_worktree_label`] and [`touch_worktree_for_cwd`];
 /// returns the open DB alongside the record so callers can issue follow-up
-/// queries. Returns `None` for a cwd under neither managed root — a repository's
-/// own `.grok/worktrees/` or the legacy `~/.grok/worktrees/` (without opening
-/// the DB) or when the DB is unavailable.
+/// queries. A cwd under neither managed root, a repository's own
+/// `.grok/worktrees/` or the legacy `~/.grok/worktrees/`, returns `None` without
+/// opening the DB. So does a cwd whose worktree has no record, and a DB that
+/// cannot be opened.
 fn worktree_record_for_cwd(cwd: &str) -> Option<(WorktreeDb, WorktreeRecord)> {
     let mut path = Path::new(cwd);
     let worktrees_dir = managed_worktrees_boundary(path)?;
@@ -2929,7 +2930,7 @@ mod tests {
         assert_eq!(lookup_worktree_label("/elsewhere"), None);
     }
 
-    // ── Repo-local worktree destinations ────────────────────────────────
+    // ---- Repo-local worktree destinations --------------------------------
 
     /// A committed repository in `temp`, canonicalized so macOS `/var` ->
     /// `/private/var` agrees between the path a test builds and the path git
@@ -3014,6 +3015,13 @@ mod tests {
         WorktreeBuilder::new(&repo, &first).create().unwrap();
 
         assert_eq!(worktree_base_dir_for_source(&first).unwrap(), managed);
+        let nested_cwd = first.join("crates").join("x");
+        std::fs::create_dir_all(&nested_cwd).unwrap();
+        assert_eq!(
+            worktree_base_dir_for_source(&nested_cwd).unwrap(),
+            managed,
+            "a session cwd nested inside a managed checkout resolves the same sibling"
+        );
         let second = resolve_fork_worktree_path(&first, "sess-2", Some("second")).unwrap();
         let second = Path::new(&second);
         assert_eq!(second.parent(), Some(managed.as_path()));
@@ -3025,23 +3033,7 @@ mod tests {
         );
     }
 
-    /// A destination that is a sibling of an existing worktree resolves the
-    /// same way whether the session's cwd is the checkout root or a directory
-    /// nested inside it.
-    #[test]
-    fn destination_from_a_nested_cwd_is_the_same_sibling() {
-        let temp = tempfile::TempDir::new().unwrap();
-        let managed = temp.path().join("repo").join(".grok").join("worktrees");
-        let nested = managed.join("label").join("crates").join("x");
-        std::fs::create_dir_all(&nested).unwrap();
-
-        assert_eq!(
-            xai_fast_worktree::enclosing_repo_worktrees_root(&nested).as_deref(),
-            Some(managed.as_path())
-        );
-    }
-
-    /// Criterion 5: a checkout at the new location is still grok-managed — the
+    /// Criterion 5: a checkout at the new location is still grok-managed: the
     /// label resolves from the registry through a nested cwd and the gc
     /// liveness touch reaches its record.
     #[test]
@@ -3103,7 +3095,7 @@ mod tests {
     }
 
     /// Criterion 6: worktrees already living under the legacy
-    /// `<grok home>/worktrees/<repo>/<label>` layout keep resolving — the base
+    /// `<grok home>/worktrees/<repo>/<label>` layout keep resolving: the base
     /// directory stays the one they are in, so a fork lands beside them.
     #[test]
     fn legacy_grok_home_worktree_still_resolves() {

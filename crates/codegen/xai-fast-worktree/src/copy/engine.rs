@@ -115,8 +115,8 @@ pub(crate) fn copy_parallel(
             }
             // Skip the directory holding this repository's grok-managed
             // checkouts. A new worktree is created inside the source tree, so
-            // walking it would copy sibling worktrees — and the destination
-            // itself — into every new checkout. `.git/info/exclude` would say
+            // walking it would copy sibling worktrees, and the destination
+            // itself, into every new checkout. `.git/info/exclude` would say
             // the same thing but is deliberately not consulted (above), so the
             // skip has to live here.
             !crate::managed_root::is_repo_worktrees_root(&entry.path())

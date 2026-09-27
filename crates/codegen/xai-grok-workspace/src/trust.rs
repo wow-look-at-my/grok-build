@@ -1583,8 +1583,8 @@ mod tests {
     fn workspace_key_does_not_collapse_an_unmanaged_dir_in_a_managed_repo() {
         // Widening the predicate to the repository-local root must not turn
         // "somewhere under the repository" into "grok-managed". The registry IS
-        // populated — with a checkout under `<repo>/.grok/worktrees/` pointing at
-        // a different source repo — so a directory beside that root, in a path no
+        // populated, with a checkout under `<repo>/.grok/worktrees/` pointing at
+        // a different source repo, so a directory beside that root, in a path no
         // longer managed, must resolve through git topology to its own repo root
         // rather than through that record.
         let temp = tempfile::TempDir::new().unwrap();
