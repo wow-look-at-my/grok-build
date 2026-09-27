@@ -773,12 +773,6 @@ pub(crate) async fn spawn_session_actor(
         .and_then(|ui| ui.get("stop_gate_ci_failing"))
         .and_then(toml::Value::as_bool)
         .unwrap_or(true);
-    let thinking_summaries_enabled = effective_cfg
-        .as_ref()
-        .and_then(|cfg| cfg.get("ui"))
-        .and_then(|ui| ui.get("thinking_summaries"))
-        .and_then(toml::Value::as_bool)
-        .unwrap_or(crate::agent::config::UiConfig::THINKING_SUMMARIES_DEFAULT);
     let (user_question_tx, user_question_rx) = tokio::sync::mpsc::unbounded_channel::<
         xai_grok_tools::implementations::grok_build::ask_user_question::types::UserQuestionRequest,
     >();
@@ -1818,7 +1812,7 @@ pub(crate) async fn spawn_session_actor(
         turn_summary_task: std::cell::RefCell::new(None),
         turn_summary_generation: std::cell::Cell::new(0),
         turn_summary_enabled: effective_config.is_turn_summary_enabled(),
-        thinking_summaries_enabled,
+        thinking_summaries_enabled: effective_config.ui.thinking_summaries_enabled(),
         session_turn_active: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         streaming_turn_capture: parking_lot::Mutex::new(StreamingTurnCapture::default()),
         streaming_tool_titles: parking_lot::Mutex::new(std::collections::HashMap::new()),
