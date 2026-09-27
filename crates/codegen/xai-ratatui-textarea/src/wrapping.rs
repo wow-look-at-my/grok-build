@@ -27,6 +27,9 @@ where
                 }
                 let start = slice_addr - text_start;
                 let end = start + slice.len();
+                // `end` is the offset just past a borrowed slice textwrap cut out
+                // of `text`, so it names a char boundary.
+                #[allow(clippy::string_slice)] // a textwrap slice boundary
                 let trailing_spaces = text[end..].chars().take_while(|c| *c == ' ').count();
                 lines.push(start..end + trailing_spaces);
             }
@@ -225,12 +228,15 @@ where
 
     // Wrap the remainder using subsequent indent width and map back to original indices.
     let base = first_line_range.end;
+    // `base` is a wrap-range end plus a run of ASCII spaces.
+    #[allow(clippy::string_slice)] // a wrap-range end advanced past ASCII spaces
     let skip_leading_spaces = flat[base..].chars().take_while(|c| *c == ' ').count();
     let base = base + skip_leading_spaces;
     let subsequent_width_available = opts
         .width
         .saturating_sub(rt_opts.subsequent_indent.width())
         .max(1);
+    #[allow(clippy::string_slice)] // `base` is a wrap-range end plus ASCII spaces
     let remaining_wrapped = wrap_ranges_trim(&flat[base..], opts.width(subsequent_width_available));
     for r in &remaining_wrapped {
         if r.is_empty() {
@@ -304,6 +310,13 @@ where
     out
 }
 
+/// Cut `original`'s spans to `range`, keeping each span's own styling.
+///
+/// `range` comes from a wrap range and `span_bounds` are the spans' own
+/// offsets over the same flat line, so every endpoint is a char boundary of
+/// the line and their intersections are too; subtracting a span's start from
+/// one of those gives a char boundary of that span's content.
+#[allow(clippy::string_slice)] // range and span bounds are both char-aligned
 fn slice_line_spans<'a>(
     original: &'a Line<'a>,
     span_bounds: &[(Range<usize>, ratatui::style::Style)],

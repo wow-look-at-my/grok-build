@@ -433,6 +433,10 @@ impl EditBuffer {
         cursor_byte: usize,
         cursor_affinity: PostEditCursorAffinity,
     ) -> EditPlan {
+        // `replaced_byte_range` is a plan range, which every builder takes from
+        // `normalize_replacement_range`; it floors and ceils to grapheme
+        // boundaries and only ever widens to an atomic range's boundaries.
+        #[allow(clippy::string_slice)] // a normalized plan range is char-aligned
         let removed_text = self.text[replaced_byte_range.clone()].to_owned();
         EditPlan {
             replaced_byte_range,
@@ -542,6 +546,9 @@ impl EditBuffer {
         let mut left_width = 0usize;
         while start > line_start {
             let previous = previous_atomic_boundary(&self.text, start, &atomic_byte_ranges);
+            // Both ends are atomic boundaries (the cursor, a line edge, or a
+            // `previous_atomic_boundary` result), hence char boundaries.
+            #[allow(clippy::string_slice)] // between two atomic boundaries
             let grapheme_width = self.text[previous..start].width();
             let next_width = left_width.saturating_add(grapheme_width);
             if next_width > left_budget {
@@ -555,6 +562,7 @@ impl EditBuffer {
         let mut visible_width = 0usize;
         while end < line_end {
             let next = next_atomic_boundary(&self.text, end, &atomic_byte_ranges);
+            #[allow(clippy::string_slice)] // between two atomic boundaries
             let grapheme_width = self.text[end..next].width();
             let next_width = visible_width.saturating_add(grapheme_width);
             if next_width > display_width {
@@ -567,9 +575,12 @@ impl EditBuffer {
             visible_width = next_width;
         }
 
+        // `start` walked atomic boundaries from the cursor, so both ends are chars.
+        #[allow(clippy::string_slice)] // between two atomic boundaries
+        let cursor_column = self.text[start..cursor_byte].width();
         SingleLineViewport {
             visible_byte_range: start..end,
-            cursor_display_column: self.text[start..cursor_byte].width(),
+            cursor_display_column: cursor_column,
         }
     }
 
@@ -753,6 +764,9 @@ fn atomic_word_class(
             WordStyle::WhitespaceDelimited => Some(WordClass::Word),
         }
     } else {
+        // Callers pass `start`/`end` from `previous_atomic_boundary` /
+        // `next_atomic_boundary`, or the endpoints of a normalized atomic range.
+        #[allow(clippy::string_slice)] // between two atomic boundaries
         word_class(&text[start..end], style)
     }
 }
