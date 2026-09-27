@@ -995,8 +995,8 @@ mod wire_alias_tests {
             r#"{"urlTemplate":"https://mcp.example/v1"}"#,
             r#"{"url_template":"https://mcp.example/v1"}"#,
         ] {
-            let transport: McpServerTransportConfig = serde_json::from_str(json)
-                .unwrap_or_else(|e| panic!("{json} must parse: {e}"));
+            let transport: McpServerTransportConfig =
+                serde_json::from_str(json).unwrap_or_else(|e| panic!("{json} must parse: {e}"));
             match transport {
                 McpServerTransportConfig::Stdio { command, .. } => assert_eq!(command, "serve"),
                 McpServerTransportConfig::StreamableHttp { url, .. } => {
@@ -1067,10 +1067,9 @@ mod wire_alias_tests {
         assert_eq!(canonical, alias);
         assert_eq!(canonical.variables.len(), 1);
 
-        let both: McpSetupConfig = serde_json::from_str(&format!(
-            r#"{{"variables":{answers},"values":{answers}}}"#
-        ))
-        .expect("one answer map named twice is one map");
+        let both: McpSetupConfig =
+            serde_json::from_str(&format!(r#"{{"variables":{answers},"values":{answers}}}"#))
+                .expect("one answer map named twice is one map");
         assert_eq!(both.variables.len(), 1);
 
         let err = serde_json::from_str::<McpSetupConfig>(

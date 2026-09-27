@@ -209,10 +209,9 @@ mod wire_alias_tests {
 
     #[test]
     fn trigger_params_whose_session_id_spellings_disagree_error_naming_the_field() {
-        let err = serde_json::from_str::<DebugTriggerParams>(
-            r#"{"session_id":"a","sessionId":"b"}"#,
-        )
-        .expect_err("two session ids must not resolve silently");
+        let err =
+            serde_json::from_str::<DebugTriggerParams>(r#"{"session_id":"a","sessionId":"b"}"#)
+                .expect_err("two session ids must not resolve silently");
         let message = err.to_string();
         assert!(message.contains("sessionId"), "{message}");
         assert!(message.contains("session_id"), "{message}");

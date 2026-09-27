@@ -1274,7 +1274,8 @@ mod tests {
     #[test]
     fn a_remote_campaign_names_its_id_under_either_key() {
         let canonical: CampaignOverride = serde_json::from_str(r#"{"id":"c1","a":1}"#).unwrap();
-        let legacy: CampaignOverride = serde_json::from_str(r#"{"campaign_id":"c1","a":1}"#).unwrap();
+        let legacy: CampaignOverride =
+            serde_json::from_str(r#"{"campaign_id":"c1","a":1}"#).unwrap();
         assert_eq!(canonical.id.as_deref(), Some("c1"));
         assert_eq!(canonical, legacy);
     }
@@ -1309,10 +1310,7 @@ mod tests {
     fn a_remote_campaign_writes_the_canonical_id_and_never_the_alias() {
         let json = serde_json::to_value(CampaignOverride {
             id: Some("c1".into()),
-            patch: serde_json::Map::from_iter([(
-                "a".into(),
-                serde_json::Value::from(1),
-            )]),
+            patch: serde_json::Map::from_iter([("a".into(), serde_json::Value::from(1))]),
         })
         .unwrap();
         assert_eq!(json["id"], "c1");

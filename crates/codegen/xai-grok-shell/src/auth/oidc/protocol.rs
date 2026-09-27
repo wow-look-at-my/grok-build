@@ -1443,9 +1443,7 @@ mod tests {
 
 #[cfg(test)]
 mod wire_alias_tests {
-    use super::{
-        IdTokenClaims, peek_access_token_principal, peek_access_token_principal_id,
-    };
+    use super::{IdTokenClaims, peek_access_token_principal, peek_access_token_principal_id};
     use base64::Engine as _;
 
     /// An unsigned, unverified token whose payload names one claim under each
@@ -1515,7 +1513,8 @@ mod wire_alias_tests {
         assert_eq!(claims.first_name.as_deref(), Some("Ada"));
         assert_eq!(claims.last_name.as_deref(), Some("L"));
 
-        let claims: IdTokenClaims = serde_json::from_str(r#"{"sub":"s","first_name":"Ada"}"#).unwrap();
+        let claims: IdTokenClaims =
+            serde_json::from_str(r#"{"sub":"s","first_name":"Ada"}"#).unwrap();
         assert_eq!(claims.first_name.as_deref(), Some("Ada"));
 
         let err = serde_json::from_str::<IdTokenClaims>(

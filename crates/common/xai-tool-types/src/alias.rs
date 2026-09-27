@@ -1011,10 +1011,7 @@ pub struct Late {
                 .unwrap_or(path.as_path())
                 .to_string_lossy()
                 .replace('\\', "/");
-            out.extend(alias_sites_in_source(
-                &relative,
-                &shipped_source(&source),
-            ));
+            out.extend(alias_sites_in_source(&relative, &shipped_source(&source)));
         }
         out.sort();
         out.dedup();

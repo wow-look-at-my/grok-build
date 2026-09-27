@@ -281,8 +281,9 @@ mod wire_alias_tests {
             assert!(message.contains(field), "{message}");
         }
 
-        let err = serde_json::from_str::<RewindPointsRequest>(r#"{"session_id":"a","sessionId":"b"}"#)
-            .expect_err("two session ids must not resolve silently");
+        let err =
+            serde_json::from_str::<RewindPointsRequest>(r#"{"session_id":"a","sessionId":"b"}"#)
+                .expect_err("two session ids must not resolve silently");
         assert!(err.to_string().contains("session_id"), "{err}");
     }
 

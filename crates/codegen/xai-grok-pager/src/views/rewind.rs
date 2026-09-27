@@ -1196,9 +1196,7 @@ mod payload_alias_tests {
             let json = if canonical == "prompt_index" {
                 format!(r#"{{"{canonical}":{left},"{camel}":{right}}}"#)
             } else {
-                format!(
-                    r#"{{"prompt_index":3,"{canonical}":{left},"{camel}":{right}}}"#
-                )
+                format!(r#"{{"prompt_index":3,"{canonical}":{left},"{camel}":{right}}}"#)
             };
             let err = serde_json::from_str::<RewindPointInfo>(&json)
                 .expect_err("{json} names one field twice with different values");
