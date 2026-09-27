@@ -704,6 +704,8 @@
             tokens_after: 66_000,
             elapsed_ms: Some(500),
             summary_preview: None,
+            breakdown: None,
+            report_path: None,
         };
         assert!(apply_session_event(&update, &mut session, &mut scrollback, false));
         assert_eq!(
@@ -741,6 +743,8 @@
             tokens_after: 20_000,
             elapsed_ms: Some(500),
             summary_preview: None,
+            breakdown: None,
+            report_path: None,
         };
         assert!(apply_session_event(&update, &mut session, &mut scrollback, false));
         session.finish_turn(&mut scrollback,
@@ -766,6 +770,8 @@
             tokens_after: 20_000,
             elapsed_ms: Some(500),
             summary_preview: None,
+            breakdown: None,
+            report_path: None,
         };
         assert!(apply_session_event(&update, &mut session, &mut scrollback, false));
         match last_session_event(&scrollback) {
@@ -791,6 +797,8 @@
             tokens_after: 66_000,
             elapsed_ms: Some(500),
             summary_preview: None,
+            breakdown: None,
+            report_path: None,
         };
         assert!(apply_session_event(
             &update,
@@ -846,6 +854,8 @@
             tokens_after: 25000,
             elapsed_ms: Some(300),
             summary_preview: None,
+            breakdown: None,
+            report_path: None,
         };
         let changed = handle_child_session_notification(update, child_sid, &mut agent, false);
         assert!(changed);
@@ -924,6 +934,8 @@
             tokens_after: 25000,
             elapsed_ms: Some(300),
             summary_preview: None,
+            breakdown: None,
+            report_path: None,
         };
         let changed = handle_child_session_notification(update, child_sid, &mut agent, false);
         // No child_view means nothing visible changed — must not trigger redraw.
