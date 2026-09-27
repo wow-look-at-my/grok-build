@@ -172,7 +172,7 @@ pub struct QuestionOption {
 }
 
 /// A single question with its options.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, serde::Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Question {
     /// The question to ask, phrased as a full question.
@@ -186,12 +186,10 @@ pub struct Question {
     /// Let the user pick more than one option (default false).
     // Model-facing schema name is snake_case (`multi_select`); deserialize also
     // accepts the legacy/ACP `multiSelect` so the shared `Question` type stays
-    // wire-compatible with the camelCase ACP ext_method.
-    #[serde(
-        default,
-        alias = "multi_select",
-        deserialize_with = "crate::types::schema::deserialize_lenient_option_bool"
-    )]
+    // wire-compatible with the camelCase ACP ext_method. A caller that sends
+    // both spellings folds them through [`Question::MULTI_SELECT_KEYS`] rather
+    // than failing the whole tool call on a duplicate field.
+    #[serde(default)]
     #[schemars(
         rename = "multi_select",
         description = "Let the user pick more than one option (default false)."
@@ -202,6 +200,69 @@ pub struct Question {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(skip)]
     pub id: Option<String>,
+}
+
+impl Question {
+    /// The keys [`multi_select`](Self::multi_select) is read under. The first
+    /// is what this type writes (the camelCase ACP spelling); `multi_select` is
+    /// the spelling the advertised tool schema names, so models send it.
+    pub const MULTI_SELECT_KEYS: xai_tool_types::Aliases =
+        xai_tool_types::Aliases::new("multiSelect", &["multi_select"]);
+}
+
+/// `Question` as a model or an ACP client writes it, with each multi-select key
+/// spelling its own field. It exists so a caller naming both folds them under
+/// [`Question::MULTI_SELECT_KEYS`] instead of tripping serde's
+/// duplicate-field check.
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct QuestionWire {
+    question: String,
+    options: Vec<QuestionOption>,
+    #[serde(
+        default,
+        deserialize_with = "crate::types::schema::deserialize_lenient_option_bool"
+    )]
+    multi_select: Option<bool>,
+    #[serde(
+        default,
+        rename = "multi_select",
+        deserialize_with = "crate::types::schema::deserialize_lenient_option_bool"
+    )]
+    multi_select_snake: Option<bool>,
+    #[serde(default)]
+    id: Option<String>,
+}
+
+impl TryFrom<QuestionWire> for Question {
+    type Error = xai_tool_types::AliasConflict;
+
+    fn try_from(wire: QuestionWire) -> Result<Self, Self::Error> {
+        Ok(Self {
+            question: wire.question,
+            options: wire.options,
+            multi_select: Question::MULTI_SELECT_KEYS
+                .fold(vec![wire.multi_select, wire.multi_select_snake])?,
+            id: wire.id,
+        })
+    }
+}
+
+/// Forwards through [`QuestionWire`] and the fold.
+///
+/// This is the body `#[serde(try_from = "QuestionWire")]` would generate,
+/// written out because schemars 1.0 reads that attribute to build the advertised
+/// schema: it would publish the shadow's shape, naming both `multiSelect` and
+/// `multi_select` to the model instead of the one key the schema renames to.
+impl<'de> serde::Deserialize<'de> for Question {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <QuestionWire as serde::Deserialize<'de>>::deserialize(deserializer)?
+            .try_into()
+            .map_err(serde::de::Error::custom)
+    }
 }
 
 /// Input for the `AskUserQuestion` tool.

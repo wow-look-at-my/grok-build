@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use xai_tool_protocol::{ToolCapabilities, ToolId};
-use xai_tool_types::ToolDescription;
+use xai_tool_types::{Aliases, ToolDescription};
 
 use crate::context::{ListToolsContext, ToolCallContext};
 use crate::error::ToolError;
@@ -162,7 +162,7 @@ pub enum ToolProgress {
 /// authors populate these in their `ToolOutput::model_output()` impls so
 /// downstream consumers don't need to know the concrete tool type.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(tag = "type", rename_all = "snake_case", try_from = "ContentBlockWire")]
 pub enum ContentBlock {
     /// Plain text. Equivalent to `ToolProgress::Text` but allowed inside a
     /// content list so a tool can interleave images and text.
@@ -176,7 +176,6 @@ pub enum ContentBlock {
     /// - `path`: file path on the Grok Computer filesystem
     /// - `metadata`: arbitrary key-value pairs (e.g. `title`, `webpage_url`)
     Image {
-        #[serde(alias = "mimeType")]
         mime_type: String,
         data: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -192,11 +191,121 @@ pub enum ContentBlock {
     /// optional preview data.
     Resource {
         uri: String,
-        #[serde(default, skip_serializing_if = "Option::is_none", alias = "mimeType")]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         mime_type: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         text: Option<String>,
     },
+}
+
+impl ContentBlock {
+    /// The keys `mime_type` is read under, on both the `Image` and `Resource`
+    /// blocks. `mimeType` is the MCP/A spelling an upstream server writes; a
+    /// block that names both under one value is one statement, not a duplicate.
+    pub const MIME_TYPE_KEYS: Aliases = Aliases::new("mime_type", &["mimeType"]);
+}
+
+/// `ContentBlock` as it arrives on the wire, with each MIME key spelling its own
+/// field, so a block naming both folds them under
+/// [`ContentBlock::MIME_TYPE_KEYS`] instead of tripping serde's
+/// duplicate-field check.
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum ContentBlockWire {
+    Text {
+        text: String,
+    },
+    Image {
+        #[serde(default)]
+        mime_type: Option<String>,
+        #[serde(default, rename = "mimeType")]
+        mime_type_camel: Option<String>,
+        data: String,
+        #[serde(default)]
+        media_id: Option<String>,
+        #[serde(default)]
+        filename: Option<String>,
+        #[serde(default)]
+        path: Option<String>,
+        #[serde(default)]
+        metadata: std::collections::HashMap<String, String>,
+    },
+    Resource {
+        uri: String,
+        #[serde(default)]
+        mime_type: Option<String>,
+        #[serde(default, rename = "mimeType")]
+        mime_type_camel: Option<String>,
+        #[serde(default)]
+        text: Option<String>,
+    },
+}
+
+/// Why a wire block could not become a [`ContentBlock`].
+#[derive(Debug)]
+enum ContentBlockWireError {
+    Alias(xai_tool_types::AliasConflict),
+    /// `mime_type` stays required on the `Image` block: an image with no MIME
+    /// type cannot be rendered, so its absence is still a rejection rather than
+    /// an empty string the renderer would have to guess at.
+    MissingImageMimeType,
+}
+
+impl std::fmt::Display for ContentBlockWireError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Alias(conflict) => conflict.fmt(f),
+            Self::MissingImageMimeType => {
+                write!(f, "missing field `mime_type` in an image content block")
+            }
+        }
+    }
+}
+
+impl std::error::Error for ContentBlockWireError {}
+
+impl From<xai_tool_types::AliasConflict> for ContentBlockWireError {
+    fn from(value: xai_tool_types::AliasConflict) -> Self {
+        Self::Alias(value)
+    }
+}
+
+impl TryFrom<ContentBlockWire> for ContentBlock {
+    type Error = ContentBlockWireError;
+
+    fn try_from(wire: ContentBlockWire) -> Result<Self, Self::Error> {
+        Ok(match wire {
+            ContentBlockWire::Text { text } => Self::Text { text },
+            ContentBlockWire::Image {
+                mime_type,
+                mime_type_camel,
+                data,
+                media_id,
+                filename,
+                path,
+                metadata,
+            } => Self::Image {
+                mime_type: ContentBlock::MIME_TYPE_KEYS
+                    .fold(vec![mime_type, mime_type_camel])?
+                    .ok_or(ContentBlockWireError::MissingImageMimeType)?,
+                data,
+                media_id,
+                filename,
+                path,
+                metadata,
+            },
+            ContentBlockWire::Resource {
+                uri,
+                mime_type,
+                mime_type_camel,
+                text,
+            } => Self::Resource {
+                uri,
+                mime_type: ContentBlock::MIME_TYPE_KEYS.fold(vec![mime_type, mime_type_camel])?,
+                text,
+            },
+        })
+    }
 }
 
 /// Build a single-item stream containing only the terminal result.
@@ -438,3 +547,102 @@ pub trait ToolFamily: Send + Sync {
 
 /// Convenience alias for the most common [`ToolFamily`] handle shape.
 pub type ArcToolFamily = Arc<dyn ToolFamily>;
+
+#[cfg(test)]
+mod content_block_alias_tests {
+    use super::ContentBlock;
+
+    /// An MCP server that writes both spellings of the MIME key in one block
+    /// says one thing twice. That must not cost the whole block.
+    #[test]
+    fn an_image_naming_both_mime_keys_under_one_value_parses() {
+        let block: ContentBlock = serde_json::from_str(
+            r#"{"type":"image","mimeType":"image/png","mime_type":"image/png","data":"abc"}"#,
+        )
+        .expect("identical MIME spellings must not conflict");
+        assert!(
+            matches!(&block, ContentBlock::Image { mime_type, .. } if mime_type == "image/png"),
+            "{block:?}"
+        );
+    }
+
+    #[test]
+    fn an_image_reading_either_mime_key_alone_still_works() {
+        let snake: ContentBlock =
+            serde_json::from_str(r#"{"type":"image","mime_type":"image/png","data":"abc"}"#)
+                .unwrap();
+        let camel: ContentBlock =
+            serde_json::from_str(r#"{"type":"image","mimeType":"image/png","data":"abc"}"#)
+                .unwrap();
+        assert_eq!(snake, camel);
+    }
+
+    /// Differing MIME types pick a decoder, so neither may win in silence.
+    #[test]
+    fn an_image_whose_mime_spellings_disagree_is_an_error_naming_the_field() {
+        let err = serde_json::from_str::<ContentBlock>(
+            r#"{"type":"image","mime_type":"image/png","mimeType":"image/jpeg","data":"abc"}"#,
+        )
+        .expect_err("conflicting MIME types must not parse");
+        let message = err.to_string();
+        assert!(message.contains("mime_type"), "{message}");
+        assert!(message.contains("mimeType"), "{message}");
+    }
+
+    /// `mime_type` stays required on an image: the old derived impl rejected its
+    /// absence, and a shadow that defaults it would silently ship an image the
+    /// renderer cannot decode.
+    #[test]
+    fn an_image_with_no_mime_key_at_all_is_still_an_error() {
+        let err = serde_json::from_str::<ContentBlock>(r#"{"type":"image","data":"abc"}"#)
+            .expect_err("an image with no MIME type must not parse");
+        assert!(err.to_string().contains("mime_type"), "{err}");
+    }
+
+    #[test]
+    fn a_resource_naming_both_mime_keys_under_one_value_parses() {
+        let block: ContentBlock = serde_json::from_str(
+            r#"{"type":"resource","uri":"file:///x","mimeType":"text/plain","mime_type":"text/plain"}"#,
+        )
+        .expect("identical MIME spellings must not conflict on a resource");
+        assert!(
+            matches!(&block, ContentBlock::Resource { mime_type: Some(m), .. } if m == "text/plain"),
+            "{block:?}"
+        );
+    }
+
+    #[test]
+    fn a_resource_whose_mime_spellings_disagree_is_an_error_naming_the_field() {
+        let err = serde_json::from_str::<ContentBlock>(
+            r#"{"type":"resource","uri":"file:///x","mime_type":"text/plain","mimeType":"text/html"}"#,
+        )
+        .expect_err("conflicting MIME types must not parse");
+        assert!(err.to_string().contains("mime_type"), "{err}");
+    }
+
+    /// `mimeType` is accepted on input only. What goes back out stays
+    /// snake_case, or the alias would leak into the next reader's input.
+    #[test]
+    fn a_block_serializes_the_canonical_mime_key_and_never_the_alias() {
+        let json = serde_json::to_value(ContentBlock::Image {
+            mime_type: "image/png".into(),
+            data: "abc".into(),
+            media_id: None,
+            filename: None,
+            path: None,
+            metadata: Default::default(),
+        })
+        .unwrap();
+        assert_eq!(json["mime_type"], "image/png");
+        assert!(json.get("mimeType").is_none(), "{json}");
+
+        let json = serde_json::to_value(ContentBlock::Resource {
+            uri: "file:///x".into(),
+            mime_type: Some("text/plain".into()),
+            text: None,
+        })
+        .unwrap();
+        assert_eq!(json["mime_type"], "text/plain");
+        assert!(json.get("mimeType").is_none(), "{json}");
+    }
+}

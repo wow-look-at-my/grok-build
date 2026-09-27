@@ -13404,6 +13404,7 @@ dependencies = [
  "xai-grok-announcements",
  "xai-grok-config",
  "xai-grok-mcp",
+ "xai-tool-types",
 ]
 
 [[package]]
@@ -13682,6 +13683,7 @@ dependencies = [
  "xai-ratatui-inline",
  "xai-ratatui-textarea",
  "xai-token-estimation",
+ "xai-tool-types",
  "xai-tty-utils",
 ]
 

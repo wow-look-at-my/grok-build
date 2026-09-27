@@ -7,34 +7,133 @@ use ratatui::text::{Line, Span};
 use crate::theme::Theme;
 use crate::views::prompt_widget::StashedPrompt;
 
+/// One rewindable prompt, as the agent's `x.ai/rewind/points` reply names it.
+///
+/// Every field reads under both the snake_case key this program names and the
+/// camelCase key the agent writes; a reply carrying both spellings of one field
+/// folds them rather than failing the whole reply on a duplicate field.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[serde(try_from = "RewindPointInfoWire")]
 pub struct RewindPointInfo {
-    #[serde(alias = "promptIndex")]
     pub prompt_index: usize,
-    #[serde(default, alias = "createdAt")]
+    #[serde(default)]
     pub created_at: String,
-    #[serde(default, alias = "numFileSnapshots")]
+    #[serde(default)]
     pub num_file_snapshots: usize,
-    #[serde(default, alias = "promptPreview")]
+    #[serde(default)]
     pub prompt_preview: Option<String>,
-    #[serde(default, alias = "hasFileChanges")]
+    #[serde(default)]
     pub has_file_changes: bool,
 }
 
+impl RewindPointInfo {
+    pub const PROMPT_INDEX_KEYS: xai_tool_types::Aliases =
+        xai_tool_types::Aliases::new("prompt_index", &["promptIndex"]);
+    pub const CREATED_AT_KEYS: xai_tool_types::Aliases =
+        xai_tool_types::Aliases::new("created_at", &["createdAt"]);
+    pub const NUM_FILE_SNAPSHOTS_KEYS: xai_tool_types::Aliases =
+        xai_tool_types::Aliases::new("num_file_snapshots", &["numFileSnapshots"]);
+    pub const PROMPT_PREVIEW_KEYS: xai_tool_types::Aliases =
+        xai_tool_types::Aliases::new("prompt_preview", &["promptPreview"]);
+    pub const HAS_FILE_CHANGES_KEYS: xai_tool_types::Aliases =
+        xai_tool_types::Aliases::new("has_file_changes", &["hasFileChanges"]);
+}
+
+/// `RewindPointInfo` with each key spelling as its own field.
+#[derive(Debug, Default, serde::Deserialize)]
+struct RewindPointInfoWire {
+    #[serde(default)]
+    prompt_index: Option<usize>,
+    #[serde(default, rename = "promptIndex")]
+    prompt_index_camel: Option<usize>,
+    #[serde(default)]
+    created_at: Option<String>,
+    #[serde(default, rename = "createdAt")]
+    created_at_camel: Option<String>,
+    #[serde(default)]
+    num_file_snapshots: Option<usize>,
+    #[serde(default, rename = "numFileSnapshots")]
+    num_file_snapshots_camel: Option<usize>,
+    #[serde(default)]
+    prompt_preview: Option<String>,
+    #[serde(default, rename = "promptPreview")]
+    prompt_preview_camel: Option<String>,
+    #[serde(default)]
+    has_file_changes: Option<bool>,
+    #[serde(default, rename = "hasFileChanges")]
+    has_file_changes_camel: Option<bool>,
+}
+
+impl TryFrom<RewindPointInfoWire> for RewindPointInfo {
+    type Error = RewindPayloadError;
+
+    fn try_from(wire: RewindPointInfoWire) -> Result<Self, Self::Error> {
+        Ok(Self {
+            prompt_index: required(
+                RewindPointInfo::PROMPT_INDEX_KEYS
+                    .fold(vec![wire.prompt_index, wire.prompt_index_camel])?,
+                "prompt_index",
+            )?,
+            created_at: RewindPointInfo::CREATED_AT_KEYS
+                .fold(vec![wire.created_at, wire.created_at_camel])?
+                .unwrap_or_default(),
+            num_file_snapshots: RewindPointInfo::NUM_FILE_SNAPSHOTS_KEYS
+                .fold(vec![wire.num_file_snapshots, wire.num_file_snapshots_camel])?
+                .unwrap_or_default(),
+            prompt_preview: RewindPointInfo::PROMPT_PREVIEW_KEYS
+                .fold(vec![wire.prompt_preview, wire.prompt_preview_camel])?,
+            has_file_changes: RewindPointInfo::HAS_FILE_CHANGES_KEYS
+                .fold(vec![wire.has_file_changes, wire.has_file_changes_camel])?
+                .unwrap_or(false),
+        })
+    }
+}
+
+/// The `x.ai/rewind/points` reply. See [`RewindPointInfo`]'s note on keys.
 #[derive(Debug, Clone, serde::Deserialize)]
+#[serde(try_from = "RewindPointsResponseWire")]
 pub struct RewindPointsResponse {
-    #[serde(alias = "rewindPoints")]
     pub rewind_points: Vec<RewindPointInfo>,
 }
 
+impl RewindPointsResponse {
+    pub const REWIND_POINTS_KEYS: xai_tool_types::Aliases =
+        xai_tool_types::Aliases::new("rewind_points", &["rewindPoints"]);
+}
+
+/// `RewindPointsResponse` with each key spelling as its own field.
+#[derive(Debug, serde::Deserialize)]
+struct RewindPointsResponseWire {
+    #[serde(default)]
+    rewind_points: Option<Vec<RewindPointInfo>>,
+    #[serde(default, rename = "rewindPoints")]
+    rewind_points_camel: Option<Vec<RewindPointInfo>>,
+}
+
+impl TryFrom<RewindPointsResponseWire> for RewindPointsResponse {
+    type Error = RewindPayloadError;
+
+    fn try_from(wire: RewindPointsResponseWire) -> Result<Self, Self::Error> {
+        Ok(Self {
+            rewind_points: required(
+                RewindPointsResponse::REWIND_POINTS_KEYS
+                    .fold(vec![wire.rewind_points, wire.rewind_points_camel])?,
+                "rewind_points",
+            )?,
+        })
+    }
+}
+
+/// The `x.ai/rewind/execute` reply. See [`RewindPointInfo`]'s note on keys.
 #[derive(Debug, Clone, serde::Deserialize)]
+#[serde(try_from = "RewindResponseWire")]
 pub struct RewindResponse {
     pub success: bool,
-    #[serde(alias = "targetPromptIndex")]
+    #[serde(default)]
     pub target_prompt_index: usize,
-    #[serde(default, alias = "revertedFiles")]
+    #[serde(default)]
     pub reverted_files: Vec<String>,
-    #[serde(default, alias = "cleanFiles")]
+    #[serde(default)]
     pub clean_files: Vec<String>,
     #[serde(default)]
     pub conflicts: Vec<RewindConflictInfo>,
@@ -42,15 +141,145 @@ pub struct RewindResponse {
     pub error: Option<String>,
     #[serde(default)]
     pub mode: Option<String>,
-    #[serde(default, alias = "promptText")]
+    #[serde(default)]
     pub prompt_text: Option<String>,
 }
 
+impl RewindResponse {
+    pub const TARGET_PROMPT_INDEX_KEYS: xai_tool_types::Aliases =
+        xai_tool_types::Aliases::new("target_prompt_index", &["targetPromptIndex"]);
+    pub const REVERTED_FILES_KEYS: xai_tool_types::Aliases =
+        xai_tool_types::Aliases::new("reverted_files", &["revertedFiles"]);
+    pub const CLEAN_FILES_KEYS: xai_tool_types::Aliases =
+        xai_tool_types::Aliases::new("clean_files", &["cleanFiles"]);
+    pub const PROMPT_TEXT_KEYS: xai_tool_types::Aliases =
+        xai_tool_types::Aliases::new("prompt_text", &["promptText"]);
+}
+
+/// `RewindResponse` with each key spelling as its own field.
+#[derive(Debug, Default, serde::Deserialize)]
+struct RewindResponseWire {
+    success: bool,
+    #[serde(default)]
+    target_prompt_index: Option<usize>,
+    #[serde(default, rename = "targetPromptIndex")]
+    target_prompt_index_camel: Option<usize>,
+    #[serde(default)]
+    reverted_files: Option<Vec<String>>,
+    #[serde(default, rename = "revertedFiles")]
+    reverted_files_camel: Option<Vec<String>>,
+    #[serde(default)]
+    clean_files: Option<Vec<String>>,
+    #[serde(default, rename = "cleanFiles")]
+    clean_files_camel: Option<Vec<String>>,
+    #[serde(default)]
+    conflicts: Vec<RewindConflictInfo>,
+    #[serde(default)]
+    error: Option<String>,
+    #[serde(default)]
+    mode: Option<String>,
+    #[serde(default)]
+    prompt_text: Option<String>,
+    #[serde(default, rename = "promptText")]
+    prompt_text_camel: Option<String>,
+}
+
+impl TryFrom<RewindResponseWire> for RewindResponse {
+    type Error = RewindPayloadError;
+
+    fn try_from(wire: RewindResponseWire) -> Result<Self, Self::Error> {
+        Ok(Self {
+            success: wire.success,
+            target_prompt_index: required(
+                RewindResponse::TARGET_PROMPT_INDEX_KEYS.fold(vec![
+                    wire.target_prompt_index,
+                    wire.target_prompt_index_camel,
+                ])?,
+                "target_prompt_index",
+            )?,
+            reverted_files: RewindResponse::REVERTED_FILES_KEYS
+                .fold(vec![wire.reverted_files, wire.reverted_files_camel])?
+                .unwrap_or_default(),
+            clean_files: RewindResponse::CLEAN_FILES_KEYS
+                .fold(vec![wire.clean_files, wire.clean_files_camel])?
+                .unwrap_or_default(),
+            conflicts: wire.conflicts,
+            error: wire.error,
+            mode: wire.mode,
+            prompt_text: RewindResponse::PROMPT_TEXT_KEYS
+                .fold(vec![wire.prompt_text, wire.prompt_text_camel])?,
+        })
+    }
+}
+
+/// One file the rewind could not apply. See [`RewindPointInfo`]'s note on keys.
 #[derive(Debug, Clone, serde::Deserialize)]
+#[serde(try_from = "RewindConflictInfoWire")]
 pub struct RewindConflictInfo {
     pub path: String,
-    #[serde(alias = "conflictType")]
     pub conflict_type: String,
+}
+
+impl RewindConflictInfo {
+    pub const CONFLICT_TYPE_KEYS: xai_tool_types::Aliases =
+        xai_tool_types::Aliases::new("conflict_type", &["conflictType"]);
+}
+
+/// `RewindConflictInfo` with each key spelling as its own field.
+#[derive(Debug, serde::Deserialize)]
+struct RewindConflictInfoWire {
+    path: String,
+    #[serde(default)]
+    conflict_type: Option<String>,
+    #[serde(default, rename = "conflictType")]
+    conflict_type_camel: Option<String>,
+}
+
+impl TryFrom<RewindConflictInfoWire> for RewindConflictInfo {
+    type Error = RewindPayloadError;
+
+    fn try_from(wire: RewindConflictInfoWire) -> Result<Self, Self::Error> {
+        Ok(Self {
+            path: wire.path,
+            conflict_type: required(
+                RewindConflictInfo::CONFLICT_TYPE_KEYS
+                    .fold(vec![wire.conflict_type, wire.conflict_type_camel])?,
+                "conflict_type",
+            )?,
+        })
+    }
+}
+
+/// Why an agent rewind payload could not be read.
+#[derive(Debug)]
+enum RewindPayloadError {
+    Alias(xai_tool_types::AliasConflict),
+    /// A field the view cannot render without. It stayed required before the
+    /// shadows existed and stays required after them.
+    MissingField(&'static str),
+}
+
+impl std::fmt::Display for RewindPayloadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Alias(conflict) => conflict.fmt(f),
+            Self::MissingField(field) => write!(f, "missing field `{field}`"),
+        }
+    }
+}
+
+impl std::error::Error for RewindPayloadError {}
+
+impl From<xai_tool_types::AliasConflict> for RewindPayloadError {
+    fn from(value: xai_tool_types::AliasConflict) -> Self {
+        Self::Alias(value)
+    }
+}
+
+/// The value a required field must carry; its absence is the error serde's
+/// derived impl used to raise.
+fn required<T>(folded: Option<T>, field: &'static str) -> Result<T, RewindPayloadError> {
+    folded.ok_or(RewindPayloadError::MissingField(field))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -881,5 +1110,214 @@ mod tests {
         assert_eq!(key_label('\x08'), "Bksp");
         assert_eq!(key_label('y'), "y");
         assert_eq!(key_label('a'), "a");
+    }
+}
+
+#[cfg(test)]
+mod payload_alias_tests {
+    use super::{RewindConflictInfo, RewindPointInfo, RewindPointsResponse, RewindResponse};
+
+    /// One rewind point, written with either key spelling — the agent replies in
+    /// camelCase, and this program's own naming is snake_case.
+    fn point_body(camel: bool) -> String {
+        fn key<'a>(camel: bool, snake: &'a str, camel_case: &'a str) -> &'a str {
+            if camel { camel_case } else { snake }
+        }
+        format!(
+            concat!(
+                "{{\"{}\":3,\"{}\":\"2026-01-01\",\"{}\":2,",
+                "\"{}\":\"hello\",\"{}\":true}}"
+            ),
+            key(camel, "prompt_index", "promptIndex"),
+            key(camel, "created_at", "createdAt"),
+            key(camel, "num_file_snapshots", "numFileSnapshots"),
+            key(camel, "prompt_preview", "promptPreview"),
+            key(camel, "has_file_changes", "hasFileChanges"),
+        )
+    }
+
+    /// The same point with every field named twice, each pair carrying one
+    /// value — what a peer that renames on the way through produces.
+    fn point_body_both_ways() -> String {
+        let camel =
+            serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&point_body(true))
+                .unwrap();
+        let snake =
+            serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&point_body(false))
+                .unwrap();
+        let mut merged = camel;
+        for (k, v) in snake {
+            merged.insert(k, v);
+        }
+        serde_json::to_string(&merged).unwrap()
+    }
+
+    #[test]
+    fn a_rewind_point_reads_from_either_key_spelling() {
+        let from_camel: RewindPointInfo = serde_json::from_str(&point_body(true))
+            .expect("the agent's camelCase shape must parse");
+        let from_snake: RewindPointInfo =
+            serde_json::from_str(&point_body(false)).expect("the snake_case shape must parse too");
+        assert_eq!(
+            (
+                from_camel.prompt_index,
+                from_camel.created_at.as_str(),
+                from_camel.num_file_snapshots,
+                from_camel.prompt_preview.as_deref(),
+                from_camel.has_file_changes,
+            ),
+            (3, "2026-01-01", 2, Some("hello"), true)
+        );
+        assert_eq!(from_camel, from_snake);
+    }
+
+    #[test]
+    fn a_rewind_point_naming_every_key_both_ways_parses_once() {
+        let both: RewindPointInfo = serde_json::from_str(&point_body_both_ways())
+            .expect("one value per field, under both keys, must not be a duplicate");
+        assert_eq!(both.prompt_index, 3);
+        assert_eq!(both.created_at, "2026-01-01");
+        assert_eq!(both.num_file_snapshots, 2);
+        assert_eq!(both.prompt_preview.as_deref(), Some("hello"));
+        assert!(both.has_file_changes);
+    }
+
+    #[test]
+    fn a_rewind_point_whose_two_spellings_disagree_is_an_error_naming_the_field() {
+        for (canonical, camel, left, right) in [
+            ("prompt_index", "promptIndex", "3", "4"),
+            ("created_at", "createdAt", r#""a""#, r#""b""#),
+            ("num_file_snapshots", "numFileSnapshots", "1", "2"),
+            ("prompt_preview", "promptPreview", r#""a""#, r#""b""#),
+            ("has_file_changes", "hasFileChanges", "true", "false"),
+        ] {
+            // `prompt_index` stays present for the other four cases: it is
+            // required, and its own absence must not be the error under test.
+            let json = if canonical == "prompt_index" {
+                format!(r#"{{"{canonical}":{left},"{camel}":{right}}}"#)
+            } else {
+                format!(
+                    r#"{{"prompt_index":3,"{canonical}":{left},"{camel}":{right}}}"#
+                )
+            };
+            let err = serde_json::from_str::<RewindPointInfo>(&json)
+                .expect_err("{json} names one field twice with different values");
+            let message = err.to_string();
+            assert!(message.contains(canonical), "{message}");
+            assert!(message.contains(camel), "{message}");
+        }
+    }
+
+    /// A required field the payload omits entirely stays required: the shadow
+    /// must not turn a missing index into index 0.
+    #[test]
+    fn a_rewind_point_with_no_prompt_index_at_all_is_still_an_error() {
+        for json in [r#"{"createdAt":"x"}"#, r#"{"created_at":"x"}"#] {
+            let err = serde_json::from_str::<RewindPointInfo>(json)
+                .expect_err("prompt_index has no default");
+            assert!(err.to_string().contains("prompt_index"), "{err}");
+        }
+    }
+
+    /// These four types read a reply and never write one, so the key they never
+    /// emit is asserted from the wire side instead: nothing here round-trips.
+    #[test]
+    fn the_points_list_reads_from_either_key_spelling() {
+        let camel: RewindPointsResponse = serde_json::from_str(r#"{"rewindPoints":[]}"#).unwrap();
+        let snake: RewindPointsResponse = serde_json::from_str(r#"{"rewind_points":[]}"#).unwrap();
+        assert!(camel.rewind_points.is_empty() && snake.rewind_points.is_empty());
+
+        let both: RewindPointsResponse =
+            serde_json::from_str(r#"{"rewind_points":[],"rewindPoints":[]}"#)
+                .expect("one empty list named twice is one empty list");
+        assert!(both.rewind_points.is_empty());
+
+        let points = |i: usize| format!(r#"[{{"prompt_index":{i}}}]"#);
+        let json = format!(
+            r#"{{"rewind_points":{},"rewindPoints":{}}}"#,
+            points(1),
+            points(2)
+        );
+        let err = serde_json::from_str::<RewindPointsResponse>(&json)
+            .expect_err("two different lists must not resolve silently");
+        assert!(err.to_string().contains("rewind_points"), "{err}");
+    }
+
+    #[test]
+    fn the_execute_reply_reads_from_either_key_spelling() {
+        let camel: RewindResponse = serde_json::from_str(concat!(
+            r#"{"success":true,"targetPromptIndex":7,"revertedFiles":["a"],"#,
+            r#""cleanFiles":["b"],"promptText":"go"}"#,
+        ))
+        .unwrap();
+        let snake: RewindResponse = serde_json::from_str(concat!(
+            r#"{"success":true,"target_prompt_index":7,"reverted_files":["a"],"#,
+            r#""clean_files":["b"],"prompt_text":"go"}"#,
+        ))
+        .unwrap();
+        assert_eq!(camel.target_prompt_index, 7);
+        assert_eq!(camel.reverted_files, vec!["a".to_owned()]);
+        assert_eq!(camel.clean_files, vec!["b".to_owned()]);
+        assert_eq!(camel.prompt_text.as_deref(), Some("go"));
+        assert_eq!(snake.target_prompt_index, camel.target_prompt_index);
+        assert_eq!(snake.prompt_text, camel.prompt_text);
+
+        let both: RewindResponse = serde_json::from_str(concat!(
+            r#"{"success":true,"target_prompt_index":7,"targetPromptIndex":7,"#,
+            r#""reverted_files":["a"],"revertedFiles":["a"],"#,
+            r#""clean_files":["b"],"cleanFiles":["b"],"#,
+            r#""prompt_text":"go","promptText":"go"}"#,
+        ))
+        .expect("one value per field, under both keys");
+        assert_eq!(both.target_prompt_index, 7);
+        assert_eq!(both.reverted_files, vec!["a".to_owned()]);
+        assert_eq!(both.clean_files, vec!["b".to_owned()]);
+        assert_eq!(both.prompt_text.as_deref(), Some("go"));
+    }
+
+    #[test]
+    fn the_execute_reply_whose_two_spellings_disagree_is_an_error_naming_the_field() {
+        for (canonical, camel, left, right) in [
+            ("target_prompt_index", "targetPromptIndex", "1", "2"),
+            ("reverted_files", "revertedFiles", r#"["a"]"#, r#"["b"]"#),
+            ("clean_files", "cleanFiles", r#"["a"]"#, r#"["b"]"#),
+            ("prompt_text", "promptText", r#""a""#, r#""b""#),
+        ] {
+            // `success` and `target_prompt_index` stay present for the other
+            // three cases: both are required, and their absence must not be the
+            // error under test.
+            let json = if canonical == "target_prompt_index" {
+                format!(r#"{{"success":true,"{canonical}":{left},"{camel}":{right}}}"#)
+            } else {
+                format!(
+                    r#"{{"success":true,"target_prompt_index":1,"{canonical}":{left},"{camel}":{right}}}"#
+                )
+            };
+            let err = serde_json::from_str::<RewindResponse>(&json)
+                .expect_err("{json} names one field twice with different values");
+            assert!(err.to_string().contains(canonical), "{err}");
+        }
+    }
+
+    #[test]
+    fn a_conflict_reads_from_either_key_spelling_and_errors_on_a_conflict() {
+        let camel: RewindConflictInfo =
+            serde_json::from_str(r#"{"path":"a.rs","conflictType":"modified"}"#).unwrap();
+        let snake: RewindConflictInfo =
+            serde_json::from_str(r#"{"path":"a.rs","conflict_type":"modified"}"#).unwrap();
+        assert_eq!(camel.conflict_type, "modified");
+        assert_eq!(snake.conflict_type, camel.conflict_type);
+
+        let both: RewindConflictInfo = serde_json::from_str(
+            r#"{"path":"a.rs","conflict_type":"modified","conflictType":"modified"}"#,
+        )
+        .expect("one conflict, two spellings");
+        assert_eq!(both.conflict_type, "modified");
+
+        let err = serde_json::from_str::<RewindConflictInfo>(
+            r#"{"path":"a.rs","conflict_type":"modified","conflictType":"deleted"}"#,
+        )
+        .expect_err("two kinds for one file must not resolve silently");
+        assert!(err.to_string().contains("conflict_type"), "{err}");
     }
 }
