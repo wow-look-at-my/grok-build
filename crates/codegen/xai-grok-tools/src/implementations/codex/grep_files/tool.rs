@@ -122,14 +122,16 @@ fn parse_results(stdout: &[u8], limit: usize) -> Vec<String> {
         if line.is_empty() {
             continue;
         }
-        if let Ok(text) = std::str::from_utf8(line) {
-            if text.is_empty() {
-                continue;
-            }
-            results.push(text.to_string());
-            if results.len() == limit {
-                break;
-            }
+        // A path is raw bytes: a filename may legally hold a byte that is not
+        // valid UTF-8, and `rg` prints it verbatim. The decode is lossy so the
+        // file still appears, with U+FFFD standing in for the undecodable byte.
+        let text = String::from_utf8_lossy(line);
+        if text.is_empty() {
+            continue;
+        }
+        results.push(text.into_owned());
+        if results.len() == limit {
+            break;
         }
     }
     results
@@ -313,6 +315,34 @@ mod tests {
         let stdout = b"";
         let parsed = parse_results(stdout, 10);
         assert!(parsed.is_empty());
+    }
+
+    /// A child printing an undecodable byte in a path yields the lossy decode,
+    /// not a dropped result and not a panic.
+    ///
+    /// `printf` writes the bytes raw, so this is the real path a `rg` run takes
+    /// when a filename holds a byte that is not valid UTF-8 -- legal on Linux
+    /// and APFS, and nothing in `rg` filters it.
+    #[test]
+    #[cfg(unix)]
+    fn parse_decodes_undecodable_child_output_lossily() {
+        // "\377" is a lone 0xFF: invalid as a UTF-8 lead byte.
+        let output = StdCommand::new("/bin/sh")
+            .args(["-c", "printf 'clean.rs\\nbad\\377name.rs\\n'"])
+            .output()
+            .expect("the shell must spawn");
+        assert!(output.status.success());
+        assert!(
+            std::str::from_utf8(&output.stdout).is_err(),
+            "the child must print bytes a strict decode rejects"
+        );
+
+        let parsed = parse_results(&output.stdout, 10);
+        assert_eq!(
+            parsed,
+            vec!["clean.rs".to_string(), "bad\u{FFFD}name.rs".to_string()],
+            "the undecodable byte becomes U+FFFD and the file stays listed"
+        );
     }
 
     // ── Integration tests (run_rg_search) ───────────────────────
