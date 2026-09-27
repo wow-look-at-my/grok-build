@@ -2998,13 +2998,13 @@ fn model_provider_honored_only_from_trusted_disk_layers() {
 }
 /// REGRESSION: the real enterprise two-file merge —
 /// `managed_config.toml` (proxy + BYO model host) layered with
-/// `requirements.toml` (deployment key + S3 trace upload) via the actual
+/// `requirements.toml` (S3 trace upload) via the actual
 /// `ConfigLayers::effective_config()` path — must resolve the deployment-config
-/// fetch to cli-chat-proxy, never the model host, and must preserve the
+/// fetch to cli-chat-proxy, never the model host.
 /// customer's S3 trace-upload endpoint.
 #[test]
 #[serial_test::serial]
-fn enterprise_two_file_merge_routes_deployment_key_to_proxy() {
+fn enterprise_two_file_merge_routes_managed_config_to_proxy() {
     for k in [
         "GROK_MANAGED_CONFIG_URL",
         "GROK_CLI_CHAT_PROXY_BASE_URL",
@@ -3035,7 +3035,6 @@ feedback = true
 telemetry = false
 
 [endpoints]
-deployment_key = "xai-token-ENTERPRISE"
 xai_api_base_url = "https://inference.acme-corp.example/xai/v1"
 trace_upload_bucket = "s3://acme-trace"
 trace_upload_endpoint_url = "https://s3.acme-corp.example"
@@ -3068,7 +3067,6 @@ trace_upload_endpoint_url = "https://s3.acme-corp.example"
             cfg.endpoints.trace_upload_endpoint_url.as_deref(),
             Some("https://s3.acme-corp.example")
         );
-    assert!(cfg.endpoints.deployment_key.is_some());
 }
 /// `[feedback.user]` in the managed layer must survive the layer
 /// merge into the resolved `Config` (its presence is the opt-in).
@@ -3205,7 +3203,7 @@ fn apply_requirements_value_overrides_user_settings() {
     let mut cfg = crate::agent::config::Config::new_from_toml_cfg(&raw_config).unwrap();
     cfg.default_yolo_mode = true;
     let requirements: toml::Value = toml::from_str(
-            "[cli]\nauto_update = false\nchannel = \"stable\"\n\n[features]\ntelemetry = false\nfeedback = false\nlsp_tools = false\nweb_fetch = false\nwrite_file = false\nremote_fetch = false\n\n[telemetry]\ntrace_upload = false\nmixpanel_enabled = false\nmixpanel_token = \"enterprise-mp-token\"\n\n[ui]\nyolo = false\n\n[models]\ndefault = \"managed-model\"\nweb_search = \"managed-ws-model\"\n\n[endpoints]\ncli_chat_proxy_base_url = \"https://managed-proxy.example/v1\"\nxai_api_base_url = \"https://managed-api.example/v1\"\nmodels_base_url = \"https://managed-models.example/v1\"\nmodels_list_url = \"https://managed-models.example/v1/models\"\ndeployment_key = \"enterprise-deploy-key-should-not-log\"\ntrace_upload_endpoint_url = \"https://s3.custom.example.com\"\ntrace_upload_credentials = '{\"aws_access_key_id\":\"AKTEST\",\"aws_secret_access_key\":\"secret\"}'\n",
+            "[cli]\nauto_update = false\nchannel = \"stable\"\n\n[features]\ntelemetry = false\nfeedback = false\nlsp_tools = false\nweb_fetch = false\nwrite_file = false\nremote_fetch = false\n\n[telemetry]\ntrace_upload = false\nmixpanel_enabled = false\nmixpanel_token = \"enterprise-mp-token\"\n\n[ui]\nyolo = false\n\n[models]\ndefault = \"managed-model\"\nweb_search = \"managed-ws-model\"\n\n[endpoints]\ncli_chat_proxy_base_url = \"https://managed-proxy.example/v1\"\nxai_api_base_url = \"https://managed-api.example/v1\"\nmodels_base_url = \"https://managed-models.example/v1\"\nmodels_list_url = \"https://managed-models.example/v1/models\"\ntrace_upload_endpoint_url = \"https://s3.custom.example.com\"\ntrace_upload_credentials = '{\"aws_access_key_id\":\"AKTEST\",\"aws_secret_access_key\":\"secret\"}'\n",
         )
         .unwrap();
     let source = RequirementSource::Requirements {
@@ -3266,23 +3264,6 @@ fn apply_requirements_value_overrides_user_settings() {
             enforced
                 .iter()
                 .any(|e| e.path == "endpoints.trace_upload_credentials" && e.value == "[redacted]")
-        );
-    assert_eq!(
-            Some("enterprise-deploy-key-should-not-log"),
-            cfg.endpoints.deployment_key.as_deref()
-        );
-    assert!(
-            enforced
-                .iter()
-                .any(|e| e.path == "endpoints.deployment_key" && e.value == "[redacted]"),
-            "deployment_key must use the redacted enforce_str variant"
-        );
-    assert!(
-            enforced
-                .iter()
-                .all(|e| e.path != "endpoints.deployment_key"
-                    || e.value != "enterprise-deploy-key-should-not-log"),
-            "raw deployment_key must not appear in enforced audit entries"
         );
     assert!(!cfg.telemetry.mixpanel_enabled);
     assert_eq!(

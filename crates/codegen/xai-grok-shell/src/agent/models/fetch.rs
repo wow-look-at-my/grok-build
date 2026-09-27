@@ -136,11 +136,7 @@ pub(crate) struct PrefetchEnv {
 
 /// Effective startup endpoints, resolved config-aware (not env-only) so the prefetch can't leak the bearer to api.x.ai.
 fn resolve_startup_endpoints() -> config::EndpointsConfig {
-    let mut endpoints = config::EndpointsConfig::from_effective_config();
-    if endpoints.deployment_key.is_none() {
-        endpoints.deployment_key = crate::managed_config::resolve_deployment_key();
-    }
-    endpoints
+    config::EndpointsConfig::from_effective_config()
 }
 
 /// Decision core of the startup prefetch gate, split from the config loading
@@ -185,7 +181,7 @@ fn start_early_prefetch_with_auth_gated(
     let _timer = crate::instrumentation_timer!("startup.early_prefetch_launch");
     let endpoints = resolve_startup_endpoints();
     if sync_managed {
-        spawn_managed_config_sync_if_stale(&endpoints);
+        spawn_managed_config_sync_if_stale();
     }
     let env = resolve_prefetch_env_from_parts(
         auth,
@@ -232,9 +228,8 @@ fn spawn_prefetch_thread(env: PrefetchEnv) -> EarlyPrefetchHandle {
 }
 
 /// Best-effort, bounded managed-config sync on a detached thread, off the readiness path (syncs at launch; the interval task covers steady state).
-fn spawn_managed_config_sync_if_stale(endpoints: &config::EndpointsConfig) {
-    let should_sync = (endpoints.deployment_key.is_some()
-        || crate::managed_config::has_active_team_auth())
+fn spawn_managed_config_sync_if_stale() {
+    let should_sync = crate::managed_config::has_active_team_auth()
         && crate::config::is_managed_config_stale_for(
             &crate::managed_config::current_serving_identity(),
         )

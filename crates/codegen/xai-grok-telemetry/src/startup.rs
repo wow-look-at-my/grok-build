@@ -64,7 +64,6 @@ pub enum AuthMode {
     Unknown,
     Personal,
     Team,
-    Deployment,
 }
 
 impl AuthMode {
@@ -664,9 +663,9 @@ mod tests {
 
         let p = begin(Owner::Client);
         enter(StartupPhase::ManagedPolicy);
-        set_auth_mode(AuthMode::Deployment);
+        set_auth_mode(AuthMode::Team);
         assert_eq!(p.stuck_in(), "managed_policy");
-        assert_eq!(p.auth_mode().label(), "deployment");
+        assert_eq!(p.auth_mode().label(), "team");
         assert!(
             agent_owned().is_none(),
             "client-owned: agent must not report"

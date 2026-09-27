@@ -1659,7 +1659,6 @@ mod tests {
                     upload_method: UploadMethod::Proxy {
                         proxy_base_url: self.base.clone(),
                         user_token: "test-token".to_string(),
-                        deployment_key: None,
                         alpha_test_key: None,
                     },
                     prefix_dir: None,

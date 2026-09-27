@@ -14,12 +14,11 @@ pub enum AuthStatus {
     LoggedIn(String),
     /// Catalog key of the first model with own `api_key`/`env_key`.
     ModelCredentials(String),
-    DeploymentKey,
     NotAuthenticated,
 }
 
 impl AuthStatus {
-    /// Banner status: env key → session → BYOK → deployment → none.
+    /// Banner status: env key → session → BYOK → none.
     ///
     /// Differs from sampling (`resolve_credentials`: BYOK → session → env) so a
     /// logged-in user sees the login host. BYOK uses
@@ -55,9 +54,6 @@ impl AuthStatus {
             })
         {
             return Self::ModelCredentials(name);
-        }
-        if agent_config.endpoints.deployment_key.is_some() {
-            return Self::DeploymentKey;
         }
         Self::NotAuthenticated
     }
@@ -128,7 +124,7 @@ mod tests {
     ///
     /// Uses `GROK_AUTH_PATH` (not `GROK_HOME`) so a OnceLock-cached real home
     /// with `auth.json` cannot leak into these tests.
-    fn isolate_auth_sources() -> (tempfile::TempDir, [EnvGuard; 7]) {
+    fn isolate_auth_sources() -> (tempfile::TempDir, [EnvGuard; 6]) {
         let dir = tempfile::tempdir().unwrap();
         let auth_path = dir.path().join("no-auth.json");
         let guards = [
@@ -136,19 +132,15 @@ mod tests {
             EnvGuard::unset(LEGACY_XAI_API_KEY_ENV_VAR),
             EnvGuard::unset("GROK_AUTH"),
             EnvGuard::set("GROK_AUTH_PATH", auth_path.to_str().unwrap()),
-            EnvGuard::unset("GROK_DEPLOYMENT_KEY"),
             EnvGuard::unset("GROK_WS_ORIGIN"),
             EnvGuard::unset("GROK_DISABLE_API_KEY_AUTH"),
         ];
         (dir, guards)
     }
 
-    fn byok_and_deployment_toml(model_id: &str) -> String {
+    fn byok_toml(model_id: &str) -> String {
         format!(
             r#"
-            [endpoints]
-            deployment_key = "deploy-key"
-
             [model."{model_id}"]
             model = "{model_id}"
             api_key = "sk-byok"
@@ -241,15 +233,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
-    fn resolve_deployment_key() {
-        let (_dir, _g) = isolate_auth_sources();
-        let mut cfg = Config::default();
-        cfg.endpoints.deployment_key = Some("deploy-key".into());
-        assert_eq!(AuthStatus::resolve(&cfg), AuthStatus::DeploymentKey);
-    }
-
-    #[test]
     fn models_list_response_round_trips() {
         let state = acp::SessionModelState::new(
             acp::ModelId::new("grok-4"),
@@ -283,17 +266,17 @@ mod tests {
 
     #[test]
     #[serial]
-    fn resolve_priority_api_key_over_byok_and_deployment() {
+    fn resolve_priority_api_key_over_byok() {
         let (_dir, _g) = isolate_auth_sources();
         let _key = EnvGuard::set(XAI_API_KEY_ENV_VAR, "xai-test-key");
         let dm = crate::models::default_model();
-        let cfg = config_from_toml(&byok_and_deployment_toml(dm));
+        let cfg = config_from_toml(&byok_toml(dm));
         assert_eq!(AuthStatus::resolve(&cfg), AuthStatus::ApiKey);
     }
 
     #[test]
     #[serial]
-    fn resolve_priority_session_over_byok_and_deployment() {
+    fn resolve_priority_session_over_byok() {
         let (_dir, _g) = isolate_auth_sources();
         let token = GrokAuth {
             key: "session-token".into(),
@@ -304,22 +287,10 @@ mod tests {
         let _auth = EnvGuard::set("GROK_AUTH", &json);
 
         let dm = crate::models::default_model();
-        let cfg = config_from_toml(&byok_and_deployment_toml(dm));
+        let cfg = config_from_toml(&byok_toml(dm));
         assert_eq!(
             AuthStatus::resolve(&cfg),
             AuthStatus::LoggedIn("grok.com".to_owned())
-        );
-    }
-
-    #[test]
-    #[serial]
-    fn resolve_priority_byok_over_deployment() {
-        let (_dir, _g) = isolate_auth_sources();
-        let dm = crate::models::default_model();
-        let cfg = config_from_toml(&byok_and_deployment_toml(dm));
-        assert_eq!(
-            AuthStatus::resolve(&cfg),
-            AuthStatus::ModelCredentials(dm.to_owned())
         );
     }
 
@@ -339,27 +310,6 @@ mod tests {
             "#
         ));
         assert_eq!(AuthStatus::resolve(&cfg), AuthStatus::NotAuthenticated);
-    }
-
-    #[test]
-    #[serial]
-    fn resolve_disable_api_key_auth_falls_through_to_deployment() {
-        let (_dir, _g) = isolate_auth_sources();
-        let dm = crate::models::default_model();
-        let cfg = config_from_toml(&format!(
-            r#"
-            [grok_com_config]
-            disable_api_key_auth = true
-
-            [endpoints]
-            deployment_key = "deploy-key"
-
-            [model."{dm}"]
-            model = "{dm}"
-            api_key = "sk-byok"
-            "#
-        ));
-        assert_eq!(AuthStatus::resolve(&cfg), AuthStatus::DeploymentKey);
     }
 
     #[test]

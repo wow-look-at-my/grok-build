@@ -349,12 +349,6 @@ impl FeedbackClient {
         self
     }
 
-    pub fn with_deployment_key(mut self, key: Option<String>) -> Self {
-        self.credentials.deployment_key = key;
-        self.rebuild_middleware();
-        self
-    }
-
     /// Create a FeedbackClient with a custom reqwest Client.
     pub fn with_client(
         http: reqwest::Client,
@@ -381,9 +375,8 @@ impl FeedbackClient {
         self
     }
 
-    /// Whether this client can refresh credentials on a 401: requires both an
-    /// attached `AuthManager` and a wired `TokenRefresher` (e.g. static
-    /// deployment-key sessions return false).
+    /// Whether this client can refresh credentials after an unauthorized
+    /// answer: it needs an `AuthManager` and a wired `TokenRefresher`.
     pub(crate) fn has_token_refresher(&self) -> bool {
         self.credentials
             .auth_manager()
@@ -421,15 +414,11 @@ impl FeedbackClient {
             Arc::new(
                 crate::auth::credential_provider::ShellAuthCredentialProvider::new(
                     am.clone(),
-                    credentials.deployment_key.clone(),
                     credentials.alpha_test_key.clone(),
                 ),
             )
         } else {
-            let wire_bearer = credentials
-                .deployment_key
-                .clone()
-                .or(credentials.user_token.clone());
+            let wire_bearer = credentials.user_token.clone();
             Arc::new(xai_grok_auth::StaticAuthCredentialProvider::new(
                 Box::new(credentials.clone()),
                 wire_bearer,
@@ -498,19 +487,14 @@ impl FeedbackClient {
     }
 
     fn add_common_headers(&self, builder: RequestBuilder) -> RequestBuilder {
-        let builder = builder
+        // User-token auth requires the companion marker header for proxy routing.
+        builder
             .header(CLIENT_VERSION_HEADER, xai_grok_version::version())
             .header(
                 crate::http::CLIENT_MODE_HEADER,
                 crate::http::process_client_mode(),
-            );
-        // User-token auth requires the companion marker header for proxy
-        // routing. Deployment keys do not need it.
-        if self.credentials.deployment_key.is_none() {
-            builder.header("X-XAI-Token-Auth", "xai-grok-cli")
-        } else {
-            builder
-        }
+            )
+            .header("X-XAI-Token-Auth", "xai-grok-cli")
     }
 
     async fn send_json<T: DeserializeOwned>(

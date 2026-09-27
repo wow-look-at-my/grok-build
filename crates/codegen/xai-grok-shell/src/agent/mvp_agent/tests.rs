@@ -2637,16 +2637,14 @@ fn build_agent_with_api_key_auth_disabled() -> MvpAgent {
     cfg.grok_com_config.disable_api_key_auth = Some(true);
     MvpAgent::new(gateway, &cfg, auth_manager, None).expect("valid test config")
 }
-/// Deployment-key / managed-config user: `XAI_API_KEY` resolves and the kill
-/// switch is off, so a dead `cached_token` MUST fall through to `xai.api_key`
-/// (no browser). This is the exact regression the fallthrough fixes.
+/// Managed-config user: `XAI_API_KEY` resolves and the kill switch is off.
 #[tokio::test(flavor = "current_thread")]
 #[serial_test::serial]
-async fn cached_token_fallthrough_prefers_api_key_for_deployment_key() {
+async fn cached_token_fallthrough_prefers_api_key() {
     use crate::agent::auth_method::{XAI_API_KEY_ENV_VAR, XAI_API_KEY_METHOD_ID};
     use xai_grok_test_support::EnvGuard;
     let _lockdown = EnvGuard::unset("GROK_DISABLE_API_KEY_AUTH");
-    let _key = EnvGuard::set(XAI_API_KEY_ENV_VAR, "test-deployment-key");
+    let _key = EnvGuard::set(XAI_API_KEY_ENV_VAR, "test-api-key");
     let agent = build_minimal_agent_for_tests();
     assert_eq!(
         agent
@@ -2654,7 +2652,7 @@ async fn cached_token_fallthrough_prefers_api_key_for_deployment_key() {
             .as_ref()
             .map(|id| id.0.as_ref()),
         Some(XAI_API_KEY_METHOD_ID),
-        "deployment-key user (XAI_API_KEY set, no kill switch) must fall \
+        "an XAI_API_KEY user (no kill switch) must fall \
          through to xai.api_key on a dead cached_token -- not interactive login",
     );
 }
@@ -2667,7 +2665,7 @@ async fn cached_token_fallthrough_respects_kill_switch() {
     use crate::agent::auth_method::{GROK_COM_METHOD_ID, XAI_API_KEY_ENV_VAR};
     use xai_grok_test_support::EnvGuard;
     let _lockdown = EnvGuard::unset("GROK_DISABLE_API_KEY_AUTH");
-    let _key = EnvGuard::set(XAI_API_KEY_ENV_VAR, "test-deployment-key");
+    let _key = EnvGuard::set(XAI_API_KEY_ENV_VAR, "test-api-key");
     let agent = build_agent_with_api_key_auth_disabled();
     assert_eq!(
         agent

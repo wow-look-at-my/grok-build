@@ -209,8 +209,8 @@ fn env_bool(name: &str) -> Option<bool> {
         _ => None,
     }
 }
-/// Derive a stable deployment ID (UUIDv5) from the deployment key.
-pub fn deployment_id_from_key(key: &str) -> String {
+/// Derive a stable ID (UUIDv5) from a secret key, so the key itself never leaves.
+pub fn key_id_from_key(key: &str) -> String {
     uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID, key.as_bytes()).to_string()
 }
 #[cfg(test)]
