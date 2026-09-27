@@ -232,7 +232,7 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - Every `todo_write` is a merge, and an item the call omits survives with its status untouched. `merge: false` used to clear the list and keep only what the call resent, which is how a status update that forgot the flag erased the user's list.
 - `merge` is still accepted on the wire and ignored, and is `#[schemars(skip)]` now that both values behave the same — advertising it will describe a choice the tool no longer offers.
 - `TodoState` has no `clear` and no remove of any shape. The guarantee lives in the data structure so a later caller cannot reach around it.
-- The list only grows, and every `todo_write` echoes all of it. So `summarize_todo_state` echoes a completed or cancelled item as its first line, cut at characters. The state keeps the full text. The post-compaction reminder already collapses finished items to counts.
+- The list only grows, and every `todo_write` echoes all of it. So `summarize_todo_state` echoes a completed or cancelled item as its first line, cut at `FINISHED_ITEM_ECHO_CHARS`. The state keeps the full text. The post-compaction reminder already collapses finished items to counts.
 - opencode's `todowrite` sends a whole list with no ids, so it merges by ITEM TEXT, not by position. Position is not identity: keying on it let a reordered or shorter list write one row's text over another's, which loses work as surely as a delete.
 
 ## Cost-indicator feature notes
