@@ -6,8 +6,8 @@ use std::path::{Path, PathBuf};
 use crate::db::{
     WorktreeKind, WorktreeRecord, WorktreeStatus, id_from_path, now_epoch_secs, repo_name_from_path,
 };
+use crate::managed_root::WORKTREES_DIR;
 
-pub const WORKTREES_DIR: &str = "worktrees";
 pub const WORKTREE_POOL_DIR: &str = "worktree_pool";
 /// Depth of a worktree below its managed root: `<root>/<repo>/<worktree>`.
 /// [`scan_two_level_dir`] and `grok du`'s bucketing have to agree on it.

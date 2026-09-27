@@ -19,6 +19,7 @@ pub mod db;
 #[cfg(feature = "metadata")]
 pub mod discovery;
 mod git;
+pub mod managed_root;
 #[cfg(target_os = "linux")]
 pub(crate) mod mount_info;
 #[cfg(target_os = "linux")]
@@ -61,9 +62,8 @@ pub use db::{
 };
 #[cfg(feature = "metadata")]
 pub use discovery::{
-    RebuildReport, WORKTREE_DEPTH, WORKTREE_POOL_DIR, WORKTREES_DIR, discover_worktrees,
-    managed_worktree_roots, path_under_managed_worktree_roots, path_under_worktree_roots,
-    rebuild_worktree_db,
+    RebuildReport, WORKTREE_DEPTH, WORKTREE_POOL_DIR, discover_worktrees, managed_worktree_roots,
+    path_under_managed_worktree_roots, path_under_worktree_roots, rebuild_worktree_db,
 };
 pub use git::checkout::{
     rehydrate_worktree_from_ref, snapshot_worktree_to_ref, transfer_snapshot_to_repo,
@@ -71,6 +71,11 @@ pub use git::checkout::{
 pub use git::{
     StaleWorktreeMatch, remove_stale_worktree_registration, remove_stale_worktree_registrations,
     remove_stale_worktree_registrations_under,
+};
+pub use managed_root::{
+    REPO_DOT_DIR, WORKTREES_DIR, WORKTREES_EXCLUDE_LINE, enclosing_repo_worktrees_root,
+    exclude_managed_worktrees_dir, is_repo_worktrees_root, main_root_for_managed_path,
+    managed_worktrees_boundary, path_in_managed_worktrees, repo_worktrees_root,
 };
 pub use sync::{SourceDirtyState, SyncReport, WorktreeSync, collect_source_dirty_state};
 #[cfg(target_os = "linux")]

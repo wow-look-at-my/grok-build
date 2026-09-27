@@ -217,7 +217,28 @@ pub(crate) fn execute_create_worktree(plan: WorktreePlan) -> Result<CreateWorktr
     let source = plan.source.clone();
     let result = execute_create_worktree_dispatch(plan)?;
     record_main_repo_marker(&source, &result.worktree_path);
+    keep_managed_worktrees_out_of_status(&result.worktree_path);
     Ok(result)
+}
+
+/// Keeps the repository's own `git status` blind to its managed worktrees dir.
+///
+/// The destination is a descendant of the working tree it was created from, so
+/// without this the main checkout reports `.grok/` as untracked for as long as
+/// any worktree exists. The entry belongs in the repository's exclude data:
+/// where one clone happens to park its checkouts is not a property of the
+/// project, so the tracked `.gitignore` stays untouched.
+fn keep_managed_worktrees_out_of_status(worktree_path: &Path) {
+    let Some(main_root) = crate::managed_root::main_root_for_managed_path(worktree_path) else {
+        return;
+    };
+    if let Err(e) = crate::managed_root::exclude_managed_worktrees_dir(&main_root) {
+        tracing::warn!(
+            error = %e,
+            main_root = %main_root.display(),
+            "failed to register the managed worktrees exclusion"
+        );
+    }
 }
 
 /// Record the source repo root in `<worktree>/.git/grok-worktree-source`.
