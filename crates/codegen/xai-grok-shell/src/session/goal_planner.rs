@@ -1406,12 +1406,12 @@ mod tests {
     #[test]
     fn planner_prompt_pins_objective_fidelity_and_environment_evidence_contract() {
         // The optional risks section and the must-have-fidelity /
-        // capturable-evidence rules are load-bearing for the
+        // no-manufactured-evidence rules are load-bearing for the
         // planner↔verifier contract; pin them so a template edit can't
         // silently drop them.
         assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("## Risks / Contradictions"));
         assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("must-have"));
-        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("capturable"));
+        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("manufactured evidence"));
     }
 
     /// Pin the anti-inflation + atomic-criterion rules (the failure mode this

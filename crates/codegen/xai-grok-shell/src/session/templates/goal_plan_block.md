@@ -12,7 +12,7 @@ Plan: {PLAN_PATH}
 - Before claiming completion, run the plan's `## Verification plan` yourself and
   confirm its observations hold. Checking is not doing: a step reads back what
   you built, and never authorizes work the objective did not ask for. Use the
-  project's existing test runner and entry point, and RUN them. Write no check
-  script or harness of your own. The harness records each run for the verifier,
+  project's existing test runner and entry point, and RUN them. Write no
+  check script or harness of your own. The harness records each run for the verifier,
   so save no proof files. Fix any missing observation before calling the goal
   complete.
