@@ -856,6 +856,58 @@ mod tests {
         assert!(large.ends_with(" [truncated]"));
     }
 
+    /// A byte the child wrote that is not valid UTF-8 is data, not an error.
+    /// Decoding strictly here would hand back nothing at all, so one stray byte
+    /// early in a message destroys the rest of it.
+    #[test]
+    fn truncate_output_keeps_the_bytes_that_do_not_decode() {
+        let mut bytes = b"first".to_vec();
+        bytes.extend([0xff, 0xfe]);
+        bytes.extend(b" last");
+        assert_eq!(truncate_output(&bytes), "first\u{fffd}\u{fffd} last");
+
+        // A multi-byte character cut by the limit loses its tail and keeps its
+        // head, rather than the whole buffer becoming undecodable.
+        let mut large = vec![b'a'; MAX_OUTPUT_BYTES - 1];
+        large.extend("énd".as_bytes());
+        let cut = truncate_output(&large);
+        assert!(cut.ends_with(" [truncated]"), "got {cut:?}");
+        assert!(
+            cut.contains(char::REPLACEMENT_CHARACTER),
+            "the split character should survive as a replacement"
+        );
+    }
+
+    /// The same bytes arriving from a real child process: the decodable part of
+    /// a gate hook's stderr reaches the model, because that text IS the reason
+    /// the hook blocked and the model is the only thing that can act on it.
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn a_gate_hooks_stderr_survives_undecodable_bytes() {
+        // A literal byte string, so no shell quoting is needed for the raw bytes;
+        // the whole argument is one token, so this takes the direct-exec path.
+        let spec = make_shell_spec("printf '\\377\\376nope\\377done' >&2; exit 2");
+        let envelope = make_envelope();
+        let ctx = make_ctx();
+        let (result, _) = run_command_hook(&spec, &envelope, &ctx, GateKind::Stop).await;
+
+        let HookRunnerResult::Stop(outcome) = &result else {
+            panic!("exit 2 with stderr must block the stop, got {result:?}");
+        };
+        let reason = outcome
+            .block_reason
+            .as_deref()
+            .expect("a blocking stop hook names its reason");
+        assert!(
+            reason.contains("nope") && reason.contains("done"),
+            "the bytes either side of the undecodable one must reach the model, got {reason:?}"
+        );
+        assert!(
+            reason.contains(char::REPLACEMENT_CHARACTER),
+            "the undecodable byte is shown rather than dropped, got {reason:?}"
+        );
+    }
+
     #[test]
     fn resolve_command_path_variants() {
         let spec =

@@ -1,5 +1,3 @@
-#![allow(clippy::string_slice)] // 10 hits predate the gate
-
 //! Subagent configuration resolution crate.
 //!
 //! Extracts the pure-logic "resolution" phase of subagent spawning from

@@ -3,7 +3,6 @@
 #![allow(clippy::cast_possible_wrap)] // 6 hits predate the gate
 #![allow(clippy::cast_precision_loss)] // 4 hits predate the gate
 #![allow(clippy::cast_sign_loss)] // 6 hits predate the gate
-#![allow(clippy::string_slice)] // 12 hits predate the gate
 #![allow(clippy::unwrap_used)] // 2 hits predate the gate
 
 //! Memory system for cross-session knowledge persistence.

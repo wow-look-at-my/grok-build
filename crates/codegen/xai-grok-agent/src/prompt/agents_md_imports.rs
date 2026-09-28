@@ -55,13 +55,14 @@ fn imports_in_line(line: &str) -> Vec<String> {
     let mut refs = Vec::new();
     let bytes = line.as_bytes();
     let mut index = 0;
-    while let Some(offset) = {
+    loop {
         // `index` is 0 or an `@` offset plus 1 plus a whitespace-search offset,
         // and `@` is ASCII, so it is always a char boundary.
         #[allow(clippy::string_slice)]
         let tail = &line[index..];
-        tail.find('@')
-    } {
+        let Some(offset) = tail.find('@') else {
+            break;
+        };
         let at = index + offset;
         index = at + 1;
         // An `@` that follows a word character is an email address or a Rust

@@ -147,6 +147,17 @@ pub fn format_skill_name(skill: &SkillInfo) -> String {
     format!("{}:{}", skill.scope.as_ref(), skill.name)
 }
 
+/// `head[..end]` for the skill XML markup above.
+///
+/// `head` is the text following an ASCII `<tag>` open tag and `end` is the
+/// offset at which the matching ASCII `</tag>` was found. An ASCII byte is
+/// always a char boundary and never appears inside a multi-byte character, so
+/// both ends of the range align.
+#[allow(clippy::string_slice)] // an ASCII close-tag offset in an aligned tail
+fn tag_prefix(head: &str, end: usize) -> &str {
+    &head[..end]
+}
+
 /// Extract a clean display string from skill XML markup.
 ///
 /// Skill invocations are encoded on the wire as XML tags:
@@ -179,11 +190,7 @@ pub fn extract_skill_display_text(text: &str) -> Option<String> {
         // multi-byte character, so every offset below is character-aligned.
         #[allow(clippy::string_slice)]
         let head = &text[start..];
-        match head.find(cmd_close) {
-            #[allow(clippy::string_slice)]
-            Some(rel) => Some(&head[..rel]),
-            None => None,
-        }
+        head.find(cmd_close).map(|rel| tag_prefix(head, rel))
     };
 
     if let Some(cmd) = command.filter(|c| !c.is_empty()) {
@@ -200,8 +207,7 @@ pub fn extract_skill_display_text(text: &str) -> Option<String> {
     #[allow(clippy::string_slice)]
     let head = &text[inner..];
     let end = head.find(name_close)?;
-    #[allow(clippy::string_slice)]
-    let name = &head[..end];
+    let name = tag_prefix(head, end);
     if name.is_empty() {
         return None;
     }
@@ -224,8 +230,7 @@ fn extract_command_args(text: &str) -> Option<&str> {
     #[allow(clippy::string_slice)]
     let head = &text[start..];
     let end = head.find(close).unwrap_or(head.len());
-    #[allow(clippy::string_slice)]
-    let args = head[..end].trim();
+    let args = tag_prefix(head, end).trim();
     if args.is_empty() { None } else { Some(args) }
 }
 

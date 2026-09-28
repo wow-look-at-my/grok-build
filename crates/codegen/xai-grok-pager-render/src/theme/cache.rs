@@ -144,6 +144,7 @@ pub fn set_auto_mode(enabled: bool) {
 /// The cache can be invalidated via [`invalidate_auto_theme_config`] so
 /// subsequent lookups re-read from disk.
 #[must_use]
+#[allow(clippy::disallowed_methods)] // Poison takes the cache back; it re-reads disk.
 pub fn auto_theme_config() -> AutoThemeConfig {
     let mut guard = AUTO_THEME_CONFIG.lock().unwrap_or_else(|e| e.into_inner());
     *guard.get_or_insert_with(load_auto_theme_config)
@@ -154,6 +155,7 @@ pub fn auto_theme_config() -> AutoThemeConfig {
 /// Call after updating `auto_dark_theme` or `auto_light_theme` in config
 /// so subsequent lookups see the new values. Used by the settings modal
 /// and the `/theme auto` slash command.
+#[allow(clippy::disallowed_methods)] // Poison takes the cache back to drop it.
 pub fn invalidate_auto_theme_config() {
     *AUTO_THEME_CONFIG.lock().unwrap_or_else(|e| e.into_inner()) = None;
 }
