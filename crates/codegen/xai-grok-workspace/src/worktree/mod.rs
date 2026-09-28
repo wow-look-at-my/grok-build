@@ -675,18 +675,21 @@ fn managed_worktrees_boundary(path: &Path) -> Option<std::path::PathBuf> {
 pub fn worktree_base_dir_for_source(source_path: &Path) -> Result<std::path::PathBuf> {
     let legacy_dir = legacy_worktrees_root();
     if let Ok(suffix) = source_path.strip_prefix(&legacy_dir) {
-        let mut components = suffix.components();
-        match (components.next(), components.next()) {
-            // `<legacy>/<bucket>/<checkout>...`: the bucket is that repository's
-            // own managed root, so the new checkout joins it there.
-            (Some(bucket), Some(_)) => return Ok(legacy_dir.join(bucket)),
-            // `<legacy>/<checkout>`: the shape an unforked grok build left
-            // behind. The one component is the checkout's own name, so the
-            // siblings go directly under the legacy root rather than inside it.
-            (Some(_), None) => return Ok(legacy_dir),
+        let Some(first) = suffix.components().next() else {
             // The legacy root itself.
-            (None, _) => return Ok(legacy_dir.join("repo")),
+            return Ok(legacy_dir.join("repo"));
+        };
+        let first = legacy_dir.join(first);
+        // `<legacy>/<checkout>...` is the shape an unforked grok build left
+        // behind: the first component is the checkout itself, so its siblings
+        // go directly under the legacy root. The `.git` entry decides it, not
+        // the component count, because `source_path` is often a cwd somewhere
+        // inside the checkout. Otherwise the first component is a
+        // per-repository bucket, and the new checkout joins it there.
+        if xai_fast_worktree::is_worktree_dir(&first) {
+            return Ok(legacy_dir);
         }
+        return Ok(first);
     }
     if let Some(managed_root) = xai_fast_worktree::enclosing_repo_worktrees_root(source_path) {
         return Ok(managed_root);
@@ -2964,6 +2967,7 @@ mod tests {
             let temp = tempfile::TempDir::new().unwrap();
             {
                 let (_env, home, wt) = worktree_db_fixture_under(&temp, under);
+                std::fs::write(wt.join(".git"), "gitdir: /repo/.git/worktrees/wt\n").unwrap();
                 let nested = wt.join("src");
                 std::fs::create_dir_all(&nested).unwrap();
 
@@ -2996,6 +3000,11 @@ mod tests {
                     worktree_base_dir_for_source(&wt).unwrap(),
                     wt.parent().unwrap(),
                     "destination for {under:?}"
+                );
+                assert_eq!(
+                    worktree_base_dir_for_source(&nested).unwrap(),
+                    wt.parent().unwrap(),
+                    "destination from a cwd inside the checkout, {under:?}"
                 );
             }
         }
