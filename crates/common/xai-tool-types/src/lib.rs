@@ -1,4 +1,8 @@
+#![allow(clippy::expect_used)] // 1 hit predates the gate
+#![allow(clippy::unwrap_used)] // 1 hit predates the gate
+
 //! Canonical, extensible tool types.
+
 mod alias;
 mod ext;
 mod schema_utils;

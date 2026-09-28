@@ -709,6 +709,7 @@ impl SchedulerActor {
         // resuming the child that just failed, and this is the only place that
         // clears it. The handle itself has no waiter: the round it watches is
         // reported to the session by other means.
+        #[allow(clippy::disallowed_methods)]
         tokio::spawn(crate::util::detached::fire_and_forget(
             "loop chain anchor guard",
             async move {

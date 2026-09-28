@@ -295,7 +295,11 @@ struct RoutingLayer {
     // spawn + the appender's own mutex) run OUTSIDE it, so a tracing event
     // emitted on the open path can't re-enter and deadlock this non-reentrant
     // Mutex. Lock-on-write is otherwise fine: the firehose is opt-in/debug-only.
-    sinks: Mutex<SinkMap>,
+    //
+    // This layer's `on_event` runs for every subscriber callback, so the lock is
+    // one that cannot poison: a panic inside one write must not turn every later
+    // log line into a panic too.
+    sinks: parking_lot::Mutex<SinkMap>,
 }
 
 impl RoutingLayer {
@@ -305,7 +309,7 @@ impl RoutingLayer {
             role,
             pid,
             max_bytes: debug_log_max_bytes(),
-            sinks: Mutex::new(SinkMap::default()),
+            sinks: parking_lot::Mutex::new(SinkMap::default()),
         }
     }
 
@@ -317,8 +321,8 @@ impl RoutingLayer {
         self
     }
 
-    fn lock(&self) -> MutexGuard<'_, SinkMap> {
-        self.sinks.lock().unwrap_or_else(|p| p.into_inner())
+    fn lock(&self) -> parking_lot::MutexGuard<'_, SinkMap> {
+        self.sinks.lock()
     }
 
     // Write `line` to `sink`, enforcing `max_bytes`: once the cap is reached,
@@ -594,6 +598,40 @@ fn prune_old_logs(dir: &Path, max_age: std::time::Duration) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The sink map is taken on every subscriber callback, so what the lock does
+    /// after somebody else panicked while holding it is the difference between a
+    /// dropped line and a process that can no longer log at all.
+    #[test]
+    fn a_panic_while_the_sink_map_is_held_leaves_it_acquirable() {
+        let layer = std::sync::Arc::new(RoutingLayer::new(
+            std::path::PathBuf::from("unused-by-this-test"),
+            "agent".to_string(),
+            std::process::id(),
+        ));
+        let writer = {
+            let layer = std::sync::Arc::clone(&layer);
+            std::thread::spawn(move || {
+                let _held = layer.sinks.lock();
+                panic!("panic while the sink map is held");
+            })
+        };
+        assert!(
+            writer.join().is_err(),
+            "the writer thread is expected to panic while holding the sink map"
+        );
+        // A later acquisition succeeds and sees the map as it was: no half-applied
+        // insert, and no panic carrying over from the thread that died holding it.
+        let map = layer.lock();
+        assert!(
+            map.sessions.is_empty(),
+            "the session sinks must still be empty"
+        );
+        assert!(
+            map.fallback.is_none(),
+            "the fallback sink must still be absent"
+        );
+    }
 
     // Routing tests drive real non-blocking writers whose worker guards are
     // parked in a process-lifetime static; flushing drains ALL of them. Serialize

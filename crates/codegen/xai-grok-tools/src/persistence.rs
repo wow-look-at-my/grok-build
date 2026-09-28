@@ -94,6 +94,9 @@ impl ResourcesPersistence {
         let writer_path = state_path.clone();
         let spawned_path = state_path.clone();
 
+        // The handle is dropped, but the task reports its own failure: the body
+        // runs through `guarded` and logs the panic under the writer's name.
+        #[allow(clippy::disallowed_methods)]
         tokio::spawn(async move {
             // Guarded so the writer's own death is attributed. Unobserved, it
             // would look like a session that persisted its tool state: `rx`

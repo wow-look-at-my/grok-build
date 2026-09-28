@@ -1,3 +1,7 @@
+#![allow(clippy::cast_possible_truncation)] // 3 hits predate the gate
+#![allow(clippy::expect_used)] // 9 hits predate the gate
+#![allow(clippy::unwrap_used)] // 5 hits predate the gate
+
 //! Agent builder, definition parsing, and system prompt assembly.
 //!
 //! This crate extracts a first-class `Agent` type from `xai-grok-shell`.

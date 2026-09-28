@@ -1,8 +1,6 @@
 //! Tracing layer for `target: "sampling_log"` → `~/.grok/logs/sampling.jsonl`.
 //! Enable with `--log-sampling` or `GROK_LOG_SAMPLING=1`.
 
-use std::sync::Mutex;
-
 use tracing::Subscriber;
 use tracing_subscriber::fmt::writer::BoxMakeWriter;
 use tracing_subscriber::layer::Layer;
@@ -16,8 +14,9 @@ const ENV_VAR: &str = "GROK_LOG_SAMPLING";
 const LOG_FILE: &str = "sampling.jsonl";
 const TARGET: &str = "sampling_log";
 
-static GUARD: std::sync::OnceLock<Mutex<Option<tracing_appender::non_blocking::WorkerGuard>>> =
-    std::sync::OnceLock::new();
+static GUARD: std::sync::OnceLock<
+    parking_lot::Mutex<Option<tracing_appender::non_blocking::WorkerGuard>>,
+> = std::sync::OnceLock::new();
 
 pub fn layer<S>() -> Box<dyn Layer<S> + Send + Sync>
 where
@@ -53,10 +52,8 @@ where
     };
 
     let (non_blocking, guard) = tracing_appender::non_blocking(file);
-    let guard_slot = GUARD.get_or_init(|| Mutex::new(None));
-    if let Ok(mut slot) = guard_slot.lock() {
-        *slot = Some(guard);
-    }
+    let guard_slot = GUARD.get_or_init(|| parking_lot::Mutex::new(None));
+    *guard_slot.lock() = Some(guard);
 
     let fmt_layer = tracing_subscriber::fmt::layer()
         .json()

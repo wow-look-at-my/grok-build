@@ -1814,7 +1814,10 @@ fn decode_osc52_payloads(bytes: &[u8]) -> Result<Vec<String>> {
         let decoded = base64::engine::general_purpose::STANDARD
             .decode(encoded)
             .with_context(|| "decode OSC 52 base64 payload")?;
-        let text = String::from_utf8(decoded).context("OSC 52 payload is not UTF-8 text")?;
+        // The payload is whatever the program put on the terminal, and the
+        // assertion under here is on clipboard text: an undecodable byte should
+        // mark itself in the text, not discard a payload the pane did print.
+        let text = String::from_utf8_lossy(&decoded).into_owned();
         payloads.push(text);
     }
     Ok(payloads)

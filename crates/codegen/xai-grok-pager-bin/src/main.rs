@@ -1,3 +1,5 @@
+#![allow(clippy::cast_sign_loss)] // 1 hit predates the gate
+#![allow(clippy::expect_used)] // 3 hits predate the gate
 #![allow(
     unused_imports,
     unused_variables,

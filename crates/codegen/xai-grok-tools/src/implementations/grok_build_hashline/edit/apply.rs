@@ -22,12 +22,17 @@ const SNIPPET_CONTEXT: usize = 3;
 /// a context hash (e.g. `"22:abc:rst"`) or only a local hash (e.g. `"22:abc"`).
 fn anchor_format_hint(scheme: &dyn AnchorScheme) -> (&'static str, String) {
     let len = scheme.hash_len().clamp(1, 4);
+    // `"abcd"` is an ASCII literal and `len` is clamped to 1..=4, so the offset
+    // is a char boundary.
+    #[allow(clippy::string_slice)]
     let hash = &"abcd"[..len];
     let has_context = scheme
         .generate_anchors(&["x"])
         .first()
         .is_some_and(|a| a.context.is_some());
     if has_context {
+        // `"rstu"` is ASCII too, for the same reason.
+        #[allow(clippy::string_slice)]
         let ctx = &"rstu"[..len];
         ("LINE:HASH1:HASH2", format!("22:{hash}:{ctx}"))
     } else {

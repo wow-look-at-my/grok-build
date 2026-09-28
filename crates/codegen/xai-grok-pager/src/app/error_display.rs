@@ -302,7 +302,9 @@ pub(crate) fn parse_http_status(raw: &str) -> Option<u16> {
     let mut from = 0;
     while let Some(i) = find_ignore_ascii_case(&raw[from..], "status ") {
         let after = from + i + "status ".len();
-        if let Some(code) = parse_status_digits(&raw[after..], false) {
+        #[allow(clippy::string_slice)] // past an ASCII marker this loop matched
+        let rest = &raw[after..];
+        if let Some(code) = parse_status_digits(rest, false) {
             return Some(code);
         }
         from = after;
@@ -333,12 +335,19 @@ pub(crate) fn parse_http_status(raw: &str) -> Option<u16> {
     ];
     for marker in MARKERS {
         if let Some(i) = find_ignore_ascii_case(raw, marker)
-            && let Some(code) = parse_status_digits(&raw[i + marker.len()..], true)
+            && let Some(code) = parse_status_digits(past_marker(raw, i, marker), true)
         {
             return Some(code);
         }
     }
     None
+}
+
+/// `raw` from the end of `marker`, which `find_ignore_ascii_case` matched at
+/// `i`. The marker is pure ASCII, so `i + marker.len()` is a char boundary.
+#[allow(clippy::string_slice)] // one past an ASCII marker that was matched
+fn past_marker<'a>(raw: &'a str, i: usize, marker: &str) -> &'a str {
+    &raw[i + marker.len()..]
 }
 
 /// Exactly three digits in 400..600. `require_close_paren` for the
@@ -354,6 +363,7 @@ fn parse_status_digits(s: &str, require_close_paren: bool) -> Option<u16> {
     if require_close_paren && bytes.get(3) != Some(&b')') {
         return None;
     }
+    #[allow(clippy::string_slice)] // the guard above proved these 3 bytes are ASCII digits
     let code: u16 = s[..3].parse().ok()?;
     (400..600).contains(&code).then_some(code)
 }

@@ -761,6 +761,23 @@ fn clean_html(html: &str) -> String {
     document.html()
 }
 
+/// `s[at..]` for the data-URI scan in [`strip_base64_data_uris`].
+///
+/// Every index handed here is an offset `find` returned for one of the ASCII
+/// needles `data:` or `,`, or such an offset plus the needle's byte width. In
+/// UTF-8 an ASCII byte is always a char boundary and never sits inside a
+/// multi-byte character, so the offset aligns.
+#[allow(clippy::string_slice)] // ASCII needle offsets
+fn scanned(s: &str, at: usize) -> &str {
+    &s[at..]
+}
+
+/// `s[from..to]` for the same scan, same proof as [`scanned`].
+#[allow(clippy::string_slice)] // ASCII needle offsets
+fn scanned_span(s: &str, from: usize, to: usize) -> &str {
+    &s[from..to]
+}
+
 /// Strip base64 data URIs from content to prevent token bloat.
 ///
 /// Uses manual scanning (`find` + byte matching) instead of regex for
@@ -781,7 +798,7 @@ fn strip_base64_data_uris(content: String) -> String {
     let mut last_end = 0;
     let mut search_from = 0;
 
-    while let Some(rel) = s[search_from..].find("data:") {
+    while let Some(rel) = scanned(s, search_from).find("data:") {
         let start = search_from + rel;
 
         // "data:" must look like a URI scheme start, not a substring of
@@ -791,9 +808,9 @@ fn strip_base64_data_uris(content: String) -> String {
             continue;
         }
 
-        if let Some(rel_comma) = s[start..].find(',') {
+        if let Some(rel_comma) = scanned(s, start).find(',') {
             let comma = start + rel_comma;
-            let header = &s[start + 5..comma];
+            let header = scanned_span(s, start + 5, comma);
 
             // RFC 2397 forbids whitespace in the header, and real headers
             // are short ASCII. Reject anything that violates this.
@@ -811,7 +828,7 @@ fn strip_base64_data_uris(content: String) -> String {
             if parts.any(|p| p.eq_ignore_ascii_case("base64")) {
                 // Consume valid base64 characters after the comma.
                 let payload_start = comma + 1;
-                let payload_len = s[payload_start..]
+                let payload_len = scanned(s, payload_start)
                     .bytes()
                     .take_while(|b| {
                         matches!(b, b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'+' | b'/' | b'=')
@@ -819,7 +836,7 @@ fn strip_base64_data_uris(content: String) -> String {
                     .count();
 
                 if payload_len >= MIN_BASE64_PAYLOAD {
-                    result.push_str(&s[last_end..start]);
+                    result.push_str(scanned_span(s, last_end, start));
                     result.push_str("[base64 ");
                     result.push_str(mime);
                     result.push_str(" data removed]");
@@ -836,7 +853,7 @@ fn strip_base64_data_uris(content: String) -> String {
     if last_end == 0 {
         return content;
     }
-    result.push_str(&s[last_end..]);
+    result.push_str(scanned(s, last_end));
     result
 }
 

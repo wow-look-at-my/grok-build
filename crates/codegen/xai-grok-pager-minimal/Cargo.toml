@@ -47,3 +47,6 @@ xai-token-estimation = { workspace = true }
 xai-grok-pager = { path = "../xai-grok-pager", features = ["test-support"] }
 
 [features]
+
+[lints]
+workspace = true

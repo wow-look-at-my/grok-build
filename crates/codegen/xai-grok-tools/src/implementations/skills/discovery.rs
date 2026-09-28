@@ -375,6 +375,9 @@ fn quote_problematic_values(frontmatter: &str) -> String {
             let Some(colon) = line.find(':') else {
                 return line.to_string();
             };
+            // `colon` is the offset of an ASCII `:`, so it and `colon + 1` are
+            // both char boundaries.
+            #[allow(clippy::string_slice)]
             let key = &line[..colon];
             if key.is_empty()
                 || !key
@@ -383,6 +386,7 @@ fn quote_problematic_values(frontmatter: &str) -> String {
             {
                 return line.to_string();
             }
+            #[allow(clippy::string_slice)]
             let after = &line[colon + 1..];
             let value = after.trim_start();
             // Require whitespace after the colon and a non-empty value.
@@ -440,10 +444,17 @@ fn recover_scalar_fields(yaml: &str) -> std::collections::HashMap<String, serde_
         // A bare block-scalar indicator (`|`, `>`, `|-`, `>2`, …) keeps its content on
         // following indented lines we skip, so treat it as empty and let the body
         // fallback supply the description.
-        let block_marker = matches!(value.as_bytes().first(), Some(b'|' | b'>'))
-            && value[1..]
-                .bytes()
-                .all(|b| matches!(b, b'+' | b'-' | b'0'..=b'9'));
+        let block_marker = match value.as_bytes().first() {
+            // The indicator is one ASCII byte, so byte 1 is a char boundary.
+            Some(b'|' | b'>') => {
+                #[allow(clippy::string_slice)]
+                let after_indicator = &value[1..];
+                after_indicator
+                    .bytes()
+                    .all(|b| matches!(b, b'+' | b'-' | b'0'..=b'9'))
+            }
+            _ => false,
+        };
         if value.is_empty() || block_marker {
             continue;
         }
@@ -475,6 +486,8 @@ pub fn parse_skill_frontmatter(
     let closing_idx = after_first
         .find("\n---")
         .ok_or(SkillParseError::NoFrontmatter)?;
+    // `closing_idx` is the offset of the ASCII `\n---` needle, a char boundary.
+    #[allow(clippy::string_slice)]
     let yaml_content = after_first[..closing_idx].trim();
 
     // Untyped map coerced per-field so one mistyped field never drops its siblings;

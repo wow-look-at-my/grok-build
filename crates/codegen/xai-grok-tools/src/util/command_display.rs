@@ -102,6 +102,9 @@ fn trim_wrapping_parens(s: &str) -> Option<&str> {
     if !t.starts_with('(') || !t.ends_with(')') || t.len() < 2 {
         return None;
     }
+    // `t` starts with `(` and ends with `)`, both single-byte ASCII, so `1` and
+    // `t.len() - 1` are char boundaries.
+    #[allow(clippy::string_slice)]
     let inner = &t[1..t.len() - 1];
     if inner.contains('(') || inner.contains(')') {
         return None;
@@ -187,7 +190,10 @@ fn take_shell_word(s: &str) -> Option<(&str, &str)> {
     if end == 0 {
         return None;
     }
-    Some((&s[..end], &s[end..]))
+    // `end` is a `char_indices` offset or `s.len()`, so both halves align.
+    #[allow(clippy::string_slice)]
+    let split = (&s[..end], &s[end..]);
+    Some(split)
 }
 
 /// Path token: quoted string or unquoted until whitespace / separator start.
@@ -203,7 +209,11 @@ fn take_path_token(s: &str) -> Option<(&str, &str)> {
             let mut i = 1;
             while i < bytes.len() {
                 if bytes[i] == quote {
-                    return Some((&s[..=i], &s[i + 1..]));
+                    // The range ends one past an ASCII quote byte, which is
+                    // always a char boundary whatever precedes it.
+                    #[allow(clippy::string_slice)]
+                    let token = (&s[..=i], &s[i + 1..]);
+                    return Some(token);
                 }
                 if bytes[i] == b'\\' && quote == b'"' && i + 1 < bytes.len() {
                     i += 2;
@@ -230,7 +240,11 @@ fn take_path_token(s: &str) -> Option<(&str, &str)> {
             if end == 0 {
                 return None;
             }
-            Some((&s[..end], &s[end..]))
+            // `end` is either a `char_indices` offset or a `byte_i +
+            // len_utf8` of the previous char, so both are boundaries.
+            #[allow(clippy::string_slice)]
+            let token = (&s[..end], &s[end..]);
+            Some(token)
         }
     }
 }
@@ -240,7 +254,10 @@ fn unquote_path_token(token: &str) -> Option<&str> {
     if t.len() >= 2 {
         let b = t.as_bytes();
         if (b[0] == b'\'' && b[t.len() - 1] == b'\'') || (b[0] == b'"' && b[t.len() - 1] == b'"') {
-            return Some(&t[1..t.len() - 1]);
+            // Both delimiters are ASCII quote bytes, so the inner range aligns.
+            #[allow(clippy::string_slice)]
+            let inner = &t[1..t.len() - 1];
+            return Some(inner);
         }
         if b[0] == b'\'' || b[0] == b'"' {
             return None;

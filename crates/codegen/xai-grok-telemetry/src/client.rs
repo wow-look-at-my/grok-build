@@ -6,7 +6,7 @@
 //! injected via [`init`]/[`init_if_needed`] so this crate avoids depending on
 //! shell's `User-Agent` builder (which couples to the `permission` module).
 
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, OnceLock};
 
 use chrono::{Local, SecondsFormat};
 use serde_json::json;
@@ -132,24 +132,24 @@ fn normalize_tier(tier: &str) -> String {
     .to_string()
 }
 
-static TELEMETRY_CLIENT: OnceLock<Mutex<Option<TelemetryClient>>> = OnceLock::new();
+static TELEMETRY_CLIENT: OnceLock<parking_lot::Mutex<Option<TelemetryClient>>> = OnceLock::new();
 
 /// Returns `true` when telemetry mode is `Enabled`.
 /// Used by `log_event` — product analytics events only fire in `Enabled` mode.
 pub fn is_enabled() -> bool {
     TELEMETRY_CLIENT
         .get()
-        .and_then(|m| m.lock().ok())
-        .is_some_and(|g| g.as_ref().is_some_and(|c| c.mode.is_enabled()))
+        .is_some_and(|m| m.lock().as_ref().is_some_and(|c| c.mode.is_enabled()))
 }
 
 /// Returns `true` when telemetry mode is `Enabled` or `SessionMetrics`.
 /// Used by `session_metrics` — lifecycle events fire in both modes.
 pub fn is_session_metrics_enabled() -> bool {
-    TELEMETRY_CLIENT
-        .get()
-        .and_then(|m| m.lock().ok())
-        .is_some_and(|g| g.as_ref().is_some_and(|c| c.mode.session_metrics_enabled()))
+    TELEMETRY_CLIENT.get().is_some_and(|m| {
+        m.lock()
+            .as_ref()
+            .is_some_and(|c| c.mode.session_metrics_enabled())
+    })
 }
 
 pub struct UserContext {
@@ -179,9 +179,9 @@ pub async fn track(event_name: &str, request_id: &str, ctx: &UserContext, mut me
     let _ = &mut metadata;
     return;
     #[allow(unreachable_code)]
-    let lock = TELEMETRY_CLIENT.get_or_init(|| Mutex::new(None));
+    let lock = TELEMETRY_CLIENT.get_or_init(|| parking_lot::Mutex::new(None));
     let client = {
-        let guard = lock.lock().unwrap_or_else(|err| err.into_inner());
+        let guard = lock.lock();
         match guard.clone() {
             Some(c) => c,
             None => return,
@@ -269,9 +269,9 @@ pub fn sync_profile() {
     // Telemetry is hard-disabled: never spawn the mixpanel.engage profile sync.
     return;
     #[allow(unreachable_code)]
-    let lock = TELEMETRY_CLIENT.get_or_init(|| Mutex::new(None));
+    let lock = TELEMETRY_CLIENT.get_or_init(|| parking_lot::Mutex::new(None));
     let client = {
-        let guard = lock.lock().unwrap_or_else(|err| err.into_inner());
+        let guard = lock.lock();
         match guard.clone() {
             Some(c) => c,
             None => return,
@@ -291,6 +291,10 @@ pub fn sync_profile() {
     let agent_id = crate::id::agent_id();
     let user_id = client.user_id.as_deref().unwrap_or(&agent_id).to_owned();
 
+    // Nobody awaits this profile write: `sync_profile` is a sync entry point and
+    // the mixpanel `engage` reply has no reader in this process -- a lost write
+    // shows up as a stale analytics profile, not as a failed caller.
+    #[allow(clippy::disallowed_methods)]
     tokio::spawn(async move {
         let mut props = std::collections::HashMap::new();
         props.insert("agent_id".into(), json!(agent_id));
@@ -333,8 +337,8 @@ pub fn init(
     subscription_tier: Option<String>,
     http_client: reqwest::Client,
 ) {
-    let lock = TELEMETRY_CLIENT.get_or_init(|| Mutex::new(None));
-    let mut guard = lock.lock().unwrap_or_else(|err| err.into_inner());
+    let lock = TELEMETRY_CLIENT.get_or_init(|| parking_lot::Mutex::new(None));
+    let mut guard = lock.lock();
     *guard = if mode.is_disabled() {
         None
     } else {
@@ -369,8 +373,8 @@ pub fn init_if_needed(
     if mode.is_disabled() {
         return;
     }
-    let lock = TELEMETRY_CLIENT.get_or_init(|| Mutex::new(None));
-    let mut guard = lock.lock().unwrap_or_else(|err| err.into_inner());
+    let lock = TELEMETRY_CLIENT.get_or_init(|| parking_lot::Mutex::new(None));
+    let mut guard = lock.lock();
     if guard.is_none() {
         *guard = Some(TelemetryClient::from_config(
             config,
@@ -423,8 +427,8 @@ mod tests {
         struct ClearClient;
         impl Drop for ClearClient {
             fn drop(&mut self) {
-                let lock = TELEMETRY_CLIENT.get_or_init(|| Mutex::new(None));
-                *lock.lock().unwrap_or_else(|err| err.into_inner()) = None;
+                let lock = TELEMETRY_CLIENT.get_or_init(|| parking_lot::Mutex::new(None));
+                *lock.lock() = None;
             }
         }
         let _clear = ClearClient;

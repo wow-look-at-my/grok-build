@@ -195,6 +195,9 @@ impl PullDiagnostics {
         }
 
         let pull = self.clone();
+        // The handle has no waiter by design: every round inside is `guarded`, and
+        // the `finish` below releases the slot whether the round answered or died.
+        #[allow(clippy::disallowed_methods)]
         tokio::spawn(async move {
             loop {
                 // Guarded so the slot cannot outlive its task: `begin` reports

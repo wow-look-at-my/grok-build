@@ -258,6 +258,12 @@ fn spawn_ci_host_with(repo_root: &Path, survives_exec: bool) -> Option<i32> {
         }
     }
 
+    // The worker is the process that outlives the jail by design: it is started on
+    // the host moments before the re-exec, it answers for the whole session, and it
+    // is torn down by `close_host_connection` (or by the worker's own EOF), not by a
+    // scope this binary could enrol it in -- the jailed child has no scope to give
+    // it. `xai_tty_utils` is not a dependency of this crate.
+    #[allow(clippy::disallowed_methods)]
     match cmd.spawn() {
         Ok(_) => {
             // Leak `ours` so the fd stays open across the jail `exec`; the
@@ -659,6 +665,10 @@ static HOST_STREAMS: std::sync::LazyLock<
 fn host_stream(fd: i32) -> Option<HostStream> {
     use std::os::unix::io::FromRawFd as _;
     use std::sync::{Arc, Mutex};
+    // A poisoned map answers `None`, which is this module's documented degradation
+    // path: the dot reads off rather than panicking inside the jailed session.
+    // `parking_lot::Mutex` is not a dependency here.
+    #[allow(clippy::disallowed_methods)]
     let mut map = HOST_STREAMS.lock().ok()?;
     // SAFETY: `fd` names a real socket opened by `spawn_ci_host` on the host
     // and inherited into this (jailed) process; we take ownership of that fd
@@ -677,6 +687,9 @@ fn host_stream(fd: i32) -> Option<HostStream> {
 #[cfg(unix)]
 fn exchange(fd: i32, request: &str) -> Option<Vec<u8>> {
     let stream = host_stream(fd)?;
+    // As above: a poisoned stream is one more transport failure, and every caller
+    // of `exchange` already degrades on `None`.
+    #[allow(clippy::disallowed_methods)]
     let mut guard = stream.lock().ok()?;
     let mut line = String::with_capacity(request.len() + 1);
     line.push_str(request);
@@ -711,6 +724,9 @@ fn exchange(fd: i32, request: &str) -> Option<Vec<u8>> {
 /// worker's lifetime, such as a test.
 #[cfg(unix)]
 pub fn close_host_connection(fd: i32) {
+    // Best-effort by contract: a poisoned map means the entry is already unreachable
+    // to any caller, and this only has to stop our own end from reading live.
+    #[allow(clippy::disallowed_methods)]
     if let Ok(mut map) = HOST_STREAMS.lock() {
         map.remove(&fd);
     }

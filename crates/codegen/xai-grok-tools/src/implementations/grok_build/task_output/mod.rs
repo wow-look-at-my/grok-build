@@ -524,23 +524,24 @@ pub(crate) async fn wait_any_event_driven(
         let id = id.clone();
         let timeout = remaining;
         let done = done.clone();
-        waits.push(
-            tokio::spawn(async move {
-                // Guarded, because `done` is the only thing this caller can be
-                // woken by: a round that died mid-flight would leave the tool
-                // parked until its deadline on a wait that no longer exists.
-                // The panic is logged against the task and the caller is woken
-                // to re-read the real task state.
-                let round = crate::util::detached::guarded(
-                    "task output bash wait",
-                    terminal.wait_for_completion(&id, Some(timeout)),
-                )
-                .await;
-                done.notify_waiters();
-                round
-            })
-            .abort_handle(),
-        );
+        // The handle lives in `waits`, which `AbortWaitsOnDrop` tears down on
+        // every exit path, and the body reports its own panic through `guarded`.
+        #[allow(clippy::disallowed_methods)]
+        let wait = tokio::spawn(async move {
+            // Guarded, because `done` is the only thing this caller can be
+            // woken by: a round that died mid-flight would leave the tool
+            // parked until its deadline on a wait that no longer exists.
+            // The panic is logged against the task and the caller is woken
+            // to re-read the real task state.
+            let round = crate::util::detached::guarded(
+                "task output bash wait",
+                terminal.wait_for_completion(&id, Some(timeout)),
+            )
+            .await;
+            done.notify_waiters();
+            round
+        });
+        waits.push(wait.abort_handle());
     }
 
     for id in subagent_ids {
@@ -549,18 +550,19 @@ pub(crate) async fn wait_any_event_driven(
             let id = id.clone();
             let timeout_ms = remaining.as_millis() as u64;
             let done = done.clone();
-            waits.push(
-                tokio::spawn(async move {
-                    let round = crate::util::detached::guarded(
-                        "task output subagent wait",
-                        be.backend().query(&id, true, Some(timeout_ms)),
-                    )
-                    .await;
-                    done.notify_waiters();
-                    round
-                })
-                .abort_handle(),
-            );
+            // As above: `waits` owns the handle and `AbortWaitsOnDrop` drains
+            // it; the body answers its own failure through `guarded`.
+            #[allow(clippy::disallowed_methods)]
+            let wait = tokio::spawn(async move {
+                let round = crate::util::detached::guarded(
+                    "task output subagent wait",
+                    be.backend().query(&id, true, Some(timeout_ms)),
+                )
+                .await;
+                done.notify_waiters();
+                round
+            });
+            waits.push(wait.abort_handle());
         }
     }
 
@@ -595,12 +597,13 @@ pub(crate) async fn wait_all_event_driven(
         let id = id.clone();
         let timeout = remaining;
         let label = id.clone();
-        handles.push((
-            label,
-            tokio::spawn(async move {
-                terminal.wait_for_completion(&id, Some(timeout)).await;
-            }),
-        ));
+        // `join_all` below awaits this handle, and `AbortWaitsOnDrop` aborts it
+        // if this future is cancelled first.
+        #[allow(clippy::disallowed_methods)]
+        let wait = tokio::spawn(async move {
+            terminal.wait_for_completion(&id, Some(timeout)).await;
+        });
+        handles.push((label, wait));
     }
 
     for id in subagent_ids {
@@ -608,12 +611,14 @@ pub(crate) async fn wait_all_event_driven(
             let be = be.clone();
             let id = id.clone();
             let timeout_ms = remaining.as_millis() as u64;
-            handles.push((
-                id.clone(),
-                tokio::spawn(async move {
-                    let _ = be.backend().query(&id, true, Some(timeout_ms)).await;
-                }),
-            ));
+            let label = id.clone();
+            // Awaited by the `join_all` below and aborted by
+            // `AbortWaitsOnDrop` on the cancellation path.
+            #[allow(clippy::disallowed_methods)]
+            let wait = tokio::spawn(async move {
+                let _ = be.backend().query(&id, true, Some(timeout_ms)).await;
+            });
+            handles.push((label, wait));
         }
     }
 

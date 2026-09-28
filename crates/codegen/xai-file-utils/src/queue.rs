@@ -2206,11 +2206,12 @@ fn temp_file_name(artifact_name: &str, session_id: &str, turn_number: u64) -> St
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis())
         .unwrap_or(0);
-    let short_id = if session_id.len() > 8 {
-        &session_id[session_id.len() - 8..]
-    } else {
-        session_id
-    };
+    // The longest suffix of at most 8 bytes that starts on a character
+    // boundary: a raw `len - 8` cut lands inside a multi-byte id and panics.
+    // An id of 8 bytes or shorter yields offset 0, i.e. the whole id.
+    let suffix_start = session_id.ceil_char_boundary(session_id.len().saturating_sub(8));
+    #[allow(clippy::string_slice)] // `suffix_start` is a `ceil_char_boundary` output
+    let short_id = &session_id[suffix_start..];
     let seq = COUNTER.fetch_add(1, Ordering::Relaxed);
     format!(
         "{}_turn{}_{}_{}_{}",

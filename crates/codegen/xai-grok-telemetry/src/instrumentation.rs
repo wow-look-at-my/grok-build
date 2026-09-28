@@ -32,9 +32,12 @@ pub enum InstrumentationMode {
 }
 
 static INSTRUMENTATION_MODE: OnceLock<InstrumentationMode> = OnceLock::new();
-static LOG_GUARD: OnceLock<Mutex<Option<tracing_appender::non_blocking::WorkerGuard>>> =
-    OnceLock::new();
-static CHROME_GUARD: OnceLock<Mutex<Option<FlushGuard>>> = OnceLock::new();
+// The finalizer's `Drop` takes both of these, so the lock has to be one that a
+// panic elsewhere cannot turn into a panic inside `Drop`.
+static LOG_GUARD: OnceLock<
+    parking_lot::Mutex<Option<tracing_appender::non_blocking::WorkerGuard>>,
+> = OnceLock::new();
+static CHROME_GUARD: OnceLock<parking_lot::Mutex<Option<FlushGuard>>> = OnceLock::new();
 
 fn mode() -> InstrumentationMode {
     *INSTRUMENTATION_MODE.get_or_init(|| {
@@ -237,10 +240,8 @@ fn build_writer(path: Option<PathBuf>) -> BoxMakeWriter {
     };
 
     let (non_blocking, guard) = tracing_appender::non_blocking(file);
-    let guard_slot = LOG_GUARD.get_or_init(|| Mutex::new(None));
-    if let Ok(mut slot) = guard_slot.lock() {
-        *slot = Some(guard);
-    }
+    let guard_slot = LOG_GUARD.get_or_init(|| parking_lot::Mutex::new(None));
+    *guard_slot.lock() = Some(guard);
     BoxMakeWriter::new(non_blocking)
 }
 
@@ -308,10 +309,8 @@ where
         .trace_style(TraceStyle::Async)
         .build();
 
-    let guard_slot = CHROME_GUARD.get_or_init(|| Mutex::new(None));
-    if let Ok(mut slot) = guard_slot.lock() {
-        *slot = Some(guard);
-    }
+    let guard_slot = CHROME_GUARD.get_or_init(|| parking_lot::Mutex::new(None));
+    *guard_slot.lock() = Some(guard);
 
     // Use TargetFilterLayer instead of .with_filter() to avoid the FilterId
     // registration issue when the layer is boxed as Box<dyn Layer<S>>.
@@ -519,11 +518,9 @@ pub fn finalize() -> Result<()> {
     Ok(())
 }
 
-fn drop_guard<T>(guard: Option<&Mutex<Option<T>>>) {
-    if let Some(lock) = guard
-        && let Ok(mut slot) = lock.lock()
-    {
-        let _ = slot.take();
+fn drop_guard<T>(guard: Option<&parking_lot::Mutex<Option<T>>>) {
+    if let Some(lock) = guard {
+        let _ = lock.lock().take();
     }
 }
 

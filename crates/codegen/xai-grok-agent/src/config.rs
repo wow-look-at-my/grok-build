@@ -46,6 +46,11 @@ enum PresetVisibility {
 }
 static TOOLSET_PRESETS: OnceLock<Mutex<HashMap<String, (ToolsetPresetBuilder, PresetVisibility)>>> =
     OnceLock::new();
+/// Every caller of this registry recovers the map from a poison rather than
+/// panicking on one: the sections here are `HashMap` insert / get / iter, so a
+/// poison can only arrive from unrelated code, and panicking on one would turn
+/// that into a process that can no longer resolve any toolset preset.
+/// `parking_lot::Mutex` is the structural fix and is not a dependency here.
 fn toolset_preset_registry()
 -> &'static Mutex<HashMap<String, (ToolsetPresetBuilder, PresetVisibility)>> {
     TOOLSET_PRESETS.get_or_init(|| Mutex::new(HashMap::new()))
@@ -53,10 +58,11 @@ fn toolset_preset_registry()
 /// Register an out-of-tree **public** (product) toolset preset by name. Public
 /// presets are enumerated by [`preset_names`] / [`all_toolset_presets`] and
 /// resolvable via [`toolset_for_preset`]. See [`TOOLSET_PRESETS`].
+#[allow(clippy::disallowed_methods)] // Recovers the map; see toolset_preset_registry.
 pub fn register_toolset_preset(name: &str, builder: ToolsetPresetBuilder) {
     toolset_preset_registry()
         .lock()
-        .expect("toolset preset registry poisoned")
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
         .insert(name.to_string(), (builder, PresetVisibility::Public));
 }
 /// Register an out-of-tree **internal** toolset preset by name. Internal presets
@@ -65,27 +71,30 @@ pub fn register_toolset_preset(name: &str, builder: ToolsetPresetBuilder) {
 /// [`preset_names`] / [`all_toolset_presets`], so they never leak into public
 /// preset enumeration (manifest generation, product preset sets, …). See
 /// [`TOOLSET_PRESETS`].
+#[allow(clippy::disallowed_methods)] // Recovers the map; see toolset_preset_registry.
 pub fn register_internal_toolset_preset(name: &str, builder: ToolsetPresetBuilder) {
     toolset_preset_registry()
         .lock()
-        .expect("toolset preset registry poisoned")
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
         .insert(name.to_string(), (builder, PresetVisibility::Internal));
 }
 /// Look up an externally-registered toolset preset by (already-normalized) name.
 /// Resolves BOTH public and internal presets.
+#[allow(clippy::disallowed_methods)] // Recovers the map; see toolset_preset_registry.
 fn registered_toolset_preset(name: &str) -> Option<ToolServerConfig> {
     toolset_preset_registry()
         .lock()
-        .expect("toolset preset registry poisoned")
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
         .get(name)
         .map(|(f, _)| f())
 }
 /// Names of externally-registered **public** presets only (internal presets are
 /// intentionally excluded from enumeration).
+#[allow(clippy::disallowed_methods)] // Recovers the map; see toolset_preset_registry.
 fn registered_public_toolset_preset_names() -> Vec<String> {
     toolset_preset_registry()
         .lock()
-        .expect("toolset preset registry poisoned")
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
         .iter()
         .filter(|(_, (_, visibility))| *visibility == PresetVisibility::Public)
         .map(|(name, _)| name.clone())

@@ -61,6 +61,7 @@ impl LspBackendAdapter {
         lsp_manager: Arc<tokio::sync::Mutex<LspManager>>,
         startup: Arc<StartupCoordinator>,
     ) {
+        #[allow(clippy::disallowed_methods)]
         tokio::spawn(async move {
             // Guarded, because the state below is what a waiter is waiting on:
             // `ensure_ready` parks on `notify` for as long as the state reads
@@ -129,6 +130,7 @@ async fn bootstrap_lsp(
         // Nothing polls this monitor: a server that dies with no monitor left
         // simply stops being diagnosed, so the round runs where a panic is
         // named rather than where it would end the task quietly.
+        #[allow(clippy::disallowed_methods)]
         tokio::spawn(crate::util::detached::fire_and_forget(
             "lsp restart monitor",
             crate::implementations::lsp::restart_monitor(mgr_weak, name),
@@ -154,6 +156,7 @@ impl super::LspBackend for LspBackendAdapter {
     fn ensure_started_background(&self) {
         let lsp_manager = self.lsp_manager.clone();
         let startup = self.startup.clone();
+        #[allow(clippy::disallowed_methods)]
         tokio::spawn(async move {
             // Guarded, because this is the round that leaves the state
             // `Starting` for the bootstrap to replace: a `Starting` nobody

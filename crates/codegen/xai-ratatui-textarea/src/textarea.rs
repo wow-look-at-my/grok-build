@@ -8597,19 +8597,21 @@ mod tests {
         }
     }
 
-    // ── Element ranges that land inside a character ──
+    // -- Element ranges that land inside a character --
     //
     // `TextElement::range` is a caller-supplied byte range with no
     // char-boundary guarantee. Each case below places a cut inside a 3-byte
-    // em dash (bytes 1..4 of "a—b") on a path that used to index the buffer
-    // with it directly.
+    // em dash (bytes 1..4 of "a\u{2014}b") on a path that used to index the
+    // buffer with it directly.
+
+    const EM: char = '\u{2014}'; // 3 bytes
 
     #[test]
     fn the_raw_slice_at_these_offsets_panics() {
-        // The pre-fix expression at each site below was `&text[..byte]` with
-        // these exact offsets, so recording the panic here is what shows the
-        // tests above are covering a crash and not a no-op change.
-        let text = "a—b"; // '—' occupies bytes 1..4
+        // The pre-fix expression at the sites below was `&text[..byte]` with
+        // these exact offsets, so recording the panic here is what shows those
+        // tests cover a crash and not a no-op change.
+        let text = format!("a{EM}b"); // EM occupies bytes 1..4
         assert!(!text.is_char_boundary(2), "the cut is mid-dash");
         let raw = std::panic::catch_unwind(|| -> &str {
             #[allow(clippy::string_slice)] // deliberately the pre-fix expression
@@ -8621,27 +8623,27 @@ mod tests {
 
     #[test]
     fn element_text_widens_a_range_ending_inside_a_character() {
-        let mut ta = ta_with("a—b");
+        let mut ta = ta_with(&format!("a{EM}b"));
         let id = ta.add_element(0..2, ElementKind(0), None);
         let text = ta.element_text(id).expect("element is registered");
-        assert_eq!(text, "a—", "the straddling dash stays whole");
+        assert_eq!(text, format!("a{EM}"), "the straddling dash stays whole");
     }
 
     #[test]
     fn selected_text_widens_an_element_edge_inside_a_character() {
-        let mut ta = ta_with("a—b");
+        let mut ta = ta_with(&format!("a{EM}b"));
         ta.add_element(1..2, ElementKind(0), None);
         // The selection itself is aligned; expansion to the element boundary
         // is what lands mid-character.
         ta.set_selection(1, 3);
         let selected = ta.selected_text().expect("selection is non-empty");
         assert!(selected.is_char_boundary(selected.len()));
-        assert_eq!(selected, "—");
+        assert_eq!(selected, EM.to_string());
     }
 
     #[test]
     fn display_width_of_range_survives_element_edges_inside_a_character() {
-        let mut ta = ta_with("a—bc");
+        let mut ta = ta_with(&format!("a{EM}bc"));
         ta.add_element(2..3, ElementKind(0), None);
         ta.add_element(3..5, ElementKind(1), None);
         let width = ta.display_width_of_range(0, ta.text().len());
@@ -8650,7 +8652,7 @@ mod tests {
 
     #[test]
     fn wrapping_survives_an_element_boundary_inside_a_character() {
-        let mut ta = ta_with("a—b—c");
+        let mut ta = ta_with(&format!("a{EM}b{EM}c"));
         ta.add_element(2..4, ElementKind(0), None);
         // Width 1 forces a wrap decision at every step past the element.
         let lines = ta.wrapped_lines(1);
@@ -8663,7 +8665,7 @@ mod tests {
 
     #[test]
     fn clamp_to_line_survives_a_line_end_inside_a_character() {
-        let mut ta = ta_with("ab—c"); // '—' occupies bytes 2..5
+        let mut ta = ta_with(&format!("ab{EM}c")); // EM occupies bytes 2..5
         // `line_end` one byte into the dash: the clamp still names a boundary.
         let clamped = ta.clamp_to_line(6, 0, 3);
         assert!(ta.text().is_char_boundary(clamped));

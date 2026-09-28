@@ -287,7 +287,15 @@ impl ScheduledTask {
         // next_fire_at() = created_at + interval = now, firing on the first tick.
         let created_at = if fire_immediately { now - cadence } else { now };
         Self {
-            id: uuid::Uuid::now_v7().to_string().replace('-', "")[..12].to_string(),
+            // A UUID with its dashes stripped is 32 ASCII hex chars; taking the
+            // first 12 characters is the same 12 bytes the previous byte slice
+            // took, without an offset that could split a character.
+            id: uuid::Uuid::now_v7()
+                .to_string()
+                .replace('-', "")
+                .chars()
+                .take(12)
+                .collect(),
             interval_secs,
             prompt,
             recurring,

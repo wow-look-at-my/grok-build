@@ -80,6 +80,7 @@ pub fn acp_bridge_transport(
     // Nothing joins with the pump: it owns both duplex halves, so its death is
     // the bridge's death, and a round-trip that never completes is the only
     // thing rmcp would notice. Guarded so the log names the bridge that died.
+    #[allow(clippy::disallowed_methods)]
     tokio::spawn(xai_grok_tools::util::detached::fire_and_forget(
         "acp mcp bridge pump",
         pump(server_id, invoker, invoke_timeout, pump_read, pump_write),

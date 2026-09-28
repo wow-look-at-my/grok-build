@@ -188,7 +188,11 @@ pub fn end_position(text: &str) -> Position {
         }
     }
     // LSP character offsets are UTF-16 code units.
-    let character = text[last_line_start..].encode_utf16().count() as u32;
+    // `last_line_start` is a `char_indices` offset plus one for an ASCII `'\n'`,
+    // so it is a char boundary.
+    #[allow(clippy::string_slice)]
+    let rest_of_line = &text[last_line_start..];
+    let character = rest_of_line.encode_utf16().count() as u32;
     Position { line, character }
 }
 

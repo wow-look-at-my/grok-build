@@ -948,9 +948,14 @@ fn self_matching_pkill_pattern(command: &str) -> Option<SelfMatchingPkill> {
         // statement-boundary parsing already treats `\n` as a separator.
         let m = caps.get(0).expect("group 0 always present");
         let mut rest = String::with_capacity(command.len());
-        rest.push_str(&command[..m.start()]);
+        // Regex match offsets are char boundaries by construction.
+        #[allow(clippy::string_slice)]
+        let before_match = &command[..m.start()];
+        #[allow(clippy::string_slice)]
+        let after_match = &command[m.end()..];
+        rest.push_str(before_match);
         rest.push('\n');
-        rest.push_str(&command[m.end()..]);
+        rest.push_str(after_match);
 
         // Resolve the matched command word as a static slice so callers
         // get a `&'static str` rather than borrowing the input command.
@@ -1057,6 +1062,8 @@ fn is_bare_echo(command: &str) -> bool {
         return false;
     }
     // Word boundary check.
+    // `t` starts with the ASCII literal "echo", so byte 4 is a boundary.
+    #[allow(clippy::string_slice)]
     let after_prefix = &t[4..];
     if !after_prefix.is_empty() && !after_prefix.starts_with(char::is_whitespace) {
         return false;
@@ -1074,8 +1081,11 @@ fn is_bare_echo(command: &str) -> bool {
         if flag_part.is_empty() || flag_part == "-" {
             break;
         }
-        rest = &rest[flag_part.len()..];
-        rest = rest.trim_start();
+        // `flag_part` collects only the ASCII `-n e E` set, so its byte length
+        // is also a char count and the offset aligns.
+        #[allow(clippy::string_slice)]
+        let after_flags = &rest[flag_part.len()..];
+        rest = after_flags.trim_start();
     }
 
     is_simple_narration_tail(rest)
@@ -1090,6 +1100,8 @@ fn is_bare_printf(command: &str) -> bool {
     if !t.starts_with("printf") {
         return false;
     }
+    // `t` starts with the ASCII literal "printf", so byte 6 is a boundary.
+    #[allow(clippy::string_slice)]
     let after_prefix = &t[6..];
     if !after_prefix.is_empty() && !after_prefix.starts_with(char::is_whitespace) {
         return false;

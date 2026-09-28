@@ -183,19 +183,26 @@ impl xai_tool_runtime::Tool for MonitorTool {
 
         let pipeline_kill_name = kill_tool_name.clone();
         let pipeline_owner = owner_session_id.clone();
-        tokio::spawn(async move {
-            supervise_monitor_pipeline(
-                &pipeline_task_id,
-                &pipeline_description,
-                pipeline_terminal,
-                &pipeline_notif,
-                &pipeline_output_file,
-                pipeline_kill_name,
-                pipeline_owner,
-                0, // fresh pipeline — read from start
-            )
-            .await;
-        });
+        // Guarded: the tool has already told the caller "you will be notified on
+        // each event", so a pipeline that dies mid-run is a promise silently
+        // broken. The log names the pipeline so the gap is attributable.
+        #[allow(clippy::disallowed_methods)]
+        tokio::spawn(crate::util::detached::fire_and_forget(
+            "monitor pipeline",
+            async move {
+                supervise_monitor_pipeline(
+                    &pipeline_task_id,
+                    &pipeline_description,
+                    pipeline_terminal,
+                    &pipeline_notif,
+                    &pipeline_output_file,
+                    pipeline_kill_name,
+                    pipeline_owner,
+                    0, // fresh pipeline — read from start
+                )
+                .await;
+            },
+        ));
 
         let kill_tool_display =
             kill_tool_name.unwrap_or_else(|| "kill_command_or_subagent".to_string());

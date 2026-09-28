@@ -296,7 +296,12 @@ impl<'a, 'b> ParsedMarkdown<'a, 'b> {
                 );
                 bytes[t.range.clone()].copy_from_slice(t.to.as_bytes());
             }
-            Some(String::from_utf8(bytes).expect("force transforms preserve UTF-8"))
+            // Every byte in `bytes` came from `self.text` or from a transform's
+            // own `String`, so undecodable bytes here can only mean a broken
+            // splice. The panic names that; lossy would hide it in the output.
+            #[allow(clippy::disallowed_methods)]
+            let rendered = String::from_utf8(bytes).expect("force transforms preserve UTF-8");
+            Some(rendered)
         } else {
             None
         };

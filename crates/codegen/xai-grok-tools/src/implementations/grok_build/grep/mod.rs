@@ -1287,8 +1287,13 @@ pub fn parse_numbered_line_prefix(line: &str) -> Option<(usize, char, &str)> {
         return None;
     }
 
+    // `idx` counts leading ASCII digits, so `idx` and `idx + 1` (the ASCII `:`
+    // or `-` separator checked above) are both char boundaries.
+    #[allow(clippy::string_slice)]
     let line_number = line[..idx].parse::<usize>().ok()?;
-    Some((line_number, sep, &line[idx + 1..]))
+    #[allow(clippy::string_slice)]
+    let content = &line[idx + 1..];
+    Some((line_number, sep, content))
 }
 
 /// Parse ripgrep `--heading` output into structured per-file matches.

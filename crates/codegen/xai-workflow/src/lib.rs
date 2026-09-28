@@ -1,3 +1,5 @@
+#![allow(clippy::cast_possible_truncation)] // 3 hits predate the gate
+
 pub mod engine;
 pub mod host;
 pub mod journal;

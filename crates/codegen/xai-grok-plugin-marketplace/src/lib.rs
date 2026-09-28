@@ -1,3 +1,5 @@
+#![allow(clippy::string_slice)] // 1 hit predates the gate
+
 //! Plugin marketplace browse and index crate.
 //!
 //! Provides marketplace source configuration, plugin discovery (indexed +

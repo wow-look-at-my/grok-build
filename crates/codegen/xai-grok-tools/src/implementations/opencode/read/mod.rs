@@ -292,7 +292,7 @@ impl xai_tool_runtime::Tool for ReadTool {
             let line = if line_text.len() > MAX_LINE_LENGTH {
                 format!(
                     "{}... (line truncated to {} chars)",
-                    &line_text[..MAX_LINE_LENGTH],
+                    crate::util::truncate_bytes(line_text, MAX_LINE_LENGTH),
                     MAX_LINE_LENGTH
                 )
             } else {

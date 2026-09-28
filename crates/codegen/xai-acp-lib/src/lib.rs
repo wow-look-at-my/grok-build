@@ -1,3 +1,5 @@
+#![allow(clippy::expect_used)] // 1 hit predates the gate
+
 mod channel;
 mod common;
 mod gateway;

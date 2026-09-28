@@ -466,8 +466,12 @@ fn extract_trigger_suffix(description: &str) -> Option<(&str, &str)> {
     }
     let pos = best_pos?;
 
+    // Every trigger prefix is ASCII and `to_ascii_lowercase` preserves byte
+    // lengths and boundaries, so `pos` is a char boundary in `description`.
+    #[allow(clippy::string_slice)]
     let before = description[..pos].trim_end();
     let before = before.strip_suffix('.').unwrap_or(before);
+    #[allow(clippy::string_slice)]
     let triggers = &description[pos..];
 
     if before.is_empty() || triggers.is_empty() {
@@ -502,6 +506,8 @@ fn strip_leading_trigger_prefix(wtu: &str) -> &str {
             // ASCII lowercasing preserves byte length, so the offset computed on
             // the lowercased copy is valid on the original `trimmed` slice.
             let off = trimmed.len() - rest.len();
+            // The connective is ASCII, so `off` is a char boundary.
+            #[allow(clippy::string_slice)]
             let out = trimmed[off..]
                 .trim_start_matches(|c: char| c == ':' || c == ',' || c.is_whitespace());
             if !out.is_empty() {

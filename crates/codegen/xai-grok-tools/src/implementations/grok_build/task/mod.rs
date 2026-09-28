@@ -66,6 +66,9 @@ fn normalize_user_ask(raw: &str) -> Option<String> {
         return None;
     }
     if let Some(start) = t.find("<user_query>") {
+        // `start` is the offset of an ASCII literal and the added width is that
+        // literal's byte length, so the offset is a char boundary.
+        #[allow(clippy::string_slice)]
         let after = &t[start + "<user_query>".len()..];
         let body = after.split("</user_query>").next().unwrap_or(after).trim();
         if body.is_empty() {
@@ -467,7 +470,9 @@ impl xai_tool_runtime::Tool for TaskTool {
                     // is no longer foreground, so the only thing that can come
                     // back from it is a panic. Guarded so that panic names the
                     // forwarder rather than leaving a child running that nobody
-                    // can cancel any more.
+                    // can cancel any more. The returned handle is kept by the
+                    // caller and aborted, so nothing joins it.
+                    #[allow(clippy::disallowed_methods)]
                     tokio::spawn(crate::util::detached::fire_and_forget(
                         "subagent cancellation forwarder",
                         async move {
@@ -527,6 +532,9 @@ impl xai_tool_runtime::Tool for TaskTool {
             // only place a late failure of the request itself can be seen. The
             // coordinator, not this task, is what holds the child's result for
             // `TaskOutput` polling.
+            // `fire_and_forget` logs the panic, and the transport error is
+            // reported by the task itself below.
+            #[allow(clippy::disallowed_methods)]
             tokio::spawn(crate::util::detached::fire_and_forget(
                 "background subagent spawn",
                 async move {

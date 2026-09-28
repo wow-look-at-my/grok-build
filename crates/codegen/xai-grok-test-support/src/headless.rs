@@ -235,7 +235,14 @@ const CRASH_PATTERNS: &[&str] = &[
 
 /// Diagnostic helper: format the tail of stderr for assertion messages.
 pub fn stderr_tail(stderr: &str, max_chars: usize) -> &str {
-    &stderr[stderr.len().saturating_sub(max_chars)..]
+    // `str::ceil_char_boundary` moves the cut up to the boundary after it so a
+    // multi-byte character at the edge is never split. This crate caps text
+    // with std directly rather than depending on `xai-grok-tools`, whose
+    // truncation helpers sit behind a much heavier dependency edge.
+    let start = stderr.ceil_char_boundary(stderr.len().saturating_sub(max_chars));
+    #[allow(clippy::string_slice)] // the index is `ceil_char_boundary`'s output
+    let tail = &stderr[start..];
+    tail
 }
 
 /// Assert that a headless run succeeded (non-timeout, zero exit code).

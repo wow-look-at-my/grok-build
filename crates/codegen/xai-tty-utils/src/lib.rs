@@ -1,3 +1,6 @@
+#![allow(clippy::cast_possible_truncation)] // 1 hit predates the gate
+#![allow(clippy::cast_possible_wrap)] // 2 hits predate the gate
+
 //! Lightweight process-spawning utilities for TTY safety.
 //!
 //! When a TUI/pager/raw-mode terminal owns the parent process's controlling

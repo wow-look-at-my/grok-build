@@ -162,6 +162,7 @@ pub fn spawn_transport_liveness(
     // install a fresh handle over the one already there, so a slot left held by
     // a dead watcher means that client's transport is never again detected as
     // closed.
+    #[allow(clippy::disallowed_methods)]
     tokio::spawn(async move {
         let watched = xai_grok_tools::util::detached::guarded(
             "mcp transport liveness watcher",

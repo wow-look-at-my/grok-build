@@ -174,9 +174,16 @@ pub fn extract_skill_display_text(text: &str) -> Option<String> {
             Some(s) => s + cmd_open.len(),
             None => break 'cmd None,
         };
-        text[start..]
-            .find(cmd_close)
-            .map(|rel| &text[start..start + rel])
+        // Both ends are `<command-message>` / `</command-message>` offsets. An
+        // ASCII byte is always a char boundary and never sits inside a
+        // multi-byte character, so every offset below is character-aligned.
+        #[allow(clippy::string_slice)]
+        let head = &text[start..];
+        match head.find(cmd_close) {
+            #[allow(clippy::string_slice)]
+            Some(rel) => Some(&head[..rel]),
+            None => None,
+        }
     };
 
     if let Some(cmd) = command.filter(|c| !c.is_empty()) {
@@ -188,9 +195,13 @@ pub fn extract_skill_display_text(text: &str) -> Option<String> {
     }
 
     // Fallback: derive "/NAME" from <command-name>NAME</command-name>.
+    // As above, both offsets are ASCII `<command-name>` tag boundaries.
     let inner = text.find(name_open)? + name_open.len();
-    let end = inner + text[inner..].find(name_close)?;
-    let name = &text[inner..end];
+    #[allow(clippy::string_slice)]
+    let head = &text[inner..];
+    let end = head.find(name_close)?;
+    #[allow(clippy::string_slice)]
+    let name = &head[..end];
     if name.is_empty() {
         return None;
     }
@@ -207,11 +218,14 @@ pub fn extract_skill_display_text(text: &str) -> Option<String> {
 fn extract_command_args(text: &str) -> Option<&str> {
     let open = "<command-args>";
     let close = "</command-args>";
+    // `start` follows an ASCII `<command-args>` open tag and `end` is either an
+    // ASCII `</command-args>` offset or `text.len()`, so both are boundaries.
     let start = text.find(open)? + open.len();
-    let end = text[start..]
-        .find(close)
-        .map_or(text.len(), |rel| start + rel);
-    let args = text[start..end].trim();
+    #[allow(clippy::string_slice)]
+    let head = &text[start..];
+    let end = head.find(close).unwrap_or(head.len());
+    #[allow(clippy::string_slice)]
+    let args = head[..end].trim();
     if args.is_empty() { None } else { Some(args) }
 }
 
@@ -298,8 +312,11 @@ pub fn apply_substitutions(content: &mut String, args: Option<&str>, ctx: &Subst
         let mut result = String::with_capacity(content.len());
         let mut rest = content.as_str();
         while let Some(pos) = rest.find(&pattern) {
-            result.push_str(&rest[..pos]);
-            let after = &rest[pos + pat_len..];
+            // `$` plus ASCII digits: `pos` is a match offset and `pat_len` the
+            // byte length of an ASCII pattern, so both offsets are boundaries.
+            #[allow(clippy::string_slice)]
+            let (head, after) = (&rest[..pos], &rest[pos + pat_len..]);
+            result.push_str(head);
             // Only substitute if the next character is NOT a digit
             // (to avoid turning "$100" into replacement + "00").
             if after.starts_with(|c: char| c.is_ascii_digit()) {
@@ -419,6 +436,9 @@ pub fn resolve_skill_internal_links(body: &str, skill_dir: &std::path::Path) -> 
 
         match link_type {
             LinkType::Inline => {
+                // pulldown-cmark reports byte spans at char boundaries, and
+                // `replace_range` below only accepts them.
+                #[allow(clippy::string_slice)]
                 let event_src = &body[event_range.clone()];
                 if let Some(rel) = event_src.rfind(url_str) {
                     let start = event_range.start + rel;
@@ -427,6 +447,9 @@ pub fn resolve_skill_internal_links(body: &str, skill_dir: &std::path::Path) -> 
             }
             LinkType::Reference | LinkType::Collapsed | LinkType::Shortcut => {
                 if let Some(def_span) = ref_def_spans.get(id) {
+                    // pulldown-cmark reference-definition spans are byte spans
+                    // at char boundaries.
+                    #[allow(clippy::string_slice)]
                     let def_src = &body[def_span.clone()];
                     if let Some(rel) = def_src.rfind(url_str) {
                         let start = def_span.start + rel;
@@ -465,7 +488,10 @@ pub fn extract_skill_body(content: &str) -> String {
     if let Some(rest) = content.get(3..)
         && let Some(closing_idx) = rest.find("\n---")
     {
-        // Return everything after the closing ---
+        // `rest` starts at byte 3 (the ASCII `---` fence is 3 bytes) and
+        // `closing_idx` is the offset of the ASCII `\n---` needle, so
+        // `closing_idx + 4` is the end of that literal and a boundary.
+        #[allow(clippy::string_slice)]
         let after_frontmatter = &rest[closing_idx + 4..];
         return after_frontmatter.trim_start().to_string();
     }

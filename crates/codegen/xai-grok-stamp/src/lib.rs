@@ -1,3 +1,5 @@
+#![allow(clippy::cast_possible_truncation)] // 1 hit predates the gate
+
 //! Writes a release number into an already-linked grok binary.
 //!
 //! The number comes from buildhost, which only assigns it once the build has
@@ -72,7 +74,12 @@ pub fn read_stamp(binary: &[u8]) -> Result<Option<String>, StampError> {
         return Ok(None);
     }
     let payload = at + STAMP_MAGIC.len() + 1;
-    Ok(String::from_utf8(binary[payload..payload + len].to_vec()).ok())
+    // The slot sits in a compiled binary: undecodable bytes mean the region is
+    // not a stamped payload, which is exactly what `None` reports. Lossy would
+    // read a random section as a version string.
+    #[allow(clippy::disallowed_methods)]
+    let stamped = String::from_utf8(binary[payload..payload + len].to_vec()).ok();
+    Ok(stamped)
 }
 
 /// Offset of the one slot in `binary`.
