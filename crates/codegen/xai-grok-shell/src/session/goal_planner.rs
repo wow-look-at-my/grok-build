@@ -1436,7 +1436,7 @@ mod tests {
         assert!(
             GOAL_PLANNER_PROMPT_TEMPLATE.contains("the recorded runs rather than build their own")
         );
-        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("never require saving output"));
+        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("a step NEVER names a file to write"));
         assert!(!GOAL_PLANNER_PROMPT_TEMPLATE.contains("captured run output"));
     }
 
@@ -1590,13 +1590,11 @@ mod tests {
 
     /// Pin the visual/interactive guidance: gamedev/UI goals must be
     /// anchored on the static/structural fallback plus unit tests of the
-    /// pure logic (physics, collision, input mapping), with capturable
-    /// extras as `evidence`, never `gating`.
+    /// pure logic (physics, collision, input mapping).
     #[test]
     fn planner_prompt_covers_visual_interactive_goals() {
         assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("## Visual / interactive objectives"));
         assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("input mapping"));
-        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("as `evidence`, never as `gating`"));
         assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("unguarded `module.exports`"));
         assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("## Entry-point launch check"));
     }

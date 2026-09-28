@@ -75,7 +75,7 @@ once you can decide:
    command must be the plan's command. The output must be a real pass: a green
    summary line, the expected content. The run must come AFTER the last edit
    to the files it covers. Later entries in the log are later in time.
-4. Investigate yourself: read the shipped code, and run the project's own tests and entry point wherever RUN_LOG has no honest run of a plan step or you doubt what it shows. A step can be absent because of the size cap, a compaction, a WITHHELD result, or because the implementer never ran it. Use only what the project already has — do NOT build a parallel test suite or a harness of your own.
+4. Investigate yourself: read the shipped code, and run the project's own tests and entry point wherever RUN_LOG has no honest run of a plan step or you doubt what it shows. A step can be absent because of the size cap, a compaction, a WITHHELD result, or because the implementer never ran it. Run the SAME steps the `## Verification plan` lists. Use only what the project already has — do NOT build a parallel test suite or a harness of your own.
 
 You have your standard tool inventory ({READ_TOOL}, {SEARCH_TOOL}, {LIST_TOOL},
 run a command). Refute when the implementer's tests are DISHONEST.

@@ -237,9 +237,9 @@ fn redirect_targets(command: &str) -> Vec<String> {
         } else {
             None
         };
-        if let Some(target) = target {
+        if let Some(target) = target.filter(|t| !t.starts_with('&')) {
             let target = target.trim_matches(['"', '\'', ';', '&', '|']);
-            if !target.is_empty() && !target.starts_with('&') && target != "/dev/null" {
+            if !target.is_empty() && target != "/dev/null" {
                 out.push(target.to_string());
             }
         }
@@ -285,7 +285,7 @@ fn mentions_path(args: &str, path: &str) -> bool {
 /// model typed, not something the work produced.
 fn only_prints_literals(command: &str) -> bool {
     let stages: Vec<&str> = command
-        .split(['&', ';', '|', '\n'])
+        .split(['&', ';', '|'])
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .collect();

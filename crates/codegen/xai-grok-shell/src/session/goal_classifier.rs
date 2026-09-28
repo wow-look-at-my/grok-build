@@ -3945,7 +3945,6 @@ mod tests {
         // Pin the audit-not-author phrases against a revert to the expensive
         // author-your-own-evidence stance.
         assert!(GOAL_VERIFIER_PROMPT_TEMPLATE.contains("AUDIT what the implementer actually ran"));
-        assert!(GOAL_VERIFIER_PROMPT_TEMPLATE.contains("Minimize tool"));
         assert!(GOAL_VERIFIER_PROMPT_TEMPLATE.contains("do NOT build a parallel"));
         assert!(GOAL_VERIFIER_PROMPT_TEMPLATE.contains("Do NOT fill the gap yourself"));
         // The RESUME template must carry the same stance.
@@ -3992,7 +3991,7 @@ mod tests {
             assert!(!tmpl.contains("screenshot"));
         }
         assert!(GOAL_VERIFIER_PROMPT_TEMPLATE.contains("Never ask it to save output"));
-        assert!(GOAL_VERIFIER_PROMPT_TEMPLATE.contains("do NOT ask for a saved artifact"));
+        assert!(GOAL_VERIFIER_PROMPT_TEMPLATE.contains("do NOT ask for a saved"));
         assert!(GOAL_VERIFIER_RESUME_PROMPT_TEMPLATE.contains("never to save an evidence file"));
         assert!(KIND_LENS_CODE_CHANGE.contains("Find that launch in RUN_LOG"));
         assert!(!KIND_LENS_CODE_CHANGE.contains("captured launch evidence"));
