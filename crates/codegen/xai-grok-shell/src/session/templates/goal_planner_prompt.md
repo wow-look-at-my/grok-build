@@ -83,7 +83,7 @@ not something to cherry-pick a success past.
 
 NO HAND-ROLLED HARNESSES. Every check uses tools the project or the system ALREADY has: its test runner, its build, its entry point, its own scripts. Never plan a check that needs a new check script, test harness, probe, shim, stub consumer, fake `window`, pixel counter, or one-off verification program, in scratch or in the repo. A library is checked by its own test suite. A browser page is checked by the project's existing browser tests if it has them. Otherwise by the static/structural fallback above. If a behavior cannot be checked with what exists, record that under `## Risks / Contradictions` and use the static/structural fallback. Do not build tooling to close the gap.
 
-Degradation MUST be honest, never fabricated: if the launch itself cannot run here for environmental reasons, the implementer RUNS it so that failure is in the record, and the static/structural fallback + the existing tests become the accepted bar — write this escape hatch INTO the launch step ("...or a logged run showing it cannot run here"). When the environment clearly cannot launch the deliverable at all, plan the fallback directly and record the limit under `## Risks / Contradictions`. A screenshot may be added as `evidence`, never as `gating`.
+Degradation MUST be honest, never fabricated: if the launch itself cannot run here for environmental reasons, the implementer RUNS it so that failure is in the record, and the static/structural fallback + the existing tests become the accepted bar — write this escape hatch INTO the launch step ("...or a logged run showing it cannot run here"). When the environment clearly cannot launch the deliverable at all, plan the fallback directly and record the limit under `## Risks / Contradictions`.
 
 ## Output contract — STRICT
 
@@ -137,8 +137,8 @@ Contradictions`.
 both follow, so all judge by the SAME observable bar; cover every criterion.
 Verification checks the work. It never adds to it: a step that acts on
 something OBJECTIVE did not put in scope is new scope, not a check. Prefer
-reading what the work already produced — files, logs, hashes, build output,
-source — over operating anything. Tag each step `gating` (decides pass/fail)
+reading what the work already produced — the source, the build output, the
+project's test results — over operating anything. Tag each step `gating` (decides pass/fail)
 or `evidence` (best-effort
 corroboration whose absence alone, once the gating steps and honest unit checks
 hold, must NOT deny completion). Each step gives the **action** (run the tests,
@@ -155,16 +155,8 @@ exercise the entry point, read the artifact) and the
   unit-level functions are exercised directly against the real path. Never set a
   bar that can only be met by building a policy/oracle the verifier will then
   rightly call theater.
-- Fit every check to what can RUN in the CURRENT environment. If it cannot run
-  here, specify a runnable substitute OR record the limit under `## Risks /
-  Contradictions`. Never accept generated/mocked artifacts as proof.
-- A step is a command to run plus what its OUTPUT must show. The harness
-  records every command the implementer runs, with its output. The verifiers
-  read that record. So never require saving output, a log, a report, or an
-  "evidence file" — that is busywork nobody reads. The one file a step may
-  name is an image (a screenshot) the verifier must look at. Write it under
-  the literal `{SCRATCH}` placeholder (e.g. `{SCRATCH}/page.png`), never a
-  hardcoded `/tmp/...` — it resolves to a private per-runner dir.
+- Fit every check to what can RUN in the CURRENT environment with what already exists. If it cannot run here, record the limit under `## Risks / Contradictions`. Never accept generated/mocked artifacts as proof.
+- A step is a command to run plus what its OUTPUT must show. Evidence is the session transcript, which records every command and its output, plus the verifiers' own investigation. So a step NEVER names a file to write: no saved output, log, report, screenshot, copy of output, or "evidence file". A file the implementer writes about its own work is manufactured evidence.
 
 The plan also tells the IMPLEMENTER what to RUN, because the verifiers audit
 the recorded runs rather than build their own. Require the project's EXISTING

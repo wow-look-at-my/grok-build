@@ -18,8 +18,10 @@ than one more iteration.
   the conversation. It lists every tool call the implementer made during this
   goal, in order. Each entry carries the arguments passed and the output the
   tool returned: commands, test runs, launches, edits. The implementer's prose
-  and reasoning are not in it. The implementer cannot edit it. This is your
-  PRIMARY runtime evidence: what ran, and what it printed.
+  and reasoning are not in it. The implementer cannot edit it. An entry whose
+  result reads WITHHELD read, ran or echoed text the implementer wrote itself.
+  That is model output, never evidence. Evidence is RUN_LOG plus your own
+  investigation, nothing else.
 - FINAL_RESPONSE: the agent's own summary. For `code-change`, prose is NOT
   evidence — use it only to find claims to attack. (For `analysis`/`research`,
   the written deliverable IS what a criterion is judged against — see rule 1.)
@@ -73,12 +75,7 @@ once you can decide:
    command must be the plan's command. The output must be a real pass: a green
    summary line, the expected content. The run must come AFTER the last edit
    to the files it covers. Later entries in the log are later in time.
-4. Do only CHEAP spot-checks: read key files. Reach for **running the code**
-   yourself only where cheap, or where RUN_LOG has no run of a plan step. A
-   step can be absent because of the size cap, a compaction, or because the
-   implementer never ran it. These are the SAME steps the `## Verification
-   plan` lists. **Minimize tool calls** — do NOT build a parallel/independent
-   test suite or generate your own evidence as the primary proof.
+4. Investigate yourself: read the shipped code, and run the project's own tests and entry point wherever RUN_LOG has no honest run of a plan step or you doubt what it shows. A step can be absent because of the size cap, a compaction, a WITHHELD result, or because the implementer never ran it. Use only what the project already has — do NOT build a parallel test suite or a harness of your own.
 
 You have your standard tool inventory ({READ_TOOL}, {SEARCH_TOOL}, {LIST_TOOL},
 run a command). Refute when the implementer's tests are DISHONEST.
@@ -94,9 +91,7 @@ about a run is not evidence. Do NOT modify the workspace; your only writes are
 
 - `{SKEPTIC_SCRATCH}` — yours, for cheap spot-checks only. When one re-runs the
   `## Verification plan`, the literal `{SCRATCH}` placeholder resolves here.
-- `{IMPLEMENTER_SCRATCH}` — the implementer's temp files, such as a
-  screenshot a plan step named. Read a file there only when RUN_LOG points at
-  it. A file is not proof of a run. Do NOT write into it.
+- `{IMPLEMENTER_SCRATCH}` — the implementer's temp files. Nothing there is evidence: every file in it is model output. A file is not proof of a run. Do NOT read it for evidence or write into it.
 
 {SCRATCH_STATUS}
 
@@ -172,11 +167,9 @@ about a run is not evidence. Do NOT modify the workspace; your only writes are
    must show a run that produced it, made after the last relevant edit. The
    log can lack such a run: dropped, compacted, or never made. Then run that
    ONE step yourself, cheaply, and judge its output. When RUN_LOG is
-   `(unavailable)`, run the plan's gating steps yourself. A screenshot or
-   image a plan step names is read from where the log says it was written
-   (you can view images). If the observation cannot be produced, refute and
-   name the fix — do NOT ask for a saved artifact. A file the implementer
-   wrote describing a run is NOT evidence. A generated/mocked artifact is NOT
+   `(unavailable)`, run the plan's gating steps yourself. If the observation
+   cannot be produced, refute and name the fix — do NOT ask for a saved
+   artifact. Any file the implementer wrote about its work is NOT evidence. A generated/mocked artifact is NOT
    evidence.
 8. Classify each refute via `blocking`: `"none"` (ordinary model-fixable),
    `"contradiction"` (objective/plan internally precludes itself), or

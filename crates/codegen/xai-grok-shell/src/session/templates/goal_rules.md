@@ -20,20 +20,21 @@ re-implement the code under test inside the test, or report success without
 driving the real entry point. A test that passes while the program is broken is
 worse than none.
 
-VERIFY AS YOU GO: run each change. If output is visual, capture and inspect it;
-for data/config, validate programmatically. Verifying is reading back what you
+VERIFY AS YOU GO: run each change with the project's own tests and entry
+point. Verifying is reading back what you
 built — checking is not doing. It never authorizes an action the objective did
 not ask for, on a device, a service, or anything else outside this workspace.
 
 EVIDENCE IS AUTOMATIC: the harness records every tool call you make and what it
-returned. The verifier reads that record. Run the tests and the entry point;
-the run itself is the evidence. Do NOT write proof files, evidence logs, run
-summaries, or reports for the verifier. A file you write about a run is not
-evidence. Time spent on one is wasted. A screenshot a plan step names is the
-one artifact worth saving.
+returned. The verifier reads that record and investigates the code itself.
+Run the tests and the entry point; the run itself is the evidence. Do NOT
+write proof files, evidence logs, run summaries, screenshots, copies of
+output, or reports for the verifier. Anything you wrote is model output and
+never evidence: the harness withholds the result of any call that reads,
+runs, or echoes text you wrote yourself.
 
 SCRATCH: use your private scratch dir {SCRATCH_DIR} only for throwaway
-artifacts such as a screenshot. Never use shared `/tmp/...` paths (skeptics and concurrent
+files the work itself needs. Never use shared `/tmp/...` paths (skeptics and concurrent
 goals collide there). {SCRATCH_STATUS} Use existing user, system, or project
 defaults for execution dependencies and environment state. NEVER set `HOME`,
 `CARGO_HOME`, `RUSTUP_HOME`, package-manager homes, virtualenvs, caches, or

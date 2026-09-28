@@ -17,7 +17,7 @@ Never write a check script, harness, probe, or shim of your own. The harness
 records every tool call you make and its output, and the verifier reads that
 record: a run IS the evidence. Do NOT write proof files, evidence logs, or run
 reports for the verifier. Use your scratch dir {scratch_dir} {scratch_status}
-only for throwaway artifacts such as a screenshot, never shared `/tmp/...`. Use existing user, system, or project
+only for throwaway files the work itself needs, never shared `/tmp/...`. Use existing user, system, or project
 defaults for execution dependencies and environment state. NEVER set `HOME`,
 `CARGO_HOME`, `RUSTUP_HOME`, package-manager homes, virtualenvs, caches, or
 config dirs to scratch, or persist references to scratch, which is deleted when

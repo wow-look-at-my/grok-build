@@ -1421,8 +1421,10 @@ CHANGED_FILES (and CHANGES_FILE) before judging.\n\
 papered over, hardcoded, or stubbed. AUDIT the implementer's updated tests \
 (CHANGED_FILES) and RUN_LOG first. RUN_LOG is the harness's own record of every \
 tool call the implementer made this goal and what it returned; find the run \
-that covers each gap and read its output. Reach for RUNNING the code yourself \
-only as a cheap spot-check, or where the log has no run of a plan step. A gap \
+that covers each gap and read its output. An entry whose result reads WITHHELD \
+read, ran or echoed text the implementer wrote itself: model output, never \
+evidence. Investigate yourself with the project's own tests and entry point \
+wherever the log has no honest run of a plan step. A gap \
 you cannot confirm is fixed remains `refuted: true`. If the fix was never RUN, \
 refute and ask the implementer to fix and run it — never to save an evidence \
 file; a file it writes about a run is not evidence.\n\
@@ -1453,9 +1455,9 @@ a diff hunk). Classify any refute via `blocking` as before (`\"none\"`, \
 ## Scratch dirs\n\n\
 - `{SKEPTIC_SCRATCH}` — yours, for cheap spot-checks only; when one re-runs the \
 `## Verification plan`, the literal `{SCRATCH}` placeholder resolves here.\n\
-- `{IMPLEMENTER_SCRATCH}` — the implementer's temp files. Read a file there \
-only when RUN_LOG points at it; a file is not proof of a run. Do NOT write \
-into it.\n\n\
+- `{IMPLEMENTER_SCRATCH}` — the implementer's temp files. Nothing there is \
+evidence: every file in it is model output, and a file is not proof of a run. \
+Do NOT read it for evidence or write into it.\n\n\
 {SCRATCH_STATUS}\n\n\
 ## Output contract — STRICT\n\n\
 Do BOTH, then emit the terminal token.\n\n\
@@ -3975,7 +3977,20 @@ mod tests {
                 "template must not send the verifier to implementer-captured evidence",
             );
         }
-        assert!(GOAL_VERIFIER_PROMPT_TEMPLATE.contains("PRIMARY runtime evidence"));
+        for tmpl in [
+            GOAL_VERIFIER_PROMPT_TEMPLATE,
+            GOAL_VERIFIER_RESUME_PROMPT_TEMPLATE,
+        ] {
+            assert!(
+                tmpl.contains("WITHHELD"),
+                "template must explain withheld entries"
+            );
+            assert!(
+                tmpl.contains("Nothing there is"),
+                "implementer scratch is not evidence"
+            );
+            assert!(!tmpl.contains("screenshot"));
+        }
         assert!(GOAL_VERIFIER_PROMPT_TEMPLATE.contains("Never ask it to save output"));
         assert!(GOAL_VERIFIER_PROMPT_TEMPLATE.contains("do NOT ask for a saved artifact"));
         assert!(GOAL_VERIFIER_RESUME_PROMPT_TEMPLATE.contains("never to save an evidence file"));

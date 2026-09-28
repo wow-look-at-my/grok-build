@@ -1641,16 +1641,14 @@ mod tests {
         assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("observations that MUST be"));
     }
 
-    /// The planner must instruct verification-plan output paths to use the
-    /// literal `{SCRATCH}` placeholder instead of hardcoded `/tmp/...`, so
-    /// the implementer and each skeptic write to distinct private dirs and
-    /// never race on a shared screenshot file.
+    /// A verification step never names a file to write.
     #[test]
-    fn planner_prompt_instructs_scratch_placeholder() {
-        assert!(
-            GOAL_PLANNER_PROMPT_TEMPLATE.contains("{SCRATCH}"),
-            "planner prompt must instruct the `{{SCRATCH}}` placeholder",
-        );
+    fn planner_prompt_never_asks_for_saved_output() {
+        let t = GOAL_PLANNER_PROMPT_TEMPLATE;
+        assert!(t.contains("a step NEVER names a file to write"));
+        assert!(t.contains("manufactured evidence"));
+        assert!(!t.contains("{SCRATCH}/"));
+        assert!(!t.contains("capture a"));
     }
 
     // ── RoleSpawnOverride + spawn-and-retry-once wrapper ─────
