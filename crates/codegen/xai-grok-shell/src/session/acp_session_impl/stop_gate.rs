@@ -209,7 +209,7 @@ impl SessionActor {
         tokio::task::spawn_blocking(move || {
             use xai_grok_tools::implementations::grok_build::ci;
             let branch = ci::current_branch(&cwd)?;
-            let runs = match ci::fetch_runs(&cwd, &branch, 10) {
+            let runs = match ci::fetch_runs(&cwd, &branch, 10, None) {
                 Ok(runs) => runs,
                 Err(error) => {
                     tracing::warn!(branch = %branch, %error, "stop gate: could not read CI, allowing the stop");
