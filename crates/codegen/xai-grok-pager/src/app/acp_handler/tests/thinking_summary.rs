@@ -124,7 +124,7 @@ fn stream_call(app: &mut AppView, session_id: &str, stream_start_ms: i64, thinki
 }
 
 #[test]
-fn a_summary_lands_under_the_collapsed_thinking_row() {
+fn a_summary_lands_on_the_collapsed_thinking_row() {
     let mut app = make_app_with_agent("sess-think-sum");
     {
         let agent = app.agents.get_mut(&AgentId(0)).unwrap();
@@ -149,17 +149,21 @@ fn a_summary_lands_under_the_collapsed_thinking_row() {
         &thinking_summary_notif("sess-think-sum", 1_000, summary, false),
         &mut app,
     );
-    assert!(changed, "a row that gained a line must report a screen change");
+    assert!(changed, "a row that gained a summary must report a screen change");
 
     let after = collapsed_thinking_rows(app.agents.get_mut(&AgentId(0)).unwrap());
     assert_eq!(after.len(), before.len(), "no row was added or removed");
+    let header = before[0].lines().next().expect("the row has a header");
+    let first = after[0].lines().next().expect("the row has a header");
     assert!(
-        after[0].contains(summary),
-        "the summary must render under the header: {after:?}"
+        first.starts_with(&format!("{header} - ")),
+        "the summary continues the header row: {after:?}"
     );
+    // Wrapping may break "off-by-one" at a hyphen, so compare without spaces.
+    let squash = |s: &str| s.split_whitespace().collect::<String>();
     assert!(
-        after[0].lines().count() > before[0].lines().count(),
-        "the summary is its own row under the header: {after:?}"
+        squash(&after[0]).contains(&squash(summary)),
+        "the whole summary is drawn: {after:?}"
     );
 }
 

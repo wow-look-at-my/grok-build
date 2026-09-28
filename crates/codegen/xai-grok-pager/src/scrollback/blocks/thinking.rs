@@ -86,7 +86,7 @@ pub struct ThinkingBlock {
     elapsed_time_ms: Option<i64>,
     /// When the thinking block started (local timestamp for live elapsed).
     started_at: Option<std::time::Instant>,
-    /// Short summary shown under the collapsed header.
+    /// Short summary shown after the collapsed header, on the same row.
     summary: Option<String>,
 }
 impl ThinkingBlock {
@@ -272,22 +272,48 @@ impl ThinkingBlock {
 
     /// Render the collapsed view: header line only, truncated to fit.
     fn render_collapsed(&self, ctx: &BlockContext) -> BlockOutput {
-        let line = self.header_line(ctx);
-        let line = append_expand_hint(line, ctx);
-        let line = crate::render::line_utils::truncate_line(line, ctx.content_width());
-        let mut lines = vec![BlockLine::separator(line)];
-        if ctx.mode == DisplayMode::Collapsed
-            && !ctx.is_running
-            && let Some(summary) = self.summary.as_deref()
-        {
-            let style = Theme::current().muted();
-            let width = ctx.content_width().max(1);
-            for row in textwrap::wrap(summary, width) {
-                lines.push(BlockLine::styled(Line::from(Span::styled(
-                    row.into_owned(),
-                    style,
-                ))));
+        let width = ctx.content_width().max(1);
+        let header = self.header_line(ctx);
+        let header_w: usize = header.spans.iter().map(|s| s.content.width()).sum();
+        let summary = self
+            .summary
+            .as_deref()
+            .filter(|_| ctx.mode == DisplayMode::Collapsed && !ctx.is_running);
+        // The summary continues the header row: "Thought for 3s - <summary>".
+        // Too narrow for the header plus " - x": header alone, no summary.
+        let Some(summary) = summary.filter(|_| header_w + 4 <= width) else {
+            let line = append_expand_hint(header, ctx);
+            let line = crate::render::line_utils::truncate_line(line, width);
+            return BlockOutput {
+                lines: vec![BlockLine::separator(line)],
+            };
+        };
+        let style = Theme::current().muted();
+        // The pad holds the header's columns so the first row wraps short.
+        let pad = " ".repeat(header_w + 1);
+        let options = textwrap::Options::new(width).initial_indent(&pad);
+        let text = format!("- {summary}");
+        let rows = textwrap::wrap(&text, options);
+        let mut lines = Vec::with_capacity(rows.len());
+        for (i, row) in rows.iter().enumerate() {
+            let mut line = if i == 0 {
+                let mut first = header.clone();
+                first
+                    .spans
+                    .push(Span::styled(row[header_w..].to_string(), style));
+                first
+            } else {
+                Line::from(Span::styled(row.to_string(), style))
+            };
+            if i + 1 == rows.len() {
+                line = append_expand_hint(line, ctx);
             }
+            let line = crate::render::line_utils::truncate_line(line, width);
+            lines.push(if i == 0 {
+                BlockLine::separator(line)
+            } else {
+                BlockLine::styled(line)
+            });
         }
         BlockOutput { lines }
     }
@@ -765,7 +791,7 @@ mod tests {
     }
 
     #[test]
-    fn a_collapsed_block_shows_its_summary_under_the_header() {
+    fn a_collapsed_block_shows_its_summary_on_the_header_row() {
         let text_of = |out: &BlockOutput| {
             out.lines
                 .iter()
@@ -782,13 +808,24 @@ mod tests {
         assert!(
             !block.set_summary("Reads the parser, then fixes the off-by-one in the lexer.".into())
         );
-        let rows = text_of(&block.output(&ctx(DisplayMode::Collapsed, 30)));
-        assert!(
-            rows.len() > 2,
-            "the summary wraps under the header: {rows:?}"
+        block.set_elapsed_time_ms(Some(3000));
+        let one_row = text_of(&block.output(&ctx(DisplayMode::Collapsed, 120)));
+        assert_eq!(
+            one_row,
+            vec!["Thought for 3.0s - Reads the parser, then fixes the off-by-one in the lexer."],
+            "the summary continues the header row"
         );
-        assert!(rows[1..].join(" ").contains("off-by-one in the lexer."));
+
+        let rows = text_of(&block.output(&ctx(DisplayMode::Collapsed, 30)));
+        assert!(rows.len() > 1, "a long summary wraps: {rows:?}");
+        assert!(rows[0].starts_with("Thought for 3.0s - Reads"), "{rows:?}");
+        // textwrap may break "off-by-one" at a hyphen, so compare without spaces.
+        let joined: String = rows.concat().split_whitespace().collect();
+        assert!(joined.contains("off-by-oneinthelexer."), "{rows:?}");
         assert!(rows.iter().all(|r| r.width() <= 30), "{rows:?}");
+
+        let narrow = text_of(&block.output(&ctx(DisplayMode::Collapsed, 16)));
+        assert_eq!(narrow.len(), 1, "no room for the summary: {narrow:?}");
 
         let expanded = text_of(&block.output(&ctx(DisplayMode::Expanded, 40)));
         assert!(
