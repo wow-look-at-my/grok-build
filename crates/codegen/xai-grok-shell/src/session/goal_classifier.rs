@@ -4015,7 +4015,10 @@ mod tests {
                 "implementer template must ban hand-rolled check scripts and harnesses",
             );
             for banned in ["temp scripts", "in-repo", "durable"] {
-                assert!(!tmpl.contains(banned), "implementer template still says {banned:?}");
+                assert!(
+                    !tmpl.contains(banned),
+                    "implementer template still says {banned:?}"
+                );
             }
         }
     }
@@ -4166,7 +4169,10 @@ mod tests {
                 "write real tests",
                 "durable",
             ] {
-                assert!(!tmpl.contains(banned), "verifier prompt still says {banned:?}");
+                assert!(
+                    !tmpl.contains(banned),
+                    "verifier prompt still says {banned:?}"
+                );
             }
         }
     }
