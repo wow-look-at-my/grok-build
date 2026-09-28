@@ -136,7 +136,14 @@ impl super::LspBackend for LspBackendAdapter {
     fn ensure_started_background(&self) {
         let lsp_manager = self.lsp_manager.clone();
         let startup = self.startup.clone();
-        tokio::spawn(async move {
+        // A warm-up needs a runtime to run on. `Drop` above already treats the
+        // absence of one as normal; a synchronous caller outside a runtime gets
+        // no warm-up and `ensure_ready` starts the servers on first use instead.
+        let Ok(handle) = tokio::runtime::Handle::try_current() else {
+            tracing::debug!("no tokio runtime: skipping the LSP startup warm-up");
+            return;
+        };
+        handle.spawn(async move {
             LspBackendAdapter::ensure_started_with_state(lsp_manager, startup).await;
         });
     }
@@ -558,5 +565,77 @@ fn workspace_symbol_to_info(ws: lsp_types::WorkspaceSymbol) -> SymbolInformation
         deprecated: None,
         location: loc,
         container_name: ws.container_name,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::implementations::lsp::LspBackend;
+
+    fn adapter(
+        servers: std::collections::BTreeMap<String, super::super::config::LspServerConfig>,
+    ) -> LspBackendAdapter {
+        let manager = LspManager::new(
+            servers,
+            std::env::temp_dir(),
+            true,
+            crate::notification::ToolNotificationHandle::noop(),
+        );
+        LspBackendAdapter::new(Arc::new(TokioMutex::new(manager)))
+    }
+
+    /// A configured server keeps the adapter out of the "nothing to do" shape
+    /// without any process being spawned: the fix under test decides whether the
+    /// bootstrap task is created at all.
+    fn adapter_with_one_configured_server() -> LspBackendAdapter {
+        adapter(std::collections::BTreeMap::from([(
+            "test-server".to_owned(),
+            super::super::config::LspServerConfig::default(),
+        )]))
+    }
+
+    /// `ensure_started_background` is a warm-up, so a caller with no runtime to
+    /// run it on loses the warm-up and nothing else. Spawning unconditionally
+    /// made every synchronous `WorkspaceHandle` construction panic the moment
+    /// the caller had any LSP server in `~/.grok/lsp.json`, which is a plain
+    /// test with no Tokio runtime and a machine-dependent one besides.
+    #[test]
+    fn ensure_started_background_without_a_runtime_skips_the_warmup() {
+        assert!(
+            tokio::runtime::Handle::try_current().is_err(),
+            "this test must have no runtime to cover the no-runtime path"
+        );
+        let adapter = adapter_with_one_configured_server();
+
+        adapter.ensure_started_background();
+
+        let state = adapter.startup.state.blocking_lock();
+        assert!(
+            matches!(&*state, StartupState::NotStarted),
+            "the warm-up must leave the state for `ensure_ready` to drive, \
+             not half-start it: {state:?}"
+        );
+    }
+
+    /// Inside a runtime the warm-up still runs, so this fix does not quietly
+    /// disable LSP startup on the path production takes. No server is
+    /// configured, so the bootstrap reaches a verdict without spawning one.
+    #[tokio::test]
+    async fn ensure_started_background_inside_a_runtime_leaves_starting_state() {
+        let adapter = adapter(std::collections::BTreeMap::new());
+
+        adapter.ensure_started_background();
+        for _ in 0..50 {
+            let started = !matches!(
+                &*adapter.startup.state.lock().await,
+                StartupState::NotStarted
+            );
+            if started {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        panic!("the warm-up never started inside a running tokio runtime");
     }
 }

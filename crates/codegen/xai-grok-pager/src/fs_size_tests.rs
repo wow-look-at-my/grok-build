@@ -99,6 +99,7 @@ fn a_root_off_the_anchor_is_measured_by_nobody() {
     let root = tmp.path().join("worktrees");
     let worktree = root.join("xai/wt-a");
     std::fs::create_dir_all(&worktree).unwrap();
+    std::fs::write(worktree.join(".git"), "gitdir: /repo/.git/worktrees/wt-a\n").unwrap();
     std::fs::write(worktree.join("payload.bin"), vec![b'x'; 65536]).unwrap();
     let elsewhere = Volume::of(tmp.path()).other_device_for_test();
 
@@ -149,5 +150,105 @@ fn volume_bytes_reports_a_real_volume() {
         capacity,
         block * widen(st.f_blocks).unwrap(),
         "statfs capacity must match statvfs blocks times the fundamental block size"
+    );
+}
+
+/// One bucket per checkout, at either depth the old location has been written
+/// in, and none for anything else under the root.
+#[test]
+fn buckets_open_for_a_checkout_at_either_depth_of_the_old_location() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = tmp.path().join("worktrees");
+    let checkout = |dir: &Path, bytes: usize| {
+        std::fs::create_dir_all(dir).unwrap();
+        std::fs::write(dir.join(".git"), "gitdir: /repo/.git/worktrees/one\n").unwrap();
+        std::fs::write(dir.join("payload.bin"), vec![b'x'; bytes]).unwrap();
+    };
+
+    // The shape an unforked grok build leaves: the checkout is the root's child.
+    let shallow = root.join("go-toolchain-dats-sandbox");
+    checkout(&shallow, 65536);
+    std::fs::create_dir_all(shallow.join("src/deep")).unwrap();
+    std::fs::write(shallow.join("src/deep/more.bin"), vec![b'y'; 8192]).unwrap();
+    // The fork's shape: a bucket per repository, a checkout per label.
+    let deep = root.join("repos-buildhost/2026-09-14-reclaim");
+    checkout(&deep, 8192);
+    // A bucket holding a plain directory -- a go build cache, on the real
+    // machine, at 208 MB. It is not a checkout and must not be a row.
+    let cache = root.join("repos-buildhost/2026-09-14-gocache");
+    std::fs::create_dir_all(cache.join("00")).unwrap();
+    std::fs::write(cache.join("00/blob"), vec![b'z'; 32768]).unwrap();
+
+    let sizes = physical_buckets(&root, Volume::of(&root));
+    let mut got: Vec<PathBuf> = sizes.buckets.keys().cloned().collect();
+    got.sort();
+    assert_eq!(
+        got,
+        vec![shallow.clone(), deep.clone()],
+        "one row per checkout, whatever depth it sits at"
+    );
+    assert_eq!(
+        sizes.buckets[&shallow].bytes(),
+        physical_dir_size(&shallow, Volume::of(&shallow))
+            .measure
+            .bytes(),
+        "a depth-1 checkout is sized by its whole tree, so its subdirectories \
+         are inside that row rather than rows of their own"
+    );
+    let not_checkouts = [
+        root.clone(),
+        cache.clone(),
+        cache.join("00"),
+        shallow.join("src"),
+        shallow.join("src/deep"),
+        root.join("repos-buildhost"),
+    ];
+    for not_a_checkout in &not_checkouts {
+        assert!(
+            !sizes.buckets.contains_key(not_a_checkout),
+            "{not_a_checkout:?} is not a checkout and must not be bucketed"
+        );
+    }
+    assert_eq!(
+        sizes.total.bytes(),
+        physical_dir_size(&root, Volume::of(&root)).measure.bytes(),
+        "bucketing must not lose or double-count a byte of the root"
+    );
+}
+
+/// A nested repository inside a checkout stays inside the row of the checkout
+/// that contains it.
+#[test]
+fn a_repository_nested_in_a_checkout_adds_no_row() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = tmp.path().join("worktrees");
+    let outer = root.join("my-checkout");
+    std::fs::create_dir_all(&outer).unwrap();
+    std::fs::write(
+        outer.join(".git"),
+        "gitdir: /repo/.git/worktrees/my-checkout\n",
+    )
+    .unwrap();
+    std::fs::write(outer.join("payload.bin"), vec![b'x'; 8192]).unwrap();
+    let nested = outer.join("vendor/lib");
+    std::fs::create_dir_all(&nested).unwrap();
+    std::fs::write(
+        nested.join(".git"),
+        "gitdir: /elsewhere/.git/worktrees/lib\n",
+    )
+    .unwrap();
+    std::fs::write(nested.join("code.bin"), vec![b'q'; 4096]).unwrap();
+
+    let sizes = physical_buckets(&root, Volume::of(&root));
+    assert_eq!(
+        sizes.buckets.keys().cloned().collect::<Vec<_>>(),
+        vec![outer.clone()],
+        "the nested repository is the outer checkout's byte, not a row beside it"
+    );
+    assert_eq!(
+        sizes.buckets[&outer].bytes(),
+        physical_dir_size(&outer, Volume::of(&outer))
+            .measure
+            .bytes()
     );
 }
