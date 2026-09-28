@@ -818,11 +818,14 @@ impl AgentBuilder {
             tool_config.tools.retain(|tc| tc.id != task_tool_id);
             task_stripped = true;
         } else {
-            let subagents = crate::discovery::all_subagents_with_plugins(
+            let mut subagents = crate::discovery::all_subagents_with_plugins(
                 &self.working_directory,
                 &self.subagent_toggle,
                 self.plugin_registry.as_deref(),
             );
+            if let Some(allowed) = &definition.allowed_subagent_types {
+                subagents.retain(|e| allowed.iter().any(|a| a.eq_ignore_ascii_case(&e.name)));
+            }
             if subagents.is_empty() {
                 tool_config.tools.retain(|tc| tc.id != task_tool_id);
                 task_stripped = true;
@@ -1007,6 +1010,9 @@ impl AgentBuilder {
             };
             definition.allowed_subagent_types = if !saw_directive && !definition.tools.is_empty() {
                 Some(vec![])
+            } else if types.is_empty() && !saw_directive {
+                // A built-in definition sets its own list. No `tools` entry overrides it.
+                definition.allowed_subagent_types.take()
             } else if types.is_empty() {
                 None
             } else {

@@ -152,6 +152,7 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - A mode change swaps the system prompt and the tool registry together. The shell never drops that swap. A swap that arrives while a turn runs waits in `ModeAgentState::pending` (`acp_session_impl/session_mode.rs`) and lands at turn end. A refused swap leaves the Explore prompt ("You have NO file editing tools") on a session the user already moved to Plan or Auto.
 - The shell owns the ring's base agent (`mode_agent_target`). A bare `plan`/`default`/`ask` that arrives while a ring identity is active restores the agent that ran before the ring. So a pager that lost its ring state cannot strand the session under Explore.
 - A read-only agent (`permission_mode: Plan`, which covers explore and plan) gets no injected `write` tool. Its prompt says it has no editing tools.
+- Explore carries the subagent tools, limited to `EXPLORE_SUBAGENT_TYPES` (`explore`, `plan`), so a child cannot write either. The limit rides `AgentDefinition::allowed_subagent_types`. The session writes it into a shared cell on every agent rebuild (`SharedAllowedSubagentTypes`). A value read once at spawn leaves a ring switch into explore unrestricted.
 
 ## `/goal` role-model notes
 
