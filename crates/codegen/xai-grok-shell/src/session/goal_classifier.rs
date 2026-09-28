@@ -1368,7 +1368,7 @@ Your PRIMARY mandate is to actively HUNT for real bugs, issues, and gaps in the 
 - Correctness — reason over the whole input space (valid, invalid, empty, boundary, large, concurrent, adversarial) for any input that makes the code produce a wrong result; one such input is a decisive refute — state the input and expected-vs-actual. Illustrative, not exhaustive: off-by-one, wrong operator, inverted condition, wrong variable/index, null/empty dereference, unhandled error path, overflow/precision/sign, bad early-return, race.\n\
 - Completeness — fully implement the requirement, not just the happy path. Refute when edge/error cases are silently dropped, a value is hardcoded that must be dynamic, a branch returns a placeholder, or only the demo case works.\n\
 - Real tests, not theater — judge each test by whether it would catch a deliberately-broken implementation; one that still passes against a wrong implementation (asserts only on mocks/constants, sets internal state instead of using the real entry point, or has no meaningful assertion) is theater — discount it (refute if it is the only evidence for a required behavior). Injecting a fake at an environment boundary (clock, RNG, network/file/output sink) so the unit's REAL logic runs deterministically is honest dependency injection, NOT theater. A green project suite is WEAK evidence, never proof. Refute hard on tests weakened, `#[ignore]`/skipped, commented out, or whose expected values were edited to match buggy output.\n\
-- End-to-end reality — build it and exercise each behavioral criterion through the REAL entry point and observed output, judging as the USER would; driving an internal flag or helper proves the mechanism exists, NOT that the wired-up feature works. A criterion whose code is present but whose integrated behavior is wrong, unreachable, or unusable is `refuted: true`, as is anything that fails to compile, fails its tests, or errors at runtime. EXCEPTION — behavior the harness cannot drive headlessly (a UI, a browser, a game loop, a long-running interactive session): the static/structural fallback is the accepted bar (the artifact is present AND the shipped unit-level functions — e.g. physics, collision, input mapping, state transitions — are exercised against the real path); this applies EVEN IF the plan did not spell the fallback out. The fallback still includes the cheap load check: a browser-loaded script must evaluate without error in a browser-like environment (`window` defined, NO Node globals) — an unguarded `module.exports`/`require` in a `<script src>` file crashes at load (blank page) and is a decisive, headlessly-provable defect. Likewise an ES-module/import-map page with no `file:` fallback message: double-clicked from disk it is a silent black screen (CORS blocks module imports), so it must either use plain scripts or visibly tell the user to serve it. Entry-point launch: whatever the deliverable (CLI, server, library, page), it must have been LAUNCHED once on its real entry path with the cheapest runtime the environment offers — run the command, boot the server and hit an endpoint, import the library fresh, or headless-load the page (zero page errors, plus the strong primary-observable bar below; module-resolution failures only surface on a real load). Find that launch in RUN_LOG (the harness's record of the implementer's calls and their output; a screenshot the step named is read from where the log wrote it) and refute when no launch was made even though the environment could launch it. Present is not correct: the launch gate must assert the deliverable's PRIMARY OBSERVABLE is CORRECT, not merely present or non-empty — a CLI's actual output content (not just that it ran), a server's response body (not just HTTP 200), a library call's real return value, or for a rendered page that the render surface's drawing dimensions equal the intended/target size (a renderer that cached a stale/default size paints a near-blank surface), that the surface is SUBSTANTIALLY filled (a high painted fraction or a painted bbox ≈ the whole surface, NOT a `> 0 pixels` check), and that a driven input produces the expected visible/state change. Launch evidence proving only \"exists / non-empty / exited 0\" is INSUFFICIENT — refute and request the stronger gate (the next-round gap). If the logged run instead shows the LAUNCHER failing for environmental reasons (browser cannot start in the sandbox, missing system dep), or the environment can launch but cannot reliably read back the primary observable (headless pixel/WebGL readback or input injection unavailable), that honest failure capture plus the static fallback IS the accepted bar — do not keep demanding a launch or readback the environment cannot perform; refute fabricated/synthetic launch evidence, not the honest fallback. (A failure the implementer RAN and the log recorded is the capture; it never has to save one.) \"Cannot read back\" means the readback mechanism is unavailable or errors, NOT a readback that succeeded and returned a blank or partial buffer — that buffer IS the deliverable's output and a defect to refute. A logged launch/run FAILURE (a page error, an empty or too-short render buffer, a \"canvas buffer empty\", a wrong/empty CLI output, an error response body, a nonzero exit) is a defect, NOT flakiness — do not wave it off or let one cherry-picked success supersede it. Re-run logged runs that DISAGREE across attempts to consensus on the CAUSE (not a pass/fail vote), and attribute EVERY failure by the cause test below. Route by CAUSE, not frequency: an ENVIRONMENT/launcher failure (the sandbox cannot run or observe it, whether every time or only intermittently) never forces a refute — take a good run if the log has one, else the honest fallback above; an APP failure (the launcher ran but the deliverable was wrong, blank, or errored) refutes even when only some runs show it — the non-determinism is itself the defect, never an unverifiable environment. Do NOT refute merely because an end-to-end outcome lacks test-only scaffolding, only when a gating criterion is missed or a real defect is present.\n\
+- End-to-end reality — build it and exercise each behavioral criterion through the REAL entry point and observed output, judging as the USER would; driving an internal flag or helper proves the mechanism exists, NOT that the wired-up feature works. A criterion whose code is present but whose integrated behavior is wrong, unreachable, or unusable is `refuted: true`, as is anything that fails to compile, fails its tests, or errors at runtime. EXCEPTION — behavior the harness cannot drive headlessly (a UI, a browser, a game loop, a long-running interactive session): the static/structural fallback is the accepted bar (the artifact is present AND the shipped unit-level functions — e.g. physics, collision, input mapping, state transitions — are covered by the project's existing test suite); this applies EVEN IF the plan did not spell the fallback out. Read the source for load defects: an unguarded `module.exports`/`require` in a `<script src>` file crashes at load (blank page), and an ES-module/import-map page with no `file:` fallback message is a silent black screen when double-clicked. Each is a decisive defect you can cite by `path:line`. Entry-point launch: when the deliverable has an entry point the environment can run, it must have been LAUNCHED once with the command a user would type — run the CLI, start the server and hit an endpoint, or run the project's own run/test script. Find that launch in RUN_LOG (the harness's record of the implementer's calls and their output) and refute when no launch was made even though the environment could launch it. Present is not correct: the launch output must show the PRIMARY OBSERVABLE is CORRECT — a CLI's actual output content (not just that it ran), a server's response body (not just HTTP 200). A logged launch FAILURE (a wrong/empty CLI output, an error response body, a nonzero exit) is an app defect, NOT flakiness. If the launch cannot run here for environmental reasons, the logged failure plus the static fallback IS the accepted bar. NO HAND-ROLLED HARNESSES: never request a check script, test harness, probe, shim, stub consumer, fake `window`, pixel counter, or one-off verification program, and never write one yourself; a hand-rolled harness the implementer wrote is not evidence. Do NOT refute merely because an end-to-end outcome lacks test-only scaffolding, only when a gating criterion is missed or a real defect is present.\n\
 - Code-correctness floor (applies EVEN under the End-to-end EXCEPTION above) — the static/structural fallback excuses the *runtime* proof, never a defect you can read in the source. Before accepting the fallback for ANY deliverable (domain-agnostic: CLI, service, library, data job, UI, game), READ the shipped code for the core behaviors the OBJECTIVE names or plainly implies — not only the ones the plan enumerated — and refute (cite `path:line`) when such a behavior is, in the code, absent, a no-op, dead, or wired to nothing: e.g. a handler/branch that never changes the state it exists to change, an input/event/endpoint/flag bound to no effect, a feature present only as a placeholder/stub return, or a primary flow with no reachable completion/terminal state the objective implies. This is a FLOOR for the objective's CORE purpose ONLY — do NOT extend it to polish, fidelity, extra scope, edge/error handling, or robustness the plan did not require (those remain false-refutes — never invent scope beyond the contract); the anti-ratchet rule still binds: the floor is fixed by the objective and does not rise between rounds.\n\
 - No regressions — run the pre-existing suite and inspect adjacent call sites and any changed signature / public API.\n\
 - No cheating — refute if the agent hardcoded the expected output, special-cased the test input, swallowed errors to suppress failures, deleted/disabled failing assertions, stubbed the hard part behind a TODO, or narrowed scope to dodge the requirement.\n\
@@ -1426,6 +1426,9 @@ only as a cheap spot-check, or where the log has no run of a plan step. A gap \
 you cannot confirm is fixed remains `refuted: true`. If the fix was never RUN, \
 refute and ask the implementer to fix and run it — never to save an evidence \
 file; a file it writes about a run is not evidence.\n\
+- NO HAND-ROLLED HARNESSES: never ask for a check script, test harness, probe, \
+shim, or one-off verification program, and never write one yourself. Judge the \
+shipped code by the project's own tests and entry point.\n\
 - Check for REGRESSIONS: the changes must not break a criterion that previously \
 held, an adjacent call site, or a passing test.\n\
 - PRIOR_GAPS — the gaps the previous round told the implementer to fix:\n\n\
@@ -4007,6 +4010,13 @@ mod tests {
                 tmpl.contains("proof files"),
                 "implementer template must tell the model not to write proof files",
             );
+            assert!(
+                tmpl.contains("check script") && tmpl.contains("harness"),
+                "implementer template must ban hand-rolled check scripts and harnesses",
+            );
+            for banned in ["temp scripts", "in-repo", "durable"] {
+                assert!(!tmpl.contains(banned), "implementer template still says {banned:?}");
+            }
         }
     }
 
@@ -4128,66 +4138,37 @@ mod tests {
         assert!(KIND_LENS_CODE_CHANGE.contains("does not rise between rounds"));
     }
 
-    /// A launch/run FAILURE must not be excused as flakiness or buried by a
-    /// cherry-picked pass — keeps the false-pass class from re-opening.
+    /// The launch output must show the primary observable is CORRECT.
     #[test]
-    fn verifier_prompt_pins_launch_failure_not_flakiness() {
-        assert!(KIND_LENS_CODE_CHANGE.contains("is a defect, NOT flakiness"));
-        assert!(KIND_LENS_CODE_CHANGE.contains("cherry-picked success supersede it"));
-        assert!(KIND_LENS_CODE_CHANGE.contains("DISAGREE across attempts"));
-        assert!(KIND_LENS_CODE_CHANGE.contains("consensus on the CAUSE"));
-        assert!(KIND_LENS_CODE_CHANGE.contains("attribute EVERY failure by the cause test"));
-        assert!(KIND_LENS_CODE_CHANGE.contains("a wrong/empty CLI output"));
-        assert!(KIND_LENS_CODE_CHANGE.contains("an error response body"));
+    fn verifier_prompt_pins_launch_gate() {
+        let lens = KIND_LENS_CODE_CHANGE;
+        assert!(lens.contains("PRIMARY OBSERVABLE is CORRECT"));
+        assert!(lens.contains("a server's response body (not just HTTP 200)"));
+        assert!(lens.contains("is an app defect, NOT flakiness"));
+        assert!(lens.contains("the logged failure plus the static fallback IS the accepted bar"));
     }
 
-    /// "Present / non-empty" is not proof the primary observable is CORRECT, and
-    /// the weak ">0 pixels"/"non-background" phrasings stay gone — keeps a
-    /// renders-but-wrong deliverable from re-passing.
+    /// Every verifier surface bans hand-rolled harnesses.
     #[test]
-    fn verifier_prompt_pins_present_is_not_correct() {
-        assert!(KIND_LENS_CODE_CHANGE.contains("PRIMARY OBSERVABLE is CORRECT"));
-        assert!(KIND_LENS_CODE_CHANGE.contains("not merely present or non-empty"));
-        assert!(KIND_LENS_CODE_CHANGE.contains("a server's response body (not just HTTP 200)"));
-        assert!(
-            KIND_LENS_CODE_CHANGE
-                .contains("a driven input produces the expected visible/state change")
-        );
-        assert!(
-            KIND_LENS_CODE_CHANGE.contains("drawing dimensions equal the intended/target size")
-        );
-        assert!(KIND_LENS_CODE_CHANGE.contains("SUBSTANTIALLY filled"));
-        assert!(KIND_LENS_CODE_CHANGE.contains("NOT a `> 0 pixels` check"));
-        assert!(!KIND_LENS_CODE_CHANGE.contains("non-background rendering"));
-        assert!(KIND_LENS_CODE_CHANGE.contains("plus the strong primary-observable bar below"));
-        assert!(KIND_LENS_CODE_CHANGE.contains("\"exists / non-empty / exited 0\""));
-        assert!(KIND_LENS_CODE_CHANGE.contains("is INSUFFICIENT"));
-        assert!(KIND_LENS_CODE_CHANGE.contains("request the stronger gate"));
-    }
-
-    /// The honest-fallback clause keeps a truly unrunnable/unobservable sandbox
-    /// converging while the cause router refutes app-side failures, and the
-    /// readback disambiguator stops a successful blank-buffer readback escaping
-    /// via the hatch — pinned so no half can silently drop.
-    #[test]
-    fn verifier_prompt_pins_environmental_fallback_bound_preserved() {
-        assert!(
-            KIND_LENS_CODE_CHANGE.contains(
-                "that honest failure capture plus the static fallback IS the accepted bar"
-            )
-        );
-        assert!(KIND_LENS_CODE_CHANGE.contains("Route by CAUSE, not frequency"));
-        assert!(KIND_LENS_CODE_CHANGE.contains("whether every time or only intermittently"));
-        assert!(KIND_LENS_CODE_CHANGE.contains("never forces a refute"));
-        assert!(KIND_LENS_CODE_CHANGE.contains("cannot run or observe it"));
-        assert!(KIND_LENS_CODE_CHANGE.contains("refutes even when only some runs show it"));
-        assert!(KIND_LENS_CODE_CHANGE.contains("never an unverifiable environment"));
-        assert!(KIND_LENS_CODE_CHANGE.contains("cannot reliably read back the primary observable"));
-        assert!(KIND_LENS_CODE_CHANGE.contains("readback mechanism is unavailable or errors"));
-        assert!(
-            KIND_LENS_CODE_CHANGE
-                .contains("that buffer IS the deliverable's output and a defect to refute")
-        );
+    fn verifier_prompts_ban_hand_rolled_harnesses() {
+        for tmpl in [
+            GOAL_VERIFIER_PROMPT_TEMPLATE,
+            GOAL_VERIFIER_RESUME_PROMPT_TEMPLATE,
+            KIND_LENS_CODE_CHANGE,
+        ] {
+            assert!(tmpl.contains("NO HAND-ROLLED HARNESSES"));
+            for banned in [
+                "import the library fresh",
+                "headless-load the page",
+                "SUBSTANTIALLY filled",
+                "request the stronger gate",
+                "MISSING or DISHONEST",
+                "write real tests",
+                "durable",
+            ] {
+                assert!(!tmpl.contains(banned), "verifier prompt still says {banned:?}");
+            }
+        }
     }
 
     #[test]

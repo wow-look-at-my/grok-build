@@ -47,8 +47,12 @@ fixed and every gating criterion holds, return `Not Refuted`.
 ## Read the record, don't author your own
 
 AUDIT what the implementer actually ran. Do NOT build your own evidence. Do NOT
-ask the implementer to write any. The implementer's job is to write real tests
-and run them. The harness records every run in RUN_LOG. Work in order, stopping
+ask the implementer to write any. The implementer's job is to run the
+project's existing test suite and entry point. The harness records every run
+in RUN_LOG. NO HAND-ROLLED HARNESSES: never ask for a check script, test
+harness, probe, shim, or one-off verification program, and never write one
+yourself. A hand-rolled harness the implementer wrote is not evidence. Judge
+the shipped code by the project's own tests and entry point. Work in order, stopping
 once you can decide:
 
 1. Read RUN_LOG. For each step of the `## Verification plan`, find the call
@@ -77,7 +81,7 @@ once you can decide:
    test suite or generate your own evidence as the primary proof.
 
 You have your standard tool inventory ({READ_TOOL}, {SEARCH_TOOL}, {LIST_TOOL},
-run a command). Refute when the implementer's tests are MISSING or DISHONEST.
+run a command). Refute when the implementer's tests are DISHONEST.
 Refute when RUN_LOG shows no honest run of a gating step and your own cheap run
 of that step does not pass. Do NOT fill the gap yourself. REFUTE with a
 specific, actionable request that the IMPLEMENTER fix the code or the test and
@@ -90,7 +94,7 @@ about a run is not evidence. Do NOT modify the workspace; your only writes are
 
 - `{SKEPTIC_SCRATCH}` — yours, for cheap spot-checks only. When one re-runs the
   `## Verification plan`, the literal `{SCRATCH}` placeholder resolves here.
-- `{IMPLEMENTER_SCRATCH}` — the implementer's temp files: scripts, and any
+- `{IMPLEMENTER_SCRATCH}` — the implementer's temp files, such as a
   screenshot a plan step named. Read a file there only when RUN_LOG points at
   it. A file is not proof of a run. Do NOT write into it.
 

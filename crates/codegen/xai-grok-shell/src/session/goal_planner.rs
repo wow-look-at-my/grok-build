@@ -1597,55 +1597,37 @@ mod tests {
         assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("## Visual / interactive objectives"));
         assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("input mapping"));
         assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("as `evidence`, never as `gating`"));
-        // Browser-load check: scripts must provably load without Node globals.
-        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("NO Node globals"));
-        // Launch check is gating for every runnable deliverable, with the
-        // headless page-load as the browser instance of the general rule.
+        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("unguarded `module.exports`"));
         assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("## Entry-point launch check"));
-        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("bare specifiers"));
-        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("Server/service"));
     }
 
-    /// The launch gate must prove the primary observable is CORRECT, not just
-    /// present — keeps a renders-but-wrong deliverable from passing planning.
+    /// The launch gate uses the command a user would type and must show the primary observable is CORRECT, not present.
     #[test]
     fn planner_prompt_requires_correct_primary_observable_launch_gate() {
-        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("PRIMARY OBSERVABLE is CORRECT"));
-        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("present and non-empty is INSUFFICIENT"));
-        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("output CONTENT, not just that it ran"));
-        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("the response BODY is sane"));
-        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("assert a real call's RETURN VALUE"));
-        assert!(
-            GOAL_PLANNER_PROMPT_TEMPLATE
-                .contains("drawing dimensions equal the intended/target size")
-        );
-        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("SUBSTANTIALLY filled"));
-        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("NOT a `> 0 pixels` check"));
-        assert!(
-            GOAL_PLANNER_PROMPT_TEMPLATE
-                .contains("a driven input produces the expected visible change")
-        );
+        let t = GOAL_PLANNER_PROMPT_TEMPLATE;
+        assert!(t.contains("PRIMARY OBSERVABLE is CORRECT"));
+        assert!(t.contains("present and\nnon-empty is INSUFFICIENT"));
+        assert!(t.contains("the command a user would type"));
+        assert!(t.contains("APP-side defect to FIX"));
     }
 
-    /// The launch gate must run more than once and route non-determinism by
-    /// cause — an app defect is fixed, a flaky/unobservable environment falls
-    /// back — so a correct app converges and the readback seam stays shut.
+    /// The planner must never plan a check that needs tooling the project does not already have.
     #[test]
-    fn planner_prompt_requires_repeated_consistent_launch() {
-        assert!(
-            GOAL_PLANNER_PROMPT_TEMPLATE.contains("MORE THAN ONCE and assert CONSISTENT success")
-        );
-        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("cherry-pick a success"));
-        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("APP-side defect to FIX"));
-        assert!(GOAL_PLANNER_PROMPT_TEMPLATE.contains("if the ENVIRONMENT is what's flaky"));
-        assert!(
-            GOAL_PLANNER_PROMPT_TEMPLATE
-                .contains("cannot reliably read back the primary observable")
-        );
-        assert!(
-            GOAL_PLANNER_PROMPT_TEMPLATE
-                .contains("is the app's output, not an unavailable readback")
-        );
+    fn planner_prompt_bans_hand_rolled_harnesses() {
+        let t = GOAL_PLANNER_PROMPT_TEMPLATE;
+        assert!(t.contains("NO HAND-ROLLED HARNESSES"));
+        assert!(t.contains("project's EXISTING\ntest suite"));
+        for banned in [
+            "fresh consumer",
+            "headlessly",
+            "painted fraction",
+            "MORE THAN ONCE",
+            "in-repo tests",
+            "durable",
+            "DOM\ndump",
+        ] {
+            assert!(!t.contains(banned), "planner prompt still says {banned:?}");
+        }
     }
 
     #[test]

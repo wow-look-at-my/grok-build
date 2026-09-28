@@ -11,7 +11,8 @@ Plan: {PLAN_PATH}
   test counts / "all fixed" / "verification re-run" / "superseding" notes there.
 - Before claiming completion, run the plan's `## Verification plan` yourself and
   confirm its observations hold. Checking is not doing: a step reads back what
-  you built, and never authorizes work the objective did not ask for. Commit
-  real tests that drive the shipped code in-repo, and RUN them. The harness
-  records each run for the verifier, so save no proof files. Fix any missing
-  observation before calling the goal complete.
+  you built, and never authorizes work the objective did not ask for. Use the
+  project's existing test runner and entry point, and RUN them. Write no check
+  script or harness of your own. The harness records each run for the verifier,
+  so save no proof files. Fix any missing observation before calling the goal
+  complete.
