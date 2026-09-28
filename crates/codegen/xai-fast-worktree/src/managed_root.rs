@@ -7,9 +7,10 @@
 //! nesting inside it.
 //!
 //! Checkouts grok created before that layout existed live under the user grok
-//! home, at `<grok home>/worktrees/<repo bucket>/<label>`. Both shapes are
-//! recognised, so a worktree at either location stays grok-managed; only new
-//! destinations changed.
+//! home, at `<grok home>/worktrees/<label>` or, one level down inside a
+//! per-repository bucket, `<grok home>/worktrees/<repo bucket>/<label>`. Both
+//! shapes are recognised, so a worktree at either location stays grok-managed;
+//! only new destinations changed.
 
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
@@ -66,6 +67,37 @@ pub fn main_root_for_managed_path(path: &Path) -> Option<PathBuf> {
         .and_then(|managed_root| managed_root.parent())
         .and_then(|dot_grok| dot_grok.parent())
         .map(Path::to_path_buf)
+}
+
+/// True when a directory's own name can name a checkout.
+///
+/// Hidden entries and the pool's claim markers sit beside checkouts without
+/// being ones, at either level of a managed root.
+pub fn is_worktree_entry_name(path: &Path) -> bool {
+    path.file_name().is_some_and(|name| {
+        let name = name.to_string_lossy();
+        !(name.starts_with('.')
+            || name.ends_with(".ready")
+            || name.ends_with(".claimed")
+            || name.ends_with(".claiming"))
+    })
+}
+
+/// True when `path` is itself a checkout.
+///
+/// The test is git's own: a checkout carries a `.git` entry -- a file when it is
+/// linked to another repository, a directory when it stands alone. Nothing about
+/// the path's depth decides it, because the checkouts under a managed root arrive
+/// in two shapes: the fork's per-repository bucket (`<root>/<repo>/<label>`) and
+/// the one an unforked build writes, with the checkout directly under the root
+/// (`<root>/<label>`). A directory *inside* a checkout has no `.git` of its own,
+/// so it is never mistaken for a second one.
+///
+/// A `.git` entry that merely dangles still counts: the linked repository may be
+/// gone while the checkout directory is very much present, and that is the case
+/// a reader has to see in order to report or reclaim it.
+pub fn is_worktree_dir(path: &Path) -> bool {
+    is_worktree_entry_name(path) && path.join(".git").symlink_metadata().is_ok()
 }
 
 /// The boundary of the managed layout that `path` sits in, if any.
@@ -224,5 +256,105 @@ mod tests {
             std::fs::read_to_string(&exclude).unwrap(),
             "*.swp\n.grok/worktrees/\n"
         );
+    }
+
+    fn checkout_at(path: &Path, linked_gitdir: Option<&str>) {
+        std::fs::create_dir_all(path).unwrap();
+        match linked_gitdir {
+            Some(gitdir) => {
+                std::fs::write(path.join(".git"), format!("gitdir: {gitdir}\n")).unwrap()
+            }
+            None => std::fs::create_dir_all(path.join(".git")).unwrap(),
+        }
+    }
+
+    /// The one test every reader of the old location asks, over both shapes that
+    /// location has ever had.
+    #[test]
+    fn a_directory_is_a_checkout_by_its_git_entry() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let home = temp.path();
+        let source = home.join("source-repo");
+
+        // The unforked shape: the checkout sits directly under the root.
+        let depth_one = home.join("worktrees/go-toolchain-dats-sandbox");
+        checkout_at(
+            &depth_one,
+            Some(&format!(
+                "{}/.git/worktrees/go-toolchain-dats-sandbox",
+                source.display()
+            )),
+        );
+        // The fork's shape: a bucket per repository, a checkout per label.
+        let bucket = home.join("worktrees/repos-buildhost");
+        let depth_two = bucket.join("2026-09-14-reclaim");
+        checkout_at(
+            &depth_two,
+            Some("/nowhere/.git/worktrees/2026-09-14-reclaim"),
+        );
+        // A pool entry, which is the bucket shape under the other root.
+        let pool = home.join("worktree_pool/inst-1/pool-a");
+        checkout_at(&pool, None);
+        // A leftover directory in a bucket that was never a checkout -- a go
+        // build cache, on the real machine, at 208 MB.
+        let cache = bucket.join("2026-09-14-gocache");
+        std::fs::create_dir_all(cache.join("00")).unwrap();
+        // Names that sit beside checkouts without being ones, each with the
+        // `.git` entry a shape-only reading would have accepted.
+        checkout_at(&bucket.join(".hidden-wt"), None);
+        checkout_at(&bucket.join("claim.ready"), None);
+        // Inside an accepted checkout: a subdirectory, and a nested repository
+        // (a submodule's checkout) with a `.git` of its own.
+        std::fs::create_dir_all(depth_one.join("src")).unwrap();
+        let nested = depth_one.join("vendor/lib");
+        checkout_at(&nested, Some("/elsewhere/.git/worktrees/lib"));
+
+        assert!(is_worktree_dir(&depth_one), "the depth-1 checkout is one");
+        assert!(is_worktree_dir(&depth_two), "the depth-2 checkout is one");
+        assert!(is_worktree_dir(&pool), "a pool entry is one");
+        assert!(
+            is_worktree_dir(&nested),
+            "a nested repository really is a checkout by this test -- it is the \
+             scan that must never ask below a checkout it already accepted"
+        );
+
+        assert!(!is_worktree_dir(&bucket), "a bucket is not a checkout");
+        assert!(
+            !is_worktree_dir(&cache),
+            "a plain directory in a bucket is not a checkout"
+        );
+        assert!(
+            !is_worktree_dir(&cache.join("00")),
+            "nor is anything inside it"
+        );
+        assert!(
+            !is_worktree_dir(&depth_one.join("src")),
+            "a directory inside a checkout is not a second checkout"
+        );
+        assert!(
+            !is_worktree_dir(&bucket.join(".hidden-wt")),
+            "a hidden name is skipped whatever it holds"
+        );
+        assert!(
+            !is_worktree_dir(&bucket.join("claim.ready")),
+            "a claim marker is skipped whatever it holds"
+        );
+        assert!(
+            !is_worktree_dir(home),
+            "the managed root itself is never a checkout"
+        );
+    }
+
+    #[test]
+    fn entry_names_separate_markers_from_labels() {
+        assert!(is_worktree_entry_name(Path::new("/r/wt/my-feature")));
+        assert!(is_worktree_entry_name(Path::new(
+            "/r/wt/2026-09-26-69e7b886"
+        )));
+        assert!(!is_worktree_entry_name(Path::new("/r/wt/.tmp_creating")));
+        assert!(!is_worktree_entry_name(Path::new("/r/wt/abc.ready")));
+        assert!(!is_worktree_entry_name(Path::new("/r/wt/abc.claimed")));
+        assert!(!is_worktree_entry_name(Path::new("/r/wt/abc.claiming")));
+        assert!(!is_worktree_entry_name(Path::new("")));
     }
 }

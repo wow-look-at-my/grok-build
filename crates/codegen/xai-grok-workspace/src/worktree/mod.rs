@@ -675,10 +675,18 @@ fn managed_worktrees_boundary(path: &Path) -> Option<std::path::PathBuf> {
 pub fn worktree_base_dir_for_source(source_path: &Path) -> Result<std::path::PathBuf> {
     let legacy_dir = legacy_worktrees_root();
     if let Ok(suffix) = source_path.strip_prefix(&legacy_dir) {
-        if let Some(component) = suffix.components().next() {
-            return Ok(legacy_dir.join(component));
+        let mut components = suffix.components();
+        match (components.next(), components.next()) {
+            // `<legacy>/<bucket>/<checkout>...`: the bucket is that repository's
+            // own managed root, so the new checkout joins it there.
+            (Some(bucket), Some(_)) => return Ok(legacy_dir.join(bucket)),
+            // `<legacy>/<checkout>`: the shape an unforked grok build left
+            // behind. The one component is the checkout's own name, so the
+            // siblings go directly under the legacy root rather than inside it.
+            (Some(_), None) => return Ok(legacy_dir),
+            // The legacy root itself.
+            (None, _) => return Ok(legacy_dir.join("repo")),
         }
-        return Ok(legacy_dir.join("repo"));
     }
     if let Some(managed_root) = xai_fast_worktree::enclosing_repo_worktrees_root(source_path) {
         return Ok(managed_root);
@@ -2584,8 +2592,8 @@ fn scan_worktree_dirs_on_disk(main_repo_root: &std::path::Path) -> Vec<String> {
     let mut paths: Vec<String> = entries
         .filter_map(|e| e.ok())
         .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
-        // Only include directories that look like git worktrees.
-        .filter(|e| e.path().join(".git").exists())
+        // The same test the scanner over the old location asks.
+        .filter(|e| xai_fast_worktree::is_worktree_dir(&e.path()))
         .filter_map(|e| {
             dunce::canonicalize(e.path())
                 .ok()
@@ -2844,11 +2852,24 @@ mod tests {
     fn worktree_db_fixture(
         temp: &tempfile::TempDir,
     ) -> (LockedTestEnv, std::path::PathBuf, std::path::PathBuf) {
+        worktree_db_fixture_under(temp, &["repo", "wt"])
+    }
+
+    /// [`worktree_db_fixture`] with the checkout's location under
+    /// `<home>/worktrees` chosen by the caller, so a resolver can be driven at
+    /// either depth the old managed location has been written at.
+    fn worktree_db_fixture_under(
+        temp: &tempfile::TempDir,
+        under_worktrees: &[&str],
+    ) -> (LockedTestEnv, std::path::PathBuf, std::path::PathBuf) {
         // Canonicalize so macOS /var -> /private/var agrees between the stored
         // record path and `db.get`'s canonicalized query path.
         let root = dunce::canonicalize(temp.path()).unwrap();
         let home = root.join("grok-home");
-        let wt = home.join("worktrees").join("repo").join("wt");
+        let mut wt = home.join("worktrees");
+        for component in under_worktrees {
+            wt = wt.join(component);
+        }
         std::fs::create_dir_all(&wt).unwrap();
         // Acquire the lock, then set the env under it (LockedTestEnv restores the
         // env before releasing the lock on drop).
@@ -2928,6 +2949,56 @@ mod tests {
             Some("my-label")
         );
         assert_eq!(lookup_worktree_label("/elsewhere"), None);
+    }
+
+    /// Every resolver that asks "is this cwd grok-managed?" walks up to the
+    /// managed boundary and consults the registry, so a checkout sitting
+    /// directly under the legacy root — the shape an unforked grok build left
+    /// behind — must resolve exactly like one inside a per-repository bucket.
+    #[test]
+    fn resolvers_answer_for_a_checkout_at_either_depth_of_the_old_location() {
+        for under in [
+            &["go-toolchain-dats-sandbox"][..],
+            &["repos-buildhost", "2026-09-14-reclaim"][..],
+        ] {
+            let temp = tempfile::TempDir::new().unwrap();
+            {
+                let (_env, home, wt) = worktree_db_fixture_under(&temp, under);
+                let nested = wt.join("src");
+                std::fs::create_dir_all(&nested).unwrap();
+
+                assert_eq!(
+                    lookup_worktree_label(&nested.to_string_lossy()).as_deref(),
+                    Some("my-label"),
+                    "label lookup over {under:?}"
+                );
+                assert_eq!(
+                    source_repo_for_cwd(&nested.to_string_lossy()).as_deref(),
+                    Some(Path::new("/repo")),
+                    "the trust collapse reads the same record over {under:?}"
+                );
+
+                touch_worktree_for_cwd(&nested.to_string_lossy());
+                let rec = WorktreeDb::open(&home)
+                    .unwrap()
+                    .get_by_id("wt")
+                    .unwrap()
+                    .unwrap();
+                assert!(
+                    rec.last_accessed_at.is_some(),
+                    "the gc liveness touch must resolve over {under:?}"
+                );
+
+                // A fork of a managed checkout lands in the root holding it, so
+                // it is a sibling of the checkout rather than a tree nested
+                // inside it.
+                assert_eq!(
+                    worktree_base_dir_for_source(&wt).unwrap(),
+                    wt.parent().unwrap(),
+                    "destination for {under:?}"
+                );
+            }
+        }
     }
 
     // ---- Repo-local worktree destinations --------------------------------

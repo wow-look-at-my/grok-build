@@ -62,7 +62,7 @@ pub use db::{
 };
 #[cfg(feature = "metadata")]
 pub use discovery::{
-    RebuildReport, WORKTREE_DEPTH, WORKTREE_POOL_DIR, discover_worktrees, managed_worktree_roots,
+    RebuildReport, WORKTREE_POOL_DIR, discover_worktrees, managed_worktree_roots,
     path_under_managed_worktree_roots, path_under_worktree_roots, rebuild_worktree_db,
 };
 pub use git::checkout::{
@@ -74,8 +74,8 @@ pub use git::{
 };
 pub use managed_root::{
     REPO_DOT_DIR, WORKTREES_DIR, WORKTREES_EXCLUDE_LINE, enclosing_repo_worktrees_root,
-    exclude_managed_worktrees_dir, is_repo_worktrees_root, main_root_for_managed_path,
-    managed_worktrees_boundary, repo_worktrees_root,
+    exclude_managed_worktrees_dir, is_repo_worktrees_root, is_worktree_dir, is_worktree_entry_name,
+    main_root_for_managed_path, managed_worktrees_boundary, repo_worktrees_root,
 };
 pub use sync::{SourceDirtyState, SyncReport, WorktreeSync, collect_source_dirty_state};
 #[cfg(target_os = "linux")]
