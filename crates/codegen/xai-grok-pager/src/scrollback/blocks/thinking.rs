@@ -819,7 +819,9 @@ mod tests {
         let rows = text_of(&block.output(&ctx(DisplayMode::Collapsed, 30)));
         assert!(rows.len() > 1, "a long summary wraps: {rows:?}");
         assert!(rows[0].starts_with("Thought for 3.0s - Reads"), "{rows:?}");
-        assert!(rows.join(" ").contains("off-by-one in the lexer."));
+        // textwrap may break "off-by-one" at a hyphen, so compare without spaces.
+        let joined: String = rows.concat().split_whitespace().collect();
+        assert!(joined.contains("off-by-oneinthelexer."), "{rows:?}");
         assert!(rows.iter().all(|r| r.width() <= 30), "{rows:?}");
 
         let narrow = text_of(&block.output(&ctx(DisplayMode::Collapsed, 16)));
