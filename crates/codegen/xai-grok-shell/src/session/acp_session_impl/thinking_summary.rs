@@ -40,11 +40,16 @@ impl SessionActor {
             }
         };
         let session_id = self.session_info.id.to_string();
+        // Thinking goes off where the catalog says the model allows it.
+        let reasoning_effort =
+            crate::agent::config::thinking_off_effort(&self.models_manager.models(), &setup.model);
         let request = ConversationRequest {
             items: vec![ConversationItem::user(
                 helpers::thinking_summary_instruction(&thinking),
             )],
             model: Some(setup.model.clone()),
+            reasoning_effort,
+            max_output_tokens: Some(helpers::THINKING_SUMMARY_MAX_OUTPUT_TOKENS),
             x_grok_conv_id: Some(format!("thinking-summary-{}", uuid::Uuid::new_v4())),
             x_grok_session_id: Some(session_id),
             x_grok_agent_id: Some(xai_grok_telemetry::id::agent_id()),
