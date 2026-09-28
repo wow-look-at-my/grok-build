@@ -209,6 +209,9 @@ fn render_fuzzy_item(
         let style = if is_match { match_style } else { normal_style };
 
         // Write the character.
+        // `byte_idx` is the current `char_indices` offset and the end adds this
+        // same character's byte length, so both ends align.
+        #[allow(clippy::string_slice)]
         let ch_str = &path[byte_idx..byte_idx + ch.len_utf8()];
         if let Some(cell) = buf.cell_mut((col, y)) {
             cell.set_symbol(ch_str);

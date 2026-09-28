@@ -4,7 +4,6 @@
 #![allow(clippy::cast_precision_loss)] // 65 hits predate the gate
 #![allow(clippy::cast_sign_loss)] // 84 hits predate the gate
 #![allow(clippy::expect_used)] // 134 hits predate the gate
-#![allow(clippy::string_slice)] // 94 hits predate the gate
 #![allow(clippy::unwrap_used)] // 60 hits predate the gate
 
 //! xai-grok-pager — Grok Build TUI.

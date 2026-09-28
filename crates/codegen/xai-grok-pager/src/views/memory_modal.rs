@@ -490,6 +490,8 @@ fn render_file_list(buf: &mut Buffer, area: Rect, state: &mut MemoryModalState, 
         );
     } else {
         let leading;
+        // The focused arm slices on a ratatui `visible_byte_range`, a boundary.
+        #[allow(clippy::string_slice)]
         let visible = if filter_focused {
             &state.query()[viewport.visible_byte_range.clone()]
         } else {
@@ -1113,6 +1115,7 @@ fn build_shortcuts(
 /// Truncate a string to fit within `max_width` display columns.
 /// Delegates to `render::line_utils::byte_offset_at_width` to avoid
 /// duplicating the Unicode-width scanning logic.
+#[allow(clippy::string_slice)] // `byte_offset_at_width` returns a `char_indices` offset
 fn truncate_to_width(s: &str, max_width: usize) -> &str {
     let offset = crate::render::line_utils::byte_offset_at_width(s, max_width);
     &s[..offset]

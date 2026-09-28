@@ -955,6 +955,9 @@ impl LocationPickerState {
     /// and the trailing segment is the prefix to match. `~` expands to
     /// home; relative parents join [`Self::base_cwd`]. The separator is `/`
     /// on all hosts and additionally `\` on Windows.
+    // Every slice here keys off `sep`, a `rfind` offset: a char boundary, and
+    // `sep + 1` sits past an ASCII separator.
+    #[allow(clippy::string_slice)]
     fn path_query_parts(&self) -> (PathBuf, String) {
         let q = self.picker.query();
         // Last path separator: `/` always; `\` additionally on Windows.

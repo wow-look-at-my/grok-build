@@ -738,6 +738,9 @@ pub fn chrome_height(
 ///
 /// A paragraph break is `\n\n`. If no break exists, the full text is the
 /// label and the description is empty.
+// `pos` is a `find` offset for the two-byte ASCII needle `"\n\n"`, so both
+// `pos` and `pos + 2` are char boundaries.
+#[allow(clippy::string_slice)]
 fn split_question_label_desc(text: &str) -> (&str, &str) {
     if let Some(pos) = text.find("\n\n") {
         (text[..pos].trim(), text[pos + 2..].trim())
@@ -1437,6 +1440,9 @@ fn collapsed_description_spans(
 }
 
 /// Word-wrap an overflowing label into chunks of at most `width` columns.
+// Every offset sliced on here is a `byte_offset_at_width` output, a `char_indices`
+// offset, or one past an ASCII `' '` that `rfind` matched: all char boundaries.
+#[allow(clippy::string_slice)]
 fn wrap_label_chunks(label: &str, width: usize) -> Vec<String> {
     let width = width.max(1);
     let mut out = Vec::new();
