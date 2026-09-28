@@ -4392,6 +4392,20 @@ pub(crate) fn effective_classifier_supports_re(
         .map(|e| e.info().supports_reasoning_effort)
         .unwrap_or(false)
 }
+/// The effort that turns thinking off for `model_id`. Only a model whose effort
+/// menu lists `none` qualifies: some models reject every explicit effort.
+pub(crate) fn thinking_off_effort(
+    models: &IndexMap<String, ModelEntry>,
+    model_id: &str,
+) -> Option<ReasoningEffort> {
+    let info = find_model_by_id(models, model_id)?.info();
+    let offers_off = info.supports_reasoning_effort
+        && info
+            .reasoning_efforts
+            .iter()
+            .any(|o| o.value == ReasoningEffort::None);
+    offers_off.then_some(ReasoningEffort::None)
+}
 /// JSON-only subset of `ModelEntryConfig`.
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
@@ -7568,6 +7582,35 @@ reasoning_effort = "low"
             &models
         ));
         assert!(!effective_classifier_supports_re(None, "missing", &models));
+    }
+    #[test]
+    fn thinking_off_only_where_the_menu_offers_none() {
+        let option = |value| ReasoningEffortOption {
+            id: format!("{value:?}"),
+            value,
+            label: format!("{value:?}"),
+            description: None,
+            default: false,
+        };
+        let mut can_off = test_model_entry("can-off", "https://x/v1", None, None, None);
+        can_off.info.supports_reasoning_effort = true;
+        can_off.info.reasoning_efforts =
+            vec![option(ReasoningEffort::None), option(ReasoningEffort::High)];
+        let mut effort_only = test_model_entry("effort-only", "https://x/v1", None, None, None);
+        effort_only.info.supports_reasoning_effort = true;
+        effort_only.info.reasoning_efforts = vec![option(ReasoningEffort::High)];
+        let plain = test_model_entry("plain", "https://x/v1", None, None, None);
+        let mut models = IndexMap::new();
+        models.insert("can-off".to_string(), can_off);
+        models.insert("effort-only".to_string(), effort_only);
+        models.insert("plain".to_string(), plain);
+        assert_eq!(
+            thinking_off_effort(&models, "can-off"),
+            Some(ReasoningEffort::None)
+        );
+        assert_eq!(thinking_off_effort(&models, "effort-only"), None);
+        assert_eq!(thinking_off_effort(&models, "plain"), None);
+        assert_eq!(thinking_off_effort(&models, "missing"), None);
     }
     #[test]
     fn sampling_config_uses_model_api_key_over_fallback() {
