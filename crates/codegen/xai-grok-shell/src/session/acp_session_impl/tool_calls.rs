@@ -2795,11 +2795,19 @@ pub(crate) fn ci_tool_title(
         CiAction::Logs => "logs",
         CiAction::Checks => "checks",
     };
+    let named_repo = ci
+        .repo
+        .as_deref()
+        .filter(|repo| !repo.is_empty())
+        .map(|repo| format!(" in {repo}"));
     match ci.branch.as_deref().filter(|branch| !branch.is_empty()) {
-        Some(branch) => format!("CI {action}: {branch}"),
+        Some(branch) => format!("CI {action}: {branch}{}", named_repo.unwrap_or_default()),
         // No branch named: the tool reads the checked-out one, which is what
         // the session is already showing.
-        None => format!("CI {action} (current branch)"),
+        None => format!(
+            "CI {action} (current branch){}",
+            named_repo.unwrap_or_default()
+        ),
     }
 }
 
@@ -2834,6 +2842,7 @@ mod ci_tool_title_tests {
         CiInput {
             action,
             branch: branch.map(str::to_string),
+            repo: None,
             run_id: None,
             limit: None,
             timeout_secs: None,
@@ -2865,6 +2874,22 @@ mod ci_tool_title_tests {
                 "CI status (current branch)"
             );
         }
+    }
+
+    #[test]
+    fn a_ci_call_about_another_repository_says_which() {
+        // A query that goes to a different repository must not read in the
+        // transcript as a query about the session's own branch.
+        let mut ask = input(CiAction::Status, Some("fix/darwin-version-stamp"));
+        ask.repo = Some("wow-look-at-my/go-toolchain".to_string());
+        assert_eq!(
+            ci_tool_title(&ask),
+            "CI status: fix/darwin-version-stamp in wow-look-at-my/go-toolchain"
+        );
+
+        let mut current = input(CiAction::Runs, None);
+        current.repo = Some("o/r".to_string());
+        assert_eq!(ci_tool_title(&current), "CI runs (current branch) in o/r");
     }
 }
 

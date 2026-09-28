@@ -64,6 +64,12 @@ pub struct CiInput {
 
     #[serde(default)]
     #[schemars(
+        description = "Repository to ask about, as `owner/name`. Defaults to the repository the session's working directory is a checkout of. Set it when the CI you need belongs to another repository."
+    )]
+    pub repo: Option<String>,
+
+    #[serde(default)]
+    #[schemars(
         description = "Run id for `logs`. Defaults to the newest failing run on the branch, which is the one to read after a red status."
     )]
     pub run_id: Option<String>,
@@ -119,8 +125,8 @@ impl xai_tool_runtime::ToolOutput for CiOutput {}
 
 /// The `gh` argv for a branch's run list, kept in one place so the tool and
 /// the stop gate ask the same question.
-pub fn run_list_args<'a>(branch: &'a str, limit: &'a str) -> Vec<&'a str> {
-    vec![
+pub fn run_list_args<'a>(branch: &'a str, limit: &'a str, repo: Option<&'a str>) -> Vec<&'a str> {
+    let mut args = vec![
         "run",
         "list",
         "--branch",
@@ -129,7 +135,98 @@ pub fn run_list_args<'a>(branch: &'a str, limit: &'a str) -> Vec<&'a str> {
         limit,
         "--json",
         ci_state::RUN_JSON_FIELDS,
-    ]
+    ];
+    push_repo(&mut args, repo);
+    args
+}
+
+/// Name the repository on the command line rather than letting `gh` discover it.
+///
+/// Discovery matches the remote's host against `GH_HOST`, so a session whose
+/// `GH_HOST` names another host gets "none of the git remotes ... correspond to
+/// GH_HOST" out of a repository that is sitting right there. A `--repo` value
+/// starting with `-` would be read back as a flag, which is why callers pass
+/// only tokens [`valid_repo_token`] accepted.
+fn push_repo<'a>(args: &mut Vec<&'a str>, repo: Option<&'a str>) {
+    if let Some(repo) = repo {
+        args.extend(["--repo", repo]);
+    }
+}
+
+/// The `owner/name` of the repository at `cwd`, read from its `origin` remote.
+///
+/// One local `git` call, so naming the repository costs no API request.
+pub fn remote_repo(cwd: &std::path::Path) -> Option<String> {
+    let output = std::process::Command::new("git")
+        .args(["remote", "get-url", "origin"])
+        .current_dir(cwd)
+        .stdin(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    repo_from_remote_url(String::from_utf8_lossy(&output.stdout).trim())
+}
+
+/// `owner/name` out of the remote forms git accepts: `https://host/o/r`,
+/// `ssh://git@host/o/r`, `git@host:o/r`, each with an optional trailing `.git`
+/// or `/`. `None` when what is left does not end in two usable segments.
+fn repo_from_remote_url(url: &str) -> Option<String> {
+    let url = url.trim().trim_end_matches('/');
+    let url = url.strip_suffix(".git").unwrap_or(url);
+    let url = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))
+        .or_else(|| url.strip_prefix("ssh://"))
+        .unwrap_or(url);
+    let url = url.strip_prefix("git@").unwrap_or(url);
+    // A scp-style remote separates host from path with a colon and a URL-style
+    // one with a slash; past either, the repository is the tail of the path.
+    let path = match url.split_once(['/', ':']) {
+        Some((_, path)) => path,
+        None => url,
+    };
+    let segments: Vec<&str> = path
+        .split('/')
+        .filter(|segment| !segment.is_empty())
+        .collect();
+    let owner = *segments.get(segments.len().checked_sub(2)?)?;
+    let name = *segments.last()?;
+    let repo = format!("{owner}/{name}");
+    valid_repo_token(&repo).then_some(repo)
+}
+
+/// Whether `token` is safe to hand to `gh` as a repository name: two
+/// non-empty segments of git-safe characters, no `/` inside either segment.
+fn valid_repo_token(token: &str) -> bool {
+    let Some((owner, name)) = token.split_once('/') else {
+        return false;
+    };
+    !owner.is_empty()
+        && !name.is_empty()
+        && !name.contains('/')
+        && !owner.starts_with('-')
+        && !name.starts_with('-')
+        && owner.len() <= 200
+        && name.len() <= 200
+        && token
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_' | b'/'))
+}
+
+/// The repository to query: the caller's, named by the git remote at `cwd`.
+///
+/// An explicitly requested name that is not a valid `owner/name` is refused
+/// rather than quietly replaced by the session's own repository.
+fn query_repo(cwd: &std::path::Path, requested: Option<&str>) -> Result<Option<String>, String> {
+    match requested {
+        Some(repo) if valid_repo_token(repo) => Ok(Some(repo.to_string())),
+        Some(repo) => Err(format!(
+            "`repo` must be `owner/name`; got {repo:?}. Name the repository as its git remote does, without a host or a scheme."
+        )),
+        None => Ok(remote_repo(cwd)),
+    }
 }
 
 /// Why a run list could not be read. A branch with no runs is not one of these: that is an empty `Ok`.
@@ -166,15 +263,21 @@ impl std::fmt::Display for CiQueryError {
 
 /// Read a branch's runs through whichever `gh` path this process can reach.
 ///
+/// `repo` must be a name [`valid_repo_token`] accepted, or `None` to ask the
+/// repository the git remote at `cwd` points at.
+///
 /// An empty `Ok` means the branch has no runs. Every failure to ask is an `Err` that says what `gh` said, so a dead token never reads as "nothing pushed".
 pub fn fetch_runs(
     cwd: &std::path::Path,
     branch: &str,
     limit: u32,
+    repo: Option<&str>,
 ) -> Result<Vec<ci_state::GhRun>, CiQueryError> {
     let limit = limit.clamp(1, MAX_RUN_LIMIT).to_string();
-    let response = xai_grok_sandbox::ci_host::run_gh(cwd, &run_list_args(branch, &limit))
-        .ok_or(CiQueryError::Unreachable)?;
+    let named = repo.map(str::to_string).or_else(|| remote_repo(cwd));
+    let response =
+        xai_grok_sandbox::ci_host::run_gh(cwd, &run_list_args(branch, &limit, named.as_deref()))
+            .ok_or(CiQueryError::Unreachable)?;
     if !response.success() {
         return Err(CiQueryError::Failed {
             code: response.code,
@@ -243,7 +346,10 @@ fn tail(text: &str, max: usize) -> (String, bool) {
 }
 
 /// The sentence a model reads off a state, phrased as what to do next.
-fn state_summary(state: CiStatus, branch: &str) -> String {
+///
+/// `repo` names the repository the query went to, so an empty answer says
+/// where it was empty rather than guessing what the repository has.
+fn state_summary(state: CiStatus, branch: &str, repo: Option<&str>) -> String {
     match state {
         CiStatus::Green => format!("CI is passing on {branch}."),
         CiStatus::Red => format!(
@@ -252,9 +358,14 @@ fn state_summary(state: CiStatus, branch: &str) -> String {
         CiStatus::Yellow => format!(
             "CI is still running on {branch}. Work on something else, or call `wait` to block until it settles."
         ),
-        CiStatus::Off => format!(
-            "No CI runs for {branch}. Nothing has been pushed yet, or this repository runs no workflows."
-        ),
+        CiStatus::Off => match repo {
+            Some(repo) => format!(
+                "No CI runs for {branch} in {repo}. Nothing has been pushed to that branch, or that branch does not exist there; pass `repo` to ask about another repository."
+            ),
+            None => format!(
+                "No CI runs for {branch}. This directory's git remote names no repository to ask, so nothing was queried. Pass `repo` as `owner/name`."
+            ),
+        },
     }
 }
 
@@ -348,11 +459,14 @@ fn run_blocking(
         }
     };
     let limit = input.limit.unwrap_or(DEFAULT_RUN_LIMIT);
+    let repo = query_repo(cwd, input.repo.as_deref())
+        .map_err(|reason| xai_tool_runtime::ToolError::custom("ci_bad_repo", reason))?;
+    let repo = repo.as_deref();
     match input.action {
-        CiAction::Status | CiAction::Runs => status_output(cwd, &branch, limit),
-        CiAction::Wait => wait_output(cwd, &branch, limit, input.timeout_secs),
-        CiAction::Logs => logs_output(cwd, &branch, input.run_id.as_deref()),
-        CiAction::Checks => Ok(checks_output(cwd, &branch)),
+        CiAction::Status | CiAction::Runs => status_output(cwd, &branch, limit, repo),
+        CiAction::Wait => wait_output(cwd, &branch, limit, repo, input.timeout_secs),
+        CiAction::Logs => logs_output(cwd, &branch, repo, input.run_id.as_deref()),
+        CiAction::Checks => Ok(checks_output(cwd, &branch, repo)),
     }
 }
 
@@ -370,8 +484,9 @@ fn status_output(
     cwd: &std::path::Path,
     branch: &str,
     limit: u32,
+    repo: Option<&str>,
 ) -> Result<CiOutput, xai_tool_runtime::ToolError> {
-    let runs = fetch_runs(cwd, branch, limit).map_err(query_error)?;
+    let runs = fetch_runs(cwd, branch, limit, repo).map_err(query_error)?;
     let state = ci_state::ci_from_runs(runs.iter().cloned().collect::<Vec<_>>());
     Ok(CiOutput {
         state: state.as_str().to_string(),
@@ -380,7 +495,7 @@ fn status_output(
         runs: summarize(&runs),
         text: None,
         truncated: false,
-        summary: state_summary(state, branch),
+        summary: state_summary(state, branch, repo),
     })
 }
 
@@ -392,6 +507,7 @@ fn wait_output(
     cwd: &std::path::Path,
     branch: &str,
     limit: u32,
+    repo: Option<&str>,
     timeout_secs: Option<u64>,
 ) -> Result<CiOutput, xai_tool_runtime::ToolError> {
     let budget = std::time::Duration::from_secs(
@@ -399,7 +515,7 @@ fn wait_output(
     );
     let deadline = std::time::Instant::now() + budget;
     loop {
-        let output = status_output(cwd, branch, limit)?;
+        let output = status_output(cwd, branch, limit, repo)?;
         if output.settled || std::time::Instant::now() >= deadline {
             if !output.settled {
                 return Ok(CiOutput {
@@ -419,9 +535,10 @@ fn wait_output(
 fn logs_output(
     cwd: &std::path::Path,
     branch: &str,
+    repo: Option<&str>,
     run_id: Option<&str>,
 ) -> Result<CiOutput, xai_tool_runtime::ToolError> {
-    let runs = fetch_runs(cwd, branch, DEFAULT_RUN_LIMIT).map_err(query_error)?;
+    let runs = fetch_runs(cwd, branch, DEFAULT_RUN_LIMIT, repo).map_err(query_error)?;
     let state = ci_state::ci_from_runs(runs.iter().cloned().collect::<Vec<_>>());
     let run_id = match run_id {
         Some(id) => id.to_string(),
@@ -438,7 +555,9 @@ fn logs_output(
             }
         },
     };
-    let response = xai_grok_sandbox::ci_host::run_gh(cwd, &["run", "view", &run_id, "--log-failed"])
+    let mut args = vec!["run", "view", run_id.as_str(), "--log-failed"];
+    push_repo(&mut args, repo);
+    let response = xai_grok_sandbox::ci_host::run_gh(cwd, &args)
         .ok_or_else(|| {
             xai_tool_runtime::ToolError::custom(
                 "ci_gh_unavailable",
@@ -465,16 +584,19 @@ fn logs_output(
     })
 }
 
-fn checks_output(cwd: &std::path::Path, branch: &str) -> CiOutput {
+fn checks_output(cwd: &std::path::Path, branch: &str, repo: Option<&str>) -> CiOutput {
     // `gh pr checks` exits non-zero when a check is failing, so its exit code
     // carries meaning and is not an error to report as one.
-    let response = xai_grok_sandbox::ci_host::run_gh(cwd, &["pr", "checks", branch])
-        .unwrap_or_else(|| xai_grok_sandbox::ci_host::GhHostResponse {
+    let mut args = vec!["pr", "checks", branch];
+    push_repo(&mut args, repo);
+    let response = xai_grok_sandbox::ci_host::run_gh(cwd, &args).unwrap_or_else(|| {
+        xai_grok_sandbox::ci_host::GhHostResponse {
             code: -1,
             stdout: String::new(),
             stderr: "could not reach `gh`".to_string(),
             truncated: false,
-        });
+        }
+    });
     let body = if response.stdout.trim().is_empty() {
         response.stderr.clone()
     } else {
@@ -532,13 +654,101 @@ mod tests {
 
     #[test]
     fn the_run_list_query_asks_for_every_field_the_parser_reads() {
-        let args = run_list_args("feat/x", "10");
+        let args = run_list_args("feat/x", "10", None);
         assert!(args.contains(&ci_state::RUN_JSON_FIELDS));
         assert!(args.contains(&"feat/x"));
         // The worker refuses anything outside its allowlist, so a query shape
         // this tool cannot send is a query it must not build.
         let owned: Vec<String> = args.iter().map(|arg| arg.to_string()).collect();
         assert!(xai_grok_sandbox::ci_host::gh_args_allowed(&owned));
+    }
+
+    /// A session whose `GH_HOST` names another host cannot let `gh` discover
+    /// the repository, so every query has to carry the name itself.
+    #[test]
+    fn every_query_names_the_repository_when_one_is_known() {
+        let list: Vec<String> = run_list_args("feat/x", "10", Some("o/r"))
+            .iter()
+            .map(|arg| arg.to_string())
+            .collect();
+        assert!(list.windows(2).any(|w| w == ["--repo", "o/r"]), "{list:?}");
+        let owned = xai_grok_sandbox::ci_host::gh_args_allowed(&list);
+        assert!(owned, "the worker must accept a named repository: {list:?}");
+
+        let logs: Vec<String> = {
+            let mut args = vec!["run", "view", "12345", "--log-failed"];
+            push_repo(&mut args, Some("o/r"));
+            args.iter().map(|arg| arg.to_string()).collect()
+        };
+        assert!(logs.windows(2).any(|w| w == ["--repo", "o/r"]));
+        assert!(xai_grok_sandbox::ci_host::gh_args_allowed(&logs));
+
+        let checks: Vec<String> = {
+            let mut args = vec!["pr", "checks", "feat/x"];
+            push_repo(&mut args, Some("o/r"));
+            args.iter().map(|arg| arg.to_string()).collect()
+        };
+        assert!(checks.windows(2).any(|w| w == ["--repo", "o/r"]));
+        assert!(xai_grok_sandbox::ci_host::gh_args_allowed(&checks));
+
+        // With no repository to name, the query is the one `gh` answered
+        // before this existed: discovery from the cwd it is run in.
+        let unnamed: Vec<String> = run_list_args("feat/x", "10", None)
+            .iter()
+            .map(|arg| arg.to_string())
+            .collect();
+        assert!(!unnamed.iter().any(|arg| arg == "--repo"));
+    }
+
+    /// The name comes from the remote, in every form git accepts one.
+    #[test]
+    fn the_repository_name_comes_out_of_the_git_remote() {
+        for url in [
+            "git@github.com:wow-look-at-my/go-toolchain.git",
+            "https://github.com/wow-look-at-my/go-toolchain.git",
+            "https://github.com/wow-look-at-my/go-toolchain",
+            "http://github.com/wow-look-at-my/go-toolchain/",
+            "ssh://git@github.com/wow-look-at-my/go-toolchain.git",
+            "ssh://git@github.com:22/wow-look-at-my/go-toolchain.git",
+        ] {
+            assert_eq!(
+                repo_from_remote_url(url).as_deref(),
+                Some("wow-look-at-my/go-toolchain"),
+                "{url}"
+            );
+        }
+        // Nothing to name: no path at all, or a path with no repository in it.
+        for url in ["", "git@github.com:", "https://github.com/"] {
+            assert_eq!(repo_from_remote_url(url), None, "{url}");
+        }
+    }
+
+    /// A `repo` the model passes is either a repository name or a rejected
+    /// request; a half-name must never turn into a query of some other repo.
+    #[test]
+    fn a_repository_token_is_checked_before_it_reaches_gh() {
+        for good in ["o/r", "Wow-Look.at/my_repo", "a/b"] {
+            assert!(valid_repo_token(good), "{good}");
+        }
+        for bad in [
+            "",
+            "r",
+            "o/",
+            "/r",
+            "o/r/s",
+            "o r/x",
+            "-o/r",
+            "o/r --hostname evil",
+            "ohy\u{e9}/r",
+        ] {
+            assert!(!valid_repo_token(bad), "{bad} must be refused");
+        }
+        // A refused name is an error naming the problem, not a silent fallback.
+        let refused = query_repo(std::path::Path::new("/nonexistent"), Some("not a repo"));
+        match refused {
+            Err(reason) => assert!(reason.contains("owner/name"), "{reason}"),
+            Ok(repo) => panic!("an invalid repo must not resolve to {repo:?}"),
+        }
     }
 
     #[test]
@@ -583,13 +793,29 @@ mod tests {
 
     #[test]
     fn every_state_tells_the_caller_what_to_do_next() {
-        assert!(state_summary(CiStatus::Red, "feat/x").contains("logs"));
-        assert!(state_summary(CiStatus::Yellow, "feat/x").contains("wait"));
-        assert!(state_summary(CiStatus::Green, "feat/x").contains("passing"));
+        assert!(state_summary(CiStatus::Red, "feat/x", None).contains("logs"));
+        assert!(state_summary(CiStatus::Yellow, "feat/x", None).contains("wait"));
+        assert!(state_summary(CiStatus::Green, "feat/x", None).contains("passing"));
         // "No runs" must never read as "passing": nothing has been pushed.
-        let none = state_summary(CiStatus::Off, "feat/x");
-        assert!(none.contains("No CI runs"));
-        assert!(!none.contains("passing"));
+        let none = state_summary(CiStatus::Off, "feat/x", Some("o/r"));
+        assert!(none.contains("No CI runs"), "{none}");
+        assert!(!none.contains("passing"), "{none}");
+    }
+
+    /// An empty answer has to say which repository it came out of. A branch
+    /// that lives elsewhere is empty here for exactly the same reason an
+    /// unpushed branch is, and the reader cannot tell the two apart without
+    /// being told where was asked.
+    #[test]
+    fn an_empty_answer_names_the_repository_it_asked() {
+        let asked = state_summary(CiStatus::Off, "feat/x", Some("o/r"));
+        assert!(asked.contains("o/r"), "{asked}");
+        assert!(
+            asked.contains("does not exist"),
+            "a branch from another repository must not read as an unpushed one: {asked}"
+        );
+        let unasked = state_summary(CiStatus::Off, "feat/x", None);
+        assert!(unasked.contains("no repository"), "{unasked}");
     }
 
     #[test]
