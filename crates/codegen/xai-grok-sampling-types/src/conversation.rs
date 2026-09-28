@@ -33,18 +33,14 @@ use std::sync::Arc;
 
 const STRUCTURED_OUTPUT_SCHEMA_NAME: &str = "structured_output";
 
-/// Truncate to at most `max_bytes`, walking back to a char boundary. Plain
+/// Truncate to at most `max_bytes`, never splitting a character. Plain
 /// `&s[..n]` panics when `n` lands inside a multi-byte character, which
-/// tool-call arguments routinely contain. `pub` for `xai-grok-shell`.
+/// tool-call arguments routinely contain.
+///
+/// The boundary math lives in `xai_grok_tools::util::truncate`; this crate
+/// depends on that one, so the two cannot drift. `pub` for `xai-grok-shell`.
 pub fn truncate_bytes(s: &str, max_bytes: usize) -> &str {
-    if s.len() <= max_bytes {
-        return s;
-    }
-    let mut end = max_bytes;
-    while !s.is_char_boundary(end) {
-        end -= 1;
-    }
-    &s[..end]
+    xai_grok_tools::util::truncate::truncate_bytes(s, max_bytes)
 }
 
 /// A provider that validates `function.arguments` rejects the whole request,
@@ -646,7 +642,13 @@ fn insert_dotted(
             if !entry.is_object() {
                 *entry = serde_json::Value::Object(serde_json::Map::new());
             }
-            let nested = entry.as_object_mut().expect("just made an object");
+            let Some(nested) = entry.as_object_mut() else {
+                tracing::error!(
+                    key = head,
+                    "extra_body segment holds a value that is not an object; dropping the path"
+                );
+                return;
+            };
             insert_dotted(nested, rest, value);
         }
         _ => {
@@ -654,9 +656,19 @@ fn insert_dotted(
                 // Two objects merge rather than replace, so setting one
                 // `options` key keeps the ones the builder wrote.
                 (Some(existing @ serde_json::Value::Object(_)), serde_json::Value::Object(_)) => {
-                    let existing = existing.as_object_mut().expect("checked");
+                    let Some(existing) = existing.as_object_mut() else {
+                        tracing::error!(
+                            key,
+                            "extra_body merge refused: the value at this key is not an object"
+                        );
+                        return;
+                    };
                     let serde_json::Value::Object(incoming) = value else {
-                        unreachable!("checked")
+                        tracing::error!(
+                            key,
+                            "extra_body merge refused: the incoming value is not an object"
+                        );
+                        return;
                     };
                     for (k, v) in incoming {
                         insert_dotted(existing, &k, v);
