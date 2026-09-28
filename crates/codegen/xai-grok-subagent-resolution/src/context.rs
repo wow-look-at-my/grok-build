@@ -183,6 +183,22 @@ fn strip_fork_noise(text: &str) -> String {
     result
 }
 
+/// `text[at..]` for the tag surgery in this module.
+///
+/// Every index handed here is the offset at which a literal was found by
+/// `find`, or such an offset plus that literal's byte length. A matched literal
+/// occupies whole characters, so both forms land on a char boundary.
+#[allow(clippy::string_slice)] // matched-literal offsets
+fn matched_tail(text: &str, at: usize) -> &str {
+    &text[at..]
+}
+
+/// `text[..to]` for the same surgery, same proof as [`matched_tail`].
+#[allow(clippy::string_slice)] // matched-literal offsets
+fn matched_head(text: &str, to: usize) -> &str {
+    &text[..to]
+}
+
 /// Remove all occurrences of `<tag...>...</tag>` from the input string.
 /// Handles tags with attributes (e.g., `<tag attr="val">`).
 /// Unclosed tags are left untouched -- stripping to end-of-string would
@@ -201,17 +217,17 @@ fn strip_xml_block<'a>(text: &'a str, tag: &str) -> Cow<'a, str> {
     let mut remaining = text;
 
     while let Some(open_start) = remaining.find(&open_prefix) {
-        let after_name = &remaining[open_start + open_prefix.len()..];
-        let is_tag = after_name.starts_with(|c: char| c == '>' || c.is_ascii_whitespace());
+        let after_open = matched_tail(remaining, open_start + open_prefix.len());
+        let is_tag = after_open.starts_with(|c: char| c == '>' || c.is_ascii_whitespace());
         if !is_tag {
-            result.push_str(&remaining[..open_start + open_prefix.len()]);
-            remaining = &remaining[open_start + open_prefix.len()..];
+            result.push_str(matched_head(remaining, open_start + open_prefix.len()));
+            remaining = after_open;
             continue;
         }
 
-        if let Some(close_rel) = remaining[open_start..].find(&close_tag) {
-            result.push_str(&remaining[..open_start]);
-            remaining = &remaining[open_start + close_rel + close_tag.len()..];
+        if let Some(close_rel) = matched_tail(remaining, open_start).find(&close_tag) {
+            result.push_str(matched_head(remaining, open_start));
+            remaining = matched_tail(remaining, open_start + close_rel + close_tag.len());
         } else {
             tracing::warn!(
                 tag,
@@ -239,14 +255,14 @@ fn strip_skill_instructions<'a>(text: &'a str) -> Cow<'a, str> {
     };
     let after_marker = marker_pos + marker.len();
 
-    let end_pos = text[after_marker..]
+    let end_pos = matched_tail(text, after_marker)
         .find("</user_query>")
         .map(|p| after_marker + p)
         .unwrap_or(text.len());
 
     let mut result = String::with_capacity(text.len());
-    result.push_str(&text[..after_marker]);
-    result.push_str(&text[end_pos..]);
+    result.push_str(matched_head(text, after_marker));
+    result.push_str(matched_tail(text, end_pos));
     Cow::Owned(result)
 }
 
@@ -371,6 +387,7 @@ fn render_summary(out: &mut String, items: &[&ConversationItem]) {
 /// ensuring correct behavior with multi-byte UTF-8 content (e.g. emoji,
 /// CJK characters). Returns the full string if it has `max_chars` or
 /// fewer characters.
+#[allow(clippy::string_slice)] // `char_indices().nth` yields a char boundary
 fn truncate_str(s: &str, max_chars: usize) -> &str {
     match s.char_indices().nth(max_chars) {
         Some((byte_offset, _)) => &s[..byte_offset],
@@ -866,6 +883,31 @@ mod tests {
         let input = "keep <system-reminder-extra>this</system-reminder-extra>";
         let result = strip_xml_block(input, "system-reminder");
         assert_eq!(result, input);
+    }
+
+    /// The strip advances byte offsets through text that carries multi-byte
+    /// characters, so the kept head and the resumed tail must stay whole.
+    #[test]
+    fn strip_xml_block_keeps_multibyte_text_around_the_block() {
+        let input = "日本語 <system-reminder>noise</system-reminder> 🚀 kept";
+        let result = strip_xml_block(input, "system-reminder");
+        assert_eq!(result, "日本語  🚀 kept");
+    }
+
+    /// An unclosed tag after multi-byte text is left untouched, including the
+    /// text before the open tag.
+    #[test]
+    fn strip_xml_block_with_multibyte_before_an_unclosed_tag_is_untouched() {
+        let input = "café <system-reminder>unclosed - content 日本";
+        let result = strip_xml_block(input, "system-reminder");
+        assert_eq!(result, input);
+    }
+
+    #[test]
+    fn strip_skill_instructions_counts_multibyte_bytes() {
+        let input = "日本 </command-args> body 🚀 </user_query> tail";
+        let result = strip_skill_instructions(input);
+        assert_eq!(result, "日本 </command-args></user_query> tail");
     }
 
     // --- strip_skill_instructions tests ---

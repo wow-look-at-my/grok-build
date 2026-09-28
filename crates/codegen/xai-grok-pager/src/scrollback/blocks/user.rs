@@ -57,23 +57,23 @@ fn token_styled_line(
         if start >= end {
             continue;
         }
+        // `start`/`end` are match-range edges clamped to this line's own edges,
+        // so each is a char boundary of the block text; subtracting `line_start`
+        // re-bases it onto `line_text`, whose start is that same boundary.
         if start > pos {
-            spans.push(Span::styled(
-                line_text[pos - line_start..start - line_start].to_string(),
-                body_style,
-            ));
+            #[allow(clippy::string_slice)] // boundary edges clamped above, re-based on line_start
+            let plain = &line_text[pos - line_start..start - line_start];
+            spans.push(Span::styled(plain.to_string(), body_style));
         }
-        spans.push(Span::styled(
-            line_text[start - line_start..end - line_start].to_string(),
-            token_style,
-        ));
+        #[allow(clippy::string_slice)] // boundary edges clamped above, re-based on line_start
+        let token = &line_text[start - line_start..end - line_start];
+        spans.push(Span::styled(token.to_string(), token_style));
         pos = end;
     }
     if pos < line_end {
-        spans.push(Span::styled(
-            line_text[pos - line_start..].to_string(),
-            body_style,
-        ));
+        #[allow(clippy::string_slice)] // pos is line_start or a clamped range edge
+        let tail = &line_text[pos - line_start..];
+        spans.push(Span::styled(tail.to_string(), body_style));
     }
     Line::from(spans)
 }

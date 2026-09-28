@@ -105,7 +105,11 @@ impl PatternEditState {
     }
 
     pub fn backspace(&mut self) {
-        if let Some(ch) = self.buffer[..self.cursor].chars().next_back() {
+        // `cursor` is only ever set to `buffer.len()`, 0, or moved by a char's
+        // `len_utf8` in this impl, so it names a char boundary.
+        #[allow(clippy::string_slice)] // cursor maintained at char boundaries by this impl
+        let before = &self.buffer[..self.cursor];
+        if let Some(ch) = before.chars().next_back() {
             self.cursor -= ch.len_utf8();
             self.buffer.remove(self.cursor);
             self.dirty = true;
@@ -120,13 +124,17 @@ impl PatternEditState {
     }
 
     pub fn move_left(&mut self) {
-        if let Some(ch) = self.buffer[..self.cursor].chars().next_back() {
+        #[allow(clippy::string_slice)] // cursor maintained at char boundaries by this impl
+        let before = &self.buffer[..self.cursor];
+        if let Some(ch) = before.chars().next_back() {
             self.cursor -= ch.len_utf8();
         }
     }
 
     pub fn move_right(&mut self) {
-        if let Some(ch) = self.buffer[self.cursor..].chars().next() {
+        #[allow(clippy::string_slice)] // cursor maintained at char boundaries by this impl
+        let after = &self.buffer[self.cursor..];
+        if let Some(ch) = after.chars().next() {
             self.cursor += ch.len_utf8();
         }
     }
@@ -977,7 +985,9 @@ fn render_pattern_editor_line(
     }
 
     let chars: Vec<char> = edit.buffer.chars().collect();
-    let cursor_idx = edit.buffer[..edit.cursor].chars().count();
+    #[allow(clippy::string_slice)] // EditBuffer::cursor is kept on char boundaries
+    let before_cursor = &edit.buffer[..edit.cursor];
+    let cursor_idx = before_cursor.chars().count();
     // Reserve one column for the caret so an end-of-line cursor is visible.
     let start = (cursor_idx + 1).saturating_sub(window);
 

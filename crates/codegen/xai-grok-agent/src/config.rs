@@ -1756,6 +1756,32 @@ impl AgentDefinition {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The registry is read on every preset resolution, so what the lock does
+    /// after a caller panicked while holding it decides whether one bad
+    /// registration ends preset resolution for the rest of the process.
+    #[test]
+    fn a_poisoned_preset_registry_still_answers() {
+        let poisoner = std::thread::spawn(|| {
+            let _held = toolset_preset_registry().lock();
+            panic!("panic while the preset registry is held");
+        });
+        assert!(
+            poisoner.join().is_err(),
+            "the poisoner must die while holding the registry"
+        );
+
+        assert!(
+            registered_toolset_preset("a-name-nobody-registered").is_none(),
+            "a lookup after the poison must answer, not panic"
+        );
+        let names = registered_public_toolset_preset_names();
+        assert!(
+            !names.iter().any(|n| n == "a-name-nobody-registered"),
+            "enumeration must read the same map the lookup did"
+        );
+    }
+
     /// Native presets only.
     #[test]
     fn toolset_for_preset_resolves_known_names() {

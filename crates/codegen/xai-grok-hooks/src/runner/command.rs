@@ -869,7 +869,7 @@ mod tests {
         // A multi-byte character cut by the limit loses its tail and keeps its
         // head, rather than the whole buffer becoming undecodable.
         let mut large = vec![b'a'; MAX_OUTPUT_BYTES - 1];
-        large.extend("énd".as_bytes());
+        large.extend("\u{e9}nd".as_bytes());
         let cut = truncate_output(&large);
         assert!(cut.ends_with(" [truncated]"), "got {cut:?}");
         assert!(

@@ -157,6 +157,9 @@ pub fn shorten_path(path: &str, budget: usize) -> String {
             continue;
         }
         if path.as_bytes().get(i.wrapping_sub(1)) == Some(&b'/') {
+            // `i` is a `char_indices` offset and the byte before it is the
+            // ASCII `/` just checked, so `i - 1` is itself a char boundary.
+            #[allow(clippy::string_slice)] // char_indices offset stepped back over an ASCII '/'
             let candidate = format!("\u{2026}{}", &path[i - 1..]);
             if candidate.width() <= budget {
                 tail_start = i - 1;
@@ -165,6 +168,9 @@ pub fn shorten_path(path: &str, budget: usize) -> String {
         }
     }
     if tail_start > 0 {
+        // `tail_start` is only ever assigned the `i - 1` above, a boundary past
+        // an ASCII `/`.
+        #[allow(clippy::string_slice)] // boundary set above from char_indices past an ASCII '/'
         let result = format!("\u{2026}{}", &path[tail_start..]);
         if result.width() <= budget {
             return result;

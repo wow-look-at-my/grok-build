@@ -391,7 +391,12 @@ pub(crate) fn execute(
                     let worktree_id = preferred_session_id
                         .clone()
                         .unwrap_or_else(|| {
-                            format!("pager-{}", &uuid::Uuid::new_v4().simple().to_string()[..12])
+                            let hex = uuid::Uuid::new_v4().simple().to_string();
+                            // `Uuid::simple()` renders 32 lowercase ASCII hex
+                            // characters, so a 12-byte prefix is a boundary.
+                            #[allow(clippy::string_slice)] // Uuid::simple() is ASCII hex
+                            let short = &hex[..12];
+                            format!("pager-{short}")
                         });
                     let copy_mode = if git_ref.is_some() { "clean" } else { "dirty" };
                     let mut params = serde_json::json!({

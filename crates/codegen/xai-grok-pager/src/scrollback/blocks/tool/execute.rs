@@ -648,7 +648,12 @@ fn strip_leading_run_word(s: &str) -> String {
     // Map back to original casing via byte length of the prefix consumed
     // (`to_ascii_lowercase` preserves length for ASCII prefixes).
     let prefix_len = s.len() - rest.len();
-    s[prefix_len..].trim_start().to_string()
+    // `rest` is a suffix of `lower = s.to_ascii_lowercase()` cut past an ASCII
+    // "run"/"running" prefix. Case-folding preserves byte length and byte
+    // positions, so a boundary of `lower` is one of `s` too.
+    #[allow(clippy::string_slice)] // suffix offset from the ASCII case-folded copy of `s`
+    let tail = &s[prefix_len..];
+    tail.trim_start().to_string()
 }
 
 impl BlockContent for ExecuteToolCallBlock {

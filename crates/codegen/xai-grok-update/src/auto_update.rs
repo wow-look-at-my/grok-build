@@ -1247,11 +1247,8 @@ fn truncate_err(s: &str, max: usize) -> String {
     if s.len() <= max {
         return s.to_string();
     }
-    let mut end = max.saturating_sub(3);
-    while end > 0 && !s.is_char_boundary(end) {
-        end -= 1;
-    }
-    format!("{}...", &s[..end])
+    let kept = xai_grok_tools::util::truncate_bytes(s, max.saturating_sub(3));
+    format!("{kept}...")
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -1989,6 +1986,9 @@ async fn cleanup_old_downloads(dir: &std::path::Path, bin_prefix: &str, current_
         }
         // The suffix after the prefix must start with a digit to be a versioned
         // binary (avoids `grok-latest`, `grok-pager-*` when prefix is `grok`).
+        // The `starts_with(&prefix)` guard above means `prefix.len()` is the end
+        // of a matched literal, hence a char boundary.
+        #[allow(clippy::string_slice)]
         let suffix = &name[prefix.len()..];
         if !suffix.starts_with(|c: char| c.is_ascii_digit()) {
             continue;
@@ -3744,6 +3744,18 @@ mod tests {
     fn test_truncate_err() {
         assert_eq!(truncate_err("  short  ", 10), "short");
         assert_eq!(truncate_err("abcdefghij", 8), "abcde...");
+    }
+
+    /// The kept budget can land inside a multi-byte character; the cut drops
+    /// back to the boundary before it rather than splitting it.
+    #[test]
+    fn test_truncate_err_snaps_to_a_char_boundary() {
+        // `—` occupies bytes 5..8. An 9-byte total budget leaves 6 payload
+        // bytes, which is inside the em dash; the kept prefix stops at 5.
+        assert_eq!(truncate_err("abcde—xyz", 9), "abcde...");
+        // 日 occupies bytes 3..6. A 7-byte budget leaves 4 payload bytes, inside
+        // 本; the kept prefix stops at 3.
+        assert_eq!(truncate_err("日本語", 7), "日...");
     }
 
     // ──────────────────────────────────────────────────────────────────────

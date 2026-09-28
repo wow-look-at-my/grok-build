@@ -1610,7 +1610,11 @@ impl AgentView {
         let display = self.session.cwd.display().to_string();
         let short = match &home {
             Some(h) if display.starts_with(h.as_str()) => {
-                format!("~{}", &display[h.len()..])
+                // `starts_with` proved `h` is a byte prefix of `display`, so
+                // `h.len()` is where that prefix ends: a char boundary.
+                #[allow(clippy::string_slice)] // past a prefix starts_with confirmed
+                let rest = &display[h.len()..];
+                format!("~{rest}")
             }
             _ => display,
         };

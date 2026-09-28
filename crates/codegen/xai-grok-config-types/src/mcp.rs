@@ -418,18 +418,24 @@ fn render_setup_template(
     let mut out = String::with_capacity(input.len());
     let mut rest = input;
     while let Some(start) = rest.find("{{") {
+        // Every offset below is a `{{` or `}}` needle offset, or such an offset
+        // plus that two-byte ASCII literal's width, so each is a char boundary.
         let (prefix, after_start) = rest.split_at(start);
         out.push_str(prefix);
+        #[allow(clippy::string_slice)] // past the two-byte ASCII `{{`
         let after_start = &after_start[2..];
         let Some(end) = after_start.find("}}") else {
             return Err("unterminated setup variable template".to_string());
         };
+        #[allow(clippy::string_slice)] // start of the ASCII `}}` needle
         let key = after_start[..end].trim();
         let Some(value) = variables.get(key) else {
             return Err(format!("unresolved setup variable '{key}'"));
         };
         out.push_str(value);
-        rest = &after_start[end + 2..];
+        #[allow(clippy::string_slice)] // past the ASCII `}}` needle
+        let remainder = &after_start[end + 2..];
+        rest = remainder;
     }
     out.push_str(rest);
     Ok(out)

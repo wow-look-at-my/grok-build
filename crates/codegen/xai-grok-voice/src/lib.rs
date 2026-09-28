@@ -3,7 +3,6 @@
 #![allow(clippy::cast_possible_wrap)] // 1 hit predates the gate
 #![allow(clippy::cast_precision_loss)] // 3 hits predate the gate
 #![allow(clippy::cast_sign_loss)] // 1 hit predates the gate
-#![allow(clippy::string_slice)] // 1 hit predates the gate
 
 //! Voice input for Grok Build CLI: an xAI streaming STT client and the
 //! [`run_voice_pipeline`] task that emits [`VoiceEvent`]s for the pager.

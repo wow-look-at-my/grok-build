@@ -124,6 +124,7 @@ fn is_loopback_host(parsed: &reqwest::Url) -> bool {
 }
 /// Truncate a string to at most `max_chars` characters.
 /// Slices at char boundaries so multi-byte UTF-8 never panics.
+#[allow(clippy::string_slice)] // `char_indices().nth` yields a char boundary
 pub fn truncate(s: &str, max_chars: usize) -> &str {
     if s.len() <= max_chars {
         return s;

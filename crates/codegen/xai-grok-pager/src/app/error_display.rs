@@ -300,6 +300,10 @@ pub(crate) fn parse_http_status(raw: &str) -> Option<u16> {
     // Every "status " occurrence, so "status unknown; … status 503" still
     // finds the code.
     let mut from = 0;
+    // `from` is 0 or a `find_ignore_ascii_case` offset advanced past the ASCII
+    // "status " it matched, so every cut at `from` is a char boundary.
+    #[allow(clippy::string_slice)]
+    // 0 or a past-ASCII-marker byte offset from find_ignore_ascii_case
     while let Some(i) = find_ignore_ascii_case(&raw[from..], "status ") {
         let after = from + i + "status ".len();
         #[allow(clippy::string_slice)] // past an ASCII marker this loop matched
@@ -391,10 +395,12 @@ fn extract_error_detail(raw: &str) -> Option<String> {
 
     // JSON before the URL-clause strip: a URL inside a JSON string would
     // otherwise split the body at its own ": " and leave garbage.
-    if let Some(json_start) = s.find('{')
-        && let Some(extracted) = extract_from_json(&s[json_start..])
-    {
-        s = extracted;
+    if let Some(json_start) = s.find('{') {
+        #[allow(clippy::string_slice)] // byte offset returned by str::find on a &str
+        let from_brace = &s[json_start..];
+        if let Some(extracted) = extract_from_json(from_brace) {
+            s = extracted;
+        }
     }
 
     s = strip_from_url_clause(&s);
@@ -402,8 +408,13 @@ fn extract_error_detail(raw: &str) -> Option<String> {
     // Prefer the "X is not in your available models" sentence when present
     // (before dropping the Model/Auth/Version dump that contains it).
     if let Some(idx) = s.find("is not in your available models") {
+        // `idx` is a `str::find` offset, and the `+ 1` on the `'\n'` offset
+        // steps over a one-byte newline; both ends are therefore boundaries.
+        #[allow(clippy::string_slice)] // str::find offset, and past a one-byte '\n'
         let line_start = s[..idx].rfind('\n').map(|i| i + 1).unwrap_or(0);
+        #[allow(clippy::string_slice)] // str::find offset over `s[idx..]`, re-based on idx
         let line_end = s[idx..].find('\n').map(|i| idx + i).unwrap_or(s.len());
+        #[allow(clippy::string_slice)] // both bounds are str::find-derived boundaries above
         let snippet = s[line_start..line_end].trim();
         if !snippet.is_empty() {
             s = snippet.to_string();
@@ -423,28 +434,46 @@ fn extract_error_detail(raw: &str) -> Option<String> {
 fn strip_retry_prefix(s: &str) -> Option<String> {
     let rest = s.strip_prefix("failed after ")?;
     let idx = rest.find(" retries: ")?;
-    Some(rest[idx + " retries: ".len()..].to_string())
+    // `idx` is a `str::find` offset and `" retries: "` is pure ASCII, so the
+    // offset past it is a char boundary.
+    #[allow(clippy::string_slice)] // past the ASCII " retries: " that str::find matched
+    let body = &rest[idx + " retries: ".len()..];
+    Some(body.to_string())
 }
 
 fn strip_api_error_prefix(s: &str) -> Option<String> {
     let start = find_ignore_ascii_case(s, "API error (status ")?;
+    // `start` is a byte offset where the ASCII marker matched, and the marker
+    // length is ASCII bytes too, so the sum is a char boundary.
+    #[allow(clippy::string_slice)] // past the ASCII "API error (status " marker
     let after = &s[start + "API error (status ".len()..];
     let colon = after.find("): ")?;
-    Some(after[colon + 3..].trim().to_string())
+    // Same shape: `colon` is a `str::find` offset and "): " is 3 ASCII bytes.
+    #[allow(clippy::string_slice)] // past the ASCII "): " that str::find matched
+    let body = &after[colon + 3..];
+    Some(body.trim().to_string())
 }
 
 fn strip_from_url_clause(s: &str) -> String {
     // "Unauthorized (401) from https://…: body" → keep body when present,
     // otherwise drop the URL clause.
     if let Some(from) = find_ignore_ascii_case(s, " from http") {
+        // `from` is where the ASCII " from " prefix of that marker matched, so
+        // stepping over it lands on a char boundary.
+        #[allow(clippy::string_slice)] // past the ASCII " from " that the marker starts with
         let after_from = &s[from + " from ".len()..];
         if let Some(colon) = after_from.find(": ") {
-            let body = after_from[colon + 2..].trim();
+            // `colon` is a `str::find` offset and ": " is 2 ASCII bytes.
+            #[allow(clippy::string_slice)] // past the ASCII ": " that str::find matched
+            let body = &after_from[colon + 2..];
+            let body = body.trim();
             if !body.is_empty() && !body.starts_with("http") {
                 return body.to_string();
             }
         }
-        return s[..from].trim().to_string();
+        #[allow(clippy::string_slice)] // up to the byte offset where an ASCII marker matched
+        let before_from = &s[..from];
+        return before_from.trim().to_string();
     }
     s.to_string()
 }
@@ -499,18 +528,23 @@ fn strip_urls(s: &str) -> String {
             out.push_str(rest);
             break;
         };
+        // `i` is the smaller of two `str::find` offsets, so it is a boundary;
+        // `url_end` is a `str::find` offset over `rest[i..]` re-based on `i`, or
+        // `rest.len()`, so it is one too.
+        #[allow(clippy::string_slice)] // starts at i, a str::find offset
         let url_end = rest[i..]
             .find(|c: char| c.is_whitespace() || c == ')')
             .map_or(rest.len(), |e| i + e);
+        #[allow(clippy::string_slice)] // ends at i, a str::find offset
         let head = &rest[..i];
         let head = head
             .strip_suffix("for url (")
             .or_else(|| head.strip_suffix('('))
             .unwrap_or(head);
         out.push_str(head);
-        rest = rest[url_end..]
-            .strip_prefix(')')
-            .unwrap_or(&rest[url_end..]);
+        #[allow(clippy::string_slice)] // starts at url_end, a str::find offset re-based on i
+        let tail = &rest[url_end..];
+        rest = tail.strip_prefix(')').unwrap_or(tail);
     }
     out.split_whitespace().collect::<Vec<_>>().join(" ")
 }

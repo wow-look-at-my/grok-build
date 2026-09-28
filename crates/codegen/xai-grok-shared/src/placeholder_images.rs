@@ -258,12 +258,18 @@ pub fn strip_paths_from_image_placeholders(text: String) -> String {
         // structurally guaranteed by the regex.
         let whole = cap.get(0).expect("regex match always has group 0");
         let n = cap.get(1).expect("regex always has group 1").as_str();
-        out.push_str(&text[last..whole.start()]);
+        // Regex match offsets are char boundaries, and `last` is either 0 or
+        // such an offset.
+        #[allow(clippy::string_slice)]
+        let between = &text[last..whole.start()];
+        out.push_str(between);
         // `write!` to a String is infallible.
         let _ = write!(out, "[Image #{n}]");
         last = whole.end();
     }
-    out.push_str(&text[last..]);
+    #[allow(clippy::string_slice)] // `last` is a regex match offset or 0
+    let trailing = &text[last..];
+    out.push_str(trailing);
     out
 }
 

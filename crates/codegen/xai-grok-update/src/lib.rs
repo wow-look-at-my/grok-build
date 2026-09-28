@@ -1,5 +1,4 @@
 #![allow(clippy::cast_possible_truncation)] // 1 hit predates the gate
-#![allow(clippy::string_slice)] // 2 hits predate the gate
 #![allow(clippy::unwrap_used)] // 7 hits predate the gate
 
 pub mod auto_update;

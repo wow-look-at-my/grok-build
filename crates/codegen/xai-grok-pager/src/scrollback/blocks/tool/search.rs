@@ -488,7 +488,12 @@ impl BlockContent for SearchToolCallBlock {
                             // Count mode: "path:N" — split at last ':',
                             // path part in path color, ":N" in normal fg.
                             if let Some(colon_pos) = path.rfind(':') {
+                                // `colon_pos` is a `str::rfind` offset for the
+                                // one-byte ASCII ':', so both cuts are boundaries.
+                                #[allow(clippy::string_slice)] // ends at a str::rfind(':') offset
                                 let file_part = &path[..colon_pos];
+                                #[allow(clippy::string_slice)]
+                                // starts at that str::rfind(':') offset
                                 let count_part = &path[colon_pos..]; // includes ':'
                                 Line::from(vec![
                                     Span::styled(

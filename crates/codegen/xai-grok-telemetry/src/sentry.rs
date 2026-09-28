@@ -202,6 +202,9 @@ fn replace_home_prefix(input: &str, home: &str) -> String {
     while let Some(idx) = rest.find(home) {
         let (before, tail) = rest.split_at(idx);
         out.push_str(before);
+        // `home` was just matched at `idx`, so `idx + home.len()` is the end of
+        // that literal and a char boundary whatever the home path contains.
+        #[allow(clippy::string_slice)]
         let after = &tail[home.len()..];
         let prev_ok = before.chars().last().is_none_or(is_segment_boundary_char);
         let next_ok = after

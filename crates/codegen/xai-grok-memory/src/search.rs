@@ -70,11 +70,16 @@ fn is_structurally_empty(text: &str) -> bool {
     let mut without_comments = String::with_capacity(text.len());
     let mut rest = text;
     while let Some(start) = rest.find("<!--") {
-        match rest[start + "<!--".len()..].find("-->") {
+        // Every offset below is an `<!--` needle offset, or such an offset plus
+        // the ASCII needle's byte length, so each is a char boundary.
+        #[allow(clippy::string_slice)]
+        let (head, after_open) = (&rest[..start], &rest[start + "<!--".len()..]);
+        match after_open.find("-->") {
             Some(end) => {
-                without_comments.push_str(&rest[..start]);
-                let after = start + "<!--".len() + end + "-->".len();
-                rest = &rest[after..];
+                without_comments.push_str(head);
+                #[allow(clippy::string_slice)] // end of an ASCII `-->` needle
+                let remainder = &after_open[end + "-->".len()..];
+                rest = remainder;
             }
             None => {
                 // Unterminated comment: keep the remainder as literal text so a

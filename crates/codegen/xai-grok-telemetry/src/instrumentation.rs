@@ -1,7 +1,7 @@
 use std::io::{self, BufRead};
 use std::marker::PhantomData;
 use std::path::PathBuf;
-use std::sync::{Mutex, OnceLock};
+use std::sync::OnceLock;
 use std::time::Instant;
 
 use anyhow::{Result, anyhow};

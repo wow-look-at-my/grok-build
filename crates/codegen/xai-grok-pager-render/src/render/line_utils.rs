@@ -183,7 +183,11 @@ pub fn fit_line_to_width<'a>(line: Line<'a>, width: usize) -> Line<'a> {
 
 /// Take the first `n` display columns from a string.
 fn take_width(s: &str, n: usize) -> String {
-    s[..byte_offset_at_width(s, n)].to_string()
+    // `byte_offset_at_width` returns either a `char_indices` offset or
+    // `s.len()`, so the cut always lands on a char boundary.
+    #[allow(clippy::string_slice)] // offset from byte_offset_at_width's char_indices walk
+    let head = &s[..byte_offset_at_width(s, n)];
+    head.to_string()
 }
 
 /// Cascade-truncate multiple text elements to fit within `avail` display columns.
