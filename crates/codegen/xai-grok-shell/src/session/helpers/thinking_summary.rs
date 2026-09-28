@@ -6,6 +6,8 @@ use xai_grok_tools::util::{ceil_char_boundary, truncate_bytes};
 
 pub(crate) const THINKING_SUMMARY_MIN_CHARS: usize = 800;
 pub(crate) const THINKING_SUMMARY_MAX_CHARS: usize = 320;
+/// Room for the answer plus the thinking of a model that cannot turn it off.
+pub(crate) const THINKING_SUMMARY_MAX_OUTPUT_TOKENS: u32 = 4096;
 const INPUT_HEAD_CHARS: usize = 16_000;
 const INPUT_TAIL_CHARS: usize = 32_000;
 
@@ -41,16 +43,31 @@ pub(crate) fn summarizable_thinking(thinking: &str) -> Option<String> {
 pub(crate) fn thinking_summary_instruction(thinking: &str) -> String {
     format!(
         "Below is the private reasoning a coding assistant wrote before it acted. \
-         Summarize it for the user in one or two short sentences: what the \
-         assistant worked out and what it decided to do. Plain text only. No \
-         preamble, no labels, no markdown, no quotes. Do not call tools.\n\n\
+         Write a terse gist of what it worked out or decided: 5 to 20 words, \
+         a fragment, like a commit subject.\n\n\
+         Style:\n\
+         - Lead with the verb or the finding. No subject: never \"The assistant\", \"I\", \"It\".\n\
+         - Drop articles and filler. Name the concrete thing: file, function, bug, choice.\n\
+         - One idea. No \"and then\" chains, no hedging, no restating the task.\n\n\
+         Examples (bad -> good):\n\
+         - \"The assistant analyzed the parser code and decided that it should fix the offset.\" \
+           -> \"Offset bug is in the caller, not the lexer\"\n\
+         - \"The assistant is considering whether to write a new retry loop or reuse the existing one, and decides to reuse it.\" \
+           -> \"Reuse existing retry helper instead of new loop\"\n\
+         - \"I need to figure out which config value takes precedence. After checking, the environment variable wins.\" \
+           -> \"Env var overrides config file\"\n\
+         - \"The assistant reads the failing test output to understand why the build is red.\" \
+           -> \"Build red from missing mold linker\"\n\
+         - \"The user wants a new flag, so the assistant plans to add it to the CLI args and wire it through.\" \
+           -> \"Add --dry-run flag, thread it to executor\"\n\n\
+         Plain text only. No preamble, labels, markdown or quotes. Do not call tools.\n\n\
          <reasoning>\n{thinking}\n</reasoning>"
     )
 }
 
 /// Clean the raw model output into a short plain-text summary.
 pub(crate) fn clean_thinking_summary(raw: &str) -> String {
-    let mut out = super::session_recap::clean_recap_text(raw);
+    let mut out = super::session_recap::clean_recap_text(drop_inline_thinking(raw));
     if out.len() > THINKING_SUMMARY_MAX_CHARS {
         let cut = floor_char_boundary(&out, THINKING_SUMMARY_MAX_CHARS);
         out.truncate(cut);
@@ -58,6 +75,18 @@ pub(crate) fn clean_thinking_summary(raw: &str) -> String {
         out.push('\u{2026}');
     }
     out
+}
+
+/// The text after a `<think>` block that a model wrote into its answer.
+fn drop_inline_thinking(raw: &str) -> &str {
+    let trimmed = raw.trim_start();
+    if !trimmed.starts_with("<think>") {
+        return raw;
+    }
+    match trimmed.find("</think>") {
+        Some(end) => &trimmed[end + "</think>".len()..],
+        None => "",
+    }
 }
 
 #[cfg(test)]
@@ -96,7 +125,21 @@ mod tests {
     fn instruction_carries_the_reasoning() {
         let text = thinking_summary_instruction("check the parser first");
         assert!(text.contains("<reasoning>\ncheck the parser first\n</reasoning>"));
-        assert!(text.contains("one or two short sentences"));
+        assert!(text.contains("5 to 20 words"));
+        assert!(text.contains("never \"The assistant\""));
+    }
+
+    #[test]
+    fn clean_drops_an_inline_think_block() {
+        assert_eq!(
+            clean_thinking_summary("<think>\nlong musing\n</think>\n\nOffset bug in caller"),
+            "Offset bug in caller"
+        );
+        assert_eq!(clean_thinking_summary("<think>never closed"), "");
+        assert_eq!(
+            clean_thinking_summary("Mentions <think> mid-text"),
+            "Mentions <think> mid-text"
+        );
     }
 
     #[test]
