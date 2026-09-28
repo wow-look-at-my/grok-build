@@ -42,6 +42,7 @@ impl DoomLoopSignalCollector {
     /// doom loop into a response read as clean. The state is a `Vec` and two
     /// flags, which a panicked write leaves at least as usable as the empty
     /// state a poison would report in its place.
+    #[allow(clippy::disallowed_methods)] // takes the state back as the doc above says
     fn state(&self) -> std::sync::MutexGuard<'_, CollectorState> {
         self.inner
             .lock()

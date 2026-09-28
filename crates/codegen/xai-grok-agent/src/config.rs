@@ -1374,10 +1374,15 @@ impl AgentDefinition {
                 "missing frontmatter delimiters".to_string(),
             ));
         }
+        // `trimmed` starts with the ASCII literal `---`, so byte 3 is a
+        // boundary, and `closing_idx` is the offset of the ASCII `\n---` needle
+        // (plus that literal's width), so every offset below aligns.
+        #[allow(clippy::string_slice)]
         let after_opening = &trimmed[3..];
         let closing_idx = after_opening.find("\n---").ok_or_else(|| {
             AgentBuildError::ParseError("missing closing frontmatter delimiter".to_string())
         })?;
+        #[allow(clippy::string_slice)]
         let yaml_content = &after_opening[..closing_idx];
         let mut def: AgentDefinition = serde_yaml::from_str(yaml_content)
             .map_err(|e| AgentBuildError::ParseError(e.to_string()))?;
@@ -1396,13 +1401,20 @@ impl AgentDefinition {
                 "missing frontmatter delimiters".to_string(),
             ));
         }
+        // Same frontmatter walk as `from_file_frontmatter_only`: `---` and
+        // `\n---` are ASCII literals and `body_start` follows an ASCII '\n', so
+        // every offset aligns.
+        #[allow(clippy::string_slice)]
         let after_opening = &trimmed[3..];
         let closing_idx = after_opening.find("\n---").ok_or_else(|| {
             AgentBuildError::ParseError("missing closing frontmatter delimiter".to_string())
         })?;
+        #[allow(clippy::string_slice)]
         let yaml_content = &after_opening[..closing_idx];
+        #[allow(clippy::string_slice)]
         let after_closing = &after_opening[closing_idx + 4..];
         let body_start = after_closing.find('\n').map(|i| i + 1).unwrap_or(0);
+        #[allow(clippy::string_slice)]
         let body = after_closing[body_start..].trim();
         let prompt_body = if body.is_empty() {
             None

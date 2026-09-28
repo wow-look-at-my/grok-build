@@ -31,6 +31,7 @@ impl ImageInputRejections {
     /// every later turn: the actor loop reads this set before each request, and
     /// a `HashSet<String>` a panic walked out of is no less usable than one it
     /// did not.
+    #[allow(clippy::disallowed_methods)] // takes the set back as the doc above says
     fn rejections(&self) -> std::sync::MutexGuard<'_, HashSet<String>> {
         self.0
             .lock()
