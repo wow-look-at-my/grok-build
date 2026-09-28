@@ -458,7 +458,11 @@ fn collect_worktrees(
             continue;
         }
         // Manual records can live anywhere; outside the roots, never sized.
-        if path_under_worktree_roots(&path, &roots) {
+        // A repository's own `.grok/worktrees/` is a managed root too, so a
+        // checkout made there is sized rather than written off as unmanaged.
+        if path_under_worktree_roots(&path, &roots)
+            || xai_fast_worktree::enclosing_repo_worktrees_root(&path).is_some()
+        {
             let size = row_size(&path, sizes, &mut out.issues, volume);
             out.rows.push(WorktreeUsage::tracked(rec, &path, size));
         } else {
