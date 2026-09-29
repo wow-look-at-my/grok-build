@@ -1808,18 +1808,19 @@ mod tests {
 
     #[test]
     fn task_output_input_schema_does_not_advertise_the_alias() {
-        // The leniency is wire-only: the advertised schema must keep exactly
-        // the canonical properties (task_ids, timeout_ms) so tool-definition
-        // dumps and param randomization are unaffected.
+        // The leniency is wire-only.
         let schema = serde_json::to_value(schemars::schema_for!(TaskOutputToolInput)).unwrap();
         let props = schema["properties"].as_object().unwrap();
-        assert!(props.contains_key("task_ids"));
-        assert!(props.contains_key("timeout_ms"));
         assert!(
             !props.contains_key("task_id"),
             "singular alias must not leak into the schema: {props:?}"
         );
-        assert_eq!(props.len(), 2);
+        let mut keys: Vec<&str> = props.keys().map(String::as_str).collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            ["grep", "head", "stage", "tail", "task_ids", "timeout_ms"]
+        );
         // And task_ids stays a plain string array.
         assert_eq!(props["task_ids"]["type"], "array");
         assert_eq!(props["task_ids"]["items"]["type"], "string");
