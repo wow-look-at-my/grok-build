@@ -759,7 +759,6 @@ fn remote_compat_value(
         CompatRemoteKey::ClaudeMcps => remote.claude_mcps_enabled,
         CompatRemoteKey::ClaudeHooks => remote.claude_hooks_enabled,
         CompatRemoteKey::ClaudeSessions => remote.claude_sessions_enabled,
-        CompatRemoteKey::CodexSessions => remote.codex_sessions_enabled,
     }
 }
 /// Resolve vendor compatibility cells from TOML and remote settings.
@@ -833,7 +832,6 @@ pub fn resolve_compat_sessions_from_raw(
         match cell.vendor() {
             CompatVendor::Cursor => config.cursor.sessions = value,
             CompatVendor::Claude => config.claude.sessions = value,
-            CompatVendor::Codex => config.codex.sessions = value,
         }
     }
     resolve_compat_config(&config, remote)
@@ -4420,7 +4418,7 @@ pub struct ModelEntryConfig {
     #[serde(default, skip_serializing_if = "is_false")]
     pub use_concise: bool,
     /// The type of system prompt to use for this model.
-    /// e.g. "grok-build", "codex".
+    /// e.g. "grok-build", "opencode".
     #[serde(default = "default_agent_type")]
     pub agent_type: String,
     /// Maximum seconds to wait between SSE chunks during inference streaming.
@@ -6157,12 +6155,7 @@ pub(crate) fn to_acp_model_info(
                     "agentType".to_string(),
                     serde_json::Value::String(info.agent_type.clone()),
                 );
-                if key.starts_with(crate::codex_provider::MODEL_ID_PREFIX) {
-                    map.insert(
-                        PROVIDER_META_KEY.to_string(),
-                        serde_json::Value::String("codex".to_string()),
-                    );
-                } else if let Some(provider) = info.model_provider.as_deref() {
+                if let Some(provider) = info.model_provider.as_deref() {
                     map.insert(
                         PROVIDER_META_KEY.to_string(),
                         serde_json::Value::String(provider.to_owned()),
@@ -8485,14 +8478,14 @@ reasoning_effort = "low"
             model = "my-agent-model"
             base_url = "https://api.example.com/v1"
             context_window = 200000
-            agent_type = "codex"
+            agent_type = "opencode"
             "#,
         )
         .unwrap();
         let cfg = Config::new_from_toml_cfg(&raw_config).expect("config should parse");
         let resolved = resolve_model_list(&cfg, None);
         let model = resolved.get("my-agent-model").expect("model should exist");
-        assert_eq!(model.info.agent_type, "codex");
+        assert_eq!(model.info.agent_type, "opencode");
     }
     #[test]
     fn model_agent_type_defaults_to_grok_build() {
@@ -8531,7 +8524,7 @@ reasoning_effort = "low"
             system_prompt_label: None,
             api_base_url: None,
             use_concise: false,
-            agent_type: "codex".to_string(),
+            agent_type: "opencode".to_string(),
             inference_idle_timeout_secs: None,
             max_retries: None,
             hidden: false,
@@ -8552,7 +8545,7 @@ reasoning_effort = "low"
             loaded_in_vram: None,
         };
         let info = ModelInfo::from_config(&entry);
-        assert_eq!(info.agent_type, "codex");
+        assert_eq!(info.agent_type, "opencode");
     }
     #[test]
     fn acp_model_meta_includes_agent_type_when_present() {
@@ -8560,12 +8553,12 @@ reasoning_effort = "low"
         let mut entry = test_model_entry("test-model", "https://test.api/v1", None, None, None);
         entry.info.name = Some("Test Model".to_string());
         entry.info.context_window = NonZeroU64::new(256_000).unwrap();
-        entry.info.agent_type = "codex".to_string();
+        entry.info.agent_type = "opencode".to_string();
         models.insert("test-model".to_string(), entry);
         let acp_models = to_acp_model_info(&models);
         let acp_model = acp_models.values().next().expect("should have one model");
         let meta = acp_model.meta.as_ref().expect("meta should be present");
-        assert_eq!(meta["agentType"], "codex");
+        assert_eq!(meta["agentType"], "opencode");
         assert_eq!(meta["totalContextTokens"], 256_000);
     }
     #[test]
@@ -12711,7 +12704,6 @@ agent_type = "cursor"
             CompatRemoteKey::ClaudeSessions => {
                 remote.claude_sessions_enabled = Some(value);
             }
-            CompatRemoteKey::CodexSessions => remote.codex_sessions_enabled = Some(value),
         }
         remote
     }
@@ -12731,7 +12723,6 @@ agent_type = "cursor"
         for (vendor, section) in [
             (CompatVendor::Cursor, "cursor"),
             (CompatVendor::Claude, "claude"),
-            (CompatVendor::Codex, "codex"),
         ] {
             let config = parse_compat(&format!("[compat.{section}]\nsessions = false"));
             assert_session_one_disabled(resolve_compat_config(&config, None), vendor);
@@ -12746,16 +12737,13 @@ agent_type = "cursor"
 [compat.cursor]
 sessions = "malformed"
 [compat.claude]
-sessions = false
-[compat.codex]
 hooks = "unrelated malformed field"
 "#,
         )
         .unwrap();
         let resolved = resolve_compat_sessions_from_raw(Ok(&raw), None);
         assert!(!resolved.cursor.sessions);
-        assert!(!resolved.claude.sessions);
-        assert!(resolved.codex.sessions);
+        assert!(resolved.claude.sessions);
     }
     #[test]
     #[serial]
@@ -12772,13 +12760,12 @@ sessions = true
         )
         .unwrap();
         let remote = crate::util::config::RemoteSettings {
-            codex_sessions_enabled: Some(false),
+            claude_sessions_enabled: Some(false),
             ..Default::default()
         };
         let resolved = resolve_compat_sessions_from_raw(Ok(&raw), Some(&remote));
         assert!(!resolved.cursor.sessions);
         assert!(resolved.claude.sessions);
-        assert!(!resolved.codex.sessions);
     }
     #[test]
     fn compat_config_cell_is_tolerant_and_fail_closed_per_cell() {
@@ -12811,7 +12798,10 @@ hooks = true
             Ok(Some(true))
         );
         assert_eq!(
-            compat_config_cell(Ok(&raw), cell(CompatVendor::Codex, CompatSurface::Sessions)),
+            compat_config_cell(
+                Ok(&raw),
+                cell(CompatVendor::Claude, CompatSurface::Sessions)
+            ),
             Ok(None)
         );
         assert_eq!(
@@ -12826,17 +12816,15 @@ hooks = true
         let resolved = resolve_compat_sessions_from_raw(Err(()), None);
         assert!(!resolved.cursor.sessions);
         assert!(!resolved.claude.sessions);
-        assert!(!resolved.codex.sessions);
     }
     #[test]
     #[serial]
     fn resolve_raw_compat_sessions_load_failure_allows_env_override() {
         let _env = isolate_compat_env();
-        let _codex = EnvGuard::set("GROK_CODEX_SESSIONS_ENABLED", "true");
+        let _claude = EnvGuard::set("GROK_CLAUDE_SESSIONS_ENABLED", "true");
         let resolved = resolve_compat_sessions_from_raw(Err(()), None);
         assert!(!resolved.cursor.sessions);
-        assert!(!resolved.claude.sessions);
-        assert!(resolved.codex.sessions);
+        assert!(resolved.claude.sessions);
     }
     #[test]
     #[serial]
@@ -12850,7 +12838,6 @@ hooks = true
         let resolved = resolve_compat_sessions_from_raw(Ok(&raw), Some(&remote));
         assert!(resolved.cursor.sessions);
         assert!(!resolved.claude.sessions);
-        assert!(resolved.codex.sessions);
     }
     #[test]
     #[serial]
@@ -12886,7 +12873,6 @@ hooks = true
         for (vendor, env_var) in [
             (CompatVendor::Cursor, "GROK_CURSOR_SESSIONS_ENABLED"),
             (CompatVendor::Claude, "GROK_CLAUDE_SESSIONS_ENABLED"),
-            (CompatVendor::Codex, "GROK_CODEX_SESSIONS_ENABLED"),
         ] {
             let _disabled = EnvGuard::set(env_var, "false");
             assert_session_one_disabled(
@@ -12897,24 +12883,23 @@ hooks = true
     }
     #[test]
     #[serial]
-    fn resolve_compat_precedence_and_reserved_codex_hook() {
+    fn resolve_compat_precedence_env_over_config_over_remote() {
         let _env = isolate_compat_env();
         let config =
-            parse_compat("[compat.cursor]\nsessions = false\n[compat.codex]\nhooks = false");
+            parse_compat("[compat.cursor]\nsessions = false\n[compat.claude]\nhooks = false");
         let remote = crate::util::config::RemoteSettings {
             cursor_sessions_enabled: Some(true),
             ..Default::default()
         };
         let resolved = resolve_compat_config(&config, Some(&remote));
         assert!(!resolved.cursor.sessions);
-        assert!(!resolved.codex.hooks);
+        assert!(!resolved.claude.hooks);
         assert!(resolved.cursor.hooks);
-        assert!(resolved.claude.hooks);
         let _session = EnvGuard::set("GROK_CURSOR_SESSIONS_ENABLED", "true");
-        let _hook = EnvGuard::set("GROK_CODEX_HOOKS_ENABLED", "true");
+        let _hook = EnvGuard::set("GROK_CLAUDE_HOOKS_ENABLED", "true");
         let resolved = resolve_compat_config(&config, Some(&remote));
         assert!(resolved.cursor.sessions);
-        assert!(resolved.codex.hooks);
+        assert!(resolved.claude.hooks);
     }
     #[test]
     #[serial]
@@ -12927,7 +12912,6 @@ hooks = true
         let remote = crate::util::config::RemoteSettings {
             cursor_sessions_enabled: Some(true),
             claude_sessions_enabled: Some(true),
-            codex_sessions_enabled: Some(false),
             ..Default::default()
         };
         let mut config = Config::new_from_toml_cfg(&raw).unwrap();
@@ -12947,7 +12931,6 @@ hooks = true
         });
         assert!(!config.compat_resolved.cursor.sessions);
         assert!(!config.compat_resolved.claude.sessions);
-        assert!(!config.compat_resolved.codex.sessions);
     }
     #[test]
     #[serial]

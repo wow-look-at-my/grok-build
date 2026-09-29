@@ -2545,58 +2545,23 @@ async fn identity_switch_clears_user_pick_latch() {
 }
 
 #[test]
-fn additive_codex_catalog_survives_xai_catalog_clear() {
-    let mgr = test_manager();
-    let cfg = config::Config::default();
-    mgr.apply_refresh_result(&cfg, Some(make_prefetched(&["grok-build"])), None);
-
-    let mut codex = IndexMap::new();
-    codex.insert("codex/gpt-test".to_string(), make_model_entry("gpt-test"));
-    mgr.set_codex_models(codex);
-
-    let combined = mgr.models();
-    assert!(combined.contains_key("grok-build"));
-    assert!(combined.contains_key("codex/gpt-test"));
-
-    mgr.clear();
-    let after_xai_clear = mgr.models();
-    assert!(!after_xai_clear.contains_key("grok-build"));
-    assert!(after_xai_clear.contains_key("codex/gpt-test"));
-}
-
-#[test]
-fn additive_provider_becomes_current_when_primary_model_is_not_auth_visible() {
-    let mgr = test_manager();
-    let cfg = config::Config::default();
-    let mut primary = make_model_entry("grok-build");
-    primary.info.supported_in_api = false;
-    let mut prefetched = IndexMap::new();
-    prefetched.insert("grok-build".to_string(), primary);
-    mgr.apply_refresh_result(&cfg, Some(prefetched), None);
-    assert_eq!(mgr.current_model_id().0.as_ref(), "grok-build");
-
-    let mut codex = IndexMap::new();
-    codex.insert("codex/gpt-test".to_string(), make_model_entry("gpt-test"));
-    mgr.set_codex_models(codex);
-
-    assert_eq!(mgr.current_model_id().0.as_ref(), "codex/gpt-test");
-}
-
-#[test]
 fn model_filters_apply_to_every_provider_in_combined_catalog() {
     let cfg = config_from_toml(
         r#"
         [models]
-        allowed_models = ["codex/*"]
+        allowed_models = ["local/*"]
         "#,
     );
     let base = resolve_model_catalog(&cfg, Some(make_prefetched(&["grok-build"])));
-    let mut codex = IndexMap::new();
-    codex.insert("codex/gpt-test".to_string(), make_model_entry("gpt-test"));
+    let mut provider = IndexMap::new();
+    provider.insert(
+        "local/llama-test".to_string(),
+        make_model_entry("llama-test"),
+    );
 
-    let combined = merge_additive_catalog(&cfg, base, &codex);
+    let combined = merge_additive_catalog(&cfg, base, &provider);
     assert!(!combined["grok-build"].info.user_selectable);
-    assert!(combined["codex/gpt-test"].info.user_selectable);
+    assert!(combined["local/llama-test"].info.user_selectable);
 }
 
 // ── resolve_context_window: per-exact-slug model listing resolution ────

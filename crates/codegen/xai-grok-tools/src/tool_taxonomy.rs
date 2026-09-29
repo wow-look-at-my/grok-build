@@ -276,7 +276,6 @@ mod tests {
                 ToolNamespace::GrokBuild => ("grok_build", "GrokBuild"),
                 ToolNamespace::GrokBuildConcise => ("grok_build_concise", "GrokBuildConcise"),
                 ToolNamespace::GrokBuildHashline => ("grok_build_hashline", "GrokBuildHashline"),
-                ToolNamespace::Codex => ("codex", "Codex"),
                 ToolNamespace::OpenCode => ("opencode", "OpenCode"),
                 ToolNamespace::MCP => ("mcp", "MCP"),
             }

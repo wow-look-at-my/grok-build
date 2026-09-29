@@ -55,7 +55,7 @@ impl AppView {
     pub(crate) fn begin_foreign_resume_detection(&mut self) -> Option<Effect> {
         let compat = self.foreign_session_compat;
         if self.foreign_resume_launch.is_some()
-            || !(compat.claude || compat.codex || compat.cursor)
+            || !(compat.claude || compat.cursor)
             || !self.pristine_foreign_resume_welcome()
         {
             return None;
@@ -230,17 +230,15 @@ impl ForeignScanCoordinator {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum ForeignPickerSource {
     Claude,
-    Codex,
     Cursor,
 }
 
 impl ForeignPickerSource {
-    const ALL: [Self; 3] = [Self::Claude, Self::Codex, Self::Cursor];
+    const ALL: [Self; 2] = [Self::Claude, Self::Cursor];
 
     pub(crate) fn from_tool(tool: ForeignSessionTool) -> Self {
         match tool {
             ForeignSessionTool::Claude => Self::Claude,
-            ForeignSessionTool::Codex => Self::Codex,
             ForeignSessionTool::Cursor => Self::Cursor,
         }
     }
@@ -248,7 +246,6 @@ impl ForeignPickerSource {
     pub(crate) const fn tool(self) -> ForeignSessionTool {
         match self {
             Self::Claude => ForeignSessionTool::Claude,
-            Self::Codex => ForeignSessionTool::Codex,
             Self::Cursor => ForeignSessionTool::Cursor,
         }
     }
@@ -256,7 +253,6 @@ impl ForeignPickerSource {
     pub(crate) fn from_picker_source(source: &str) -> Option<Self> {
         match source {
             "claude" => Some(Self::Claude),
-            "codex" => Some(Self::Codex),
             "cursor" => Some(Self::Cursor),
             _ => None,
         }
@@ -265,7 +261,6 @@ impl ForeignPickerSource {
     pub(crate) const fn picker_source(self) -> &'static str {
         match self {
             Self::Claude => "claude",
-            Self::Codex => "codex",
             Self::Cursor => "cursor",
         }
     }
@@ -273,7 +268,6 @@ impl ForeignPickerSource {
     pub(crate) const fn display_label(self) -> &'static str {
         match self {
             Self::Claude => "Claude Code",
-            Self::Codex => "Codex",
             Self::Cursor => "Cursor",
         }
     }
@@ -281,7 +275,6 @@ impl ForeignPickerSource {
     const fn skill_name(self) -> &'static str {
         match self {
             Self::Claude => "resume-claude",
-            Self::Codex => "resume-codex",
             Self::Cursor => "resume-cursor",
         }
     }
@@ -289,7 +282,6 @@ impl ForeignPickerSource {
     fn compat_enabled(self, compat: EnabledForeignSessionSources) -> bool {
         match self {
             Self::Claude => compat.claude,
-            Self::Codex => compat.codex,
             Self::Cursor => compat.cursor,
         }
     }
@@ -297,7 +289,6 @@ impl ForeignPickerSource {
     fn set_enabled(self, enabled: &mut EnabledForeignSessionSources) {
         match self {
             Self::Claude => enabled.claude = true,
-            Self::Codex => enabled.codex = true,
             Self::Cursor => enabled.cursor = true,
         }
     }
@@ -388,7 +379,7 @@ where
     WorkFut: Future<Output = T>,
 {
     let enabled = gated_sources_async_with(compat, grok_home, metadata_exists).await;
-    if !(enabled.claude || enabled.codex || enabled.cursor) {
+    if !(enabled.claude || enabled.cursor) {
         return None;
     }
     Some(work(enabled).await)
@@ -420,7 +411,7 @@ pub(crate) fn scan_effect(
     seq: u64,
 ) -> Option<Effect> {
     coordinator.begin_request(seq);
-    (compat.claude || compat.codex || compat.cursor).then(|| Effect::ScanForeignSessions {
+    (compat.claude || compat.cursor).then(|| Effect::ScanForeignSessions {
         cwd: cwd.to_path_buf(),
         compat,
         grok_home: grok_home.to_path_buf(),
@@ -536,7 +527,6 @@ mod tests {
     fn compat_all() -> EnabledForeignSessionSources {
         EnabledForeignSessionSources {
             claude: true,
-            codex: true,
             cursor: true,
         }
     }
@@ -585,7 +575,7 @@ mod tests {
         let store_calls_for_work = std::rc::Rc::clone(&store_calls);
         let result = with_gated_sources_async_with(
             EnabledForeignSessionSources {
-                codex: true,
+                cursor: true,
                 ..Default::default()
             },
             Path::new("/grok"),
@@ -605,7 +595,7 @@ mod tests {
         assert!(
             probed
                 .iter()
-                .all(|path| path.to_string_lossy().contains("resume-codex"))
+                .all(|path| path.to_string_lossy().contains("resume-cursor"))
         );
         assert_eq!(store_calls.get(), 0);
     }
@@ -616,8 +606,7 @@ mod tests {
             let path = path.to_string_lossy();
             std::future::ready(
                 path.contains("bundled/skills/resume-claude")
-                    || path.contains("skills/resume-codex")
-                    || path.contains("bundled/skills/resume-cursor"),
+                    || (path.contains("skills/resume-cursor") && !path.contains("bundled")),
             )
         })
         .await;
@@ -625,7 +614,6 @@ mod tests {
             enabled,
             EnabledForeignSessionSources {
                 claude: true,
-                codex: true,
                 cursor: true,
             }
         );
@@ -680,7 +668,6 @@ mod tests {
             Effect::ScanForeignSessions {
                 compat: EnabledForeignSessionSources {
                     claude: true,
-                    codex: true,
                     cursor: true,
                 },
                 seq: 2,
@@ -783,11 +770,6 @@ mod tests {
                 "/resume-claude native-id",
             ),
             (
-                ForeignPickerSource::Codex,
-                "codex",
-                "/resume-codex native-id",
-            ),
-            (
                 ForeignPickerSource::Cursor,
                 "cursor",
                 "/resume-cursor native-id",
@@ -802,32 +784,12 @@ mod tests {
     }
 
     #[test]
-    fn summary_mapping_collapses_cursor_and_codex_store_variants() {
+    fn summary_mapping_collapses_cursor_store_variants() {
         for (tool, store_source, picker_source) in [
             (
                 ForeignSessionTool::Claude,
                 ForeignSessionSource::ClaudeCode,
                 "claude",
-            ),
-            (
-                ForeignSessionTool::Codex,
-                ForeignSessionSource::CodexCli,
-                "codex",
-            ),
-            (
-                ForeignSessionTool::Codex,
-                ForeignSessionSource::CodexVsCode,
-                "codex",
-            ),
-            (
-                ForeignSessionTool::Codex,
-                ForeignSessionSource::CodexAtlas,
-                "codex",
-            ),
-            (
-                ForeignSessionTool::Codex,
-                ForeignSessionSource::CodexChatGpt,
-                "codex",
             ),
             (
                 ForeignSessionTool::Cursor,
@@ -877,7 +839,7 @@ mod tests {
         replace_foreign_entries(
             &mut entries,
             vec![
-                picker_entry("z", "codex", 1),
+                picker_entry("z", "cursor", 1),
                 picker_entry("b", "claude", 1),
                 picker_entry("a", "claude", 1),
             ],

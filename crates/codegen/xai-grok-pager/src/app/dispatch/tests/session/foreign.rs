@@ -59,7 +59,7 @@ fn foreign_result_interleaves_deduplicates_and_empty_clears_only_external() {
         Action::TaskComplete(TaskResult::ForeignSessionsScanned {
             entries: vec![
                 at(make_foreign_entry("old", "claude", "/repo"), 10),
-                at(make_foreign_entry("new", "codex", "/repo"), 30),
+                at(make_foreign_entry("new", "cursor", "/repo"), 30),
                 at(make_foreign_entry("old", "claude", "/repo"), 10),
             ],
             seq: 4,
@@ -138,7 +138,6 @@ fn modal_refetch_clears_orphaned_welcome_foreign_loading() {
     app.foreign_session_compat =
         xai_grok_workspace::foreign_sessions::EnabledForeignSessionSources {
             claude: true,
-            codex: true,
             cursor: true,
         };
     app.session_picker_lanes.foreign_loading = true;
@@ -168,7 +167,6 @@ fn modal_foreign_scan_uses_native_list_cwd() {
     app.foreign_session_compat =
         xai_grok_workspace::foreign_sessions::EnabledForeignSessionSources {
             claude: true,
-            codex: true,
             cursor: true,
         };
     open_session_picker_with(&mut app, vec![]);
@@ -310,7 +308,7 @@ fn modal_native_failure_waits_for_foreign_rows_before_toast() {
 
     let _ = dispatch(
         Action::TaskComplete(TaskResult::ForeignSessionsScanned {
-            entries: vec![make_foreign_entry("foreign-only", "codex", "/repo")],
+            entries: vec![make_foreign_entry("foreign-only", "cursor", "/repo")],
             seq: 7,
         }),
         &mut app,
@@ -372,7 +370,7 @@ fn welcome_selection_survives_foreign_insertion_with_viewport_offset() {
 
     let _ = dispatch(
         Action::TaskComplete(TaskResult::ForeignSessionsScanned {
-            entries: vec![at(make_foreign_entry("new", "codex", "/repo"), 30)],
+            entries: vec![at(make_foreign_entry("new", "cursor", "/repo"), 30)],
             seq: 8,
         }),
         &mut app,
@@ -483,7 +481,7 @@ fn external_filter_clears_and_suppresses_native_content_state() {
     app.session_picker_grouped = false;
     app.session_picker_entries = Some(vec![
         make_picker_entry("native", "/repo"),
-        make_foreign_entry("foreign", "codex", "/repo"),
+        make_foreign_entry("foreign", "cursor", "/repo"),
     ]);
     app.session_picker_content_results = Some(vec![content_hit("native-hit")]);
     app.session_picker_content_loading = true;
@@ -806,7 +804,7 @@ fn colliding_native_and_foreign_ids_use_source_at_initiation() {
     open_session_picker_with(
         &mut app,
         vec![
-            make_foreign_entry("shared-id", "codex", "/repo"),
+            make_foreign_entry("shared-id", "cursor", "/repo"),
             make_picker_entry("shared-id", "/repo"),
         ],
     );
@@ -829,7 +827,7 @@ fn colliding_native_and_foreign_ids_use_source_at_initiation() {
     assert!(
         dispatch(
             Action::ExpandSessionCard {
-                source: "codex".into(),
+                source: "cursor".into(),
                 session_id: "shared-id".into(),
             },
             &mut app,
@@ -839,7 +837,7 @@ fn colliding_native_and_foreign_ids_use_source_at_initiation() {
     assert!(
         dispatch(
             Action::DeleteSession {
-                source: "codex".into(),
+                source: "cursor".into(),
                 session_id: "shared-id".into(),
                 cwd: "/repo".into(),
             },
@@ -883,16 +881,16 @@ fn gated_foreign_pick_replaces_all_prior_startup_intents() {
     app.deferred_startup.pending_chat = true;
     open_session_picker_with(
         &mut app,
-        vec![make_foreign_entry("codex-deferred", "codex", "/repo")],
+        vec![make_foreign_entry("cursor-deferred", "cursor", "/repo")],
     );
 
     assert!(dispatch(Action::PickSession(0), &mut app).is_empty());
     assert!(matches!(
         app.deferred_startup.session.as_ref(),
         Some(crate::app::session_startup::DeferredSessionStartup::ForeignResume {
-            tool: ForeignSessionTool::Codex,
+            tool: ForeignSessionTool::Cursor,
             native_id,
-        }) if native_id == "codex-deferred"
+        }) if native_id == "cursor-deferred"
     ));
     assert!(!app.deferred_startup.worktree);
     assert!(app.deferred_startup.worktree_label.is_none());
@@ -924,7 +922,7 @@ fn gated_foreign_pick_replaces_all_prior_startup_intents() {
             .pending_prompts
             .front()
             .map(|prompt| prompt.text.as_str()),
-        Some("/resume-codex codex-deferred")
+        Some("/resume-cursor cursor-deferred")
     );
 }
 
@@ -932,7 +930,7 @@ fn gated_foreign_pick_replaces_all_prior_startup_intents() {
 fn welcome_and_modal_foreign_picks_always_target_fresh_sessions() {
     let mut welcome = test_app();
     welcome.session_picker_entries =
-        Some(vec![make_foreign_entry("codex-native", "codex", "/repo")]);
+        Some(vec![make_foreign_entry("cursor-native", "cursor", "/repo")]);
     let effects = dispatch(Action::PickSession(0), &mut welcome);
     assert!(
         effects
@@ -945,7 +943,7 @@ fn welcome_and_modal_foreign_picks_always_target_fresh_sessions() {
             .pending_prompts
             .front()
             .map(|prompt| prompt.text.as_str()),
-        Some("/resume-codex codex-native")
+        Some("/resume-cursor cursor-native")
     );
 
     let mut modal = test_app_with_agent();
@@ -1009,7 +1007,6 @@ fn chat_picker_never_launches_or_accepts_foreign_scan() {
     app.foreign_session_compat =
         xai_grok_workspace::foreign_sessions::EnabledForeignSessionSources {
             claude: true,
-            codex: true,
             cursor: true,
         };
     let effects = dispatch(Action::FetchSessionList, &mut app);
@@ -1034,7 +1031,6 @@ fn native_fetch_effect_precedes_background_foreign_gate() {
     app.foreign_session_compat =
         xai_grok_workspace::foreign_sessions::EnabledForeignSessionSources {
             claude: true,
-            codex: true,
             cursor: true,
         };
 

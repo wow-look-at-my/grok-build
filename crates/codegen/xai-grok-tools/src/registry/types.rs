@@ -1,8 +1,7 @@
 use crate::{
     computer::types::{AsyncFileSystem, TerminalBackend},
     implementations::{
-        codex, grok_build, grok_build_concise, grok_build_hashline, opencode,
-        skills::types::SkillInfo,
+        grok_build, grok_build_concise, grok_build_hashline, opencode, skills::types::SkillInfo,
     },
     notification::ToolNotificationHandle,
     persistence::ResourcesPersistence,
@@ -716,10 +715,6 @@ impl ToolRegistryBuilder {
         b.register::<grok_build::SchedulerCreateTool>();
         b.register::<grok_build::SchedulerDeleteTool>();
         b.register::<grok_build::SchedulerListTool>();
-        b.register::<codex::apply_patch::ApplyPatchTool>();
-        b.register::<codex::list_dir::CodexListDirTool>();
-        b.register::<codex::grep_files::CodexGrepFilesTool>();
-        b.register::<codex::read_file::CodexReadFileTool>();
         b.register::<opencode::OpenCodeBashTool>();
         b.register::<opencode::OpenCodeReadTool>();
         b.register::<opencode::OpenCodeEditTool>();
@@ -2188,12 +2183,12 @@ mod tests {
     ///
     /// Before the fix, the `kind_params` builder used `if map.is_empty()` to
     /// seed identity param-name mappings only from the **first** tool of each
-    /// kind. When `codex:apply_patch` (`ToolKind::Edit`, input: `{ patch }`)
-    /// appeared before `grok_build:search_replace` (`ToolKind::Edit`, input:
-    /// `{ file_path, old_string, new_string, replace_all }`), the renderer's
-    /// context had `params.edit = { "patch": "patch" }` — missing
-    /// `replace_all`. At runtime, the template `${{ params.edit.replace_all }}`
-    /// failed with "undefined value".
+    /// kind. When `opencode:edit` (`ToolKind::Edit`, camelCase input:
+    /// `{ filePath, oldString, newString, replaceAll }`) appears before
+    /// `grok_build:search_replace` (`ToolKind::Edit`, input:
+    /// `{ file_path, old_string, new_string, replace_all }`), a first-tool-only
+    /// seed leaves `params.edit` without `replace_all`. The template
+    /// `${{ params.edit.replace_all }}` then fails with "undefined value".
     #[tokio::test]
     async fn kind_params_merged_across_multiple_tools_of_same_kind() {
         let tmp = TempDir::new().unwrap();
@@ -2202,7 +2197,7 @@ mod tests {
         let config = ToolServerConfig {
             tools: vec![
                 ToolConfig {
-                    id: "Codex:apply_patch".to_string(),
+                    id: "OpenCode:edit".to_string(),
                     params: None,
                     name_override: None,
                     params_name_overrides: None,
@@ -2248,7 +2243,7 @@ mod tests {
             .await;
         let result = result.expect(
             "search_replace must not fail with template rendering error \
-             when codex:apply_patch appears before it in the config",
+             when opencode:edit appears before it in the config",
         );
         assert!(
             result.prompt_text.contains("replace_all"),
@@ -2977,7 +2972,7 @@ mod tests {
     ///
     /// Without `name_override`, the client_name defaults to `entry.id`
     /// (e.g. `"read_file"`). If both `GrokBuild:read_file` and
-    /// `Codex:read_file` are in the config, both would get
+    /// `GrokBuildConcise:read_file` are in the config, both would get
     /// `client_name = "read_file"`, making the second unreachable at
     /// dispatch time.
     #[test]
@@ -2995,7 +2990,7 @@ mod tests {
                     kind: None,
                 },
                 ToolConfig {
-                    id: "Codex:read_file".to_string(),
+                    id: "GrokBuildConcise:read_file".to_string(),
                     params: None,
                     name_override: None, // both resolve to "read_file"
                     params_name_overrides: None,
@@ -3091,9 +3086,9 @@ mod tests {
                     kind: None,
                 },
                 ToolConfig {
-                    id: "Codex:read_file".to_string(),
+                    id: "GrokBuildConcise:read_file".to_string(),
                     params: None,
-                    name_override: Some("codex_read_file".to_string()), // disambiguated
+                    name_override: Some("concise_read_file".to_string()), // disambiguated
                     params_name_overrides: None,
                     description_override: None,
                     behavior_version: None,
@@ -3130,7 +3125,7 @@ mod tests {
                     kind: None,
                 },
                 ToolConfig {
-                    id: "Codex:read_file".to_string(),
+                    id: "GrokBuildConcise:read_file".to_string(),
                     params: None,
                     name_override: None,
                     params_name_overrides: None,

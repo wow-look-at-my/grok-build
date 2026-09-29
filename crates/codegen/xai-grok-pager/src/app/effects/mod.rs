@@ -645,7 +645,7 @@ pub(crate) fn execute(
                         )
                         .await;
                     if latest_seq.load(std::sync::atomic::Ordering::Acquire) != seq
-                        || !(enabled.claude || enabled.codex || enabled.cursor)
+                        || !(enabled.claude || enabled.cursor)
                     {
                         return TaskResult::ForeignSessionsScanned {
                             entries: Vec::new(),

@@ -3129,7 +3129,6 @@ mod tests {
         let trust = TrustState::Done;
         for (tool, label) in [
             (ForeignSessionTool::Claude, "Claude Code"),
-            (ForeignSessionTool::Codex, "Codex"),
             (ForeignSessionTool::Cursor, "Cursor"),
         ] {
             let hint = xai_grok_workspace::foreign_sessions::RecentForeignSession {

@@ -227,9 +227,6 @@ pub(super) enum PlanEditGate {
 ///   ([`PlanModeTracker::should_auto_approve_edit`]) so the gate and the
 ///   permission bypass can never disagree.
 ///
-/// `apply_patch` maps to a placeholder `AccessKind::Edit("apply_patch")` and
-/// therefore never matches the plan file: it is always rejected in plan mode
-/// (conservative — per-file targets are only known after patch parsing).
 /// Non-edit tools (bash, read, grep, MCP, web) are never gated here; they
 /// flow to the normal permission path, where yolo may still auto-approve
 /// them. `enter_plan_mode` / `exit_plan_mode` map to `AccessKind::Read` and
@@ -1769,7 +1766,6 @@ impl SessionActor {
                 .in_scope(|| {});
                 (acp::ToolKind::Other, vec![], vec![])
             }
-            ToolInput::ApplyPatch(_) => (acp::ToolKind::Edit, vec![], vec![]),
             ToolInput::Dynamic(_) => (acp::ToolKind::Other, vec![], vec![]),
             ToolInput::MemorySearch(_) => (acp::ToolKind::Other, vec![], vec![]),
             ToolInput::MemoryGet(_) => (acp::ToolKind::Read, vec![], vec![]),
@@ -3114,22 +3110,6 @@ mod plan_mode_edit_gate_tests {
         assert_eq!(
             gate(&t, &write("/tmp/gate-session/plan.md")),
             PlanEditGate::Allow
-        );
-    }
-    /// `apply_patch` carries a placeholder access path, never the plan file:
-    /// always rejected in plan mode (conservative).
-    #[test]
-    fn apply_patch_rejected_in_plan_mode() {
-        use xai_grok_tools::implementations::codex::apply_patch::ApplyPatchInput;
-        let t = active_tracker();
-        assert_eq!(
-            gate(
-                &t,
-                &ToolInput::ApplyPatch(ApplyPatchInput {
-                    patch: String::new()
-                })
-            ),
-            PlanEditGate::RejectNonPlanFile
         );
     }
     /// Non-edit tools are never gated — they flow to the normal permission

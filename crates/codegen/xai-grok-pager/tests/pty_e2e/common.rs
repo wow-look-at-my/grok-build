@@ -213,7 +213,7 @@ pub(crate) async fn start_dual_agent_type_content() -> ContentController {
 
 /// A strict-harness agent type for mismatch tests -- see
 /// [`start_dual_agent_type_content`] for why it cannot be an arbitrary string.
-pub(crate) const STRICT_HARNESS_AGENT_TYPE: &str = "codex";
+pub(crate) const STRICT_HARNESS_AGENT_TYPE: &str = "grok-build-orchestrator";
 
 // ── Folder-trust welcome sub-state e2e ──────────────────────────────────
 

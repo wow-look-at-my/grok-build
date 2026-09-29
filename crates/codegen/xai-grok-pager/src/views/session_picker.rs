@@ -240,13 +240,13 @@ pub(crate) fn loading_spinner_active(
 /// Filter session entries by native, remote, or external source.
 ///
 /// Default is [`Self::Grok`]: native Grok sessions only (local / remote /
-/// conversation), so `/resume` does not mix Claude/Codex/Cursor foreign
+/// conversation), so `/resume` does not mix Claude/Cursor foreign
 /// sessions into the list. `f` cycles Grok → External → All → Local →
 /// Remote — External first so one press from the default reveals foreign
 /// sessions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SourceFilter {
-    /// Native Grok sessions only — excludes Claude/Codex/Cursor foreign rows.
+    /// Native Grok sessions only — excludes Claude/Cursor foreign rows.
     #[default]
     Grok,
     Local,
@@ -286,7 +286,7 @@ impl SourceFilter {
     ///
     /// grok.com conversations carry `source == "conversation"` and live remotely,
     /// so they pass the `Remote` filter (and `Grok` / `All`) but not `Local`.
-    /// Foreign sources (`claude` / `codex` / `cursor`) only pass `External` and
+    /// Foreign sources (`claude` / `cursor`) only pass `External` and
     /// `All`.
     pub fn matches(self, source: &str) -> bool {
         match self {
@@ -949,7 +949,7 @@ pub(crate) fn build_content_header_label(
 }
 
 /// Hint shown on the default `Grok` view when the foreign-session scan loaded
-/// Claude/Codex/Cursor entries it hides. Grok-only: `next(Grok) == External`
+/// Claude/Cursor entries it hides. Grok-only: `next(Grok) == External`
 /// makes the copy literally true, and reaching Local/Remote already cycles
 /// through External/All, so the discovery hint is only needed on the default
 /// state.
@@ -1359,7 +1359,7 @@ mod tests {
     #[test]
     fn foreign_id_does_not_suppress_native_content_result() {
         let mut foreign = make_entry("shared", "repo");
-        foreign.source = "codex".into();
+        foreign.source = "cursor".into();
         let entries = vec![foreign];
         let hits = vec![make_content_hit("shared")];
 
@@ -1436,20 +1436,18 @@ mod tests {
 
     #[test]
     fn source_filter_matches() {
-        // Default Grok filter: native only (not Claude/Codex/Cursor).
+        // Default Grok filter: native only (not Claude/Cursor).
         assert!(SourceFilter::Grok.matches("local"));
         assert!(SourceFilter::Grok.matches("remote"));
         assert!(SourceFilter::Grok.matches("both"));
         assert!(SourceFilter::Grok.matches("conversation"));
         assert!(!SourceFilter::Grok.matches("claude"));
-        assert!(!SourceFilter::Grok.matches("codex"));
         assert!(!SourceFilter::Grok.matches("cursor"));
 
         assert!(SourceFilter::All.matches("local"));
         assert!(SourceFilter::All.matches("remote"));
         assert!(SourceFilter::All.matches("both"));
         assert!(SourceFilter::All.matches("claude"));
-        assert!(SourceFilter::All.matches("codex"));
         assert!(SourceFilter::All.matches("cursor"));
 
         assert!(SourceFilter::Local.matches("local"));
@@ -1468,7 +1466,6 @@ mod tests {
         assert!(!SourceFilter::Local.matches("conversation"));
 
         assert!(SourceFilter::External.matches("claude"));
-        assert!(SourceFilter::External.matches("codex"));
         assert!(SourceFilter::External.matches("cursor"));
         assert!(!SourceFilter::External.matches("local"));
         assert!(!SourceFilter::External.matches("remote"));
@@ -1501,7 +1498,7 @@ mod tests {
             entry_with_source("s1", "remote"),
             entry_with_source("s2", "both"),
             entry_with_source("s3", "claude"),
-            entry_with_source("s4", "codex"),
+            entry_with_source("s4", "cursor"),
             entry_with_source("s5", "cursor"),
         ];
 
@@ -1557,7 +1554,7 @@ mod tests {
         let entries = vec![
             entry_with_source("s0", "local"),
             entry_with_source("s1", "claude"),
-            entry_with_source("s2", "codex"),
+            entry_with_source("s2", "cursor"),
         ];
 
         // Only the default Grok view surfaces the hint (with the count).
@@ -1591,13 +1588,13 @@ mod tests {
     #[test]
     fn foreign_entry_uses_source_badge_and_has_no_detail_expansion() {
         let mut entry = make_entry("foreign", "repo");
-        entry.source = "codex".into();
+        entry.source = "cursor".into();
         let mut state = PickerState::default();
         state.expanded.insert(0);
 
         let built = build_session_entry_data(&[entry], &[0], &state, 80);
 
-        assert_eq!(built[0].badge, "codex");
+        assert_eq!(built[0].badge, "cursor");
         assert!(!built[0].collapsible);
         assert!(!built[0].is_expanded);
         assert!(built[0].field_data.is_empty());
