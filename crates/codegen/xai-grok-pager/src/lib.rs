@@ -1,3 +1,11 @@
+#![allow(clippy::cast_lossless)] // 98 hits predate the gate
+#![allow(clippy::cast_possible_truncation)] // 785 hits predate the gate
+#![allow(clippy::cast_possible_wrap)] // 79 hits predate the gate
+#![allow(clippy::cast_precision_loss)] // 65 hits predate the gate
+#![allow(clippy::cast_sign_loss)] // 84 hits predate the gate
+#![allow(clippy::expect_used)] // 134 hits predate the gate
+#![allow(clippy::unwrap_used)] // 60 hits predate the gate
+
 //! xai-grok-pager — Grok Build TUI.
 //!
 //! A clean-room implementation built on the v3 pager rendering engine.

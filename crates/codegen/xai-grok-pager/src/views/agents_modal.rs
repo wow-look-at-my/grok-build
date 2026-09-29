@@ -270,7 +270,7 @@ pub struct AgentsModalState {
 }
 /// Built-in agent names that should be shown to the user.
 /// Skips internal variants (GrokBuildConcise, GrokBuildPlan,
-/// GrokBuildPlanNoSubagents, GrokBuildAskUser, Codex, Opencode).
+/// GrokBuildPlanNoSubagents, GrokBuildAskUser, Opencode).
 fn user_visible_builtins() -> &'static [BuiltinAgentName] {
     &[
         BuiltinAgentName::GrokBuild,
@@ -1211,6 +1211,8 @@ fn render_agents_search(
     let editor_width = area.width - painted_prefix_width;
     let viewport = editor.viewport(editor_width as usize);
     let leading;
+    // The focused arm slices on a ratatui `visible_byte_range`, a char boundary.
+    #[allow(clippy::string_slice)]
     let visible: &str = if focused {
         &editor.text()[viewport.visible_byte_range.clone()]
     } else {
@@ -1799,6 +1801,8 @@ fn render_create_text_field(
     let remaining = w.saturating_sub(label_width);
     let viewport = editor.viewport(remaining);
     let leading;
+    // The active arm slices on a ratatui `visible_byte_range`, a char boundary.
+    #[allow(clippy::string_slice)]
     let display: &str = if active {
         &editor.text()[viewport.visible_byte_range.clone()]
     } else {

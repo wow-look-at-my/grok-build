@@ -893,14 +893,20 @@ fn tee_errors<'a, T: Send + 'a>(
     let cell_clone = Arc::clone(&cell);
     let teed = raw
         .map(move |item| {
-            if let Err(ref e) = item
-                && let Ok(mut guard) = cell_clone.lock()
-                && guard.is_none()
-            {
+            if let Err(ref e) = item {
+                // The lock comes back even from a holder that died: this cell
+                // is the only record of why the attempt failed, and a skipped
+                // capture would have the turn report a synthesized reason.
+                #[allow(clippy::disallowed_methods)] // takes the cell back as above
+                let mut guard = cell_clone
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
                 // Capture only the first error -- subsequent errors
                 // on a torn-down stream are usually secondary effects
                 // of the same disconnect.
-                *guard = Some(clone_error(e));
+                if guard.is_none() {
+                    *guard = Some(clone_error(e));
+                }
             }
             item
         })
@@ -1097,10 +1103,14 @@ async fn drive_l2(
                             .adopt(&request_id, event_tx, cancel_token, "the original failed", None)
                             .await;
                     }
+                    // The captured error is the only record of why the attempt
+                    // failed, so it is taken back from a holder that died rather
+                    // than being replaced by a synthesized reason.
+                    #[allow(clippy::disallowed_methods)]
                     let raw = captured
                         .lock()
-                        .ok()
-                        .and_then(|mut g| g.take());
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .take();
                     let error = raw.unwrap_or_else(|| synthesize_from_info(&info));
                     return AttemptOutcome::Failed { error };
                 }

@@ -172,8 +172,11 @@ pub(crate) fn emit_segment_hyperlinks(
         if s_in >= e_in {
             continue;
         }
-        let col_start = col + unicode_display_width(&segment[..s_in]);
-        let col_end = col_start + unicode_display_width(&segment[s_in..e_in]);
+        // `s_in` and `e_in` were snapped to char boundaries just above.
+        #[allow(clippy::string_slice)]
+        let (before, matched) = (&segment[..s_in], &segment[s_in..e_in]);
+        let col_start = col + unicode_display_width(before);
+        let col_end = col_start + unicode_display_width(matched);
         let lt = &link_targets[clr.link_idx];
         out.push(HyperlinkTarget {
             line_index,

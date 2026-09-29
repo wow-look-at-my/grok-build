@@ -350,7 +350,11 @@ fn split_frontmatter(content: &str) -> Option<(&str, &str)> {
     for delimiter in ["\n---\n", "\n---\r\n", "\r\n---\r\n", "\r\n---\n"] {
         if let Some(index) = rest.find(delimiter) {
             let body_start = index + delimiter.len();
-            return Some((&rest[..index], &rest[body_start..]));
+            // `index` is the offset of an ASCII delimiter and `body_start` that
+            // offset plus the delimiter's byte length, so both align.
+            #[allow(clippy::string_slice)]
+            let parts = (&rest[..index], &rest[body_start..]);
+            return Some(parts);
         }
     }
 

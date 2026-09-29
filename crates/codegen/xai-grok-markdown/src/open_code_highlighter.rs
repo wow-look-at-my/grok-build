@@ -214,6 +214,7 @@ impl OpenCodeHighlighter {
         // Walk only the not-yet-committed remainder.
         let highlighter = Highlighter::new(&syn.theme);
         let mut tentative: Option<HlLine> = None;
+        #[allow(clippy::string_slice)] // committed_len only advances past '\n'-terminated lines
         for line in LinesWithEndings::from(&text[self.committed_len..]) {
             if line.ends_with('\n') {
                 // A newline-terminated line is final: highlight once and

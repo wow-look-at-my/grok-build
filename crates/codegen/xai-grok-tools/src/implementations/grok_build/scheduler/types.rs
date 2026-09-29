@@ -204,6 +204,7 @@ pub fn scheduler_tool_error(error: SchedulerError) -> xai_tool_runtime::ToolErro
 #[serde(rename_all = "camelCase")]
 pub struct ScheduledTask {
     pub id: String,
+    #[serde(deserialize_with = "deserialize_interval_secs")]
     pub interval_secs: u64,
     pub prompt: String,
     #[serde(default = "default_recurring")]
@@ -237,6 +238,33 @@ fn default_recurring() -> bool {
     true
 }
 
+/// The cadence as the duration a fire time is computed with.
+///
+/// `None` when the seconds have no `i64` second count, or no `chrono` duration.
+/// A cadence above `i64::MAX` seconds has no answer here, where a narrowing
+/// cast would hand back a negative duration and a schedule in the past.
+pub(crate) fn interval_duration(interval_secs: u64) -> Option<chrono::Duration> {
+    chrono::Duration::try_seconds(i64::try_from(interval_secs).ok()?)
+}
+
+/// `interval_secs` read back from persisted state. A stored value with no
+/// duration is refused with the number it read, so no task loads with a cadence
+/// that cannot become a fire time.
+fn deserialize_interval_secs<'de, D>(deserializer: D) -> Result<u64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::Error as _;
+    let interval_secs = u64::deserialize(deserializer)?;
+    interval_duration(interval_secs)
+        .map(|_| interval_secs)
+        .ok_or_else(|| {
+            D::Error::custom(format!(
+                "intervalSeconds {interval_secs} has no representable schedule"
+            ))
+        })
+}
+
 impl ScheduledTask {
     pub fn new(interval_secs: u64, prompt: String, recurring: bool, durable: bool) -> Self {
         Self::with_fire_immediately(interval_secs, prompt, recurring, durable, false)
@@ -250,15 +278,24 @@ impl ScheduledTask {
         fire_immediately: bool,
     ) -> Self {
         let now = Utc::now();
+        // An interval is validated where a task is created, where the create
+        // tool parses one, and where state loads, each of which refuses a value
+        // with no duration.
+        let cadence = interval_duration(interval_secs)
+            .unwrap_or_else(|| panic!("scheduled interval {interval_secs} s has no duration"));
         // When fire_immediately is true, anchor created_at in the past so that
         // next_fire_at() = created_at + interval = now, firing on the first tick.
-        let created_at = if fire_immediately {
-            now - chrono::Duration::seconds(interval_secs as i64)
-        } else {
-            now
-        };
+        let created_at = if fire_immediately { now - cadence } else { now };
         Self {
-            id: uuid::Uuid::now_v7().to_string().replace('-', "")[..12].to_string(),
+            // A UUID with its dashes stripped is 32 ASCII hex chars; taking the
+            // first 12 characters is the same 12 bytes the previous byte slice
+            // took, without an offset that could split a character.
+            id: uuid::Uuid::now_v7()
+                .to_string()
+                .replace('-', "")
+                .chars()
+                .take(12)
+                .collect(),
             interval_secs,
             prompt,
             recurring,
@@ -280,7 +317,13 @@ impl ScheduledTask {
     /// Next fire time, computed from `last_fired_at` (or `created_at` if never fired).
     pub fn next_fire_at(&self) -> DateTime<Utc> {
         let anchor = self.last_fired_at.unwrap_or(self.created_at);
-        anchor + chrono::Duration::seconds(self.interval_secs as i64)
+        anchor
+            + interval_duration(self.interval_secs).unwrap_or_else(|| {
+                panic!(
+                    "scheduled interval {} s has no duration",
+                    self.interval_secs
+                )
+            })
     }
 
     /// Whether this task has expired (recurring tasks only).
@@ -456,5 +499,43 @@ mod tests {
 
         assert!(result.is_err());
         assert_eq!(clock.snapshot(), before);
+    }
+
+    /// A persisted cadence with no `i64` second count is refused by the load,
+    /// naming the number it read. Stored anyway it would come back as a
+    /// negative duration and a task that fires every tick.
+    #[test]
+    fn a_persisted_interval_with_no_second_count_is_refused() {
+        let raw = format!(
+            r#"{{"id":"x","intervalSecs":{},"prompt":"p","createdAt":"2026-01-01T00:00:00Z",
+                 "lastFiredAt":null,"expiresAt":null}}"#,
+            u64::MAX
+        );
+        let err = serde_json::from_str::<ScheduledTask>(&raw)
+            .expect_err("u64::MAX seconds has no i64 second count");
+        assert!(
+            err.to_string().contains(&u64::MAX.to_string()),
+            "the error names the value: {err}"
+        );
+    }
+
+    /// A cadence with no second count never becomes a duration, and one with a
+    /// second count round-trips and adds to the anchor in the right direction.
+    #[test]
+    fn an_interval_with_no_second_count_is_not_a_negative_duration() {
+        assert!(interval_duration(u64::MAX).is_none());
+        assert!(interval_duration(u64::from(u32::MAX)).is_some());
+
+        let ten_years = 3650 * 86_400;
+        let fits: ScheduledTask = serde_json::from_str(&format!(
+            r#"{{"id":"x","intervalSecs":{ten_years},"prompt":"p","createdAt":"2026-01-01T00:00:00Z",
+                 "lastFiredAt":null,"expiresAt":null}}"#
+        ))
+        .expect("a cadence with a second count loads");
+        assert_eq!(fits.interval_secs, ten_years);
+        assert!(
+            fits.next_fire_at() > fits.created_at,
+            "the cadence is added to the anchor as a duration"
+        );
     }
 }

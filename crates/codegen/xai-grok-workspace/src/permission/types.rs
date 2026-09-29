@@ -321,7 +321,6 @@ impl From<&xai_grok_tools::types::ToolInput> for AccessKind {
             ToolInput::SearchReplace(search_replace) => {
                 AccessKind::Edit(search_replace.file_path.to_string())
             }
-            ToolInput::ApplyPatch(_) => AccessKind::Edit("apply_patch".to_string()),
             ToolInput::HashlineEdit(he) => AccessKind::Edit(he.file_path.to_string()),
             ToolInput::Write(w) => AccessKind::Edit(w.file_path.clone()),
             ToolInput::CopyMove(c) => AccessKind::Edit(c.destination.clone()),
@@ -712,19 +711,6 @@ mod tests {
         assert!(
             matches!(access, AccessKind::WebSearch(ref q) if q == "rust lang"),
             "WebSearch should produce AccessKind::WebSearch with the query, got {access:?}"
-        );
-    }
-    #[test]
-    fn apply_patch_maps_to_edit_access() {
-        use xai_grok_tools::implementations::codex::apply_patch::ApplyPatchInput;
-        use xai_grok_tools::types::ToolInput;
-        let input = ToolInput::ApplyPatch(ApplyPatchInput {
-            patch: String::new(),
-        });
-        let access = AccessKind::from(&input);
-        assert!(
-            matches!(access, AccessKind::Edit(_)),
-            "ApplyPatch should produce AccessKind::Edit, got {access:?}"
         );
     }
     #[test]

@@ -3562,7 +3562,7 @@ mod agent_name_persistence_tests {
             "cursor",
             "grok-build",
             "grok-build-plan",
-            "codex",
+            "opencode",
             "browser-use",
         ] {
             let mut summary = Summary::new(

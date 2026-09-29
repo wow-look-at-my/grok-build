@@ -35,26 +35,36 @@ struct CollectorState {
 }
 
 impl DoomLoopSignalCollector {
+    /// The accumulated state, whatever a prior holder was doing when it died.
+    ///
+    /// The signals are what the stream transform acts on and the policy is what
+    /// it judges them by, so either one going missing silently turns a reported
+    /// doom loop into a response read as clean. The state is a `Vec` and two
+    /// flags, which a panicked write leaves at least as usable as the empty
+    /// state a poison would report in its place.
+    #[allow(clippy::disallowed_methods)] // takes the state back as the doc above says
+    fn state(&self) -> std::sync::MutexGuard<'_, CollectorState> {
+        self.inner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     /// A fresh, armed collector judging confidence with `policy`.
     pub(crate) fn new(policy: DoomLoopRecoveryPolicy) -> Self {
         let collector = Self::default();
-        if let Ok(mut state) = collector.inner.lock() {
-            state.policy = policy;
-        }
+        collector.state().policy = policy;
         collector
     }
 
     /// Stop the mid-stream abort for this attempt; signals keep recording.
     pub(crate) fn disarm_abort(&self) {
-        if let Ok(mut state) = self.inner.lock() {
-            state.abort_disarmed = true;
-        }
+        self.state().abort_disarmed = true;
     }
 
     /// While armed: the raw labels of the confident signals recorded so far
     /// (non-draining), or `None` when there is nothing to act on.
     pub(crate) fn abort_triggers(&self) -> Option<Vec<String>> {
-        let state = self.inner.lock().ok()?;
+        let state = self.state();
         if state.abort_disarmed {
             return None;
         }
@@ -92,16 +102,13 @@ impl DoomLoopSignalCollector {
 
     /// Drain the recorded signals; empty when nothing was reported.
     pub(crate) fn take(&self) -> Vec<DoomLoopSignal> {
-        match self.inner.lock() {
-            Ok(mut state) => std::mem::take(&mut state.signals),
-            Err(_) => Vec::new(),
-        }
+        // The lock is taken through [`Self::state`], so a signal the decoder
+        // recorded is never dropped for having been held when something panicked.
+        std::mem::take(&mut self.state().signals)
     }
 
     fn record(&self, signals: Vec<DoomLoopSignal>) {
-        let Ok(mut state) = self.inner.lock() else {
-            return;
-        };
+        let mut state = self.state();
         // Cumulative sets are re-sent as they grow; the raw label is the
         // stable identity. Linear scan is fine for these tiny sets.
         for signal in signals {
@@ -113,9 +120,7 @@ impl DoomLoopSignalCollector {
 
     /// Debug-log the first malformed payload per attempt (never per event).
     fn log_malformed_once(&self) {
-        let Ok(mut state) = self.inner.lock() else {
-            return;
-        };
+        let mut state = self.state();
         if !state.malformed_logged {
             state.malformed_logged = true;
             tracing::debug!("doom-loop check payload malformed or empty; ignoring");
@@ -225,5 +230,40 @@ mod tests {
         collector.disarm_abort();
         assert!(collector.abort_triggers().is_none());
         assert_eq!(collector.take().len(), 2, "recording survives the disarm");
+    }
+
+    /// A panic inside one collector step silences nothing afterwards.
+    ///
+    /// Every step goes through [`DoomLoopSignalCollector::state`], which takes
+    /// the lock back whatever a prior holder was doing when it died. A poisoned
+    /// `std` lock instead leaves `disarm_abort` and `take` reporting the empty
+    /// answer, and an empty report is read as a response with nothing wrong
+    /// with it.
+    #[test]
+    fn a_panicking_holder_leaves_the_collector_working() {
+        let confident = r#"{"type":"response.doom_loop_check","doom_loop_check":{"triggers":["tail_repetition:8@thinking"]}}"#;
+        let collector = DoomLoopSignalCollector::new(DoomLoopRecoveryPolicy::default());
+        assert!(collector.absorb(DOOM_LOOP_CHECK_EVENT_TYPE, confident));
+        assert!(collector.abort_triggers().is_some());
+
+        let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _held = collector.state();
+            panic!("the decode died holding the collector");
+        }));
+        assert!(
+            panicked.is_err(),
+            "the test must actually have panicked while holding the lock"
+        );
+
+        collector.disarm_abort();
+        assert!(
+            collector.abort_triggers().is_none(),
+            "the disarm must reach the state a poisoned lock still holds"
+        );
+        assert_eq!(
+            collector.take().len(),
+            1,
+            "a signal recorded before the panic must survive it"
+        );
     }
 }

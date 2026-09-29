@@ -2045,6 +2045,9 @@ fn extract_skill_header_command(text: &str) -> Option<String> {
     }
     let cmd_name = text.split(&[' ', '\n'][..]).next()?;
     if let Some(input_idx) = text.find("## Input\n") {
+        // `input_idx` is a `str::find` offset and `"## Input\n"` is pure ASCII,
+        // so the offset past it is a char boundary.
+        #[allow(clippy::string_slice)] // past the ASCII "## Input\n" that str::find matched
         let args = text[input_idx + "## Input\n".len()..].trim();
         if !args.is_empty() {
             return Some(format!("{cmd_name} {args}"));
@@ -2106,10 +2109,14 @@ fn extract_cron_prompt_body(text: &str) -> Option<String> {
     }
     let end_tag = "</system-reminder>";
     let close = text.find(end_tag)?;
+    #[allow(clippy::string_slice)] // ends at a str::find offset
     let header = &text[..close];
     if !header.contains("scheduled task execution") {
         return None;
     }
+    // `close` is a `str::find` offset and `end_tag` is pure ASCII, so the offset
+    // past it is a char boundary.
+    #[allow(clippy::string_slice)] // past the ASCII closing tag that str::find matched
     let body = text[close + end_tag.len()..].trim();
     if body.is_empty() {
         return None;
@@ -2633,7 +2640,11 @@ fn tool_call_to_block(tc: &acp::ToolCall, session_cwd: Option<&Path>) -> RenderB
                 || name.to_ascii_lowercase().starts_with("skill:")
             {
                 let label = match name.find(':') {
-                    Some(i) => format!("Skill{}", &name[i..]),
+                    Some(i) => {
+                        #[allow(clippy::string_slice)] // starts at a str::find offset
+                        let from_colon = &name[i..];
+                        format!("Skill{from_colon}")
+                    }
                     None => "Skill".into(),
                 };
                 (label, ToolCallBlock::Skill)
@@ -5132,7 +5143,7 @@ mod tests {
             "completion must not snap a user-expanded Edit back to Collapsed"
         );
     }
-    /// Multi-file (apply_patch shape: several Diff items) and title-fallback
+    /// Multi-file (several Diff items) and title-fallback
     /// Edits can't be summarized by the one-liner: they materialize Expanded
     /// with the summary marked untrusted, config-independent. Each case
     /// isolates one untrusted signal.

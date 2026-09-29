@@ -1,3 +1,8 @@
+#![allow(clippy::cast_lossless)] // 5 hits predate the gate
+#![allow(clippy::cast_possible_truncation)] // 12 hits predate the gate
+#![allow(clippy::cast_precision_loss)] // 1 hit predates the gate
+#![allow(clippy::cast_sign_loss)] // 2 hits predate the gate
+
 //! xai-grok-sampler - Actor-based sampling layer for xAI grok.
 //!
 //! This crate extracts the HTTP streaming + retry logic out of

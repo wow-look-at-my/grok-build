@@ -23,12 +23,24 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 
 - `cargo fmt --all` before pushing. The `fmt` job in `ci.yml` runs `cargo fmt --all --check` and fails the build on any unformatted file. It is its own job, because rustfmt parses and never compiles. It answers in seconds rather than waiting on the cold build.
 - `cargo check -p <touched-crate>` before pushing.
+- `Lint (workspace)` is `--lib --bins`, so it compiles no `#[cfg(test)]` module, and `Build the dependencies` is `cargo test --locked --workspace --no-run`, which compiles all of them. An import clippy calls unused can still be the one a test needs: removing `std::sync::Mutex` from `xai-grok-telemetry`'s `debug_log.rs` passed the lint and broke the dependency build two steps earlier in the same job. Mirror both commands, not whichever one was red.
 - `cargo test -p <touched-crate>` for the crate you changed.
 - Prefer committing real tests that drive the shipped code (not mocks of the unit under test, not hand-built expected objects).
 - **A web session cannot link the workspace.** `target/` reaches ~16 GB after a `cargo check` of the pager, against a ~12 GB session disk allowance. So `cargo build -p xai-grok-pager-bin` runs the container out of space. Check the crate, run that crate's tests, push, and let CI produce the binary.
 - **Do not run `cargo test -p xai-grok-shell` in a web session.** Its test binary runs the disk out the same way. Run `cargo check -p xai-grok-shell --tests`, push, and read the shell tests' result from CI's `Build & test`.
 - `protoc` is missing from the image and the `bin/protoc` dotslash shim cannot run either, so any build that reaches `xai-grok-tools-api` dies in its build script. Run `apt-get install -y protobuf-compiler` first.
 - `mold` is missing too, and the repo's cargo config passes `-fuse-ld=mold`. Every build script then fails to link with `collect2: fatal error: cannot find 'ld'`, on `proc-macro2` and `libc` — which reads as a broken C toolchain and is not one. Run `apt-get install -y mold`.
+- **A local clippy run cannot measure the whole denied set, on macOS.** Code behind `#[cfg(target_os = "linux")]` is never compiled here, so clippy never reads it and a lint denied at workspace level reports nothing for it. The parent-death checks in `xai-tty-utils` and `xai-grok-workspace` are that shape (`getppid()` returning a `pid_t`, compared against a captured `u32`), and `clippy::cast_sign_loss` rejected them in CI while `cargo clippy --workspace --lib --bins` exited 0 on the Mac. A per-crate exception count generated on a Mac is therefore a floor, not a total. A HOST clippy run is what that floor comes from - `--target x86_64-unknown-linux-gnu` reads those files and is a complete measurement:
+
+```
+CC_x86_64_unknown_linux_gnu=ci/zig-linux-cc.sh \
+  cargo clippy --locked --workspace --lib --bins --keep-going \
+    --target x86_64-unknown-linux-gnu
+```
+
+Cross-clippy links nothing, but ring and aws-lc compile C in their build scripts and need a compiler for the TARGET. `ci/zig-linux-cc.sh` is `ci/zig-target-cc.sh`'s trick pointed at Linux: zig ships the cross toolchain, and cc-rs's own target flags are dropped because zig spells them differently. Run it through rustup's pinned 1.94.1 (`PATH=/opt/homebrew/opt/rustup/bin:$PATH`): a Homebrew `cargo` is a different rustfmt and a different clippy, and it reported a file clean that CI's Rustfmt job then rejected over import order.
+- `Lint (workspace)` passes `--keep-going` for that reason. A denied lint is a compile error, which stops the crate that hit it and leaves every crate behind it unlinted; on a graph where several crates have Linux-only code, one CI cycle per crate is the alternative.
+- The runner's clippy is not the clippy on a development machine, and the lint tables differ between the two. Where a lint's verdict matters, read CI rather than concluding from a local run.
 
 ## `--sandbox` jail notes
 
@@ -142,6 +154,8 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - `/debug <question>` injects the question plus an execution-context snapshot (`slash/commands/debug_context.rs`) through `CommandResult::InjectSkill`. Only `scroll`, `fps` and `log` are reserved. Everything else is free text. So a question must never come back as an "unknown option" error again.
 - Staleness is `current_exe()` versus a canonicalized `$GROK_HOME/bin/grok`. `current_exe()` resolves the symlink at exec time, so after an update the two disagree and the block says the running process is not what is on disk. Both sides must stay canonicalized or every symlinked install reads as stale.
 - `GROK_*`/`XAI_*` values whose NAME looks like a credential are withheld — the prompt leaves the session and lands in the model's transcript.
+- `/debug` turns the firehose on. With no `GROK_DEBUG_LOG`/`GROK_LOG_FILE`, `install_firehose` installs the routing layer DORMANT behind `RuntimeGate`, and `debug_log::enable_firehose` wakes it. Spans pass the gate while it is closed. The routing layer must see a session span when it opens, or that session's later events go to the fallback file.
+- The agent can be a separate leader process, so the pager's switch does not reach it. The `/debug` prompt block carries `ENABLE_FIREHOSE_META`, and the shell's `prompt` handler calls `enable_firehose` on it. Events before the switch are not in the log. The injected context says so.
 
 ## Shift+Tab mode ring notes
 
@@ -152,6 +166,7 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - A mode change swaps the system prompt and the tool registry together. The shell never drops that swap. A swap that arrives while a turn runs waits in `ModeAgentState::pending` (`acp_session_impl/session_mode.rs`) and lands at turn end. A refused swap leaves the Explore prompt ("You have NO file editing tools") on a session the user already moved to Plan or Auto.
 - The shell owns the ring's base agent (`mode_agent_target`). A bare `plan`/`default`/`ask` that arrives while a ring identity is active restores the agent that ran before the ring. So a pager that lost its ring state cannot strand the session under Explore.
 - A read-only agent (`permission_mode: Plan`, which covers explore and plan) gets no injected `write` tool. Its prompt says it has no editing tools.
+- Explore carries the subagent tools, limited to `EXPLORE_SUBAGENT_TYPES` (`explore`, `plan`), so a child cannot write either. The limit rides `AgentDefinition::allowed_subagent_types`. The session writes it into a shared cell on every agent rebuild (`SharedAllowedSubagentTypes`). A value read once at spawn leaves a ring switch into explore unrestricted.
 
 ## `/goal` role-model notes
 
@@ -186,7 +201,9 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - Assistant prose and reasoning are left out on purpose. A verifier that reads the implementer's narration inherits its bias. A command line and its output carry none.
 - `GoalOrchestration::start_prompt_index` is the cut. A `User` item's `prompt_index` below it puts the calls that follow outside the goal. A compaction summary inside the goal is reported in the log header. The calls before it are gone from the conversation. So the verifier is told to run a missing plan step itself.
 - Each result keeps its head and its tail, because a test runner puts its verdict at the tail. Arguments are capped too. The whole log is capped and keeps the newest calls. The header states how many older calls it dropped. An absence then reads as an absence.
-- Every implementer-facing template (`goal_rules*.md`, `goal_continuation_directive*.md`, `goal_plan_block.md`, the planner prompt) says the run is the evidence and forbids proof files. `implementer_templates_never_ask_for_proof_files` pins that. The scratch dir stays, for temp scripts and a screenshot a plan step names.
+- Every implementer-facing template (`goal_rules*.md`, `goal_continuation_directive*.md`, `goal_plan_block.md`, the planner prompt) says the run is the evidence and forbids proof files. The scratch dir stays, for a screenshot a plan step names.
+- Gathering evidence is the verifier's job alone. While a goal is active, `prepare_tool_call` refuses any implementer call whose arguments name the session dir or a bookkeeping file (`chat_history.jsonl`, `updates.jsonl`, a run log, verdict or details file), via `run_log::goal_bookkeeping_target`. Implementer prompts never describe how runs are recorded, because that description is what sent the model after its own transcript.
+- Every goal prompt (planner, implementer, verifier, strategist) bans hand-rolled check scripts, harnesses, probes and shims. Checks use the project's existing test runner, build and entry point.
 
 ## Verification does not widen the goal
 
@@ -464,7 +481,7 @@ Every one of those is the test doing its job. Making them pass there means weake
 - `/effort` consults exactly one thing: `meta.supportsReasoningEffort` on the session's ACP catalog entry for the current model (`supports_reasoning_effort_meta`, read by `ModelState::resolve_effort_for_model`). Nothing asks the model, and no request is made. So a wrong refusal is always a catalog-entry fault, never a provider one.
 - The shell writes that key only when `ModelInfo.supports_reasoning_effort` is true (`to_acp_model_info`). It OMITS the key otherwise, rather than writing `false`. Its sources are `[model.<key>].supports_reasoning_effort`, a non-empty `[model.<key>].reasoning_efforts` menu (`derive_reasoning_effort_fields`), the `/v1/models` entry's own flag, and the Messages-backend auto-default.
 - The refusal carries its evidence (`UnsupportedEffortDiagnosis`). That is the model id, whether it is in the catalog at all, and what `reasoning_effort_meta_state` found. The state is one of no meta, key absent, explicitly false, or not a bool with the value quoted. It also reports a `reasoningEfforts` menu that is there anyway. Such a menu is the catalog contradicting itself. The message says so. A one-line "does not support reasoning effort" is unarguable and therefore undebuggable.
-- `[models].force_reasoning_effort_models` is the override. Globs match the catalog key or the model id. It applies to the FINISHED catalog (`force_reasoning_effort_support`, called from `resolve_model_catalog` and from each `merge_codex_catalog`). That is what makes it work where `[model.<key>]` cannot. A `[model.X]` table whose name matches no catalog key ADDS a model instead of overriding one. So a key/id mismatch leaves the real entry unflagged, in silence.
+- `[models].force_reasoning_effort_models` is the override. Globs match the catalog key or the model id. It applies to the FINISHED catalog (`force_reasoning_effort_support`, called from `resolve_model_catalog` and from `merge_additive_catalog`). That is what makes it work where `[model.<key>]` cannot. A `[model.X]` table whose name matches no catalog key ADDS a model instead of overriding one. So a key/id mismatch leaves the real entry unflagged, in silence.
 - A forced model with no menu of its own gets the built-in low..xhigh fallback. That is what any flagged model gets when the server sent no `reasoningEfforts`.
 
 ## Workflow agent-concurrency notes
@@ -492,7 +509,7 @@ Every one of those is the test doing its job. Making them pass there means weake
 
 - `[model_providers.<id>]` declares a base URL, and `model_provider_discovery.rs` asks that base what it serves (`models_autodetect`, default on; `models_list_url` for a listing that lives elsewhere). A discovered model is built through `config::entry_for_provider_model`. That is the SAME merge a `[model.<id>] model_provider = "..."` block gets, fail-closed auth ref included. A second construction path is how a discovered model reaches a third party's endpoint with the session bearer.
 - Keys are `<provider id>/<slug>`. An unqualified key lets one provider's listing overwrite another provider's model of the same name, and overwrite the user's own `[model.<id>]` block.
-- Discovery is additive, like Codex: `ModelsManager::provider_models`, folded on by `with_additive_catalogs`. Every rebuild of the catalog goes through that one method. A merge that some paths skip drops the provider's models on the next config reload.
+- Discovery is additive: `ModelsManager::provider_models`, folded on by `with_additive_catalogs`. Every rebuild of the catalog goes through that one method. A merge that some paths skip drops the provider's models on the next config reload.
 - A `[model.<id>]` block that routes to a listed model is MERGED with it, under the block's key (`resolve_discovered_models`, `ConfigModelOverride::laid_over`). Every field the block sets wins. The listing fills the rest, so a block that only renames a model keeps the runtime's window, capabilities and residency. `provider_models` stores the raw listing (`DiscoveredModel`). The merge runs at each rebuild against the current config. A reloaded block therefore applies without a second listing request.
 - A block with no `model_provider` also claims a listed model when its `base_url` or `api_base_url` is the provider's (case and trailing slash ignored) and its slug matches. It routes to the same place, so leaving both put one model in the picker twice.
 - A block claims per provider. Another provider that serves the same slug on another URL keeps its own entry (`a_block_claims_only_the_provider_on_its_url`).

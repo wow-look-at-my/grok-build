@@ -398,7 +398,12 @@ pub(super) fn mcp_args_lines(req: &acp::RequestPermissionRequest) -> Vec<String>
     let mut lines: Vec<String> = pretty
         .lines()
         .map(|l| match l.char_indices().nth(MCP_ARGS_MAX_LINE_CHARS) {
-            Some((byte_idx, _)) => format!("{}…", &l[..byte_idx]),
+            Some((byte_idx, _)) => {
+                // `byte_idx` is a `char_indices` offset, so a char boundary.
+                #[allow(clippy::string_slice)] // offset from char_indices().nth()
+                let head = &l[..byte_idx];
+                format!("{head}\u{2026}")
+            }
             None => l.to_owned(),
         })
         .collect();

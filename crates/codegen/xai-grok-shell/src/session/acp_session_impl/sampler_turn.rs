@@ -429,7 +429,6 @@ impl SessionActor {
                 extra_body: Default::default(),
             });
         let creds = self.chat_state_handle.get_credentials().await;
-        let codex_backend = crate::codex_provider::is_codex_backend(&cfg.base_url);
         let model_facts = self.model_auth_facts(cfg.model.as_str());
         let auth_method = self.auth_method_id.load();
         let gate =
@@ -446,11 +445,7 @@ impl SessionActor {
         } else {
             creds.api_key
         };
-        let auth_scheme = if codex_backend {
-            xai_grok_sampler::AuthScheme::Bearer
-        } else {
-            model_facts.auth_scheme
-        };
+        let auth_scheme = model_facts.auth_scheme;
         let mut extra_headers = cfg.extra_headers;
         crate::agent::config::inject_url_derived_headers(
             &mut extra_headers,
@@ -504,22 +499,15 @@ impl SessionActor {
             idle_timeout_secs: None,
             client_identifier: self.client_identifier.clone(),
             deployment_id: None,
-            user_id: if codex_backend {
-                None
-            } else {
-                self.auth_manager
-                    .as_ref()
-                    .and_then(|am| am.current_or_expired())
-                    .filter(|a| a.is_xai_auth())
-                    .map(|a| a.user_id)
-            },
+            user_id: self
+                .auth_manager
+                .as_ref()
+                .and_then(|am| am.current_or_expired())
+                .filter(|a| a.is_xai_auth())
+                .map(|a| a.user_id),
             origin_client: self.origin_client.clone(),
             attribution_callback: self.attribution_callback.clone(),
-            bearer_resolver: if codex_backend {
-                Some(std::sync::Arc::new(
-                    crate::codex_provider::CodexBearerResolver,
-                ))
-            } else if use_bearer_resolver {
+            bearer_resolver: if use_bearer_resolver {
                 self.auth_manager.as_ref().map(|am| {
                     crate::auth::credential_provider::WireValidBearerResolver::shared(am.clone())
                 })
@@ -531,15 +519,7 @@ impl SessionActor {
             compaction_at_tokens: self.compaction_at_tokens.get(),
             doom_loop_recovery: self.doom_loop_recovery,
             output_rate_floor: self.output_rate_floor.get(),
-            header_injector: if codex_backend {
-                Some(std::sync::Arc::new(
-                    crate::codex_provider::CodexHeaderInjector::new(
-                        self.session_info.id.0.as_ref(),
-                    ),
-                ))
-            } else {
-                Some(std::sync::Arc::new(TraceContextInjector))
-            },
+            header_injector: Some(std::sync::Arc::new(TraceContextInjector)),
         }
     }
     /// Install auto-mode permission classifier with a live LLM side-query
@@ -926,9 +906,15 @@ impl SessionActor {
         }
         if self.tool_context.sampler_retry_only_before_output {
             let handle = self.chat_state_handle.clone();
-            tokio::spawn(async move {
-                let _ = handle.mark_usage_incomplete(true, true).await;
-            });
+            // Marking the usage incomplete is what keeps a failed child's spend
+            // from being read as final, and nobody awaits this round, so its
+            // failure has to be attributed rather than lost.
+            tokio::spawn(xai_grok_tools::util::detached::fire_and_forget(
+                "mark usage incomplete",
+                async move {
+                    let _ = handle.mark_usage_incomplete(true, true).await;
+                },
+            ));
             let message = format!(
                 "workflow child model request failed; usage may understate real spend: {}",
                 error.message
@@ -1494,17 +1480,6 @@ impl SessionActor {
     /// Soft failures with a still-usable access token still return here
     /// (grace / optimistic send); 401 recovery remains the safety net.
     pub(crate) async fn refresh_token_if_expired(&self) {
-        if self
-            .chat_state_handle
-            .get_sampling_config()
-            .await
-            .is_some_and(|cfg| crate::codex_provider::is_codex_backend(&cfg.base_url))
-        {
-            if let Err(error) = crate::codex_provider::refresh_credentials().await {
-                tracing::warn!(%error, "Codex credential refresh failed");
-            }
-            return;
-        }
         if let Some(ref am) = self.auth_manager {
             let creds = self.chat_state_handle.get_credentials().await;
             let (model_id, base_url) = self
@@ -1704,15 +1679,21 @@ impl SessionActor {
         } else if self.tool_context.task_output_token_budget.is_some() {
             self.tool_context.fail_task_output_usage_closed();
             let handle = self.chat_state_handle.clone();
-            tokio::spawn(async move {
-                let _ = handle.mark_usage_incomplete(true, true).await;
-            });
+            tokio::spawn(xai_grok_tools::util::detached::fire_and_forget(
+                "mark usage incomplete",
+                async move {
+                    let _ = handle.mark_usage_incomplete(true, true).await;
+                },
+            ));
             None
         } else if self.tool_context.sampler_retry_only_before_output {
             let handle = self.chat_state_handle.clone();
-            tokio::spawn(async move {
-                let _ = handle.mark_usage_incomplete(true, true).await;
-            });
+            tokio::spawn(xai_grok_tools::util::detached::fire_and_forget(
+                "mark usage incomplete",
+                async move {
+                    let _ = handle.mark_usage_incomplete(true, true).await;
+                },
+            ));
             None
         } else {
             None

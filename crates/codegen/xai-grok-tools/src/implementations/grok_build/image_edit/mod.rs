@@ -121,13 +121,19 @@ async fn resolve_to_data_url(value: &str) -> Result<String, xai_tool_runtime::To
         let comma = value.find(',').ok_or_else(|| {
             xai_tool_runtime::ToolError::invalid_arguments("malformed data URL in image reference")
         })?;
-        if !value[..comma].contains(";base64") {
+        // `comma` is the offset of an ASCII `,`, so it and `comma + 1` are char
+        // boundaries.
+        #[allow(clippy::string_slice)]
+        let header = &value[..comma];
+        if !header.contains(";base64") {
             return Err(xai_tool_runtime::ToolError::invalid_arguments(
                 "image references only support base64 data URLs",
             ));
         }
+        #[allow(clippy::string_slice)]
+        let payload = &value[comma + 1..];
         base64::engine::general_purpose::STANDARD
-            .decode(&value[comma + 1..])
+            .decode(payload)
             .map_err(|e| {
                 xai_tool_runtime::ToolError::invalid_arguments(format!(
                     "invalid base64 in image reference: {e}"
@@ -171,8 +177,11 @@ fn parse_attachment_token(value: &str) -> Option<usize> {
         .unwrap_or(trimmed)
         .trim();
     // Strip an optional leading `image` label (case-insensitive). The
-    // 5-byte prefix is ASCII, so slicing at byte 5 stays on a boundary.
+    // 5-byte prefix is ASCII, so slicing at byte 5 stays on a boundary —
+    // `get(..5)` above is what proves it, since it returns `None` for an
+    // offset that splits a character.
     let rest = match inner.get(..5).map(str::to_ascii_lowercase).as_deref() {
+        #[allow(clippy::string_slice)] // `get(..5)` succeeded, so byte 5 aligns
         Some("image") => inner[5..].trim_start(),
         _ => inner,
     };

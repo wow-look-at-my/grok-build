@@ -119,6 +119,9 @@ impl ChildRunner for TestRunner {
                 };
             }
             let _ = started.send(request.id.clone());
+            if request.prompt == PANICKING_PROMPT {
+                panic!("{} died holding its reporter", request.id);
+            }
             let result = tokio::select! {
                 _ = cancellation.cancelled() => {
                     if wait_after_cancel {
@@ -2708,5 +2711,53 @@ async fn workflow_spawns_bypass_the_session_concurrent_limit() {
             .expect("spawn round-trips")
             .success
     );
+    harness.actor.abort();
+}
+
+/// A prompt that makes [`TestRunner`]'s run future unwind.
+const PANICKING_PROMPT: &str = "panic mid-run";
+
+/// A child that dies mid-run has to leave a finished record behind.
+///
+/// The unwinding is caught where the run is pushed, so what the coordinator
+/// still owes whoever holds the task id is an answer naming the failure: a bare
+/// "panicked" cannot be told apart from any other way a child can die, and the
+/// caller is the one that has to decide what to do about it.
+#[tokio::test]
+async fn a_panicking_child_reports_what_it_died_of() {
+    let mut harness = harness(false, std::time::Duration::from_secs(60));
+    let spawn = tokio::spawn({
+        let backend = harness.backend.clone();
+        async move {
+            let mut request = request("dead-child", true);
+            request.prompt = PANICKING_PROMPT.to_owned();
+            backend.spawn(request).await
+        }
+    });
+
+    let started = harness.started.recv().await.expect("child started");
+    assert_eq!(started, "dead-child");
+
+    harness
+        .completions
+        .recv()
+        .await
+        .expect("the child that died must be finished, not left running");
+
+    let snapshot = harness
+        .backend
+        .query("dead-child", false, None)
+        .await
+        .expect("the id the caller holds still resolves");
+    let SubagentSnapshotStatus::Failed { error } = &snapshot.status else {
+        panic!("expected a failed record, got {:?}", snapshot.status);
+    };
+    assert!(
+        error.contains("dead-child died holding its reporter"),
+        "the report must carry what the child panicked with, got {error:?}"
+    );
+
+    let _ = harness.finish.send(());
+    let _ = spawn.await;
     harness.actor.abort();
 }

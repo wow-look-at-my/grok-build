@@ -14,6 +14,30 @@ pub(super) const SKILL_BUDGET_CONTEXT_PERCENT: f64 = 0.5;
 /// Derived from percentage to prevent drift: (200k tokens * 4 bytes/token * 50%).
 pub(super) const DEFAULT_CHAR_BUDGET: usize =
     (200_000.0 * 4.0 * SKILL_BUDGET_CONTEXT_PERCENT) as usize;
+
+/// First whole `f64` above the largest `usize` any supported target has: 2^64,
+/// one past `usize::MAX` on the 64-bit targets this builds for.
+const USIZE_CEILING: f64 = 18_446_744_073_709_551_616.0;
+
+/// Character budget for a listing of a context window of `tokens`, taking
+/// `percent` of it at four chars per token.
+///
+/// `None` when the window states no char count a `usize` can hold. A window
+/// read from config or a model catalog is not bounded by anything this crate
+/// checks, and a saturated budget would truncate nothing at all.
+pub(super) fn listing_budget_chars(tokens: u64, percent: f64) -> Option<usize> {
+    // A context window is counted at f64 precision, which is exact below
+    // 2^53 tokens; every real window is far under that.
+    #[allow(clippy::cast_precision_loss)]
+    let chars = (tokens as f64) * 4.0 * percent;
+    if !chars.is_finite() || chars >= USIZE_CEILING {
+        return None;
+    }
+    // `chars` is below the ceiling above, so this keeps its whole value.
+    #[allow(clippy::cast_possible_truncation)]
+    let budget = chars as usize;
+    Some(budget)
+}
 /// Per-entry cap on description + when_to_use combined. Discovery only — the
 /// full skill body is loaded on invocation, so the listing stays terse. Split
 /// proportionally between the two fields (see `proportional_budgets`).
@@ -442,8 +466,12 @@ fn extract_trigger_suffix(description: &str) -> Option<(&str, &str)> {
     }
     let pos = best_pos?;
 
+    // Every trigger prefix is ASCII and `to_ascii_lowercase` preserves byte
+    // lengths and boundaries, so `pos` is a char boundary in `description`.
+    #[allow(clippy::string_slice)]
     let before = description[..pos].trim_end();
     let before = before.strip_suffix('.').unwrap_or(before);
+    #[allow(clippy::string_slice)]
     let triggers = &description[pos..];
 
     if before.is_empty() || triggers.is_empty() {
@@ -478,6 +506,8 @@ fn strip_leading_trigger_prefix(wtu: &str) -> &str {
             // ASCII lowercasing preserves byte length, so the offset computed on
             // the lowercased copy is valid on the original `trimmed` slice.
             let off = trimmed.len() - rest.len();
+            // The connective is ASCII, so `off` is a char boundary.
+            #[allow(clippy::string_slice)]
             let out = trimmed[off..]
                 .trim_start_matches(|c: char| c == ':' || c == ',' || c.is_whitespace());
             if !out.is_empty() {
@@ -683,6 +713,25 @@ mod tests {
     #[test]
     fn no_skills_returns_none() {
         assert!(announce(&[], 8_000).is_none());
+    }
+
+    /// The window arrives as tokens and the budget as a `usize` char count,
+    /// with an `f64` percentage in between. A window whose char count leaves
+    /// `usize` answers `None` instead of a saturated budget that bounds nothing;
+    /// one inside the range converts exactly.
+    #[test]
+    fn a_window_outside_the_char_range_states_no_budget() {
+        assert_eq!(listing_budget_chars(128_000, 0.5), Some(256_000));
+        // 2^53 tokens: the largest count an f64 holds exactly, and its char
+        // count is exactly representable too.
+        assert_eq!(
+            listing_budget_chars(9_007_199_254_740_992, 0.5),
+            Some(18_014_398_509_481_984)
+        );
+        assert_eq!(listing_budget_chars(u64::MAX, 0.5), None);
+        // A small enough percent brings even that window back into range.
+        let huge = listing_budget_chars(u64::MAX, 0.01).expect("a tenth of a percent fits");
+        assert!(huge > usize::try_from(u32::MAX).expect("u32 max fits usize"));
     }
 
     // ── "Use when" label de-duplication ───────────────────────────

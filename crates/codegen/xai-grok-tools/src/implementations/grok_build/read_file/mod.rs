@@ -312,7 +312,11 @@ pub fn extract_file_content_lines(
     let mut raw_output = if first_line.is_none() || file_content.is_empty() {
         String::new()
     } else {
-        file_content[start..end].to_owned()
+        // `start` and `end` accumulate the byte lengths of
+        // `split_inclusive('\n')` pieces, so both are char boundaries.
+        #[allow(clippy::string_slice)]
+        let slice = &file_content[start..end];
+        slice.to_owned()
     };
     if raw_output.ends_with("\r\n") {
         raw_output.truncate(raw_output.len().saturating_sub(2));
@@ -1301,7 +1305,7 @@ mod tests {
                 .content
                 .contains("[image content will be provided separately]"),
             "expected capture placeholder; got: {}",
-            &extracted.content[..extracted.content.len().min(300)]
+            crate::util::truncate_bytes(&extracted.content, 300)
         );
         assert!(
             !extracted.content.contains("AAAAAAAAAAAA"),

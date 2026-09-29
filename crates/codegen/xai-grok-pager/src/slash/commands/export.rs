@@ -100,7 +100,13 @@ fn list_path_completions(cwd: &Path, query: &str) -> Vec<ArgItem> {
             .unwrap_or(cwd);
         // Reconstruct the user's prefix up to the last `/` (preserving ~).
         let prefix = match trimmed.rfind('/') {
-            Some(pos) => &trimmed[..=pos],
+            // `pos` is a `str::rfind` offset for a one-byte ASCII `/`, so
+            // `..=pos` ends on the boundary just past it.
+            Some(pos) => {
+                #[allow(clippy::string_slice)] // inclusive end one past a str::rfind('/') offset
+                let through_slash = &trimmed[..=pos];
+                through_slash
+            }
             None => "",
         };
         (parent.to_path_buf(), prefix.to_string())

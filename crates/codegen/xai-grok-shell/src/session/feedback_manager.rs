@@ -280,8 +280,12 @@ impl FeedbackManager {
     ) -> Self {
         let (signals_handle, actor) = SessionSignalsActor::with_sync_interval(config.sync_interval);
 
-        // Spawn the signals actor
-        tokio::spawn(actor.run());
+        // The signals actor answers every handle method on this manager, so its
+        // death is reported with its name rather than as a closed channel.
+        tokio::spawn(xai_grok_tools::util::detached::fire_and_forget(
+            "feedback manager signals actor",
+            actor.run(),
+        ));
 
         let session_id = session_id.into();
         let feedback_client = feedback_client.map(|c| c.with_session_id(session_id.clone()));

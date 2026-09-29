@@ -338,6 +338,13 @@ fn apply_terminal_event_overrides(event: &mut rs::ResponseStreamEvent, data: &st
                 })
                 .map(|c| c.as_usd_float()),
         )
+        .unwrap_or_else(|err| {
+            tracing::error!(
+                error = %err,
+                "provider reported a usage.cost with no tick form; leaving the response unpriced"
+            );
+            None
+        })
     });
     if let Some(ticks) = ticks {
         response
@@ -410,6 +417,10 @@ fn extract_retry_after(headers: &reqwest::header::HeaderMap) -> Option<u64> {
 /// Seconds from a rate-limit reset header, which is written as a bare number
 /// or with a unit (`1.5`, `1.5s`, `30s`). A fractional value rounds UP: a
 /// wait shorter than the reset earns the same 429 back.
+///
+/// A value with no `u64` second count is `None`: the same unusable answer the
+/// parser already gives for a non-finite or negative one, so the caller uses
+/// its own backoff rather than a wait this header did not state.
 fn parse_reset_seconds(raw: &str) -> Option<u64> {
     let raw = raw.trim();
     let digits = raw.strip_suffix('s').unwrap_or(raw).trim();
@@ -417,7 +428,21 @@ fn parse_reset_seconds(raw: &str) -> Option<u64> {
     if !secs.is_finite() || secs < 0.0 {
         return None;
     }
-    Some(secs.ceil() as u64)
+    let whole = secs.ceil();
+    // 2^64 is the first whole `f64` above `u64::MAX`; below it the value is a
+    // whole number the `u64` holds exactly.
+    const U64_SECONDS_BOUND: f64 = 18_446_744_073_709_551_616.0;
+    if whole >= U64_SECONDS_BOUND {
+        tracing::error!(
+            header = %raw,
+            seconds = whole,
+            "rate-limit reset header has no u64 second count; ignoring it"
+        );
+        return None;
+    }
+    #[allow(clippy::cast_possible_truncation)]
+    let seconds = whole as u64;
+    Some(seconds)
 }
 
 fn extract_should_retry(headers: &reqwest::header::HeaderMap) -> Option<bool> {
@@ -2592,6 +2617,52 @@ mod tests {
     use super::*;
     use indexmap::IndexMap;
     use xai_grok_sampling_types::types::ChatRequestMessage;
+
+    /// A reset header naming seconds that no `u64` can hold states no wait the
+    /// client can honour, so it parses as absent rather than as a saturated
+    /// wait of `u64::MAX` seconds.
+    #[test]
+    fn a_reset_header_beyond_the_u64_second_range_is_not_a_wait() {
+        assert_eq!(parse_reset_seconds("1e300"), None);
+        assert_eq!(parse_reset_seconds("18446744073709551616"), None);
+        assert_eq!(
+            parse_reset_seconds("1e19"),
+            Some(10_000_000_000_000_000_000),
+            "a magnitude that fits u64 converts exactly"
+        );
+    }
+
+    /// Values that fit are unchanged: fractional rounds up, unit suffix strips.
+    #[test]
+    fn reset_headers_that_fit_still_parse_to_the_same_waits() {
+        assert_eq!(parse_reset_seconds("1.5s"), Some(2));
+        assert_eq!(parse_reset_seconds("30"), Some(30));
+        assert_eq!(parse_reset_seconds("30s"), Some(30));
+        assert_eq!(parse_reset_seconds("-1"), None);
+    }
+
+    /// An unusable token-reset header leaves the server's own `Retry-After`
+    /// standing; with no usable header at all the client states no wait.
+    #[test]
+    fn an_unusable_reset_header_does_not_replace_retry_after() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(
+            reqwest::header::RETRY_AFTER,
+            reqwest::header::HeaderValue::from_static("60"),
+        );
+        headers.insert(
+            reqwest::header::HeaderName::from_static("x-ratelimit-reset-tokens"),
+            reqwest::header::HeaderValue::from_static("1e300"),
+        );
+        assert_eq!(extract_retry_after(&headers), Some(60));
+
+        let mut only_reset = reqwest::header::HeaderMap::new();
+        only_reset.insert(
+            reqwest::header::HeaderName::from_static("x-ratelimit-reset-tokens"),
+            reqwest::header::HeaderValue::from_static("1e300"),
+        );
+        assert_eq!(extract_retry_after(&only_reset), None);
+    }
 
     /// The sampler's own default output budget is what a caller that sets none
     /// sends, so the default is where an impossible request is born: the

@@ -415,6 +415,9 @@ impl SuggestionController {
                 if accept_end == 0 {
                     return None;
                 }
+                // `one_word_end` returns a `trim_start` prefix length plus a
+                // `find(char::is_whitespace)` offset: a char boundary.
+                #[allow(clippy::string_slice)]
                 let accepted = self.ghost.text[..accept_end].to_owned();
                 self.ghost.text.drain(..accept_end);
                 if self.ghost.text.is_empty() {
@@ -603,9 +606,15 @@ impl SuggestionController {
         // continuation). Trim the incomplete escape; the strict-extension
         // check below then decides whether anything is left to fill.
         if lcp.bytes().rev().take_while(|&b| b == b'\\').count() % 2 == 1 {
-            lcp = &lcp[..lcp.len() - 1];
+            // An odd run of trailing `\` means the last char is that one-byte
+            // ASCII escape, so `len - 1` lands on a boundary.
+            #[allow(clippy::string_slice)]
+            let trimmed = &lcp[..lcp.len() - 1];
+            lcp = trimmed;
         }
         let range = self.validated_replace_range(range, lcp, current_text)?;
+        // Both ends pass `is_char_boundary` inside `validated_replace_range`.
+        #[allow(clippy::string_slice)]
         let typed = &current_text[range.clone()];
         (lcp.len() > typed.len() && lcp.starts_with(typed)).then(|| (range, lcp.to_owned()))
     }
@@ -631,6 +640,9 @@ impl SuggestionController {
         }
         let mut end = range.end;
         if range.end == request.len() && current_text.len() > request.len() {
+            // The `||` only reaches the slice once `is_char_boundary` has
+            // accepted `range.start`, and `request` is a prefix of `current_text`.
+            #[allow(clippy::string_slice)]
             if !current_text.is_char_boundary(range.start)
                 || !replacement.starts_with(&current_text[range.start..])
             {
@@ -763,6 +775,7 @@ impl SuggestionController {
 }
 
 /// Longest common prefix of two strings, trimmed to a char boundary.
+#[allow(clippy::string_slice)] // `n` ends at 0 or at an `is_char_boundary` offset
 fn common_str_prefix<'a>(a: &'a str, b: &str) -> &'a str {
     let mut n = a.bytes().zip(b.bytes()).take_while(|(x, y)| x == y).count();
     while n > 0 && !a.is_char_boundary(n) {
@@ -775,6 +788,9 @@ fn common_str_prefix<'a>(a: &'a str, b: &str) -> &'a str {
 /// leading whitespace followed by a run of non-whitespace characters.
 fn one_word_end(s: &str) -> usize {
     let leading_ws = s.len() - s.trim_start().len();
+    // `trim_start` strips whole characters, so the bytes it removed end on a
+    // char boundary.
+    #[allow(clippy::string_slice)]
     let after_ws = &s[leading_ws..];
     let word_len = after_ws.find(char::is_whitespace).unwrap_or(after_ws.len());
     leading_ws + word_len

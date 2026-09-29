@@ -64,6 +64,9 @@ fn effective_keywords(candidate: &KeywordCandidate<'_>) -> Vec<String> {
 
 fn normalize_domain(domain: &str) -> Option<String> {
     let trimmed = domain.trim();
+    // `i` is the offset of the ASCII `://` needle and `+ 3` is that literal's
+    // byte length, so the offset lands on a char boundary.
+    #[allow(clippy::string_slice)]
     let after_scheme = match trimmed.find("://") {
         Some(i) => &trimmed[i + 3..],
         None => trimmed,

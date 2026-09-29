@@ -41,6 +41,11 @@ impl SandboxLogger {
             "sandbox event"
         );
 
+        // Recording a violation must not panic on the way in, and the counters
+        // above already moved by the time this runs: the `Err` arm costs one
+        // buffered event, where a `unwrap_or_else(into_inner)` would keep a lock
+        // held by whatever panicked. `parking_lot::Mutex` is not a dependency here.
+        #[allow(clippy::disallowed_methods)]
         if let Ok(mut events) = self.events.lock() {
             events.push(event);
         }
@@ -52,6 +57,7 @@ impl SandboxLogger {
     }
 
     /// Take all accumulated events, draining the internal buffer.
+    #[allow(clippy::disallowed_methods)] // `unwrap_or_default` is the poison arm
     pub fn take_events(&self) -> Vec<SandboxEvent> {
         self.events
             .lock()

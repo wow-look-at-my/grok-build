@@ -1,3 +1,5 @@
+#![allow(clippy::cast_possible_wrap)] // 1 hit predates the gate
+
 //! Cross-platform system **sleep/wake** (suspend/resume) notifications.
 //!
 //! The motivating use case: an OIDC token refresh that is *in flight when the
@@ -34,6 +36,7 @@
 //! sleep anyway. `DidWake` handlers must stay cheap and non-blocking.
 
 /// A system power transition.
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PowerEvent {
     /// The system is about to sleep (lid close / suspend), or — on macOS — is

@@ -611,6 +611,8 @@ pub fn render_hook_hover_popup(
     let Some(badge_start_in_text) = row_text.find("[hooks:") else {
         return;
     };
+    // `badge_start_in_text` is a `find` offset, so it is a char boundary.
+    #[allow(clippy::string_slice)]
     let badge_end_in_text = row_text[badge_start_in_text..]
         .find(']')
         .map(|i| badge_start_in_text + i + 1)

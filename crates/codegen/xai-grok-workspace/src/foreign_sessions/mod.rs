@@ -1,16 +1,11 @@
 //! Bounded, metadata-only listing of foreign coding-agent sessions.
-//! Foreign SQLite stores are opened only when `xai_sqlite_journal::JournalMode`
-//! selects local WAL. The direct read-only/query-only transaction makes no
-//! logical writes, though WAL coordination may update shared-memory read marks.
-//! Network filesystems fail soft before SQLite open, conversion, or writes.
 use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime};
 mod capability;
 mod claude;
-mod codex;
-use capability::{ApprovedRoot, open_sqlite_transaction};
+use capability::ApprovedRoot;
 pub const MAX_SESSIONS_PER_TOOL: usize = 50;
 pub const MAX_SESSION_AGE: Duration = Duration::from_secs(30 * 24 * 60 * 60);
 pub const MAX_TITLE_CHARS: usize = 200;
@@ -18,16 +13,11 @@ const MAX_FUTURE_SKEW: Duration = Duration::from_secs(5 * 60);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ForeignSessionTool {
     Claude,
-    Codex,
     Cursor,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ForeignSessionSource {
     ClaudeCode,
-    CodexCli,
-    CodexVsCode,
-    CodexAtlas,
-    CodexChatGpt,
     CursorDesktop,
     CursorCli,
 }
@@ -84,7 +74,6 @@ impl<T> RecentProbe<T> {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct EnabledForeignSessionSources {
     pub claude: bool,
-    pub codex: bool,
     pub cursor: bool,
 }
 pub fn scan_foreign_sessions(
@@ -92,7 +81,7 @@ pub fn scan_foreign_sessions(
     enabled: EnabledForeignSessionSources,
 ) -> Vec<ForeignSessionSummary> {
     let scan_cursor = |_: &Path, _: SystemTime| Vec::new();
-    scan_with(cwd, enabled, claude::scan, codex::scan, scan_cursor)
+    scan_with(cwd, enabled, claude::scan, scan_cursor)
 }
 pub fn most_recent_foreign_session(
     cwd: &Path,
@@ -106,42 +95,33 @@ pub fn most_recent_foreign_session(
         within,
         SystemTime::now(),
         claude::most_recent,
-        codex::most_recent,
         recent_cursor,
     ) {
         RecentProbe::Complete(session) => session,
         RecentProbe::Incomplete => None,
     }
 }
-fn most_recent_with<Claude, Codex, Cursor>(
+fn most_recent_with<Claude, Cursor>(
     cwd: &Path,
     enabled: EnabledForeignSessionSources,
     within: Duration,
     now: SystemTime,
     recent_claude: Claude,
-    recent_codex: Codex,
     recent_cursor: Cursor,
 ) -> RecentProbe<RecentForeignSession>
 where
     Claude: FnOnce(&Path, SystemTime, Duration) -> RecentProbe<RecentCandidate>,
-    Codex: FnOnce(&Path, SystemTime, Duration) -> RecentProbe<RecentCandidate>,
     Cursor: FnOnce(&Path, SystemTime, Duration) -> RecentProbe<RecentCandidate>,
 {
-    if !enabled.claude && !enabled.codex && !enabled.cursor {
+    if !enabled.claude && !enabled.cursor {
         return RecentProbe::Complete(None);
     }
     let Ok(cwd) = dunce::canonicalize(cwd) else {
         return RecentProbe::Complete(None);
     };
-    let mut candidates = Vec::with_capacity(3);
+    let mut candidates = Vec::with_capacity(2);
     if enabled.claude {
         match recent_claude(&cwd, now, within) {
-            RecentProbe::Complete(candidate) => candidates.extend(candidate),
-            RecentProbe::Incomplete => return RecentProbe::Incomplete,
-        }
-    }
-    if enabled.codex {
-        match recent_codex(&cwd, now, within) {
             RecentProbe::Complete(candidate) => candidates.extend(candidate),
             RecentProbe::Incomplete => return RecentProbe::Incomplete,
         }
@@ -173,19 +153,17 @@ fn recent_candidate_order(a: &RecentCandidate, b: &RecentCandidate) -> Ordering 
         .then_with(|| a.native_id.cmp(&b.native_id))
         .then_with(|| a.source.cmp(&b.source))
 }
-fn scan_with<Claude, Codex, Cursor>(
+fn scan_with<Claude, Cursor>(
     cwd: &Path,
     enabled: EnabledForeignSessionSources,
     mut scan_claude: Claude,
-    mut scan_codex: Codex,
     mut scan_cursor: Cursor,
 ) -> Vec<ForeignSessionSummary>
 where
     Claude: FnMut(&Path, SystemTime) -> Vec<ForeignSessionSummary>,
-    Codex: FnMut(&Path, SystemTime) -> Vec<ForeignSessionSummary>,
     Cursor: FnMut(&Path, SystemTime) -> Vec<ForeignSessionSummary>,
 {
-    if !enabled.claude && !enabled.codex && !enabled.cursor {
+    if !enabled.claude && !enabled.cursor {
         return Vec::new();
     }
     let canonical_cwd = dunce::canonicalize(cwd).unwrap_or_else(|_| cwd.to_path_buf());
@@ -199,13 +177,6 @@ where
         let mut tool_sessions = Vec::new();
         for cwd in &cwd_spellings {
             tool_sessions.extend(scan_claude(cwd, now));
-        }
-        sessions.extend(finish_tool_scan(tool_sessions));
-    }
-    if enabled.codex {
-        let mut tool_sessions = Vec::new();
-        for cwd in &cwd_spellings {
-            tool_sessions.extend(scan_codex(cwd, now));
         }
         sessions.extend(finish_tool_scan(tool_sessions));
     }
@@ -268,20 +239,6 @@ pub(super) fn is_within(updated_at: SystemTime, now: SystemTime, within: Duratio
         Err(future) => future.duration() <= MAX_FUTURE_SKEW,
     }
 }
-pub(super) fn system_time_from_millis(millis: i64) -> Option<SystemTime> {
-    let millis = u64::try_from(millis).ok()?;
-    UNIX_EPOCH.checked_add(Duration::from_millis(millis))
-}
-pub(super) fn millis_from_system_time(time: SystemTime) -> Option<i64> {
-    let millis = time.duration_since(UNIX_EPOCH).ok()?.as_millis();
-    i64::try_from(millis).ok()
-}
-pub(super) fn millis_bounds(now: SystemTime, within: Duration) -> Option<(i64, i64)> {
-    Some((
-        millis_from_system_time(now.checked_sub(within)?)?,
-        millis_from_system_time(now.checked_add(MAX_FUTURE_SKEW)?)?,
-    ))
-}
 pub(super) fn normalize_title(value: &str) -> Option<String> {
     let normalized = value.split_whitespace().collect::<Vec<_>>().join(" ");
     if normalized.is_empty() {
@@ -304,6 +261,7 @@ pub(super) fn normalize_title(value: &str) -> Option<String> {
 mod tests {
     use super::*;
     use std::cell::{Cell, RefCell};
+    use std::time::UNIX_EPOCH;
     fn summary(id: &str, updated_at: SystemTime) -> ForeignSessionSummary {
         ForeignSessionSummary {
             tool: ForeignSessionTool::Claude,
@@ -344,7 +302,6 @@ mod tests {
         let cwd = dunce::canonicalize(root.path()).unwrap();
         let enabled = EnabledForeignSessionSources {
             claude: true,
-            codex: true,
             cursor: true,
         };
         let winner = most_recent_with(
@@ -362,24 +319,16 @@ mod tests {
             },
             |_, _, _| {
                 complete_candidate(
-                    ForeignSessionTool::Codex,
-                    ForeignSessionSource::CodexCli,
-                    "codex",
-                    now - Duration::from_secs(1),
-                )
-            },
-            |_, _, _| {
-                complete_candidate(
                     ForeignSessionTool::Cursor,
                     ForeignSessionSource::CursorDesktop,
                     "cursor",
-                    now - Duration::from_secs(2),
+                    now - Duration::from_secs(1),
                 )
             },
         )
         .unwrap();
-        assert_eq!(winner.tool, ForeignSessionTool::Codex);
-        assert_eq!(winner.native_id, "codex");
+        assert_eq!(winner.tool, ForeignSessionTool::Cursor);
+        assert_eq!(winner.native_id, "cursor");
         let tied = most_recent_with(
             &cwd,
             enabled,
@@ -390,14 +339,6 @@ mod tests {
                     ForeignSessionTool::Claude,
                     ForeignSessionSource::ClaudeCode,
                     "claude",
-                    now,
-                )
-            },
-            |_, _, _| {
-                complete_candidate(
-                    ForeignSessionTool::Codex,
-                    ForeignSessionSource::CodexCli,
-                    "codex",
                     now,
                 )
             },
@@ -437,7 +378,6 @@ mod tests {
                     now - within,
                 )
             },
-            |_, _, _| -> RecentProbe<RecentCandidate> { panic!("disabled codex store touched") },
             |_, _, _| -> RecentProbe<RecentCandidate> { panic!("disabled cursor store touched") },
         )
         .unwrap();
@@ -455,7 +395,6 @@ mod tests {
                     now + MAX_FUTURE_SKEW,
                 )
             },
-            |_, _, _| -> RecentProbe<RecentCandidate> { panic!("disabled codex store touched") },
             |_, _, _| -> RecentProbe<RecentCandidate> { panic!("disabled cursor store touched") },
         )
         .unwrap();
@@ -475,9 +414,6 @@ mod tests {
                     )
                 },
                 |_, _, _| -> RecentProbe<RecentCandidate> {
-                    panic!("disabled codex store touched")
-                },
-                |_, _, _| -> RecentProbe<RecentCandidate> {
                     panic!("disabled cursor store touched")
                 },
             )
@@ -489,38 +425,33 @@ mod tests {
         let now = UNIX_EPOCH + Duration::from_secs(10_000);
         let root = tempfile::tempdir().unwrap();
         let cwd = dunce::canonicalize(root.path()).unwrap();
-        let calls = Cell::new((0, 0, 0));
+        let calls = Cell::new((0, 0));
         let found = most_recent_with(
             &cwd,
             EnabledForeignSessionSources {
-                codex: true,
+                cursor: true,
                 ..Default::default()
             },
             Duration::from_secs(600),
             now,
             |_, _, _| {
-                let (_, codex, cursor) = calls.get();
-                calls.set((1, codex, cursor));
+                let (_, cursor) = calls.get();
+                calls.set((1, cursor));
                 RecentProbe::Complete(None)
             },
             |_, _, _| {
-                let (claude, _, cursor) = calls.get();
-                calls.set((claude, 1, cursor));
+                let (claude, _) = calls.get();
+                calls.set((claude, 1));
                 complete_candidate(
-                    ForeignSessionTool::Codex,
-                    ForeignSessionSource::CodexCli,
-                    "codex",
+                    ForeignSessionTool::Cursor,
+                    ForeignSessionSource::CursorDesktop,
+                    "cursor",
                     now,
                 )
             },
-            |_, _, _| {
-                let (claude, codex, _) = calls.get();
-                calls.set((claude, codex, 1));
-                RecentProbe::Complete(None)
-            },
         );
-        assert_eq!(calls.get(), (0, 1, 0));
-        assert_eq!(found.unwrap().tool, ForeignSessionTool::Codex);
+        assert_eq!(calls.get(), (0, 1));
+        assert_eq!(found.unwrap().tool, ForeignSessionTool::Cursor);
     }
     #[test]
     fn incomplete_enabled_tool_suppresses_cross_tool_winner() {
@@ -531,7 +462,6 @@ mod tests {
             &cwd,
             EnabledForeignSessionSources {
                 claude: true,
-                codex: true,
                 cursor: true,
             },
             Duration::from_secs(600),
@@ -539,13 +469,12 @@ mod tests {
             |_, _, _| RecentProbe::<RecentCandidate>::Incomplete,
             |_, _, _| {
                 complete_candidate(
-                    ForeignSessionTool::Codex,
-                    ForeignSessionSource::CodexCli,
-                    "codex",
+                    ForeignSessionTool::Cursor,
+                    ForeignSessionSource::CursorDesktop,
+                    "cursor",
                     now,
                 )
             },
-            |_, _, _| RecentProbe::Complete(None),
         );
         assert_eq!(result, RecentProbe::Incomplete);
     }
@@ -560,7 +489,7 @@ mod tests {
         let found = most_recent_with(
             &spelled,
             EnabledForeignSessionSources {
-                codex: true,
+                cursor: true,
                 ..Default::default()
             },
             Duration::from_secs(600),
@@ -570,7 +499,6 @@ mod tests {
                 assert_eq!(received, expected);
                 RecentProbe::Complete(None)
             },
-            |_, _, _| -> RecentProbe<RecentCandidate> { panic!("disabled cursor store touched") },
         );
         assert!(found.is_none());
     }
@@ -583,15 +511,10 @@ mod tests {
             &missing,
             EnabledForeignSessionSources {
                 claude: true,
-                codex: true,
                 cursor: true,
             },
             Duration::from_secs(600),
             SystemTime::now(),
-            |_, _, _| {
-                calls.set(calls.get() + 1);
-                RecentProbe::Complete(None)
-            },
             |_, _, _| {
                 calls.set(calls.get() + 1);
                 RecentProbe::Complete(None)
@@ -610,7 +533,6 @@ mod tests {
             Path::new("/repo"),
             EnabledForeignSessionSources::default(),
             |_, _| panic!("claude scanner called"),
-            |_, _| panic!("codex scanner called"),
             |_, _| panic!("cursor scanner called"),
         );
         assert!(sessions.is_empty());
@@ -618,12 +540,11 @@ mod tests {
     #[test]
     fn only_enabled_sources_are_invoked() {
         let claude_calls = Cell::new(0);
-        let codex_calls = Cell::new(0);
         let cursor_calls = Cell::new(0);
         scan_with(
             Path::new("/repo"),
             EnabledForeignSessionSources {
-                codex: true,
+                cursor: true,
                 ..Default::default()
             },
             |_, _| {
@@ -631,18 +552,11 @@ mod tests {
                 Vec::new()
             },
             |_, _| {
-                codex_calls.set(codex_calls.get() + 1);
-                Vec::new()
-            },
-            |_, _| {
                 cursor_calls.set(cursor_calls.get() + 1);
                 Vec::new()
             },
         );
-        assert_eq!(
-            (claude_calls.get(), codex_calls.get(), cursor_calls.get()),
-            (0, 1, 0)
-        );
+        assert_eq!((claude_calls.get(), cursor_calls.get()), (0, 1));
     }
     #[test]
     fn finish_scan_deduplicates_sorts_and_caps() {
@@ -704,7 +618,7 @@ mod tests {
         scan_with(
             &spelled,
             EnabledForeignSessionSources {
-                codex: true,
+                cursor: true,
                 ..Default::default()
             },
             |_, _| panic!("claude scanner called"),
@@ -712,7 +626,6 @@ mod tests {
                 received.borrow_mut().push(cwd.to_path_buf());
                 Vec::new()
             },
-            |_, _| panic!("cursor scanner called"),
         );
         assert_eq!(
             received.into_inner(),
@@ -730,7 +643,6 @@ mod tests {
                     ..Default::default()
                 },
                 |_, _| panic!("claude scanner called"),
-                |_, _| panic!("codex scanner called"),
                 |cwd, _| {
                     received.borrow_mut().push(cwd.to_path_buf());
                     Vec::new()
@@ -748,7 +660,7 @@ mod tests {
         scan_with(
             &cwd,
             EnabledForeignSessionSources {
-                codex: true,
+                cursor: true,
                 ..Default::default()
             },
             |_, _| panic!("claude scanner called"),
@@ -757,7 +669,6 @@ mod tests {
                 assert!(!received.to_string_lossy().starts_with(r"\\?\"));
                 Vec::new()
             },
-            |_, _| panic!("cursor scanner called"),
         );
     }
 }

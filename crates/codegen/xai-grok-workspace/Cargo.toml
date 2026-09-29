@@ -23,7 +23,6 @@ git2 = { version = "0.21", default-features = false, features = ["vendored-libgi
 ignore = { workspace = true }
 md5 = { workspace = true }
 regex = { workspace = true }
-rusqlite = { version = "0.37", features = ["bundled"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
@@ -83,7 +82,6 @@ xai-file-utils = { path = "../xai-file-utils" }
 xai-grok-auth = { path = "../xai-grok-auth" }
 xai-grok-telemetry = { workspace = true }
 xai-tty-utils = { workspace = true }
-xai-sqlite-journal = { workspace = true }
 reqwest = { workspace = true }
 xai-tool-protocol = { workspace = true }
 xai-tool-runtime = { workspace = true }

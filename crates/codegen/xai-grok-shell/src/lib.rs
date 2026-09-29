@@ -1,3 +1,11 @@
+#![allow(clippy::cast_lossless)] // 105 hits predate the gate
+#![allow(clippy::cast_possible_truncation)] // 257 hits predate the gate
+#![allow(clippy::cast_possible_wrap)] // 107 hits predate the gate
+#![allow(clippy::cast_precision_loss)] // 17 hits predate the gate
+#![allow(clippy::cast_sign_loss)] // 56 hits predate the gate
+#![allow(clippy::expect_used)] // 95 hits predate the gate
+#![allow(clippy::string_slice)] // 90 hits predate the gate
+#![allow(clippy::unwrap_used)] // 37 hits predate the gate
 #![allow(
     unused_imports,
     unused_variables,
@@ -24,10 +32,7 @@ pub use xai_grok_shell_assets::bundle;
 pub mod claude_import;
 pub mod claude_import_state;
 pub mod cli_models;
-pub(crate) mod codex_provider;
 pub mod config;
-/// Stable ACP auth-method id for the additive Codex/ChatGPT provider.
-pub const CODEX_AUTH_METHOD_ID: &str = codex_provider::AUTH_METHOD_ID;
 pub use xai_grok_shell_base::cpu_profile;
 pub use xai_grok_shell_base::env;
 pub mod extensions;

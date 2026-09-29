@@ -151,7 +151,7 @@ impl LatexDelimiterNormalizer {
         let mut buf = std::mem::take(&mut self.pending);
         buf.push_str(chunk);
         let (out, consumed) = self.process(&buf, false);
-        self.pending = buf[consumed..].to_string();
+        self.pending = span(&buf, consumed, buf.len()).to_string();
         out
     }
 
@@ -181,7 +181,7 @@ impl LatexDelimiterNormalizer {
                         match scan_fence_open(bytes, i, final_flush) {
                             FenceScan::NeedMore => break,
                             FenceScan::Match { ch, len, end } => {
-                                out.push_str(&buf[i..end]);
+                                out.push_str(span(buf, i, end));
                                 i = end;
                                 self.state = State::Fenced { ch, len };
                                 self.at_line_start = false;
@@ -201,7 +201,7 @@ impl LatexDelimiterNormalizer {
                             if i + run == n && !final_flush {
                                 break; // run may extend; hold it back
                             }
-                            out.push_str(&buf[i..i + run]);
+                            out.push_str(span(buf, i, i + run));
                             i += run;
                             self.state = State::InlineCode { run };
                             self.at_line_start = false;
@@ -218,7 +218,7 @@ impl LatexDelimiterNormalizer {
                                         // Trim pulldown's flanking whitespace so `$…$` is
                                         // accepted; the custom set (vs `char::is_ascii_whitespace`)
                                         // exists only to add vertical tab (0x0B).
-                                        let inner = buf[i + 2..close]
+                                        let inner = span(buf, i + 2, close)
                                             .trim_matches(|c: char| matches!(c, ' ' | '\t'..='\r'));
                                         if inner.is_empty() {
                                             // Empty after trim: a lone `$` keeps the old
@@ -248,7 +248,7 @@ impl LatexDelimiterNormalizer {
                                 Bs::DisplayOpen { len } => {
                                     match find_display_close(buf, i + len, final_flush) {
                                         DisplayClose::Found { close, close_len } => {
-                                            emit_display_span(&mut out, &buf[i + len..close]);
+                                            emit_display_span(&mut out, span(buf, i + len, close));
                                             i = close + close_len;
                                         }
                                         // No close in reach: emit the canonical opener
@@ -268,7 +268,7 @@ impl LatexDelimiterNormalizer {
                                     i += len;
                                 }
                                 Bs::Literal { len } => {
-                                    out.push_str(&buf[i..i + len]);
+                                    out.push_str(span(buf, i, i + len));
                                     i += len;
                                 }
                             }
@@ -287,7 +287,7 @@ impl LatexDelimiterNormalizer {
                                 // the same bytes on a second pass (idempotency).
                                 match find_display_close(buf, i + 2, final_flush) {
                                     DisplayClose::Found { close, close_len } => {
-                                        emit_display_span(&mut out, &buf[i + 2..close]);
+                                        emit_display_span(&mut out, span(buf, i + 2, close));
                                         i = close + close_len;
                                     }
                                     // No close in reach: `$$` stays literal (pulldown
@@ -315,7 +315,7 @@ impl LatexDelimiterNormalizer {
                             while i < n && !matches!(bytes[i], b'\n' | b'`' | b'\\' | b'$') {
                                 i += 1;
                             }
-                            out.push_str(&buf[start..i]);
+                            out.push_str(span(buf, start, i));
                             self.at_line_start = false;
                         }
                     }
@@ -330,7 +330,7 @@ impl LatexDelimiterNormalizer {
                         match bytes[i] {
                             b'\n' => {
                                 i += 1;
-                                out.push_str(&buf[start..i]);
+                                out.push_str(span(buf, start, i));
                                 self.state = State::Normal;
                                 self.at_line_start = true;
                                 handled = true;
@@ -339,12 +339,12 @@ impl LatexDelimiterNormalizer {
                             b'`' => {
                                 let r = count_run(bytes, i, b'`');
                                 if i + r == n && !final_flush {
-                                    out.push_str(&buf[start..i]);
+                                    out.push_str(span(buf, start, i));
                                     return (out, i); // hold back the trailing run
                                 }
                                 if r == run {
                                     i += r;
-                                    out.push_str(&buf[start..i]);
+                                    out.push_str(span(buf, start, i));
                                     self.state = State::Normal;
                                     self.at_line_start = false;
                                     handled = true;
@@ -356,7 +356,7 @@ impl LatexDelimiterNormalizer {
                         }
                     }
                     if !handled {
-                        out.push_str(&buf[start..i]); // EOF inside code
+                        out.push_str(span(buf, start, i)); // EOF inside code
                     }
                 }
                 State::Fenced { ch, len } => {
@@ -364,7 +364,7 @@ impl LatexDelimiterNormalizer {
                         match scan_fence_close(bytes, i, ch, len, final_flush) {
                             FenceScan::NeedMore => break,
                             FenceScan::Match { end, .. } => {
-                                out.push_str(&buf[i..end]);
+                                out.push_str(span(buf, i, end));
                                 i = end;
                                 self.state = State::Normal;
                                 self.at_line_start = false;
@@ -384,7 +384,7 @@ impl LatexDelimiterNormalizer {
                     } else {
                         self.at_line_start = false;
                     }
-                    out.push_str(&buf[start..i]);
+                    out.push_str(span(buf, start, i));
                 }
             }
         }
@@ -407,6 +407,17 @@ fn count_run(bytes: &[u8], start: usize, ch: u8) -> usize {
         j += 1;
     }
     j - start
+}
+
+/// `buf[from..to]` for the delimiter scanners and the state machine.
+///
+/// Every index handed here names an ASCII delimiter byte that the scan just
+/// inspected (`` ` ``, `~`, `\`, `$`, `\n`, space, tab), or an offset advanced
+/// past a run of them. In UTF-8 an ASCII byte is always a char boundary and
+/// never appears inside a multi-byte character, so both ends are boundaries.
+#[allow(clippy::string_slice)] // both ends are ASCII delimiter offsets
+fn span(buf: &str, from: usize, to: usize) -> &str {
+    &buf[from..to]
 }
 
 /// Result of scanning for a fence open/close marker at a line start.
@@ -687,7 +698,7 @@ fn find_display_close(buf: &str, content_start: usize, final_flush: bool) -> Dis
                 }
                 Some(b'e') => {
                     // `\end{equation}` / `\end{equation*}` closes the span.
-                    let rest = &buf[k..];
+                    let rest = span(buf, k, buf.len());
                     let mut matched = None;
                     let mut could_extend = false;
                     for tok in [ENV_END, ENV_END_STARRED] {
@@ -792,8 +803,10 @@ enum EnvScan {
 }
 
 /// Match `\begin{equation}` / `\end{equation}` (and starred variants) at `i`.
+///
+/// `i` is the offset of the `\` byte the caller just inspected.
 fn match_env(buf: &str, i: usize, final_flush: bool) -> EnvScan {
-    let rest = &buf[i..];
+    let rest = span(buf, i, buf.len());
     let mut best: Option<usize> = None;
     let mut could_extend = false;
     for tok in ENV_TOKENS {

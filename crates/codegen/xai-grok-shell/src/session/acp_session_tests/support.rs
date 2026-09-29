@@ -377,6 +377,7 @@ pub(crate) async fn create_test_actor_with_terminal(
         models_manager: Default::default(),
         display_cwd: std::sync::OnceLock::new(),
         active_agent_type: parking_lot::Mutex::new(None),
+        allowed_subagent_types: Default::default(),
         mode_agent: Default::default(),
         queue_exit_reminder_on_approved_exit: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         active_skill: parking_lot::Mutex::new(None),

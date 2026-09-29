@@ -3801,14 +3801,14 @@ impl MvpAgent {
     /// Resolve the agent definition for a session.
     ///
     /// Priority (highest to lowest):
-    /// 1. Model `agent_type` if it names a strict harness (codex, …).
-    /// 2. `acp_agent_profile` from ACP `_meta.agentProfile` (remote clients).
-    /// 3. `agent_profile_path` from CLI `--agent-profile`.
-    /// 4. `agent_config` from config.toml `[agent]`.
-    /// 5. `GROK_AGENT` env var.
-    /// 6. Built-in default agent.
+    /// - Model `agent_type` if it names a strict harness.
+    /// - `acp_agent_profile` from ACP `_meta.agentProfile` (remote clients).
+    /// - `agent_profile_path` from CLI `--agent-profile`.
+    /// - `agent_config` from config.toml `[agent]`.
+    /// - `GROK_AGENT` env var.
+    /// - Built-in default agent.
     ///
-    /// `GROK_AGENT` and an explicit `[agent] name` bypass step 1.
+    /// `GROK_AGENT` and an explicit `[agent] name` bypass the strict-harness step.
     /// Strict-harness classification is structural — see
     /// [`xai_grok_agent::config::is_strict_harness_agent_type`].
     ///

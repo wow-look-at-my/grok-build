@@ -192,7 +192,7 @@ pub struct UiConfig {
     /// `None` = on (client default). Written by the pager's settings modal.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub show_thinking_blocks: Option<bool>,
-    /// Summarize a long thinking block and show the summary under its collapsed
+    /// Summarize each thinking block and show the summary under its collapsed
     /// header. `None` = on (client default). Written by the pager's settings
     /// modal; resolved once per session, so a change takes effect next session.
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -151,10 +151,12 @@ fn split_trailing_token(args: &str) -> Option<(&str, &str)> {
 
 /// Whether `query` is `token`, then whitespace, then anything.
 fn leads_with(query: &str, token: &str) -> bool {
-    query.len() > token.len()
-        && query.is_char_boundary(token.len())
-        && query[..token.len()].eq_ignore_ascii_case(token)
-        && query[token.len()..].starts_with(char::is_whitespace)
+    query.len() > token.len() && query.is_char_boundary(token.len()) && {
+        // The `is_char_boundary` clause above runs first and short-circuits,
+        // so `split_at` here cannot land inside a character.
+        let (head, tail) = query.split_at(token.len());
+        head.eq_ignore_ascii_case(token) && tail.starts_with(char::is_whitespace)
+    }
 }
 
 /// The effort or route rows `args_query` leads into, if any.

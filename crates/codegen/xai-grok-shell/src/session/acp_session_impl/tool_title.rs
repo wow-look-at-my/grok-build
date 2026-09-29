@@ -140,7 +140,6 @@ fn input_title(
         ),
         ToolInput::KillTask(kill_task) => format!("Kill task: {}", kill_task.task_id),
         ToolInput::Skill(skill) => format!("Skill: {}", skill.skill),
-        ToolInput::ApplyPatch(_) => "Apply patch".to_string(),
         ToolInput::Dynamic(args) => dynamic_tool_title(wire_name, kind, args, cwd),
         ToolInput::MemorySearch(ms) => {
             let end = ms
@@ -222,9 +221,6 @@ fn input_title(
             };
             format!("{verb} `{}` → `{}`", cm.source, cm.destination)
         }
-        ToolInput::CodexListDir(ld) => format!("List `{}`", ld.dir_path),
-        ToolInput::CodexGrepFiles(gf) => gf.pattern.clone(),
-        ToolInput::CodexReadFile(rf) => format!("Read `{}`", rf.file_path),
         ToolInput::Lsp(lsp) => lsp_tool_title(lsp),
         ToolInput::SendMessage(sm) => format!("Message {}", sm.to),
     }
@@ -308,21 +304,6 @@ mod title_tests {
                 input("CopyMove", json!({"source": "a.rs", "destination": "b.rs"})),
                 "move_file",
                 "Move `a.rs` → `b.rs`",
-            ),
-            (
-                input("CodexListDir", json!({"dir_path": "/proj/src"})),
-                "list_dir",
-                "List `/proj/src`",
-            ),
-            (
-                input("CodexGrepFiles", json!({"pattern": "fn main"})),
-                "grep_files",
-                "fn main",
-            ),
-            (
-                input("CodexReadFile", json!({"file_path": "/proj/a.rs"})),
-                "read_file",
-                "Read `/proj/a.rs`",
             ),
             (
                 input(
@@ -412,8 +393,8 @@ mod title_tests {
     /// which it draws as the bare ACP kind.
     #[test]
     fn an_empty_title_falls_back_to_the_wire_name() {
-        let grep = input("CodexGrepFiles", json!({"pattern": ""}));
-        assert_eq!(title(&grep, "grep_files", None), "grep_files");
+        let grep = input("Grep", json!({"pattern": ""}));
+        assert_eq!(title(&grep, "grep", None), "grep");
     }
 }
 #[cfg(test)]

@@ -629,8 +629,7 @@ fn resolve_agent_definition_defaults_to_grok_build() {
         unsafe { std::env::set_var("GROK_AGENT", v) }
     }
 }
-/// When model_agent_type = Some("codex"), the codex agent is selected even
-/// though the default chain would return grok-build.
+/// When model_agent_type names a strict harness.
 #[test]
 #[serial_test::serial]
 fn resolve_agent_definition_model_agent_type_overrides_default() {
@@ -644,9 +643,9 @@ fn resolve_agent_definition_model_agent_type_overrides_default() {
         None,
         &config::AgentSelectionConfig::default(),
         None,
-        Some("codex"),
+        Some("grok-build-orchestrator"),
     );
-    assert_eq!(def.name, "codex");
+    assert_eq!(def.name, "grok-build-orchestrator");
     if let Some(v) = prev {
         unsafe { std::env::set_var("GROK_AGENT", v) }
     }
@@ -981,9 +980,18 @@ fn harnesses_are_compatible_for_stock_family_pairs() {
 }
 #[test]
 fn harnesses_are_compatible_rejects_strict_mismatches() {
-    assert!(harnesses_are_compatible("codex", "codex"));
-    assert!(!harnesses_are_compatible("grok-build-plan", "codex"));
-    assert!(!harnesses_are_compatible("codex", "grok-build"));
+    assert!(harnesses_are_compatible(
+        "grok-build-orchestrator",
+        "grok-build-orchestrator"
+    ));
+    assert!(!harnesses_are_compatible(
+        "grok-build-plan",
+        "grok-build-orchestrator"
+    ));
+    assert!(!harnesses_are_compatible(
+        "grok-build-orchestrator",
+        "grok-build"
+    ));
 }
 
 /// An agent type nobody has heard of is never strict, because
@@ -996,7 +1004,7 @@ fn harnesses_are_compatible_rejects_strict_mismatches() {
 fn an_unknown_agent_type_is_never_strict() {
     assert!(harnesses_are_compatible("grok-build", "cursor"));
     assert!(harnesses_are_compatible("cursor", "grok-build-plan"));
-    assert!(!harnesses_are_compatible("cursor", "codex"));
+    assert!(!harnesses_are_compatible("cursor", "grok-build-orchestrator"));
 }
 #[test]
 fn explicit_agent_type_wins_over_session_default() {
@@ -1185,7 +1193,7 @@ fn make_test_handle(
         agent_name: "grok-build".to_string(),
         managed_mcp_proxy_base_url: String::new(),
         session_default_agent_profile: None,
-        allowed_subagent_types: None,
+        allowed_subagent_types: Default::default(),
         hook_registry: None,
         workspace_ops: xai_grok_workspace::WorkspaceOps::for_test(),
         terminal_backend: None,
@@ -1204,10 +1212,10 @@ async fn lookup_session_model_returns_per_session_model() {
         "grok-3-fast"
     );
     assert_eq!(
-        lookup_session_model(Some(acp::ModelId::new("codex-mini")), &default_model)
+        lookup_session_model(Some(acp::ModelId::new("grok-code-fast")), &default_model)
             .0
             .as_ref(),
-        "codex-mini"
+        "grok-code-fast"
     );
 }
 /// lookup_session_model falls back to the default when no session model is known.
@@ -1230,7 +1238,7 @@ async fn set_session_model_does_not_cross_contaminate() {
         (sid_b.clone(), make_test_handle("grok-3", false, None)),
     ]
     .into();
-    sessions.get_mut(&sid_a).unwrap().model_id = acp::ModelId::new("codex-mini");
+    sessions.get_mut(&sid_a).unwrap().model_id = acp::ModelId::new("grok-code-fast");
     assert_eq!(
         lookup_session_model(
             sessions.get(&sid_a).map(|h| h.model_id.clone()),
@@ -1238,7 +1246,7 @@ async fn set_session_model_does_not_cross_contaminate() {
         )
         .0
         .as_ref(),
-        "codex-mini"
+        "grok-code-fast"
     );
     assert_eq!(
         lookup_session_model(

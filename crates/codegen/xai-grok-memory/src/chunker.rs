@@ -215,6 +215,8 @@ pub(crate) fn header_level(line: &str) -> Option<usize> {
     }
     let level = trimmed.chars().take_while(|&c| c == '#').count();
     // Must be followed by a space or end of line to be a valid header
+    // `trimmed` leads with `level` ASCII '#' bytes, so `level` is a boundary.
+    #[allow(clippy::string_slice)]
     let rest = &trimmed[level..];
     if rest.is_empty() || rest.starts_with(' ') {
         Some(level)

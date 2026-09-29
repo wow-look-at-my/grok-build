@@ -1724,17 +1724,25 @@ fn parse_color_string(s: &str) -> Result<Color, String> {
 
 fn parse_hex_color(hex: &str) -> Result<Color, String> {
     let hex = hex.trim_start_matches('#');
+    // A 3- or 6-byte `hex` is not necessarily 3 or 6 CHARACTERS: one 3-byte
+    // non-ASCII character measures `len() == 3` and puts `hex[0..1]` mid-grapheme.
+    // Each cut is therefore bounds-checked and reports the same error a bad
+    // digit already does.
+    let hex_nibble = |range: std::ops::Range<usize>| -> Result<&str, String> {
+        hex.get(range)
+            .ok_or_else(|| format!("invalid hex color: #{hex}"))
+    };
     let (r, g, b) = match hex.len() {
         3 => {
-            let r = u8::from_str_radix(&hex[0..1], 16).map_err(|e| e.to_string())? * 17;
-            let g = u8::from_str_radix(&hex[1..2], 16).map_err(|e| e.to_string())? * 17;
-            let b = u8::from_str_radix(&hex[2..3], 16).map_err(|e| e.to_string())? * 17;
+            let r = u8::from_str_radix(hex_nibble(0..1)?, 16).map_err(|e| e.to_string())? * 17;
+            let g = u8::from_str_radix(hex_nibble(1..2)?, 16).map_err(|e| e.to_string())? * 17;
+            let b = u8::from_str_radix(hex_nibble(2..3)?, 16).map_err(|e| e.to_string())? * 17;
             (r, g, b)
         }
         6 => {
-            let r = u8::from_str_radix(&hex[0..2], 16).map_err(|e| e.to_string())?;
-            let g = u8::from_str_radix(&hex[2..4], 16).map_err(|e| e.to_string())?;
-            let b = u8::from_str_radix(&hex[4..6], 16).map_err(|e| e.to_string())?;
+            let r = u8::from_str_radix(hex_nibble(0..2)?, 16).map_err(|e| e.to_string())?;
+            let g = u8::from_str_radix(hex_nibble(2..4)?, 16).map_err(|e| e.to_string())?;
+            let b = u8::from_str_radix(hex_nibble(4..6)?, 16).map_err(|e| e.to_string())?;
             (r, g, b)
         }
         _ => return Err(format!("invalid hex color: #{hex}")),
@@ -1967,6 +1975,11 @@ pub fn persist_respect_manual_folds(enabled: bool) -> std::io::Result<()> {
              that startup would never read",
         ));
     }
+    // The lock serialises writes of `pager.toml`; a poison is taken back rather
+    // than failed on, because the file on disk is the state and a saved settings
+    // write must still land after an unrelated panic. `parking_lot::Mutex` is not
+    // a dependency of this crate.
+    #[allow(clippy::disallowed_methods)]
     let _guard = PAGER_TOML_SAVE_LOCK
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());

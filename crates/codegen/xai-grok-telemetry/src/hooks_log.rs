@@ -20,7 +20,6 @@
 
 use std::fmt;
 use std::path::PathBuf;
-use std::sync::Mutex;
 use std::time::Instant;
 
 use tracing::Subscriber;
@@ -34,8 +33,9 @@ use xai_grok_config::grok_home;
 
 const ENV_HOOKS_LOG: &str = "GROK_HOOKS_LOG";
 
-static LOG_GUARD: std::sync::OnceLock<Mutex<Option<tracing_appender::non_blocking::WorkerGuard>>> =
-    std::sync::OnceLock::new();
+static LOG_GUARD: std::sync::OnceLock<
+    parking_lot::Mutex<Option<tracing_appender::non_blocking::WorkerGuard>>,
+> = std::sync::OnceLock::new();
 
 #[derive(Clone)]
 struct UptimeTimer {
@@ -85,10 +85,8 @@ where
     };
 
     let (non_blocking, guard) = tracing_appender::non_blocking(file);
-    let guard_slot = LOG_GUARD.get_or_init(|| Mutex::new(None));
-    if let Ok(mut slot) = guard_slot.lock() {
-        *slot = Some(guard);
-    }
+    let guard_slot = LOG_GUARD.get_or_init(|| parking_lot::Mutex::new(None));
+    *guard_slot.lock() = Some(guard);
 
     // Filter for both hooks and plugins targets at debug level
     let filter = tracing_subscriber::filter::EnvFilter::new(

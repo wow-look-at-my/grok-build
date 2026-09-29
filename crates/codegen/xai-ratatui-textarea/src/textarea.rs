@@ -396,12 +396,10 @@ impl TextArea {
     /// so we never land in the middle of a multi-byte character.
     fn clamp_to_line(&self, pos: usize, line_start: usize, line_end: usize) -> usize {
         if line_end > line_start {
-            // Find the start of the last character in the line.
-            let last_char_start = self.text[line_start..line_end]
-                .char_indices()
-                .next_back()
-                .map(|(i, _)| line_start + i)
-                .unwrap_or(line_start);
+            // Start of the last character in the line: the greatest char
+            // boundary below `line_end`. Flooring rather than slicing also
+            // covers a `line_end` that is not itself a boundary.
+            let last_char_start = self.text.floor_char_boundary(line_end - 1).max(line_start);
             pos.min(last_char_start)
         } else {
             line_start
@@ -964,8 +962,16 @@ impl TextArea {
         let start = sel.anchor.min(sel.head);
         let end = sel.anchor.max(sel.head);
         let expanded = self.expand_range_to_element_boundaries(start..end);
-        let clamped_start = expanded.start.min(self.text.len());
-        let clamped_end = expanded.end.min(self.text.len());
+        // Expansion can land on a caller-supplied element boundary that is not
+        // char-aligned; widen the selection to whole characters so every
+        // consumer (copy, delete, paint) gets a range the buffer can be sliced
+        // with. Identity for a selection that already ends on boundaries.
+        let clamped_start = self
+            .text
+            .floor_char_boundary(expanded.start.min(self.text.len()));
+        let clamped_end = self
+            .text
+            .ceil_char_boundary(expanded.end.min(self.text.len()));
         if clamped_start >= clamped_end {
             None
         } else {
@@ -976,6 +982,8 @@ impl TextArea {
     /// Text within the current selection (buffer text, not display text).
     pub fn selected_text(&self) -> Option<String> {
         let range = self.selection_range()?;
+        // `selection_range` widens both ends to char boundaries.
+        #[allow(clippy::string_slice)] // a range selection_range already widened
         Some(self.text[range].to_string())
     }
 
@@ -1206,8 +1214,10 @@ impl TextArea {
                         }
                         // Double-click: select word under cursor.
                         // Whitespace clicks just place the cursor (no selection).
+                        // `pos` is the click position, already snapped to a char
+                        // boundary by `clamp_to_line` / the element math above.
                         let is_ws = pos < self.text.len()
-                            && self.text[pos..]
+                            && text_span(&self.text, pos, self.text.len())
                                 .chars()
                                 .next()
                                 .is_none_or(|ch| ch.is_whitespace());
@@ -1220,7 +1230,7 @@ impl TextArea {
                             });
                             // Place cursor on the last character of the
                             // selection (neovim style), not one past the end.
-                            let cursor = self.text[start..end]
+                            let cursor = text_span(&self.text, start, end)
                                 .char_indices()
                                 .next_back()
                                 .map(|(i, _)| start + i)
@@ -1613,6 +1623,10 @@ impl TextArea {
     ///
     /// If `pos` is inside an element, returns the element start.
     fn word_start_at(&self, pos: usize) -> usize {
+        // Snap the incoming position down to the start of the character that
+        // contains it; every slice below is taken from `pos` or from an offset
+        // walked over whole characters from it. Identity for an aligned `pos`.
+        let pos = self.text.floor_char_boundary(pos.min(self.text.len()));
         // If inside an element, return element start.
         if let Some(elem) = self
             .elements
@@ -1624,14 +1638,19 @@ impl TextArea {
 
         // Determine the class of the character at `pos` (or just before if at end).
         let target_class = if pos < self.text.len() {
-            Self::char_class(self.text[pos..].chars().next().unwrap())
+            #[allow(clippy::string_slice)] // `pos` is snapped above
+            let at = &self.text[pos..];
+            Self::char_class(at.chars().next().unwrap())
         } else if pos > 0 {
-            let ch = self.text[..pos].chars().next_back().unwrap();
+            #[allow(clippy::string_slice)] // `pos` is snapped above
+            let before_pos = &self.text[..pos];
+            let ch = before_pos.chars().next_back().unwrap();
             Self::char_class(ch)
         } else {
             return 0;
         };
 
+        #[allow(clippy::string_slice)] // `pos` is snapped above
         let before = &self.text[..pos];
         let word_start = before
             .char_indices()
@@ -1648,6 +1667,10 @@ impl TextArea {
     ///
     /// If `pos` is inside an element, returns the element end.
     fn word_end_at(&self, pos: usize) -> usize {
+        // Snap the incoming position up to the next character start; every
+        // slice below is taken from `pos` or from an offset walked over whole
+        // characters from it. Identity for an aligned `pos`.
+        let pos = self.text.ceil_char_boundary(pos.min(self.text.len()));
         // If inside an element, return element end.
         if let Some(elem) = self
             .elements
@@ -1659,11 +1682,14 @@ impl TextArea {
 
         // Determine the class of the character at `pos`.
         let target_class = if pos < self.text.len() {
-            Self::char_class(self.text[pos..].chars().next().unwrap())
+            #[allow(clippy::string_slice)] // `pos` is snapped above
+            let at = &self.text[pos..];
+            Self::char_class(at.chars().next().unwrap())
         } else {
             return self.text.len();
         };
 
+        #[allow(clippy::string_slice)] // `pos` is snapped above
         let after = &self.text[pos..];
         let word_end = after
             .char_indices()
@@ -1688,21 +1714,32 @@ impl TextArea {
         if from >= to {
             return 0;
         }
+        // Cuts come from cursors, wrap ranges and element boundaries, and a
+        // caller-supplied element boundary need not land on one. Snapping every
+        // offset used below UP to the next character start keeps adjacent
+        // pieces sharing one value, so no character is counted twice and none
+        // is split. Identity when the offsets already align.
+        let ceil = |byte: usize| self.text.ceil_char_boundary(byte.min(self.text.len()));
+        let to = ceil(to);
         let mut width = 0usize;
-        let mut pos = from;
+        let mut pos = ceil(from);
 
         for elem in &self.elements {
-            if elem.range.start >= to {
+            let elem_start = ceil(elem.range.start);
+            let elem_end = ceil(elem.range.end);
+            if elem_start >= to {
                 break; // elements are sorted, no more overlap possible
             }
-            if elem.range.end <= pos {
+            if elem_end <= pos {
                 continue; // element is entirely before our current position
             }
 
             // Plain text before this element
-            if pos < elem.range.start {
-                let plain_end = elem.range.start.min(to);
-                width += self.plain_display_width(&self.text[pos..plain_end]);
+            if pos < elem_start {
+                let plain_end = elem_start.min(to);
+                #[allow(clippy::string_slice)] // both ends are snapped above
+                let plain = &self.text[pos..plain_end];
+                width += self.plain_display_width(plain);
                 pos = plain_end;
             }
             if pos >= to {
@@ -1710,15 +1747,15 @@ impl TextArea {
             }
 
             // Element region
-            let elem_start_in_range = elem.range.start.max(pos);
-            let elem_end_in_range = elem.range.end.min(to);
+            let elem_start_in_range = elem_start.max(pos);
+            let elem_end_in_range = elem_end.min(to);
             if elem_start_in_range < elem_end_in_range {
                 if let Some(display) = &elem.display {
                     // If the range covers the entire element (or starts at element start),
                     // use the full display width. If it covers only a partial overlap
                     // (cursor inside element — shouldn't happen normally), fall back to
                     // buffer text width.
-                    if elem_start_in_range == elem.range.start {
+                    if elem_start_in_range == elem_start {
                         let display_w: usize = display
                             .spans
                             .iter()
@@ -1726,13 +1763,14 @@ impl TextArea {
                             .sum();
                         width += display_w;
                     } else {
-                        width += self.plain_display_width(
-                            &self.text[elem_start_in_range..elem_end_in_range],
-                        );
+                        #[allow(clippy::string_slice)] // both ends are snapped above
+                        let overlap = &self.text[elem_start_in_range..elem_end_in_range];
+                        width += self.plain_display_width(overlap);
                     }
                 } else {
-                    width += self
-                        .plain_display_width(&self.text[elem_start_in_range..elem_end_in_range]);
+                    #[allow(clippy::string_slice)] // both ends are snapped above
+                    let overlap = &self.text[elem_start_in_range..elem_end_in_range];
+                    width += self.plain_display_width(overlap);
                 }
                 pos = elem_end_in_range;
             }
@@ -1740,7 +1778,9 @@ impl TextArea {
 
         // Remaining plain text after all elements
         if pos < to {
-            width += self.plain_display_width(&self.text[pos..to]);
+            #[allow(clippy::string_slice)] // both ends are snapped above
+            let plain = &self.text[pos..to];
+            width += self.plain_display_width(plain);
         }
 
         width
@@ -1768,6 +1808,14 @@ impl TextArea {
         line_end: usize,
         target_col: usize,
     ) -> (usize, bool) {
+        // Cuts here come from wrap-cache line ranges and from element
+        // boundaries, which are caller-supplied byte offsets. Snapping each one
+        // up to the next character start keeps every position returned below on
+        // a boundary and every slice whole; adjacent pieces share the same
+        // snapped value. Identity when the offsets already align.
+        let ceil = |byte: usize| self.text.ceil_char_boundary(byte.min(self.text.len()));
+        let line_start = ceil(line_start);
+        let line_end = ceil(line_end);
         let mut width_so_far = 0usize;
         let mut pos = line_start;
 
@@ -1779,8 +1827,8 @@ impl TextArea {
                 .position(|e| pos >= e.range.start && pos < e.range.end)
             {
                 let elem = &self.elements[elem_idx];
-                let elem_start = elem.range.start;
-                let elem_buf_end = elem.range.end;
+                let elem_start = ceil(elem.range.start);
+                let elem_buf_end = ceil(elem.range.end);
                 // The visible portion of the element on this line
                 let elem_line_end = elem_buf_end.min(line_end);
 
@@ -1793,7 +1841,9 @@ impl TextArea {
                             .map(|s| s.content.as_ref().width())
                             .sum()
                     } else {
-                        self.plain_display_width(&self.text[elem_start..elem_line_end])
+                        #[allow(clippy::string_slice)] // both ends are snapped above
+                        let under = &self.text[elem_start..elem_line_end];
+                        self.plain_display_width(under)
                     };
 
                     if width_so_far + elem_display_w > target_col {
@@ -1813,7 +1863,9 @@ impl TextArea {
                 } else {
                     // We're in the middle of an element (e.g. a wrapped line starts
                     // mid-element). Skip past the rest of the element on this line.
-                    let partial_w = self.plain_display_width(&self.text[pos..elem_line_end]);
+                    #[allow(clippy::string_slice)] // both ends are snapped above
+                    let partial = &self.text[pos..elem_line_end];
+                    let partial_w = self.plain_display_width(partial);
                     if width_so_far + partial_w > target_col {
                         // Snap to element's actual end boundary
                         return (elem_buf_end, true);
@@ -1825,6 +1877,7 @@ impl TextArea {
             }
 
             // Plain text grapheme
+            #[allow(clippy::string_slice)] // both ends are snapped above
             let slice = &self.text[pos..line_end];
             if let Some(grapheme) = slice.graphemes(true).next() {
                 let grapheme_width = self.grapheme_display_width(grapheme);
@@ -2457,7 +2510,11 @@ impl TextArea {
         }
 
         // Fallback to logical line navigation if we don't have wrapping info yet.
-        if let Some(prev_nl) = self.text[..self.cursor()].rfind('\n') {
+        // The cursor is normalized to a grapheme boundary by the editor, and a
+        // '\n' offset is ASCII, so every cut below lands on a boundary.
+        #[allow(clippy::string_slice)] // up to the char-aligned cursor
+        let before_cursor = &self.text[..self.cursor()];
+        if let Some(prev_nl) = before_cursor.rfind('\n') {
             let target_col = match self.preferred_col {
                 Some(c) => c,
                 None => {
@@ -2466,7 +2523,11 @@ impl TextArea {
                     c
                 }
             };
-            let prev_line_start = self.text[..prev_nl].rfind('\n').map(|i| i + 1).unwrap_or(0);
+            #[allow(clippy::string_slice)] // `prev_nl` is an ASCII '\n' offset
+            let prev_line_start = before_cursor[..prev_nl]
+                .rfind('\n')
+                .map(|i| i + 1)
+                .unwrap_or(0);
             let prev_line_end = prev_nl;
             self.move_to_display_col_on_line(prev_line_start, prev_line_end, target_col);
         } else {
@@ -2528,11 +2589,13 @@ impl TextArea {
                 c
             }
         };
-        if let Some(next_nl) = self.text[self.cursor()..]
-            .find('\n')
-            .map(|i| i + self.cursor())
-        {
+        // The cursor is normalized to a grapheme boundary by the editor, and a
+        // '\n' offset is ASCII, so every cut below lands on a boundary.
+        #[allow(clippy::string_slice)] // from the char-aligned cursor
+        let after_cursor = &self.text[self.cursor()..];
+        if let Some(next_nl) = after_cursor.find('\n').map(|i| i + self.cursor()) {
             let next_line_start = next_nl + 1;
+            #[allow(clippy::string_slice)] // one past an ASCII '\n'
             let next_line_end = self.text[next_line_start..]
                 .find('\n')
                 .map(|i| i + next_line_start)
@@ -2693,7 +2756,7 @@ impl TextArea {
         self.elements
             .iter()
             .find(|e| e.id == id)
-            .map(|e| &self.text[e.range.clone()])
+            .map(|e| text_span(&self.text, e.range.start, e.range.end))
     }
 
     /// Update the display for an existing element. Invalidates the wrap cache.
@@ -2762,20 +2825,25 @@ impl TextArea {
         }
         let pos = self.cursor().min(self.text.len());
 
+        // The cursor is normalized to a grapheme boundary by the editor, and
+        // `rfind`/`find` over a `char` predicate return the byte index of a
+        // whole character, so every cut below lands on a boundary.
+        #[allow(clippy::string_slice)] // up to the char-aligned cursor
+        let up_to_cursor = &self.text[..pos];
         // Find word start: scan backward from cursor to find whitespace boundary
-        let start = self.text[..pos]
+        let start = up_to_cursor
             .rfind(|c: char| c.is_whitespace())
             .map(|i| {
-                i + self.text[i..]
-                    .chars()
-                    .next()
-                    .map(|c| c.len_utf8())
-                    .unwrap_or(1)
+                #[allow(clippy::string_slice)] // `i` is the offset of a whole char
+                let at = &self.text[i..];
+                i + at.chars().next().map(|c| c.len_utf8()).unwrap_or(1)
             })
             .unwrap_or(0);
 
         // Find word end: scan forward from cursor to find whitespace boundary
-        let end = self.text[pos..]
+        #[allow(clippy::string_slice)] // from the char-aligned cursor
+        let from_cursor = &self.text[pos..];
+        let end = from_cursor
             .find(|c: char| c.is_whitespace())
             .map(|i| i + pos)
             .unwrap_or(self.text.len());
@@ -2789,6 +2857,7 @@ impl TextArea {
 
         // If cursor is beyond the word end (cursor at whitespace after word), return None
         // Unless cursor is exactly at start position of the word
+        #[allow(clippy::string_slice)] // both ends are whitespace-char offsets, see above
         let word = &self.text[start..end];
         if word.chars().all(|c| c.is_whitespace()) {
             return None;
@@ -3021,6 +3090,14 @@ impl TextArea {
         width: usize,
         result: &mut Vec<Range<usize>>,
     ) {
+        // Segment bounds come from logical-line scanning and from element
+        // boundaries, which are caller-supplied byte offsets. Snapping each cut
+        // up to the next character start keeps every emitted line range on a
+        // boundary and stops any slice below splitting a character; adjacent
+        // pieces share the same snapped value. Identity when already aligned.
+        let ceil = |byte: usize| self.text.ceil_char_boundary(byte.min(self.text.len()));
+        let start = ceil(start);
+        let end = ceil(end);
         if start >= end {
             // Empty logical line
             result.push(start..end);
@@ -3040,7 +3117,8 @@ impl TextArea {
                 .iter()
                 .find(|e| pos == e.range.start && e.range.start < e.range.end)
             {
-                let elem_end = elem.range.end.min(end);
+                let elem_start = ceil(elem.range.start);
+                let elem_end = ceil(elem.range.end).min(end);
                 let elem_dw: usize = if let Some(display) = &elem.display {
                     display
                         .spans
@@ -3048,7 +3126,9 @@ impl TextArea {
                         .map(|s| s.content.as_ref().width())
                         .sum()
                 } else {
-                    self.plain_display_width(&self.text[elem.range.start..elem_end])
+                    #[allow(clippy::string_slice)] // both ends are snapped above
+                    let under = &self.text[elem_start..elem_end];
+                    self.plain_display_width(under)
                 };
 
                 if display_w > 0 && display_w + elem_dw > width {
@@ -3077,6 +3157,7 @@ impl TextArea {
             }
 
             // Plain text grapheme cluster
+            #[allow(clippy::string_slice)] // both ends are snapped or walked by grapheme
             let slice = &self.text[pos..end];
             let Some(grapheme) = slice.graphemes(true).next() else {
                 break;
@@ -3316,7 +3397,7 @@ impl TextArea {
 
                 // 1. Render plain text before this element (buf_pos..overlap_start)
                 if buf_pos < overlap_start && display_x < area.width {
-                    let plain = &self.text[buf_pos..overlap_start];
+                    let plain = text_span(&self.text, buf_pos, overlap_start);
                     let avail = (area.width - display_x) as usize;
                     let (paint, paint_w) = paint_plain_for_display(plain, avail, self.tab_width);
                     buf.set_string(area.x + display_x, y, paint.as_ref(), Style::default());
@@ -3350,7 +3431,7 @@ impl TextArea {
                     // display_x doesn't advance (already blank in the buffer).
                 } else {
                     // No custom display: render buffer text with default element style.
-                    let styled = &self.text[overlap_start..overlap_end];
+                    let styled = text_span(&self.text, overlap_start, overlap_end);
                     let style = Style::default().fg(Color::Cyan);
                     let (paint, paint_w) = paint_plain_for_display(styled, avail, self.tab_width);
                     buf.set_string(area.x + display_x, y, paint.as_ref(), style);
@@ -3362,7 +3443,7 @@ impl TextArea {
 
             // 3. Render any remaining plain text after the last element
             if buf_pos < line_range.end && display_x < area.width {
-                let plain = &self.text[buf_pos..line_range.end];
+                let plain = text_span(&self.text, buf_pos, line_range.end);
                 let avail = (area.width - display_x) as usize;
                 let (paint, paint_w) = paint_plain_for_display(plain, avail, self.tab_width);
                 buf.set_string(area.x + display_x, y, paint.as_ref(), Style::default());
@@ -3432,12 +3513,28 @@ fn clip_str_to_display_width(s: &str, max_width: usize) -> &str {
     clip_str_to_display_width_with_tab(s, max_width, 0)
 }
 
+/// `text[from..to]` with both ends widened to whole characters.
+///
+/// The indices here come from cursor positions, wrap-cache line ranges and
+/// element ranges, and an element range is a caller-supplied byte range that
+/// need not land on a boundary. Widening keeps every character the slice
+/// touches intact, and is the identity when both ends already align (so any
+/// ASCII cut is unaffected).
+#[allow(clippy::string_slice)] // both ends are outputs of the boundary calls
+fn text_span(text: &str, from: usize, to: usize) -> &str {
+    let from = text.floor_char_boundary(from);
+    let to = text.ceil_char_boundary(to).max(from);
+    &text[from..to]
+}
+
 /// Clip considering tabs as `tab_width` columns (byte index into original `s`).
 fn clip_str_to_display_width_with_tab(s: &str, max_width: usize, tab_width: u8) -> &str {
     let mut width = 0;
     for (i, grapheme) in s.grapheme_indices(true) {
         let grapheme_width = grapheme_display_width_with_tab(grapheme, tab_width);
         if width + grapheme_width > max_width {
+            // `i` is a `grapheme_indices` offset, hence a char boundary.
+            #[allow(clippy::string_slice)] // up to a `grapheme_indices` position
             return &s[..i];
         }
         width += grapheme_width;
@@ -8498,6 +8595,81 @@ mod tests {
                 }
             }
         }
+    }
+
+    // -- Element ranges that land inside a character --
+    //
+    // `TextElement::range` is a caller-supplied byte range with no
+    // char-boundary guarantee. Each case below places a cut inside a 3-byte
+    // em dash (bytes 1..4 of "a\u{2014}b") on a path that used to index the
+    // buffer with it directly.
+
+    const EM: char = '\u{2014}'; // 3 bytes
+
+    #[test]
+    fn the_raw_slice_at_these_offsets_panics() {
+        // The pre-fix expression at the sites below was `&text[..byte]` with
+        // these exact offsets, so recording the panic here is what shows those
+        // tests cover a crash and not a no-op change.
+        let text = format!("a{EM}b"); // EM occupies bytes 1..4
+        assert!(!text.is_char_boundary(2), "the cut is mid-dash");
+        let raw = std::panic::catch_unwind(|| -> &str {
+            #[allow(clippy::string_slice)] // deliberately the pre-fix expression
+            let head = &text[..2];
+            head
+        });
+        assert!(raw.is_err(), "a slice inside a character must panic");
+    }
+
+    #[test]
+    fn element_text_widens_a_range_ending_inside_a_character() {
+        let mut ta = ta_with(&format!("a{EM}b"));
+        let id = ta.add_element(0..2, ElementKind(0), None);
+        let text = ta.element_text(id).expect("element is registered");
+        assert_eq!(text, format!("a{EM}"), "the straddling dash stays whole");
+    }
+
+    #[test]
+    fn selected_text_widens_an_element_edge_inside_a_character() {
+        let mut ta = ta_with(&format!("a{EM}b"));
+        ta.add_element(1..2, ElementKind(0), None);
+        // The selection itself is aligned; expansion to the element boundary
+        // is what lands mid-character.
+        ta.set_selection(1, 3);
+        let selected = ta.selected_text().expect("selection is non-empty");
+        assert!(selected.is_char_boundary(selected.len()));
+        assert_eq!(selected, EM.to_string());
+    }
+
+    #[test]
+    fn display_width_of_range_survives_element_edges_inside_a_character() {
+        let mut ta = ta_with(&format!("a{EM}bc"));
+        ta.add_element(2..3, ElementKind(0), None);
+        ta.add_element(3..5, ElementKind(1), None);
+        let width = ta.display_width_of_range(0, ta.text().len());
+        assert!(width >= 3, "every character is counted at least once");
+    }
+
+    #[test]
+    fn wrapping_survives_an_element_boundary_inside_a_character() {
+        let mut ta = ta_with(&format!("a{EM}b{EM}c"));
+        ta.add_element(2..4, ElementKind(0), None);
+        // Width 1 forces a wrap decision at every step past the element.
+        let lines = ta.wrapped_lines(1);
+        assert!(!lines.is_empty());
+        for line in lines.iter() {
+            assert!(ta.text().is_char_boundary(line.start.min(ta.text().len())));
+            assert!(ta.text().is_char_boundary(line.end.min(ta.text().len())));
+        }
+    }
+
+    #[test]
+    fn clamp_to_line_survives_a_line_end_inside_a_character() {
+        let mut ta = ta_with(&format!("ab{EM}c")); // EM occupies bytes 2..5
+        // `line_end` one byte into the dash: the clamp still names a boundary.
+        let clamped = ta.clamp_to_line(6, 0, 3);
+        assert!(ta.text().is_char_boundary(clamped));
+        assert_eq!(clamped, 2);
     }
 
     // ── Inline element tests ──

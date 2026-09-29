@@ -14,6 +14,12 @@ use prompt_encrypted::*;
 
 /// Decrypt XOR-obfuscated template data (mirrors `scripts/encrypt_templates.py::xor_encrypt`).
 /// Obfuscation only — not a security boundary.
+///
+/// The strict decode is the integrity check on the generated blob: a payload
+/// that no longer decodes is a `prompt_encrypted.rs` that is out of step with
+/// its source, and decoding it lossily would put replacement characters into
+/// every prompt instead of saying so.
+#[allow(clippy::disallowed_methods)]
 fn decrypt(data: &[u8], seed: u8) -> Zeroizing<String> {
     let bytes: Vec<u8> = data
         .iter()
@@ -37,18 +43,9 @@ pub fn base_template_source() -> Zeroizing<String> {
     base_template()
 }
 
-pub(crate) fn apply_patch_template() -> Zeroizing<String> {
-    decrypt(CODEX_PROMPT_ENC, PROMPT_SEEDS[1])
-}
-
-/// Apply-patch prompt template source, exposed for `grok prompt --section apply-patch-template`.
-pub fn apply_patch_template_source() -> Zeroizing<String> {
-    apply_patch_template()
-}
-
 /// The subagent-specific base template (decrypted fresh; zeroed on drop).
 pub(crate) fn subagent_template() -> Zeroizing<String> {
-    decrypt(SUBAGENT_PROMPT_ENC, PROMPT_SEEDS[2])
+    decrypt(SUBAGENT_PROMPT_ENC, PROMPT_SEEDS[1])
 }
 
 /// The compact system prompt used after conversation compaction.
@@ -73,7 +70,6 @@ mod tests {
                 .collect()
         }
         let base_raw = include_bytes!("../../templates/prompt.md");
-        let apply_patch_raw = include_bytes!("../../templates/apply_patch_prompt.md");
         let subagent_raw = include_bytes!("../../templates/subagent_prompt.md");
 
         assert_eq!(
@@ -82,13 +78,8 @@ mod tests {
             "prompt.md encrypted bytes are stale — run scripts/encrypt_templates.py"
         );
         assert_eq!(
-            CODEX_PROMPT_ENC,
-            &xor_encrypt(apply_patch_raw, PROMPT_SEEDS[1]),
-            "apply_patch_prompt.md encrypted bytes are stale — run scripts/encrypt_templates.py"
-        );
-        assert_eq!(
             SUBAGENT_PROMPT_ENC,
-            &xor_encrypt(subagent_raw, PROMPT_SEEDS[2]),
+            &xor_encrypt(subagent_raw, PROMPT_SEEDS[1]),
             "subagent_prompt.md encrypted bytes are stale — run scripts/encrypt_templates.py"
         );
     }
@@ -140,13 +131,6 @@ mod tests {
         renderer
             .render_with_extra(&tmpl, placeholders)
             .expect("subagent template render failed")
-    }
-
-    fn render_apply_patch(renderer: &TemplateRenderer, placeholders: &serde_json::Value) -> String {
-        let tmpl = apply_patch_template();
-        renderer
-            .render_with_extra(&tmpl, placeholders)
-            .expect("codex template render failed")
     }
 
     // ── Variable substitution ───────────────────────────────────────
@@ -534,97 +518,6 @@ mod tests {
         );
     }
 
-    // ── Apply-patch template rendering ───────────────────────────────────
-
-    #[test]
-    fn test_apply_patch_template_renders() {
-        let prompt = render_apply_patch(&default_renderer(), &default_placeholders());
-        assert!(prompt.contains("coding agent"));
-    }
-
-    #[test]
-    fn test_apply_patch_template_contains_resolved_tool_names() {
-        let prompt = render_apply_patch(&default_renderer(), &default_placeholders());
-        assert!(prompt.contains("todo_write"), "Should contain 'todo_write'");
-        // apply_patch is hardcoded, not resolved via ${{ tools.by_kind.edit }}
-        assert!(
-            prompt.contains("apply_patch"),
-            "Should contain hardcoded 'apply_patch'"
-        );
-        assert!(!prompt.contains("${{"), "No unresolved template variables");
-        assert!(!prompt.contains("${%"), "No unresolved template blocks");
-    }
-
-    #[test]
-    fn test_apply_patch_template_plan_absent_omits_planning() {
-        // Renderer without Plan tool
-        let tools: HashMap<ToolKind, String> = [
-            (ToolKind::Read, "read_file".to_string()),
-            (ToolKind::Edit, "search_replace".to_string()),
-            (ToolKind::Execute, "run_terminal_cmd".to_string()),
-        ]
-        .into();
-        let r = TemplateRenderer::new(tools, HashMap::new());
-        let prompt = render_apply_patch(&r, &default_placeholders());
-        assert!(
-            !prompt.contains("## Planning"),
-            "Planning section should be omitted when plan tool absent"
-        );
-        assert!(
-            !prompt.contains("update_plan"),
-            "update_plan references should be omitted"
-        );
-    }
-
-    #[test]
-    fn test_apply_patch_template_plan_present_includes_planning() {
-        let prompt = render_apply_patch(&default_renderer(), &default_placeholders());
-        assert!(
-            prompt.contains("## Planning"),
-            "Planning section should be present when plan tool exists"
-        );
-    }
-
-    #[test]
-    fn test_apply_patch_template_with_overridden_tool_names() {
-        let tools: HashMap<ToolKind, String> = [
-            (ToolKind::Read, "view_file".to_string()),
-            (ToolKind::Edit, "some_other_edit".to_string()),
-            (ToolKind::Execute, "run_terminal_cmd".to_string()),
-            (ToolKind::Plan, "update_plan".to_string()),
-            (
-                ToolKind::BackgroundTaskAction,
-                "get_task_output".to_string(),
-            ),
-        ]
-        .into();
-        let r = TemplateRenderer::new(tools, HashMap::new());
-        let prompt = render_apply_patch(&r, &default_placeholders());
-        // apply_patch is hardcoded — NOT affected by Edit tool override
-        assert!(
-            prompt.contains("`apply_patch`"),
-            "apply_patch must remain hardcoded regardless of edit override"
-        );
-        assert!(
-            !prompt.contains("some_other_edit"),
-            "Edit override must NOT leak into apply-patch prompt"
-        );
-        // Plan tool IS resolved via template
-        assert!(
-            prompt.contains("`update_plan`"),
-            "Should use overridden 'update_plan'"
-        );
-    }
-
-    #[test]
-    fn test_apply_patch_template_deterministic_across_renders() {
-        let r = default_renderer();
-        let p = default_placeholders();
-        let a = render_apply_patch(&r, &p);
-        let b = render_apply_patch(&r, &p);
-        assert_eq!(a, b, "Apply-patch template rendering must be deterministic");
-    }
-
     #[test]
     fn test_subagent_template_deterministic_across_renders() {
         let r = default_renderer();
@@ -767,7 +660,6 @@ mod tests {
     fn test_template_vars_are_always_guarded() {
         assert_guards(&base_template(), "prompt.md");
         assert_guards(&subagent_template(), "subagent_prompt.md");
-        assert_guards(&apply_patch_template(), "apply_patch_prompt.md");
     }
 
     // ── Combination sweep ───────────────────────────────────────────

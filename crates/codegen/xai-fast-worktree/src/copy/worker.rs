@@ -48,6 +48,14 @@ pub(crate) fn run_worker(rx: crossbeam::channel::Receiver<CopyEntry>, ctx: Worke
     }
 }
 
+/// Copy one entry, recording every failure in `issues`.
+///
+/// `issues` is taken back from a poisoned lock rather than unwrapped: a worker
+/// that panicked mid-copy is dead, but the copy continues on other workers, and
+/// an unwrap would drop the failures they go on to report — a run that says it
+/// copied cleanly while files are missing. `parking_lot::Mutex` is the structural
+/// fix and is not a dependency of this crate.
+#[allow(clippy::disallowed_methods)]
 fn process_entry(
     entry: &CopyEntry,
     src: &Path,
@@ -68,7 +76,7 @@ fn process_entry(
     {
         issues
             .lock()
-            .unwrap()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .push(format!("mkdir {}: {}", parent.display(), e));
         return false;
     }
@@ -83,7 +91,7 @@ fn process_entry(
             Err(e) => {
                 issues
                     .lock()
-                    .unwrap()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
                     .push(format!("mkdir {}: {}", entry.rel_path.display(), e));
                 false
             }
@@ -95,20 +103,18 @@ fn process_entry(
                     true
                 }
                 Err(e) => {
-                    issues.lock().unwrap().push(format!(
-                        "symlink {}: {}",
-                        entry.rel_path.display(),
-                        e
-                    ));
+                    issues
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .push(format!("symlink {}: {}", entry.rel_path.display(), e));
                     false
                 }
             },
             Err(e) => {
-                issues.lock().unwrap().push(format!(
-                    "read_link {}: {}",
-                    entry.rel_path.display(),
-                    e
-                ));
+                issues
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .push(format!("read_link {}: {}", entry.rel_path.display(), e));
                 false
             }
         },
@@ -126,7 +132,7 @@ fn process_entry(
             Err(e) => {
                 issues
                     .lock()
-                    .unwrap()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
                     .push(format!("copy {}: {}", entry.rel_path.display(), e));
                 false
             }

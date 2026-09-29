@@ -1192,9 +1192,9 @@ pub fn default_settings() -> Vec<SettingMeta> {
             key: "thinking_summaries",
             category: SettingCategory::Appearance,
             owner: SettingOwner::Shared,
-            label: "Summarize long thinking",
-            description: "Under a long collapsed thinking block, show a one-or-two-sentence \
-                          summary of what the model worked out. Uses a model call per long \
+            label: "Summarize thinking",
+            description: "Under a collapsed thinking block, show a one-or-two-sentence \
+                          summary of what the model worked out. Uses a model call per \
                           thinking block. Restart required: a session picks the setting up \
                           when it starts.",
             keywords: &[

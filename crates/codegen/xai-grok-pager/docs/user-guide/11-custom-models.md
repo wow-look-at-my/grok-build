@@ -42,11 +42,7 @@ Or use the alias:
 
 Press `Ctrl+M` from the scrollback pane to open the model picker. It lists all available models, both built-in and custom, and lets you switch with a single keystroke. With the prompt focused, `Ctrl+M` toggles multiline input instead -- use `/model` to switch without leaving the prompt.
 
-Provider catalogs are combined rather than replaced. For example, after
-`/login codex`, Codex models appear alongside Grok and custom models with
-qualified IDs such as `codex/gpt-5.4` and display names prefixed with
-`Codex ·`. Refreshing or signing out of one provider does not erase models
-owned by another provider.
+Provider catalogs are combined rather than replaced. For example, models autodetected from a `[model_providers.<id>]` block appear alongside Grok and custom models with qualified IDs such as `ollama/llama3`. Refreshing or signing out of one provider does not erase models owned by another provider.
 
 ### Config Default
 

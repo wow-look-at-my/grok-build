@@ -28,6 +28,9 @@ impl PrRef {
     /// stdout, or an MCP create_pull_request result (URLs may be embedded in
     /// JSON strings). Returns `None` when no PR URL is present (e.g.
     /// `gh pr create --web`).
+    // Every offset below comes from `match_indices`/`find` over an ASCII
+    // delimiter, which reports the byte a character starts at.
+    #[allow(clippy::string_slice)]
     pub fn find_in(text: &str) -> Option<Self> {
         let mut last = None;
         for (start, _) in text.match_indices("http") {
@@ -63,6 +66,9 @@ impl PrRef {
 /// `env` (with `-u NAME` args), `VAR=value` assignments, and an absolute /
 /// relative path on the binary itself (`/opt/homebrew/bin/gh` → `gh`).
 /// Covers common `env` / `VAR=value` / absolute-path wrappers around git/gh.
+// Every offset here is `find`/`rfind` of an ASCII delimiter (whitespace, `=`
+// path separator), so each one names a char boundary.
+#[allow(clippy::string_slice)]
 fn strip_invocation_prefixes(statement: &str) -> &str {
     let mut rest = statement.trim_start();
     loop {

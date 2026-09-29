@@ -20,7 +20,11 @@ pub struct LoopCommand;
 fn parse_loop_args(args: &str) -> (Option<&str>, &str) {
     let trimmed = args.trim();
     if let Some(space) = trimmed.find(char::is_whitespace) {
+        // `str::find` with a char predicate reports the offset of a char START,
+        // so `space` is a char boundary whichever end of the token it cuts.
+        #[allow(clippy::string_slice)] // ends at a str::find char-predicate offset
         let first = &trimmed[..space];
+        #[allow(clippy::string_slice)] // starts at that same str::find offset
         let rest = trimmed[space..].trim_start();
         if is_interval_token(first) && !rest.is_empty() {
             return (Some(first), rest);

@@ -52,7 +52,6 @@ fn seed_foreign_resume_hint(
     app.foreign_session_compat =
         xai_grok_workspace::foreign_sessions::EnabledForeignSessionSources {
             claude: true,
-            codex: true,
             cursor: true,
         };
     let Effect::CanonicalizeForeignResumeCwd {
@@ -123,7 +122,6 @@ fn resume_foreign_session_consumes_hint_and_uses_each_tools_prompt() {
     use xai_grok_workspace::foreign_sessions::ForeignSessionTool;
     for (tool, prompt) in [
         (ForeignSessionTool::Claude, "/resume-claude native-id"),
-        (ForeignSessionTool::Codex, "/resume-codex native-id"),
         (ForeignSessionTool::Cursor, "/resume-cursor native-id"),
     ] {
         let mut app = test_app();
@@ -157,7 +155,11 @@ fn resume_foreign_session_without_hint_is_noop() {
 fn resume_foreign_session_stashes_prompt_behind_trust_and_auth() {
     use xai_grok_workspace::foreign_sessions::ForeignSessionTool;
     for (tool, prompt, auth_pending) in [
-        (ForeignSessionTool::Codex, "/resume-codex native-id", false),
+        (
+            ForeignSessionTool::Claude,
+            "/resume-claude native-id",
+            false,
+        ),
         (ForeignSessionTool::Cursor, "/resume-cursor native-id", true),
     ] {
         let mut app = test_app();

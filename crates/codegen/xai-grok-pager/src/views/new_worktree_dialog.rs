@@ -127,6 +127,8 @@ pub fn render_new_worktree_dialog(area: Rect, buf: &mut Buffer, state: &NewWorkt
     let prefix_w = LABEL_PREFIX.width() as u16;
     let input_width = inner_width.saturating_sub(prefix_w);
     let viewport = state.viewport(input_width as usize);
+    // The range is a ratatui `visible_byte_range`, a char boundary.
+    #[allow(clippy::string_slice)]
     let visible_input = &state.label()[viewport.visible_byte_range];
 
     let prefix_span = Span::styled(LABEL_PREFIX, Style::default().fg(theme.gray_bright));

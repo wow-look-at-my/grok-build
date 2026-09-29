@@ -6,6 +6,18 @@
 //! - the grok-build continuation carrier ([`format_compact_summary_content`]),
 //! - the canonical `<user_query>` wrapping ([`wrap_user_query`]).
 
+/// `text[from..to]` for the tag surgery below.
+///
+/// Every index handed here is the offset at which one of the ASCII literals
+/// `<analysis>`, `</analysis>`, `<summary>` or `</summary>` was found, or that
+/// offset plus the literal's byte length. In UTF-8 an ASCII byte is always a
+/// char boundary and never appears inside a multi-byte character, so both ends
+/// of the range align.
+#[allow(clippy::string_slice)] // both ends are ASCII tag offsets
+fn span(text: &str, from: usize, to: usize) -> &str {
+    &text[from..to]
+}
+
 /// Clean the compaction model's raw output into the plain-text `Summary:`
 /// block that seeds the next turn.
 ///
@@ -30,24 +42,37 @@ pub fn format_compact_summary(summary: &str) -> String {
     //    one.
     while let Some(start) = result.find("<analysis>") {
         let is_leading = match result.find("<summary>") {
-            Some(sp) => start < sp || result[sp + "<summary>".len()..start].trim().is_empty(),
-            None => result[..start].trim().is_empty(),
+            Some(sp) => {
+                start < sp
+                    || span(&result, sp + "<summary>".len(), start)
+                        .trim()
+                        .is_empty()
+            }
+            None => span(&result, 0, start).trim().is_empty(),
         };
         if !is_leading {
             break;
         }
-        match result[start..].find("</analysis>") {
+        match span(&result, start, result.len()).find("</analysis>") {
             Some(rel) => {
                 let end = start + rel + "</analysis>".len();
-                result = format!("{}{}", &result[..start], &result[end..]);
+                result = format!(
+                    "{}{}",
+                    span(&result, 0, start),
+                    span(&result, end, result.len())
+                );
             }
             None => {
                 // Unclosed leading <analysis>: drop up to the next <summary>
                 // (preserving a summary that follows) or to the end (truncation).
-                let drop_to = result[start..]
+                let drop_to = span(&result, start, result.len())
                     .find("<summary>")
                     .map_or(result.len(), |rel| start + rel);
-                result = format!("{}{}", &result[..start], &result[drop_to..]);
+                result = format!(
+                    "{}{}",
+                    span(&result, 0, start),
+                    span(&result, drop_to, result.len())
+                );
                 break;
             }
         }
@@ -63,9 +88,9 @@ pub fn format_compact_summary(summary: &str) -> String {
         && let Some(end) = result.rfind("</summary>")
         && end > start
     {
-        let before = result[..start].to_string();
-        let after = result[end + "</summary>".len()..].to_string();
-        let inner = strip_leading_scratchpad(result[start + "<summary>".len()..end].trim());
+        let before = span(&result, 0, start).to_string();
+        let after = span(&result, end + "</summary>".len(), result.len()).to_string();
+        let inner = strip_leading_scratchpad(span(&result, start + "<summary>".len(), end).trim());
         result = format!("{before}Summary:\n{inner}{after}");
     }
 
@@ -97,7 +122,7 @@ fn strip_leading_scratchpad(inner: &str) -> String {
     if !lead.starts_with(|c: char| c.is_ascii_digit())
         && let Some(pos) = s.rfind("</analysis>")
     {
-        s = s[pos + "</analysis>".len()..].trim_start();
+        s = span(s, pos + "</analysis>".len(), s.len()).trim_start();
     }
     if let Some(rest) = s.strip_prefix("<summary>") {
         s = rest.trim_start();

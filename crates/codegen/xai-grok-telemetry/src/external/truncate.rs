@@ -22,18 +22,6 @@ pub const MAX_CONTENT_BYTES: usize = 60 * 1024;
 /// File-extension attribute cap (`"rs"`, `"tsx"`, …).
 pub const MAX_FILE_EXTENSION_LEN: usize = 10;
 
-/// Truncate on a `char` boundary at or before `max_bytes`.
-fn floor_char_boundary(s: &str, max_bytes: usize) -> usize {
-    if max_bytes >= s.len() {
-        return s.len();
-    }
-    let mut idx = max_bytes;
-    while idx > 0 && !s.is_char_boundary(idx) {
-        idx -= 1;
-    }
-    idx
-}
-
 /// Standard attribute-value truncation: strings whose `char` count exceeds
 /// [`MAX_STRING_LEN`] collapse to their first [`TRUNCATED_PREFIX_LEN`] chars
 /// plus [`TRUNCATION_MARKER`]. Returns `None` when unchanged.
@@ -58,8 +46,13 @@ pub fn truncate_content(s: &str) -> Option<String> {
     if s.len() <= MAX_CONTENT_BYTES {
         return None;
     }
-    let idx = floor_char_boundary(s, MAX_CONTENT_BYTES);
-    Some(format!("{}{TRUNCATION_MARKER}", &s[..idx]))
+    // `str::floor_char_boundary` (stable since Rust 1.91) snaps the budget down
+    // to a char boundary. This crate caps text with std directly rather than
+    // depending on `xai-grok-tools`, whose truncation helpers sit behind a much
+    // heavier dependency edge for a logging engine.
+    #[allow(clippy::string_slice)] // the index is a char boundary
+    let head = &s[..s.floor_char_boundary(MAX_CONTENT_BYTES)];
+    Some(format!("{head}{TRUNCATION_MARKER}"))
 }
 
 /// Reduce a JSON value for the gated `tool_parameters` attribute: depth
@@ -74,8 +67,9 @@ pub fn reduce_tool_input(value: &serde_json::Value) -> String {
     }
     // Over budget even after structural reduction: clamp the serialized text.
     // The result may not be valid JSON, but it is bounded and marked.
-    let idx = floor_char_boundary(&serialized, MAX_TOOL_INPUT_JSON_BYTES);
-    format!("{}{TRUNCATION_MARKER}", &serialized[..idx])
+    #[allow(clippy::string_slice)] // the index is a char boundary
+    let head = &serialized[..serialized.floor_char_boundary(MAX_TOOL_INPUT_JSON_BYTES)];
+    format!("{head}{TRUNCATION_MARKER}")
 }
 
 fn reduce_json(value: &serde_json::Value, depth: usize) -> serde_json::Value {

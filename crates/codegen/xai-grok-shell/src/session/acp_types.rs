@@ -36,11 +36,76 @@ pub(crate) struct AllSessionOverviewResponse {
 // ── Compaction ──────────────────────────────────────────────────────────
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[serde(try_from = "CompactConversationRequestWire")]
 pub(crate) struct CompactConversationRequest {
-    #[serde(alias = "sessionId")]
     pub session_id: String,
-    #[serde(default, alias = "userContext")]
+    #[serde(default)]
     pub user_context: Option<String>,
+}
+
+impl CompactConversationRequest {
+    /// The keys [`session_id`](Self::session_id) is read under. ACP params are
+    /// camelCase; the snake_case spelling arrives from in-process callers.
+    pub(crate) const SESSION_ID_KEYS: xai_tool_types::Aliases =
+        xai_tool_types::Aliases::new("session_id", &["sessionId"]);
+    /// The keys [`user_context`](Self::user_context) is read under. `/compact
+    /// <instructions>` has always travelled as `userContext`.
+    pub(crate) const USER_CONTEXT_KEYS: xai_tool_types::Aliases =
+        xai_tool_types::Aliases::new("user_context", &["userContext"]);
+}
+
+/// `CompactConversationRequest` as it arrives over ACP, with each key spelling
+/// its own field, so a request naming both folds them instead of tripping
+/// serde's duplicate-field check.
+#[derive(Debug, Default, serde::Deserialize)]
+struct CompactConversationRequestWire {
+    #[serde(default)]
+    session_id: Option<String>,
+    #[serde(default, rename = "sessionId")]
+    session_id_camel: Option<String>,
+    #[serde(default)]
+    user_context: Option<String>,
+    #[serde(default, rename = "userContext")]
+    user_context_camel: Option<String>,
+}
+
+impl TryFrom<CompactConversationRequestWire> for CompactConversationRequest {
+    type Error = CompactRequestError;
+
+    fn try_from(wire: CompactConversationRequestWire) -> Result<Self, Self::Error> {
+        Ok(Self {
+            session_id: CompactConversationRequest::SESSION_ID_KEYS
+                .fold(vec![wire.session_id, wire.session_id_camel])?
+                .ok_or(CompactRequestError::MissingSessionId)?,
+            user_context: CompactConversationRequest::USER_CONTEXT_KEYS
+                .fold(vec![wire.user_context, wire.user_context_camel])?,
+        })
+    }
+}
+
+/// Why a compact request could not be read. `session_id` stayed required
+/// before the shadow and stays required after it.
+#[derive(Debug)]
+enum CompactRequestError {
+    Alias(xai_tool_types::AliasConflict),
+    MissingSessionId,
+}
+
+impl std::fmt::Display for CompactRequestError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Alias(conflict) => conflict.fmt(f),
+            Self::MissingSessionId => f.write_str("missing field `session_id`"),
+        }
+    }
+}
+
+impl std::error::Error for CompactRequestError {}
+
+impl From<xai_tool_types::AliasConflict> for CompactRequestError {
+    fn from(value: xai_tool_types::AliasConflict) -> Self {
+        Self::Alias(value)
+    }
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
@@ -82,7 +147,7 @@ pub struct FeedbackResponse {
 /// thumbs button on a specific assistant message in the desktop chat
 /// history) may attach.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "snake_case", try_from = "ClientFeedbackInputWire")]
 pub struct ClientFeedbackInput {
     /// Session ID this feedback is for (required)
     pub session_id: String,
@@ -116,7 +181,7 @@ pub struct ClientFeedbackInput {
     pub context_type: Option<prod_mc_cli_chat_proxy_types::feedback_types::ContextType>,
 
     /// 0-based turn number this feedback is about.
-    #[serde(default, alias = "turnNumber")]
+    #[serde(default)]
     pub turn_number: Option<i64>,
 
     /// Feedback request ID - if present, this is a response to a FeedbackRequestNotification
@@ -135,6 +200,67 @@ pub struct ClientFeedbackInput {
     /// Terminal environment snapshot from the client.
     #[serde(default)]
     pub terminal_info: Option<prod_mc_cli_chat_proxy_types::feedback_types::FeedbackTerminalInfo>,
+}
+
+impl ClientFeedbackInput {
+    /// The keys [`turn_number`](Self::turn_number) is read under. The rest of
+    /// this struct is snake_case; a camelCase client sends this one key the
+    /// other way, and one that sends both says one thing twice.
+    pub const TURN_NUMBER_KEYS: xai_tool_types::Aliases =
+        xai_tool_types::Aliases::new("turn_number", &["turnNumber"]);
+}
+
+/// `ClientFeedbackInput` as a client sends it, with each turn-number spelling
+/// its own field. See [`ClientFeedbackInput::TURN_NUMBER_KEYS`].
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+struct ClientFeedbackInputWire {
+    session_id: String,
+    client_type: prod_mc_cli_chat_proxy_types::feedback_types::ClientType,
+    #[serde(default)]
+    rating_type: Option<prod_mc_cli_chat_proxy_types::feedback_types::RatingType>,
+    #[serde(default)]
+    rating_value: Option<i32>,
+    #[serde(default)]
+    feedback_text: Option<String>,
+    #[serde(default)]
+    feedback_categories: Vec<String>,
+    #[serde(default)]
+    context_type: Option<prod_mc_cli_chat_proxy_types::feedback_types::ContextType>,
+    #[serde(default)]
+    turn_number: Option<i64>,
+    #[serde(default, rename = "turnNumber")]
+    turn_number_camel: Option<i64>,
+    #[serde(default)]
+    request_id: Option<String>,
+    #[serde(default)]
+    client_version: Option<String>,
+    #[serde(default)]
+    metadata: Option<serde_json::Value>,
+    #[serde(default)]
+    terminal_info: Option<prod_mc_cli_chat_proxy_types::feedback_types::FeedbackTerminalInfo>,
+}
+
+impl TryFrom<ClientFeedbackInputWire> for ClientFeedbackInput {
+    type Error = xai_tool_types::AliasConflict;
+
+    fn try_from(wire: ClientFeedbackInputWire) -> Result<Self, Self::Error> {
+        Ok(Self {
+            session_id: wire.session_id,
+            client_type: wire.client_type,
+            rating_type: wire.rating_type,
+            rating_value: wire.rating_value,
+            feedback_text: wire.feedback_text,
+            feedback_categories: wire.feedback_categories,
+            context_type: wire.context_type,
+            turn_number: ClientFeedbackInput::TURN_NUMBER_KEYS
+                .fold(vec![wire.turn_number, wire.turn_number_camel])?,
+            request_id: wire.request_id,
+            client_version: wire.client_version,
+            metadata: wire.metadata,
+            terminal_info: wire.terminal_info,
+        })
+    }
 }
 
 impl ClientFeedbackInput {
@@ -940,5 +1066,94 @@ mod tests {
         let json = serde_json::to_string(&original).unwrap();
         let roundtripped: TokenUsageCategory = serde_json::from_str(&json).unwrap();
         assert_eq!(roundtripped, original);
+    }
+}
+
+#[cfg(test)]
+mod wire_alias_tests {
+    use super::{ClientFeedbackInput, CompactConversationRequest};
+
+    #[test]
+    fn a_compact_request_reads_its_keys_under_either_spelling() {
+        for json in [
+            r#"{"session_id":"s1","user_context":"focus on tests"}"#,
+            r#"{"sessionId":"s1","userContext":"focus on tests"}"#,
+        ] {
+            let request: CompactConversationRequest =
+                serde_json::from_str(json).unwrap_or_else(|e| panic!("{json}: {e}"));
+            assert_eq!(request.session_id, "s1");
+            assert_eq!(request.user_context.as_deref(), Some("focus on tests"));
+        }
+    }
+
+    /// `/compact <instructions>` and the camelCase client both land here; a
+    /// request that names the same context twice is one instruction.
+    #[test]
+    fn a_compact_request_naming_both_spellings_under_one_value_parses_once() {
+        let request: CompactConversationRequest = serde_json::from_str(
+            r#"{"session_id":"s1","sessionId":"s1","user_context":"x","userContext":"x"}"#,
+        )
+        .expect("one value per key, under both spellings");
+        assert_eq!(request.session_id, "s1");
+        assert_eq!(request.user_context.as_deref(), Some("x"));
+    }
+
+    /// Two different instructions decide what the summary keeps, and two session
+    /// ids decide which session is compacted.
+    #[test]
+    fn a_compact_request_whose_spellings_disagree_errors_naming_the_field() {
+        for (json, field) in [
+            (r#"{"session_id":"a","sessionId":"b"}"#, "session_id"),
+            (
+                r#"{"session_id":"a","user_context":"x","userContext":"y"}"#,
+                "user_context",
+            ),
+        ] {
+            let err = serde_json::from_str::<CompactConversationRequest>(json)
+                .expect_err("{json} names one field twice with different values");
+            assert!(err.to_string().contains(field), "{err}");
+        }
+    }
+
+    #[test]
+    fn a_compact_request_with_no_session_id_at_all_is_still_an_error() {
+        let err = serde_json::from_str::<CompactConversationRequest>(r#"{"userContext":"x"}"#)
+            .expect_err("compaction addresses a session by id");
+        assert!(err.to_string().contains("session_id"), "{err}");
+    }
+
+    #[test]
+    fn a_compact_request_writes_the_canonical_keys_and_never_an_alias() {
+        let json = serde_json::to_value(CompactConversationRequest {
+            session_id: "s1".into(),
+            user_context: Some("x".into()),
+        })
+        .unwrap();
+        assert_eq!(json["session_id"], "s1");
+        assert_eq!(json["user_context"], "x");
+        assert!(json.get("sessionId").is_none(), "{json}");
+        assert!(json.get("userContext").is_none(), "{json}");
+    }
+
+    #[test]
+    fn feedback_input_reads_the_turn_number_under_either_spelling() {
+        let base = r#""session_id":"s1","client_type":"tui""#;
+        let snake: ClientFeedbackInput =
+            serde_json::from_str(&format!("{{{base},\"turn_number\":4}}")).unwrap();
+        let camel: ClientFeedbackInput =
+            serde_json::from_str(&format!("{{{base},\"turnNumber\":4}}")).unwrap();
+        assert_eq!(snake.turn_number, Some(4));
+        assert_eq!(camel.turn_number, snake.turn_number);
+
+        let both: ClientFeedbackInput =
+            serde_json::from_str(&format!("{{{base},\"turn_number\":4,\"turnNumber\":4}}"))
+                .expect("one turn named twice is one turn");
+        assert_eq!(both.turn_number, Some(4));
+
+        let err = serde_json::from_str::<ClientFeedbackInput>(&format!(
+            "{{{base},\"turn_number\":4,\"turnNumber\":5}}"
+        ))
+        .expect_err("two turn numbers must not resolve silently");
+        assert!(err.to_string().contains("turn_number"), "{err}");
     }
 }

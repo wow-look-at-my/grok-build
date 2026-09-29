@@ -495,20 +495,31 @@ fn parse_ask_user_qa_pairs(output: &str) -> Vec<(String, String)> {
             if !remaining.starts_with('"') {
                 break;
             }
-            remaining = &remaining[1..]; // skip opening "
+            // Every offset in this loop is either one past an ASCII needle
+            // `starts_with`/`str::find` confirmed, or ends at such an offset.
+            #[allow(clippy::string_slice)] // one past an ASCII '"' that starts_with confirmed
+            let after_quote = &remaining[1..]; // skip opening "
+            remaining = after_quote;
 
             // Find the closing " before =
             let Some(q_end) = remaining.find("\"=\"") else {
                 break;
             };
-            let question = remaining[..q_end].to_string();
-            remaining = &remaining[q_end + 3..]; // skip "="
+            #[allow(clippy::string_slice)] // ends at a str::find("\"=\"") offset
+            let question_slice = &remaining[..q_end];
+            let question = question_slice.to_string();
+            #[allow(clippy::string_slice)]
+            // past the 3 ASCII bytes of "\"=\"" that str::find matched
+            let after_sep = &remaining[q_end + 3..]; // skip "="
+            remaining = after_sep;
 
             // Find the end of the answer: next `", "` pair start or end of string.
             // The answer value continues until we hit `, "` (next pair) or end.
             let answer_end = remaining.find(", \"").unwrap_or(remaining.len());
 
-            let mut answer_text = remaining[..answer_end].to_string();
+            #[allow(clippy::string_slice)] // ends at a str::find(", \"") offset or remaining.len()
+            let answer_slice = &remaining[..answer_end];
+            let mut answer_text = answer_slice.to_string();
             // Strip trailing quote if present (answer is quoted)
             if answer_text.ends_with('"') {
                 answer_text.pop();
@@ -526,9 +537,14 @@ fn parse_ask_user_qa_pairs(output: &str) -> Vec<(String, String)> {
             pairs.push((question, answer_text));
 
             // Advance past the separator
-            remaining = &remaining[answer_end..];
+            #[allow(clippy::string_slice)] // starts at the str::find(", \"") offset above
+            let from_answer = &remaining[answer_end..];
+            remaining = from_answer;
             if remaining.starts_with(", ") {
-                remaining = &remaining[2..];
+                // `starts_with(", ")` proved the first two bytes are ASCII.
+                #[allow(clippy::string_slice)] // past the ASCII ", " that starts_with confirmed
+                let past_sep = &remaining[2..];
+                remaining = past_sep;
             }
         }
 
@@ -550,7 +566,11 @@ fn parse_ask_user_qa_pairs(output: &str) -> Vec<(String, String)> {
             let line = lines[i].trim_start_matches([' ', '-']).trim();
             // Check for "question text"
             if line.starts_with('"') && line.ends_with('"') {
-                let question = line[1..line.len() - 1].to_string();
+                // Both ends were just proven to be one-byte ASCII quotes, so
+                // `1` and `len() - 1` are char boundaries.
+                #[allow(clippy::string_slice)] // one past an ASCII quote byte at each end
+                let quoted = &line[1..line.len() - 1];
+                let question = quoted.to_string();
                 let answer = if i + 1 < lines.len() {
                     let next = lines[i + 1].trim();
                     if let Some(a) = next.strip_prefix("Answer: ") {

@@ -84,6 +84,7 @@ impl Theme {
             command: GOLD,
             path: AMBER,
             running: CYAN,
+            thinking_summary: rgb(42, 161, 179),
             warning: GOLD,
 
             fuzzy_accent: PURPLE_BRIGHT,

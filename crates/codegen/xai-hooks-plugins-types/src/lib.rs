@@ -1,3 +1,5 @@
+#![allow(clippy::string_slice)] // 1 hit predates the gate
+
 //! Shared DTO types for hooks/plugins ACP extensions.
 //!
 //! This crate defines the wire format for `x.ai/hooks/*` and `x.ai/plugins/*`
@@ -398,6 +400,8 @@ fn strip_control_chars(s: &str) -> String {
 
 fn truncate_chars(s: &str, max_chars: usize) -> String {
     match s.char_indices().nth(max_chars) {
+        // `idx` is a `char_indices` position, hence a char boundary.
+        #[allow(clippy::string_slice)]
         Some((idx, _)) => s[..idx].to_string(),
         None => s.to_string(),
     }

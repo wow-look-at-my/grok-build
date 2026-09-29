@@ -48,6 +48,7 @@ use std::sync::OnceLock;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::process::Command;
 use xai_grok_sampling_types::ConversationItem;
+use xai_grok_tools::util::truncate_bytes;
 
 use crate::util::subprocess::git_bin;
 
@@ -279,15 +280,9 @@ fn truncate_diff(raw: String) -> String {
         return raw;
     }
     let elided = raw.len().saturating_sub(GOAL_CLASSIFIER_DIFF_MAX_BYTES);
-    // Truncate at a UTF-8 boundary at or below the budget; `floor_char_boundary`
-    // is stable as of 1.79 but we use a manual scan to stay on the
-    // crate's MSRV path.
-    let mut cut = GOAL_CLASSIFIER_DIFF_MAX_BYTES;
-    while cut > 0 && !raw.is_char_boundary(cut) {
-        cut -= 1;
-    }
-    let mut out = String::with_capacity(cut + 64);
-    out.push_str(&raw[..cut]);
+    let head = truncate_bytes(&raw, GOAL_CLASSIFIER_DIFF_MAX_BYTES);
+    let mut out = String::with_capacity(head.len() + 64);
+    out.push_str(head);
     out.push_str(&format!(
         "\n... (diff truncated, {elided} bytes elided) ...\n"
     ));

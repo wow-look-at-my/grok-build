@@ -1,3 +1,5 @@
+#![allow(clippy::cast_possible_wrap)] // 1 hit predates the gate
+
 //! Unified MCP adapter for the xAI Computer Hub.
 //!
 //! This crate bridges MCP (Model Context Protocol) servers into the

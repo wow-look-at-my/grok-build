@@ -255,6 +255,7 @@ fn skill_group(skill: &SkillInfo) -> SkillGroup {
 ///
 /// Splits on newlines first, then wraps each paragraph at word boundaries.
 /// All slicing uses `char_indices` so multi-byte UTF-8 is never split.
+#[allow(clippy::string_slice)] // `byte_limit` is a `char_indices` offset, `cut` a `rfind` one
 fn word_wrap(text: &str, max_w: usize) -> Vec<&str> {
     if max_w == 0 {
         return vec![text];
@@ -838,6 +839,8 @@ impl ModalInput {
                     return ModalInputOutcome::Changed;
                 }
                 let completed = self.focused_field_mut().and_then(|field| {
+                    // `cursor_byte()` is the textarea's own cursor offset, a char boundary.
+                    #[allow(clippy::string_slice)]
                     let partial = field.text()[..field.cursor_byte()].to_owned();
                     tab_complete_path(&partial)
                 });
@@ -4030,6 +4033,8 @@ fn render_input_form(buf: &mut Buffer, area: Rect, input: &ModalInput, theme: &T
             }
         } else {
             let viewport = field.viewport(max_text_w);
+            // The range is a ratatui `visible_byte_range`, a char boundary.
+            #[allow(clippy::string_slice)]
             let visible = &field.text()[viewport.visible_byte_range];
             buf.set_string(text_x, content_y, visible, text_style);
 

@@ -1,3 +1,8 @@
+#![allow(clippy::cast_lossless)] // 2 hits predate the gate
+#![allow(clippy::cast_possible_truncation)] // 1 hit predates the gate
+#![allow(clippy::cast_possible_wrap)] // 6 hits predate the gate
+#![allow(clippy::unwrap_used)] // 2 hits predate the gate
+
 //! xai-hunk-tracker - Track file hunks (diffs) with agent/external attribution.
 //!
 //! This crate provides:

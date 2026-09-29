@@ -194,11 +194,8 @@ pub fn build_dream_user_message(
             if trimmed.len() <= cap {
                 buf.push_str(trimmed);
             } else {
-                let mut end = cap;
-                while end > 0 && !trimmed.is_char_boundary(end) {
-                    end -= 1;
-                }
-                buf.push_str(&trimmed[..end]);
+                let kept = xai_grok_tools::util::truncate_bytes(trimmed, cap);
+                buf.push_str(kept);
                 tracing::warn!(
                     target: LOG,
                     original = trimmed.len(),

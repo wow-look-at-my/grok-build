@@ -1669,6 +1669,8 @@ fn locate_prompt(harness: &PtyHarness) -> Result<MousePoint> {
         let Some(marker_byte) = line.find('❯') else {
             continue;
         };
+        // `marker_byte` is where `find('❯')` matched, so it is a char boundary.
+        #[allow(clippy::string_slice)] // offset of a matched character
         let col = line[..marker_byte].chars().count() + 2;
         return Ok(MousePoint {
             row: row as u16,
@@ -1687,8 +1689,12 @@ fn locate_prompt_drop_point(harness: &PtyHarness) -> Result<MousePoint> {
         let Some(marker_byte) = line.find('❯') else {
             continue;
         };
+        // Both offsets bound the `❯` character itself: its start, and one past
+        // its `len_utf8()`.
+        #[allow(clippy::string_slice)] // one past a matched character
         let after_marker = &line[marker_byte + '❯'.len_utf8()..];
         let content_cols = after_marker.trim_end().chars().count();
+        #[allow(clippy::string_slice)] // offset of a matched character
         let marker_col = line[..marker_byte].chars().count();
         return Ok(MousePoint {
             row: row as u16,
@@ -1755,9 +1761,13 @@ fn locate_text_impl(
     let mut seen = 0usize;
     for (row, line) in output.lines.iter().enumerate() {
         let mut start_byte = 0usize;
+        // `start_byte` is either 0 or one past a previous match of `text`, and
+        // `byte` is the offset `find(text)` matched at; each is a char boundary.
+        #[allow(clippy::string_slice)] // offset of a matched needle
         while let Some(rel_byte) = line[start_byte..].find(text) {
             let byte = start_byte + rel_byte;
             if seen == occurrence {
+                #[allow(clippy::string_slice)] // offset of a matched needle
                 let mut col = line[..byte].chars().count();
                 if end {
                     col += text.chars().count().saturating_sub(1);
@@ -1795,6 +1805,8 @@ fn decode_osc52_payloads(bytes: &[u8]) -> Result<Vec<String>> {
             continue;
         };
         let end = rest.find(['\x07', '\x1b']).unwrap_or(rest.len());
+        // `end` is the offset of an ASCII BEL/ESC byte, or the whole segment.
+        #[allow(clippy::string_slice)] // up to a matched ASCII control byte
         let encoded = &rest[..end];
         if encoded.is_empty() {
             continue;
@@ -1802,7 +1814,10 @@ fn decode_osc52_payloads(bytes: &[u8]) -> Result<Vec<String>> {
         let decoded = base64::engine::general_purpose::STANDARD
             .decode(encoded)
             .with_context(|| "decode OSC 52 base64 payload")?;
-        let text = String::from_utf8(decoded).context("OSC 52 payload is not UTF-8 text")?;
+        // The payload is whatever the program put on the terminal, and the
+        // assertion under here is on clipboard text: an undecodable byte should
+        // mark itself in the text, not discard a payload the pane did print.
+        let text = String::from_utf8_lossy(&decoded).into_owned();
         payloads.push(text);
     }
     Ok(payloads)

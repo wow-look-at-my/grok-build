@@ -4,7 +4,7 @@
 //! no I/O, no actor state. They live in `xai-chat-state` so that both
 //! this crate and `xai-grok-shell` can share them without duplication.
 use std::collections::BTreeSet;
-use xai_grok_sampling_types::{ContentPart, ConversationItem, ToolResultItem};
+use xai_grok_sampling_types::{ContentPart, ConversationItem, SyntheticReason, ToolResultItem};
 /// Drops tool results and flattens assistant `tool_calls` into
 /// `[Called tools: ...]` text annotations.
 ///
@@ -243,9 +243,9 @@ fn truncate_text_to_bytes(s: &str, max_bytes: usize) -> Option<std::sync::Arc<st
         end -= 1;
     }
     let dropped = s.len() - end;
+    let kept = tag_span(s, 0, end);
     Some(std::sync::Arc::<str>::from(format!(
-        "{}\n[... truncated {dropped} bytes to fit the compaction window ...]",
-        &s[..end]
+        "{kept}\n[... truncated {dropped} bytes to fit the compaction window ...]"
     )))
 }
 /// Tags injected by the runtime that should be stripped from user queries.
@@ -272,7 +272,7 @@ fn strip_system_tags(text: &str) -> String {
         let open = format!("<{tag}>");
         let close = format!("</{tag}>");
         while let Some(start) = result.find(&open) {
-            if let Some(rel_end) = result[start..].find(&close) {
+            if let Some(rel_end) = tag_span_to_end(&result, start).find(&close) {
                 let end_pos = start + rel_end + close.len();
                 result.replace_range(start..end_pos, "");
             } else {
@@ -290,8 +290,8 @@ fn strip_system_tags(text: &str) -> String {
 pub fn extract_user_query(text: &str) -> String {
     if let Some(start) = text.find("<user_query>") {
         let content_start = start + "<user_query>".len();
-        if let Some(end) = text[content_start..].find("</user_query>") {
-            let inner = text[content_start..content_start + end].trim();
+        if let Some(end) = tag_span_to_end(text, content_start).find("</user_query>") {
+            let inner = tag_span(text, content_start, content_start + end).trim();
             return strip_system_tags(inner);
         }
     }
@@ -355,12 +355,20 @@ pub fn is_synthetic_extracted_query(text: &str) -> bool {
 /// user turns — they must anchor the compaction boundary even though
 /// they have no extractable text query.
 ///
+/// A mid-turn interjection is a real user turn. The user typed it, and it
+/// is often the newest thing the user said. Compaction re-injects the last
+/// real user turn verbatim. Without interjections, that copy is an old
+/// prompt that later interjections have overtaken.
+///
 /// This is the single source of truth for "real user" classification
 /// in the compaction pipeline.
 pub fn is_real_user_turn(item: &ConversationItem) -> bool {
     match item {
         ConversationItem::User(u) => {
-            if u.synthetic_reason.is_some() {
+            if u.synthetic_reason
+                .as_ref()
+                .is_some_and(|r| *r != SyntheticReason::Interjection)
+            {
                 return false;
             }
             let has_images = u
@@ -635,6 +643,25 @@ impl CompactionStateContext {
 /// Clean the compaction model's raw output into the plain-text `Summary:`
 /// block that seeds the next turn.
 ///
+/// `text[from..to]` for the tag surgery in this module.
+///
+/// Every index handed here is the offset at which one of the ASCII literals
+/// this module scans for — a [`SYSTEM_TAGS`] pair, `<user_query>`,
+/// `</user_query>`, `<analysis>`, `</analysis>`, `<summary>` or `</summary>` —
+/// was found, or that offset plus the literal's byte length. In UTF-8 an ASCII
+/// byte is always a char boundary and never appears inside a multi-byte
+/// character, so both ends of the range align.
+#[allow(clippy::string_slice)] // both ends are ASCII tag offsets
+fn tag_span(text: &str, from: usize, to: usize) -> &str {
+    &text[from..to]
+}
+
+/// `text[from..]`, the tail after a tag. Same proof as [`tag_span`].
+#[allow(clippy::string_slice)] // the offset is an ASCII tag offset
+fn tag_span_to_end(text: &str, from: usize) -> &str {
+    &text[from..]
+}
+
 /// Drafting scratchpad (a top-level `<analysis>` block, or a nested
 /// `<analysis>`/`<summary>` wrapper / untagged markdown "**Analysis**" header
 /// inside the summary) is stripped; control tokens echoed *within* the body
@@ -646,22 +673,35 @@ pub fn format_compact_summary(summary: &str) -> String {
     let mut result = summary.to_string();
     while let Some(start) = result.find("<analysis>") {
         let is_leading = match result.find("<summary>") {
-            Some(sp) => start < sp || result[sp + "<summary>".len()..start].trim().is_empty(),
-            None => result[..start].trim().is_empty(),
+            Some(sp) => {
+                start < sp
+                    || tag_span(&result, sp + "<summary>".len(), start)
+                        .trim()
+                        .is_empty()
+            }
+            None => tag_span(&result, 0, start).trim().is_empty(),
         };
         if !is_leading {
             break;
         }
-        match result[start..].find("</analysis>") {
+        match tag_span_to_end(&result, start).find("</analysis>") {
             Some(rel) => {
                 let end = start + rel + "</analysis>".len();
-                result = format!("{}{}", &result[..start], &result[end..]);
+                result = format!(
+                    "{}{}",
+                    tag_span(&result, 0, start),
+                    tag_span_to_end(&result, end)
+                );
             }
             None => {
-                let drop_to = result[start..]
+                let drop_to = tag_span_to_end(&result, start)
                     .find("<summary>")
                     .map_or(result.len(), |rel| start + rel);
-                result = format!("{}{}", &result[..start], &result[drop_to..]);
+                result = format!(
+                    "{}{}",
+                    tag_span(&result, 0, start),
+                    tag_span_to_end(&result, drop_to)
+                );
                 break;
             }
         }
@@ -670,9 +710,10 @@ pub fn format_compact_summary(summary: &str) -> String {
         && let Some(end) = result.rfind("</summary>")
         && end > start
     {
-        let before = result[..start].to_string();
-        let after = result[end + "</summary>".len()..].to_string();
-        let inner = strip_leading_scratchpad(result[start + "<summary>".len()..end].trim());
+        let before = tag_span(&result, 0, start).to_string();
+        let after = tag_span_to_end(&result, end + "</summary>".len()).to_string();
+        let inner =
+            strip_leading_scratchpad(tag_span(&result, start + "<summary>".len(), end).trim());
         result = format!("{before}Summary:\n{inner}{after}");
     }
     result = neutralize_compaction_control_tokens(&result);
@@ -697,7 +738,7 @@ fn strip_leading_scratchpad(inner: &str) -> String {
     if !lead.starts_with(|c: char| c.is_ascii_digit())
         && let Some(pos) = s.rfind("</analysis>")
     {
-        s = s[pos + "</analysis>".len()..].trim_start();
+        s = tag_span_to_end(s, pos + "</analysis>".len()).trim_start();
     }
     if let Some(rest) = s.strip_prefix("<summary>") {
         s = rest.trim_start();
@@ -1680,6 +1721,51 @@ actual user question";
                 );
             }
         }
+    }
+    #[tokio::test]
+    async fn compaction_anchors_on_the_newest_interjection() {
+        let conversation = vec![
+            ConversationItem::system("sys"),
+            ConversationItem::user("<user_query>\ndelete\n</user_query>"),
+            ConversationItem::assistant("deleted"),
+            ConversationItem::interjection(
+                "The user sent a message while you were working:\n<user_query>\nnow rename the crate\n</user_query>",
+            ),
+            ConversationItem::assistant("renaming"),
+        ];
+        let ctx = CompactionStateContext::build(&conversation, CompactionInputs::default()).await;
+        assert_eq!(
+            ctx.last_user_query.as_deref(),
+            Some("now rename the crate"),
+            "the anchor must be the newest message the user sent, not the last idle prompt"
+        );
+        assert_eq!(
+            ctx.recent_messages.len(),
+            1,
+            "the verbatim tail must start after the newest user message"
+        );
+        let compacted = build_compacted_history(CompactedHistoryInput {
+            system_message: ConversationItem::system("sys"),
+            user_message_prefix: "<user_info>OS: linux</user_info>".to_string(),
+            agents_md_reminder: None,
+            state_context: &ctx,
+            compaction_summary: "summary".to_string(),
+            system_reminder: None,
+            summary_before_recent: false,
+            transcript_hint: None,
+            summary_count: 1,
+        });
+        let text: Vec<String> = compacted.iter().map(|i| i.text_content()).collect();
+        assert!(
+            text.iter().any(|t| t.contains("now rename the crate")),
+            "compacted history must carry the newest user message: {text:?}"
+        );
+        assert!(
+            !text
+                .iter()
+                .any(|t| t.contains("<user_query>\ndelete\n</user_query>")),
+            "compacted history must not re-inject the stale prompt: {text:?}"
+        );
     }
     #[tokio::test]
     async fn test_compaction_state_context_build() {

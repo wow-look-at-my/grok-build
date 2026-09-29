@@ -49,16 +49,11 @@ pub fn is_unsafe_display_char(c: char) -> bool {
         )
 }
 
-/// Polyfill for nightly-only [`str::floor_char_boundary`].
-/// Snaps a byte index down to the nearest char boundary.
-pub fn floor_char_boundary(s: &str, index: usize) -> usize {
-    let index = index.min(s.len());
-    let mut i = index;
-    while i > 0 && !s.is_char_boundary(i) {
-        i -= 1;
-    }
-    i
-}
+/// Largest byte index `<= index` that is a char boundary in `s`.
+///
+/// Re-exported from `xai_grok_tools::util` so the whole workspace shares one
+/// implementation of the boundary math.
+pub use xai_grok_tools::util::floor_char_boundary;
 
 /// `String`-owning delegate of [`crate::util::truncate_to_width`].
 pub fn truncate_str(s: &str, max_width: usize) -> String {
@@ -188,7 +183,11 @@ pub fn fit_line_to_width<'a>(line: Line<'a>, width: usize) -> Line<'a> {
 
 /// Take the first `n` display columns from a string.
 fn take_width(s: &str, n: usize) -> String {
-    s[..byte_offset_at_width(s, n)].to_string()
+    // `byte_offset_at_width` returns either a `char_indices` offset or
+    // `s.len()`, so the cut always lands on a char boundary.
+    #[allow(clippy::string_slice)] // offset from byte_offset_at_width's char_indices walk
+    let head = &s[..byte_offset_at_width(s, n)];
+    head.to_string()
 }
 
 /// Cascade-truncate multiple text elements to fit within `avail` display columns.

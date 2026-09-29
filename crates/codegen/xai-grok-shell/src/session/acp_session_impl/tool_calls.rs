@@ -227,9 +227,6 @@ pub(super) enum PlanEditGate {
 ///   ([`PlanModeTracker::should_auto_approve_edit`]) so the gate and the
 ///   permission bypass can never disagree.
 ///
-/// `apply_patch` maps to a placeholder `AccessKind::Edit("apply_patch")` and
-/// therefore never matches the plan file: it is always rejected in plan mode
-/// (conservative — per-file targets are only known after patch parsing).
 /// Non-edit tools (bash, read, grep, MCP, web) are never gated here; they
 /// flow to the normal permission path, where yolo may still auto-approve
 /// them. `enter_plan_mode` / `exit_plan_mode` map to `AccessKind::Read` and
@@ -1020,6 +1017,29 @@ impl SessionActor {
                 .await?;
             return Ok(Err(ToolLoop::Continue));
         }
+        if self.goal_tracker.lock().status()
+            == Some(crate::session::goal_tracker::GoalStatus::Active)
+        {
+            let session_dir = crate::session::persistence::session_dir(&self.session_info);
+            if let Some(target) = crate::session::goal_classifier::run_log::goal_bookkeeping_target(
+                &call.function.arguments,
+                &session_dir.to_string_lossy(),
+            ) {
+                tracing::info!(
+                    tool_name = %call.function.name,
+                    target,
+                    "goal: refused a read of session bookkeeping"
+                );
+                let msg = format!(
+                    "Refused: this call touches `{target}`, the session's own record. \
+                     Reading the transcript is the verifier's job. Do not collect, extract \
+                     or summarize evidence. Keep working on the objective."
+                );
+                self.handle_tool_not_executed(&call.id, &tool_call_id, msg)
+                    .await?;
+                return Ok(Err(ToolLoop::Continue));
+            }
+        }
         let tool_call_display = self
             .send_tool_call_start(&tool_call_id, &call.function.name, tool_input.clone())
             .await;
@@ -1769,7 +1789,6 @@ impl SessionActor {
                 .in_scope(|| {});
                 (acp::ToolKind::Other, vec![], vec![])
             }
-            ToolInput::ApplyPatch(_) => (acp::ToolKind::Edit, vec![], vec![]),
             ToolInput::Dynamic(_) => (acp::ToolKind::Other, vec![], vec![]),
             ToolInput::MemorySearch(_) => (acp::ToolKind::Other, vec![], vec![]),
             ToolInput::MemoryGet(_) => (acp::ToolKind::Read, vec![], vec![]),
@@ -3114,22 +3133,6 @@ mod plan_mode_edit_gate_tests {
         assert_eq!(
             gate(&t, &write("/tmp/gate-session/plan.md")),
             PlanEditGate::Allow
-        );
-    }
-    /// `apply_patch` carries a placeholder access path, never the plan file:
-    /// always rejected in plan mode (conservative).
-    #[test]
-    fn apply_patch_rejected_in_plan_mode() {
-        use xai_grok_tools::implementations::codex::apply_patch::ApplyPatchInput;
-        let t = active_tracker();
-        assert_eq!(
-            gate(
-                &t,
-                &ToolInput::ApplyPatch(ApplyPatchInput {
-                    patch: String::new()
-                })
-            ),
-            PlanEditGate::RejectNonPlanFile
         );
     }
     /// Non-edit tools are never gated — they flow to the normal permission

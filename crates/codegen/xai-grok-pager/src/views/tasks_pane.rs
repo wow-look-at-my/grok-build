@@ -323,6 +323,8 @@ impl TaskEntry {
         } else {
             let trimmed = task.command.trim();
             let label = if let Some(nl) = trimmed.find('\n') {
+                // `nl` is a `find` offset, so it is a char boundary.
+                #[allow(clippy::string_slice)]
                 let first_line = trimmed[..nl].trim_end();
                 format!("{first_line}\u{2026}")
             } else {

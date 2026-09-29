@@ -257,7 +257,6 @@ pub fn access_kind_for_hub_tool(tool_name: &str, args: &Value) -> Option<AccessK
                 .to_owned();
             Some(AccessKind::Edit(path))
         }
-        "apply_patch" => Some(AccessKind::Edit("apply_patch".to_owned())),
         "web_fetch" => {
             let url = args
                 .get("url")

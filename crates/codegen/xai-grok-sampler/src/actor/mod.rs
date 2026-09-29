@@ -8,6 +8,11 @@
 pub(crate) mod request_task;
 pub(crate) mod state;
 
+use std::any::Any;
+use std::future::Future;
+use std::panic::AssertUnwindSafe;
+
+use futures_util::FutureExt;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
@@ -35,6 +40,96 @@ pub struct SamplerActor {
     tasks: JoinSet<RequestId>,
 }
 
+/// Spawn one request round onto the actor's set, reporting its id even when the
+/// round unwinds.
+///
+/// The actor clears `active_requests` from the id a finished round returns, and
+/// a `JoinError` carries none. Spawned bare, a round that panicked would leave
+/// `IsActive` answering true and `ActiveCount` counting a request that stopped
+/// existing, for the rest of the sampler's life.
+fn spawn_tracked_round(
+    tasks: &mut JoinSet<RequestId>,
+    tracked_id: RequestId,
+    task: impl Future<Output = RequestId> + Send + 'static,
+) {
+    tasks.spawn(async move {
+        match AssertUnwindSafe(task).catch_unwind().await {
+            Ok(request_id) => request_id,
+            Err(panic) => {
+                tracing::error!(
+                    request_id = tracked_id.as_str(),
+                    panic = %panic_payload(&*panic),
+                    "sampling request task panicked; its completion is answered as a dropped sender"
+                );
+                tracked_id
+            }
+        }
+    });
+}
+
+/// Text describing what a panic carried, for a log line.
+///
+/// The two payloads `panic!` itself produces are a `&'static str` (a literal)
+/// and a `String` (a formatted one). Anything else is named as a non-message
+/// rather than reported as nothing.
+fn panic_payload(panic: &(dyn Any + Send)) -> String {
+    if let Some(text) = panic.downcast_ref::<&'static str>() {
+        return (*text).to_string();
+    }
+    if let Some(text) = panic.downcast_ref::<String>() {
+        return text.clone();
+    }
+    "panicked with a payload that is not a message".to_string()
+}
+
+#[cfg(test)]
+mod round_tests {
+    use super::*;
+
+    /// A round that unwinds is reported by the set as a finished id, not as a
+    /// join failure. That is what lets the actor drop the request from
+    /// `active_requests`: `JoinError` carries no id to remove.
+    #[tokio::test]
+    async fn a_panicking_round_still_reports_its_id() {
+        let mut tasks: JoinSet<RequestId> = JoinSet::new();
+        let id = RequestId::random();
+        let expected = id.clone();
+        spawn_tracked_round(&mut tasks, id, async {
+            tokio::task::yield_now().await;
+            panic!("the request round died");
+        });
+
+        let joined = tokio::time::timeout(std::time::Duration::from_secs(5), tasks.join_next())
+            .await
+            .expect("the round must finish, one way or another")
+            .expect("a round was in the set");
+        let reported = joined.expect("a panicked round must report its id, not fail its join");
+        assert_eq!(reported, expected);
+    }
+
+    /// The success path hands back whatever the round returned.
+    #[tokio::test]
+    async fn a_completed_round_reports_its_own_id() {
+        let mut tasks: JoinSet<RequestId> = JoinSet::new();
+        let tracked = RequestId::random();
+        let returned = RequestId::random();
+        let expected = returned.clone();
+        spawn_tracked_round(&mut tasks, tracked, async move {
+            tokio::task::yield_now().await;
+            returned
+        });
+
+        let joined = tokio::time::timeout(std::time::Duration::from_secs(5), tasks.join_next())
+            .await
+            .expect("the round must finish")
+            .expect("a round was in the set");
+        assert_eq!(
+            joined.expect("the round completed").as_str(),
+            expected.as_str()
+        );
+    }
+}
+
 impl SamplerActor {
     /// Spawn the actor on the current tokio runtime and return a
     /// handle. The actor stops when the returned handle (and all its
@@ -51,7 +146,20 @@ impl SamplerActor {
             state: ActorState::new(config, retry_policy),
             tasks: JoinSet::new(),
         };
-        tokio::spawn(actor.run());
+        // The actor owns the command half every `SamplerHandle` sends to and
+        // every in-flight request reports through. Its death is reported here,
+        // by name, rather than surfacing later as a closed channel in
+        // whichever caller happens to send next.
+        let run = tokio::spawn(actor.run());
+        tokio::spawn(async move {
+            if let Err(error) = run.await {
+                tracing::error!(
+                    task = "sampler actor",
+                    error = %error,
+                    "sampler actor is no longer serving requests"
+                );
+            }
+        });
         SamplerHandle::new(cmd_tx)
     }
 
@@ -124,16 +232,24 @@ impl SamplerActor {
                 // blobs for the same rejection on every turn.
                 image_input_rejections
                     .strip_if_rejected(&effective_config.model, &mut request_inner);
-                self.tasks.spawn(request_task::run_request_task(
-                    request_id,
-                    request_inner,
-                    effective_config,
-                    retry_policy,
-                    event_tx,
-                    cancel_token,
-                    completion_tx,
-                    image_input_rejections,
-                ));
+                // The id is what the actor needs back to clear
+                // `active_requests`, so the round is spawned through
+                // `spawn_tracked_round` rather than bare.
+                let tracked_id = request_id.clone();
+                spawn_tracked_round(
+                    &mut self.tasks,
+                    tracked_id,
+                    request_task::run_request_task(
+                        request_id,
+                        request_inner,
+                        effective_config,
+                        retry_policy,
+                        event_tx,
+                        cancel_token,
+                        completion_tx,
+                        image_input_rejections,
+                    ),
+                );
             }
             SamplerCommand::Cancel { request_id } => {
                 self.state.cancel(&request_id);

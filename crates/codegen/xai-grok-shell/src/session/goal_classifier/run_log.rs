@@ -11,6 +11,7 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 
 use xai_grok_sampling_types::{ConversationItem, SyntheticReason};
+use xai_grok_tools::util::{ceil_char_boundary, truncate_bytes};
 
 use super::evidence::sanitize_final_response;
 
@@ -41,6 +42,8 @@ pub(crate) struct RunLog {
     /// A compaction summary sits inside the goal's span, so calls before it
     /// are gone from the conversation and therefore from the log.
     pub compacted: bool,
+    /// Calls whose result was replaced because it showed the implementer's own words back (see [`AuthoredFiles`]).
+    pub withheld: usize,
 }
 
 /// Build the run log from `items`.
@@ -60,6 +63,8 @@ pub(crate) fn build_run_log(
     let mut pending: HashMap<&str, (&str, &str)> = HashMap::new();
     // Rendered entries in call order, without their sequence number.
     let mut entries: Vec<String> = Vec::new();
+    let mut authored = AuthoredFiles::default();
+    let mut withheld = 0usize;
 
     for item in items {
         match item {
@@ -85,7 +90,15 @@ pub(crate) fn build_run_log(
                 let (name, args) = pending
                     .remove(r.tool_call_id.as_str())
                     .unwrap_or(("(call not in history)", "{}"));
-                entries.push(render_entry(name, args, Some(&r.content)));
+                let entry = match authored.model_output_reason(args) {
+                    Some(reason) => {
+                        withheld += 1;
+                        render_withheld(name, args, &reason)
+                    }
+                    None => render_entry(name, args, Some(&r.content)),
+                };
+                entries.push(entry);
+                authored.record(name, args);
             }
             _ => {}
         }
@@ -125,6 +138,12 @@ pub(crate) fn build_run_log(
              only the newest are shown.\n"
         ));
     }
+    if withheld > 0 {
+        body.push_str(&format!(
+            "{withheld} call(s) read, ran or printed text the implementer wrote \
+             itself. Their output is withheld: model output is not evidence.\n"
+        ));
+    }
     if compacted {
         body.push_str(
             "The conversation was compacted during this goal, so calls made \
@@ -143,7 +162,172 @@ pub(crate) fn build_run_log(
         calls,
         elided_calls,
         compacted,
+        withheld,
     }
+}
+
+/// Files the implementer authored during the goal that are not shipped code.
+#[derive(Default)]
+struct AuthoredFiles {
+    paths: Vec<String>,
+}
+
+impl AuthoredFiles {
+    /// Note the files `args` writes. Called after the call is classified,
+    /// so a call that writes a file is not tainted by that same file.
+    fn record(&mut self, name: &str, args: &str) {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(args) else {
+            return;
+        };
+        if let Some(command) = command_of(&value) {
+            self.paths.extend(redirect_targets(command));
+        }
+        let lower = name.to_ascii_lowercase();
+        if ["write", "edit", "create", "patch"]
+            .iter()
+            .any(|k| lower.contains(k))
+        {
+            for key in ["path", "file_path", "target_file", "filePath"] {
+                if let Some(p) = value.get(key).and_then(|v| v.as_str())
+                    && is_non_shipped(p)
+                {
+                    self.paths.push(p.to_string());
+                }
+            }
+        }
+    }
+
+    /// Why a call's result is model output, or `None` when it is evidence.
+    fn model_output_reason(&self, args: &str) -> Option<String> {
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(args)
+            && let Some(command) = command_of(&value)
+            && only_prints_literals(command)
+        {
+            return Some("the command only prints text the implementer wrote".into());
+        }
+        self.paths
+            .iter()
+            .find(|p| mentions_path(args, p))
+            .map(|p| format!("it reads or runs `{p}`, a file the implementer wrote"))
+    }
+}
+
+fn command_of(value: &serde_json::Value) -> Option<&str> {
+    ["command", "cmd"]
+        .iter()
+        .find_map(|k| value.get(*k).and_then(|v| v.as_str()))
+}
+
+/// Targets of `>`, `>>` and `tee` in a shell command. A file descriptor
+/// (`2>&1`) and `/dev/null` are not files anybody reads back.
+fn redirect_targets(command: &str) -> Vec<String> {
+    let tokens: Vec<&str> = command.split_whitespace().collect();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < tokens.len() {
+        let t = tokens[i];
+        let target = if t == "tee" || t == ">" || t == ">>" {
+            let mut j = i + 1;
+            while tokens.get(j).is_some_and(|a| a.starts_with('-')) {
+                j += 1;
+            }
+            tokens.get(j).copied()
+        } else if let Some(pos) = t.find('>') {
+            let rest = t[pos..].trim_start_matches('>');
+            (!rest.is_empty()).then_some(rest)
+        } else {
+            None
+        };
+        if let Some(target) = target.filter(|t| !t.starts_with('&')) {
+            let target = target.trim_matches(['"', '\'', ';', '&', '|']);
+            if !target.is_empty() && target != "/dev/null" {
+                out.push(target.to_string());
+            }
+        }
+        i += 1;
+    }
+    out
+}
+
+/// A write-tool path that is not part of the shipped work: under a temp
+/// dir, or named for the evidence it pretends to be.
+fn is_non_shipped(path: &str) -> bool {
+    let lower = path.to_ascii_lowercase();
+    let temp = ["/tmp/", "/var/folders/", "/private/tmp/", "grok-goal"]
+        .iter()
+        .any(|p| lower.contains(p))
+        || std::env::temp_dir()
+            .to_str()
+            .is_some_and(|t| !t.is_empty() && lower.starts_with(&t.to_ascii_lowercase()));
+    let file = lower.rsplit('/').next().unwrap_or(&lower);
+    let evidence_name = ["evidence", "proof", "verification", "verify_", "report"]
+        .iter()
+        .any(|w| file.contains(w))
+        || [".log", ".out"].iter().any(|e| file.ends_with(e));
+    temp || evidence_name
+}
+
+/// Whether `args` names `path`, by its full spelling or its file name.
+fn mentions_path(args: &str, path: &str) -> bool {
+    if path.len() < 4 {
+        return false;
+    }
+    if args.contains(path) {
+        return true;
+    }
+    let file = path.rsplit('/').next().unwrap_or(path);
+    file.len() >= 4
+        && args
+            .split(|c: char| !(c.is_alphanumeric() || matches!(c, '.' | '_' | '-')))
+            .any(|tok| tok == file)
+}
+
+/// A command whose every stage is `echo`/`printf`: its output is text the
+/// model typed, not something the work produced.
+fn only_prints_literals(command: &str) -> bool {
+    let stages: Vec<&str> = command
+        .split(['&', ';', '|'])
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .collect();
+    !stages.is_empty()
+        && stages.iter().all(|s| {
+            let first = s.split_whitespace().next().unwrap_or("");
+            first == "echo" || first == "printf"
+        })
+}
+
+/// Names of the session's own record. The implementer never needs them.
+const BOOKKEEPING_FILES: &[&str] = &[
+    "chat_history.jsonl",
+    "updates.jsonl",
+    ".runlog.md",
+    "goal-classifier-",
+    "goal-verdict-",
+    "goal-verifier-details-",
+];
+
+/// What in `args` names the session's own record, if anything. A goal's
+/// implementer that reads its transcript is building evidence the verifier
+/// reads for itself, so the harness refuses the call.
+pub(crate) fn goal_bookkeeping_target(args: &str, session_dir: &str) -> Option<String> {
+    let session_dir = session_dir.trim_end_matches('/');
+    if session_dir.len() >= 4 && args.contains(session_dir) {
+        return Some(session_dir.to_string());
+    }
+    BOOKKEEPING_FILES
+        .iter()
+        .find(|name| args.contains(*name))
+        .map(|name| (*name).to_string())
+}
+
+/// A call whose output the verifier must not see: the arguments stay so the
+/// verifier knows it was made, the result is replaced.
+fn render_withheld(name: &str, args: &str, reason: &str) -> String {
+    format!(
+        "{name}\nargs: {}\nresult: WITHHELD — {reason}. Model output is not evidence.\n",
+        cap_args(args)
+    )
 }
 
 /// One call: the tool name, its arguments, and the result (or that none
@@ -175,11 +359,11 @@ fn cap_args(args: &str) -> Cow<'_, str> {
     if clean.len() <= RUN_LOG_ARGS_MAX_BYTES {
         return clean;
     }
-    let cut = floor_char_boundary(&clean, RUN_LOG_ARGS_MAX_BYTES);
+    let head = truncate_bytes(&clean, RUN_LOG_ARGS_MAX_BYTES);
     Cow::Owned(format!(
         "{}… ({} bytes elided)",
-        &clean[..cut],
-        clean.len() - cut
+        head,
+        clean.len() - head.len()
     ))
 }
 
@@ -190,28 +374,16 @@ fn head_tail(s: &str) -> Cow<'_, str> {
     if s.len() <= RUN_LOG_RESULT_HEAD_BYTES + RUN_LOG_RESULT_TAIL_BYTES {
         return Cow::Borrowed(s);
     }
-    let head_end = floor_char_boundary(s, RUN_LOG_RESULT_HEAD_BYTES);
+    let head = truncate_bytes(s, RUN_LOG_RESULT_HEAD_BYTES);
     let tail_start = ceil_char_boundary(s, s.len() - RUN_LOG_RESULT_TAIL_BYTES);
+    #[allow(clippy::string_slice)] // `ceil_char_boundary` returns a char boundary
+    let tail = &s[tail_start..];
     Cow::Owned(format!(
         "{}\n... ({} bytes elided) ...\n{}",
-        &s[..head_end],
-        tail_start - head_end,
-        &s[tail_start..]
+        head,
+        tail_start - head.len(),
+        tail
     ))
-}
-
-fn floor_char_boundary(s: &str, mut i: usize) -> usize {
-    while i > 0 && !s.is_char_boundary(i) {
-        i -= 1;
-    }
-    i
-}
-
-fn ceil_char_boundary(s: &str, mut i: usize) -> usize {
-    while i < s.len() && !s.is_char_boundary(i) {
-        i += 1;
-    }
-    i
 }
 
 #[cfg(test)]
@@ -412,6 +584,127 @@ mod tests {
         let log = build_run_log(&[user_at(Some(0))], Some(0));
         assert_eq!(log.calls, 0);
         assert!(log.body.contains("(no tool calls recorded)"));
+    }
+
+    /// Output copied into a file and read back is the model's own words.
+    #[test]
+    fn reading_back_a_redirected_output_copy_is_withheld() {
+        let items = vec![
+            call(
+                "a",
+                "run_terminal_command",
+                r#"{"command":"cargo test 2>&1 | tee /tmp/results.txt"}"#,
+            ),
+            result("a", "test result: FAILED. 1 failed"),
+            call("b", "read_file", r#"{"path":"/tmp/results.txt"}"#),
+            result("b", "test result: ok. ALL PASSED"),
+        ];
+        let log = build_run_log(&items, None);
+        assert_eq!(log.withheld, 1);
+        assert!(log.body.contains("1 failed"), "the real run stays evidence");
+        assert!(!log.body.contains("ALL PASSED"));
+        assert!(log.body.contains("WITHHELD"));
+    }
+
+    /// A hand-written check script in a temp dir is not evidence, and neither is running it.
+    #[test]
+    fn running_a_script_the_model_wrote_to_temp_is_withheld() {
+        let items = vec![
+            call(
+                "w",
+                "write",
+                r#"{"path":"/tmp/grok-goal-x/implementer/check.sh","content":"echo PASS"}"#,
+            ),
+            result("w", "wrote file"),
+            call(
+                "r",
+                "run_terminal_command",
+                r#"{"command":"bash /tmp/grok-goal-x/implementer/check.sh"}"#,
+            ),
+            result("r", "PASS"),
+        ];
+        let log = build_run_log(&items, None);
+        assert_eq!(log.withheld, 1);
+        assert!(!log.body.contains("\nPASS"));
+    }
+
+    /// A command that only echoes prints what the model typed.
+    #[test]
+    fn echo_only_commands_are_withheld() {
+        let items = vec![
+            call(
+                "e",
+                "run_terminal_command",
+                r#"{"command":"echo 'all 12 tests passed' && printf 'ok\n'"}"#,
+            ),
+            result("e", "all 12 tests passed\nok"),
+        ];
+        let log = build_run_log(&items, None);
+        assert_eq!(log.withheld, 1);
+        assert!(!log.body.contains("12 tests passed\nok"));
+    }
+
+    /// Shipped source the model edited, and the project's own test run, stay evidence.
+    #[test]
+    fn shipped_edits_and_real_runs_are_kept() {
+        let items = vec![
+            call(
+                "w",
+                "write",
+                r#"{"path":"src/lib.rs","content":"fn f() {}"}"#,
+            ),
+            result("w", "wrote file"),
+            call(
+                "t",
+                "run_terminal_command",
+                r#"{"command":"cargo test 2>&1 > /dev/null; cargo test src/lib.rs"}"#,
+            ),
+            result("t", "test result: ok. 4 passed"),
+        ];
+        let log = build_run_log(&items, None);
+        assert_eq!(log.withheld, 0);
+        assert!(log.body.contains("4 passed"));
+    }
+
+    #[test]
+    fn transcript_reads_are_goal_bookkeeping() {
+        let dir = "/home/u/.grok/sessions/abc";
+        assert_eq!(
+            goal_bookkeeping_target(
+                r#"{"command":"node -e \"read('/home/u/.grok/sessions/abc/chat_history.jsonl')\""}"#,
+                dir
+            )
+            .as_deref(),
+            Some(dir)
+        );
+        assert_eq!(
+            goal_bookkeeping_target(r#"{"command":"jq . ~/x/chat_history.jsonl"}"#, dir).as_deref(),
+            Some("chat_history.jsonl")
+        );
+        assert_eq!(
+            goal_bookkeeping_target(
+                r#"{"path":"/tmp/grok-goal-v/goal-classifier-v-1.runlog.md"}"#,
+                dir
+            )
+            .as_deref(),
+            Some(".runlog.md")
+        );
+        assert_eq!(
+            goal_bookkeeping_target(r#"{"command":"cargo test -p foo"}"#, dir),
+            None
+        );
+        assert_eq!(
+            goal_bookkeeping_target(r#"{"path":"src/lib.rs"}"#, dir),
+            None
+        );
+    }
+
+    #[test]
+    fn redirect_targets_skip_descriptors_and_dev_null() {
+        assert_eq!(
+            redirect_targets("a 2>&1 >out.txt; b > /dev/null; c >> log.out | tee -a x.md"),
+            ["out.txt", "log.out", "x.md"]
+        );
     }
 
     /// A close tag echoed by a tool cannot end the verifier's reminder block.
