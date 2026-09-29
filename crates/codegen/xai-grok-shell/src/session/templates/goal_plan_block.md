@@ -13,6 +13,7 @@ Plan: {PLAN_PATH}
   confirm its observations hold. Checking is not doing: a step reads back what
   you built, and never authorizes work the objective did not ask for. Use the
   project's existing test runner and entry point, and RUN them. Write no
-  check script or harness of your own. The harness records each run for the verifier,
-  so save no proof files. Fix any missing observation before calling the goal
+  check script or harness of your own. Collecting evidence is the verifier's
+  job, not yours: save nothing about your runs and never read the session
+  transcript. Fix any missing observation before calling the goal
   complete.
