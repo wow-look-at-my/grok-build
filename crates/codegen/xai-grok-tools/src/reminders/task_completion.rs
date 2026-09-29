@@ -599,8 +599,6 @@ pub fn consumed_completion_ids(output: &ToolOutput) -> Vec<&str> {
         | ToolOutput::WebFetch(_)
         | ToolOutput::MCP(_)
         | ToolOutput::Skill(_)
-        | ToolOutput::ApplyPatch(_)
-        | ToolOutput::CodexGrepFiles(_)
         | ToolOutput::SearchTool(_)
         | ToolOutput::EnterPlanMode(_)
         | ToolOutput::ExitPlanMode(_)

@@ -7,7 +7,6 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use strum::{AsRefStr, Display, EnumIter, EnumString, IntoStaticStr};
-use xai_grok_tools::implementations::codex;
 use xai_grok_tools::implementations::grok_build;
 use xai_grok_tools::implementations::grok_build_concise;
 use xai_grok_tools::implementations::memory;
@@ -232,7 +231,6 @@ fn native_toolset_presets() -> Vec<(&'static str, ToolServerConfig)> {
         ("grok-build", workspace_grok_build_toolset()),
         ("grok-build-concise", grok_build_concise_toolset()),
         ("grok-build-plan", grok_build_plan_toolset()),
-        ("codex", codex_toolset()),
         ("explore", explore_toolset()),
         ("plan", plan_toolset()),
         ("grok-computer", grok_computer_toolset()),
@@ -358,23 +356,6 @@ pub fn grok_build_hashline_toolset(
     ]);
     ToolServerConfig {
         tools,
-        behavior_preset: None,
-    }
-}
-fn codex_toolset() -> ToolServerConfig {
-    ToolServerConfig {
-        tools: vec![
-            bash_tool_config(),
-            (&codex::CodexReadFileTool).into(),
-            (&codex::ApplyPatchTool).into(),
-            (&codex::CodexListDirTool).into(),
-            (&codex::CodexGrepFilesTool).into(),
-            kill_task_tool_config(),
-            (&grok_build::TodoWriteTool).into(),
-            task_output_tool_config(),
-            (&search_tool::SearchTool).into(),
-            (&use_tool::UseTool).into(),
-        ],
         behavior_preset: None,
     }
 }
@@ -736,7 +717,6 @@ pub enum BuiltinAgentName {
     GrokBuildPlan,
     GrokBuildPlanNoSubagents,
     GrokBuildAskUser,
-    Codex,
     Opencode,
     GeneralPurpose,
     Explore,
@@ -765,7 +745,6 @@ impl BuiltinAgentName {
             Self::GrokBuildPlan => AgentDefinition::grok_build_plan(),
             Self::GrokBuildPlanNoSubagents => AgentDefinition::grok_build_plan_no_subagents(),
             Self::GrokBuildAskUser => AgentDefinition::grok_build_ask_user(),
-            Self::Codex => AgentDefinition::codex(),
             Self::Opencode => AgentDefinition::opencode(),
             Self::GeneralPurpose => AgentDefinition::general_purpose(),
             Self::Explore => AgentDefinition::explore(),
@@ -1634,13 +1613,6 @@ impl AgentDefinition {
             )
         }
     }
-    pub fn codex() -> Self {
-        Self {
-            tool_config: codex_toolset(),
-            system_prompt: TemplateOverride::Codex,
-            ..Self::base(BuiltinAgentName::Codex, "Codex toolset and prompt")
-        }
-    }
     pub fn opencode() -> Self {
         Self {
             tool_config: opencode_toolset(),
@@ -1803,7 +1775,6 @@ mod tests {
             "grok_build",
             "grok-build-concise",
             "grok-build-plan",
-            "codex",
             "explore",
             "plan",
             "grok-computer",
@@ -1944,7 +1915,7 @@ mod tests {
     /// until classified.
     fn expected_strict_harness(name: BuiltinAgentName) -> bool {
         match name {
-            BuiltinAgentName::Codex | BuiltinAgentName::GrokBuildOrchestrator => true,
+            BuiltinAgentName::GrokBuildOrchestrator => true,
             BuiltinAgentName::GrokBuild
             | BuiltinAgentName::GrokBuildConcise
             | BuiltinAgentName::GrokBuildPlan
@@ -1975,7 +1946,7 @@ mod tests {
     }
     #[test]
     fn is_strict_harness_agent_type_classifies_by_name() {
-        for strict in ["codex", "grok-build-orchestrator"] {
+        for strict in ["grok-build-orchestrator"] {
             assert!(
                 is_strict_harness_agent_type(strict),
                 "{strict} should be strict"
@@ -2632,7 +2603,6 @@ description: Test default tool config
             ("grok-build", BuiltinAgentName::GrokBuild),
             ("grok-build-concise", BuiltinAgentName::GrokBuildConcise),
             ("grok-build-ask-user", BuiltinAgentName::GrokBuildAskUser),
-            ("codex", BuiltinAgentName::Codex),
             ("opencode", BuiltinAgentName::Opencode),
             ("general-purpose", BuiltinAgentName::GeneralPurpose),
             ("explore", BuiltinAgentName::Explore),
@@ -2747,7 +2717,6 @@ description: Test default tool config
     fn carries_discipline_false_for_every_template_and_audience() {
         for tpl in [
             crate::prompt::context::TemplateOverride::None,
-            crate::prompt::context::TemplateOverride::Codex,
             crate::prompt::context::TemplateOverride::Custom("fake".to_string()),
         ] {
             let def = def_with_template(tpl.clone());

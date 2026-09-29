@@ -1549,9 +1549,9 @@ fn summarize_tool_config_uses_name_override_and_strips_namespace() {
     use xai_grok_tools::types::tool::ToolKind;
     let mut read = ToolConfig::from_id("GrokBuild:read_file");
     read.kind = Some(ToolKind::Read);
-    let mut read_dup = ToolConfig::from_id("Codex:read_file");
+    let mut read_dup = ToolConfig::from_id("OpenCode:read");
     read_dup.kind = Some(ToolKind::Read);
-    read_dup.name_override = Some("codex_read".to_string());
+    read_dup.name_override = Some("alt_read".to_string());
     let mut grep = ToolConfig::from_id("OpenCode:grep");
     grep.kind = Some(ToolKind::Search);
     grep.name_override = Some("alt_grep".to_string());

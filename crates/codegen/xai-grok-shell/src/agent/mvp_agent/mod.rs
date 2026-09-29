@@ -1080,7 +1080,7 @@ pub(crate) fn agent_name_after_model_switch(
 /// `grok-build-plan` doesn't require rebuilding the harness and would
 /// destroy a client-supplied `_meta.agentProfile` if it did.
 ///
-/// Strict harnesses (`codex`, …) are only compatible with
+/// Strict harnesses (`grok-build-orchestrator`) are only compatible with
 /// themselves. Strict↔stock transitions are never compatible.
 pub(crate) fn harnesses_are_compatible(active: &str, required: &str) -> bool {
     use xai_grok_agent::config::is_strict_harness_agent_type;

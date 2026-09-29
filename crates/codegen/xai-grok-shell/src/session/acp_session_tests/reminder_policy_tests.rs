@@ -230,7 +230,6 @@ fn todo_gate_applicable_predicate_matrix() {
     }
     let templates = [
         TemplateOverride::None,
-        TemplateOverride::Codex,
         TemplateOverride::Custom("custom".into()),
     ];
     for tpl in templates {

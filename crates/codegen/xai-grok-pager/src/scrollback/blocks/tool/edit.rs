@@ -800,7 +800,7 @@ pub struct EditToolCallBlock {
     pub prefix: &'static str,
     pub display_name: Option<String>,
     /// One-liner summary can't be trusted: the call touched multiple files
-    /// (apply_patch emits one Diff per file, only the first becomes hunks) or
+    /// (one Diff per file, and only the first becomes hunks) or
     /// the path fell back to the tool title. Suppresses the diffstat suffix;
     /// `ScrollbackState`'s materialize policy keeps such blocks expanded.
     pub summary_untrusted: bool,

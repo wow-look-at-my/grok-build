@@ -117,14 +117,7 @@ struct CatalogState {
 
 struct Inner {
     catalog: RwLock<CatalogState>,
-    /// Additive provider catalogs that must survive xAI auth refreshes,
-    /// config rebuilds, and xAI logout. Entries are provider-qualified.
-    /// Independent lock: its lifecycle doesn't follow the xAI catalog's
-    /// fetch/apply cycle that `catalog` guards.
-    codex_models: RwLock<IndexMap<String, ModelEntry>>,
-    /// Models autodetected from each `[model_providers.<id>]` listing. Same
-    /// lifecycle argument as `codex_models`: a provider's own catalog does not
-    /// follow the xAI fetch/apply cycle that `catalog` guards.
+    /// Models autodetected from each `[model_providers.<id>]` listing.
     provider_models:
         RwLock<IndexMap<String, crate::agent::model_provider_discovery::DiscoveredModel>>,
     current_model_id: RwLock<acp::ModelId>,
@@ -288,7 +281,6 @@ impl ModelsManagerBuilder {
                     models: self.models,
                     ..Default::default()
                 }),
-                codex_models: RwLock::new(IndexMap::new()),
                 provider_models: RwLock::new(IndexMap::new()),
                 current_model_id: RwLock::new(self.current_model_id),
                 current_reasoning_effort: RwLock::new(current_reasoning_effort),
@@ -553,22 +545,6 @@ impl ModelsManager {
         self.inner.catalog.write().models.insert(id.into(), entry);
     }
 
-    /// Replace the additive Codex catalog and notify every connected model
-    /// selector. xAI models remain untouched, so signing into a second
-    /// provider expands the picker rather than replacing it.
-    pub(crate) fn set_codex_models(&self, models: IndexMap<String, ModelEntry>) {
-        *self.inner.codex_models.write() = models;
-        let cfg = self.inner.cfg.read().clone();
-        let prefetched = self.inner.catalog.read().prefetched.clone();
-        self.rebuild(&cfg, prefetched);
-        self.reselect_current_model_if_missing(&cfg);
-        self.notify_models_updated();
-    }
-
-    pub(crate) fn clear_codex_models(&self) {
-        self.set_codex_models(IndexMap::new());
-    }
-
     /// Replace the models autodetected from the `[model_providers.*]` listings
     /// and notify every connected model selector. The xAI catalog is untouched,
     /// so a provider's listing expands the picker rather than replacing it.
@@ -786,14 +762,13 @@ impl ModelsManager {
         cfg: &config::Config,
         base: IndexMap<String, ModelEntry>,
     ) -> IndexMap<String, ModelEntry> {
-        let with_codex = merge_additive_catalog(cfg, base, &self.inner.codex_models.read());
         // Resolved against THIS config, so a reloaded `[model.<id>]` block that
         // claims a discovered model is merged with the listing on the spot.
         let discovered = crate::agent::model_provider_discovery::resolve_discovered_models(
             cfg,
             &self.inner.provider_models.read(),
         );
-        merge_additive_catalog(cfg, with_codex, &discovered)
+        merge_additive_catalog(cfg, base, &discovered)
     }
 
     fn rebuild(&self, cfg: &config::Config, prefetched: Option<IndexMap<String, ModelEntry>>) {

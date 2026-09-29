@@ -534,7 +534,6 @@ pub const ENUM_VARIANTS: &[EnumVariantAlias] = &[
             "GrokBuild",
             "GrokBuildConcise",
             "GrokBuildHashline",
-            "Codex",
             "OpenCode",
             "open_code",
             "MCP",

@@ -675,8 +675,6 @@ pub struct RemoteSettings {
     pub cursor_sessions_enabled: Option<bool>,
     #[serde(default)]
     pub claude_sessions_enabled: Option<bool>,
-    #[serde(default)]
-    pub codex_sessions_enabled: Option<bool>,
     /// When `Some(true)`, enable goal mode remotely.
     /// When `Some(false)`, force-disable it (kill-switch).
     /// Absent ⇒ client default (enabled).
@@ -1260,8 +1258,8 @@ pub struct GoalRoleModel {
     /// session's env/ACP/strict-harness precedence chain. NOT a subagent type:
     /// the role always spawns `general-purpose`, so the harness only re-flavors
     /// that toolset. An `agent_type` that doesn't resolve, that resolves to a
-    /// strict harness whose flavor the subagent system can't represent (e.g.
-    /// `codex`), or whose role toolset can't satisfy the role, fails open to the
+    /// strict harness whose flavor the subagent system can't represent, or
+    /// whose role toolset can't satisfy the role.
     /// session model + harness before commit.
     pub agent_type: String,
 }
@@ -1414,27 +1412,19 @@ mod tests {
             (
                 settings.cursor_sessions_enabled,
                 settings.claude_sessions_enabled,
-                settings.codex_sessions_enabled,
             )
         };
         let json = r#"{
             "cursor_sessions_enabled": true,
-            "claude_sessions_enabled": false,
-            "codex_sessions_enabled": true
+            "claude_sessions_enabled": false
         }"#;
         let settings: RemoteSettings = serde_json::from_str(json).unwrap();
-        assert_eq!(
-            session_flags(&settings),
-            (Some(true), Some(false), Some(true))
-        );
+        assert_eq!(session_flags(&settings), (Some(true), Some(false)));
         let serialized = serde_json::to_string(&settings).unwrap();
         let round_trip: RemoteSettings = serde_json::from_str(&serialized).unwrap();
-        assert_eq!(
-            session_flags(&round_trip),
-            (Some(true), Some(false), Some(true))
-        );
+        assert_eq!(session_flags(&round_trip), (Some(true), Some(false)));
         let absent: RemoteSettings = serde_json::from_str("{}").unwrap();
-        assert_eq!(session_flags(&absent), (None, None, None));
+        assert_eq!(session_flags(&absent), (None, None));
     }
     #[test]
     fn remote_settings_image_description_model_round_trip() {

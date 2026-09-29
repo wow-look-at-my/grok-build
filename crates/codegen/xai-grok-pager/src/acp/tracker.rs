@@ -5146,7 +5146,7 @@ mod tests {
             "completion must not snap a user-expanded Edit back to Collapsed"
         );
     }
-    /// Multi-file (apply_patch shape: several Diff items) and title-fallback
+    /// Multi-file (several Diff items) and title-fallback
     /// Edits can't be summarized by the one-liner: they materialize Expanded
     /// with the summary marked untrusted, config-independent. Each case
     /// isolates one untrusted signal.
