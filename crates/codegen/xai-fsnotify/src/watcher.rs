@@ -983,6 +983,11 @@ pub(crate) fn start_with_timeout(
     // callback owns the primary sender).
     let backfill_tx = tx.clone();
 
+    // `progress` records startup stages for the timeout message only: a stage that
+    // is not recorded costs detail in one diagnostic, and neither the starting
+    // caller nor the watcher thread should die over it. `parking_lot::Mutex` is not
+    // a dependency of this crate.
+    #[allow(clippy::disallowed_methods)]
     if let Ok(mut p) = progress.lock() {
         p.set_stage("spawning_watcher_thread");
     }
@@ -991,6 +996,8 @@ pub(crate) fn start_with_timeout(
 
     let watcher_loop = move || {
         let update_stage = |stage: &'static str| {
+            // Best-effort stage recording; see the caller above.
+            #[allow(clippy::disallowed_methods)]
             if let Ok(mut p) = progress_for_thread.lock() {
                 p.set_stage(stage);
             }
@@ -1376,6 +1383,7 @@ pub(crate) fn start_with_timeout(
         .map_err(|e| crate::FsNotifyError::WatcherStart(Box::new(e)))?;
 
     // Wait for watcher to be ready (with timeout)
+    #[allow(clippy::disallowed_methods)] // best-effort stage recording
     if let Ok(mut p) = progress.lock() {
         p.set_stage("waiting_for_ready");
     }
@@ -1383,6 +1391,9 @@ pub(crate) fn start_with_timeout(
         Ok(Ok(())) => {}
         Ok(Err(e)) => return Err(crate::FsNotifyError::WatcherStart(e)),
         Err(_) => {
+            // A poison answers the same tuple an unreadable progress would: the
+            // stage names are diagnostics, never the watcher's state.
+            #[allow(clippy::disallowed_methods)]
             let (stage, stage_elapsed, total_elapsed, timeline) =
                 progress.lock().map(|p| p.snapshot()).unwrap_or((
                     "unknown",

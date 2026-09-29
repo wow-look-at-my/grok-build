@@ -292,7 +292,7 @@ impl xai_tool_runtime::Tool for ReadTool {
             let line = if line_text.len() > MAX_LINE_LENGTH {
                 format!(
                     "{}... (line truncated to {} chars)",
-                    &line_text[..MAX_LINE_LENGTH],
+                    crate::util::truncate_bytes(line_text, MAX_LINE_LENGTH),
                     MAX_LINE_LENGTH
                 )
             } else {
@@ -1331,7 +1331,7 @@ mod tests {
                 assert!(
                     fc.content.starts_with("<path>"),
                     "Output should start with '<path>', got: {}",
-                    &fc.content[..fc.content.len().min(50)],
+                    crate::util::truncate_bytes(&fc.content, 50),
                 );
                 assert!(
                     fc.content.contains("<type>file</type>"),
@@ -1344,7 +1344,7 @@ mod tests {
                 assert!(
                     fc.content.ends_with("</content>"),
                     "Output should end with '</content>', got tail: {}",
-                    &fc.content[fc.content.len().saturating_sub(30)..],
+                    crate::util::tail_bytes(&fc.content, 30),
                 );
                 // Verify line number format: "N: content".
                 assert!(

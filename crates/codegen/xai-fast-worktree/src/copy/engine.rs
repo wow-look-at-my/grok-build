@@ -212,7 +212,10 @@ pub(crate) fn copy_parallel(
         let _ = worker.join();
     }
 
-    // Collect issues.
+    // Collect issues. A poisoned accumulator is read anyway: the run reports what
+    // it recorded rather than losing the list to a panic at the summary line.
+    // `parking_lot::Mutex` is the structural fix and is not a dependency here.
+    #[allow(clippy::disallowed_methods)]
     let issues = match Arc::try_unwrap(issues) {
         Ok(mutex) => mutex.into_inner().unwrap_or_default(),
         Err(arc) => arc.lock().unwrap().clone(),

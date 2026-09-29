@@ -169,9 +169,16 @@ pub fn parse_schedule_interval_secs(human: &str) -> Option<u64> {
     if !s.starts_with("every ") {
         return None;
     }
+    #[allow(clippy::string_slice)] // past the ASCII "every " that starts_with just matched
     let rest = s[6..].trim_start();
     let (num_str, unit) = if let Some(sp) = rest.find(char::is_whitespace) {
-        (&rest[..sp], &rest[sp + 1..])
+        #[allow(clippy::string_slice)] // byte offset returned by str::find on a &str
+        let head = &rest[..sp];
+        // The whitespace `find` matched can itself be multi-byte (U+00A0 is
+        // `char::is_whitespace`), so `sp + 1` is not a boundary. A bad offset
+        // answers `None` the way every other malformed input here does.
+        let tail = rest.get(sp + 1..)?;
+        (head, tail)
     } else if rest.len() >= 2 {
         let (d, u) = rest.split_at(rest.len() - 1);
         (d, u)
@@ -222,7 +229,11 @@ pub fn truncate_to_width(s: &str, max_width: usize) -> Cow<'_, str> {
         return Cow::Borrowed("");
     }
     let end = byte_offset_at_width(s, max_width - 1);
-    Cow::Owned(format!("{}…", &s[..end]))
+    // `byte_offset_at_width` returns either a `char_indices` offset or
+    // `s.len()`, so `end` is always a char boundary.
+    #[allow(clippy::string_slice)] // offset from byte_offset_at_width's char_indices walk
+    let head = &s[..end];
+    Cow::Owned(format!("{head}\u{2026}"))
 }
 
 /// Byte offset at which display width would exceed `max_width`, or `s.len()`.

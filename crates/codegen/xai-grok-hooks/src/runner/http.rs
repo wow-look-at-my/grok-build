@@ -371,6 +371,7 @@ fn truncate_preview(s: &str) -> String {
             .last()
             .map(|(i, _)| i)
             .unwrap_or(0);
+        #[allow(clippy::string_slice)] // `boundary` is a `char_indices` position
         let mut preview = trimmed[..boundary].to_string();
         preview.push_str("...");
         preview

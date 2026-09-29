@@ -1,6 +1,7 @@
 //! Input/output types for the background-task / sub-agent task tools
 //! (`task`, `get_task_output`, `wait_tasks`).
 
+use crate::Aliases;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -602,7 +603,7 @@ pub fn format_resume_footer(
 pub const MAX_MULTI_WAIT_IDS: usize = 20;
 
 /// Input for the `get_task_output` tool.
-#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Default, Serialize, JsonSchema)]
 pub struct TaskOutputToolInput {
     /// Task IDs to query. Pass one or more; a single task is a one-element list.
     ///
@@ -612,14 +613,11 @@ pub struct TaskOutputToolInput {
     /// Models frequently mirror `kill_task`'s singular `task_id` here (in
     /// soak rollouts 3 of 4 organic calls did) and previously hard-failed
     /// with "Provide a non-empty task_ids list", after which they abandoned
-    /// the background-task workflow for shell polling.
+    /// the background-task workflow for shell polling. A call naming both
+    /// keys folds them through [`TaskOutputToolInput::TASK_IDS_KEYS`], so the
+    /// frequent case of one list spelled twice parses.
     #[schemars(
         description = "Task IDs to get output from. Pass one or more; for a single task use a one-element array. With a positive timeout_ms, multiple ids wait until all complete. Omit timeout_ms or pass 0 for a non-blocking snapshot."
-    )]
-    #[serde(
-        default,
-        alias = "task_id",
-        deserialize_with = "crate::serde_lenient::deserialize_lenient_string_list"
     )]
     pub task_ids: Vec<String>,
 
@@ -633,6 +631,63 @@ pub struct TaskOutputToolInput {
     )]
     #[serde(default)]
     pub timeout_ms: Option<u64>,
+}
+
+impl TaskOutputToolInput {
+    /// The keys [`task_ids`](Self::task_ids) is read under. The first is what
+    /// this type writes; `task_id` is accepted on input only.
+    pub const TASK_IDS_KEYS: Aliases = Aliases::new("task_ids", &["task_id"]);
+}
+
+/// `TaskOutputToolInput` as a model writes it, with each task-id key spelling
+/// its own field. It exists so a call naming both folds them under
+/// [`TaskOutputToolInput::TASK_IDS_KEYS`] rather than tripping serde's
+/// duplicate-field check, which rejects a second key whatever its value.
+#[derive(Debug, Default, Deserialize)]
+struct TaskOutputToolInputWire {
+    #[serde(
+        default,
+        deserialize_with = "crate::serde_lenient::deserialize_lenient_string_list_opt"
+    )]
+    task_ids: Option<Vec<String>>,
+    #[serde(
+        default,
+        rename = "task_id",
+        deserialize_with = "crate::serde_lenient::deserialize_lenient_string_list_opt"
+    )]
+    task_id: Option<Vec<String>>,
+    #[serde(default)]
+    timeout_ms: Option<u64>,
+}
+
+impl TryFrom<TaskOutputToolInputWire> for TaskOutputToolInput {
+    type Error = crate::AliasConflict;
+
+    fn try_from(wire: TaskOutputToolInputWire) -> Result<Self, Self::Error> {
+        Ok(Self {
+            task_ids: TaskOutputToolInput::TASK_IDS_KEYS
+                .fold(vec![wire.task_ids, wire.task_id])?
+                .unwrap_or_default(),
+            timeout_ms: wire.timeout_ms,
+        })
+    }
+}
+
+/// Forwards through [`TaskOutputToolInputWire`] and the fold.
+///
+/// This is the body `#[serde(try_from = "TaskOutputToolInputWire")]` would
+/// generate, written out because schemars 1.0 reads that attribute to build the
+/// advertised schema — it would publish the shadow's shape, and so name
+/// `task_id` to the model, which the whole leniency exists to avoid.
+impl<'de> Deserialize<'de> for TaskOutputToolInput {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        TaskOutputToolInputWire::deserialize(deserializer)?
+            .try_into()
+            .map_err(serde::de::Error::custom)
+    }
 }
 
 /// Trimmed, de-duplicated task IDs preserving first-seen order. Single source
@@ -995,22 +1050,23 @@ fn substitute_tool_placeholders(
 ) -> String {
     let mut out = String::with_capacity(template.len());
     let mut rest = template;
-    while let Some(start) = rest.find("${{") {
-        out.push_str(&rest[..start]);
-        let after = &rest[start + 3..];
-        match after.find("}}") {
-            Some(end) => {
-                let expr = after[..end].trim();
+    // `split_once` hands back the text on both sides of the delimiter already
+    // sliced, so no byte offset is ever computed from a `find` result.
+    while let Some((before, after_open)) = rest.split_once("${{") {
+        out.push_str(before);
+        match after_open.split_once("}}") {
+            Some((expr, after_close)) => {
+                let expr = expr.trim();
                 let kind = expr.rsplit('.').next().unwrap_or(expr).trim();
                 match resolve(kind) {
                     Some(name) => out.push_str(&name),
                     None => out.push_str(kind),
                 }
-                rest = &after[end + 2..];
+                rest = after_close;
             }
             None => {
                 out.push_str("${{");
-                rest = after;
+                rest = after_open;
             }
         }
     }
@@ -1625,6 +1681,76 @@ mod tests {
         // answers "Task 228 not found" instead of a deserialize error.
         let input: TaskOutputToolInput = serde_json::from_str(r#"{"task_id": 228}"#).unwrap();
         assert_eq!(input.resolved_task_ids(), vec!["228"]);
+    }
+
+    /// A model that echoes `kill_task`'s singular key alongside the plural one
+    /// is repeating itself, and a repeat is not a `duplicate field` error.
+    #[test]
+    fn task_output_input_naming_both_keys_under_one_list_parses_once() {
+        let input: TaskOutputToolInput =
+            serde_json::from_str(r#"{"task_ids":["a","b"],"task_id":["a","b"]}"#)
+                .expect("one list spelled twice must parse");
+        assert_eq!(input.resolved_task_ids(), vec!["a", "b"]);
+
+        // Same ids, one side spelled as a bare string the plural key also accepts.
+        let input: TaskOutputToolInput =
+            serde_json::from_str(r#"{"task_ids":["a"],"task_id":"a"}"#)
+                .expect("a bare string and its one-element array are one statement");
+        assert_eq!(input.resolved_task_ids(), vec!["a"]);
+    }
+
+    /// Two different id lists in one call is a contradiction about which task to
+    /// read; the tool may not pick a side in silence.
+    #[test]
+    fn task_output_input_whose_key_spellings_disagree_is_an_error_naming_the_field() {
+        let err =
+            serde_json::from_str::<TaskOutputToolInput>(r#"{"task_ids":["a"],"task_id":"b"}"#)
+                .expect_err("conflicting id lists must not parse");
+        let message = err.to_string();
+        assert!(message.contains("task_ids"), "{message}");
+        assert!(message.contains("task_id`"), "{message}");
+    }
+
+    #[test]
+    fn task_output_input_serializes_the_canonical_key_and_never_the_alias() {
+        let json = serde_json::to_value(TaskOutputToolInput {
+            task_ids: vec!["a".into()],
+            timeout_ms: None,
+        })
+        .unwrap();
+        assert_eq!(json["task_ids"], serde_json::json!(["a"]));
+        assert!(json.get("task_id").is_none(), "{json}");
+    }
+
+    #[test]
+    fn task_output_input_naming_both_keys_under_one_value_is_not_a_duplicate() {
+        // The whole point: a model echoing both keys with one list must parse.
+        let input: TaskOutputToolInput =
+            serde_json::from_str(r#"{"task_ids":["a","b"],"task_id":["a","b"]}"#)
+                .expect("both keys, one list");
+        assert_eq!(input.resolved_task_ids(), vec!["a", "b"]);
+
+        // A bare string under the singular key and the same list under the
+        // plural one are the same statement.
+        let input: TaskOutputToolInput =
+            serde_json::from_str(r#"{"task_ids":["x"],"task_id":"x"}"#)
+                .expect("one id, two spellings");
+        assert_eq!(input.resolved_task_ids(), vec!["x"]);
+    }
+
+    #[test]
+    fn task_output_input_round_trips_under_the_canonical_key_only() {
+        let json = serde_json::to_value(TaskOutputToolInput {
+            task_ids: vec!["a".into()],
+            timeout_ms: Some(10),
+        })
+        .unwrap();
+        assert_eq!(json["task_ids"], serde_json::json!(["a"]));
+        assert_eq!(json["timeout_ms"], serde_json::json!(10));
+        assert!(
+            json.get("task_id").is_none(),
+            "the singular key must never be written: {json}"
+        );
     }
 
     #[test]

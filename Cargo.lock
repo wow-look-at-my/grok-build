@@ -13044,6 +13044,7 @@ dependencies = [
 name = "xai-chat-state"
 version = "0.1.0"
 dependencies = [
+ "futures-util",
  "indexmap",
  "regex",
  "serde",
@@ -13404,6 +13405,7 @@ dependencies = [
  "xai-grok-announcements",
  "xai-grok-config",
  "xai-grok-mcp",
+ "xai-tool-types",
 ]
 
 [[package]]
@@ -13682,6 +13684,7 @@ dependencies = [
  "xai-ratatui-inline",
  "xai-ratatui-textarea",
  "xai-token-estimation",
+ "xai-tool-types",
  "xai-tty-utils",
 ]
 
@@ -13892,6 +13895,7 @@ dependencies = [
  "xai-grok-compaction",
  "xai-grok-tools",
  "xai-token-estimation",
+ "xai-tool-types",
 ]
 
 [[package]]
@@ -14241,6 +14245,7 @@ dependencies = [
  "xai-grok-secrets",
  "xai-mixpanel",
  "xai-token-estimation",
+ "xai-tool-types",
 ]
 
 [[package]]
@@ -14410,6 +14415,7 @@ dependencies = [
  "anyhow",
  "cpal",
  "futures-util",
+ "parking_lot",
  "rustls",
  "serde",
  "serde_json",

@@ -61,7 +61,11 @@ pub fn classify_bytes(bytes: &[u8]) -> FileContentState {
     }
 
     // Only now allocate the String (size is within limit)
-    match String::from_utf8(bytes.to_vec()) {
+    // The strict decode IS the classification: `Err` here selects the Binary
+    // arm, so lossy would report undecodable bytes as text with holes in it.
+    #[allow(clippy::disallowed_methods)]
+    let decoded = String::from_utf8(bytes.to_vec());
+    match decoded {
         Ok(s) => FileContentState::Full(s),
         Err(_) => FileContentState::Binary {
             byte_len: Some(byte_len),
@@ -160,7 +164,10 @@ pub async fn read_file_bounded(path: &std::path::Path) -> FileContentState {
     }
 
     // Convert to String (size already checked)
-    match String::from_utf8(full_buf) {
+    // As above: `Err` selects the Binary arm, so the strict decode is the test.
+    #[allow(clippy::disallowed_methods)]
+    let decoded = String::from_utf8(full_buf);
+    match decoded {
         Ok(s) => FileContentState::Full(s),
         Err(_) => FileContentState::Binary {
             byte_len: Some(byte_len),

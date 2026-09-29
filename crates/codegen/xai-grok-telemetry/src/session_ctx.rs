@@ -253,6 +253,12 @@ pub fn emit_event_with_origin<T: Serialize + Send + 'static>(
         return;
     }
     PENDING_EVENTS.fetch_add(1, Ordering::Release);
+    // The task's `PendingEventGuard` releases the count on unwind, so a panic
+    // here costs the one analytics event and cannot strand `drain_pending`.
+    // Nothing awaits this post: the caller is a sync emit that returns before the
+    // request is even built, and the "someone who would have been told" is the
+    // analytics dashboard, which has no line back into this process.
+    #[allow(clippy::disallowed_methods)]
     tokio::spawn(async move {
         let _pending = PendingEventGuard;
         let user_ctx = UserContext::collect();

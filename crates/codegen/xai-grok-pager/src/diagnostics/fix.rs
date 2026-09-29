@@ -1291,6 +1291,10 @@ fn tokenize_tmux_command<'a>(
                 "unterminated quoted tmux token",
             ));
         }
+        // `start` sits after a skipped ASCII whitespace byte and `index` stops on
+        // an ASCII whitespace byte or at `len()`. No UTF-8 continuation byte is
+        // ASCII, so both ends land on char boundaries.
+        #[allow(clippy::string_slice)] // both bounds are ASCII-delimited token edges
         let raw = &command[start..index];
         let value = raw
             .strip_prefix(['\'', '"'])
@@ -1354,6 +1358,9 @@ fn classify_tmux_assignment(
             index += 1;
             break;
         }
+        // The guard above proved the token starts with the ASCII `-`, which
+        // occupies byte 0 alone, so 1 is a char boundary.
+        #[allow(clippy::string_slice)] // one past an ASCII '-' that starts_with confirmed
         let flags = &token.value[1..];
         is_global |= flags.contains('g');
         if flags.contains('s') {
@@ -1535,7 +1542,13 @@ fn is_posix_ssh_function_declaration(line: &str) -> bool {
     };
     let after_name = after_name.trim_start();
     after_name.starts_with("()")
-        || (after_name.starts_with('(') && after_name[1..].trim_start().starts_with(')'))
+        || (after_name.starts_with('(') && {
+            // `starts_with('(')` above proved byte 0 is an ASCII paren, so 1 is
+            // a char boundary.
+            #[allow(clippy::string_slice)] // one past an ASCII '(' that starts_with confirmed
+            let past_paren = &after_name[1..];
+            past_paren.trim_start().starts_with(')')
+        })
 }
 
 fn token_is_exact_name(text: &str, name: &str) -> bool {

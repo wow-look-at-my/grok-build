@@ -1,3 +1,5 @@
+#![allow(clippy::cast_possible_truncation)] // 2 hits predate the gate
+
 //! Interactive playground for the scrollback search render layer.
 //!
 //! Drives a real [`ScrollbackSearchState`] over a sample scrollback so the

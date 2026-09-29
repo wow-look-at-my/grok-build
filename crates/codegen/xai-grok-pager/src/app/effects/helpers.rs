@@ -650,8 +650,13 @@ pub(super) fn extract_first_user_prompt(
             })
             .or_else(|| content.and_then(|c| c.as_str()).map(String::from))?;
         if let Some(start) = text.find("<user_query>") {
+            // `start` is a `str::find` offset and the tag is pure ASCII, so the
+            // offset past it is a char boundary.
+            #[allow(clippy::string_slice)] // past the ASCII "<user_query>" str::find matched
             let after = &text[start + "<user_query>".len()..];
             let end = after.find("</user_query>").unwrap_or(after.len());
+            // `end` is that `find` offset, or `after.len()`: either is a boundary.
+            #[allow(clippy::string_slice)] // str::find offset over `after`, or its len()
             let query = after[..end].trim();
             if !query.is_empty() && !query.starts_with('<') {
                 return Some(query.to_string());

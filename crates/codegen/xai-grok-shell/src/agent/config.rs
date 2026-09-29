@@ -144,7 +144,12 @@ impl std::fmt::Display for EnvKeys {
     }
 }
 /// Configuration for API endpoints.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// `Deserialize` is written out rather than derived so `[endpoints]` can be read
+/// through [`EndpointsConfigWire`], which folds the two spellings of
+/// [`models_list_url`](Self::models_list_url) instead of tripping serde's
+/// duplicate-field check.
+#[derive(Debug, Clone, Serialize)]
 #[serde(default)]
 pub struct EndpointsConfig {
     /// cli chat proxy base URL. `None` = unset, and every URL derived from it is blank.
@@ -165,7 +170,9 @@ pub struct EndpointsConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub models_base_url: Option<String>,
     /// Env: `GROK_MODELS_LIST_URL`. Overrides the default `{base}/models` list URL.
-    #[serde(alias = "models_endpoint", skip_serializing_if = "Option::is_none")]
+    /// Read under both spellings of [`EndpointsConfig::MODELS_LIST_URL_KEYS`];
+    /// written under this one.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub models_list_url: Option<String>,
     /// Env: `GROK_FEEDBACK_BASE_URL`. Where feedback submissions go.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -247,6 +254,214 @@ pub struct EndpointsConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gcs_service_account_key: Option<String>,
 }
+impl EndpointsConfig {
+    /// The keys [`models_list_url`](Self::models_list_url) is read under.
+    /// `models_endpoint` is the earlier spelling, still written by deployed
+    /// configs and by the managed-config layers that predate the rename.
+    pub const MODELS_LIST_URL_KEYS: xai_tool_types::Aliases =
+        xai_tool_types::Aliases::new("models_list_url", &["models_endpoint"]);
+}
+
+/// `EndpointsConfig` with each list-URL key spelling as its own field, so a
+/// table naming both folds under [`EndpointsConfig::MODELS_LIST_URL_KEYS`]
+/// rather than failing the whole `[endpoints]` table as a duplicate field.
+///
+/// Every field carries `#[serde(default)]` from the container, which is the
+/// same rule [`EndpointsConfig`] applies on its own: an absent key is unset,
+/// never an error. `external_otel_master_switch` is absent here because it is
+/// `#[serde(skip)]` on the target and is filled at construction, not read.
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+struct EndpointsConfigWire {
+    cli_chat_proxy_base_url: Option<String>,
+    xai_api_base_url: String,
+    allowed_endpoints: Vec<String>,
+    alpha_test_key: Option<String>,
+    models_base_url: Option<String>,
+    models_list_url: Option<String>,
+    models_endpoint: Option<String>,
+    feedback_base_url: Option<String>,
+    trace_upload_url: Option<String>,
+    trace_upload_bucket: Option<String>,
+    trace_upload_region: Option<String>,
+    trace_upload_credentials_file: Option<String>,
+    trace_upload_credentials: Option<String>,
+    trace_upload_endpoint_url: Option<String>,
+    managed_config_url: Option<String>,
+    otel_exporter_otlp_endpoint: Option<String>,
+    otel_exporter_otlp_traces_endpoint: Option<String>,
+    otel_exporter_otlp_headers: Option<String>,
+    grok_internal_otlp_traces_endpoint: Option<String>,
+    grok_internal_otlp_headers: Option<String>,
+    otel_traces_exporter: Option<String>,
+    otel_traces_export_interval: Option<u64>,
+    otel_exporter_otlp_timeout: Option<u64>,
+    management_api_key: Option<String>,
+    gcs_service_account_key: Option<String>,
+}
+
+impl TryFrom<EndpointsConfigWire> for EndpointsConfig {
+    type Error = xai_tool_types::AliasConflict;
+
+    fn try_from(wire: EndpointsConfigWire) -> Result<Self, Self::Error> {
+        Ok(Self {
+            cli_chat_proxy_base_url: wire.cli_chat_proxy_base_url,
+            xai_api_base_url: wire.xai_api_base_url,
+            allowed_endpoints: wire.allowed_endpoints,
+            alpha_test_key: wire.alpha_test_key,
+            models_base_url: wire.models_base_url,
+            models_list_url: EndpointsConfig::MODELS_LIST_URL_KEYS
+                .fold(vec![wire.models_list_url, wire.models_endpoint])?,
+            feedback_base_url: wire.feedback_base_url,
+            trace_upload_url: wire.trace_upload_url,
+            trace_upload_bucket: wire.trace_upload_bucket,
+            trace_upload_region: wire.trace_upload_region,
+            trace_upload_credentials_file: wire.trace_upload_credentials_file,
+            trace_upload_credentials: wire.trace_upload_credentials,
+            trace_upload_endpoint_url: wire.trace_upload_endpoint_url,
+            managed_config_url: wire.managed_config_url,
+            otel_exporter_otlp_endpoint: wire.otel_exporter_otlp_endpoint,
+            otel_exporter_otlp_traces_endpoint: wire.otel_exporter_otlp_traces_endpoint,
+            otel_exporter_otlp_headers: wire.otel_exporter_otlp_headers,
+            grok_internal_otlp_traces_endpoint: wire.grok_internal_otlp_traces_endpoint,
+            grok_internal_otlp_headers: wire.grok_internal_otlp_headers,
+            external_otel_master_switch: false,
+            otel_traces_exporter: wire.otel_traces_exporter,
+            otel_traces_export_interval: wire.otel_traces_export_interval,
+            otel_exporter_otlp_timeout: wire.otel_exporter_otlp_timeout,
+            management_api_key: wire.management_api_key,
+            gcs_service_account_key: wire.gcs_service_account_key,
+        })
+    }
+}
+
+/// Forwards through [`EndpointsConfigWire`] and the fold.
+///
+/// This is the body `#[serde(try_from = "EndpointsConfigWire")]` would generate,
+/// written out so the target keeps its own field attributes: the container
+/// would otherwise have to repeat `external_otel_master_switch`'s `skip` in the
+/// shadow, where a field that never reaches the wire has nothing to say.
+impl<'de> Deserialize<'de> for EndpointsConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <EndpointsConfigWire as serde::Deserialize<'de>>::deserialize(deserializer)?
+            .try_into()
+            .map_err(serde::de::Error::custom)
+    }
+}
+
+#[cfg(test)]
+mod endpoints_wire_alias_tests {
+    use super::EndpointsConfig;
+
+    fn parse(table: &str) -> Result<EndpointsConfig, serde_json::Error> {
+        serde_json::from_str(&format!("{{{table}}}"))
+    }
+
+    /// A `[endpoints]` table naming the list URL under both keys is one URL
+    /// stated twice. The table can arrive from a managed-config or campaign
+    /// layer, not only from the user's own file, and a duplicate-field
+    /// rejection here would take the whole config down with it.
+    #[test]
+    fn a_table_naming_the_list_url_under_both_keys_under_one_value_parses_once() {
+        let cfg = parse(
+            r#""models_list_url":"https://m.test/models","models_endpoint":"https://m.test/models""#,
+        )
+        .expect("one value named under two keys is one value");
+        assert_eq!(
+            cfg.models_list_url.as_deref(),
+            Some("https://m.test/models")
+        );
+    }
+
+    #[test]
+    fn a_table_reading_either_list_url_spelling_alone_still_works() {
+        let canonical = parse(r#""models_list_url":"https://a.test/models""#).unwrap();
+        assert_eq!(
+            canonical.models_list_url.as_deref(),
+            Some("https://a.test/models")
+        );
+
+        let legacy = parse(r#""models_endpoint":"https://b.test/models""#).unwrap();
+        assert_eq!(
+            legacy.models_list_url.as_deref(),
+            Some("https://b.test/models")
+        );
+    }
+
+    /// Two different list URLs is a real disagreement about where models are
+    /// listed, so it fails and names the field rather than picking one.
+    #[test]
+    fn a_table_whose_list_url_spellings_disagree_is_an_error_naming_the_field() {
+        let err = parse(r#""models_list_url":"https://a.test","models_endpoint":"https://b.test""#)
+            .expect_err("two list URLs must not resolve silently");
+        let text = err.to_string();
+        assert!(text.contains("models_list_url"), "{err}");
+        assert!(text.contains("models_endpoint"), "{err}");
+    }
+
+    #[test]
+    fn the_list_url_serializes_under_the_canonical_key_only() {
+        let mut cfg = EndpointsConfig::default();
+        cfg.models_list_url = Some("https://a.test/models".to_owned());
+        let json = serde_json::to_value(&cfg).unwrap();
+        assert_eq!(json["models_list_url"], "https://a.test/models");
+        assert!(
+            json.get("models_endpoint").is_none(),
+            "the alias key must not appear on the wire: {json}"
+        );
+    }
+
+    /// The shadow repeats the field list, so a field added to `EndpointsConfig`
+    /// and not to the shadow would silently stop being read. Populating every
+    /// field and round-tripping it catches that: a dropped field comes back as
+    /// its default, which changes the serialized shape.
+    #[test]
+    fn the_shadow_reads_every_field_the_config_writes() {
+        let mut cfg = EndpointsConfig::default();
+        cfg.cli_chat_proxy_base_url = Some("https://proxy.test".to_owned());
+        cfg.xai_api_base_url = "https://api.test".to_owned();
+        cfg.allowed_endpoints = vec!["https://allow.test".to_owned()];
+        cfg.alpha_test_key = Some("alpha".to_owned());
+        cfg.models_base_url = Some("https://models.test".to_owned());
+        cfg.models_list_url = Some("https://list.test".to_owned());
+        cfg.feedback_base_url = Some("https://feedback.test".to_owned());
+        cfg.trace_upload_url = Some("https://upload.test".to_owned());
+        cfg.trace_upload_bucket = Some("bucket".to_owned());
+        cfg.trace_upload_region = Some("region".to_owned());
+        cfg.trace_upload_credentials_file = Some("/dev/null".to_owned());
+        cfg.trace_upload_credentials = Some("{\"type\":\"service_account\"}".to_owned());
+        cfg.trace_upload_endpoint_url = Some("https://s3.test".to_owned());
+        cfg.managed_config_url = Some("https://managed.test".to_owned());
+        cfg.otel_exporter_otlp_endpoint = Some("https://otlp.test".to_owned());
+        cfg.otel_exporter_otlp_traces_endpoint = Some("https://traces.test".to_owned());
+        cfg.otel_exporter_otlp_headers = Some("a=b".to_owned());
+        cfg.grok_internal_otlp_traces_endpoint = Some("https://internal.test".to_owned());
+        cfg.grok_internal_otlp_headers = Some("c=d".to_owned());
+        cfg.otel_traces_exporter = Some("otlp".to_owned());
+        cfg.otel_traces_export_interval = Some(1_234);
+        cfg.otel_exporter_otlp_timeout = Some(5_678);
+        cfg.management_api_key = Some("mgmt".to_owned());
+        cfg.gcs_service_account_key = Some("gcs".to_owned());
+
+        let written = serde_json::to_value(&cfg).unwrap();
+        let keys = written.as_object().expect("a table").len();
+        assert!(
+            keys >= 24,
+            "the fixture must exercise every field the shadow reads, got {keys}: {written}"
+        );
+        let read_back: EndpointsConfig =
+            serde_json::from_value(written.clone()).expect("a config this type wrote must parse");
+        assert_eq!(
+            serde_json::to_value(&read_back).unwrap(),
+            written,
+            "a key the shadow does not read comes back as its default"
+        );
+    }
+}
+
 /// A blank or whitespace-only override counts as unset. Single source of truth
 /// for the "empty value = not configured" rule shared by the endpoint resolvers.
 fn blank_as_unset(opt: &Option<String>) -> Option<String> {

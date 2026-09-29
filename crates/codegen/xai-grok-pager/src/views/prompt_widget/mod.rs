@@ -470,6 +470,9 @@ impl StashedPrompt {
                 return false;
             }
             chip.range = chip.range.start - start..chip.range.end - start;
+            // `chip.range` is a textarea element range rebased onto `text`,
+            // which the textarea keeps on char boundaries.
+            #[allow(clippy::string_slice)]
             if chip.kind == KIND_IMAGE
                 && let Some(number) = parse_image_display_number(&text[chip.range.clone()])
             {
@@ -1257,6 +1260,8 @@ impl PromptWidget {
                     // absorb an element's byte: a chip's leading space is chip
                     // data, and replace_range expands any overlap to the whole
                     // element (the absorb would swallow the chip).
+                    // `range.end` passed `is_char_boundary` in the guard above.
+                    #[allow(clippy::string_slice)]
                     let next_is_plain_space = self.textarea.text()[range.end..].starts_with(' ')
                         && !self
                             .textarea
@@ -1425,6 +1430,9 @@ impl PromptWidget {
     ///
     /// Element text is `@path` or `@path:10` or `@path:10-12`.
     /// Returns `(path, None)` or `(path, Some(10..11))` or `(path, Some(10..13))`.
+    // `colon_pos` is a `rfind` offset for an ASCII `:`, so `colon_pos + 1` is a
+    // char boundary too.
+    #[allow(clippy::string_slice)]
     fn parse_file_ref_element(text: &str) -> (String, Option<std::ops::Range<usize>>) {
         let text = text.strip_prefix('@').unwrap_or(text);
         if let Some(colon_pos) = text.rfind(':') {
@@ -1449,6 +1457,8 @@ impl PromptWidget {
                 continue;
             }
             if cursor >= elem.range.start && cursor <= elem.range.end + 1 {
+                // `elem.range` is a textarea element range, kept on char boundaries.
+                #[allow(clippy::string_slice)]
                 let text = &self.textarea.text()[elem.range.clone()];
                 return Some(Self::parse_file_ref_element(text));
             }
@@ -1468,6 +1478,8 @@ impl PromptWidget {
                 continue;
             }
             if cursor == elem.range.end || cursor == elem.range.start {
+                // `elem.range` is a textarea element range, kept on char boundaries.
+                #[allow(clippy::string_slice)]
                 let text = &self.textarea.text()[elem.range.clone()];
                 return Some(Self::parse_file_ref_element(text));
             }
@@ -2295,6 +2307,8 @@ impl PromptWidget {
         // original insertion applied (normalize_cr above + the textarea's
         // tab expansion) — e.g. a trailing-newline difference is a
         // different paste and takes the normal path below.
+        // `elem.range` is a textarea element range, kept on char boundaries.
+        #[allow(clippy::string_slice)]
         if !replacing_selection
             && let Some(elem) = self.paste_element_near_cursor()
             && self.textarea.text()[elem.range.clone()] == *self.textarea.expand_tabs(text)
@@ -2477,6 +2491,9 @@ impl PromptWidget {
 
         let mut synced = Vec::with_capacity(live_image_elements.len());
 
+        // `range` is a live image element's range in the textarea buffer, which
+        // the textarea keeps on char boundaries.
+        #[allow(clippy::string_slice)]
         for (id, range) in &live_image_elements {
             // Primary: match by element_id (collision-free, stable
             // for non-undo/redo edits).
@@ -2643,6 +2660,9 @@ impl PromptWidget {
     /// Buffer text with `[Image #N]` chip placeholders removed, for
     /// text-only surfaces (e.g. question/permission feedback) that must
     /// not leak image tokens onto the wire.
+    // `prev_end` is 0 or a textarea element range end, and `elem.range.start` a
+    // range start: the textarea keeps both on char boundaries.
+    #[allow(clippy::string_slice)]
     pub(crate) fn text_without_image_chips(&self) -> String {
         let text = self.textarea.text();
         let mut out = String::with_capacity(text.len());
@@ -2713,6 +2733,8 @@ impl PromptWidget {
             if elem.kind != KIND_IMAGE {
                 continue;
             }
+            // `elem.range` is a textarea element range, kept on char boundaries.
+            #[allow(clippy::string_slice)]
             if let Some(dn) = parse_image_display_number(&buf[elem.range.clone()]) {
                 if by_number.iter().any(|(seen_dn, _)| *seen_dn == dn) {
                     tracing::warn!(
@@ -2764,6 +2786,8 @@ impl PromptWidget {
     }
 
     /// Buffer text of `elem` if it is a paste chip (`KIND_PASTE`).
+    // `elem.range` is a textarea element range, kept on char boundaries.
+    #[allow(clippy::string_slice)]
     fn paste_text(&self, elem: &TextElement) -> Option<&str> {
         (elem.kind == KIND_PASTE).then(|| &self.textarea.text()[elem.range.clone()])
     }
@@ -3528,6 +3552,9 @@ fn parse_line_range(s: &str) -> Option<std::ops::Range<usize>> {
 /// Style: `@` and `:` in gray, path in theme.path, numbers in text_primary.
 pub fn file_ref_display(path: &str) -> Line<'static> {
     let theme = Theme::current();
+    // `colon_pos` is a `rfind` offset for an ASCII `:`, so `colon_pos + 1` is a
+    // char boundary too.
+    #[allow(clippy::string_slice)]
     let (file_part, line_part) = if let Some(colon_pos) = path.rfind(':') {
         (&path[..colon_pos], Some(&path[colon_pos + 1..]))
     } else {
@@ -3582,6 +3609,9 @@ fn chip_placeholder_regex() -> &'static regex::Regex {
 /// This gives the slash system a clean view of just user-typed text,
 /// so element placeholders like `[Image #1]` (which contain spaces)
 /// don't break command parsing.
+// `prev_end` is 0 or a textarea element range end, and `elem.range.start` a
+// range start: the textarea keeps both on char boundaries.
+#[allow(clippy::string_slice)]
 fn strip_all_elements(
     text: &str,
     cursor: usize,

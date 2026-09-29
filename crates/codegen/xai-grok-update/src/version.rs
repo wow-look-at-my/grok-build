@@ -155,7 +155,7 @@ async fn fetch_npm_tag(tag: &str, npm_registry: Option<&str>) -> Result<String> 
         anyhow::bail!("npm view @{} failed: {}", tag, stderr.trim());
     }
 
-    let stdout = String::from_utf8(output.stdout)?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
     let value: Value = serde_json::from_str(stdout.trim())?;
     match value {
         Value::String(version) => Ok(version),
@@ -212,7 +212,7 @@ async fn fetch_gh_release_latest(exclude_pre: bool) -> Result<String> {
         anyhow::bail!("gh release list failed: {}", stderr.trim());
     }
 
-    let tag = String::from_utf8(output.stdout)?.trim().to_string();
+    let tag = String::from_utf8_lossy(&output.stdout).trim().to_string();
     // Tags are formatted as "v0.1.141", strip the leading "v"
     let version = tag.strip_prefix('v').unwrap_or(&tag).to_string();
     if version.is_empty() {

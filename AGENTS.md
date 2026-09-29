@@ -23,12 +23,24 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 
 - `cargo fmt --all` before pushing. The `fmt` job in `ci.yml` runs `cargo fmt --all --check` and fails the build on any unformatted file. It is its own job, because rustfmt parses and never compiles. It answers in seconds rather than waiting on the cold build.
 - `cargo check -p <touched-crate>` before pushing.
+- `Lint (workspace)` is `--lib --bins`, so it compiles no `#[cfg(test)]` module, and `Build the dependencies` is `cargo test --locked --workspace --no-run`, which compiles all of them. An import clippy calls unused can still be the one a test needs: removing `std::sync::Mutex` from `xai-grok-telemetry`'s `debug_log.rs` passed the lint and broke the dependency build two steps earlier in the same job. Mirror both commands, not whichever one was red.
 - `cargo test -p <touched-crate>` for the crate you changed.
 - Prefer committing real tests that drive the shipped code (not mocks of the unit under test, not hand-built expected objects).
 - **A web session cannot link the workspace.** `target/` reaches ~16 GB after a `cargo check` of the pager, against a ~12 GB session disk allowance. So `cargo build -p xai-grok-pager-bin` runs the container out of space. Check the crate, run that crate's tests, push, and let CI produce the binary.
 - **Do not run `cargo test -p xai-grok-shell` in a web session.** Its test binary runs the disk out the same way. Run `cargo check -p xai-grok-shell --tests`, push, and read the shell tests' result from CI's `Build & test`.
 - `protoc` is missing from the image and the `bin/protoc` dotslash shim cannot run either, so any build that reaches `xai-grok-tools-api` dies in its build script. Run `apt-get install -y protobuf-compiler` first.
 - `mold` is missing too, and the repo's cargo config passes `-fuse-ld=mold`. Every build script then fails to link with `collect2: fatal error: cannot find 'ld'`, on `proc-macro2` and `libc` — which reads as a broken C toolchain and is not one. Run `apt-get install -y mold`.
+- **A local clippy run cannot measure the whole denied set, on macOS.** Code behind `#[cfg(target_os = "linux")]` is never compiled here, so clippy never reads it and a lint denied at workspace level reports nothing for it. The parent-death checks in `xai-tty-utils` and `xai-grok-workspace` are that shape (`getppid()` returning a `pid_t`, compared against a captured `u32`), and `clippy::cast_sign_loss` rejected them in CI while `cargo clippy --workspace --lib --bins` exited 0 on the Mac. A per-crate exception count generated on a Mac is therefore a floor, not a total. A HOST clippy run is what that floor comes from - `--target x86_64-unknown-linux-gnu` reads those files and is a complete measurement:
+
+```
+CC_x86_64_unknown_linux_gnu=ci/zig-linux-cc.sh \
+  cargo clippy --locked --workspace --lib --bins --keep-going \
+    --target x86_64-unknown-linux-gnu
+```
+
+Cross-clippy links nothing, but ring and aws-lc compile C in their build scripts and need a compiler for the TARGET. `ci/zig-linux-cc.sh` is `ci/zig-target-cc.sh`'s trick pointed at Linux: zig ships the cross toolchain, and cc-rs's own target flags are dropped because zig spells them differently. Run it through rustup's pinned 1.94.1 (`PATH=/opt/homebrew/opt/rustup/bin:$PATH`): a Homebrew `cargo` is a different rustfmt and a different clippy, and it reported a file clean that CI's Rustfmt job then rejected over import order.
+- `Lint (workspace)` passes `--keep-going` for that reason. A denied lint is a compile error, which stops the crate that hit it and leaves every crate behind it unlinted; on a graph where several crates have Linux-only code, one CI cycle per crate is the alternative.
+- The runner's clippy is not the clippy on a development machine, and the lint tables differ between the two. Where a lint's verdict matters, read CI rather than concluding from a local run.
 
 ## `--sandbox` jail notes
 
@@ -142,6 +154,8 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - `/debug <question>` injects the question plus an execution-context snapshot (`slash/commands/debug_context.rs`) through `CommandResult::InjectSkill`. Only `scroll`, `fps` and `log` are reserved. Everything else is free text. So a question must never come back as an "unknown option" error again.
 - Staleness is `current_exe()` versus a canonicalized `$GROK_HOME/bin/grok`. `current_exe()` resolves the symlink at exec time, so after an update the two disagree and the block says the running process is not what is on disk. Both sides must stay canonicalized or every symlinked install reads as stale.
 - `GROK_*`/`XAI_*` values whose NAME looks like a credential are withheld — the prompt leaves the session and lands in the model's transcript.
+- `/debug` turns the firehose on. With no `GROK_DEBUG_LOG`/`GROK_LOG_FILE`, `install_firehose` installs the routing layer DORMANT behind `RuntimeGate`, and `debug_log::enable_firehose` wakes it. Spans pass the gate while it is closed. The routing layer must see a session span when it opens, or that session's later events go to the fallback file.
+- The agent can be a separate leader process, so the pager's switch does not reach it. The `/debug` prompt block carries `ENABLE_FIREHOSE_META`, and the shell's `prompt` handler calls `enable_firehose` on it. Events before the switch are not in the log. The injected context says so.
 
 ## Shift+Tab mode ring notes
 
@@ -188,6 +202,7 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - `GoalOrchestration::start_prompt_index` is the cut. A `User` item's `prompt_index` below it puts the calls that follow outside the goal. A compaction summary inside the goal is reported in the log header. The calls before it are gone from the conversation. So the verifier is told to run a missing plan step itself.
 - Each result keeps its head and its tail, because a test runner puts its verdict at the tail. Arguments are capped too. The whole log is capped and keeps the newest calls. The header states how many older calls it dropped. An absence then reads as an absence.
 - Every implementer-facing template (`goal_rules*.md`, `goal_continuation_directive*.md`, `goal_plan_block.md`, the planner prompt) says the run is the evidence and forbids proof files. The scratch dir stays, for a screenshot a plan step names.
+- Gathering evidence is the verifier's job alone. While a goal is active, `prepare_tool_call` refuses any implementer call whose arguments name the session dir or a bookkeeping file (`chat_history.jsonl`, `updates.jsonl`, a run log, verdict or details file), via `run_log::goal_bookkeeping_target`. Implementer prompts never describe how runs are recorded, because that description is what sent the model after its own transcript.
 - Every goal prompt (planner, implementer, verifier, strategist) bans hand-rolled check scripts, harnesses, probes and shims. Checks use the project's existing test runner, build and entry point.
 
 ## Verification does not widen the goal

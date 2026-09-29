@@ -33,18 +33,14 @@ use std::sync::Arc;
 
 const STRUCTURED_OUTPUT_SCHEMA_NAME: &str = "structured_output";
 
-/// Truncate to at most `max_bytes`, walking back to a char boundary. Plain
+/// Truncate to at most `max_bytes`, never splitting a character. Plain
 /// `&s[..n]` panics when `n` lands inside a multi-byte character, which
-/// tool-call arguments routinely contain. `pub` for `xai-grok-shell`.
+/// tool-call arguments routinely contain.
+///
+/// The boundary math lives in `xai_grok_tools::util::truncate`; this crate
+/// depends on that one, so the two cannot drift. `pub` for `xai-grok-shell`.
 pub fn truncate_bytes(s: &str, max_bytes: usize) -> &str {
-    if s.len() <= max_bytes {
-        return s;
-    }
-    let mut end = max_bytes;
-    while !s.is_char_boundary(end) {
-        end -= 1;
-    }
-    &s[..end]
+    xai_grok_tools::util::truncate::truncate_bytes(s, max_bytes)
 }
 
 /// A provider that validates `function.arguments` rejects the whole request,
@@ -646,7 +642,13 @@ fn insert_dotted(
             if !entry.is_object() {
                 *entry = serde_json::Value::Object(serde_json::Map::new());
             }
-            let nested = entry.as_object_mut().expect("just made an object");
+            let Some(nested) = entry.as_object_mut() else {
+                tracing::error!(
+                    key = head,
+                    "extra_body segment holds a value that is not an object; dropping the path"
+                );
+                return;
+            };
             insert_dotted(nested, rest, value);
         }
         _ => {
@@ -654,9 +656,19 @@ fn insert_dotted(
                 // Two objects merge rather than replace, so setting one
                 // `options` key keeps the ones the builder wrote.
                 (Some(existing @ serde_json::Value::Object(_)), serde_json::Value::Object(_)) => {
-                    let existing = existing.as_object_mut().expect("checked");
+                    let Some(existing) = existing.as_object_mut() else {
+                        tracing::error!(
+                            key,
+                            "extra_body merge refused: the value at this key is not an object"
+                        );
+                        return;
+                    };
                     let serde_json::Value::Object(incoming) = value else {
-                        unreachable!("checked")
+                        tracing::error!(
+                            key,
+                            "extra_body merge refused: the incoming value is not an object"
+                        );
+                        return;
                     };
                     for (k, v) in incoming {
                         insert_dotted(existing, &k, v);
@@ -1067,9 +1079,10 @@ impl ModelPricing {
 
 /// Derive cost in USD ticks (1e10 per USD) from reported token usage and a
 /// model's per-token pricing. Returns `None` when `pricing` is unusable
-/// (all tiers zero) or `usage` is absent, so the caller can fall back to the
-/// honest-absence behavior. Pure integer-arithmetic-at-the-f64 level then
-/// rounded to the nearest tick; deterministic and exactly assertable.
+/// (all tiers zero), `usage` is absent, or the derived tick count does not fit
+/// `i64`, so the caller can fall back to the honest-absence behavior. Pure
+/// integer-arithmetic-at-the-f64 level then rounded to the nearest tick;
+/// deterministic and exactly assertable.
 ///
 /// Billing tiers (mirroring [`TokenUsage`]):
 /// - uncached input = `prompt_tokens − cached_prompt_tokens − cache_creation`
@@ -1095,7 +1108,16 @@ pub fn compute_cost_ticks(usage: Option<&TokenUsage>, pricing: &ModelPricing) ->
         + cached * pricing.cached_read_per_token_usd
         + cache_creation * pricing.cache_creation_per_token_usd
         + f64::from(usage.completion_tokens) * pricing.output_per_token_usd;
-    let ticks = (usd * 1e10).round() as i64;
+    // Pricing the catalog or config carries can be wrong by orders of
+    // magnitude, and a tick count outside `i64` has no representation at all:
+    // the turn is reported as unpriced rather than as a saturated price.
+    let ticks = match crate::types::ticks_from_usd("computed cost (usage x pricing)", usd) {
+        Ok(ticks) => ticks,
+        Err(err) => {
+            tracing::error!(error = %err, "derived cost has no tick form; reporting the turn as unpriced");
+            return None;
+        }
+    };
     // A configured-but-zero-usage turn yields 0 ticks; the capture site
     // normalizes non-positive to `None` via `reported_cost_ticks`, which is
     // the correct honest-absence outcome for a turn that billed nothing.
@@ -5981,6 +6003,18 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(compute_cost_ticks(None, &pricing), None);
+    }
+
+    /// Pricing large enough that the tick count leaves `i64` leaves the turn
+    /// unpriced. A saturated `i64::MAX` would be a price the model never had.
+    #[test]
+    fn compute_cost_ticks_none_when_the_tick_count_does_not_fit_i64() {
+        let pricing = ModelPricing {
+            input_per_token_usd: 1e18,
+            ..Default::default()
+        };
+        let usage = usage_with(1_000, 0, 0, 0);
+        assert_eq!(compute_cost_ticks(Some(&usage), &pricing), None);
     }
 
     /// A misreported cache split (cached > prompt) must not produce a negative

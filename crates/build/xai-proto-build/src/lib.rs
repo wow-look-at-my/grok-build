@@ -156,8 +156,7 @@ impl XaiProtoBuilder {
                 return Err(anyhow::anyhow!("protoc command failed"));
             }
 
-            let output =
-                String::from_utf8(output.stdout).context("protoc command output not UTF-8")?;
+            let output = String::from_utf8_lossy(&output.stdout);
 
             let mut lines = output.lines();
             let first_line = lines.next().context("protoc command output is empty")?;

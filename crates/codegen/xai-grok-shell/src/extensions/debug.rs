@@ -35,21 +35,85 @@ async fn handle_agent(agent: &MvpAgent) -> ExtResult {
         .map_err(|e| acp::Error::internal_error().data(e.to_string()))
 }
 
+/// Params for `x.ai/debug/trigger_feedback`, as an ACP client sends them.
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase", try_from = "DebugTriggerParamsWire")]
+struct DebugTriggerParams {
+    session_id: String,
+    /// "tier1" | "tier2" | "tier3" (default: "tier1")
+    #[serde(default)]
+    tier: Option<String>,
+    /// "thumbs" | "stars" | "text" | "thumbs_text" | "stars_text" (default: "thumbs_text")
+    #[serde(default)]
+    mode: Option<String>,
+}
+
+impl DebugTriggerParams {
+    /// The keys `session_id` is read under. ACP params are camelCase, which is
+    /// what the container's own renaming reads the field as; the snake_case
+    /// spelling arrives from shell-side callers.
+    const SESSION_ID_KEYS: xai_tool_types::Aliases =
+        xai_tool_types::Aliases::new("sessionId", &["session_id"]);
+}
+
+/// `DebugTriggerParams` with each session-key spelling as its own field, so a
+/// request naming both folds them instead of tripping serde's duplicate-field
+/// check.
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DebugTriggerParamsWire {
+    #[serde(default)]
+    session_id: Option<String>,
+    #[serde(default, rename = "session_id")]
+    session_id_snake: Option<String>,
+    #[serde(default)]
+    tier: Option<String>,
+    #[serde(default)]
+    mode: Option<String>,
+}
+
+impl TryFrom<DebugTriggerParamsWire> for DebugTriggerParams {
+    type Error = DebugTriggerParamsError;
+
+    fn try_from(wire: DebugTriggerParamsWire) -> Result<Self, Self::Error> {
+        Ok(Self {
+            session_id: DebugTriggerParams::SESSION_ID_KEYS
+                .fold(vec![wire.session_id, wire.session_id_snake])?
+                .ok_or(DebugTriggerParamsError::MissingSessionId)?,
+            tier: wire.tier,
+            mode: wire.mode,
+        })
+    }
+}
+
+/// Why debug trigger params could not be read; `parse_params` turns it into an
+/// `invalid_params` ACP error.
+#[derive(Debug)]
+enum DebugTriggerParamsError {
+    Alias(xai_tool_types::AliasConflict),
+    /// `session_id` was required before the shadow and stays required after it.
+    MissingSessionId,
+}
+
+impl std::fmt::Display for DebugTriggerParamsError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Alias(conflict) => conflict.fmt(f),
+            Self::MissingSessionId => f.write_str("missing field `session_id`"),
+        }
+    }
+}
+
+impl std::error::Error for DebugTriggerParamsError {}
+
+impl From<xai_tool_types::AliasConflict> for DebugTriggerParamsError {
+    fn from(value: xai_tool_types::AliasConflict) -> Self {
+        Self::Alias(value)
+    }
+}
+
 async fn handle_trigger_feedback(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
     use crate::session::feedback::{FeedbackMode, FeedbackTier};
-
-    #[derive(serde::Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    struct DebugTriggerParams {
-        #[serde(alias = "session_id")]
-        session_id: String,
-        /// "tier1" | "tier2" | "tier3" (default: "tier1")
-        #[serde(default)]
-        tier: Option<String>,
-        /// "thumbs" | "stars" | "text" | "thumbs_text" | "stars_text" (default: "thumbs_text")
-        #[serde(default)]
-        mode: Option<String>,
-    }
 
     let params: DebugTriggerParams = parse_params(args)?;
 
@@ -124,4 +188,39 @@ fn handle_arm_auto_compact(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResul
     ExtMethodResult::success(serde_json::json!({ "armed": true }))
         .to_ext_response()
         .map_err(|e| acp::Error::internal_error().data(e.to_string()))
+}
+
+#[cfg(test)]
+mod wire_alias_tests {
+    use super::DebugTriggerParams;
+
+    #[test]
+    fn trigger_params_read_the_session_id_under_either_spelling() {
+        for json in [
+            r#"{"sessionId":"s1"}"#,
+            r#"{"session_id":"s1"}"#,
+            r#"{"session_id":"s1","sessionId":"s1"}"#,
+        ] {
+            let params: DebugTriggerParams =
+                serde_json::from_str(json).unwrap_or_else(|e| panic!("{json}: {e}"));
+            assert_eq!(params.session_id, "s1");
+        }
+    }
+
+    #[test]
+    fn trigger_params_whose_session_id_spellings_disagree_error_naming_the_field() {
+        let err =
+            serde_json::from_str::<DebugTriggerParams>(r#"{"session_id":"a","sessionId":"b"}"#)
+                .expect_err("two session ids must not resolve silently");
+        let message = err.to_string();
+        assert!(message.contains("sessionId"), "{message}");
+        assert!(message.contains("session_id"), "{message}");
+    }
+
+    #[test]
+    fn trigger_params_with_no_session_id_at_all_are_still_an_error() {
+        let err = serde_json::from_str::<DebugTriggerParams>(r#"{"tier":"tier2"}"#)
+            .expect_err("the handler addresses a session by id");
+        assert!(err.to_string().contains("session_id"), "{err}");
+    }
 }

@@ -165,7 +165,10 @@ fn main() -> Result<()> {
 
             println!("\n✓ Worktree created successfully!");
             println!("  Path:   {}", result.worktree_path.display());
-            println!("  Commit: {}", &result.commit[..12]);
+            println!(
+                "  Commit: {}",
+                result.commit.get(..12).unwrap_or(&result.commit)
+            );
 
             // For snapshot methods (btrfs/overlay), files_copied will be 0
             if result.unignored_copy.files_copied > 0 {

@@ -914,7 +914,11 @@ fn strip_matching_quotes(s: &str) -> &str {
         let first = bytes[0];
         let last = bytes[bytes.len() - 1];
         if (first == b'"' && last == b'"') || (first == b'\'' && last == b'\'') {
-            return &s[1..s.len() - 1];
+            // Both ends were just proven to be ASCII quote bytes, so each
+            // occupies exactly one byte: `1` and `len() - 1` are char boundaries.
+            #[allow(clippy::string_slice)] // one past an ASCII quote byte at each end
+            let inner = &s[1..s.len() - 1];
+            return inner;
         }
     }
     s
@@ -1018,13 +1022,24 @@ fn split_space_before_path(s: &str) -> Vec<&str> {
     let mut start = 0;
     let mut i = 0;
     while i < bytes.len() {
-        if bytes[i] == b' ' && starts_with_drop_anchor(&s[i + 1..]) {
-            parts.push(&s[start..i]);
-            start = i + 1;
+        if bytes[i] == b' ' {
+            // The byte at `i` was just checked to be an ASCII space, so it
+            // occupies byte `i` alone and both `i` and `i + 1` are char
+            // boundaries. `start` is 0 or one past such a space.
+            #[allow(clippy::string_slice)] // one past a byte just checked to be ASCII
+            let rest = &s[i + 1..];
+            #[allow(clippy::string_slice)] // 0 or one past a checked ASCII space, up to this space
+            let part = &s[start..i];
+            if starts_with_drop_anchor(rest) {
+                parts.push(part);
+                start = i + 1;
+            }
         }
         i += 1;
     }
-    parts.push(&s[start..]);
+    #[allow(clippy::string_slice)] // start is 0 or one past a checked ASCII space
+    let tail = &s[start..];
+    parts.push(tail);
     parts
 }
 

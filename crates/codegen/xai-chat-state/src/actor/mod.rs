@@ -13,6 +13,10 @@ pub mod state;
 #[cfg(test)]
 mod tests;
 
+use std::any::Any;
+use std::panic::AssertUnwindSafe;
+
+use futures_util::FutureExt;
 use tokio::sync::mpsc;
 use tracing::debug;
 
@@ -40,6 +44,21 @@ pub struct ChatStateActor {
     event_tx: mpsc::UnboundedSender<ChatStateEvent>,
     /// Cancellation token for graceful shutdown.
     cancellation_token: tokio_util::sync::CancellationToken,
+}
+
+/// Text describing what a panic carried, for a log line.
+///
+/// The two payloads `panic!` itself produces are a `&'static str` (a literal)
+/// and a `String` (a formatted one). Anything else is named as a non-message
+/// rather than reported as nothing.
+fn panic_payload(panic: &(dyn Any + Send)) -> String {
+    if let Some(text) = panic.downcast_ref::<&'static str>() {
+        return (*text).to_string();
+    }
+    if let Some(text) = panic.downcast_ref::<String>() {
+        return text.clone();
+    }
+    "panicked with a payload that is not a message".to_string()
 }
 
 impl ChatStateActor {
@@ -107,8 +126,30 @@ impl ChatStateActor {
                         debug!("ChatStateActor shutting down: all handles dropped");
                         break;
                     };
-                    self.handle_command(cmd).await;
+                    self.run_command(cmd).await;
                 }
+            }
+        }
+    }
+
+    /// Process one command, so a round that unwinds does not end the actor.
+    ///
+    /// The actor is the only writer of the session's conversation and the only
+    /// answerer of a handle's ack, so an actor lost to one command closes every
+    /// ack after it for the rest of the session. The panicked round's own ack
+    /// still closes: the sender unwinds with the command.
+    async fn run_command(&mut self, cmd: ChatStateCommand) {
+        match AssertUnwindSafe(self.handle_command(cmd))
+            .catch_unwind()
+            .await
+        {
+            Ok(()) => {}
+            Err(panic) => {
+                tracing::error!(
+                    task = "chat state command",
+                    panic = %panic_payload(&*panic),
+                    "chat state command panicked; the actor keeps serving"
+                );
             }
         }
     }

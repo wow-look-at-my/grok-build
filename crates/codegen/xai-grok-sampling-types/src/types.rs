@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::num::NonZeroU64;
+use xai_tool_types::Aliases;
 
 // ============================================================================
 // TraceContext — cloneable, type-erased context for request tracing
@@ -679,16 +680,70 @@ impl<'de> Deserialize<'de> for UsageCost {
     }
 }
 
-/// Convert a USD float to integer ticks (1 USD = 1e10 ticks), rounding to
-/// the nearest tick. Non-positive or NaN/inf values yield `None` ("unreported",
-/// never "free"). Used by the capture sites that read `usage.cost`.
-pub fn usd_float_to_ticks(usd: Option<f64>) -> Option<i64> {
-    let v = usd?;
-    if !v.is_finite() || v <= 0.0 {
-        return None;
+/// Ticks per USD: one tick is 1e-10 USD.
+const TICKS_PER_USD: f64 = 1e10;
+
+/// One above `i64::MAX` as an exactly-representable `f64` (2^63). A whole
+/// `f64` strictly between -2^63 and 2^63 is an integer `i64` can hold exactly.
+const I64_TICKS_BOUND: f64 = 9_223_372_036_854_775_808.0;
+
+/// A USD amount whose tick form has no `i64`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CostTicksOverflow {
+    /// The field the amount was read from, e.g. `usage.cost`.
+    pub field: &'static str,
+    /// The amount in USD, as the source reported it.
+    pub usd: f64,
+}
+
+impl std::fmt::Display for CostTicksOverflow {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{} of {} USD does not fit the i64 USD-tick range ({} ticks per USD, max {} ticks)",
+            self.field,
+            self.usd,
+            TICKS_PER_USD,
+            i64::MAX
+        )
     }
-    let ticks = (v * 1e10).round() as i64;
-    (ticks > 0).then_some(ticks)
+}
+
+impl std::error::Error for CostTicksOverflow {}
+
+/// Convert a USD amount to integer ticks (1 USD = 1e10 ticks), rounding to the
+/// nearest tick.
+///
+/// `field` names where the amount came from and rides the error. An amount
+/// whose tick count leaves `i64` is `Err`: no tick count that the source did
+/// not report is ever produced.
+pub fn ticks_from_usd(field: &'static str, usd: f64) -> Result<i64, CostTicksOverflow> {
+    let scaled = (usd * TICKS_PER_USD).round();
+    if !scaled.is_finite() || scaled.abs() >= I64_TICKS_BOUND {
+        return Err(CostTicksOverflow { field, usd });
+    }
+    // `scaled` is whole and inside -2^63..2^63, so this conversion is exact.
+    #[allow(clippy::cast_possible_truncation)]
+    let ticks = scaled as i64;
+    Ok(ticks)
+}
+
+/// Convert a provider-reported USD float to integer ticks.
+///
+/// `Ok(None)` is the honest-absence answer for a missing, non-positive or
+/// non-finite amount ("unreported", never "free"). An amount too large to hold
+/// as ticks is `Err` naming the field and the amount, so a capture site never
+/// stores a price the provider did not report. Used by the sites that read
+/// `usage.cost`.
+pub fn usd_float_to_ticks(usd: Option<f64>) -> Result<Option<i64>, CostTicksOverflow> {
+    let Some(v) = usd else {
+        return Ok(None);
+    };
+    if !v.is_finite() || v <= 0.0 {
+        return Ok(None);
+    }
+    let ticks = ticks_from_usd("usage.cost", v)?;
+    Ok((ticks > 0).then_some(ticks))
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
@@ -785,17 +840,20 @@ pub struct ToolCallFunctionDelta {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[serde(try_from = "ChatChunkDeltaWire")]
 pub struct ChatChunkDelta {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub role: Option<Role>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
-    /// Thinking/chain-of-thought text streamed by the model. Deserializes from
-    /// either `reasoning_content` (OpenAI/xAI naming) or `reasoning`
-    /// (synthetic.new's OpenAI-compatible naming) so both wire shapes feed the
-    /// same accumulator; serializes as `reasoning_content` (the shape the
-    /// resend path / providers accept).
-    #[serde(skip_serializing_if = "Option::is_none", alias = "reasoning")]
+    /// Thinking/chain-of-thought text streamed by the model. Reads from either
+    /// `reasoning_content` (OpenAI/xAI naming) or `reasoning` (synthetic.new's
+    /// OpenAI-compatible naming) so both wire shapes feed the same accumulator;
+    /// serializes as `reasoning_content` (the shape the resend path / providers
+    /// accept). A gateway that sends the same text under BOTH keys says one
+    /// thing twice, so [`ChatChunkDelta::REASONING_KEYS`] folds them rather than
+    /// failing the chunk; text that disagrees between them is an error.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_content: Option<String>,
     /// Tool call deltas. Handles `null` in JSON as empty vec.
     #[serde(
@@ -806,6 +864,47 @@ pub struct ChatChunkDelta {
     pub tool_calls: Vec<ToolCallDelta>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_call_id: Option<String>,
+}
+
+impl ChatChunkDelta {
+    /// The keys [`reasoning_content`](Self::reasoning_content) is read under.
+    /// The first is what this type writes; the rest are accepted on input only.
+    pub const REASONING_KEYS: Aliases = Aliases::new("reasoning_content", &["reasoning"]);
+}
+
+/// `ChatChunkDelta` as it arrives on the wire, with each key spelling its own
+/// field. It exists so a chunk naming both reasoning keys folds them under
+/// [`ChatChunkDelta::REASONING_KEYS`] instead of tripping serde's
+/// duplicate-field check, which rejects a second key whatever its value.
+#[derive(Debug, Default, Deserialize)]
+struct ChatChunkDeltaWire {
+    #[serde(default)]
+    role: Option<Role>,
+    #[serde(default)]
+    content: Option<String>,
+    #[serde(default)]
+    reasoning_content: Option<String>,
+    #[serde(default)]
+    reasoning: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_null_default")]
+    tool_calls: Vec<ToolCallDelta>,
+    #[serde(default)]
+    tool_call_id: Option<String>,
+}
+
+impl TryFrom<ChatChunkDeltaWire> for ChatChunkDelta {
+    type Error = xai_tool_types::AliasConflict;
+
+    fn try_from(wire: ChatChunkDeltaWire) -> Result<Self, Self::Error> {
+        Ok(Self {
+            role: wire.role,
+            content: wire.content,
+            reasoning_content: ChatChunkDelta::REASONING_KEYS
+                .fold(vec![wire.reasoning_content, wire.reasoning])?,
+            tool_calls: wire.tool_calls,
+            tool_call_id: wire.tool_call_id,
+        })
+    }
 }
 
 /// Parameters to control realtime data.
@@ -1951,23 +2050,116 @@ mod tests {
 
     #[test]
     fn usd_float_to_ticks_converts_correctly() {
-        // $0.0000416 → round(0.0000416 * 1e10) = 416_000
-        assert_eq!(usd_float_to_ticks(Some(0.0000416)), Some(416_000));
-        // $1.00 → 1e10 ticks
-        assert_eq!(usd_float_to_ticks(Some(1.0)), Some(10_000_000_000));
+        // $0.0000416 -> round(0.0000416 * 1e10) = 416_000
+        assert_eq!(usd_float_to_ticks(Some(0.0000416)).unwrap(), Some(416_000));
+        // $1.00 -> 1e10 ticks
+        assert_eq!(usd_float_to_ticks(Some(1.0)).unwrap(), Some(10_000_000_000));
     }
 
     #[test]
     fn usd_float_to_ticks_none_for_non_positive() {
-        assert_eq!(usd_float_to_ticks(Some(0.0)), None);
-        assert_eq!(usd_float_to_ticks(Some(-1.0)), None);
-        assert_eq!(usd_float_to_ticks(None), None);
+        assert_eq!(usd_float_to_ticks(Some(0.0)).unwrap(), None);
+        assert_eq!(usd_float_to_ticks(Some(-1.0)).unwrap(), None);
+        assert_eq!(usd_float_to_ticks(None).unwrap(), None);
     }
 
     #[test]
     fn usd_float_to_ticks_none_for_nan_inf() {
-        assert_eq!(usd_float_to_ticks(Some(f64::NAN)), None);
-        assert_eq!(usd_float_to_ticks(Some(f64::INFINITY)), None);
+        assert_eq!(usd_float_to_ticks(Some(f64::NAN)).unwrap(), None);
+        assert_eq!(usd_float_to_ticks(Some(f64::INFINITY)).unwrap(), None);
+    }
+
+    /// A USD float the provider reported that has no tick form is an error
+    /// naming the field and the amount, never a saturated tick count.
+    #[test]
+    fn usd_float_to_ticks_errors_on_an_amount_with_no_tick_form() {
+        let err = usd_float_to_ticks(Some(1e300)).expect_err("1e300 USD has no i64 ticks");
+        assert_eq!(err.field, "usage.cost");
+        assert_eq!(err.usd, 1e300);
+        let message = err.to_string();
+        assert!(
+            message.contains("usage.cost") && message.contains("i64"),
+            "the error names the field and the target type: {message}"
+        );
+        // The largest USD amount that still converts: just under 2^63 ticks.
+        assert!(usd_float_to_ticks(Some(9.0e8)).is_ok());
+    }
+
+    /// The `usage.cost` of a real response, converted the way the capture
+    /// sites convert it: an amount with no tick form surfaces as an error.
+    #[test]
+    fn usage_cost_above_the_tick_range_surfaces_as_an_error() {
+        let json = json!({
+            "prompt_tokens": 18,
+            "completion_tokens": 10,
+            "total_tokens": 28,
+            "cost": 1e300
+        });
+        let usage: Usage = serde_json::from_value(json).expect("the wire parses");
+        let usd = usage
+            .cost
+            .as_ref()
+            .map(|c| c.as_usd_float())
+            .expect("cost reported");
+        let err = usd_float_to_ticks(Some(usd)).expect_err("1e300 USD has no i64 ticks");
+        assert_eq!(err.usd, 1e300);
+    }
+
+    #[test]
+    fn ticks_from_usd_errors_naming_the_field_and_value() {
+        let err =
+            ticks_from_usd("model_pricing", 1e18).expect_err("1e18 USD has no i64 tick count");
+        assert_eq!(
+            err,
+            CostTicksOverflow {
+                field: "model_pricing",
+                usd: 1e18
+            }
+        );
+        assert!(err.to_string().contains("model_pricing"));
+    }
+
+    /// A token count above the `u32` the wire field carries is rejected by the
+    /// parse, so it never arrives as a narrowed number.
+    #[test]
+    fn usage_token_count_above_u32_range_is_a_parse_error() {
+        let json = json!({
+            "prompt_tokens": 4_294_967_296u64,
+            "completion_tokens": 10,
+            "total_tokens": 28
+        });
+        let err = serde_json::from_value::<Usage>(json)
+            .expect_err("4294967296 does not fit the u32 prompt_tokens field");
+        assert!(
+            err.to_string().contains("expected u32"),
+            "the parse error names the type the number overflowed: {err}"
+        );
+    }
+
+    /// Cost ticks arrive as `i64`; one above that range is a parse error, not
+    /// a wrapped number.
+    #[test]
+    fn usage_cost_ticks_above_i64_range_is_a_parse_error() {
+        let raw = r#"{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2,
+                      "cost_in_usd_ticks":9223372036854775808}"#;
+        let err =
+            serde_json::from_str::<Usage>(raw).expect_err("2^63 ticks does not fit the i64 field");
+        assert!(
+            err.to_string().contains("expected i64"),
+            "the parse error names the type the number overflowed: {err}"
+        );
+    }
+
+    /// The largest amount with a tick form is converted exactly: 9.2e18 ticks
+    /// is far above the 2^53 where an `f64` stops holding units, and the count
+    /// the caller stores is the integer the amount works out to.
+    #[test]
+    fn ticks_from_usd_converts_the_largest_amount_it_accepts() {
+        assert_eq!(
+            ticks_from_usd("usage.cost", 9.2e8).unwrap(),
+            9_200_000_000_000_000_000
+        );
+        assert!(ticks_from_usd("usage.cost", 9.3e8).is_err());
     }
 
     #[test]
@@ -2049,5 +2241,71 @@ mod tests {
         let inner: &dyn TraceContext = &*cloned_trace;
         let downcast = inner.as_any().downcast_ref::<TestTrace>().unwrap();
         assert_eq!(downcast.0, "trace-data");
+    }
+
+    /// A translating gateway puts the same reasoning text on both spellings in
+    /// every delta. Two copies of one string must not cost the reply.
+    #[test]
+    fn delta_carrying_both_reasoning_spellings_parses_to_one_value() {
+        let delta: ChatChunkDelta =
+            serde_json::from_str(r#"{"reasoning":"We","reasoning_content":"We"}"#)
+                .expect("both spellings, same text");
+        assert_eq!(delta.reasoning_content.as_deref(), Some("We"));
+    }
+
+    #[test]
+    fn delta_reading_either_reasoning_spelling_alone_still_works() {
+        let only_alias: ChatChunkDelta = serde_json::from_str(r#"{"reasoning":"alpha"}"#).unwrap();
+        assert_eq!(only_alias.reasoning_content.as_deref(), Some("alpha"));
+
+        let only_canonical: ChatChunkDelta =
+            serde_json::from_str(r#"{"reasoning_content":"beta"}"#).unwrap();
+        assert_eq!(only_canonical.reasoning_content.as_deref(), Some("beta"));
+    }
+
+    /// Equal text is a duplicate. Different text is a contradiction, and picking
+    /// one side in silence is how a wrong answer reaches the transcript.
+    #[test]
+    fn delta_whose_reasoning_spellings_disagree_is_an_error_naming_the_field() {
+        let err = serde_json::from_str::<ChatChunkDelta>(
+            r#"{"reasoning":"one","reasoning_content":"two"}"#,
+        )
+        .expect_err("conflicting spellings must not parse");
+        let message = err.to_string();
+        assert!(message.contains("reasoning_content"), "{message}");
+        assert!(message.contains("reasoning"), "{message}");
+    }
+
+    /// The chunk shape reported against a real gateway: `reasoning`,
+    /// `reasoning_details` and `reasoning_content` together. The details key is
+    /// the provider's own and is nobody else's business.
+    #[test]
+    fn gateway_chunk_carrying_reasoning_details_and_both_spellings_parses() {
+        let chunk: ChatCompletionChunk = serde_json::from_str(
+            r#"{"id":"chatcmpl-1","object":"chat.completion.chunk","created":1,
+                "model":"m","choices":[{"index":0,"finish_reason":null,"delta":{
+                    "role":"assistant","reasoning":"We",
+                    "reasoning_details":[{"format":"text","text":"We"}],
+                    "reasoning_content":"We"}}]}"#,
+        )
+        .expect("the reported gateway chunk must parse");
+        assert_eq!(
+            chunk.choices[0].delta.reasoning_content.as_deref(),
+            Some("We")
+        );
+    }
+
+    #[test]
+    fn delta_serializes_the_canonical_reasoning_key_and_never_the_alias() {
+        let json = serde_json::to_value(ChatChunkDelta {
+            reasoning_content: Some("We".into()),
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(
+            json.get("reasoning_content").and_then(|v| v.as_str()),
+            Some("We")
+        );
+        assert!(json.get("reasoning").is_none(), "{json}");
     }
 }

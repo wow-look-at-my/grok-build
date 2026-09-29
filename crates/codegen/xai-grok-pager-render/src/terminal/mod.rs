@@ -1087,6 +1087,9 @@ fn parse_tmux_major_minor(version: &str) -> Option<(u32, u32)> {
     let minor_end = minor_str
         .find(|c: char| !c.is_ascii_digit())
         .unwrap_or(minor_str.len());
+    // `find` with a char predicate returns the byte offset of a char start, and
+    // the fallback is `len()`, so `minor_end` is a char boundary.
+    #[allow(clippy::string_slice)] // str::find offset over a char predicate, or len()
     let minor: u32 = minor_str[..minor_end].parse().ok()?;
     Some((major, minor))
 }

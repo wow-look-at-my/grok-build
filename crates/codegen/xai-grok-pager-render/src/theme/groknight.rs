@@ -93,6 +93,7 @@ impl Theme {
             command: YELLOW,
             path: ORANGE,
             running: CYAN,
+            thinking_summary: rgb(42, 161, 179),
             warning: YELLOW,
 
             fuzzy_accent: BLUE,

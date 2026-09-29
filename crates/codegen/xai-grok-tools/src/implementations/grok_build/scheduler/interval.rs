@@ -1,9 +1,10 @@
-use super::types::SchedulerError;
+use super::types::{SchedulerError, interval_duration};
 
 const MINIMUM_INTERVAL_SECS: u64 = 60;
 
 /// Parse an interval string like "5m", "2h", "30s", "1d" into seconds.
-/// Minimum interval is 60 seconds; values below are clamped.
+/// Minimum interval is 60 seconds; values below are clamped. An interval with
+/// no duration to add to a timestamp is refused here, where it arrives as text.
 pub fn parse_interval(s: &str) -> Result<u64, SchedulerError> {
     let s = s.trim();
     if s.is_empty() {
@@ -39,9 +40,15 @@ pub fn parse_interval(s: &str) -> Result<u64, SchedulerError> {
 
     let secs = value
         .checked_mul(unit_secs)
-        .ok_or_else(|| SchedulerError::InvalidInterval(format!("interval too large: {s:?}")))?;
+        .ok_or_else(|| SchedulerError::InvalidInterval(format!("interval too large: {s:?}")))?
+        .max(MINIMUM_INTERVAL_SECS);
 
-    Ok(secs.max(MINIMUM_INTERVAL_SECS))
+    interval_duration(secs).ok_or_else(|| {
+        SchedulerError::InvalidInterval(format!(
+            "interval too large: {s:?} ({secs} s has no representable schedule)"
+        ))
+    })?;
+    Ok(secs)
 }
 
 /// Convert seconds to a human-readable interval string.
@@ -129,8 +136,24 @@ mod tests {
         // Digits parse as u64 but the unit multiplication overflows — must
         // surface an error rather than panicking (debug) or wrapping (release).
         assert!(parse_interval("1000000000000000000d").is_err());
-        assert!(parse_interval(&format!("{}s", u64::MAX)).is_ok());
+        assert!(parse_interval(&format!("{}s", u64::MAX)).is_err());
         assert!(parse_interval(&format!("{}d", u64::MAX)).is_err());
+    }
+
+    /// Seconds with no `i64` second count are refused where the interval
+    /// arrives as text. A value stored anyway would come back as a negative
+    /// duration and a schedule in the past. A cadence that does have a second
+    /// count is returned unchanged.
+    #[test]
+    fn an_interval_with_no_second_count_returns_error() {
+        let err = parse_interval(&format!("{}s", u64::MAX))
+            .expect_err("u64::MAX seconds has no i64 second count");
+        assert!(
+            matches!(err, SchedulerError::InvalidInterval(ref message)
+                if message.contains("no representable schedule")),
+            "the error names the condition: {err}"
+        );
+        assert_eq!(parse_interval("3650d").unwrap(), 3650 * 86_400);
     }
 
     #[test]

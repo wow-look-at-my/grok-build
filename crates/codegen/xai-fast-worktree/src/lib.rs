@@ -1,3 +1,10 @@
+#![allow(clippy::cast_lossless)] // 1 hit predates the gate
+#![allow(clippy::cast_possible_truncation)] // 17 hits predate the gate
+#![allow(clippy::cast_possible_wrap)] // 7 hits predate the gate
+#![allow(clippy::cast_sign_loss)] // 5 hits predate the gate
+#![allow(clippy::string_slice)] // 1 hit predates the gate
+#![allow(clippy::unwrap_used)] // 6 hits predate the gate
+
 //! High-performance git worktree creation using CoW cloning.
 //!
 //! This crate provides fast worktree creation by:

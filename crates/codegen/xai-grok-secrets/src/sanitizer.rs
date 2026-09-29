@@ -235,6 +235,9 @@ fn replace_home_prefix(input: &str, home: &str) -> String {
     let mut rest = input;
     while let Some(idx) = rest.find(home) {
         let (before, tail) = rest.split_at(idx);
+        // `tail` begins with `home` — `idx` is where `find` matched it — so
+        // `home.len()` is a char boundary of `tail`.
+        #[allow(clippy::string_slice)] // past a prefix that was just matched
         let after = &tail[home.len()..];
         let prev_ok = before.chars().last().is_none_or(is_segment_boundary);
         let next_ok = after.chars().next().is_none_or(is_segment_boundary);

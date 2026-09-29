@@ -1,3 +1,7 @@
+#![allow(clippy::cast_possible_truncation)] // 1 hit predates the gate
+#![allow(clippy::cast_sign_loss)] // 2 hits predate the gate
+#![allow(clippy::expect_used)] // 3 hits predate the gate
+
 //! Shared utilities used by both `xai-grok-shell` and its downstream clients
 //! (e.g. `xai-grok-pager-render`). This crate sits upstream of `xai-grok-shell`
 //! so it must never depend on it.

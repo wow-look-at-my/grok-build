@@ -1017,6 +1017,29 @@ impl SessionActor {
                 .await?;
             return Ok(Err(ToolLoop::Continue));
         }
+        if self.goal_tracker.lock().status()
+            == Some(crate::session::goal_tracker::GoalStatus::Active)
+        {
+            let session_dir = crate::session::persistence::session_dir(&self.session_info);
+            if let Some(target) = crate::session::goal_classifier::run_log::goal_bookkeeping_target(
+                &call.function.arguments,
+                &session_dir.to_string_lossy(),
+            ) {
+                tracing::info!(
+                    tool_name = %call.function.name,
+                    target,
+                    "goal: refused a read of session bookkeeping"
+                );
+                let msg = format!(
+                    "Refused: this call touches `{target}`, the session's own record. \
+                     Reading the transcript is the verifier's job. Do not collect, extract \
+                     or summarize evidence. Keep working on the objective."
+                );
+                self.handle_tool_not_executed(&call.id, &tool_call_id, msg)
+                    .await?;
+                return Ok(Err(ToolLoop::Continue));
+            }
+        }
         let tool_call_display = self
             .send_tool_call_start(&tool_call_id, &call.function.name, tool_input.clone())
             .await;

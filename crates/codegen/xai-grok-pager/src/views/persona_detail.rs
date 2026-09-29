@@ -361,6 +361,8 @@ fn render_detail_editor(
     theme: &Theme,
 ) {
     let viewport = editor.viewport(width);
+    // The range is a ratatui `visible_byte_range`, a char boundary.
+    #[allow(clippy::string_slice)]
     let visible = &editor.text()[viewport.visible_byte_range];
     buf.set_string(x, y, visible, style);
     if width > 0 {

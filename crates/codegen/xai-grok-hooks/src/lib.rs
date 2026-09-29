@@ -1,3 +1,7 @@
+#![allow(clippy::cast_possible_truncation)] // 14 hits predate the gate
+#![allow(clippy::cast_possible_wrap)] // 1 hit predates the gate
+#![allow(clippy::expect_used)] // 1 hit predates the gate
+
 //! # xai-grok-hooks
 //!
 //! Runtime hook system for Grok — file-based discovery, command execution,

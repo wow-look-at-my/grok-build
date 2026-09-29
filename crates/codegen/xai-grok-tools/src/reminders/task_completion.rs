@@ -34,14 +34,14 @@ pub const DEFAULT_TASK_OUTPUT_TOOL: &str = "get_task_output";
 /// their only chance to see the output.
 const MAX_INLINE_COMPLETION_BYTES: usize = 4_000;
 #[derive(Clone, Debug, Default)]
-pub struct TaskCompletionReservations(pub Arc<std::sync::Mutex<HashMap<String, usize>>>);
+pub struct TaskCompletionReservations(pub Arc<parking_lot::Mutex<HashMap<String, usize>>>);
 impl TaskCompletionReservations {
     pub fn reserve(&self, id: String) {
-        let mut ids = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        let mut ids = self.0.lock();
         *ids.entry(id).or_default() += 1;
     }
     pub fn release(&self, id: &str) {
-        let mut ids = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        let mut ids = self.0.lock();
         if let Some(count) = ids.get_mut(id) {
             if *count > 1 {
                 *count -= 1;
@@ -51,18 +51,10 @@ impl TaskCompletionReservations {
         }
     }
     pub fn contains(&self, id: &str) -> bool {
-        self.0
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .contains_key(id)
+        self.0.lock().contains_key(id)
     }
     pub fn snapshot(&self) -> Vec<String> {
-        self.0
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .keys()
-            .cloned()
-            .collect()
+        self.0.lock().keys().cloned().collect()
     }
 }
 crate::register_resource!(
@@ -220,9 +212,14 @@ fn format_running_tasks_warning(running: &[&TaskSnapshot], kill_task_name: Optio
 fn split_wrapped_monitor_event(event_text: &str) -> Option<(&str, &str)> {
     let rest = event_text.strip_prefix("<monitor-event description=\"")?;
     let open_end = rest.find(">\n")?;
+    // `open_end` is the offset of the ASCII `>\n`, and `desc_end` the offset of
+    // the ASCII `" task_id="` within it, so each offset is a char boundary.
+    #[allow(clippy::string_slice)]
     let open_tag = &rest[..open_end];
     let desc_end = open_tag.rfind("\" task_id=\"")?;
+    #[allow(clippy::string_slice)]
     let description = &open_tag[..desc_end];
+    #[allow(clippy::string_slice)]
     let inner = rest[open_end + 2..].strip_suffix("\n</monitor-event>")?;
     Some((description, inner))
 }
@@ -551,7 +548,13 @@ fn task_text_agent_id(text: &str) -> Option<&str> {
     let end = after
         .find(|c: char| c.is_whitespace())
         .unwrap_or(after.len());
-    if end == 0 { None } else { Some(&after[..end]) }
+    if end == 0 {
+        return None;
+    }
+    // `find` on a `char` predicate reports the byte a character starts at.
+    #[allow(clippy::string_slice)]
+    let agent_id = &after[..end];
+    Some(agent_id)
 }
 pub fn consumed_completion_ids(output: &ToolOutput) -> Vec<&str> {
     let mut ids = Vec::new();
@@ -780,6 +783,33 @@ impl Reminder for TaskCompletionReminder {
 mod tests {
     use super::*;
     use crate::types::output::TextOutput;
+    /// A reservation made by a caller that panics still reserves nothing.
+    ///
+    /// The guard type is spelled out rather than inferred: `parking_lot`'s
+    /// guard is the one that cannot report a poisoned lock, so the next tool
+    /// call acquires the map and sees the reservation the panicked caller had
+    /// already recorded. A lock that poisoned would make every later tool call
+    /// on the session fail on a map of counters.
+    #[test]
+    fn a_panicking_reserver_leaves_the_map_open_to_the_next_tool_call() {
+        let reservations = TaskCompletionReservations::default();
+        let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let mut held: parking_lot::MutexGuard<'_, HashMap<String, usize>> =
+                reservations.0.lock();
+            held.insert("bg-uuid-42".to_string(), 1);
+            panic!("the tool call died holding the reservations");
+        }));
+        assert!(
+            panicked.is_err(),
+            "the test must actually have panicked while holding the lock"
+        );
+        assert!(
+            reservations.contains("bg-uuid-42"),
+            "the next acquirer gets the map, with what the panicked call had reserved"
+        );
+        reservations.release("bg-uuid-42");
+        assert!(!reservations.contains("bg-uuid-42"));
+    }
     #[test]
     fn consumed_completion_ids_from_text_with_consumed_id() {
         let output = ToolOutput::Text(TextOutput {

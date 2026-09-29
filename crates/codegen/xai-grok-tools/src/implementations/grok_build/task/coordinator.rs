@@ -181,7 +181,7 @@ impl<R: ChildRunner> SubagentCoordinator<R> {
                 Some((id, output)) = self.runs.next(), if !self.runs.is_empty() => {
                     match output {
                         Ok(output) => self.finish_child(&id, output),
-                        Err(_) => self.finish_panicked_child(&id),
+                        Err(panic) => self.finish_panicked_child(&id, &*panic),
                     }
                 }
                 Some((respond_to, outcome)) = self.validations.next(), if !self.validations.is_empty() => {
@@ -848,7 +848,14 @@ impl<R: ChildRunner> SubagentCoordinator<R> {
         self.start_queued_within_capacity();
     }
 
-    fn finish_panicked_child(&mut self, id: &str) {
+    /// Fails a child whose run future panicked, naming what the panic carried.
+    ///
+    /// The unwinding itself is caught where the run is pushed, so the child is
+    /// already out of `runs` by the time this runs; what is left to do is say
+    /// why to whoever polls this task, because a bare "panicked" cannot tell a
+    /// broken runner apart from a broken tool call inside it.
+    fn finish_panicked_child(&mut self, id: &str, panic: &(dyn std::any::Any + Send)) {
+        let detail = crate::util::detached::panic_payload(panic);
         let request = self
             .active
             .get(id)
@@ -857,13 +864,13 @@ impl<R: ChildRunner> SubagentCoordinator<R> {
         let Some(request) = request else {
             return;
         };
-        tracing::error!(subagent_id = id, "subagent child runner panicked");
+        tracing::error!(subagent_id = id, panic = %detail, "subagent child runner panicked");
         self.finish_child(
             id,
             ChildRunOutput {
                 result: SubagentResult {
                     success: false,
-                    error: Some("Subagent runtime panicked".to_owned()),
+                    error: Some(format!("Subagent runtime panicked: {detail}")),
                     subagent_id: request.id.clone(),
                     child_session_id: request.id,
                     ..Default::default()

@@ -906,9 +906,15 @@ impl SessionActor {
         }
         if self.tool_context.sampler_retry_only_before_output {
             let handle = self.chat_state_handle.clone();
-            tokio::spawn(async move {
-                let _ = handle.mark_usage_incomplete(true, true).await;
-            });
+            // Marking the usage incomplete is what keeps a failed child's spend
+            // from being read as final, and nobody awaits this round, so its
+            // failure has to be attributed rather than lost.
+            tokio::spawn(xai_grok_tools::util::detached::fire_and_forget(
+                "mark usage incomplete",
+                async move {
+                    let _ = handle.mark_usage_incomplete(true, true).await;
+                },
+            ));
             let message = format!(
                 "workflow child model request failed; usage may understate real spend: {}",
                 error.message
@@ -1673,15 +1679,21 @@ impl SessionActor {
         } else if self.tool_context.task_output_token_budget.is_some() {
             self.tool_context.fail_task_output_usage_closed();
             let handle = self.chat_state_handle.clone();
-            tokio::spawn(async move {
-                let _ = handle.mark_usage_incomplete(true, true).await;
-            });
+            tokio::spawn(xai_grok_tools::util::detached::fire_and_forget(
+                "mark usage incomplete",
+                async move {
+                    let _ = handle.mark_usage_incomplete(true, true).await;
+                },
+            ));
             None
         } else if self.tool_context.sampler_retry_only_before_output {
             let handle = self.chat_state_handle.clone();
-            tokio::spawn(async move {
-                let _ = handle.mark_usage_incomplete(true, true).await;
-            });
+            tokio::spawn(xai_grok_tools::util::detached::fire_and_forget(
+                "mark usage incomplete",
+                async move {
+                    let _ = handle.mark_usage_incomplete(true, true).await;
+                },
+            ));
             None
         } else {
             None

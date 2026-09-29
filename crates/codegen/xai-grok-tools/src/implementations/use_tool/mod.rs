@@ -1060,7 +1060,7 @@ mod tests {
                 assert!(
                     text.contains("[MCP output truncated:"),
                     "truncated output must contain truncation annotation, got: {}",
-                    &text[text.len().saturating_sub(200)..],
+                    crate::util::tail_bytes(text, 200),
                 );
                 let expected = format!("showing first {}", format_bytes(limit as u64));
                 assert!(
@@ -1455,17 +1455,17 @@ mod tests {
                 assert!(
                     text.contains("to query the saved file"),
                     "JSON dump must steer to query the file: {}",
-                    &text[text.len().saturating_sub(300)..]
+                    crate::util::tail_bytes(text, 300)
                 );
                 assert!(
                     text.contains("`bash`"),
                     "steer references the resolved shell tool (fallback bash): {}",
-                    &text[text.len().saturating_sub(300)..]
+                    crate::util::tail_bytes(text, 300)
                 );
                 assert!(
                     !text.contains("if available"),
                     "presence is detected, so no 'if available' hedge: {}",
-                    &text[text.len().saturating_sub(300)..]
+                    crate::util::tail_bytes(text, 300)
                 );
             } else {
                 panic!("expected OkayOutput");

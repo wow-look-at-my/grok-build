@@ -26,7 +26,7 @@ fn git(args: &[&str]) -> String {
         .output()
         .ok()
         .filter(|o| o.status.success())
-        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "unknown".to_string())

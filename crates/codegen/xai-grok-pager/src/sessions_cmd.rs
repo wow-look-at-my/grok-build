@@ -233,8 +233,10 @@ fn print_sessions_grouped(sessions: &[MergedSession]) {
                 "(no summary)"
             };
             let truncated: String = summary.chars().take(50).collect();
-            let created = &s.created_at[..s.created_at.len().min(10)];
-            let updated = &s.updated_at[..s.updated_at.len().min(10)];
+            // Cutting the date half off an ISO timestamp for a column: the
+            // shared helper owns the boundary math.
+            let created = xai_grok_tools::util::truncate_bytes(&s.created_at, 10);
+            let updated = xai_grok_tools::util::truncate_bytes(&s.updated_at, 10);
             println!(
                 "{}  {}  {}  {}  {}",
                 s.session_id, created, updated, s.source, truncated

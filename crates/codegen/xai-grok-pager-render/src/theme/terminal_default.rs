@@ -66,6 +66,7 @@ impl Theme {
             command: Color::Yellow,
             path: Color::Cyan,
             running: Color::Cyan,
+            thinking_summary: Color::Cyan,
             warning: Color::Yellow,
 
             fuzzy_accent: Color::Cyan,

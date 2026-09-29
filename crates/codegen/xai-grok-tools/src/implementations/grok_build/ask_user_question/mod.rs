@@ -172,7 +172,7 @@ pub struct QuestionOption {
 }
 
 /// A single question with its options.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, serde::Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Question {
     /// The question to ask, phrased as a full question.
@@ -186,12 +186,10 @@ pub struct Question {
     /// Let the user pick more than one option (default false).
     // Model-facing schema name is snake_case (`multi_select`); deserialize also
     // accepts the legacy/ACP `multiSelect` so the shared `Question` type stays
-    // wire-compatible with the camelCase ACP ext_method.
-    #[serde(
-        default,
-        alias = "multi_select",
-        deserialize_with = "crate::types::schema::deserialize_lenient_option_bool"
-    )]
+    // wire-compatible with the camelCase ACP ext_method. A caller that sends
+    // both spellings folds them through [`Question::MULTI_SELECT_KEYS`] rather
+    // than failing the whole tool call on a duplicate field.
+    #[serde(default)]
     #[schemars(
         rename = "multi_select",
         description = "Let the user pick more than one option (default false)."
@@ -202,6 +200,69 @@ pub struct Question {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(skip)]
     pub id: Option<String>,
+}
+
+impl Question {
+    /// The keys [`multi_select`](Self::multi_select) is read under. The first
+    /// is what this type writes (the camelCase ACP spelling); `multi_select` is
+    /// the spelling the advertised tool schema names, so models send it.
+    pub const MULTI_SELECT_KEYS: xai_tool_types::Aliases =
+        xai_tool_types::Aliases::new("multiSelect", &["multi_select"]);
+}
+
+/// `Question` as a model or an ACP client writes it, with each multi-select key
+/// spelling its own field. It exists so a caller naming both folds them under
+/// [`Question::MULTI_SELECT_KEYS`] instead of tripping serde's
+/// duplicate-field check.
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct QuestionWire {
+    question: String,
+    options: Vec<QuestionOption>,
+    #[serde(
+        default,
+        deserialize_with = "crate::types::schema::deserialize_lenient_option_bool"
+    )]
+    multi_select: Option<bool>,
+    #[serde(
+        default,
+        rename = "multi_select",
+        deserialize_with = "crate::types::schema::deserialize_lenient_option_bool"
+    )]
+    multi_select_snake: Option<bool>,
+    #[serde(default)]
+    id: Option<String>,
+}
+
+impl TryFrom<QuestionWire> for Question {
+    type Error = xai_tool_types::AliasConflict;
+
+    fn try_from(wire: QuestionWire) -> Result<Self, Self::Error> {
+        Ok(Self {
+            question: wire.question,
+            options: wire.options,
+            multi_select: Question::MULTI_SELECT_KEYS
+                .fold(vec![wire.multi_select, wire.multi_select_snake])?,
+            id: wire.id,
+        })
+    }
+}
+
+/// Forwards through [`QuestionWire`] and the fold.
+///
+/// This is the body `#[serde(try_from = "QuestionWire")]` would generate,
+/// written out because schemars 1.0 reads that attribute to build the advertised
+/// schema: it would publish the shadow's shape, naming both `multiSelect` and
+/// `multi_select` to the model instead of the one key the schema renames to.
+impl<'de> serde::Deserialize<'de> for Question {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <QuestionWire as serde::Deserialize<'de>>::deserialize(deserializer)?
+            .try_into()
+            .map_err(serde::de::Error::custom)
+    }
 }
 
 /// Input for the `AskUserQuestion` tool.
@@ -660,6 +721,74 @@ mod tests {
         });
         let input: AskUserQuestionInput = serde_json::from_value(json).unwrap();
         assert_eq!(input.questions[0].multi_select, Some(true));
+    }
+
+    /// A caller that sends the ACP spelling and the schema spelling with the
+    /// same answer is saying one thing twice, so it reads as one question.
+    #[test]
+    fn a_question_naming_both_multi_select_keys_under_one_value_parses_once() {
+        let json = serde_json::json!({
+            "questions": [{
+                "question": "Pick DB?",
+                "options": [{"label": "Postgres", "description": "Relational DB"}],
+                "multiSelect": true,
+                "multi_select": true
+            }]
+        });
+        let input: AskUserQuestionInput =
+            serde_json::from_value(json).expect("one answer named under two keys is one answer");
+        assert_eq!(input.questions[0].multi_select, Some(true));
+    }
+
+    /// The camelCase half of the pair works on its own, which is the shape the
+    /// ACP `ext_method` sends. The snake_case half is
+    /// [`input_accepts_snake_case_multi_select`].
+    #[test]
+    fn a_question_reading_the_acp_multi_select_spelling_alone_still_works() {
+        let json = serde_json::json!({
+            "questions": [{
+                "question": "Pick DB?",
+                "options": [{"label": "Postgres", "description": "Relational DB"}],
+                "multiSelect": false
+            }]
+        });
+        let input: AskUserQuestionInput = serde_json::from_value(json).unwrap();
+        assert_eq!(input.questions[0].multi_select, Some(false));
+    }
+
+    /// The two spellings carrying different answers is a real contradiction --
+    /// it decides whether the user may pick more than one option -- so it fails
+    /// and names both keys rather than taking one in silence.
+    #[test]
+    fn a_question_whose_multi_select_spellings_disagree_is_an_error_naming_the_field() {
+        let json = serde_json::json!({
+            "questions": [{
+                "question": "Pick DB?",
+                "options": [{"label": "Postgres", "description": "Relational DB"}],
+                "multiSelect": true,
+                "multi_select": false
+            }]
+        });
+        let err = serde_json::from_value::<AskUserQuestionInput>(json)
+            .expect_err("a contradicted multi_select must not resolve silently");
+        let text = err.to_string();
+        assert!(text.contains("multiSelect"), "{err}");
+        assert!(text.contains("multi_select"), "{err}");
+    }
+
+    /// What goes back out is the canonical key only. The notification the tool
+    /// sends to the client is a serialized `Question`, so a stray `multi_select`
+    /// on the way out is a second spelling a client has to learn.
+    #[test]
+    fn a_question_serializes_the_canonical_multi_select_key_and_never_the_alias() {
+        let mut question = make_question("Pick DB?", &["Postgres", "SQLite"]);
+        question.multi_select = Some(true);
+        let json = serde_json::to_value(&question).unwrap();
+        assert_eq!(json["multiSelect"], serde_json::Value::from(true));
+        assert!(
+            json.get("multi_select").is_none(),
+            "the alias key must not appear on the wire: {json}"
+        );
     }
 
     // ── Migration fallback tests (no UserQuestionSender) ─────────────────

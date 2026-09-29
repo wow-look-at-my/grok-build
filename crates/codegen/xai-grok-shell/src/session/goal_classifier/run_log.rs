@@ -11,6 +11,7 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 
 use xai_grok_sampling_types::{ConversationItem, SyntheticReason};
+use xai_grok_tools::util::{ceil_char_boundary, truncate_bytes};
 
 use super::evidence::sanitize_final_response;
 
@@ -296,6 +297,30 @@ fn only_prints_literals(command: &str) -> bool {
         })
 }
 
+/// Names of the session's own record. The implementer never needs them.
+const BOOKKEEPING_FILES: &[&str] = &[
+    "chat_history.jsonl",
+    "updates.jsonl",
+    ".runlog.md",
+    "goal-classifier-",
+    "goal-verdict-",
+    "goal-verifier-details-",
+];
+
+/// What in `args` names the session's own record, if anything. A goal's
+/// implementer that reads its transcript is building evidence the verifier
+/// reads for itself, so the harness refuses the call.
+pub(crate) fn goal_bookkeeping_target(args: &str, session_dir: &str) -> Option<String> {
+    let session_dir = session_dir.trim_end_matches('/');
+    if session_dir.len() >= 4 && args.contains(session_dir) {
+        return Some(session_dir.to_string());
+    }
+    BOOKKEEPING_FILES
+        .iter()
+        .find(|name| args.contains(*name))
+        .map(|name| (*name).to_string())
+}
+
 /// A call whose output the verifier must not see: the arguments stay so the
 /// verifier knows it was made, the result is replaced.
 fn render_withheld(name: &str, args: &str, reason: &str) -> String {
@@ -334,11 +359,11 @@ fn cap_args(args: &str) -> Cow<'_, str> {
     if clean.len() <= RUN_LOG_ARGS_MAX_BYTES {
         return clean;
     }
-    let cut = floor_char_boundary(&clean, RUN_LOG_ARGS_MAX_BYTES);
+    let head = truncate_bytes(&clean, RUN_LOG_ARGS_MAX_BYTES);
     Cow::Owned(format!(
         "{}… ({} bytes elided)",
-        &clean[..cut],
-        clean.len() - cut
+        head,
+        clean.len() - head.len()
     ))
 }
 
@@ -349,28 +374,16 @@ fn head_tail(s: &str) -> Cow<'_, str> {
     if s.len() <= RUN_LOG_RESULT_HEAD_BYTES + RUN_LOG_RESULT_TAIL_BYTES {
         return Cow::Borrowed(s);
     }
-    let head_end = floor_char_boundary(s, RUN_LOG_RESULT_HEAD_BYTES);
+    let head = truncate_bytes(s, RUN_LOG_RESULT_HEAD_BYTES);
     let tail_start = ceil_char_boundary(s, s.len() - RUN_LOG_RESULT_TAIL_BYTES);
+    #[allow(clippy::string_slice)] // `ceil_char_boundary` returns a char boundary
+    let tail = &s[tail_start..];
     Cow::Owned(format!(
         "{}\n... ({} bytes elided) ...\n{}",
-        &s[..head_end],
-        tail_start - head_end,
-        &s[tail_start..]
+        head,
+        tail_start - head.len(),
+        tail
     ))
-}
-
-fn floor_char_boundary(s: &str, mut i: usize) -> usize {
-    while i > 0 && !s.is_char_boundary(i) {
-        i -= 1;
-    }
-    i
-}
-
-fn ceil_char_boundary(s: &str, mut i: usize) -> usize {
-    while i < s.len() && !s.is_char_boundary(i) {
-        i += 1;
-    }
-    i
 }
 
 #[cfg(test)]
@@ -651,6 +664,39 @@ mod tests {
         let log = build_run_log(&items, None);
         assert_eq!(log.withheld, 0);
         assert!(log.body.contains("4 passed"));
+    }
+
+    #[test]
+    fn transcript_reads_are_goal_bookkeeping() {
+        let dir = "/home/u/.grok/sessions/abc";
+        assert_eq!(
+            goal_bookkeeping_target(
+                r#"{"command":"node -e \"read('/home/u/.grok/sessions/abc/chat_history.jsonl')\""}"#,
+                dir
+            )
+            .as_deref(),
+            Some(dir)
+        );
+        assert_eq!(
+            goal_bookkeeping_target(r#"{"command":"jq . ~/x/chat_history.jsonl"}"#, dir).as_deref(),
+            Some("chat_history.jsonl")
+        );
+        assert_eq!(
+            goal_bookkeeping_target(
+                r#"{"path":"/tmp/grok-goal-v/goal-classifier-v-1.runlog.md"}"#,
+                dir
+            )
+            .as_deref(),
+            Some(".runlog.md")
+        );
+        assert_eq!(
+            goal_bookkeeping_target(r#"{"command":"cargo test -p foo"}"#, dir),
+            None
+        );
+        assert_eq!(
+            goal_bookkeeping_target(r#"{"path":"src/lib.rs"}"#, dir),
+            None
+        );
     }
 
     #[test]

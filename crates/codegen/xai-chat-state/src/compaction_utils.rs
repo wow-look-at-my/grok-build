@@ -243,9 +243,9 @@ fn truncate_text_to_bytes(s: &str, max_bytes: usize) -> Option<std::sync::Arc<st
         end -= 1;
     }
     let dropped = s.len() - end;
+    let kept = tag_span(s, 0, end);
     Some(std::sync::Arc::<str>::from(format!(
-        "{}\n[... truncated {dropped} bytes to fit the compaction window ...]",
-        &s[..end]
+        "{kept}\n[... truncated {dropped} bytes to fit the compaction window ...]"
     )))
 }
 /// Tags injected by the runtime that should be stripped from user queries.
@@ -272,7 +272,7 @@ fn strip_system_tags(text: &str) -> String {
         let open = format!("<{tag}>");
         let close = format!("</{tag}>");
         while let Some(start) = result.find(&open) {
-            if let Some(rel_end) = result[start..].find(&close) {
+            if let Some(rel_end) = tag_span_to_end(&result, start).find(&close) {
                 let end_pos = start + rel_end + close.len();
                 result.replace_range(start..end_pos, "");
             } else {
@@ -290,8 +290,8 @@ fn strip_system_tags(text: &str) -> String {
 pub fn extract_user_query(text: &str) -> String {
     if let Some(start) = text.find("<user_query>") {
         let content_start = start + "<user_query>".len();
-        if let Some(end) = text[content_start..].find("</user_query>") {
-            let inner = text[content_start..content_start + end].trim();
+        if let Some(end) = tag_span_to_end(text, content_start).find("</user_query>") {
+            let inner = tag_span(text, content_start, content_start + end).trim();
             return strip_system_tags(inner);
         }
     }
@@ -643,6 +643,25 @@ impl CompactionStateContext {
 /// Clean the compaction model's raw output into the plain-text `Summary:`
 /// block that seeds the next turn.
 ///
+/// `text[from..to]` for the tag surgery in this module.
+///
+/// Every index handed here is the offset at which one of the ASCII literals
+/// this module scans for — a [`SYSTEM_TAGS`] pair, `<user_query>`,
+/// `</user_query>`, `<analysis>`, `</analysis>`, `<summary>` or `</summary>` —
+/// was found, or that offset plus the literal's byte length. In UTF-8 an ASCII
+/// byte is always a char boundary and never appears inside a multi-byte
+/// character, so both ends of the range align.
+#[allow(clippy::string_slice)] // both ends are ASCII tag offsets
+fn tag_span(text: &str, from: usize, to: usize) -> &str {
+    &text[from..to]
+}
+
+/// `text[from..]`, the tail after a tag. Same proof as [`tag_span`].
+#[allow(clippy::string_slice)] // the offset is an ASCII tag offset
+fn tag_span_to_end(text: &str, from: usize) -> &str {
+    &text[from..]
+}
+
 /// Drafting scratchpad (a top-level `<analysis>` block, or a nested
 /// `<analysis>`/`<summary>` wrapper / untagged markdown "**Analysis**" header
 /// inside the summary) is stripped; control tokens echoed *within* the body
@@ -654,22 +673,35 @@ pub fn format_compact_summary(summary: &str) -> String {
     let mut result = summary.to_string();
     while let Some(start) = result.find("<analysis>") {
         let is_leading = match result.find("<summary>") {
-            Some(sp) => start < sp || result[sp + "<summary>".len()..start].trim().is_empty(),
-            None => result[..start].trim().is_empty(),
+            Some(sp) => {
+                start < sp
+                    || tag_span(&result, sp + "<summary>".len(), start)
+                        .trim()
+                        .is_empty()
+            }
+            None => tag_span(&result, 0, start).trim().is_empty(),
         };
         if !is_leading {
             break;
         }
-        match result[start..].find("</analysis>") {
+        match tag_span_to_end(&result, start).find("</analysis>") {
             Some(rel) => {
                 let end = start + rel + "</analysis>".len();
-                result = format!("{}{}", &result[..start], &result[end..]);
+                result = format!(
+                    "{}{}",
+                    tag_span(&result, 0, start),
+                    tag_span_to_end(&result, end)
+                );
             }
             None => {
-                let drop_to = result[start..]
+                let drop_to = tag_span_to_end(&result, start)
                     .find("<summary>")
                     .map_or(result.len(), |rel| start + rel);
-                result = format!("{}{}", &result[..start], &result[drop_to..]);
+                result = format!(
+                    "{}{}",
+                    tag_span(&result, 0, start),
+                    tag_span_to_end(&result, drop_to)
+                );
                 break;
             }
         }
@@ -678,9 +710,10 @@ pub fn format_compact_summary(summary: &str) -> String {
         && let Some(end) = result.rfind("</summary>")
         && end > start
     {
-        let before = result[..start].to_string();
-        let after = result[end + "</summary>".len()..].to_string();
-        let inner = strip_leading_scratchpad(result[start + "<summary>".len()..end].trim());
+        let before = tag_span(&result, 0, start).to_string();
+        let after = tag_span_to_end(&result, end + "</summary>".len()).to_string();
+        let inner =
+            strip_leading_scratchpad(tag_span(&result, start + "<summary>".len(), end).trim());
         result = format!("{before}Summary:\n{inner}{after}");
     }
     result = neutralize_compaction_control_tokens(&result);
@@ -705,7 +738,7 @@ fn strip_leading_scratchpad(inner: &str) -> String {
     if !lead.starts_with(|c: char| c.is_ascii_digit())
         && let Some(pos) = s.rfind("</analysis>")
     {
-        s = s[pos + "</analysis>".len()..].trim_start();
+        s = tag_span_to_end(s, pos + "</analysis>".len()).trim_start();
     }
     if let Some(rest) = s.strip_prefix("<summary>") {
         s = rest.trim_start();

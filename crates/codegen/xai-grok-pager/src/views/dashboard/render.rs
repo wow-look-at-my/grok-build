@@ -498,6 +498,8 @@ fn rename_editor_view(draft: &RenameDraft, width: u16) -> (&str, u16) {
     let prefix_width = UnicodeWidthStr::width(RENAME_PREFIX) as u16;
     let editor_width = width.saturating_sub(prefix_width);
     let viewport = draft.viewport(editor_width as usize);
+    // The range is a ratatui `visible_byte_range`, a char boundary.
+    #[allow(clippy::string_slice)]
     let visible = &draft.text()[viewport.visible_byte_range];
     let cursor_offset = prefix_width
         .saturating_add(viewport.cursor_display_column as u16)
@@ -2161,6 +2163,9 @@ fn row_bg(theme: &Theme, state: &DashboardState, row: &DashboardRow) -> Color {
 /// half-block pass (see `render_spacer_halos`), which extends the
 /// highlight half a cell above and below so it reads as centered on
 /// the text.
+// Every slice in this fn is a full-range `&x[..]` on a `String`, whose ends
+// are the string's own char boundaries.
+#[allow(clippy::string_slice)]
 fn render_row(
     buf: &mut Buffer,
     rect: Rect,
@@ -3018,6 +3023,8 @@ fn render_dispatch(
                 state.dispatch.cursor(),
             )
             .single_line_viewport(avail as usize);
+            // The range is a ratatui `visible_byte_range`, a char boundary.
+            #[allow(clippy::string_slice)]
             let visible = &state.dispatch.text()[viewport.visible_byte_range];
             if avail > 0 {
                 buf.set_span(

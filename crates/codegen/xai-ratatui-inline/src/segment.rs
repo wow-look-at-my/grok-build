@@ -98,7 +98,11 @@ pub fn split_into_line_segments<'a>(input: &'a str, term_width: usize) -> Vec<Li
 
     macro_rules! push_segment {
         ($end:expr, $crlf:expr) => {
-            #[allow(unused_assignments)]
+            // `segment_start` and `$end` are only ever set to the first byte of
+            // a printed char (`index + 1 - ch.len_utf8()`), one past a `\n` or
+            // `\r`, or one past the final byte of an escape sequence. Each is a
+            // char boundary, so the slice cannot split a character.
+            #[allow(unused_assignments, clippy::string_slice)]
             {
                 segments.push(LineSegment {
                     content: &input[segment_start..$end],
@@ -194,7 +198,11 @@ pub fn split_into_line_segments<'a>(input: &'a str, term_width: usize) -> Vec<Li
                 // Last segment doesn't end with crlf and the current one has no visual actions, concatenate
                 debug_assert_eq!(segment_start, (last_end as usize - input_start as usize));
                 let last_offset = last_start as usize - input_start as usize;
-                last.content = &input[last_offset..segment_end];
+                // Both ends come from `push_segment!`'s boundaries above: a char
+                // start, or one past a `\n`, `\r` or escape-sequence byte.
+                #[allow(clippy::string_slice)] // segment offsets are char-aligned
+                let joined = &input[last_offset..segment_end];
+                last.content = joined;
             } else {
                 // There's last segment but either it ends with lf or pending segment has visual width
                 // note: pending segment can't have lf because otherwise we would have matched on it

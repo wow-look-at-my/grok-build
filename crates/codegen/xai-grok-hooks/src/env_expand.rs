@@ -170,6 +170,11 @@ pub(crate) fn expand_env_vars_with_extra(input: &str, extra: &HashMap<String, St
 /// `#`, `/`, `:N` (digit), `:N:M`, etc. This shares its detection
 /// logic with [`crate::runner::command::find_unresolved_env_vars`] via
 /// [`iter_env_var_references`].
+/// Every offset below comes from [`EnvVarRefIter`], which only ever returns
+/// positions at an ASCII `$`, `{`, `}` or identifier byte; the `cursor` copies
+/// run between two such positions. An ASCII byte is always a char boundary, so
+/// no cut here can land inside a multi-byte character.
+#[allow(clippy::string_slice)] // offsets are ASCII delimiter positions
 fn mask_modifier_forms(input: &str, sentinel: &str) -> String {
     let mut out = String::with_capacity(input.len());
     let mut cursor: usize = 0;

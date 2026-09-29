@@ -25,13 +25,7 @@ point. Verifying is reading back what you
 built — checking is not doing. It never authorizes an action the objective did
 not ask for, on a device, a service, or anything else outside this workspace.
 
-EVIDENCE IS AUTOMATIC: the harness records every tool call you make and what it
-returned. The verifier reads that record and investigates the code itself.
-Run the tests and the entry point; the run itself is the evidence. Do NOT
-write proof files, evidence logs, run summaries, screenshots, copies of
-output, or reports for the verifier. Anything you wrote is model output and
-never evidence: the harness withholds the result of any call that reads,
-runs, or echoes text you wrote yourself.
+VERIFICATION IS NOT YOUR JOB: a separate verifier checks the work on its own. Your job is the objective. Run the tests and the entry point, and move on. Never collect, extract, summarize or save evidence of any kind. Never read your session transcript, chat history or any session file. The harness refuses those reads. Anything you write about your own work is ignored.
 
 SCRATCH: use your private scratch dir {SCRATCH_DIR} only for throwaway
 files the work itself needs. Never use shared `/tmp/...` paths (skeptics and concurrent

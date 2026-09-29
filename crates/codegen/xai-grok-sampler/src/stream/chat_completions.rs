@@ -143,6 +143,14 @@ pub fn stream_chat_completions<'a>(
                         xai_grok_sampling_types::usd_float_to_ticks(
                             u.cost.as_ref().map(|c| c.as_usd_float()),
                         )
+                        .unwrap_or_else(|err| {
+                            tracing::error!(
+                                error = %err,
+                                request_id = %request_id.as_str(),
+                                "provider reported a usage.cost with no tick form; leaving the response unpriced"
+                            );
+                            None
+                        })
                     });
                 cost_usd_ticks = match (cost_usd_ticks, chunk_cost) {
                     (_, Some(n)) => Some(n),

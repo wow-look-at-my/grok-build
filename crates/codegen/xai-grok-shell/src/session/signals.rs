@@ -619,7 +619,13 @@ impl SessionSignalsHandle {
     /// This spawns a background task to process signal events.
     pub fn new() -> Self {
         let (handle, actor) = SessionSignalsActor::new();
-        tokio::spawn(actor.run());
+        // Nothing joins with the actor: its death would otherwise surface as a
+        // closed command channel on whichever `SignalEvent` is sent next, with
+        // no note of what closed it.
+        tokio::spawn(xai_grok_tools::util::detached::fire_and_forget(
+            "session signals actor",
+            actor.run(),
+        ));
         handle
     }
 }
@@ -1872,7 +1878,13 @@ pub fn spawn_signals_actor() -> SessionSignalsHandle {
 /// Spawn a new signals actor with a custom sync interval.
 pub fn spawn_signals_actor_with_interval(sync_interval: Duration) -> SessionSignalsHandle {
     let (handle, actor) = SessionSignalsActor::with_sync_interval(sync_interval);
-    tokio::spawn(actor.run());
+    // The actor owns the receiving half of every handle's channel, so its death
+    // is named here rather than left for the next `SignalEvent` send to
+    // discover as an unexplained closed channel.
+    tokio::spawn(xai_grok_tools::util::detached::fire_and_forget(
+        "session signals actor",
+        actor.run(),
+    ));
     handle
 }
 

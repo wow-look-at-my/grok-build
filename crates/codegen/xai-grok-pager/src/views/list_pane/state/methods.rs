@@ -264,9 +264,13 @@ impl ListPaneState {
         // Also store the screen position so the caller can set the
         // terminal hardware cursor via Frame::set_cursor_position().
         if area.width > 0 && area.height > 0 {
+            // EditBuffer::cursor is kept on char boundaries.
+            #[allow(clippy::string_slice)]
             let text_before_cursor = &self.input_textarea.text()[..self.input_textarea.cursor()];
             let cursor_line = text_before_cursor.chars().filter(|c| *c == '\n').count();
             let last_line_start = text_before_cursor.rfind('\n').map(|i| i + 1).unwrap_or(0);
+            // `last_line_start` is a `rfind` offset past a one-byte `'\n'`.
+            #[allow(clippy::string_slice)]
             let cursor_col = text_before_cursor[last_line_start..]
                 .width()
                 .min(area.width as usize - 1) as u16;

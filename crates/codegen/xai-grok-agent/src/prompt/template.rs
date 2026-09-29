@@ -14,6 +14,12 @@ use prompt_encrypted::*;
 
 /// Decrypt XOR-obfuscated template data (mirrors `scripts/encrypt_templates.py::xor_encrypt`).
 /// Obfuscation only — not a security boundary.
+///
+/// The strict decode is the integrity check on the generated blob: a payload
+/// that no longer decodes is a `prompt_encrypted.rs` that is out of step with
+/// its source, and decoding it lossily would put replacement characters into
+/// every prompt instead of saying so.
+#[allow(clippy::disallowed_methods)]
 fn decrypt(data: &[u8], seed: u8) -> Zeroizing<String> {
     let bytes: Vec<u8> = data
         .iter()

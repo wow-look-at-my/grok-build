@@ -401,15 +401,22 @@ impl LspClient {
 
         let stderr_task = child.stderr.take().map(|stderr| {
             let name = server_name.to_string();
-            tokio::spawn(async move {
-                use tokio::io::AsyncBufReadExt;
-                let stderr = tokio::process::ChildStderr::from_std(stderr);
-                let Ok(stderr) = stderr else { return };
-                let mut lines = tokio::io::BufReader::new(stderr).lines();
-                while let Ok(Some(line)) = lines.next_line().await {
-                    tracing::debug!(server = %name, "stderr: {line}");
-                }
-            })
+            // Nobody joins with this pump: the server's stderr is a log, not a
+            // result. Guarded so the loss of that log says which pump died, and
+            // the child's own exit path is unaffected either way.
+            #[allow(clippy::disallowed_methods)]
+            tokio::spawn(crate::util::detached::fire_and_forget(
+                "lsp server stderr pump",
+                async move {
+                    use tokio::io::AsyncBufReadExt;
+                    let stderr = tokio::process::ChildStderr::from_std(stderr);
+                    let Ok(stderr) = stderr else { return };
+                    let mut lines = tokio::io::BufReader::new(stderr).lines();
+                    while let Ok(Some(line)) = lines.next_line().await {
+                        tracing::debug!(server = %name, "stderr: {line}");
+                    }
+                },
+            ))
         });
 
         tracing::debug!(server = %server_name, pid = ?child.id(), "LSP server spawned (stdio)");
@@ -420,6 +427,9 @@ impl LspClient {
             .map_err(|e| LspError::SpawnFailed(format!("stdin async wrap: {e}")))?;
 
         let name = server_name.to_string();
+        // The handle is kept: it rides `TransportHandles` to `LspClient::main_loop`,
+        // where startup failure and shutdown abort it.
+        #[allow(clippy::disallowed_methods)]
         let handle = tokio::spawn(async move {
             use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
             if let Err(e) = main_loop
@@ -451,6 +461,9 @@ impl LspClient {
 
         let (read_half, write_half) = stream.into_split();
         let name = server_name.to_string();
+        // Returned to the caller and stored on `LspClient::main_loop`, which is
+        // where it is aborted.
+        #[allow(clippy::disallowed_methods)]
         Ok(tokio::spawn(async move {
             use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
             if let Err(e) = main_loop

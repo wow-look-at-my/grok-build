@@ -2,6 +2,7 @@ use crate::sampling::Client as OaiCompatClient;
 use crate::sampling::types::ChatRequestMessage;
 use crate::sampling::{ConversationItem, ConversationRequest, Role};
 use anyhow::Result;
+use xai_grok_tools::util::truncate_bytes;
 
 pub fn build_transcript(messages: &[ConversationItem]) -> String {
     const MAX_CONTENT_BYTES: usize = 2000;
@@ -33,8 +34,7 @@ pub fn build_transcript(messages: &[ConversationItem]) -> String {
         result.push_str("] ");
 
         if content.len() > MAX_CONTENT_BYTES {
-            let end = floor_char_boundary(content, MAX_CONTENT_BYTES);
-            result.push_str(&content[..end]);
+            result.push_str(truncate_bytes(content, MAX_CONTENT_BYTES));
             result.push_str("...");
         } else {
             result.push_str(content);
@@ -48,22 +48,11 @@ pub fn build_transcript(messages: &[ConversationItem]) -> String {
     result
 }
 
-/// Returns the largest valid UTF-8 character boundary index at or before `index`.
-#[inline]
-pub(super) fn floor_char_boundary(s: &str, index: usize) -> usize {
-    if index >= s.len() {
-        s.len()
-    } else if s.is_char_boundary(index) {
-        index
-    } else {
-        // UTF-8 characters are at most 4 bytes, back up at most 3 bytes
-        let mut i = index;
-        while i > 0 && !s.is_char_boundary(i) {
-            i -= 1;
-        }
-        i
-    }
-}
+/// Largest valid UTF-8 character boundary index at or before `index`.
+///
+/// Re-exported from `xai_grok_tools::util` so the whole workspace shares one
+/// implementation of the boundary math.
+pub(super) use xai_grok_tools::util::floor_char_boundary;
 
 pub fn truncate_middle_words(s: &str, max_words: usize) -> (String, Option<usize>) {
     let words: Vec<&str> = s.split_whitespace().collect();

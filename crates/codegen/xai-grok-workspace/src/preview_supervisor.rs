@@ -266,8 +266,13 @@ fn build_preview_command(cfg: &PreviewArgs) -> io::Result<tokio::process::Comman
                     return Err(io::Error::last_os_error());
                 }
                 // If the WS already exited (PDEATHSIG won't fire), bail before
-                // exec rather than orphan.
-                if libc::getppid() as u32 != parent_pid {
+                // exec rather than orphan. Compared as `pid_t`s: `getppid`
+                // answers the kernel's signed type, and a parent pid that will
+                // not fit one is not this process's parent, so it bails exactly
+                // as a value that failed to compare did.
+                let parent_matches =
+                    i32::try_from(parent_pid).is_ok_and(|parent| libc::getppid() == parent);
+                if !parent_matches {
                     libc::_exit(0);
                 }
                 Ok(())

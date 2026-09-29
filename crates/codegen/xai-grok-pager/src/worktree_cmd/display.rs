@@ -103,11 +103,8 @@ pub fn print_show(rec: &WorktreeRecord, out: &mut impl Write) -> std::io::Result
         writeln!(out, "  Git Ref:        {git_ref}")?;
     }
     if let Some(ref commit) = rec.head_commit {
-        let short = if commit.len() > 12 {
-            &commit[..12]
-        } else {
-            commit
-        };
+        // Shorten the OID to 12 bytes; the shared helper owns the boundary math.
+        let short = xai_grok_tools::util::truncate_bytes(commit, 12);
         writeln!(out, "  HEAD:           {short}")?;
     }
     writeln!(

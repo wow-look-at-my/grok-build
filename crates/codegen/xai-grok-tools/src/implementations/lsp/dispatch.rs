@@ -61,8 +61,21 @@ impl LspBackendAdapter {
         lsp_manager: Arc<tokio::sync::Mutex<LspManager>>,
         startup: Arc<StartupCoordinator>,
     ) {
+        #[allow(clippy::disallowed_methods)]
         tokio::spawn(async move {
-            let result = bootstrap_lsp(lsp_manager, startup.clone()).await;
+            // Guarded, because the state below is what a waiter is waiting on:
+            // `ensure_ready` parks on `notify` for as long as the state reads
+            // `Starting`, so a bootstrap that dies mid-flight has to move the
+            // state anyway and say why.
+            let result = match crate::util::detached::guarded(
+                "lsp bootstrap",
+                bootstrap_lsp(lsp_manager, startup.clone()),
+            )
+            .await
+            {
+                Ok(result) => result,
+                Err(panic) => Err(format!("the LSP bootstrap task panicked: {panic}")),
+            };
             let mut state = startup.state.lock().await;
             *state = match result {
                 Ok(()) => StartupState::Ready,
@@ -114,7 +127,14 @@ async fn bootstrap_lsp(
         // Hand the monitor a `Weak` so it never keeps the manager (and its
         // language-server children) alive past the owning session.
         let mgr_weak = Arc::downgrade(&lsp_manager);
-        tokio::spawn(crate::implementations::lsp::restart_monitor(mgr_weak, name));
+        // Nothing polls this monitor: a server that dies with no monitor left
+        // simply stops being diagnosed, so the round runs where a panic is
+        // named rather than where it would end the task quietly.
+        #[allow(clippy::disallowed_methods)]
+        tokio::spawn(crate::util::detached::fire_and_forget(
+            "lsp restart monitor",
+            crate::implementations::lsp::restart_monitor(mgr_weak, name),
+        ));
     }
     Ok(())
 }
@@ -144,7 +164,21 @@ impl super::LspBackend for LspBackendAdapter {
             return;
         };
         handle.spawn(async move {
-            LspBackendAdapter::ensure_started_with_state(lsp_manager, startup).await;
+            // Guarded, because this is the round that leaves the state
+            // `Starting` for the bootstrap to replace: a `Starting` nobody
+            // moves is the one state `ensure_ready` parks on forever, so the
+            // failure has to move it too.
+            let started = crate::util::detached::guarded(
+                "lsp start",
+                LspBackendAdapter::ensure_started_with_state(lsp_manager, startup.clone()),
+            )
+            .await;
+            if let Err(panic) = started {
+                let mut state = startup.state.lock().await;
+                *state = StartupState::Failed(format!("the LSP start task panicked: {panic}"));
+                drop(state);
+                startup.notify.notify_waiters();
+            }
         });
     }
 
@@ -572,6 +606,7 @@ fn workspace_symbol_to_info(ws: lsp_types::WorkspaceSymbol) -> SymbolInformation
 mod tests {
     use super::*;
     use crate::implementations::lsp::LspBackend;
+    use std::time::Duration;
 
     fn adapter(
         servers: std::collections::BTreeMap<String, super::super::config::LspServerConfig>,
@@ -593,6 +628,29 @@ mod tests {
             "test-server".to_owned(),
             super::super::config::LspServerConfig::default(),
         )]))
+    }
+
+    /// A bootstrap that ends in failure still answers whoever is waiting.
+    ///
+    /// `ensure_ready` parks on the coordinator's `notify` for as long as the
+    /// state reads `Starting`, so a bootstrap that stopped without moving the
+    /// state leaves every later LSP tool call waiting on a task that already
+    /// ended. A manager with no servers configured is that ending, with nothing
+    /// injected.
+    #[tokio::test]
+    async fn a_failed_bootstrap_answers_the_waiter_instead_of_stranding_it() {
+        let manager = Arc::new(TokioMutex::new(LspManager::default()));
+        let adapter = LspBackendAdapter::new(manager);
+
+        let outcome = tokio::time::timeout(Duration::from_secs(30), adapter.ensure_ready())
+            .await
+            .expect("the waiter must be answered, not left parked on a bootstrap that ended");
+        let error = outcome.expect_err("a manager with no language servers is not ready");
+        assert!(
+            error.contains("No LSP servers"),
+            "the failure must reach the caller as its own reason, got {error}"
+        );
+        assert!(!adapter.is_ready());
     }
 
     /// `ensure_started_background` is a warm-up, so a caller with no runtime to

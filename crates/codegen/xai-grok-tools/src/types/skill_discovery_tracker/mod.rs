@@ -17,7 +17,10 @@ use crate::implementations::skills::types::SkillInfo;
 use crate::types::compat::CompatConfig;
 
 use conditional::ConditionalSkills;
-use listing::{DEFAULT_SKILL_TOOL_NAME, SKILL_BUDGET_CONTEXT_PERCENT, format_announcement};
+use listing::{
+    DEFAULT_SKILL_TOOL_NAME, SKILL_BUDGET_CONTEXT_PERCENT, format_announcement,
+    listing_budget_chars,
+};
 
 pub use listing::{XmlRenderMode, format_announcement_xml, format_compaction_skill_listing};
 
@@ -320,8 +323,17 @@ impl SkillManager {
         skill_budget_percent: Option<f64>,
     ) {
         let percent = skill_budget_percent.unwrap_or(SKILL_BUDGET_CONTEXT_PERCENT);
-        self.listing_budget_chars =
-            context_window_tokens.map(|tokens| (tokens as f64 * 4.0 * percent) as usize);
+        self.listing_budget_chars = context_window_tokens.and_then(|tokens| {
+            listing_budget_chars(tokens, percent).or_else(|| {
+                tracing::error!(
+                    context_window_tokens = tokens,
+                    skill_budget_percent = percent,
+                    "skill listing budget has no representable char count; \
+                     falling back to the default budget"
+                );
+                None
+            })
+        });
         // Store the real cwd as string for path prefix rewriting.
         if let Some(ref display) = display_cwd {
             if let Some(ref c) = cwd {
@@ -1318,7 +1330,8 @@ mod tests {
             .collect();
         // 128k context window → budget = 128_000 * 4 * 0.5 = 256000 chars
         let context_window: u64 = 128_000;
-        let expected_budget = (context_window as f64 * 4.0 * SKILL_BUDGET_CONTEXT_PERCENT) as usize;
+        let expected_budget =
+            listing_budget_chars(context_window, SKILL_BUDGET_CONTEXT_PERCENT).unwrap();
         mgr.seed(None, None, skills, None, Some(context_window), None);
         let r = mgr.take_pending_reconciliation().unwrap();
         let text = r.effects.system_reminder.unwrap();
@@ -1342,7 +1355,8 @@ mod tests {
         // 300 token context window → budget = 300 * 4 * 0.5 = 600 chars.
         // 200 skills with 500-char descriptions can't fit.
         let context_window: u64 = 300;
-        let expected_budget = (context_window as f64 * 4.0 * SKILL_BUDGET_CONTEXT_PERCENT) as usize;
+        let expected_budget =
+            listing_budget_chars(context_window, SKILL_BUDGET_CONTEXT_PERCENT).unwrap();
         mgr.seed(None, None, skills, None, Some(context_window), None);
         let r = mgr.take_pending_reconciliation().unwrap();
         let text = r.effects.system_reminder.unwrap();
@@ -1367,6 +1381,30 @@ mod tests {
         let text = r.effects.system_reminder.unwrap();
         assert!(text.contains("desc for commit"));
         assert!(text.contains("desc for review"));
+    }
+
+    /// A window with no `usize` char count budgets at the default rather than
+    /// at a saturated count. A saturated budget truncates nothing, so the
+    /// listing would carry every description the session has.
+    #[test]
+    fn budget_cap_falls_back_to_the_default_for_an_unrepresentable_window() {
+        let mut mgr = SkillManager::new();
+        let skills: Vec<SkillInfo> = (0..2_000)
+            .map(|i| {
+                let mut s = make_skill(&format!("skill-{i}"), &format!("/s/{i}/SKILL.md"));
+                s.description = "A".repeat(500);
+                s
+            })
+            .collect();
+        mgr.seed(None, None, skills, None, Some(u64::MAX), None);
+        let r = mgr.take_pending_reconciliation().unwrap();
+        let text = r.effects.system_reminder.unwrap();
+        let default_budget = listing::DEFAULT_CHAR_BUDGET;
+        assert!(
+            text.len() <= default_budget + 100,
+            "listing should be near the default budget ({default_budget}), got {} chars",
+            text.len()
+        );
     }
 
     // ── XML format mode tests ───────────────────────────────────

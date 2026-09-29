@@ -120,6 +120,8 @@ pub fn encode_cwd_dirname(cwd: &str) -> String {
         return url_encoded.into_owned();
     }
     let hash = blake3::hash(cwd.as_bytes());
+    // A blake3 hex digest is `[0-9a-f]`, so any byte offset is a char boundary.
+    #[allow(clippy::string_slice)]
     let hash16 = &hash.to_hex()[..16];
     let leaf = std::path::Path::new(cwd)
         .file_name()

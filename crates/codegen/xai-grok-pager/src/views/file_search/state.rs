@@ -392,7 +392,10 @@ impl FileSearchState {
         // `context::detect`); step past that one char so typing resumes after
         // the directory.
         if no_op && !at_end {
-            cursor += src[range.end..].chars().next().map_or(1, char::len_utf8);
+            // `range.end` is an `AtContext` token end, a `char_indices` offset.
+            #[allow(clippy::string_slice)]
+            let step = src[range.end..].chars().next().map_or(1, char::len_utf8);
+            cursor += step;
         }
 
         Some(FileSearchReplacement {

@@ -86,7 +86,7 @@ fn same_path(a: &Path, b: &Path) -> bool {
     if a == b {
         return true;
     }
-    match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+    match (dunce::canonicalize(a), dunce::canonicalize(b)) {
         (Ok(ca), Ok(cb)) => ca == cb,
         _ => false,
     }

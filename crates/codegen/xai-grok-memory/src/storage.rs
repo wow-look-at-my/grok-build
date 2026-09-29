@@ -168,7 +168,7 @@ impl MemoryStorage {
         append: bool,
     ) -> std::io::Result<PathBuf> {
         let sessions_dir = self.sessions_dir();
-        let sid8 = &session_id[..session_id.len().min(8)];
+        let sid8 = xai_grok_tools::util::truncate_bytes(session_id, 8);
         let filename = format!("{date}-{slug}-{sid8}.md");
         let path = sessions_dir.join(&filename);
 
@@ -563,7 +563,10 @@ pub fn normalize_memory_content(raw: &str) -> String {
 
         // Multi-line → promote first line to heading if it's short enough.
         Some(pos) => {
+            // A `'\n'` byte offset is a char boundary, so both halves align.
+            #[allow(clippy::string_slice)]
             let first_line = trimmed[..pos].trim();
+            #[allow(clippy::string_slice)]
             let rest = trimmed[pos..].trim();
 
             if first_line.len() <= 80 {
@@ -638,6 +641,8 @@ fn compute_workspace_hash(cwd: &Path) -> String {
 
     let slug = if slug.is_empty() { "workspace" } else { &slug };
     let hash = blake3::hash(hash_input.as_bytes());
+    // blake3 hex digests are lowercase ASCII, so byte 8 is a boundary.
+    #[allow(clippy::string_slice)]
     let hash8 = &hash.to_hex()[..8];
 
     format!("{slug}-{hash8}")
@@ -664,8 +669,11 @@ pub(crate) fn extract_repo_identity(cwd: &Path) -> Option<String> {
 fn normalize_remote_url(url: &str) -> Option<String> {
     let path = if let Some(colon_pos) = url.find(':') {
         // SSH format: git@github.com:org/repo.git
-        if url[..colon_pos].contains('@') && !url[..colon_pos].contains('/') {
-            &url[colon_pos + 1..]
+        // `colon_pos` is an ASCII ':' offset, so it and `colon_pos + 1` align.
+        #[allow(clippy::string_slice)]
+        let (scheme, after_colon) = (&url[..colon_pos], &url[colon_pos + 1..]);
+        if scheme.contains('@') && !scheme.contains('/') {
+            after_colon
         } else {
             // HTTPS/SSH-with-scheme: https://github.com/org/repo.git
             url.split("//")

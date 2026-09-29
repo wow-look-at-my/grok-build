@@ -68,6 +68,9 @@ pub fn detect(text: &str, cursor: usize) -> Option<AtContext> {
 /// Like [`detect`], but treats whitespace *inside* `drill_prefix` (the path of
 /// the directory being drilled into) as part of the @-token, so `@my dir/` stays
 /// one token. Self-validating: inert once the path content stops matching it.
+// Every offset sliced on here is `cursor` (guarded by `is_char_boundary` above)
+// or an `rfind`/`char_indices` offset, stepped only past the ASCII `@` and `!`.
+#[allow(clippy::string_slice)]
 pub fn detect_with_drill(
     text: &str,
     cursor: usize,

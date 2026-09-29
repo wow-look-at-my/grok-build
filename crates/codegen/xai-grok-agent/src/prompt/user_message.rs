@@ -43,15 +43,14 @@ pub fn normalize_git_status(status: &str) -> Option<String> {
     if status.len() <= GIT_STATUS_CHARACTER_LIMIT {
         return Some(status.to_string());
     }
-    let mut end = GIT_STATUS_CHARACTER_LIMIT;
-    while !status.is_char_boundary(end) {
-        end -= 1;
-    }
-    let mut truncated = &status[..end];
+    let mut truncated = xai_grok_tools::util::truncate_bytes(status, GIT_STATUS_CHARACTER_LIMIT);
     if let Some(nl) = truncated.rfind('\n')
         && nl > 0
     {
-        truncated = &truncated[..nl];
+        // A `'\n'` byte offset is a char boundary.
+        #[allow(clippy::string_slice)]
+        let at_newline = &truncated[..nl];
+        truncated = at_newline;
     }
     Some(format!("{truncated}\n\n... (git status truncated)"))
 }

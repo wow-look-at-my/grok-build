@@ -19,3 +19,6 @@ xai-grok-version = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+
+[lints]
+workspace = true
