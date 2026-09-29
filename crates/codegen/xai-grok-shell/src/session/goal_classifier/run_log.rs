@@ -700,8 +700,14 @@ mod tests {
             .as_deref(),
             Some(".runlog.md")
         );
-        assert_eq!(goal_bookkeeping_target(r#"{"command":"cargo test -p foo"}"#, dir), None);
-        assert_eq!(goal_bookkeeping_target(r#"{"path":"src/lib.rs"}"#, dir), None);
+        assert_eq!(
+            goal_bookkeeping_target(r#"{"command":"cargo test -p foo"}"#, dir),
+            None
+        );
+        assert_eq!(
+            goal_bookkeeping_target(r#"{"path":"src/lib.rs"}"#, dir),
+            None
+        );
     }
 
     #[test]
