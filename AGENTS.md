@@ -29,6 +29,9 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - **Do not run `cargo test -p xai-grok-shell` in a web session.** Its test binary runs the disk out the same way. Run `cargo check -p xai-grok-shell --tests`, push, and read the shell tests' result from CI's `Build & test`.
 - `protoc` is missing from the image and the `bin/protoc` dotslash shim cannot run either, so any build that reaches `xai-grok-tools-api` dies in its build script. Run `apt-get install -y protobuf-compiler` first.
 - `mold` is missing too, and the repo's cargo config passes `-fuse-ld=mold`. Every build script then fails to link with `collect2: fatal error: cannot find 'ld'`, on `proc-macro2` and `libc` — which reads as a broken C toolchain and is not one. Run `apt-get install -y mold`.
+- **A local clippy run cannot measure the whole denied set, on macOS.** Code behind `#[cfg(target_os = "linux")]` is never compiled here, so clippy never reads it and a lint denied at workspace level reports nothing for it. The parent-death checks in `xai-tty-utils` and `xai-grok-workspace` are that shape (`getppid()` returning a `pid_t`, compared against a captured `u32`), and `clippy::cast_sign_loss` rejected them in CI while `cargo clippy --workspace --lib --bins` exited 0 on the Mac. A per-crate exception count generated on a Mac is therefore a floor, not a total. CI is the only complete measurement.
+- `Lint (workspace)` passes `--keep-going` for that reason. A denied lint is a compile error, which stops the crate that hit it and leaves every crate behind it unlinted; on a graph where several crates have Linux-only code, one CI cycle per crate is the alternative.
+- The runner's clippy is not the clippy on a development machine, and the lint tables differ between the two. Where a lint's verdict matters, read CI rather than concluding from a local run.
 
 ## `--sandbox` jail notes
 

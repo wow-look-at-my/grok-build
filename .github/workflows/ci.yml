@@ -129,9 +129,10 @@ jobs:
       # `--lib --bins` rather than `--all-targets` because that is what makes `unwrap_used` and `expect_used` mean what they are for. Those two lints exist to stop a panic on data from outside the process, and a test asserting on a value it just built is not that. Compiling the lib and the binaries leaves every `#[cfg(test)]` module out of the build, so the deny covers exactly the shipped code and a test module can still use `unwrap` without an attribute on it. Integration tests under `tests/` are a separate target and are linted by nothing here.
       #
       # `!cancelled()` keeps a test failure from hiding a lint failure, and the other way round.
+      # `--keep-going` because a denied lint stops the crate that hit it, and a crate behind it in the graph never gets compiled. The runner's clippy is not necessarily the clippy a developer has locally, and the lint tables differ between versions, so one crate's failure must not hide the crates whose hits this runner also finds. Without the flag that becomes one CI cycle per crate.
       - name: Lint (workspace)
         if: ${{ !cancelled() }}
-        run: cargo clippy --locked --workspace --lib --bins
+        run: cargo clippy --locked --workspace --lib --bins --keep-going
 
       # The PTY cases are #[ignore]d, so the run above built their binaries and skipped every case; this is the only thing that executes them. Same `--workspace` scope as the compile step on purpose: `-p xai-grok-pager` resolves its own feature set and rebuilds the graph instead of reusing target/. `!cancelled()` keeps a workspace-test failure from hiding a PTY failure.
       - name: Test (PTY end-to-end)

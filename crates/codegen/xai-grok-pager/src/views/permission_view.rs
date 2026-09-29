@@ -1119,6 +1119,9 @@ fn prepare_bash_display_text(command: &str) -> String {
     // Drop trailing blank lines (common when scripts end with `\n`)
     // but keep interior blank lines.
     while out.ends_with('\n') {
+        // The loop guard proves the last byte is a one-byte `'\n'`, so
+        // `len - 1` is a char boundary.
+        #[allow(clippy::string_slice)]
         let without = &out[..out.len() - 1];
         if without.ends_with('\\') {
             // Dangling `\` continuation at EOF: keep the backslash visible on
@@ -1151,6 +1154,11 @@ fn prepare_bash_display_text(command: &str) -> String {
 /// chunk boundaries are discovered lazily rather than materialized. The
 /// capped prefix is identical to the same rows of an uncapped call (packing
 /// is greedy left-to-right).
+// Every offset sliced on here is either a `bounds` value (the parse offsets
+// are filtered through `line.is_char_boundary` below, and the chain ends at
+// `line.len()`) or such an offset stepped over ASCII whitespace: all char
+// boundaries.
+#[allow(clippy::string_slice)]
 fn soft_wrap_row_texts<'a>(
     line: &'a str,
     line_start: usize,
@@ -1271,6 +1279,10 @@ fn soft_wrap_row_texts<'a>(
 /// is reached and break points are discovered lazily, so a huge unquoted
 /// line costs only the candidate rows actually considered — never a
 /// full-line width scan or a full break-offset allocation.
+// Every offset sliced on here is a `QuoteAwareBreakPoints` value (the start of
+// an ASCII whitespace run, so a boundary), `line.len()`, or one of those stepped
+// over ASCII whitespace: all char boundaries.
+#[allow(clippy::string_slice)]
 fn bash_quote_aware_wrap(line: &str, width: usize, max_rows: usize) -> Vec<&str> {
     if max_rows == 0 {
         return Vec::new();

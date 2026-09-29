@@ -478,6 +478,8 @@ fn render_search_bar_with_label_viewport(
         let cursor_limit = input_width.saturating_sub(1);
         let cursor_col = if let Some(viewport) = viewport {
             if !query.is_empty() {
+                // The range is a ratatui `visible_byte_range`, a char boundary.
+                #[allow(clippy::string_slice)]
                 let displayed = &query[viewport.visible_byte_range];
                 buf.set_span(
                     input_x,
@@ -493,6 +495,9 @@ fn render_search_bar_with_label_viewport(
             while cursor_byte > 0 && !query.is_char_boundary(cursor_byte) {
                 cursor_byte -= 1;
             }
+            // The loop above walks `cursor_byte` down to an `is_char_boundary`
+            // offset.
+            #[allow(clippy::string_slice)]
             let prefix_width = query[..cursor_byte].width();
             let (start_byte, cursor_col) = if prefix_width <= cursor_limit {
                 (0, prefix_width)
@@ -509,6 +514,9 @@ fn render_search_bar_with_label_viewport(
                 (start_byte, prefix_width - skipped_width)
             };
             if !query.is_empty() {
+                // `start_byte` is 0 or a `char_indices` offset stepped past one
+                // whole character.
+                #[allow(clippy::string_slice)]
                 let displayed = truncate_str(&query[start_byte..], cursor_limit);
                 buf.set_span(
                     input_x,
@@ -825,6 +833,9 @@ pub fn render_filter_indicator(
 /// Parse `[bracket]` highlight markers in a string into styled spans.
 /// Text inside `[...]` gets `highlight_style`, the rest gets `base_style`.
 /// Brackets are stripped from the output.
+// Both offsets are `find` results for an ASCII bracket, or one past such a
+// match, so every slice here starts and ends on a char boundary.
+#[allow(clippy::string_slice)]
 fn parse_highlight_spans<'a>(s: &'a str, base_style: Style, highlight_style: Style) -> Line<'a> {
     let mut spans = Vec::new();
     let mut rest = s;
@@ -863,12 +874,11 @@ fn render_styled_spans(buf: &mut Buffer, spans: &Line<'_>, x: u16, y: u16, max_w
         } else {
             let end = byte_offset_for_width(&span.content, avail);
             if end > 0 {
-                buf.set_span(
-                    cx,
-                    y,
-                    &Span::styled(&span.content[..end], span.style),
-                    avail as u16,
-                );
+                // `byte_offset_for_width` walks `char_indices`, so `end` is a
+                // char boundary.
+                #[allow(clippy::string_slice)]
+                let head = &span.content[..end];
+                buf.set_span(cx, y, &Span::styled(head, span.style), avail as u16);
             }
             break;
         }
@@ -947,6 +957,10 @@ pub struct RenderedRow {
 ///
 /// `bg` is the base background color (used in Floating mode popups).
 #[allow(clippy::too_many_arguments)]
+// Every offset sliced on here is a `byte_offset_for_width` output (a
+// `char_indices` offset or the string's length), `val.len()`, or one past an
+// ASCII `' '` that `rfind` matched: all char boundaries.
+#[allow(clippy::string_slice)]
 pub fn render_picker_row(
     buf: &mut Buffer,
     x: u16,
