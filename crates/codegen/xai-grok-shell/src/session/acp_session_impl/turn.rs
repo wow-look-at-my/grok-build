@@ -2321,7 +2321,7 @@ impl SessionActor {
                 })),
             );
             let model_timer = std::time::Instant::now();
-            let (response, latency) = match self.run_turn_via_sampler(request.clone()).await {
+            let (mut response, latency) = match self.run_turn_via_sampler(request.clone()).await {
                 Ok(SamplerTurnOutcome::Response(r, latency)) => (r, latency),
                 Err(error) => {
                     self.tool_context.fail_task_output_usage_closed();
@@ -2656,6 +2656,8 @@ impl SessionActor {
                     self.current_model_id().await,
                 );
             }
+            // Before the assistant item is recorded: history and the pager must both see the split calls.
+            let split_chains = self.split_joined_bash_calls(&mut response.items).await;
             let mut tool_calls = response.tool_calls().to_vec();
             metrics_drop_guard.record_model_response(tool_calls.len());
             if let Some(fp) = response
@@ -2836,7 +2838,9 @@ impl SessionActor {
             // single tool result can't by itself hand back more than what's
             // actually left of the window — see `reseed_context_budget_output_cap`.
             self.reseed_context_budget_output_cap().await;
-            let execute_tool_calls_result = self.execute_tool_calls(tool_call_responses).await;
+            let execute_tool_calls_result = self
+                .execute_tool_calls_with_chains(tool_call_responses, split_chains)
+                .await;
             match execute_tool_calls_result {
                 Ok(ToolLoop::PermissionReject { tool_name, reason }) => {
                     return Ok(TurnOutcome::Cancelled {

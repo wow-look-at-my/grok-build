@@ -353,25 +353,80 @@ impl SessionActor {
         &self,
         tool_calls: Vec<crate::sampling::types::ToolCallResponse>,
     ) -> Result<ToolLoop, acp::Error> {
+        self.execute_tool_calls_with_chains(tool_calls, Vec::new())
+            .await
+    }
+
+    /// Run `tool_calls`. Every member of a split chain after the first runs in
+    /// a later batch, after the member before it has finished.
+    pub(super) async fn execute_tool_calls_with_chains(
+        &self,
+        tool_calls: Vec<crate::sampling::types::ToolCallResponse>,
+        chains: Vec<super::command_split::SplitChain>,
+    ) -> Result<ToolLoop, acp::Error> {
+        use super::command_split::{ChainStep, chain_step};
         if let Some(cfg) = self.chat_state_handle.get_sampling_config().await {
             tracing::Span::current().record("model_id", cfg.model.as_str());
         }
         let mut final_result: Option<ToolLoop> = None;
         let mut deferred_followups: Vec<ConversationItem> = Vec::new();
-        if tool_calls.len() > 1 {
-            let kind_of = |name: &str| self.agent.borrow().tool_bridge().tool_kind(name);
-            let (body, tail) = split_exit_plan_tail(tool_calls, kind_of);
-            if !body.is_empty() {
-                self.execute_tool_calls_batch(body, &mut deferred_followups, &mut final_result)
-                    .await?;
+        let mut outcomes = std::collections::HashMap::new();
+        let followers: std::collections::HashSet<&str> = chains
+            .iter()
+            .flat_map(|c| c.members.iter().skip(1).map(|m| m.id.as_str()))
+            .collect();
+        let (first, later): (Vec<_>, Vec<_>) = tool_calls
+            .into_iter()
+            .partition(|call| !followers.contains(call.id.as_str()));
+        let mut later: std::collections::HashMap<String, _> = later
+            .into_iter()
+            .map(|call| (call.id.clone(), call))
+            .collect();
+        self.execute_tool_call_batches(
+            first,
+            &mut deferred_followups,
+            &mut final_result,
+            &mut outcomes,
+        )
+        .await?;
+        let depth = chains.iter().map(|c| c.members.len()).max().unwrap_or(0);
+        for step in 1..depth {
+            let mut batch = Vec::new();
+            for chain in &chains {
+                let (Some(member), Some(previous)) =
+                    (chain.members.get(step), chain.members.get(step - 1))
+                else {
+                    continue;
+                };
+                let Some(call) = later.remove(&member.id) else {
+                    continue;
+                };
+                // A cancelled turn cancels the rest in the batch, as it
+                // cancels any other call.
+                if final_result.is_some() {
+                    batch.push(call);
+                    continue;
+                }
+                match chain_step(
+                    outcomes.get(&previous.id).copied(),
+                    member.only_if_previous_succeeded,
+                ) {
+                    ChainStep::Run => batch.push(call),
+                    ChainStep::Skip { reason, outcome } => {
+                        outcomes.insert(member.id.clone(), outcome);
+                        self.skip_chain_call(call, reason).await?;
+                    }
+                }
             }
-            if !tail.is_empty() {
-                self.execute_tool_calls_batch(tail, &mut deferred_followups, &mut final_result)
-                    .await?;
-            }
-        } else {
-            self.execute_tool_calls_batch(tool_calls, &mut deferred_followups, &mut final_result)
+            if !batch.is_empty() {
+                self.execute_tool_call_batches(
+                    batch,
+                    &mut deferred_followups,
+                    &mut final_result,
+                    &mut outcomes,
+                )
                 .await?;
+            }
         }
         {
             let _span = if !deferred_followups.is_empty() {
@@ -396,12 +451,39 @@ impl SessionActor {
         }
         Ok(ToolLoop::Continue)
     }
+    /// Run one batch, with its ExitPlan-kind calls held back to run after the rest.
+    async fn execute_tool_call_batches(
+        &self,
+        tool_calls: Vec<crate::sampling::types::ToolCallResponse>,
+        deferred_followups: &mut Vec<ConversationItem>,
+        final_result: &mut Option<ToolLoop>,
+        outcomes: &mut std::collections::HashMap<String, super::command_split::CallOutcome>,
+    ) -> Result<(), acp::Error> {
+        if tool_calls.len() > 1 {
+            let kind_of = |name: &str| self.agent.borrow().tool_bridge().tool_kind(name);
+            let (body, tail) = split_exit_plan_tail(tool_calls, kind_of);
+            if !body.is_empty() {
+                self.execute_tool_calls_batch(body, deferred_followups, final_result, outcomes)
+                    .await?;
+            }
+            if !tail.is_empty() {
+                self.execute_tool_calls_batch(tail, deferred_followups, final_result, outcomes)
+                    .await?;
+            }
+        } else if !tool_calls.is_empty() {
+            self.execute_tool_calls_batch(tool_calls, deferred_followups, final_result, outcomes)
+                .await?;
+        }
+        Ok(())
+    }
+
     /// Prepare → dispatch → post-flight. Caller owns the outer tail flush.
     async fn execute_tool_calls_batch(
         &self,
         tool_calls: Vec<crate::sampling::types::ToolCallResponse>,
         deferred_followups: &mut Vec<ConversationItem>,
         final_result: &mut Option<ToolLoop>,
+        outcomes: &mut std::collections::HashMap<String, super::command_split::CallOutcome>,
     ) -> Result<(), acp::Error> {
         let mut approved: Vec<PreparedToolCall> = Vec::new();
         for call in tool_calls.into_iter() {
@@ -656,6 +738,21 @@ impl SessionActor {
                 Ok(tool_result) => tool_result.output.is_error(),
                 Err(_) => true,
             };
+            outcomes.insert(
+                prepared.call_id.clone(),
+                match &result {
+                    Ok(r)
+                        if matches!(
+                            r.output,
+                            xai_grok_tools::types::output::ToolOutput::BackgroundTaskStarted(_)
+                        ) =>
+                    {
+                        super::command_split::CallOutcome::Backgrounded
+                    }
+                    _ if tool_failed => super::command_split::CallOutcome::Failed,
+                    _ => super::command_split::CallOutcome::Succeeded,
+                },
+            );
             let tool_loop = match result {
                 Ok(tool_result) => {
                     let effective_tool_name = tool_result

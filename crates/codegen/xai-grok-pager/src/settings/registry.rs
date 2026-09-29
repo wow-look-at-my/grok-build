@@ -527,6 +527,7 @@ pub fn current_value_for(
             Some(SettingValue::Bool(ui.stop_gate_unfinished_todos_enabled()))
         }
         "stop_gate_ci_failing" => Some(SettingValue::Bool(ui.stop_gate_ci_failing_enabled())),
+        "split_and_tee_commands" => Some(SettingValue::Bool(ui.split_and_tee_commands_enabled())),
         // Resolved once per session in the shell; the pager keeps the `[ui]`
         // mirror so the row reads back what the next session will do.
         "thinking_summaries" => Some(SettingValue::Bool(ui.thinking_summaries_enabled())),
@@ -902,6 +903,13 @@ mod tests {
                         *default,
                         ui.stop_gate_ci_failing_enabled(),
                         "stop_gate_ci_failing default drifts from UiConfig::default()"
+                    );
+                }
+                ("split_and_tee_commands", SettingKind::Bool { default }) => {
+                    assert_eq!(
+                        *default,
+                        ui.split_and_tee_commands_enabled(),
+                        "split_and_tee_commands default drifts from UiConfig::default()"
                     );
                 }
                 ("combine_queued_prompts", SettingKind::Bool { default }) => {

@@ -46,6 +46,8 @@ use crate::types::resources::{
 use crate::types::template_renderer::TemplateRenderer;
 use crate::types::tool::{ToolKind, ToolNamespace};
 
+pub(crate) mod capture_report;
+pub mod command_plan;
 pub(crate) mod git_safety;
 
 #[derive(thiserror::Error, Debug)]
@@ -207,6 +209,9 @@ pub struct BashParams {
     /// not match the reminder wording.
     #[serde(default = "default_true")]
     pub surface_bg_completion_reminders: bool,
+    /// Experimental split-and-tee mode.
+    #[serde(default)]
+    pub capture_pipeline_stages: bool,
 }
 
 impl Default for BashParams {
@@ -222,6 +227,7 @@ impl Default for BashParams {
             max_block_until_ms: None,
             allow_background_operator: true,
             surface_bg_completion_reminders: true,
+            capture_pipeline_stages: false,
         }
     }
 }
@@ -2104,6 +2110,20 @@ impl xai_tool_runtime::Tool for BashTool {
                 clamp_foreground_block(timeout, config_timeout, max_foreground_block())
             };
 
+            // Split-and-tee: run a rewritten pipeline and show the model's own
+            // command everywhere a command is displayed.
+            let capture = (params.capture_pipeline_stages
+                && ampersand == AmpersandSemantics::PosixBackground)
+                .then(|| command_plan::plan_pipeline_capture(&input.command, &output_file))
+                .flatten();
+            let (command, display_command) = match &capture {
+                Some(plan) => (
+                    Self::get_prefixed_command(&params.cmd_prefix, &plan.command),
+                    Some(input.command.clone()),
+                ),
+                None => (command, display_command),
+            };
+
             let request = TerminalRunRequest {
                 command: command.clone(),
                 working_directory: cwd.clone(),
@@ -2270,6 +2290,31 @@ impl xai_tool_runtime::Tool for BashTool {
                     tracing::info_span!("git.pr_merge", tool_name = "run_terminal_cmd")
                         .in_scope(|| {});
                 }
+            }
+
+            if let Some(plan) = capture {
+                let read_back = {
+                    let res = resources.lock().await;
+                    capture_report::ReadBack::from_renderer(res.get::<TemplateRenderer>())
+                };
+                let log_file = output_file.clone();
+                let facts = {
+                    let plan = plan.clone();
+                    tokio::task::spawn_blocking(move || {
+                        capture_report::CaptureFacts::gather(&plan, &log_file)
+                    })
+                    .await
+                    .map_err(|e| {
+                        xai_tool_runtime::ToolError::custom("internal_error", e.to_string())
+                    })?
+                };
+                capture_report::apply(
+                    &mut bash,
+                    &plan,
+                    &facts,
+                    read_back.as_ref(),
+                    tool_call_id.as_str(),
+                );
             }
 
             Ok(BashToolOutput::Foreground(bash))
@@ -3063,6 +3108,153 @@ mod tests {
     }
 
     // ─── Tests ───
+
+    fn split_and_tee_resources() -> (SharedResources, tempfile::TempDir) {
+        let (mut resources, tmp) = make_real_resources(None);
+        resources.insert(Params(BashParams {
+            capture_pipeline_stages: true,
+            ..BashParams::default()
+        }));
+        (resources.into_shared(), tmp)
+    }
+
+    async fn task_output(
+        resources: &SharedResources,
+        input: xai_tool_types::TaskOutputToolInput,
+    ) -> String {
+        let out = xai_tool_runtime::Tool::run(
+            &crate::implementations::grok_build::task_output::TaskOutputTool,
+            test_ctx(resources.clone()),
+            input,
+        )
+        .await
+        .expect("get_task_output runs");
+        crate::types::output::ToolOutput::TaskOutput(out).to_prompt_format()
+    }
+
+    /// The real terminal runs the rewritten pipe: the trailing tail is a view, the first stage is kept whole.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn split_and_tee_keeps_every_stage_and_reads_them_back() {
+        let (resources, _tmp) = split_and_tee_resources();
+        let result = xai_tool_runtime::Tool::run(
+            &BashTool,
+            test_ctx_with_call_id(resources.clone(), "call_tee1"),
+            make_input("printf 'ok 1\\nFAIL a\\nok 2\\nFAIL b\\n' | grep FAIL | tail -n 1"),
+        )
+        .await
+        .unwrap();
+        let BashToolOutput::Foreground(bash) = result else {
+            panic!("expected foreground output");
+        };
+        assert_eq!(bash.exit_code, 0);
+        let (body, footer) = bash
+            .output_for_prompt
+            .split_once("\n\n[")
+            .expect("a footer follows the output");
+        assert_eq!(body, "exit: 0\nFAIL b\n");
+        assert!(
+            footer.contains("the last 1 of 2 lines shown"),
+            "{}",
+            bash.output_for_prompt
+        );
+        assert!(
+            footer.contains("stage 1 `printf 'ok 1\\nFAIL a\\nok 2\\nFAIL b\\n'`: exit 0, 4 lines"),
+            "{}",
+            bash.output_for_prompt
+        );
+        assert!(
+            footer.contains("stage 2 `grep FAIL`: exit 0, the output above"),
+            "{}",
+            bash.output_for_prompt
+        );
+        assert!(
+            footer.contains(r#"get_task_output("task_ids": ["call_tee1"], "stage": 1"#),
+            "{}",
+            bash.output_for_prompt
+        );
+
+        let stage = task_output(
+            &resources,
+            xai_tool_types::TaskOutputToolInput {
+                task_ids: vec!["call_tee1".into()],
+                stage: Some(1),
+                grep: Some("^ok".into()),
+                ..Default::default()
+            },
+        )
+        .await;
+        assert!(stage.contains("[2 of 4 lines match /^ok/; showing 2]"), "{stage}");
+        assert!(stage.contains("1: ok 1\n3: ok 2"), "{stage}");
+        assert!(stage.contains("Exit Code: 0"), "{stage}");
+
+        // The final log holds everything `| tail -n 1` would have thrown away.
+        let full = task_output(
+            &resources,
+            xai_tool_types::TaskOutputToolInput {
+                task_ids: vec!["call_tee1".into()],
+                tail: Some(5),
+                ..Default::default()
+            },
+        )
+        .await;
+        assert!(full.contains("FAIL a\nFAIL b"), "{full}");
+
+        let missing = task_output(
+            &resources,
+            xai_tool_types::TaskOutputToolInput {
+                task_ids: vec!["call_tee1".into()],
+                stage: Some(4),
+                ..Default::default()
+            },
+        )
+        .await;
+        assert!(missing.contains("no stage 4. Saved stages: 1."), "{missing}");
+    }
+
+    /// A stage that fails reports its own exit code, and the pipe's exit code is still the last stage's.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn split_and_tee_reports_each_stage_exit_code() {
+        let (resources, _tmp) = split_and_tee_resources();
+        let result = xai_tool_runtime::Tool::run(
+            &BashTool,
+            test_ctx_with_call_id(resources, "call_tee2"),
+            make_input("sh -c 'echo boom; exit 3' | cat"),
+        )
+        .await
+        .unwrap();
+        let BashToolOutput::Foreground(bash) = result else {
+            panic!("expected foreground output");
+        };
+        assert_eq!(bash.exit_code, 0);
+        assert!(
+            bash.output_for_prompt
+                .contains("stage 1 `sh -c 'echo boom; exit 3'`: exit 3, 1 line,"),
+            "{}",
+            bash.output_for_prompt
+        );
+        assert_eq!(bash.command, "sh -c 'echo boom; exit 3' | cat");
+    }
+
+    /// With the mode off, a pipe runs exactly as written.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn pipes_are_untouched_when_split_and_tee_is_off() {
+        let (resources, tmp) = make_real_resources(None);
+        let result = xai_tool_runtime::Tool::run(
+            &BashTool,
+            test_ctx_with_call_id(resources.into_shared(), "call_tee3"),
+            make_input("printf 'a\\nb\\n' | tail -n 1"),
+        )
+        .await
+        .unwrap();
+        let BashToolOutput::Foreground(bash) = result else {
+            panic!("expected foreground output");
+        };
+        assert_eq!(bash.output_for_prompt, "exit: 0\nb\n");
+        assert!(!tmp.path().join("terminal/call_tee3.stage1.log").exists());
+    }
 
     #[tokio::test]
     async fn foreground_command_success() {

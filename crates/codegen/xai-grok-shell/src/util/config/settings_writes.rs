@@ -36,6 +36,11 @@ pub async fn set_stop_gate_ci_failing(value: bool) -> Result<()> {
     update_config(|cfg| cfg.ui.stop_gate_ci_failing = Some(value)).await
 }
 
+/// Persist `[ui].split_and_tee_commands` via `update_config`.
+pub async fn set_split_and_tee_commands(value: bool) -> Result<()> {
+    update_config(|cfg| cfg.ui.split_and_tee_commands = Some(value)).await
+}
+
 /// Persist `[ui].stop_gate_unfinished_todos` via `update_config`.
 pub async fn set_stop_gate_unfinished_todos(value: bool) -> Result<()> {
     update_config(|cfg| cfg.ui.stop_gate_unfinished_todos = Some(value)).await
