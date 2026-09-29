@@ -1,7 +1,7 @@
 use super::*;
 
 impl SessionActor {
-    /// Summarize long thinking in `response`, keyed by its `stream_start_ms`.
+    /// Summarize the thinking in `response`, keyed by its `stream_start_ms`.
     pub(crate) fn spawn_thinking_summary(
         self: &Arc<Self>,
         response: &xai_grok_sampling_types::ConversationResponse,

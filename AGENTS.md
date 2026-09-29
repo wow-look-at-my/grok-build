@@ -155,6 +155,7 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - A mode change swaps the system prompt and the tool registry together. The shell never drops that swap. A swap that arrives while a turn runs waits in `ModeAgentState::pending` (`acp_session_impl/session_mode.rs`) and lands at turn end. A refused swap leaves the Explore prompt ("You have NO file editing tools") on a session the user already moved to Plan or Auto.
 - The shell owns the ring's base agent (`mode_agent_target`). A bare `plan`/`default`/`ask` that arrives while a ring identity is active restores the agent that ran before the ring. So a pager that lost its ring state cannot strand the session under Explore.
 - A read-only agent (`permission_mode: Plan`, which covers explore and plan) gets no injected `write` tool. Its prompt says it has no editing tools.
+- Explore carries the subagent tools, limited to `EXPLORE_SUBAGENT_TYPES` (`explore`, `plan`), so a child cannot write either. The limit rides `AgentDefinition::allowed_subagent_types`. The session writes it into a shared cell on every agent rebuild (`SharedAllowedSubagentTypes`). A value read once at spawn leaves a ring switch into explore unrestricted.
 
 ## `/goal` role-model notes
 
@@ -189,7 +190,8 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - Assistant prose and reasoning are left out on purpose. A verifier that reads the implementer's narration inherits its bias. A command line and its output carry none.
 - `GoalOrchestration::start_prompt_index` is the cut. A `User` item's `prompt_index` below it puts the calls that follow outside the goal. A compaction summary inside the goal is reported in the log header. The calls before it are gone from the conversation. So the verifier is told to run a missing plan step itself.
 - Each result keeps its head and its tail, because a test runner puts its verdict at the tail. Arguments are capped too. The whole log is capped and keeps the newest calls. The header states how many older calls it dropped. An absence then reads as an absence.
-- Every implementer-facing template (`goal_rules*.md`, `goal_continuation_directive*.md`, `goal_plan_block.md`, the planner prompt) says the run is the evidence and forbids proof files. `implementer_templates_never_ask_for_proof_files` pins that. The scratch dir stays, for temp scripts and a screenshot a plan step names.
+- Every implementer-facing template (`goal_rules*.md`, `goal_continuation_directive*.md`, `goal_plan_block.md`, the planner prompt) says the run is the evidence and forbids proof files. The scratch dir stays, for a screenshot a plan step names.
+- Every goal prompt (planner, implementer, verifier, strategist) bans hand-rolled check scripts, harnesses, probes and shims. Checks use the project's existing test runner, build and entry point.
 
 ## Verification does not widen the goal
 

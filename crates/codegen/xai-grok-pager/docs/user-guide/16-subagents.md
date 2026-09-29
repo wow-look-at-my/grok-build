@@ -87,7 +87,7 @@ The `spawn_subagent` tool accepts a `subagent_type` parameter that selects the c
 | Type              | Description                                          |
 | ----------------- | ---------------------------------------------------- |
 | `general-purpose` | Default type. Full-capability agent for any task.    |
-| `explore`         | Research agent. Searches, reads, greps, and runs shell commands, but does not edit files. Use it for codebase investigation. |
+| `explore`         | Research agent. Searches, reads and greps, and can spawn `explore` and `plan` subagents. It does not edit files or run shell commands. Use it for codebase investigation. |
 | `plan`            | Planning agent. Explores the codebase and produces a structured implementation plan; does not edit files. |
 
 Project- or user-defined agents can add new types or shadow these built-ins by name.
@@ -195,7 +195,7 @@ A capability mode is an optional, coarse filter on a subagent's tools:
 | `execute`    | Yes  | No    | Yes     | Read, plus run shell commands and background tasks. No file edits. |
 | `all`        | Yes  | Yes   | Yes     | Unrestricted tool access.                    |
 
-If you omit `capability_mode`, the subagent uses its agent type's toolset. The built-in `explore` and `plan` types read, search, and run shell commands but cannot edit files; `general-purpose` ships the full toolset.
+If you omit `capability_mode`, the subagent uses its agent type's toolset. The built-in `explore` and `plan` types read and search but cannot edit files or run shell commands; `general-purpose` ships the full toolset.
 
 ---
 

@@ -608,6 +608,28 @@ mod tests {
     use crate::implementations::lsp::LspBackend;
     use std::time::Duration;
 
+    fn adapter(
+        servers: std::collections::BTreeMap<String, super::super::config::LspServerConfig>,
+    ) -> LspBackendAdapter {
+        let manager = LspManager::new(
+            servers,
+            std::env::temp_dir(),
+            true,
+            crate::notification::ToolNotificationHandle::noop(),
+        );
+        LspBackendAdapter::new(Arc::new(TokioMutex::new(manager)))
+    }
+
+    /// A configured server keeps the adapter out of the "nothing to do" shape
+    /// without any process being spawned: the fix under test decides whether the
+    /// bootstrap task is created at all.
+    fn adapter_with_one_configured_server() -> LspBackendAdapter {
+        adapter(std::collections::BTreeMap::from([(
+            "test-server".to_owned(),
+            super::super::config::LspServerConfig::default(),
+        )]))
+    }
+
     /// A bootstrap that ends in failure still answers whoever is waiting.
     ///
     /// `ensure_ready` parks on the coordinator's `notify` for as long as the
@@ -629,28 +651,6 @@ mod tests {
             "the failure must reach the caller as its own reason, got {error}"
         );
         assert!(!adapter.is_ready());
-    }
-
-    fn adapter(
-        servers: std::collections::BTreeMap<String, super::super::config::LspServerConfig>,
-    ) -> LspBackendAdapter {
-        let manager = LspManager::new(
-            servers,
-            std::env::temp_dir(),
-            true,
-            crate::notification::ToolNotificationHandle::noop(),
-        );
-        LspBackendAdapter::new(Arc::new(TokioMutex::new(manager)))
-    }
-
-    /// A configured server keeps the adapter out of the "nothing to do" shape
-    /// without any process being spawned: the fix under test decides whether the
-    /// bootstrap task is created at all.
-    fn adapter_with_one_configured_server() -> LspBackendAdapter {
-        adapter(std::collections::BTreeMap::from([(
-            "test-server".to_owned(),
-            super::super::config::LspServerConfig::default(),
-        )]))
     }
 
     /// `ensure_started_background` is a warm-up, so a caller with no runtime to
