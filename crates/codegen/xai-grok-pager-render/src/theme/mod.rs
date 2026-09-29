@@ -196,6 +196,7 @@ impl Theme {
             command: q(self.command),
             path: q(self.path),
             running: q(self.running),
+            thinking_summary: q(self.thinking_summary),
             warning: q(self.warning),
 
             fuzzy_accent: q(self.fuzzy_accent),
@@ -602,6 +603,8 @@ impl Theme {
             // ANSI16 has no separate teal slot, so the truecolor teal model accent folds onto cyan here.
             accent_model: cyan,
             running: cyan,
+            // The dark slot on both polarities: it reads on black and on white.
+            thinking_summary: Color::Cyan,
             // Yellow family — warning text, plan-mode gold, shell
             // commands, file paths. ANSI16 has no orange or gold slot,
             // so warm accents all fold onto yellow.

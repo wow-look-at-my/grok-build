@@ -58,6 +58,7 @@ impl Theme {
             command: GOLD,
             path: ROSE,
             running: FOAM,
+            thinking_summary: rgb(86, 148, 159),
             warning: GOLD,
 
             fuzzy_accent: PINE,
