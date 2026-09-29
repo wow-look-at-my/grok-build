@@ -127,7 +127,10 @@ pub(crate) fn apply(
         };
         let raw = String::from_utf8_lossy(&bash.output);
         let stripped = strip_ansi_escapes::strip_str(&raw);
-        bash.output_for_prompt = format!("{header}\n{}", view.apply(&stripped));
+        bash.output_for_prompt = format!(
+            "{header}\n{}",
+            BashOutput::make_output_for_prompt(view.apply(&stripped))
+        );
     }
     bash.output_for_prompt
         .push_str(&footer(plan, facts, read_back, task_id, &bash.output_file));
@@ -142,16 +145,16 @@ fn footer(
 ) -> String {
     let mut out = String::from("\n");
     if let Some(view) = plan.tail_view {
-        let total = facts
-            .output
-            .map_or_else(|| "?".to_string(), |c| c.lines.to_string());
-        let shown = match view {
-            TailView::Last(n) => format!("the last {n}"),
-            TailView::From(n) => format!("from line {n}"),
+        let total = facts.output.map(|c| c.lines);
+        let shown = match (view, total) {
+            (TailView::Last(n), Some(t)) if t <= n as u64 => format!("all {t} lines shown"),
+            (TailView::Last(n), Some(t)) => format!("the last {n} of {t} lines shown"),
+            (TailView::From(n), Some(t)) => format!("line {n} on, of {t} lines, shown"),
+            (TailView::Last(n), None) => format!("the last {n} lines shown"),
+            (TailView::From(n), None) => format!("line {n} on shown"),
         };
         out.push_str(&format!(
-            "\n[`{}` ran as a view over the kept output: {shown} of {total} lines shown. The exit \
-			 code is `{}`'s own.]",
+            "\n[`{}` ran as a view over the kept output: {shown}. The exit code is `{}`'s own.]",
             view.describe(),
             short(&plan.final_stage),
         ));

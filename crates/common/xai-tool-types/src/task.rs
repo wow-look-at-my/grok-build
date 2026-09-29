@@ -1452,6 +1452,12 @@ pub fn build_task_output_description(naming: &TaskOutputToolNaming) -> String {
         Some(r) => format!("\n- If output is large, use {r} on the output_file path"),
         None => String::new(),
     };
+    // The views read terminal logs, which only a command tool writes.
+    let view_note = if bash_background_param.is_some() {
+        "\n- head, tail and grep read the whole saved log of one command, and stage reads one stage of a piped command. Use them to see more of an output instead of running the command again. A finished command's result names its id when its log can be read this way"
+    } else {
+        ""
+    };
     let wait_cap = MAX_WAIT_MS_PLACEHOLDER;
 
     format!(
@@ -1459,8 +1465,7 @@ pub fn build_task_output_description(naming: &TaskOutputToolNaming) -> String {
          Usage notes:\n\
          - Pass {task_ids_param} with one or more ids from {sources}{monitor_note}; for a single task use a one-element array. Multiple ids with a positive {timeout_ms_param} wait until all complete\n\
          - Omit {timeout_ms_param} or pass 0 for a non-blocking status snapshot; set a positive {timeout_ms_param} to wait up to that many milliseconds, capped at {wait_cap}\n\
-         - Returns current output, status, and exit code if completed{read_note}\n\
-         - head, tail and grep read the whole saved log of one task, and stage reads one stage of a piped command. Use them to see more of an output instead of running the command again. A finished command's result names its id when its log can be read this way"
+         - Returns current output, status, and exit code if completed{read_note}{view_note}"
     )
 }
 
@@ -2191,7 +2196,8 @@ mod tests {
              - Pass task_ids with one or more ids from background=true commands or subagents (a monitor's task_id is returned by monitor); for a single task use a one-element array. Multiple ids with a positive timeout_ms wait until all complete\n\
              - Omit timeout_ms or pass 0 for a non-blocking status snapshot; set a positive timeout_ms to wait up to that many milliseconds, capped at {max_wait_ms}\n\
              - Returns current output, status, and exit code if completed\n\
-             - If output is large, use read_file on the output_file path"
+             - If output is large, use read_file on the output_file path\n\
+             - head, tail and grep read the whole saved log of one command, and stage reads one stage of a piped command. Use them to see more of an output instead of running the command again. A finished command's result names its id when its log can be read this way"
         );
     }
 

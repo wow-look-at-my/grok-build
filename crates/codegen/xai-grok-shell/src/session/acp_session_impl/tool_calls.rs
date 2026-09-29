@@ -428,6 +428,17 @@ impl SessionActor {
                 .await?;
             }
         }
+        // A call the model made must always get a result, even one that no
+        // chain step reached.
+        if !later.is_empty() {
+            self.execute_tool_call_batches(
+                later.into_values().collect(),
+                &mut deferred_followups,
+                &mut final_result,
+                &mut outcomes,
+            )
+            .await?;
+        }
         {
             let _span = if !deferred_followups.is_empty() {
                 Some(

@@ -15,10 +15,10 @@ use super::setters::{
     set_screen_mode_inner, set_scroll_lines_inner, set_scroll_mode_inner, set_scroll_speed_inner,
     set_show_thinking_blocks_inner, set_show_tips_inner, set_simple_mode_inner,
     set_split_and_tee_commands_inner, set_stop_gate_ci_failing_inner,
-    set_stop_gate_unfinished_todos_inner, set_theme_inner,
-    set_thinking_summaries_inner, set_timeline_inner, set_timestamps, set_timestamps_inner,
-    set_ttft_timeout_secs_inner, set_vim_mode_inner, set_voice_capture_mode_inner,
-    set_voice_keybind_enabled_inner, set_voice_stt_language_inner,
+    set_stop_gate_unfinished_todos_inner, set_theme_inner, set_thinking_summaries_inner,
+    set_timeline_inner, set_timestamps, set_timestamps_inner, set_ttft_timeout_secs_inner,
+    set_vim_mode_inner, set_voice_capture_mode_inner, set_voice_keybind_enabled_inner,
+    set_voice_stt_language_inner,
 };
 use crate::app::actions::{Action, Effect};
 use crate::app::app_view::{ActiveView, AppView};

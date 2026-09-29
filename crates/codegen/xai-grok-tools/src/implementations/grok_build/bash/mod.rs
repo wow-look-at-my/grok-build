@@ -2329,6 +2329,7 @@ impl xai_tool_runtime::Tool for BashTool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::tool_metadata::test_ctx_with_call_id;
     #[test]
     fn bash_timeout_schema_defaults_to_120s() {
         let schema = serde_json::to_value(schemars::schema_for!(BashToolInput)).unwrap();
@@ -3184,7 +3185,10 @@ mod tests {
             },
         )
         .await;
-        assert!(stage.contains("[2 of 4 lines match /^ok/; showing 2]"), "{stage}");
+        assert!(
+            stage.contains("[2 of 4 lines match /^ok/; showing 2]"),
+            "{stage}"
+        );
         assert!(stage.contains("1: ok 1\n3: ok 2"), "{stage}");
         assert!(stage.contains("Exit Code: 0"), "{stage}");
 
@@ -3209,7 +3213,10 @@ mod tests {
             },
         )
         .await;
-        assert!(missing.contains("no stage 4. Saved stages: 1."), "{missing}");
+        assert!(
+            missing.contains("no stage 4. Saved stages: 1."),
+            "{missing}"
+        );
     }
 
     /// A stage that fails reports its own exit code, and the pipe's exit code is still the last stage's.
