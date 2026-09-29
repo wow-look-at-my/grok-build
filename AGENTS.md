@@ -142,6 +142,8 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - `/debug <question>` injects the question plus an execution-context snapshot (`slash/commands/debug_context.rs`) through `CommandResult::InjectSkill`. Only `scroll`, `fps` and `log` are reserved. Everything else is free text. So a question must never come back as an "unknown option" error again.
 - Staleness is `current_exe()` versus a canonicalized `$GROK_HOME/bin/grok`. `current_exe()` resolves the symlink at exec time, so after an update the two disagree and the block says the running process is not what is on disk. Both sides must stay canonicalized or every symlinked install reads as stale.
 - `GROK_*`/`XAI_*` values whose NAME looks like a credential are withheld — the prompt leaves the session and lands in the model's transcript.
+- `/debug` turns the firehose on. With no `GROK_DEBUG_LOG`/`GROK_LOG_FILE`, `install_firehose` installs the routing layer DORMANT behind `RuntimeGate`, and `debug_log::enable_firehose` wakes it. Spans pass the gate while it is closed. The routing layer must see a session span when it opens, or that session's later events go to the fallback file.
+- The agent can be a separate leader process, so the pager's switch does not reach it. The `/debug` prompt block carries `ENABLE_FIREHOSE_META`, and the shell's `prompt` handler calls `enable_firehose` on it. Events before the switch are not in the log. The injected context says so.
 
 ## Shift+Tab mode ring notes
 

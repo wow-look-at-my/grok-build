@@ -273,6 +273,9 @@ impl DebugContext {
              this process wrote, and it usually names the subsystem that made the \
              decision. Search it for the value, flag, or model id the user is asking \
              about instead of reading it end to end.\n\
+             - The log row says whether the firehose ran since launch or only since \
+             this /debug. If it only just started, the failure the user saw is not in \
+             it: ask the user to reproduce the problem now, then read the log.\n\
              - Read the config files listed above, every layer of them: a value the \
              user did not choose usually came from one of those files, from a \
              GROK_*/XAI_* variable, or from a built-in default in the binary.\n\
@@ -282,8 +285,8 @@ impl DebugContext {
              - Run things. The binary path above with `--version`, a listing of its \
              directory, a grep over the log, a read of the config — you have shell and \
              file tools here and they answer these questions in seconds. If the log is \
-             empty the firehose was off: say so and ask for a relaunch with \
-             GROK_DEBUG_LOG=1 rather than inventing an answer from nothing.\n\
+             still empty after a repro, say so and quote its row above rather than \
+             inventing an answer from nothing.\n\
              - If a source checkout of grok is available, verify against the source \
              for this commit; otherwise reason from the binary, the config, and the \
              log, and say which one you used.\n\
