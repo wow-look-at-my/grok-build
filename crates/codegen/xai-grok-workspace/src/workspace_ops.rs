@@ -896,10 +896,19 @@ impl WorkspaceOp for FuzzyChangeReq {
         let ws = ws.clone();
         let search_id = self.search_id.clone();
         let limit = self.limit.unwrap_or(100);
-        tokio::spawn(async move {
-            ws.run_fuzzy_notifications(search_id, min_generation, has_query, query_version, limit)
+        tokio::spawn(xai_grok_tools::util::detached::fire_and_forget(
+            "fuzzy search notifications",
+            async move {
+                ws.run_fuzzy_notifications(
+                    search_id,
+                    min_generation,
+                    has_query,
+                    query_version,
+                    limit,
+                )
                 .await;
-        });
+            },
+        ));
         Ok(true)
     }
 }

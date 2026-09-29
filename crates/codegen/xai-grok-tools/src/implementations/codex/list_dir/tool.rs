@@ -249,8 +249,7 @@ fn format_entry_component(name: &std::ffi::OsStr) -> String {
 
 /// Truncate a string at a char boundary, returning at most `max_bytes` bytes.
 fn take_at_char_boundary(s: &str, max_bytes: usize) -> &str {
-    let end = crate::util::floor_char_boundary(s, max_bytes);
-    &s[..end]
+    crate::util::truncate_bytes(s, max_bytes)
 }
 
 // ─── Tests ──────────────────────────────────────────────────────────

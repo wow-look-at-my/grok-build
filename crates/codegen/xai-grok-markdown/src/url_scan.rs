@@ -48,8 +48,13 @@ pub(crate) fn detect_plain_urls_with_offset(
             let span_text: &str = span.content.as_ref();
 
             for link in finder.links(span_text) {
-                let before = &span_text[..link.start()];
-                let matched = &span_text[link.start()..link.end()];
+                // `link.as_str()` is linkify's own `&text[start..end]` over these
+                // same offsets, so both are char boundaries by construction.
+                #[allow(clippy::string_slice)]
+                let (before, matched) = (
+                    &span_text[..link.start()],
+                    &span_text[link.start()..link.end()],
+                );
 
                 let col_start = display_col + unicode_display_width(before);
                 let col_end = col_start + unicode_display_width(matched);

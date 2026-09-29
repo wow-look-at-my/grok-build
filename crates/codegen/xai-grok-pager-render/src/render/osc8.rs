@@ -452,7 +452,12 @@ fn push_link_segments(
         if start >= end {
             continue;
         }
+        // Row bounds are accumulated `span.content.len()` values of this same
+        // joined text, and `match_range` is a `regex::Match` range, so every
+        // bound below is a char boundary and so is their max/min.
+        #[allow(clippy::string_slice)] // span-boundary start through a regex match start
         let col_start = UnicodeWidthStr::width(&text[row.start..start]);
+        #[allow(clippy::string_slice)] // regex match start through a regex match end
         let col_end = col_start + UnicodeWidthStr::width(&text[start..end]);
         let (Some(cs), Some(ce)) = (
             to_overlay_col(content_x, col_start),

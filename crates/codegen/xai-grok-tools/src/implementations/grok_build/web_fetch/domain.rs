@@ -58,8 +58,11 @@ impl DomainMatcher {
                 continue;
             }
 
-            // Split on first '/' to separate host from optional path.
+            // Split on first '/' to separate host from optional path. The
+            // separator is an ASCII byte, so `i` is a char boundary and both
+            // halves align.
             let (host, path) = match normalized.find('/') {
+                #[allow(clippy::string_slice)]
                 Some(i) => (normalized[..i].to_owned(), Some(&normalized[i..])),
                 None => (normalized, None),
             };

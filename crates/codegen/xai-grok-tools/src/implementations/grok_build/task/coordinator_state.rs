@@ -777,14 +777,10 @@ pub fn cap_completion_output(output: &Arc<str>, cap: usize) -> Arc<str> {
     if output.len() <= cap {
         return output.clone();
     }
-    let mut end = cap;
-    while end > 0 && !output.is_char_boundary(end) {
-        end -= 1;
-    }
+    let kept = crate::util::truncate_bytes(output, cap);
+    let end = kept.len();
     Arc::from(format!(
-        "{}\n[output truncated: {} of {} bytes shown]",
-        &output[..end],
-        end,
+        "{kept}\n[output truncated: {end} of {} bytes shown]",
         output.len()
     ))
 }

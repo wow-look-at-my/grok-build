@@ -648,12 +648,13 @@ fn parse_dump(shell: ShellKind, raw: &str) -> Option<(PathBuf, String)> {
     }
 
     // Strip markers
-    let without_markers = &raw[start_line.len()..raw.len() - end_line.len()];
+    let without_markers = raw.strip_prefix(&start_line)?.strip_suffix(&end_line)?;
 
     // First line is $PWD
     let newline_pos = without_markers.find('\n')?;
-    let cwd = &without_markers[..newline_pos];
-    let rest = &without_markers[newline_pos..]; // includes the leading \n
+    // `newline_pos` is the offset of a `\n`, so splitting there is on a boundary;
+    // `rest` keeps the leading `\n`.
+    let (cwd, rest) = without_markers.split_at(newline_pos);
 
     Some((PathBuf::from(cwd), rest.to_string()))
 }
@@ -662,10 +663,9 @@ fn parse_dump(shell: ShellKind, raw: &str) -> Option<(PathBuf, String)> {
 /// If the marker is not found, returns the full output.
 fn parse_after_marker<'a>(output: &'a str, marker: &str) -> &'a str {
     let needle = format!("{marker}\n");
-    match output.find(&needle) {
-        Some(idx) => &output[idx + needle.len()..],
-        None => output,
-    }
+    output
+        .split_once(&needle)
+        .map_or(output, |(_before, after)| after)
 }
 
 /// Write the snapshot to the state-in pipe, then close the fd.
@@ -915,7 +915,7 @@ mod tests {
         assert!(
             state.snapshot.contains("grok_snap_") || state.snapshot.is_empty(),
             "snapshot should contain encoded blocks or be empty: {:?}",
-            &state.snapshot[..state.snapshot.len().min(200)]
+            crate::util::truncate_bytes(&state.snapshot, 200)
         );
     }
 
@@ -977,7 +977,7 @@ mod tests {
         assert!(
             state.update_from_dump(&dump),
             "dump should have valid markers, got: {:?}",
-            &dump[..dump.len().min(500)]
+            crate::util::truncate_bytes(&dump, 500)
         );
         // The snapshot contains base64-encoded env vars, so the variable name
         // won't appear in plaintext. Verify the dump was valid and non-empty.

@@ -217,7 +217,11 @@ impl AgentView {
             Style::default().fg(theme.text_secondary)
         };
         if show_hint {
-            let button = format!("{}{KEY_HINT}]", &connect_label[..connect_label.len() - 1]);
+            // The label is the trailing `]` re-added below, so dropping it by
+            // suffix keeps this a boundary-safe cut whatever the label turns out
+            // to be (`[Install]` / `[Retry]`).
+            let stem = connect_label.strip_suffix(']').unwrap_or(connect_label);
+            let button = format!("{stem}{KEY_HINT}]");
             buf.set_span_safe(
                 connect_x,
                 area.y,

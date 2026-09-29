@@ -45,6 +45,9 @@ fn parse_to_events(input: &str) -> Result<Vec<KeyEvent>> {
             // Try to parse a special key notation.
             let start_pos: String = chars.clone().collect();
             if let Some(end) = start_pos.find('>') {
+                // The first character is the ASCII '<' this branch matched and
+                // `end` is the offset of an ASCII '>', so both bounds align.
+                #[allow(clippy::string_slice)] // between two matched ASCII delimiters
                 let notation = &start_pos[1..end]; // between < and >
                 // Consume chars including the >.
                 for _ in 0..=end {

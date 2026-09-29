@@ -10,6 +10,8 @@ pub const BEARER_SUFFIX_LEN: usize = 12;
 /// tokens from `auth.json` or an auth-provider command are not ASCII-safe.
 pub fn bearer_suffix(s: &str) -> &str {
     match s.char_indices().rev().nth(BEARER_SUFFIX_LEN - 1) {
+        // `char_indices` reports the offset a character starts at.
+        #[allow(clippy::string_slice)]
         Some((i, _)) => &s[i..],
         None => s,
     }

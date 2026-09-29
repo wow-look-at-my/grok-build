@@ -1,3 +1,4 @@
+#![allow(clippy::cast_lossless)] // 1 hit predates the gate
 #![allow(
     unused_imports,
     unused_variables,
@@ -20,12 +21,47 @@ use serde::{Deserialize, Serialize};
 use xai_grok_announcements::RemoteAnnouncement;
 /// A remote `campaigns[]` entry: an `id` gate plus a full-power
 /// flattened config patch (the JSON sibling of a `[[campaigns]]` TOML override).
+///
+/// The entry arrives over the wire, so `campaign_id` is folded through
+/// [`CampaignOverride::ID_KEYS`] rather than read as a serde alias: an
+/// `#[serde(alias)]` makes a second key a `duplicate field` error even when the
+/// two carry one value, which would drop the whole campaign.
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(try_from = "CampaignOverrideWire")]
 pub struct CampaignOverride {
-    #[serde(default, alias = "campaign_id")]
     pub id: Option<String>,
     #[serde(flatten, default)]
     pub patch: serde_json::Map<String, serde_json::Value>,
+}
+
+impl CampaignOverride {
+    /// The keys [`id`](Self::id) is read under. The first is what this type
+    /// writes; `campaign_id` is the TOML sibling's spelling.
+    pub const ID_KEYS: xai_tool_types::Aliases =
+        xai_tool_types::Aliases::new("id", &["campaign_id"]);
+}
+
+/// `CampaignOverride` as it arrives, with each id spelling its own field so the
+/// flattened patch keeps everything else.
+#[derive(Debug, Default, Deserialize)]
+struct CampaignOverrideWire {
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default, rename = "campaign_id")]
+    campaign_id: Option<String>,
+    #[serde(flatten, default)]
+    patch: serde_json::Map<String, serde_json::Value>,
+}
+
+impl TryFrom<CampaignOverrideWire> for CampaignOverride {
+    type Error = xai_tool_types::AliasConflict;
+
+    fn try_from(wire: CampaignOverrideWire) -> Result<Self, Self::Error> {
+        Ok(Self {
+            id: CampaignOverride::ID_KEYS.fold(vec![wire.id, wire.campaign_id])?,
+            patch: wire.patch,
+        })
+    }
 }
 /// Doom-loop recovery settings: ONE struct serves both the local
 /// `[doom_loop_recovery]` TOML table and the remote settings
@@ -1232,6 +1268,56 @@ pub struct GoalRoleModel {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A `campaigns[]` entry from the settings service may name its gate under
+    /// either key. A bare `#[serde(alias)]` made an entry that named both a
+    /// `duplicate field` error, which costs the whole campaign patch.
+    #[test]
+    fn a_remote_campaign_names_its_id_under_either_key() {
+        let canonical: CampaignOverride = serde_json::from_str(r#"{"id":"c1","a":1}"#).unwrap();
+        let legacy: CampaignOverride =
+            serde_json::from_str(r#"{"campaign_id":"c1","a":1}"#).unwrap();
+        assert_eq!(canonical.id.as_deref(), Some("c1"));
+        assert_eq!(canonical, legacy);
+    }
+
+    #[test]
+    fn a_remote_campaign_naming_id_both_ways_under_one_value_parses_once() {
+        let both: CampaignOverride =
+            serde_json::from_str(r#"{"id":"c1","campaign_id":"c1","a":1}"#)
+                .expect("one id named twice is one id");
+        assert_eq!(both.id.as_deref(), Some("c1"));
+        assert_eq!(
+            both.patch.get("a").cloned(),
+            Some(serde_json::Value::from(1)),
+            "the flattened patch must keep the keys that are not the id"
+        );
+    }
+
+    /// Two different ids in one entry decide which campaign applies, so neither
+    /// key may win in silence.
+    #[test]
+    fn a_remote_campaign_whose_id_spellings_disagree_is_an_error_naming_the_field() {
+        let err = serde_json::from_str::<CampaignOverride>(r#"{"id":"a","campaign_id":"b"}"#)
+            .expect_err("conflicting campaign ids must not resolve silently");
+        let message = err.to_string();
+        assert!(message.contains("id"), "{message}");
+        assert!(message.contains("campaign_id"), "{message}");
+    }
+
+    /// The patch is what a campaign carries, so `campaign_id` must not be left
+    /// behind in it as just another key.
+    #[test]
+    fn a_remote_campaign_writes_the_canonical_id_and_never_the_alias() {
+        let json = serde_json::to_value(CampaignOverride {
+            id: Some("c1".into()),
+            patch: serde_json::Map::from_iter([("a".into(), serde_json::Value::from(1))]),
+        })
+        .unwrap();
+        assert_eq!(json["id"], "c1");
+        assert!(json.get("campaign_id").is_none(), "{json}");
+    }
+
     #[test]
     fn worktree_auto_gc_partial_object_and_round_trip() {
         let json = r#"{"worktree_auto_gc":{"enabled":false}}"#;

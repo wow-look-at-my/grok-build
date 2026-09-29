@@ -1,3 +1,5 @@
+#![allow(clippy::expect_used)] // 1 hit predates the gate
+
 mod sanitizer;
 
 pub use sanitizer::{

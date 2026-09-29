@@ -260,6 +260,9 @@ fn split_statements(command: &str) -> Vec<&str> {
             0
         };
         if sep_len > 0 {
+            // `i` is a `char_indices` offset of an ASCII separator and `start`
+            // is 0 or such an offset plus the separator's width.
+            #[allow(clippy::string_slice)]
             let stmt = command[start..i].trim();
             if !stmt.is_empty() {
                 out.push(stmt);
@@ -268,6 +271,8 @@ fn split_statements(command: &str) -> Vec<&str> {
             continue;
         }
     }
+    // Same walk: `start` is a separator boundary or 0.
+    #[allow(clippy::string_slice)]
     let stmt = command[start..].trim();
     if !stmt.is_empty() {
         out.push(stmt);

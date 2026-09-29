@@ -51,6 +51,10 @@ fn decode_managed_toml(encoded: &str) -> Option<toml::Value> {
         .decode(compact.as_bytes())
         .map_err(|e| tracing::warn!("managed preference is not valid base64: {e}"))
         .ok()?;
+    // A managed preference has to be UTF-8 TOML to mean anything: decoding a
+    // non-UTF-8 payload lossily would parse replacement characters instead of
+    // rejecting the profile, so `None` is the answer here.
+    #[allow(clippy::disallowed_methods)]
     let toml_str = String::from_utf8(decoded)
         .map_err(|e| tracing::warn!("managed preference is not valid UTF-8: {e}"))
         .ok()?;

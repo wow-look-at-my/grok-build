@@ -1,5 +1,5 @@
 use super::types::{BATCH_TRUNCATION_LIMIT, BUFFER_CAP_BYTES, LINE_TRUNCATION_LIMIT};
-use crate::util::floor_char_boundary;
+use crate::util::truncate_bytes;
 
 /// Processes raw stdout chunks into complete lines.
 ///
@@ -53,8 +53,8 @@ impl LineProcessor {
 
 fn truncate_line(line: &str) -> String {
     if line.len() > LINE_TRUNCATION_LIMIT {
-        let boundary = floor_char_boundary(line, LINE_TRUNCATION_LIMIT);
-        format!("{}...(truncated)", &line[..boundary])
+        let boundary = truncate_bytes(line, LINE_TRUNCATION_LIMIT);
+        format!("{}...(truncated)", boundary)
     } else {
         line.to_string()
     }
@@ -64,8 +64,8 @@ fn truncate_line(line: &str) -> String {
 pub fn batch_lines(lines: &[String]) -> String {
     let joined = lines.join("\n");
     if joined.len() > BATCH_TRUNCATION_LIMIT {
-        let boundary = floor_char_boundary(&joined, BATCH_TRUNCATION_LIMIT);
-        format!("{}\n...(truncated)", &joined[..boundary])
+        let boundary = truncate_bytes(&joined, BATCH_TRUNCATION_LIMIT);
+        format!("{boundary}\n...(truncated)")
     } else {
         joined
     }

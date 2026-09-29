@@ -469,7 +469,11 @@ fn build_confusable_hint(
     let norm_start = norm_file.find(&norm_old)?;
     let orig_start = offset_map[norm_start];
     let orig_end = offset_map[norm_start + norm_old.len()];
+    // Both offsets are `build_offset_map` entries indexed at a normalized char
+    // boundary, which map back to the start byte of an original character.
+    #[allow(clippy::string_slice)]
     let match_start_line = file[..orig_start].matches('\n').count() + 1;
+    #[allow(clippy::string_slice)]
     let match_end_line = file[..orig_end].matches('\n').count() + 1;
     let hits = detect_confusables(file);
     let mut affected_lines: Vec<usize> = hits

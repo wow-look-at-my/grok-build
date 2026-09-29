@@ -64,6 +64,12 @@ pub struct FsWatcherStats {
 /// stays bounded by the number of distinct working directories.
 pub fn stats() -> FsWatcherStats {
     let live = {
+        // Poison of the weak-ref registry is recovered rather than propagated:
+        // every section is a `HashMap` retain / get / insert, so the map a panic
+        // walked out of is still sound, and panicking here would take down the
+        // next session that asks for a watcher over any directory.
+        // `parking_lot::Mutex` is the structural fix and is not a dependency here.
+        #[allow(clippy::disallowed_methods)]
         let mut map = registry().lock().unwrap_or_else(PoisonError::into_inner);
         map.retain(|_, w| w.strong_count() > 0);
         map.len()
@@ -114,6 +120,8 @@ pub fn shared(cwd: PathBuf, config: FsConfig) -> Result<Arc<FsEventSource>, FsNo
 
     // Fast path: an existing live watcher for this directory.
     {
+        // Poison is recovered; see `stats()`.
+        #[allow(clippy::disallowed_methods)]
         let mut map = registry().lock().unwrap_or_else(PoisonError::into_inner);
         map.retain(|_, w| w.strong_count() > 0);
         if let Some(existing) = map.get(&key).and_then(Weak::upgrade) {
@@ -128,6 +136,8 @@ pub fn shared(cwd: PathBuf, config: FsConfig) -> Result<Arc<FsEventSource>, FsNo
     let handle = event_loop_handle()?;
     let source = Arc::new(FsEventSource::start_on(handle, cwd, config)?);
 
+    // Poison is recovered; see `stats()`.
+    #[allow(clippy::disallowed_methods)]
     let mut map = registry().lock().unwrap_or_else(PoisonError::into_inner);
     // Another caller may have created the watcher while we were initializing;
     // prefer theirs and let ours drop (tearing down the redundant watcher).

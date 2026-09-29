@@ -19,8 +19,10 @@
 //! arrived.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
+
+use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use async_lsp::lsp_types::Diagnostic;
 
@@ -224,17 +226,11 @@ impl DiagnosticsStore {
     }
 
     fn read(&self) -> RwLockReadGuard<'_, HashMap<String, Answer>> {
-        self.inner
-            .documents
-            .read()
-            .unwrap_or_else(|e| e.into_inner())
+        self.inner.documents.read()
     }
 
     fn write(&self) -> RwLockWriteGuard<'_, HashMap<String, Answer>> {
-        self.inner
-            .documents
-            .write()
-            .unwrap_or_else(|e| e.into_inner())
+        self.inner.documents.write()
     }
 }
 

@@ -92,9 +92,28 @@ impl ResourcesPersistence {
     pub fn new(state_path: PathBuf) -> Self {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         let writer_path = state_path.clone();
+        let spawned_path = state_path.clone();
 
+        // The handle is dropped, but the task reports its own failure: the body
+        // runs through `guarded` and logs the panic under the writer's name.
+        #[allow(clippy::disallowed_methods)]
         tokio::spawn(async move {
-            Self::writer_loop(rx, writer_path).await;
+            // Guarded so the writer's own death is attributed. Unobserved, it
+            // would look like a session that persisted its tool state: `rx`
+            // goes with the task, so later sends fail and `flush` below is the
+            // only place anyone could still notice.
+            let wrote = crate::util::detached::guarded(
+                "resources persistence writer",
+                Self::writer_loop(rx, writer_path),
+            )
+            .await;
+            if let Err(panic) = wrote {
+                tracing::error!(
+                    state_path = %spawned_path.display(),
+                    panic = %panic,
+                    "resources state is no longer being persisted; the writer task panicked"
+                );
+            }
         });
 
         Self {
@@ -206,8 +225,25 @@ impl ResourcesPersistence {
             return;
         }
         let (done_tx, done_rx) = tokio::sync::oneshot::channel();
-        let _ = self.tx.send(ResourcesPersistenceCommand::Flush(done_tx));
-        let _ = done_rx.await;
+        if self
+            .tx
+            .send(ResourcesPersistenceCommand::Flush(done_tx))
+            .is_err()
+        {
+            // The writer went away, so nothing was written. Returning quietly
+            // here would report a flush that never happened.
+            tracing::error!(
+                state_path = %self.state_path.display(),
+                "resources flush failed; the writer task is gone"
+            );
+            return;
+        }
+        if done_rx.await.is_err() {
+            tracing::error!(
+                state_path = %self.state_path.display(),
+                "resources flush failed; the writer stopped before acknowledging it"
+            );
+        }
     }
 
     /// Convert the `serde_json::Value` (from serialize()) into the nested

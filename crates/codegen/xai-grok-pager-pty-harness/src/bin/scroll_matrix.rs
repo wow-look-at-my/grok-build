@@ -1,3 +1,5 @@
+#![allow(clippy::expect_used)] // 2 hits predate the gate
+
 //! `scroll-matrix` — scroll validation matrix sweep for xai-grok-pager.
 //!
 //! Runs matrix cells (`scroll_matrix::CELLS`) against a real pager binary in

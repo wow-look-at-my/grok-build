@@ -56,11 +56,16 @@ pub(crate) async fn inject_anchors(
     let (prefix, body, suffix) = match (stdout.find(">\n"), stdout.rfind("\n</workspace_result>")) {
         (Some(start), Some(end)) => {
             let body_start = start + 2;
-            (
+            // Both offsets come from `find` on the ASCII literals `>\n` and
+            // `\n</workspace_result>` (plus that literal's width), so the three
+            // ranges tile `stdout` at char boundaries.
+            #[allow(clippy::string_slice)]
+            let parts = (
                 &stdout[..body_start],
                 &stdout[body_start..end],
                 &stdout[end..],
-            )
+            );
+            parts
         }
         _ => return stdout_bytes.to_vec(),
     };
@@ -129,8 +134,15 @@ fn parse_rg_line(line: &str) -> Option<(usize, char, &str)> {
     if sep != ':' && sep != '-' {
         return None;
     }
+    // `idx` counted ASCII digits and `bytes[idx]` is the ASCII `:`/`-`
+    // separator, so both offsets are char boundaries.
+    // `idx` counts leading ASCII digits, so `idx` and `idx + 1` (the ASCII `:`
+    // or `-` separator) are both char boundaries.
+    #[allow(clippy::string_slice)]
     let num: usize = line[..idx].parse().ok()?;
-    Some((num, sep, &line[idx + 1..]))
+    #[allow(clippy::string_slice)]
+    let content = &line[idx + 1..];
+    Some((num, sep, content))
 }
 
 const DESCRIPTION: &str = r#"Search file contents with anchor-annotated results${%- if tools.by_kind.edit %} for use with ${{ tools.by_kind.edit }}${%- endif %}.

@@ -21,7 +21,11 @@ pub fn format_interjection(text: String) -> String {
             .last()
             .map(|(i, c)| i + c.len_utf8())
             .unwrap_or(text.len());
-        format!("{}... [truncated]", &text[..end])
+        // `end` is the offset one past a character that `char_indices` named,
+        // or the whole string's length; both are char boundaries.
+        #[allow(clippy::string_slice)] // one past a `char_indices` character
+        let head = &text[..end];
+        format!("{head}... [truncated]")
     } else {
         text
     };

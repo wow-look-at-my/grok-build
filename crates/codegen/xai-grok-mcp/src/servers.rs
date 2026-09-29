@@ -4033,11 +4033,17 @@ fn drain_mcp_stderr_to_log(server_name: &str, mut stderr: tokio::process::ChildS
     };
     let mut file = tokio::fs::File::from_std(file);
     let server_name = server_name.to_string();
-    tokio::spawn(async move {
-        if let Err(e) = tokio::io::copy(&mut stderr, &mut file).await {
-            tracing::warn!("MCP stderr drain '{server_name}': {e}");
-        }
-    });
+    // Guarded so the drain dying is attributed to this server: the log file simply
+    // stops growing otherwise, which reads as a server that printed nothing.
+    #[allow(clippy::disallowed_methods)]
+    tokio::spawn(xai_grok_tools::util::detached::fire_and_forget(
+        "mcp stderr drain",
+        async move {
+            if let Err(e) = tokio::io::copy(&mut stderr, &mut file).await {
+                tracing::warn!("MCP stderr drain '{server_name}': {e}");
+            }
+        },
+    ));
 }
 
 fn expand_session_id_headers(

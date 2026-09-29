@@ -3980,17 +3980,27 @@ pub async fn connect_local_workspace(
     );
     if crate::session::tool_config::tool_state_enabled() {
         let home = workspace_home.clone();
-        tokio::spawn(async move {
-            crate::recovery::cleanup_stale_sessions(
-                &home,
-                crate::recovery::DEFAULT_SESSION_MAX_AGE,
-            )
-            .await;
-        });
+        // Startup housekeeping: no caller waits on it, so a death is named
+        // rather than left as sessions that were never cleaned.
+        tokio::spawn(xai_grok_tools::util::detached::fire_and_forget(
+            "stale session cleanup",
+            async move {
+                crate::recovery::cleanup_stale_sessions(
+                    &home,
+                    crate::recovery::DEFAULT_SESSION_MAX_AGE,
+                )
+                .await;
+            },
+        ));
     }
-    tokio::task::spawn_blocking(|| {
-        crate::worktree::run_auto_gc_best_effort();
-    });
+    // Same: the blocking half's `JoinHandle` is not kept, so a panic inside the
+    // gc is reported by name here rather than by nothing at all.
+    tokio::spawn(xai_grok_tools::util::detached::fire_and_forget(
+        "worktree auto gc",
+        tokio::task::spawn_blocking(|| {
+            crate::worktree::run_auto_gc_best_effort();
+        }),
+    ));
     let ws_handle = WorkspaceHandle::new_with_data_collection(
         ws_config,
         workspace_home,

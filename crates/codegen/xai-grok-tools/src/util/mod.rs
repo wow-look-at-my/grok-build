@@ -1,6 +1,7 @@
 pub mod base64_images;
 pub mod binary;
 pub mod command_display;
+pub mod detached;
 pub mod env;
 pub mod fs;
 pub mod git_detect;
@@ -36,7 +37,7 @@ pub use spawn::{
 };
 pub use truncate::{
     DEFAULT_SOFT_WRAP_WIDTH, ceil_char_boundary, estimate_tokens, floor_char_boundary,
-    format_bytes, soft_wrap_line, soft_wrap_lines, truncate_line, truncate_str,
-    truncate_str_with_marker,
+    format_bytes, soft_wrap_line, soft_wrap_lines, tail_bytes, truncate_bytes, truncate_line,
+    truncate_str, truncate_str_with_marker,
 };
 pub use xai_tty_utils::detach_std_command;

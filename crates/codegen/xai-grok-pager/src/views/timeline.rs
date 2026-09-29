@@ -295,8 +295,12 @@ pub fn render_tick_hover_popup(
             rest = "";
         } else {
             let end = crate::render::line_utils::byte_offset_at_width(rest, max_text);
-            lines.push(rest[..end].to_string());
-            rest = rest[end..].trim_start();
+            // `byte_offset_at_width` returns a `char_indices` offset, so both
+            // halves start and end on a character boundary.
+            #[allow(clippy::string_slice)]
+            let (head, tail) = (&rest[..end], &rest[end..]);
+            lines.push(head.to_string());
+            rest = tail.trim_start();
         }
     }
     if lines.is_empty() {

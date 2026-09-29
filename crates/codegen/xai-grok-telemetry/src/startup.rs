@@ -6,7 +6,7 @@
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, LazyLock, Mutex};
+use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
 
 /// `unified.jsonl` message keys, exported so consumers (the probe, tests)
@@ -113,14 +113,14 @@ struct Inner {
 
 pub struct StartupTimer {
     started: Instant,
-    inner: Mutex<Inner>,
+    inner: parking_lot::Mutex<Inner>,
 }
 
 impl StartupTimer {
     pub fn new() -> Self {
         Self {
             started: Instant::now(),
-            inner: Mutex::new(Inner {
+            inner: parking_lot::Mutex::new(Inner {
                 completed: Vec::new(),
                 current: None,
                 auth_mode: AuthMode::Unknown,
@@ -129,8 +129,8 @@ impl StartupTimer {
         }
     }
 
-    fn lock(&self) -> std::sync::MutexGuard<'_, Inner> {
-        self.inner.lock().unwrap_or_else(|e| e.into_inner())
+    fn lock(&self) -> parking_lot::MutexGuard<'_, Inner> {
+        self.inner.lock()
     }
 
     /// Closes the open phase; re-entering the open phase is ignored, so two
@@ -276,7 +276,7 @@ impl Default for StartupTimer {
     }
 }
 
-static CURRENT: Mutex<Option<Arc<StartupTimer>>> = Mutex::new(None);
+static CURRENT: parking_lot::Mutex<Option<Arc<StartupTimer>>> = parking_lot::Mutex::new(None);
 static DONE: AtomicBool = AtomicBool::new(false);
 static PROCESS_START: LazyLock<Instant> = LazyLock::new(Instant::now);
 
@@ -291,11 +291,7 @@ pub fn process_elapsed() -> Duration {
 }
 
 fn current() -> Option<Arc<StartupTimer>> {
-    CURRENT
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .as_ref()
-        .map(Arc::clone)
+    CURRENT.lock().as_ref().map(Arc::clone)
 }
 
 /// Installs a new attempt, unless startup already ended; after that the
@@ -303,7 +299,7 @@ fn current() -> Option<Arc<StartupTimer>> {
 pub fn begin(owner: Owner) -> Arc<StartupTimer> {
     let timer = Arc::new(StartupTimer::new());
     timer.lock().owner = owner;
-    let mut current = CURRENT.lock().unwrap_or_else(|e| e.into_inner());
+    let mut current = CURRENT.lock();
     if !DONE.load(Ordering::Relaxed) {
         *current = Some(Arc::clone(&timer));
         spawn_slow_phase_warnings();
@@ -389,7 +385,7 @@ pub(crate) fn is_active() -> bool {
 
 fn clear() {
     DONE.store(true, Ordering::Relaxed);
-    *CURRENT.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    *CURRENT.lock() = None;
 }
 
 /// Stops recording for a standalone agent at its first client, so idle
@@ -403,7 +399,7 @@ pub fn mark_agent_serving() {
 #[cfg(test)]
 pub(crate) fn reset_for_tests() {
     DONE.store(false, Ordering::Relaxed);
-    *CURRENT.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    *CURRENT.lock() = None;
 }
 
 /// Lazily installs an agent-owned timer, covering the standalone leader
@@ -502,7 +498,7 @@ pub(crate) fn report_total(outcome: StartupOutcome) {
     if DONE.swap(true, Ordering::Relaxed) {
         return;
     }
-    let timer = CURRENT.lock().unwrap_or_else(|e| e.into_inner()).take();
+    let timer = CURRENT.lock().take();
     let total_ms = process_elapsed().as_millis() as u64;
     let (phases, auth_mode) = match timer {
         Some(p) => {

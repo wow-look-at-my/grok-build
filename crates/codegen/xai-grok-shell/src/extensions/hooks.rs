@@ -132,11 +132,11 @@ pub(crate) enum ClientHookDecision {
 /// Response payload for `x.ai/hooks/run` (client to agent). `Default` (used on
 /// timeout, transport error, or a malformed reply) proceeds.
 #[derive(Debug, Clone, Default, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", try_from = "ClientHookResponseWire")]
 pub(crate) struct ClientHookResponse {
     #[serde(default)]
     pub decision: ClientHookDecision,
-    #[serde(default, alias = "reason")]
+    #[serde(default)]
     pub system_message: Option<String>,
     #[serde(default, rename = "continue")]
     pub continue_: Option<bool>,
@@ -144,6 +144,48 @@ pub(crate) struct ClientHookResponse {
     pub stop_reason: Option<String>,
     #[serde(default)]
     pub additional_context: Option<String>,
+}
+
+impl ClientHookResponse {
+    /// The keys [`system_message`](Self::system_message) is read under. Claude
+    /// Code's hook JSON calls it `reason`; the ACP shape calls it
+    /// `systemMessage`, and a client that sends both says one thing twice.
+    pub(crate) const SYSTEM_MESSAGE_KEYS: xai_tool_types::Aliases =
+        xai_tool_types::Aliases::new("systemMessage", &["reason"]);
+}
+
+/// `ClientHookResponse` as the client writes it, with each key spelling its own
+/// field. See [`ClientHookResponse::SYSTEM_MESSAGE_KEYS`].
+#[derive(Debug, Default, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ClientHookResponseWire {
+    #[serde(default)]
+    decision: ClientHookDecision,
+    #[serde(default)]
+    system_message: Option<String>,
+    #[serde(default)]
+    reason: Option<String>,
+    #[serde(default, rename = "continue")]
+    continue_: Option<bool>,
+    #[serde(default)]
+    stop_reason: Option<String>,
+    #[serde(default)]
+    additional_context: Option<String>,
+}
+
+impl TryFrom<ClientHookResponseWire> for ClientHookResponse {
+    type Error = xai_tool_types::AliasConflict;
+
+    fn try_from(wire: ClientHookResponseWire) -> Result<Self, Self::Error> {
+        Ok(Self {
+            decision: wire.decision,
+            system_message: ClientHookResponse::SYSTEM_MESSAGE_KEYS
+                .fold(vec![wire.system_message, wire.reason])?,
+            continue_: wire.continue_,
+            stop_reason: wire.stop_reason,
+            additional_context: wire.additional_context,
+        })
+    }
 }
 
 /// Parse client hooks from `session/new` `_meta["x.ai/hooks"]`, shaped
@@ -560,5 +602,54 @@ mod tests {
         assert_eq!(value["toolInput"]["command"], "ls");
         assert_eq!(value["toolInputTruncated"], true);
         assert_eq!(value["permissionMode"], "default");
+    }
+}
+
+#[cfg(test)]
+mod wire_alias_tests {
+    use super::ClientHookResponse;
+
+    /// A client's hook reply names its message `reason` (the Claude Code hook
+    /// shape) or `systemMessage` (the ACP shape). Both are the same statement.
+    #[test]
+    fn a_hook_reply_reads_its_message_under_either_spelling() {
+        let deny: ClientHookResponse =
+            serde_json::from_str(r#"{"decision":"deny","reason":"no"}"#).unwrap();
+        assert_eq!(deny.system_message.as_deref(), Some("no"));
+
+        let deny: ClientHookResponse =
+            serde_json::from_str(r#"{"decision":"deny","systemMessage":"no"}"#).unwrap();
+        assert_eq!(deny.system_message.as_deref(), Some("no"));
+    }
+
+    #[test]
+    fn a_hook_reply_naming_both_under_one_value_parses_once() {
+        let deny: ClientHookResponse =
+            serde_json::from_str(r#"{"decision":"deny","systemMessage":"no","reason":"no"}"#)
+                .expect("one message named twice is one message");
+        assert_eq!(deny.system_message.as_deref(), Some("no"));
+        assert_eq!(deny.decision, super::ClientHookDecision::Deny);
+    }
+
+    /// Two different messages tell the user two different reasons to proceed.
+    #[test]
+    fn a_hook_reply_whose_message_spellings_disagree_is_an_error_naming_the_field() {
+        let err = serde_json::from_str::<ClientHookResponse>(
+            r#"{"decision":"deny","systemMessage":"a","reason":"b"}"#,
+        )
+        .expect_err("conflicting messages must not resolve silently");
+        let message = err.to_string();
+        assert!(message.contains("systemMessage"), "{message}");
+        assert!(message.contains("reason"), "{message}");
+    }
+
+    /// The reply is fail-open by default, and a body naming neither key is the
+    /// absent case, not an error.
+    #[test]
+    fn a_hook_reply_with_neither_message_key_still_proceeds() {
+        let proceed: ClientHookResponse = serde_json::from_str(r#"{"decision":"continue"}"#)
+            .expect("an absent message is the default");
+        assert_eq!(proceed.system_message, None);
+        assert_eq!(proceed.decision, super::ClientHookDecision::Continue);
     }
 }

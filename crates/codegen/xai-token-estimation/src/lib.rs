@@ -1,3 +1,8 @@
+#![allow(clippy::cast_lossless)] // 2 hits predate the gate
+#![allow(clippy::cast_possible_truncation)] // 1 hit predates the gate
+#![allow(clippy::cast_precision_loss)] // 2 hits predate the gate
+#![allow(clippy::cast_sign_loss)] // 1 hit predates the gate
+
 //! Pure shared token-estimation primitives.
 //!
 //! This crate is the single source of truth for the bytes/4 heuristic and the

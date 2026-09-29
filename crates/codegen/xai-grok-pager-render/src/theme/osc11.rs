@@ -100,6 +100,9 @@ pub(crate) fn classify_luminance(r: u8, g: u8, b: u8) -> SystemAppearance {
 /// hex formats.  For 4-digit values the high byte is extracted (>> 8).
 pub(crate) fn parse_osc11_rgb(response: &str) -> Option<(u8, u8, u8)> {
     let rgb_start = response.find("rgb:")? + 4;
+    // `find` returns a char boundary and `"rgb:"` is 4 ASCII bytes, so stepping
+    // past it lands on one too.
+    #[allow(clippy::string_slice)] // past the ASCII "rgb:" that str::find matched
     let rgb_part = &response[rgb_start..];
 
     // Split on channel separator `/` and terminators (BEL, ESC).
@@ -231,7 +234,13 @@ fn unix_read_with_timeout(timeout: Duration) -> Option<String> {
     if !ends_with_osc_terminator(&buf) {
         return None;
     }
-    String::from_utf8(buf).ok()
+    // A reply that is not UTF-8 is not the terminal's OSC 11 answer at all (it is
+    // some other byte on the wire), and `None` is the caller's "no idea what the
+    // background is" state. Lossy would turn that stray bytes-into-a-color-name
+    // claim, which is the one thing this function must not do.
+    #[allow(clippy::disallowed_methods)]
+    let decoded = String::from_utf8(buf).ok();
+    decoded
 }
 
 /// True when the buffer ends with BEL or ST (`ESC \`).

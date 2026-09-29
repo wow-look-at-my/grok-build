@@ -635,7 +635,7 @@ pub(crate) async fn run_shell_child(
         let bucket = bucket_url.clone();
         let method = upload_method.clone();
         let auth_for_spawn = ctx.auth_manager.clone();
-        tokio::spawn(async move {
+        crate::upload::turn::spawn_upload_task("subagent metadata", async move {
             upload_subagent_metadata(&gcs_meta, &bucket, method, auth_for_spawn).await;
         });
     }

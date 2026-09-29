@@ -347,6 +347,9 @@ fn parse_update_file_chunk(
                 parsed_lines += 1;
                 break;
             }
+            // Every arm below slices `[1..]` only after the first character
+            // matched a single-byte ASCII marker (` `, `+`, or `-`).
+            #[allow(clippy::string_slice)]
             line_contents => match line_contents.chars().next() {
                 None => {
                     // Interpret empty line as a context line.

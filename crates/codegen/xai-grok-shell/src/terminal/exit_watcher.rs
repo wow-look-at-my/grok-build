@@ -178,6 +178,78 @@ pub(super) async fn watch_for_exit(
     .await;
 }
 
+/// Watch a background terminal for its exit, and release the task even if the
+/// watch itself dies.
+///
+/// `complete_and_release` is the only path that marks the task completed and
+/// hands the client terminal back. A watcher that unwound left `get_task`
+/// reporting a task that never finishes, so `wait_for_completion` callers sat
+/// out their whole deadline for a process that had already stopped, and the
+/// terminal was never released.
+pub(super) async fn watch_for_exit_releasing_task(
+    gateway: GatewaySender,
+    session_id: acp::SessionId,
+    task_id: String,
+    tasks: TaskMap,
+    notification_handle: ToolNotificationHandle,
+    recorder: OutputRecorder,
+) {
+    let watched = xai_grok_tools::util::detached::guarded(
+        "terminal exit watcher",
+        watch_for_exit(
+            gateway.clone(),
+            session_id.clone(),
+            task_id.clone(),
+            tasks.clone(),
+            notification_handle.clone(),
+            recorder,
+        ),
+    )
+    .await;
+    let Err(panic) = watched else {
+        return;
+    };
+    // Skipped once the task reads completed, because a second release would
+    // overwrite the exit status the real completion recorded with this one.
+    // A poisoned map says nothing either way, so the release is attempted.
+    let released_already = match tasks.lock() {
+        Ok(tracked) => tracked
+            .get(task_id.as_str())
+            .is_none_or(super::adapter::TrackedTask::is_completed),
+        Err(poisoned) => {
+            tracing::error!(
+                task_id,
+                error = %poisoned,
+                "exit watcher release: the task map is poisoned, so the release reports what it can"
+            );
+            false
+        }
+    };
+    if released_already {
+        return;
+    }
+    // Guarded in turn: a release that unwinds would be lost exactly like the
+    // round this one is recovering from.
+    let _ = xai_grok_tools::util::detached::guarded(
+        "terminal exit watcher release",
+        complete_and_release(
+            &gateway,
+            &session_id,
+            &acp::TerminalId::new(task_id.clone()),
+            &tasks,
+            &notification_handle,
+            &task_id,
+            SnapshotOutput {
+                output: String::new(),
+                truncated: false,
+                exit_code: None,
+                signal: Some(format!("exit-watcher-panicked: {panic}")),
+            },
+        ),
+    )
+    .await;
+}
+
 /// Releases even when the task is gone, so the client terminal is not leaked.
 async fn complete_and_release(
     gateway: &GatewaySender,

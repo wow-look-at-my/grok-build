@@ -1,3 +1,5 @@
+#![allow(clippy::cast_possible_truncation)] // 1 hit predates the gate
+
 use std::collections::VecDeque;
 use std::io::{self, stdout};
 use std::time::{Duration, Instant};
@@ -58,7 +60,11 @@ fn truncate_for_display(text: &str) -> String {
             .take_while(|(i, _)| *i < MAX_DISPLAY_TEXT_LEN)
             .last()
             .map_or(0, |(i, c)| i + c.len_utf8());
-        format!("{}...", &text[..end])
+        // `end` is a char boundary: a `char_indices` offset plus that char's
+        // own `len_utf8`, so it lands on the start of the following char.
+        #[allow(clippy::string_slice)] // offset from char_indices + len_utf8
+        let head = &text[..end];
+        format!("{head}...")
     }
 }
 

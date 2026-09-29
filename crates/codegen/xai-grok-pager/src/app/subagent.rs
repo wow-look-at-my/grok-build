@@ -393,9 +393,14 @@ fn parse_tag_prefix(description: &str) -> (Option<&str>, &str) {
     if let Some(rest) = description.strip_prefix('[')
         && let Some(close) = rest.find(']')
     {
+        // `close` is a `str::find` offset for the one-byte ASCII `]`, so both
+        // `close` and `close + 1` are char boundaries.
+        #[allow(clippy::string_slice)] // ends at a str::find(']') offset
         let tag = rest[..close].trim();
         if !tag.is_empty() {
-            return (Some(tag), rest[close + 1..].trim_start());
+            #[allow(clippy::string_slice)] // one past the str::find(']') offset
+            let after_tag = rest[close + 1..].trim_start();
+            return (Some(tag), after_tag);
         }
     }
     (None, description)

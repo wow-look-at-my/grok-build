@@ -260,7 +260,7 @@ fn render_command(cursor: &mut Cursor<'_>, out: &mut MathBox, depth: usize, mode
                     }
                     cursor.bump();
                 }
-                let idx = &cursor.src[start..cursor.pos];
+                let idx = cursor.bytes(start, cursor.pos);
                 cursor.bump(); // consume `]`
                 Some(render_atom(idx, depth, mode))
             } else {

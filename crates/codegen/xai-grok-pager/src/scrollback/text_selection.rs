@@ -1170,6 +1170,9 @@ fn strip_trailing_url_punctuation(url: &str) -> &str {
     let mut end = url.len();
 
     loop {
+        // `end` starts at `url.len()` and only ever steps back by the
+        // `len_utf8` of the char it just read, so it stays on a char boundary.
+        #[allow(clippy::string_slice)] // boundary walked back by len_utf8 in this loop
         let last = match url[..end].chars().next_back() {
             Some(c) if TRAILING_URL_PUNCT.contains(&c) => c,
             _ => break,
@@ -1182,7 +1185,10 @@ fn strip_trailing_url_punctuation(url: &str) -> &str {
             '>' => Some('<'),
             _ => None,
         } {
+            // Same boundary invariant as `last` above.
+            #[allow(clippy::string_slice)] // boundary walked back by len_utf8 in this loop
             let opens = url[..end].chars().filter(|&c| c == open).count();
+            #[allow(clippy::string_slice)] // boundary walked back by len_utf8 in this loop
             let closes = url[..end].chars().filter(|&c| c == last).count();
             if opens >= closes {
                 break;
@@ -1192,7 +1198,10 @@ fn strip_trailing_url_punctuation(url: &str) -> &str {
         end -= last.len_utf8();
     }
 
-    &url[..end]
+    // `end` only moved by whole `len_utf8` steps from `url.len()`.
+    #[allow(clippy::string_slice)] // boundary walked back by len_utf8 in this loop
+    let trimmed = &url[..end];
+    trimmed
 }
 
 /// Compute the display-column width of a string via grapheme clusters.
@@ -1212,11 +1221,22 @@ fn display_width(text: &str) -> u16 {
 /// handling prose contexts like `"see https://example.com."`.
 pub fn url_range_at_col(text: &str, col: u16) -> Option<Range<u16>> {
     for m in URL_RE.find_iter(text) {
+        #[allow(clippy::string_slice)] // start offset of a regex::Match over `text`
         let col_start = display_width(&text[..m.start()]);
         let url = strip_trailing_url_punctuation(m.as_str());
 
         // Skip degenerate URLs reduced to just the scheme (e.g. "https://").
-        if url.find("://").is_some_and(|i| url[i + 3..].is_empty()) {
+        let scheme_reduced = match url.find("://") {
+            // `find` returns a char boundary and "://" is 3 ASCII bytes, so the
+            // offset just past it is one too.
+            Some(i) => {
+                #[allow(clippy::string_slice)] // past the ASCII "://" that str::find matched
+                let after_scheme = &url[i + 3..];
+                after_scheme.is_empty()
+            }
+            None => false,
+        };
+        if scheme_reduced {
             continue;
         }
 

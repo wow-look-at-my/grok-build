@@ -1,3 +1,7 @@
+#![allow(clippy::cast_precision_loss)] // 2 hits predate the gate
+#![allow(clippy::expect_used)] // 3 hits predate the gate
+#![allow(clippy::string_slice)] // 6 hits predate the gate
+
 //! Pure data types for the xAI sampling / chat-completion API layer.
 //!
 //! This crate contains the API-agnostic conversation types, chat completion
