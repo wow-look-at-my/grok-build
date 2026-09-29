@@ -8,6 +8,7 @@ description = "Voice dictation (streaming STT) for Grok Build CLI"
 [dependencies]
 anyhow = { workspace = true }
 futures-util = { workspace = true }
+parking_lot = { workspace = true }
 # Used by the standalone `voice-probe` bin to install the process-level crypto
 # provider (`ring`, matching the pager's choice in its own main). The lib itself
 # only reaches rustls through tokio-tungstenite.

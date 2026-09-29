@@ -14415,6 +14415,7 @@ dependencies = [
  "anyhow",
  "cpal",
  "futures-util",
+ "parking_lot",
  "rustls",
  "serde",
  "serde_json",
