@@ -14,7 +14,7 @@ use std::ffi::OsStr;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Mutex, MutexGuard, OnceLock};
+use std::sync::OnceLock;
 
 use tracing::Subscriber;
 use tracing::field::{Field, Visit};
@@ -791,7 +791,7 @@ mod tests {
     // such tests so a concurrent `cargo test` thread can't clear another's guards
     // before it reads. (nextest already isolates each test in its own process.)
     fn flush_test_lock() -> std::sync::MutexGuard<'static, ()> {
-        static LOCK: Mutex<()> = Mutex::new(());
+        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
         LOCK.lock().unwrap_or_else(|p| p.into_inner())
     }
 
