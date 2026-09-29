@@ -83,7 +83,9 @@ Refute when RUN_LOG shows no honest run of a gating step and your own cheap run
 of that step does not pass. Do NOT fill the gap yourself. REFUTE with a
 specific, actionable request that the IMPLEMENTER fix the code or the test and
 RUN it (the next round's gap). Never ask it to save output, write a report, or
-produce an "evidence file". The harness records its runs. A file it writes
+produce an "evidence file", and never ask it to show, extract, quote or
+summarize a run or its transcript: RUN_LOG and your own investigation are
+the evidence, and gathering it is your job alone. The harness records its runs. A file it writes
 about a run is not evidence. Do NOT modify the workspace; your only writes are
 `{DETAILS_FILE}` and `{VERDICT_FILE}`.{TOOLSET_TOOLS}
 

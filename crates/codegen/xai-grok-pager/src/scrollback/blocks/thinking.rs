@@ -288,7 +288,7 @@ impl ThinkingBlock {
                 lines: vec![BlockLine::separator(line)],
             };
         };
-        let style = Theme::current().muted();
+        let style = Style::default().fg(Theme::current().thinking_summary);
         // The pad holds the header's columns so the first row wraps short.
         let pad = " ".repeat(header_w + 1);
         let options = textwrap::Options::new(width).initial_indent(&pad);

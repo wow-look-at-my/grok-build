@@ -13,12 +13,15 @@ use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use tracing::Subscriber;
 use tracing::field::{Field, Visit};
+use tracing::subscriber::Interest;
 use tracing_appender::non_blocking::NonBlocking;
 use tracing_subscriber::filter::{EnvFilter, LevelFilter};
-use tracing_subscriber::layer::{Context, Layer};
+use tracing_subscriber::layer::{Context, Filter, Layer};
 use tracing_subscriber::registry::LookupSpan;
 
 use crate::session_ctx::SESSION_ID_FIELD;
@@ -193,6 +196,11 @@ fn sanitize_key(id: &str) -> String {
     safe
 }
 
+/// The file the routing layer writes for `session_id` under `dir`.
+pub fn session_log_path(dir: &Path, session_id: &str) -> PathBuf {
+    dir.join(format!("{}.txt", sanitize_key(session_id)))
+}
+
 // `latest.txt` link + swap-temp name parts, shared by `update_latest_symlink`
 // (create/rename) and `prune_old_logs` (spare rule + orphan cleanup) so the
 // sites can never drift. Tests pin the literals on purpose: orphans created by
@@ -359,7 +367,7 @@ impl RoutingLayer {
             }
         }
         // First event for this session: open OUTSIDE the lock.
-        let path = self.dir.join(format!("{key}.txt"));
+        let path = session_log_path(&self.dir, key);
         let Ok(writer) = crate::appender::non_blocking_file_writer(&path) else {
             return;
         };
@@ -431,16 +439,142 @@ where
     }
 }
 
+// ── Runtime switch ───────────────────────────────────────────────────────────
+
+/// Prompt content-block `_meta` key.
+pub const ENABLE_FIREHOSE_META: &str = "enableDebugFirehose";
+
+/// Set by [`enable_firehose`]. Only the dormant routing layer reads it.
+static RUNTIME_ENABLED: AtomicBool = AtomicBool::new(false);
+
+/// What [`install_firehose`] put on the subscriber in this process.
+static INSTALLED: OnceLock<Installed> = OnceLock::new();
+
+#[derive(Debug, Clone)]
+enum Installed {
+    PerSession {
+        dir: PathBuf,
+    },
+    SingleFile {
+        path: PathBuf,
+    },
+    /// The routing layer is on the subscriber but drops every event until [`enable_firehose`] runs.
+    Dormant {
+        dir: PathBuf,
+    },
+}
+
+/// Where the firehose of this process writes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FirehoseStatus {
+    /// One file per session, named by [`session_log_path`] under `dir`.
+    PerSession {
+        dir: PathBuf,
+        /// True when [`enable_firehose`] turned it on after startup.
+        enabled_at_runtime: bool,
+    },
+    /// One file for the whole process (`GROK_LOG_FILE` / `GROK_DEBUG_LOG=<path>`).
+    SingleFile { path: PathBuf },
+    /// This process installed no firehose, or its file did not open.
+    Unavailable,
+}
+
+/// Turn the firehose on for the rest of this process and say where it writes.
+///
+/// dormant routing layer, and this call wakes it. A firehose that is already on
+/// stays as it is.
+pub fn enable_firehose() -> FirehoseStatus {
+    match INSTALLED.get() {
+        Some(Installed::PerSession { dir }) => FirehoseStatus::PerSession {
+            dir: dir.clone(),
+            enabled_at_runtime: false,
+        },
+        Some(Installed::SingleFile { path }) => FirehoseStatus::SingleFile { path: path.clone() },
+        Some(Installed::Dormant { dir }) => {
+            if !RUNTIME_ENABLED.swap(true, Ordering::Relaxed) {
+                sweep_old_logs();
+                tracing::info!(target: "xai_grok_telemetry", dir = %dir.display(), "debug firehose enabled at runtime");
+            }
+            FirehoseStatus::PerSession {
+                dir: dir.clone(),
+                enabled_at_runtime: true,
+            }
+        }
+        None => FirehoseStatus::Unavailable,
+    }
+}
+
+/// The firehose filter, closed to events until [`RUNTIME_ENABLED`] is set.
+/// Spans always pass.
+struct RuntimeGate {
+    inner: EnvFilter,
+}
+
+impl<S> Filter<S> for RuntimeGate
+where
+    S: Subscriber + for<'span> LookupSpan<'span>,
+{
+    fn enabled(&self, meta: &tracing::Metadata<'_>, cx: &Context<'_, S>) -> bool {
+        (meta.is_span() || RUNTIME_ENABLED.load(Ordering::Relaxed))
+            && Filter::<S>::enabled(&self.inner, meta, cx)
+    }
+
+    fn callsite_enabled(&self, meta: &'static tracing::Metadata<'static>) -> Interest {
+        let interest = Filter::<S>::callsite_enabled(&self.inner, meta);
+        if interest.is_never() || meta.is_span() {
+            interest
+        } else {
+            Interest::sometimes()
+        }
+    }
+
+    fn max_level_hint(&self) -> Option<LevelFilter> {
+        Filter::<S>::max_level_hint(&self.inner)
+    }
+
+    fn on_new_span(
+        &self,
+        attrs: &tracing::span::Attributes<'_>,
+        id: &tracing::span::Id,
+        ctx: Context<'_, S>,
+    ) {
+        Filter::<S>::on_new_span(&self.inner, attrs, id, ctx);
+    }
+
+    fn on_record(
+        &self,
+        id: &tracing::span::Id,
+        values: &tracing::span::Record<'_>,
+        ctx: Context<'_, S>,
+    ) {
+        Filter::<S>::on_record(&self.inner, id, values, ctx);
+    }
+
+    fn on_enter(&self, id: &tracing::span::Id, ctx: Context<'_, S>) {
+        Filter::<S>::on_enter(&self.inner, id, ctx);
+    }
+
+    fn on_exit(&self, id: &tracing::span::Id, ctx: Context<'_, S>) {
+        Filter::<S>::on_exit(&self.inner, id, ctx);
+    }
+
+    fn on_close(&self, id: tracing::span::Id, ctx: Context<'_, S>) {
+        Filter::<S>::on_close(&self.inner, id, ctx);
+    }
+}
+
 // ── Install + lifecycle ──────────────────────────────────────────────────────
 
 /// Resolve the requested debug target and install the matching firehose layer on
 /// `registry`, then init the subscriber.
 ///
-/// PerSession installs the routing layer (firehose filter, RUST_LOG-immune) and
+/// PerSession installs the routing layer (firehose filter.
 /// prunes old session logs; SingleFile installs a flat `fmt` file picking the
-/// filter by source (GROK_LOG_FILE respects RUST_LOG). Open failures warn AFTER
-/// init in the single-file case; routing open failures are per-file at write
-/// time and degrade gracefully. `role` names the per-pid fallback file.
+/// filter by source (GROK_LOG_FILE respects RUST_LOG). With no target.
+/// routing layer goes on dormant, for [`enable_firehose`] to wake. Open
+/// failures warn AFTER init in the single-file case.
+/// per-file at write time and degrade gracefully. `role` names the per-pid
+/// fallback file.
 pub fn install_firehose<S>(registry: S, role: &str)
 where
     S: Subscriber + for<'span> LookupSpan<'span> + Send + Sync + 'static,
@@ -450,10 +584,11 @@ where
 
     match resolve_debug_target() {
         Some(DebugTarget::PerSession { dir }) => {
-            let layer = RoutingLayer::new(dir, role.to_owned(), std::process::id())
+            let layer = RoutingLayer::new(dir.clone(), role.to_owned(), std::process::id())
                 .with_filter(firehose_filter());
             registry.with(layer).init();
-            // Tie pruning to actually routing a firehose, not to the flag.
+            let _ = INSTALLED.set(Installed::PerSession { dir });
+            // Tie pruning to routing a firehose, not to the flag.
             sweep_old_logs();
         }
         Some(DebugTarget::SingleFile { path, src }) => {
@@ -462,15 +597,34 @@ where
                 DebugSource::GrokDebugLog => firehose_filter(),
             };
             match build_file_layer::<S>(&path, filter) {
-                Ok(layer) => registry.with(layer).init(),
+                Ok(layer) => {
+                    registry.with(layer).init();
+                    let _ = INSTALLED.set(Installed::SingleFile { path });
+                }
                 Err(e) => {
                     registry.init();
                     tracing::warn!("failed to open {} {path:?}: {e}", src.label());
                 }
             }
         }
-        None => registry.init(),
+        None => {
+            let dir = grok_home().join("debug");
+            registry
+                .with(dormant_routing_layer(dir.clone(), role))
+                .init();
+            let _ = INSTALLED.set(Installed::Dormant { dir });
+        }
     }
+}
+
+/// The routing layer behind [`RuntimeGate`].
+fn dormant_routing_layer<S>(dir: PathBuf, role: &str) -> impl Layer<S>
+where
+    S: Subscriber + for<'span> LookupSpan<'span>,
+{
+    RoutingLayer::new(dir, role.to_owned(), std::process::id()).with_filter(RuntimeGate {
+        inner: firehose_filter(),
+    })
 }
 
 /// Flush parked firehose writers at process exit (no-op when none installed).
@@ -896,6 +1050,63 @@ mod tests {
         assert!(
             two.contains("two only") && !two.contains("one first"),
             "sid-two.txt: {two:?}"
+        );
+    }
+
+    #[test]
+    fn dormant_layer_writes_nothing_until_enabled_then_routes_to_the_open_session() {
+        use tracing_subscriber::layer::SubscriberExt as _;
+
+        let _lock = flush_test_lock();
+        RUNTIME_ENABLED.store(false, Ordering::Relaxed);
+        let dir = tempfile::tempdir().unwrap();
+        let subscriber = tracing_subscriber::registry()
+            .with(dormant_routing_layer(dir.path().to_path_buf(), "tui"));
+
+        tracing::subscriber::with_default(subscriber, || {
+            let span = tracing::info_span!(
+                target: "xai_grok_telemetry::session_ctx",
+                "session",
+                session_id = %"sid-late"
+            );
+            span.in_scope(|| {
+                tracing::debug!(target: "xai_grok_shell", "before the switch");
+            });
+            RUNTIME_ENABLED.store(true, Ordering::Relaxed);
+            span.in_scope(|| {
+                tracing::debug!(target: "xai_grok_shell", "after the switch");
+            });
+        });
+        RUNTIME_ENABLED.store(false, Ordering::Relaxed);
+        crate::appender::flush_file_log_guards();
+
+        let session_file =
+            std::fs::read_to_string(session_log_path(dir.path(), "sid-late")).unwrap();
+        assert!(
+            session_file.contains("after the switch"),
+            "an enabled firehose must reach the session file of a span opened before the switch: {session_file:?}"
+        );
+        assert!(
+            !session_file.contains("before the switch"),
+            "a dormant firehose must write nothing: {session_file:?}"
+        );
+        assert!(
+            !dir.path()
+                .join(format!("tui-{}.txt", std::process::id()))
+                .exists(),
+            "the event must route to the session file, not the fallback"
+        );
+    }
+
+    #[test]
+    fn session_log_path_matches_the_routing_layer_file() {
+        assert_eq!(
+            session_log_path(Path::new("/d"), "../x"),
+            PathBuf::from("/d/.._x.txt")
+        );
+        assert_eq!(
+            session_log_path(Path::new("/d"), ".."),
+            PathBuf::from("/d/_.txt")
         );
     }
 

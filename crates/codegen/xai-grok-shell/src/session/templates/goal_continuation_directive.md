@@ -13,10 +13,9 @@ Keep your {todo_tool} list current (≥1 `in_progress`, descriptive
 just at the end. Tests must drive the SHIPPED code on the real path — no
 hard-coded values, no starting past the thing under test, no
 re-implementing it. Use the project's existing test runner and entry point.
-Never write a check script, harness, probe, or shim of your own. The harness
-records every tool call you make and its output, and the verifier reads that
-record: a run IS the evidence. Do NOT write proof files, evidence logs, or run
-reports for the verifier. Use your scratch dir {scratch_dir} {scratch_status}
+Never write a check script, harness, probe, or shim of your own. Verification
+is the verifier's job, not yours: never collect, extract or save evidence,
+and never read your session transcript or session files. Use your scratch dir {scratch_dir} {scratch_status}
 only for throwaway files the work itself needs, never shared `/tmp/...`. Use existing user, system, or project
 defaults for execution dependencies and environment state. NEVER set `HOME`,
 `CARGO_HOME`, `RUSTUP_HOME`, package-manager homes, virtualenvs, caches, or
