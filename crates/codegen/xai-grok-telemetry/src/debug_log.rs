@@ -13,7 +13,6 @@ use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 
 use tracing::Subscriber;
 use tracing::field::{Field, Visit};

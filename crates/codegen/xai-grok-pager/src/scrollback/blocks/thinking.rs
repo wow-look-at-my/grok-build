@@ -298,9 +298,14 @@ impl ThinkingBlock {
         for (i, row) in rows.iter().enumerate() {
             let mut line = if i == 0 {
                 let mut first = header.clone();
-                first
-                    .spans
-                    .push(Span::styled(row[header_w..].to_string(), style));
+                // The guard above proved the pad fits the width, so textwrap
+                // left this row's first `header_w + 1` bytes as the pad's ASCII
+                // spaces. `header_w` is inside that run, so it is a char
+                // boundary, and the slice keeps the pad's last space as the
+                // gap after the header.
+                #[allow(clippy::string_slice)] // inside the ASCII-space initial indent
+                let tail = row[header_w..].to_string();
+                first.spans.push(Span::styled(tail, style));
                 first
             } else {
                 Line::from(Span::styled(row.to_string(), style))
