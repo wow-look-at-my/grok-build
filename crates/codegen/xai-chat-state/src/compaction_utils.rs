@@ -4,7 +4,7 @@
 //! no I/O, no actor state. They live in `xai-chat-state` so that both
 //! this crate and `xai-grok-shell` can share them without duplication.
 use std::collections::BTreeSet;
-use xai_grok_sampling_types::{ContentPart, ConversationItem, ToolResultItem};
+use xai_grok_sampling_types::{ContentPart, ConversationItem, SyntheticReason, ToolResultItem};
 /// Drops tool results and flattens assistant `tool_calls` into
 /// `[Called tools: ...]` text annotations.
 ///
@@ -355,12 +355,20 @@ pub fn is_synthetic_extracted_query(text: &str) -> bool {
 /// user turns — they must anchor the compaction boundary even though
 /// they have no extractable text query.
 ///
+/// A mid-turn interjection is a real user turn. The user typed it, and it
+/// is often the newest thing the user said. Compaction re-injects the last
+/// real user turn verbatim. Without interjections, that copy is an old
+/// prompt that later interjections have overtaken.
+///
 /// This is the single source of truth for "real user" classification
 /// in the compaction pipeline.
 pub fn is_real_user_turn(item: &ConversationItem) -> bool {
     match item {
         ConversationItem::User(u) => {
-            if u.synthetic_reason.is_some() {
+            if u.synthetic_reason
+                .as_ref()
+                .is_some_and(|r| *r != SyntheticReason::Interjection)
+            {
                 return false;
             }
             let has_images = u
@@ -1713,6 +1721,51 @@ actual user question";
                 );
             }
         }
+    }
+    #[tokio::test]
+    async fn compaction_anchors_on_the_newest_interjection() {
+        let conversation = vec![
+            ConversationItem::system("sys"),
+            ConversationItem::user("<user_query>\ndelete\n</user_query>"),
+            ConversationItem::assistant("deleted"),
+            ConversationItem::interjection(
+                "The user sent a message while you were working:\n<user_query>\nnow rename the crate\n</user_query>",
+            ),
+            ConversationItem::assistant("renaming"),
+        ];
+        let ctx = CompactionStateContext::build(&conversation, CompactionInputs::default()).await;
+        assert_eq!(
+            ctx.last_user_query.as_deref(),
+            Some("now rename the crate"),
+            "the anchor must be the newest message the user sent, not the last idle prompt"
+        );
+        assert_eq!(
+            ctx.recent_messages.len(),
+            1,
+            "the verbatim tail must start after the newest user message"
+        );
+        let compacted = build_compacted_history(CompactedHistoryInput {
+            system_message: ConversationItem::system("sys"),
+            user_message_prefix: "<user_info>OS: linux</user_info>".to_string(),
+            agents_md_reminder: None,
+            state_context: &ctx,
+            compaction_summary: "summary".to_string(),
+            system_reminder: None,
+            summary_before_recent: false,
+            transcript_hint: None,
+            summary_count: 1,
+        });
+        let text: Vec<String> = compacted.iter().map(|i| i.text_content()).collect();
+        assert!(
+            text.iter().any(|t| t.contains("now rename the crate")),
+            "compacted history must carry the newest user message: {text:?}"
+        );
+        assert!(
+            !text
+                .iter()
+                .any(|t| t.contains("<user_query>\ndelete\n</user_query>")),
+            "compacted history must not re-inject the stale prompt: {text:?}"
+        );
     }
     #[tokio::test]
     async fn test_compaction_state_context_build() {

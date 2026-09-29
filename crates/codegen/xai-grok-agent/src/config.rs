@@ -384,10 +384,11 @@ fn codex_toolset() -> ToolServerConfig {
 /// (Glob), `grep` (Grep).
 /// `run_terminal_command` (Bash) is intentionally omitted so exploration cannot
 /// mutate the workspace — the read-only guarantee is enforced by the toolset,
-/// not merely by the prompt. With no `BashTool`, the background-task helpers
-/// (`KillTaskTool`/`TaskOutputTool`) are unnecessary and also omitted.
+/// not merely by the prompt.
 /// `send_message` mutates nothing here, and without it an explorer cannot
 /// answer the session that spawned it until its whole run ends.
+/// The subagent tools are here so explore mode can fan a search out.
+/// [`EXPLORE_SUBAGENT_TYPES`] keeps every child read-only.
 fn explore_toolset() -> ToolServerConfig {
     ToolServerConfig {
         tools: vec![
@@ -395,10 +396,16 @@ fn explore_toolset() -> ToolServerConfig {
             (&grok_build::ListDirTool).into(),
             (&grok_build::GrepTool).into(),
             (&grok_build::SendMessageTool).into(),
+            task_tool_config(),
+            task_output_tool_config(),
+            wait_tasks_tool_config(),
+            kill_task_tool_config(),
         ],
         behavior_preset: None,
     }
 }
+/// The subagent types explore may spawn. Both are read-only, so explore stays read-only through its children.
+pub const EXPLORE_SUBAGENT_TYPES: &[&str] = &["explore", "plan"];
 /// Plan-mode toolset — read-only inspection tools, no shell, no file-editing.
 ///
 /// Enforces read-only at the toolset: the agent may inspect the repo and keep
@@ -1663,6 +1670,12 @@ impl AgentDefinition {
             permission_mode: PermissionMode::Plan,
             prompt_body: Some(subagent_prompts::EXPLORE_PROMPT.to_string()),
             inherit_skills: false,
+            allowed_subagent_types: Some(
+                EXPLORE_SUBAGENT_TYPES
+                    .iter()
+                    .map(|t| (*t).to_string())
+                    .collect(),
+            ),
             ..Self::base(BuiltinAgentName::Explore, "")
         }
     }
@@ -1808,8 +1821,21 @@ mod tests {
         let gb = toolset_for_preset("grok-build").unwrap();
         let plan = toolset_for_preset("plan").unwrap();
         let explore = toolset_for_preset("explore").unwrap();
-        assert!(explore.tools.len() < plan.tools.len());
+        assert!(explore.tools.len() < gb.tools.len());
         assert!(plan.tools.len() < gb.tools.len());
+        assert_ne!(explore.tools.len(), plan.tools.len());
+    }
+    #[test]
+    fn explore_can_spawn_only_read_only_subagents() {
+        let ids: Vec<String> = explore_toolset().tools.into_iter().map(|t| t.id).collect();
+        for tool in [task_tool_config(), wait_tasks_tool_config()] {
+            assert!(ids.contains(&tool.id), "explore lacks {}", tool.id);
+        }
+        assert!(!ids.contains(&bash_tool_config().id));
+        assert_eq!(
+            AgentDefinition::explore().allowed_subagent_types,
+            Some(vec!["explore".to_string(), "plan".to_string()])
+        );
     }
     fn grok_computer_exclusive_ids() -> Vec<String> {
         #[allow(unused_mut)]

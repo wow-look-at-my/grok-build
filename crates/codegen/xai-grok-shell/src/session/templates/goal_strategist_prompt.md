@@ -38,9 +38,10 @@ a subsystem whose design fights the objective and needs a clean rewrite.
 
 Change the HOW: refactor for testability, split a monolith into small pure units,
 extract the thing under test from its I/O, make an un-driveable behavior
-verifiable via a static / structural check plus a unit test of the shipped
-function, or rewrite one subsystem from a short spec. Prefer SMALL, mechanical,
-verifiable steps the implementer can execute one at a time.
+verifiable by reading the source plus a test of the shipped function in the
+project's existing suite, or rewrite one subsystem from a short spec. Prefer
+SMALL, mechanical, verifiable steps the implementer can execute one at a time.
+Never recommend a check script, test harness, probe, or shim of its own.
 
 ## Constraint
 

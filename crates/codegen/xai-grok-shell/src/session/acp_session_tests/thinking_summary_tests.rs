@@ -1,9 +1,9 @@
-//! The summary call a long thinking block triggers, driven end to end.
+//! The summary call a thinking block triggers, driven end to end.
 //!
 //! The pager half (`scrollback::blocks::thinking`, and the pager's
 //! `acp_handler::tests::thinking_summary`) draws whatever arrives here. What
 //! these tests own is the producing half on the real path: a completed response
-//! carrying over-threshold reasoning must put one request on the wire, and the
+//! carrying reasoning must put one request on the wire, and the
 //! update it broadcasts must carry the key the summary was written for and the
 //! cleaned text the model answered with. The switch is exercised in both
 //! positions, because a session that resolved it off must spend nothing.
@@ -13,8 +13,7 @@ use super::*;
 use xai_grok_sampling_types::{ConversationItem, ConversationResponse, synthesized_reasoning_item};
 use xai_grok_test_support::MockInferenceServer;
 
-/// Reasoning long enough to clear `THINKING_SUMMARY_MIN_CHARS`, so the
-/// threshold itself is not what these tests are silently passing on.
+/// Reasoning long enough to cover the path a real turn takes.
 fn long_reasoning() -> String {
     format!(
         "Read the parser first. {}",
@@ -176,7 +175,7 @@ async fn a_long_thinking_block_is_summarized_keyed_to_its_own_call() {
 }
 
 #[tokio::test]
-async fn short_thinking_is_not_summarized_and_costs_no_request() {
+async fn short_thinking_is_summarized_too() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
@@ -188,7 +187,7 @@ async fn short_thinking_is_not_summarized_and_costs_no_request() {
             let actor = std::sync::Arc::new(actor);
 
             let server = MockInferenceServer::start().await.unwrap();
-            server.set_response("should never be asked for");
+            server.set_response("Read parser first");
             aim_at(&actor, &server).await;
 
             actor.spawn_thinking_summary(
@@ -196,38 +195,18 @@ async fn short_thinking_is_not_summarized_and_costs_no_request() {
                 Some(5_000),
             );
 
-            // Nothing is expected on the rail; give the LocalSet room to run any
-            // task it wrongly spawned, then require that the endpoint stayed cold.
-            for _ in 0..200 {
-                tokio::task::yield_now().await;
-            }
+            let update = take_thinking_summary(&mut grx)
+                .await
+                .expect("a collapsed short block still needs its summary");
+            assert_eq!(
+                update.get("stream_start_ms").and_then(|v| v.as_i64()),
+                Some(5_000)
+            );
             assert_eq!(
                 server.request_count(),
-                0,
-                "thinking under the threshold must not cost a model call"
-            );
-            let mut broadcast_a_summary = false;
-            while let Ok(msg) = grx.try_recv() {
-                let xai_acp_lib::AcpClientMessage::ExtNotification(args) = msg else {
-                    continue;
-                };
-                let is_summary =
-                    serde_json::from_str::<serde_json::Value>(args.request.params.get())
-                        .ok()
-                        .and_then(|v| {
-                            v.get("update")?
-                                .get("sessionUpdate")?
-                                .as_str()
-                                .map(str::to_owned)
-                        })
-                        .is_some_and(|tag| tag == "thinking_summary");
-                if is_summary {
-                    broadcast_a_summary = true;
-                }
-            }
-            assert!(
-                !broadcast_a_summary,
-                "short thinking has nothing to summarize; no update may reach the client"
+                1,
+                "one short thinking block is one summary call: {}",
+                server.request_log_summary()
             );
         })
         .await;

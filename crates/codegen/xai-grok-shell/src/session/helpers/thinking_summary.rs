@@ -4,7 +4,6 @@ use crate::sampling::ConversationResponse;
 use crate::session::helpers::chat::floor_char_boundary;
 use xai_grok_tools::util::{ceil_char_boundary, truncate_bytes};
 
-pub(crate) const THINKING_SUMMARY_MIN_CHARS: usize = 800;
 pub(crate) const THINKING_SUMMARY_MAX_CHARS: usize = 320;
 /// Room for the answer plus the thinking of a model that cannot turn it off.
 pub(crate) const THINKING_SUMMARY_MAX_OUTPUT_TOKENS: u32 = 4096;
@@ -22,9 +21,11 @@ pub(crate) fn response_thinking_text(response: &ConversationResponse) -> String 
         .join("\n\n")
 }
 
+/// Every non-empty block gets a summary: thinking is drawn collapsed, so the
+/// summary is the only part of a short block the user sees.
 pub(crate) fn summarizable_thinking(thinking: &str) -> Option<String> {
     let thinking = thinking.trim();
-    if thinking.len() < THINKING_SUMMARY_MIN_CHARS {
+    if thinking.is_empty() {
         return None;
     }
     if thinking.len() <= INPUT_HEAD_CHARS + INPUT_TAIL_CHARS {
@@ -94,17 +95,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn short_thinking_needs_no_summary() {
-        assert_eq!(summarizable_thinking("I will read the file."), None);
+    fn only_empty_thinking_needs_no_summary() {
+        assert_eq!(summarizable_thinking(""), None);
+        assert_eq!(summarizable_thinking("  \n\t "), None);
         assert_eq!(
-            summarizable_thinking(&"x".repeat(THINKING_SUMMARY_MIN_CHARS - 1)),
-            None
+            summarizable_thinking("I will read the file.").as_deref(),
+            Some("I will read the file.")
         );
     }
 
     #[test]
     fn long_thinking_is_passed_whole_under_the_budget() {
-        let text = "word ".repeat(THINKING_SUMMARY_MIN_CHARS);
+        let text = "word ".repeat(800);
         assert_eq!(summarizable_thinking(&text).as_deref(), Some(text.trim()));
     }
 
