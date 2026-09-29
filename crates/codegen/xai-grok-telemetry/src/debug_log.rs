@@ -13,8 +13,8 @@ use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use tracing::Subscriber;
 use tracing::field::{Field, Visit};
