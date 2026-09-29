@@ -11,6 +11,8 @@ use tokio::sync::{mpsc, oneshot};
 use xai_file_utils::queue::UploadQueue;
 use xai_grok_sampling_types::ReasoningEffort;
 use xai_hunk_tracker::HunkTrackerHandle;
+/// `None` = unrestricted, `Some([])` = blocked, `Some(types)` = only those.
+pub type SharedAllowedSubagentTypes = std::sync::Arc<parking_lot::Mutex<Option<Vec<String>>>>;
 /// Coarse lifecycle state of a session as known to the leader/agent.
 ///
 /// A grok session has no
@@ -167,8 +169,8 @@ pub struct SessionHandle {
     pub agent_name: String,
     pub managed_mcp_proxy_base_url: String,
     pub session_default_agent_profile: Option<String>,
-    /// Subagent types this agent can spawn (from Agent(t1, t2) in tools).
-    pub allowed_subagent_types: Option<Vec<String>>,
+    /// Subagent types the ACTIVE agent can spawn.
+    pub allowed_subagent_types: SharedAllowedSubagentTypes,
     /// Hook registry for this session (snapshot from spawn time).
     pub hook_registry: Option<std::sync::Arc<xai_grok_hooks::discovery::HookRegistry>>,
     /// Typed workspace operations handle (agent sessions use local ops).

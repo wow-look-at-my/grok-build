@@ -1185,7 +1185,7 @@ fn make_test_handle(
         agent_name: "grok-build".to_string(),
         managed_mcp_proxy_base_url: String::new(),
         session_default_agent_profile: None,
-        allowed_subagent_types: None,
+        allowed_subagent_types: Default::default(),
         hook_registry: None,
         workspace_ops: xai_grok_workspace::WorkspaceOps::for_test(),
         terminal_backend: None,

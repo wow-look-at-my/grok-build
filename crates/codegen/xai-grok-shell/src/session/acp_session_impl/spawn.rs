@@ -1265,7 +1265,10 @@ pub(crate) async fn spawn_session_actor(
         .as_deref()
         .unwrap_or(crate::agent::config::DEFAULT_AGENT_TYPE)
         .to_owned();
-    let allowed_subagent_types_for_handle = agent.definition().allowed_subagent_types.clone();
+    let allowed_subagent_types_for_handle: crate::session::handle::SharedAllowedSubagentTypes =
+        std::sync::Arc::new(parking_lot::Mutex::new(
+            agent.definition().allowed_subagent_types.clone(),
+        ));
     let mut hook_discovery_errors: Vec<xai_grok_hooks::error::HookError> = Vec::new();
     let built_hook_registry: Option<Arc<xai_grok_hooks::discovery::HookRegistry>> =
         if let Some(override_reg) = hook_registry_override {
@@ -1716,6 +1719,7 @@ pub(crate) async fn spawn_session_actor(
             lock
         },
         active_agent_type: parking_lot::Mutex::new(initial_agent_type),
+        allowed_subagent_types: allowed_subagent_types_for_handle.clone(),
         mode_agent: Default::default(),
         queue_exit_reminder_on_approved_exit,
         active_skill: parking_lot::Mutex::new(None),

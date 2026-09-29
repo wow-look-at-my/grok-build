@@ -237,6 +237,7 @@ impl SessionActor {
                     "rebuild_agent: build failed for agent_type={new_agent_name}: {e}"
                 ))
             })?;
+        *self.allowed_subagent_types.lock() = new_agent.definition().allowed_subagent_types.clone();
         let new_system_prompt = new_agent.system_prompt().to_string();
         let mut new_prompt_context = new_agent.prompt_context().clone();
         new_prompt_context.normalize_for_persistence();
