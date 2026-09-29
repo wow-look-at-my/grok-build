@@ -188,6 +188,7 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - `GoalOrchestration::start_prompt_index` is the cut. A `User` item's `prompt_index` below it puts the calls that follow outside the goal. A compaction summary inside the goal is reported in the log header. The calls before it are gone from the conversation. So the verifier is told to run a missing plan step itself.
 - Each result keeps its head and its tail, because a test runner puts its verdict at the tail. Arguments are capped too. The whole log is capped and keeps the newest calls. The header states how many older calls it dropped. An absence then reads as an absence.
 - Every implementer-facing template (`goal_rules*.md`, `goal_continuation_directive*.md`, `goal_plan_block.md`, the planner prompt) says the run is the evidence and forbids proof files. The scratch dir stays, for a screenshot a plan step names.
+- Gathering evidence is the verifier's job alone. While a goal is active, `prepare_tool_call` refuses any implementer call whose arguments name the session dir or a bookkeeping file (`chat_history.jsonl`, `updates.jsonl`, a run log, verdict or details file), via `run_log::goal_bookkeeping_target`. Implementer prompts never describe how runs are recorded, because that description is what sent the model after its own transcript.
 - Every goal prompt (planner, implementer, verifier, strategist) bans hand-rolled check scripts, harnesses, probes and shims. Checks use the project's existing test runner, build and entry point.
 
 ## Verification does not widen the goal

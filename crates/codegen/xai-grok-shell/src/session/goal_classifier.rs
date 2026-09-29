@@ -1427,7 +1427,8 @@ evidence. Investigate yourself with the project's own tests and entry point \
 wherever the log has no honest run of a plan step. A gap \
 you cannot confirm is fixed remains `refuted: true`. If the fix was never RUN, \
 refute and ask the implementer to fix and run it — never to save an evidence \
-file; a file it writes about a run is not evidence.\n\
+file, and never to show, extract or summarize a run or its transcript. \
+Gathering evidence is your job alone.\n\
 - NO HAND-ROLLED HARNESSES: never ask for a check script, test harness, probe, \
 shim, or one-off verification program, and never write one yourself. Judge the \
 shipped code by the project's own tests and entry point.\n\

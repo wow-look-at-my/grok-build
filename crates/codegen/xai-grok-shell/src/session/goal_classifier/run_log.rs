@@ -296,6 +296,30 @@ fn only_prints_literals(command: &str) -> bool {
         })
 }
 
+/// Names of the session's own record. The implementer never needs them.
+const BOOKKEEPING_FILES: &[&str] = &[
+    "chat_history.jsonl",
+    "updates.jsonl",
+    ".runlog.md",
+    "goal-classifier-",
+    "goal-verdict-",
+    "goal-verifier-details-",
+];
+
+/// What in `args` names the session's own record, if anything. A goal's
+/// implementer that reads its transcript is building evidence the verifier
+/// reads for itself, so the harness refuses the call.
+pub(crate) fn goal_bookkeeping_target(args: &str, session_dir: &str) -> Option<String> {
+    let session_dir = session_dir.trim_end_matches('/');
+    if session_dir.len() >= 4 && args.contains(session_dir) {
+        return Some(session_dir.to_string());
+    }
+    BOOKKEEPING_FILES
+        .iter()
+        .find(|name| args.contains(*name))
+        .map(|name| (*name).to_string())
+}
+
 /// A call whose output the verifier must not see: the arguments stay so the
 /// verifier knows it was made, the result is replaced.
 fn render_withheld(name: &str, args: &str, reason: &str) -> String {
@@ -651,6 +675,33 @@ mod tests {
         let log = build_run_log(&items, None);
         assert_eq!(log.withheld, 0);
         assert!(log.body.contains("4 passed"));
+    }
+
+    #[test]
+    fn transcript_reads_are_goal_bookkeeping() {
+        let dir = "/home/u/.grok/sessions/abc";
+        assert_eq!(
+            goal_bookkeeping_target(
+                r#"{"command":"node -e \"read('/home/u/.grok/sessions/abc/chat_history.jsonl')\""}"#,
+                dir
+            )
+            .as_deref(),
+            Some(dir)
+        );
+        assert_eq!(
+            goal_bookkeeping_target(r#"{"command":"jq . ~/x/chat_history.jsonl"}"#, dir).as_deref(),
+            Some("chat_history.jsonl")
+        );
+        assert_eq!(
+            goal_bookkeeping_target(
+                r#"{"path":"/tmp/grok-goal-v/goal-classifier-v-1.runlog.md"}"#,
+                dir
+            )
+            .as_deref(),
+            Some(".runlog.md")
+        );
+        assert_eq!(goal_bookkeeping_target(r#"{"command":"cargo test -p foo"}"#, dir), None);
+        assert_eq!(goal_bookkeeping_target(r#"{"path":"src/lib.rs"}"#, dir), None);
     }
 
     #[test]
