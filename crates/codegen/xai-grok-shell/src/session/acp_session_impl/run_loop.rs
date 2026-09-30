@@ -493,6 +493,9 @@ pub(super) async fn run_session(
     tokio::task::spawn_local(super::status_line::run_status_emitter(Arc::downgrade(
         &session,
     )));
+    tokio::task::spawn_local(SessionActor::run_mcp_reconnect_loop(Arc::downgrade(
+        &session,
+    )));
     let liveness_watchers_enabled = {
         let user_cfg = crate::config::load_effective_config().ok();
         let requirements = crate::agent::config::read_requirements_toml();
