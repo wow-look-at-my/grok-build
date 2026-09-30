@@ -292,7 +292,7 @@ async fn e2e_crash_recovers_drops_client_then_restart_succeeds() {
 
 /// Scenario 2: server is permanently dead.
 /// Three scripted `Err` respawns exhaust the `[1,4,16]s` backoff.
-/// That yields 3 per-attempt `RestartFailed` pushes and 1 final exhausted `RestartFailed`, and the client stays dropped.
+/// That yields per-attempt `RestartFailed` pushes and exhausted `RestartFailed`, and the client stays dropped while the steady retries run.
 #[tokio::test(start_paused = true, flavor = "current_thread")]
 async fn e2e_crash_permanently_dead_exhausts_after_three_attempts() {
     let mcp_state = Arc::new(TokioMutex::new(McpState::new(vec![])));
@@ -356,7 +356,7 @@ async fn e2e_crash_permanently_dead_exhausts_after_three_attempts() {
             }
             assert_eq!(
                 at(&pushes, 3).detail.as_deref(),
-                Some("exhausted after 3 attempts"),
+                Some("exhausted after 3 attempts; retrying every 30s"),
             );
 
             dispatcher.abort();
