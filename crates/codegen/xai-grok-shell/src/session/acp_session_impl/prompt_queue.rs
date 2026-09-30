@@ -328,6 +328,12 @@ impl SessionActor {
         });
         let auto_send_now = follow_up_steer && turn_running && blocked_in_wait && !held_user_queue;
         let send_now = item.is_queue_editable() && (send_now || auto_send_now);
+        // A wait is a gap: the harvest aborts the wait, not the turn. A queued send-now cancels the turn, so skip then.
+        let harvest_into_wait = !send_now
+            && turn_running
+            && blocked_in_wait
+            && !goal_active
+            && !state.pending_inputs.iter().any(|queued| queued.send_now);
         let front_awaiting_commit_now = Self::front_awaiting_commit(&state);
         let cancel_running_turn =
             send_now && Self::send_now_cancels_running_turn(&state, goal_active);
@@ -381,6 +387,10 @@ impl SessionActor {
         }
         if merge_into_goal || send_now {
             self.broadcast_queue_changed(&state);
+        }
+        drop(state);
+        if harvest_into_wait {
+            self.harvest_queued_prompts_into_interjections(false).await;
         }
         cancel_running_turn
     }
