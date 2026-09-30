@@ -42,7 +42,9 @@ use xai_grok_telemetry::debug_log::{
 
 use super::debug_context::{DebugContext, ModelFacts};
 use crate::app::actions::Action;
-use crate::slash::command::{AppCtx, ArgItem, CommandExecCtx, CommandResult, SlashCommand};
+use crate::slash::command::{
+    AppCtx, ArgItem, CommandExecCtx, CommandResult, SlashCommand, slash_meta,
+};
 
 /// The per-session firehose file: `<grok_home>/debug/<session_id>.txt`.
 pub fn debug_log_path(grok_home: &Path, session_id: &str) -> PathBuf {
@@ -109,30 +111,15 @@ const SUBCOMMANDS: &[(&str, &str)] = &[
 pub struct DebugCommand;
 
 impl SlashCommand for DebugCommand {
-    fn name(&self) -> &str {
-        "debug"
-    }
-
-    fn description(&self) -> &str {
-        "Debug grok itself: inject this session's execution context and a question"
-    }
-
-    fn usage(&self) -> &str {
-        "/debug [<what is wrong> | scroll | fps | log]"
-    }
-
-    fn takes_args(&self) -> bool {
-        true
-    }
-
-    fn arg_placeholder(&self) -> Option<&str> {
-        Some("what is wrong? (or: scroll | fps | log)")
-    }
-
-    /// The injection needs a session id to resolve the log path, so the
-    /// session-less dashboard input does not offer it.
-    fn session_scoped(&self) -> bool {
-        true
+    slash_meta! {
+        name: "debug",
+        description: "Debug grok itself: inject this session's execution context and a question",
+        usage: "/debug [<what is wrong> | scroll | fps | log]",
+        takes_args: true,
+        // The injection needs a session id to resolve the log path, so the
+        // session-less dashboard input does not offer it.
+        session_scoped: true,
+        arg_placeholder: "what is wrong? (or: scroll | fps | log)",
     }
 
     fn suggest_args(&self, _ctx: &AppCtx, _args_query: &str) -> Option<Vec<ArgItem>> {
@@ -219,7 +206,7 @@ fn model_facts(ctx: &CommandExecCtx) -> ModelFacts {
         reasoning_effort: ctx
             .models
             .reasoning_effort
-            .map(|effort| effort.as_str().to_string()),
+            .map(|effort| effort.as_ref().to_string()),
     }
 }
 
@@ -240,7 +227,10 @@ mod tests {
             billing_surface_visible: true,
             usage_command_visible: true,
             workflows_available: true,
+            saved_workflows: &[],
+            workflow_runs: &[],
             screen_mode: crate::app::ScreenMode::Fullscreen,
+            current_title: None,
         }
     }
 
@@ -255,8 +245,7 @@ mod tests {
         );
     }
 
-    /// `/debug scroll` and `/scroll-debug` must stay routed to the SAME
-    /// action — the HUD has one toggle, two spellings.
+    /// `/debug scroll` and `/scroll-debug` must stay routed to the same action: the HUD has one toggle, two spellings.
     #[test]
     fn debug_scroll_routes_to_same_action_as_scroll_debug() {
         let models = ModelState::default();

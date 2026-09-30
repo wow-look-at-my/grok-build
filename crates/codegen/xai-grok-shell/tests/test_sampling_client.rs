@@ -1302,7 +1302,8 @@ async fn test_doom_loop_check_enabled_sends_header_and_absorbs_check_event() {
     server.enqueue_response("/v1/responses", ScriptedResponse::sse(events));
 
     let mut config = test_sampler_config(&server.url(), ApiBackend::Responses, &[]);
-    config.doom_loop_recovery = Some(Default::default());
+    let policy = xai_grok_sampling_types::doom_loop::DoomLoopRecoveryPolicy::default();
+    config.doom_loop_recovery = Some(policy);
     let client = Client::new(config).unwrap();
 
     let request = ConversationRequest::from_items(vec![ConversationItem::user("Hello")]);
@@ -1321,7 +1322,13 @@ async fn test_doom_loop_check_enabled_sends_header_and_absorbs_check_event() {
 
     let logged = server.requests().pop().unwrap();
     assert!(logged.path.contains("/responses"));
-    assert_eq!(logged.header("x-grok-doom-loop-check"), Some("true"));
+    // The header carries the detector window, not a bare opt-in flag.
+    let window = policy.window_tokens.to_string();
+    assert_eq!(
+        logged.header("x-grok-doom-loop-check"),
+        Some(window.as_str())
+    );
+    assert_eq!(window, "1024");
 }
 
 /// With the check disabled no header goes on the wire, and check frames from

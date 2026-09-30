@@ -99,7 +99,11 @@ pub fn same_model(origin: &str, target: &str) -> bool {
     if !prefix.eq_ignore_ascii_case(short.as_bytes()) {
         return false;
     }
-    match long.as_bytes()[short.len()..].split_first() {
+    match long
+        .as_bytes()
+        .get(short.len()..)
+        .and_then(<[u8]>::split_first)
+    {
         Some((b'-', date)) => !date.is_empty() && date.iter().all(u8::is_ascii_digit),
         _ => false,
     }
@@ -110,7 +114,9 @@ pub fn same_model(origin: &str, target: &str) -> bool {
 /// `User` or `System` item closes the turn, so reasoning with no assistant
 /// behind it has no recorded origin.
 pub fn reasoning_origin_model(items: &[ConversationItem], reasoning_idx: usize) -> Option<&str> {
-    items[reasoning_idx + 1..]
+    items
+        .get(reasoning_idx + 1..)
+        .unwrap_or(&[])
         .iter()
         .find_map(|item| match item {
             ConversationItem::Assistant(a) => Some(a.model_id.as_deref()),
