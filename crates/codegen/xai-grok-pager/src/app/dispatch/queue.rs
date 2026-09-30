@@ -412,10 +412,7 @@ pub(super) fn with_held_queue_flush(
 fn release_queued_prompt_from(app: &mut AppView, agent_id: Option<AgentId>) -> Vec<Effect> {
     use crate::app::agent::QueueEntryKind;
 
-    if !crate::appearance::cache::load_follow_up_steer() {
-        return Vec::new();
-    }
-
+    // No follow-up-mode gate: a parked wait is a gap, so Queue mode sends here too.
     let id = match agent_id {
         Some(id) => id,
         None => match app.active_view {
