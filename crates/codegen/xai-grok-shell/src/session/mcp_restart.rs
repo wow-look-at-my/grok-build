@@ -1,21 +1,14 @@
-//! Bounded stdio MCP auto-restart.
+//! Stdio MCP auto-restart.
 //!
 //! Auto-restart triggers on [`McpClientEventKind::TransportClosed`] and [`McpClientEventKind::HandshakeFailed`] keys for **stdio** MCP servers.
 //! When [`crate::session::mcp_dispatcher::run_dispatcher`] processes a window containing such a key, it hands the key to [`maybe_schedule_restart`].
-//! That function applies the guard rails listed below; if all pass, it spawns a one-shot [`auto_restart_stdio`] task.
-//! The task sleeps and respawns up to three times before parking the server as `unavailable`.
+//! That function applies the guard rails listed below; if all pass, it spawns an [`auto_restart_stdio`] task.
+//! It ends only when the server recovers, is disabled, is superseded, or the session shuts down.
 //!
 //! ## Backoff
 //!
-//! Three attempts at exactly:
-//!
-//! ```text
-//! attempt 1 → +1s  (t=1s)
-//! attempt 2 → +4s  (t=5s)
-//! attempt 3 → +16s (t=21s)
-//! ```
-//!
-//! Encoded as [`BACKOFF`]. The full window before exhaustion is 21 s.
+//! [`BACKOFF`] puts attempts at t=1s, t=5s and t=21s. The `exhausted` push follows the third failure.
+//! After that, one attempt runs every [`STEADY_RETRY_INTERVAL`] with no limit.
 //!
 //! ## Guard rails (skip conditions)
 //!
@@ -97,6 +90,9 @@ pub(crate) const HTTP_RECOVERY_BACKOFF: [Duration; 7] = [
     Duration::from_secs(30),
     Duration::from_secs(30),
 ];
+
+/// Wait between attempts once a ladder is spent. Both loops keep an enabled server on this cadence until it recovers.
+pub(crate) const STEADY_RETRY_INTERVAL: Duration = Duration::from_secs(30);
 
 /// Skip-reason label values surfaced on `mcp.auto_restart.skipped`.
 ///
@@ -253,7 +249,113 @@ impl Drop for RestartInFlightGuard {
     }
 }
 
-/// One-shot task: sleep, re-check guard rails, respawn, repeat (at most 3 attempts), emitting the `mcp.auto_restart.*` metrics.
+/// How a single stdio restart attempt ended.
+enum StdioAttempt {
+    /// The task must stop: the server recovered, moved on, was disabled, or the session is shutting down.
+    Done,
+    /// The respawn failed; the caller decides when to try again.
+    Failed(String),
+}
+
+/// Sleep `wait`, re-check the guard rails, then respawn once.
+/// A success pushes `Ready`; a disable pushes `Disabled`.
+async fn attempt_stdio_restart(
+    actions: &dyn RestartActions,
+    session_id: &str,
+    server: &str,
+    attempt: usize,
+    wait: Duration,
+    cancel: &tokio_util::sync::CancellationToken,
+) -> StdioAttempt {
+    // Select on the shutdown token so the sleep aborts promptly instead of delaying shutdown or pushing through a tearing-down gateway
+    tokio::select! {
+        _ = tokio::time::sleep(wait) => {}
+        _ = cancel.cancelled() => {
+            tracing::debug!(
+                server = %server,
+                attempt,
+                "auto-restart cancelled during backoff (session shutdown)",
+            );
+            return StdioAttempt::Done;
+        }
+    }
+
+    // Also short-circuit before the (multi-second) respawn call if cancellation landed between the sleep completing and now
+    if cancel.is_cancelled() {
+        tracing::debug!(
+            server = %server,
+            attempt,
+            "auto-restart cancelled before respawn (session shutdown)",
+        );
+        return StdioAttempt::Done;
+    }
+
+    // HTTP/HttpAuth are filtered at schedule time
+    // The `Reason::Disabled` push below only fires for user-driven removal (toggle-off / config diff)
+    if !actions.is_stdio_server_configured(server).await {
+        tracing::info!(
+            server = %server,
+            attempt,
+            "auto-restart aborted: server no longer configured",
+        );
+        record_skipped(server, SkipReason::Disabled);
+        push(
+            actions,
+            session_id,
+            server,
+            McpServerStatus::Unavailable,
+            McpServerStatusReason::Disabled,
+            None,
+        );
+        return StdioAttempt::Done;
+    }
+    if actions.is_in_shutting_down(server) {
+        tracing::info!(
+            server = %server,
+            attempt,
+            "auto-restart aborted: server in shutting_down set",
+        );
+        record_skipped(server, SkipReason::ShuttingDown);
+        return StdioAttempt::Done;
+    }
+
+    record_attempted(server, attempt);
+
+    match actions.respawn_stdio(server).await {
+        Ok(Respawn::Superseded) => {
+            record_skipped(server, SkipReason::Superseded);
+            StdioAttempt::Done
+        }
+        Ok(Respawn::Installed) => {
+            tracing::info!(
+                server = %server,
+                attempt,
+                "auto-restart succeeded",
+            );
+            record_succeeded(server, attempt);
+            push(
+                actions,
+                session_id,
+                server,
+                McpServerStatus::Ready,
+                McpServerStatusReason::RestartSucceeded,
+                None,
+            );
+            StdioAttempt::Done
+        }
+        Err(reason) => {
+            tracing::warn!(
+                server = %server,
+                attempt,
+                %reason,
+                "auto-restart attempt failed",
+            );
+            StdioAttempt::Failed(reason)
+        }
+    }
+}
+
+/// Restart task: the [`BACKOFF`] ladder, then one attempt every [`STEADY_RETRY_INTERVAL`] until the server recovers, is disabled, or the session ends.
 /// Must run inside a `LocalSet` (the production `RestartActions` holds `!Send` types).
 /// `respawn_stdio` wires `set_event_tx` AFTER `ensure_initialized`, so the dispatcher's mapping from `Ready` to `Initialized` does not fire.
 pub(crate) async fn auto_restart_stdio(
@@ -264,109 +366,25 @@ pub(crate) async fn auto_restart_stdio(
 ) {
     for (idx, wait) in BACKOFF.iter().enumerate() {
         let attempt = idx + 1;
-
-        // On graceful shutdown the dispatcher cancels this token
-        // Select on it so the backoff sleep aborts promptly instead of delaying shutdown or pushing through a tearing-down gateway
-        tokio::select! {
-            _ = tokio::time::sleep(*wait) => {}
-            _ = cancel.cancelled() => {
-                tracing::debug!(
-                    server = %server,
-                    attempt,
-                    "auto-restart cancelled during backoff (session shutdown)",
-                );
-                return;
-            }
-        }
-
-        // Also short-circuit before the (multi-second) respawn call if cancellation landed between the sleep completing and now
-        if cancel.is_cancelled() {
-            tracing::debug!(
-                server = %server,
-                attempt,
-                "auto-restart cancelled before respawn (session shutdown)",
-            );
-            return;
-        }
-
-        // HTTP/HttpAuth are filtered at schedule time
-        // The `Reason::Disabled` push below only fires for user-driven removal (toggle-off / config diff)
-        if !actions.is_stdio_server_configured(&server).await {
-            tracing::info!(
-                server = %server,
-                attempt,
-                "auto-restart aborted: server no longer configured",
-            );
-            record_skipped(&server, SkipReason::Disabled);
-            push(
+        match attempt_stdio_restart(&*actions, &session_id, &server, attempt, *wait, &cancel).await
+        {
+            StdioAttempt::Done => return,
+            StdioAttempt::Failed(reason) => push(
                 &*actions,
                 &session_id,
                 &server,
                 McpServerStatus::Unavailable,
-                McpServerStatusReason::Disabled,
-                None,
-            );
-            return;
-        }
-        if actions.is_in_shutting_down(&server) {
-            tracing::info!(
-                server = %server,
-                attempt,
-                "auto-restart aborted: server in shutting_down set",
-            );
-            record_skipped(&server, SkipReason::ShuttingDown);
-            return;
-        }
-
-        record_attempted(&server, attempt);
-
-        match actions.respawn_stdio(&server).await {
-            Ok(Respawn::Superseded) => {
-                record_skipped(&server, SkipReason::Superseded);
-                return;
-            }
-            Ok(Respawn::Installed) => {
-                tracing::info!(
-                    server = %server,
+                McpServerStatusReason::RestartFailed,
+                Some(format!(
+                    "attempt {} of {}: {}",
                     attempt,
-                    "auto-restart succeeded",
-                );
-                record_succeeded(&server, attempt);
-                push(
-                    &*actions,
-                    &session_id,
-                    &server,
-                    McpServerStatus::Ready,
-                    McpServerStatusReason::RestartSucceeded,
-                    None,
-                );
-                return;
-            }
-            Err(reason) => {
-                tracing::warn!(
-                    server = %server,
-                    attempt,
-                    %reason,
-                    "auto-restart attempt failed",
-                );
-                push(
-                    &*actions,
-                    &session_id,
-                    &server,
-                    McpServerStatus::Unavailable,
-                    McpServerStatusReason::RestartFailed,
-                    Some(format!(
-                        "attempt {} of {}: {}",
-                        attempt,
-                        BACKOFF.len(),
-                        reason
-                    )),
-                );
-            }
+                    BACKOFF.len(),
+                    reason
+                )),
+            ),
         }
     }
 
-    // All three attempts failed; park the server
     record_exhausted(&server);
     push(
         &*actions,
@@ -374,10 +392,29 @@ pub(crate) async fn auto_restart_stdio(
         &server,
         McpServerStatus::Unavailable,
         McpServerStatusReason::RestartFailed,
-        Some(format!("exhausted after {} attempts", BACKOFF.len())),
+        Some(format!(
+            "exhausted after {} attempts; retrying every {}s",
+            BACKOFF.len(),
+            STEADY_RETRY_INTERVAL.as_secs()
+        )),
     );
-    // The evicted client was never replaced; its tools are still registered.
+    // The evicted client was never replaced; drop its tools so the model stops calling a dead server.
     actions.unregister_server_tools(&server);
+
+    for attempt in BACKOFF.len() + 1.. {
+        if let StdioAttempt::Done = attempt_stdio_restart(
+            &*actions,
+            &session_id,
+            &server,
+            attempt,
+            STEADY_RETRY_INTERVAL,
+            &cancel,
+        )
+        .await
+        {
+            return;
+        }
+    }
 }
 
 /// HTTP counterpart to [`maybe_schedule_restart`]: retries `reset_http_client` on the [`HTTP_RECOVERY_BACKOFF`] ladder.
@@ -419,17 +456,19 @@ pub(crate) async fn maybe_schedule_http_recovery(
     true
 }
 
-/// Retry loop backing [`maybe_schedule_http_recovery`]: immediate attempt, then back off on [`HTTP_RECOVERY_BACKOFF`], re-checking guards each time.
-/// Returns on success, a tripped guard, or cancellation; parks the server (metric only) once exhausted.
+/// Retry loop backing [`maybe_schedule_http_recovery`]: immediate attempt, the [`HTTP_RECOVERY_BACKOFF`] ladder, then [`STEADY_RETRY_INTERVAL`] forever.
+/// Guards are re-checked each time. Returns on success, a tripped guard, or cancellation.
 /// Must run in a `LocalSet`.
 async fn http_recovery_loop(
     actions: Rc<dyn RestartActions>,
     server: McpServerName,
     cancel: tokio_util::sync::CancellationToken,
 ) {
-    // `wait_before` is the delay before each attempt: `None` for the immediate first, then each `HTTP_RECOVERY_BACKOFF` step
-    let waits = std::iter::once(None).chain(HTTP_RECOVERY_BACKOFF.iter().map(Some));
-    let total = HTTP_RECOVERY_BACKOFF.len() + 1;
+    // `wait_before` is the delay before each attempt: `None` for the immediate first, then the ladder, then the steady cadence
+    let waits = std::iter::once(None)
+        .chain(HTTP_RECOVERY_BACKOFF.iter().copied().map(Some))
+        .chain(std::iter::repeat(Some(STEADY_RETRY_INTERVAL)));
+    let ladder = HTTP_RECOVERY_BACKOFF.len() + 1;
 
     for (idx, wait_before) in waits.enumerate() {
         let attempt = idx + 1;
@@ -437,7 +476,7 @@ async fn http_recovery_loop(
         if let Some(wait) = wait_before {
             // Abort the sleep promptly on shutdown instead of holding the claim.
             tokio::select! {
-                _ = tokio::time::sleep(*wait) => {}
+                _ = tokio::time::sleep(wait) => {}
                 _ = cancel.cancelled() => return,
             }
         }
@@ -467,7 +506,6 @@ async fn http_recovery_loop(
                 return;
             }
             Err(reason) => {
-                // Keep retrying; the `Pending` client keeps lazy recovery alive.
                 tracing::warn!(
                     server = %server,
                     attempt,
@@ -476,16 +514,16 @@ async fn http_recovery_loop(
                 );
             }
         }
+        if attempt == ladder {
+            record_http_recovery_exhausted(&server);
+            tracing::warn!(
+                server = %server,
+                attempts = ladder,
+                interval_secs = STEADY_RETRY_INTERVAL.as_secs(),
+                "in-place HTTP transport recovery ladder exhausted; retrying on a fixed interval",
+            );
+        }
     }
-
-    // Ladder exhausted; park the server
-    // A later tool call still triggers lazy recovery via `ensure_initialized`
-    record_http_recovery_exhausted(&server);
-    tracing::warn!(
-        server = %server,
-        attempts = total,
-        "in-place HTTP transport recovery exhausted; server parked until next tool call",
-    );
 }
 
 /// Build a wire payload and hand it to the actions' `push_status` hook.
@@ -694,6 +732,19 @@ mod tests {
         tokio_util::sync::CancellationToken::new()
     }
 
+    /// Advance the paused clock by one sleep and let the woken task reach its next sleep.
+    async fn step(wait: StdDuration) {
+        tokio::time::advance(wait).await;
+        tokio::task::yield_now().await;
+    }
+
+    /// Step through every [`BACKOFF`] sleep, so all of them ladder attempts run.
+    async fn drive_ladder() {
+        for wait in BACKOFF {
+            step(wait).await;
+        }
+    }
+
     async fn run_in_local<F, T>(f: F) -> T
     where
         F: std::future::Future<Output = T>,
@@ -702,21 +753,19 @@ mod tests {
         local.run_until(f).await
     }
 
-    /// Contract: with all 3 attempts failing, respawn is called at `t=1s`, `t=5s`, `t=21s`.
+    /// Contract: with every attempt failing, respawn is called at `t=1s`, `t=5s`, `t=21s`, then every steady interval.
     #[tokio::test(start_paused = true)]
     async fn backoff_attempts_sequence() {
         run_in_local(async {
             let mock = Rc::new(MockActions::new());
             mock.configure("svr");
-            mock.script_outcome(Err("e1".into()));
-            mock.script_outcome(Err("e2".into()));
-            mock.script_outcome(Err("e3".into()));
+            let cancel = tokio_util::sync::CancellationToken::new();
 
             let task = tokio::task::spawn_local(auto_restart_stdio(
                 dyn_actions(mock.clone()),
                 "sess-1".to_string(),
                 "svr".to_string(),
-                never_cancel(),
+                cancel.clone(),
             ));
 
             // t=0: nothing yet
@@ -738,6 +787,14 @@ mod tests {
             tokio::task::yield_now().await;
             assert_eq!(mock.respawn_call_count(), 3);
 
+            // After the ladder, one attempt per steady interval with no limit
+            for expected in 4..=6 {
+                tokio::time::advance(STEADY_RETRY_INTERVAL).await;
+                tokio::task::yield_now().await;
+                assert_eq!(mock.respawn_call_count(), expected);
+            }
+
+            cancel.cancel();
             task.await.unwrap();
         })
         .await;
@@ -1006,21 +1063,22 @@ mod tests {
             mock.script_outcome(Err("transport reset".into()));
             mock.script_outcome(Err("spawn failed".into()));
             mock.script_outcome(Err("handshake timeout".into()));
+            let cancel = tokio_util::sync::CancellationToken::new();
 
             let task = tokio::task::spawn_local(auto_restart_stdio(
                 dyn_actions(mock.clone()),
                 "sess-1".to_string(),
                 "svr".to_string(),
-                never_cancel(),
+                cancel.clone(),
             ));
 
-            tokio::time::advance(StdDuration::from_secs(21)).await;
-            tokio::task::yield_now().await;
+            drive_ladder().await;
+            cancel.cancel();
             task.await.unwrap();
 
             assert_eq!(mock.respawn_call_count(), 3);
             let pushes = mock.pushes();
-            // Each failed attempt pushes `RestartFailed`, then the exhausted park pushes a fourth
+            // Each failed attempt pushes `RestartFailed`, then the exhausted push is a fourth
             assert_eq!(pushes.len(), 4, "got pushes: {pushes:?}");
             for p in &pushes {
                 assert_eq!(p.reason, McpServerStatusReason::RestartFailed);
@@ -1045,22 +1103,22 @@ mod tests {
             );
             assert_eq!(
                 pushes.get(3).and_then(|p| p.detail.as_deref()),
-                Some("exhausted after 3 attempts"),
+                Some("exhausted after 3 attempts; retrying every 30s"),
             );
         })
         .await;
     }
 
-    /// Contract: exhausting all three stdio respawn attempts unregisters the dead server's tools AND emits the four `RestartFailed` pushes.
-    /// Unregistering stops the model dispatching against a `not found` server.
+    /// Contract: exhausting the ladder unregisters the dead server's tools once.
     #[tokio::test(start_paused = true)]
-    async fn exhaustion_unregisters_server_tools() {
+    async fn exhaustion_unregisters_tools_then_recovers_on_steady_retry() {
         run_in_local(async {
             let mock = Rc::new(MockActions::new());
             mock.configure("svr");
-            mock.script_outcome(Err("e1".into()));
-            mock.script_outcome(Err("e2".into()));
-            mock.script_outcome(Err("e3".into()));
+            for e in ["e1", "e2", "e3", "e4"] {
+                mock.script_outcome(Err(e.into()));
+            }
+            mock.script_outcome(Ok(Respawn::Installed));
 
             let task = tokio::task::spawn_local(auto_restart_stdio(
                 dyn_actions(mock.clone()),
@@ -1069,15 +1127,60 @@ mod tests {
                 never_cancel(),
             ));
 
-            tokio::time::advance(StdDuration::from_secs(21)).await;
-            tokio::task::yield_now().await;
-            task.await.unwrap();
-
+            drive_ladder().await;
             assert_eq!(mock.respawn_call_count(), 3);
             assert_eq!(
                 mock.unregister_calls(),
                 vec!["svr".to_string()],
                 "exhausted restart must unregister the dead server's tools exactly once",
+            );
+
+            step(STEADY_RETRY_INTERVAL).await;
+            assert_eq!(mock.respawn_call_count(), 4);
+            step(STEADY_RETRY_INTERVAL).await;
+            task.await.unwrap();
+
+            assert_eq!(mock.respawn_call_count(), 5);
+            assert_eq!(mock.unregister_calls().len(), 1);
+            let pushes = mock.pushes();
+            assert_eq!(
+                pushes.len(),
+                5,
+                "3 attempt pushes, 1 exhausted push, no push for a steady failure, 1 Ready: {pushes:?}"
+            );
+            let last = pushes.last().expect("a Ready push");
+            assert_eq!(last.status, McpServerStatus::Ready);
+            assert_eq!(last.reason, McpServerStatusReason::RestartSucceeded);
+        })
+        .await;
+    }
+
+    /// Contract: disabling a server during the steady phase stops the retries with a `Disabled` push.
+    #[tokio::test(start_paused = true)]
+    async fn steady_retry_stops_when_disabled() {
+        run_in_local(async {
+            let mock = Rc::new(MockActions::new());
+            mock.configure("svr");
+
+            let task = tokio::task::spawn_local(auto_restart_stdio(
+                dyn_actions(mock.clone()),
+                "sess-1".to_string(),
+                "svr".to_string(),
+                never_cancel(),
+            ));
+
+            drive_ladder().await;
+            step(STEADY_RETRY_INTERVAL).await;
+            assert_eq!(mock.respawn_call_count(), 4);
+
+            mock.unconfigure("svr");
+            step(STEADY_RETRY_INTERVAL).await;
+            task.await.unwrap();
+
+            assert_eq!(mock.respawn_call_count(), 4);
+            assert_eq!(
+                mock.pushes().last().map(|p| p.reason),
+                Some(McpServerStatusReason::Disabled)
             );
         })
         .await;
@@ -1309,18 +1412,17 @@ mod tests {
         .await;
     }
 
-    /// Contract: when every attempt fails, the loop tries once per `HTTP_RECOVERY_BACKOFF` step plus the immediate attempt.
-    /// Then it parks the server (no more resets, no status push).
+    /// Contract: when the ladder fails.
     #[tokio::test(start_paused = true)]
-    async fn http_recovery_parks_after_exhausting_backoff() {
+    async fn http_recovery_keeps_retrying_after_backoff() {
         run_in_local(async {
             let mock = Rc::new(MockActions::new());
             mock.configure_http("http-mcp-server");
-            // Script one more failure than the total attempts so an unexpected extra attempt would still be a scripted Err
-            // The count assertion below catches it
-            for _ in 0..HTTP_RECOVERY_BACKOFF.len() + 2 {
+            let ladder = HTTP_RECOVERY_BACKOFF.len() + 1;
+            for _ in 0..ladder + 2 {
                 mock.script_reset("http-mcp-server", Err("still down".into()));
             }
+            mock.script_reset("http-mcp-server", Ok(()));
 
             let spawned = maybe_schedule_http_recovery(
                 dyn_actions(mock.clone()),
@@ -1330,24 +1432,26 @@ mod tests {
             .await;
             assert!(spawned);
 
-            // Drive the whole ladder: the immediate attempt plus every backoff step
             tokio::task::yield_now().await;
             for wait in HTTP_RECOVERY_BACKOFF {
-                tokio::time::advance(wait).await;
-                tokio::task::yield_now().await;
+                step(wait).await;
             }
-            // Allow the parked/exhaustion path to run.
-            tokio::time::advance(StdDuration::from_secs(60)).await;
-            tokio::task::yield_now().await;
+            assert_eq!(mock.reset_calls().len(), ladder);
 
+            for extra in 1..=3 {
+                step(STEADY_RETRY_INTERVAL).await;
+                assert_eq!(mock.reset_calls().len(), ladder + extra);
+            }
+
+            step(STEADY_RETRY_INTERVAL).await;
             assert_eq!(
                 mock.reset_calls().len(),
-                HTTP_RECOVERY_BACKOFF.len() + 1,
-                "one immediate attempt plus one per backoff step, then park",
+                ladder + 3,
+                "loop stops once recovered"
             );
             assert!(
                 mock.pushes().is_empty(),
-                "exhaustion parks silently; ensure_initialized owns status",
+                "HTTP recovery relies on ensure_initialized for status; no direct push",
             );
         })
         .await;
