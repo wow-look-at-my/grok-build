@@ -1858,18 +1858,6 @@ fn move_setting_away_from_default(app: &mut AppView, key: crate::settings::Setti
         "voice_stt_language" => {
             let _ = dispatch(Action::SetVoiceSttLanguage("es".to_string()), app);
         }
-        "fork_secondary_model" => {
-            use agent_client_protocol as acp;
-            use std::sync::Arc;
-            if let ActiveView::Agent(aid) = app.active_view
-                && let Some(agent) = app.agents.get_mut(&aid)
-            {
-                let id = acp::ModelId::new(Arc::from("test-fork-move"));
-                let info = acp::ModelInfo::new(id.clone(), "Test Fork Move".to_string());
-                agent.session.models.available.insert(id.clone(), info);
-                let _ = dispatch(Action::SetForkSecondaryModel(id), app);
-            }
-        }
         "default_selected_permission" => {
             let _ = dispatch(
                 Action::SetDefaultSelectedPermission("allow_once".to_string()),

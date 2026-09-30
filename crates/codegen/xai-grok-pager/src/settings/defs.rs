@@ -1861,31 +1861,6 @@ pub fn default_settings() -> Vec<SettingMeta> {
             restart_required: false,
             hidden_in_minimal: false,
         },
-        // Only the CLI flag (`--todo-gate`) is wired. Those arms don't yet have a place to land. `restart_required: false`
-        // because the config-reloader rebroadcasts UI changes.
-        SettingMeta {
-            key: "fork_secondary_model",
-            category: SettingCategory::Models,
-            owner: SettingOwner::Shell,
-            label: "Fork secondary model",
-            description: "Model used for the secondary agent when forking. Pick `(no override)` to clear.",
-            keywords: &[
-                "fork",
-                "secondary",
-                "model",
-                "agent",
-                "subagent",
-                "branch",
-                "models",
-            ],
-            kind: SettingKind::DynamicEnum {
-                default: "",
-                source: DynamicEnumSource::ActiveModelCatalog,
-                supports_preview: false,
-            },
-            restart_required: false,
-            hidden_in_minimal: false,
-        },
     ]
     .into_iter()
     .chain(harness_model_settings())

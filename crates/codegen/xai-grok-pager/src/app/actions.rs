@@ -597,12 +597,6 @@ pub enum Action {
     /// Set `[ui].ttft_timeout_secs`: how long a model call may go without
     /// output before it is reissued. `0` turns the limit off.
     SetTtftTimeoutSecs(i64),
-    /// Commit the fork-secondary model. Typed `ModelId` payload, persisted to `[ui].fork_secondary_model`.
-    /// Rebroadcast via `ConfigUpdate::Ui` so running agents pick up the change.
-    SetForkSecondaryModel(acp::ModelId),
-    /// Clear the persisted fork-secondary model, restoring the built-in default.
-    /// Active agent keeps its value; next fork uses the default.
-    ClearForkSecondaryModel,
     /// Commit one harness model slot into `[models]`. The first field is
     /// the slot id from `xai_grok_models::HARNESS_MODEL_SLOTS`; an empty
     /// model id clears the slot. Restart-required — a slot is resolved

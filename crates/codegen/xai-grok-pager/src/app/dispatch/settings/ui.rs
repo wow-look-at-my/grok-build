@@ -6,14 +6,13 @@ use super::setters::{
     set_combine_queued_prompts_inner, set_compact_mode, set_compact_mode_inner,
     set_confirm_before_rewind_inner, set_contextual_hint_inner, set_default_model_inner,
     set_default_selected_permission_inner, set_display_refresh_auto_cadence_inner,
-    set_follow_up_behavior_inner, set_fork_secondary_model_inner, set_group_tool_verbs_inner,
-    set_harness_model_inner, set_hunk_tracker_mode_inner, set_invert_scroll_inner,
-    set_keep_text_selection_inner, set_max_thoughts_width_inner,
-    set_min_output_tokens_per_sec_inner, set_multiline_mode, set_output_rate_max_retries_inner,
-    set_output_rate_sustained_secs_inner, set_output_rate_window_secs_inner,
-    set_page_flip_on_send_inner, set_prompt_suggestions_inner, set_remember_tool_approvals_inner,
-    set_render_mermaid_inner, set_respect_manual_folds_inner, set_screen_mode_inner,
-    set_scroll_lines_inner, set_scroll_mode_inner, set_scroll_speed_inner,
+    set_follow_up_behavior_inner, set_group_tool_verbs_inner, set_harness_model_inner,
+    set_hunk_tracker_mode_inner, set_invert_scroll_inner, set_keep_text_selection_inner,
+    set_max_thoughts_width_inner, set_min_output_tokens_per_sec_inner, set_multiline_mode,
+    set_output_rate_max_retries_inner, set_output_rate_sustained_secs_inner,
+    set_output_rate_window_secs_inner, set_page_flip_on_send_inner, set_prompt_suggestions_inner,
+    set_remember_tool_approvals_inner, set_render_mermaid_inner, set_respect_manual_folds_inner,
+    set_screen_mode_inner, set_scroll_lines_inner, set_scroll_mode_inner, set_scroll_speed_inner,
     set_show_thinking_blocks_inner, set_show_tips_inner, set_simple_mode_inner,
     set_stop_gate_ci_failing_inner, set_stop_gate_unfinished_todos_inner, set_theme_inner,
     set_thinking_summaries_inner, set_timeline_inner, set_timestamps, set_timestamps_inner,
@@ -816,20 +815,6 @@ pub(in crate::app::dispatch) fn action_for_reset(
         ("voice_stt_language", SettingValue::Enum(s)) => {
             Some(Action::SetVoiceSttLanguage((*s).to_string()))
         }
-        // fork_secondary_model: empty becomes Clear, non-empty is a skew guard
-        ("fork_secondary_model", SettingValue::String(s)) => {
-            if s.is_empty() {
-                Some(Action::ClearForkSecondaryModel)
-            } else {
-                tracing::error!(
-                    target: "settings",
-                    value = %s,
-                    "action_for_reset(fork_secondary_model) received non-empty default — \
-                     registry/dispatch skew (default should be empty string)",
-                );
-                None
-            }
-        }
         // Harness model slots: the registry default is the empty string,
         // which clears the slot back to inheriting.
         (key, SettingValue::String(s)) if xai_grok_models::slot_for_setting_key(key).is_some() => {
@@ -1149,15 +1134,6 @@ pub(in crate::app::dispatch) fn apply_setting_rollback(
             } else {
                 set_auto_update_inner(app, *b);
             }
-        }
-        // fork_secondary_model: empty rollback restores baseline default.
-        ("fork_secondary_model", SettingValue::String(s)) => {
-            let restored = if s.is_empty() {
-                xai_grok_shell::models::default_model().to_string()
-            } else {
-                s.clone()
-            };
-            set_fork_secondary_model_inner(app, restored);
         }
         // Harness model slots: an empty rollback value restores the slot
         // to inheriting, which is what it was before the failed write.

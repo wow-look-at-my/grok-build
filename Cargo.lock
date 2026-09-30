@@ -14619,7 +14619,6 @@ dependencies = [
  "xai-grok-config",
  "xai-grok-config-types",
  "xai-grok-image",
- "xai-grok-models",
  "xai-grok-status-line",
  "xai-tty-utils",
 ]

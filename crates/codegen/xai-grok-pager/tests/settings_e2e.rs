@@ -61,7 +61,6 @@ const ALL_SETTINGS_EXERCISED: &[&str] = &[
     "plan_mode",
     "show_tips",
     "auto_update",
-    "fork_secondary_model",
     "show_thinking_blocks",
     "thinking_summaries",
     "prompt_suggestions",
@@ -2075,8 +2074,7 @@ fn registry_kind_membership_through_pr_14() {
         "Enum kind membership drift",
     );
 
-    // `default_model` and `fork_secondary_model` migrated to DynamicEnum and
-    // must not come back as String.
+    // `default_model` migrated to DynamicEnum and must not come back as String.
     let string_keys = by_kind.remove("String").unwrap_or_default();
     assert!(
         string_keys.is_empty(),
@@ -2086,7 +2084,7 @@ fn registry_kind_membership_through_pr_14() {
     // Every harness model slot is a DynamicEnum too. They come from their own
     // table rather than a literal list, so adding a slot cannot drift here.
     let dynamic_enum_keys = by_kind.remove("DynamicEnum").unwrap_or_default();
-    let mut expected_dynamic: Vec<&str> = vec!["default_model", "fork_secondary_model"];
+    let mut expected_dynamic: Vec<&str> = vec!["default_model"];
     expected_dynamic.extend(
         xai_grok_models::HARNESS_MODEL_SLOTS
             .iter()
@@ -2242,7 +2240,6 @@ fn defaults_round_trip_through_registry() {
             "plan_mode" => SettingValue::Enum("off"),
             "show_tips" => SettingValue::Bool(true),
             "auto_update" => SettingValue::Bool(true),
-            "fork_secondary_model" => SettingValue::String(String::new()),
             "show_thinking_blocks" => SettingValue::Bool(true),
             "thinking_summaries" => SettingValue::Bool(true),
             "prompt_suggestions" => SettingValue::Bool(true),
@@ -6372,105 +6369,24 @@ fn pr13_cli_batch_settings_are_discoverable_via_search() {
     }
 }
 
-/// `fork_secondary_model` lives under Models.
-#[test]
-fn pr14_model_family_renders_under_models_category() {
-    let reg = SettingsRegistry::defaults();
-    let meta = reg
-        .find("fork_secondary_model")
-        .expect("`fork_secondary_model` must be registered");
-    assert_eq!(
-        meta.category,
-        SettingCategory::Models,
-        "`fork_secondary_model` must live under Models"
-    );
-    assert_eq!(
-        meta.owner,
-        SettingOwner::Shell,
-        "`fork_secondary_model` is SHELL-owned (persisted via util::config)"
-    );
-}
-
-/// `fork_secondary_model` is `restart_required: false`.
-#[test]
-fn pr14_restart_required_split() {
-    let reg = SettingsRegistry::defaults();
-    let fork = reg.find("fork_secondary_model").unwrap();
-    assert!(
-        !fork.restart_required,
-        "fork_secondary_model must be restart_required: false — the shell's \
-         config_reloader rebroadcasts the new default on the next fork"
-    );
-}
-
 /// Model settings use `DynamicEnum` with `ActiveModelCatalog`.
 #[test]
 fn pr14_string_settings_use_known_model_validator() {
     use xai_grok_pager::settings::DynamicEnumSource;
     let reg = SettingsRegistry::defaults();
-    for key in ["default_model", "fork_secondary_model"] {
-        let meta = reg
-            .find(key)
-            .unwrap_or_else(|| panic!("`{key}` must be registered"));
-        match &meta.kind {
-            SettingKind::DynamicEnum { source, .. } => {
-                assert_eq!(
-                    *source,
-                    DynamicEnumSource::ActiveModelCatalog,
-                    "`{key}` must pull choices from the active model catalog \
-                     so the picker matches `/model`'s UX"
-                );
-            }
-            other => panic!("expected DynamicEnum kind for `{key}`, got {other:?}"),
+    let meta = reg
+        .find("default_model")
+        .expect("`default_model` must be registered");
+    match &meta.kind {
+        SettingKind::DynamicEnum { source, .. } => {
+            assert_eq!(
+                *source,
+                DynamicEnumSource::ActiveModelCatalog,
+                "`default_model` must pull choices from the active model catalog \
+                 so the picker matches `/model`'s UX"
+            );
         }
-    }
-}
-
-/// Defaults round-trip through `current_value_for`.
-#[test]
-fn pr14_model_family_defaults_roundtrip_via_current_value_for() {
-    use xai_grok_pager::settings::current_value_for;
-    let ui = UiConfig::default();
-    let pager = PagerLocalSnapshot::default();
-
-    // The baseline value folds to the empty string, the sentinel meaning no override is set
-    let value = current_value_for("fork_secondary_model", &ui, &pager).unwrap();
-    assert_eq!(
-        value,
-        SettingValue::String(String::new()),
-        "PR 14: `fork_secondary_model` defaults to empty string (no-opinion sentinel)",
-    );
-}
-
-/// Non-baseline `fork_secondary_model` surfaces verbatim.
-#[test]
-fn pr14_fork_secondary_model_reads_ui_config_non_baseline() {
-    use xai_grok_pager::settings::current_value_for;
-    let ui = UiConfig {
-        fork_secondary_model: "Custom Fork Model".to_string(),
-        ..UiConfig::default()
-    };
-    let pager = PagerLocalSnapshot::default();
-    assert_eq!(
-        current_value_for("fork_secondary_model", &ui, &pager),
-        Some(SettingValue::String("Custom Fork Model".to_string())),
-        "non-baseline `fork_secondary_model` must surface verbatim — the \
-         baseline-equality fold only kicks in for the default value",
-    );
-}
-
-/// Model-family settings are discoverable via search.
-#[test]
-fn pr14_model_family_settings_are_discoverable_via_search() {
-    let reg = SettingsRegistry::defaults();
-    let cases = [("fork", "fork_secondary_model")];
-    for (query, expected_key) in cases {
-        let hits = reg.search(query);
-        assert!(
-            hits.iter().any(|m| m.key == expected_key),
-            "search(`{query}`) must include `{expected_key}` — hit keys: {:?}",
-            hits.iter().map(|m| m.key).collect::<Vec<_>>(),
-        );
+        other => panic!("expected DynamicEnum kind for `default_model`, got {other:?}"),
     }
 }
 
