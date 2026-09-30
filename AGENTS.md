@@ -277,6 +277,7 @@ Cross-clippy links nothing, but ring and aws-lc compile C in their build scripts
 - `resolve` runs on the turn path and is sync. So it never waits on the network. A model with no fresh cache entry answers as unpriced for that call and starts a background fetch. The price lands for the next call. `in_flight` holds one fetch per model. A second turn therefore starts no second request.
 - The cache is `$GROK_HOME/model_pricing_cache.json`, one entry per model. An absence is cached too, with a shorter TTL, or every turn on an unpriced model re-fetches. A failed lookup is NOT an absence and is not cached. Caching one pins an outage into the catalog for the whole TTL.
 - A document that prices no tier is recorded as an absence. Recording it as an all-zero price claims a price the catalog never gave.
+- A provider listing's own price sits between config and the catalog. `parse_listing_pricing` reads a `cost` array (`unit` per token, thousand or million) and OpenRouter's per-token `pricing`. Discovery registers it with `register_listed_prices`, because `resolve_configured_pricing` reads config alone and never sees a discovered model.
 
 - The per-message cache-hit-percent indicator reads the same `ResponseCompleted.usage` the cost indicator does (`AcpUpdateTracker::set_response_cache_hit`). It renders on its OWN reserved row below the content instead of widening the cost/timestamp gutter further (`EntryRenderer::cache_hit_reserved_rows`).
 

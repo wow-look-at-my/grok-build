@@ -1163,6 +1163,57 @@ fn parse_openai_style_field_wins_over_openrouter_context_length() {
     assert_eq!(result.context_window.get(), 350_000);
 }
 #[test]
+fn parse_gateway_listing_reads_capabilities_and_cost() {
+    let value = serde_json::json!({
+        "capabilities": {
+            "context_length": 1_000_000,
+            "max_output_tokens": 128_000,
+            "supports_reasoning": true
+        },
+        "cost": [{
+            "type": "tokens",
+            "currency": "USD",
+            "unit": "per_million_tokens",
+            "input": 4,
+            "output": 20,
+            "cache_read": 0.2,
+            "cache_write": 5
+        }],
+        "id": "claude-opus-5-5",
+        "object": "model",
+        "api_types": ["anthropic_messages", "anthropic_count_tokens"],
+        "owned_by": "vertex",
+        "permission": []
+    });
+    let result = parse_remote_model_value(&value, "http://localhost:18080/v1").unwrap();
+    assert_eq!(result.context_window.get(), 1_000_000);
+    assert_eq!(result.max_completion_tokens, Some(128_000));
+    let p = &result.pricing;
+    assert!((p.input_per_token_usd - 4e-6).abs() < 1e-15);
+    assert!((p.output_per_token_usd - 20e-6).abs() < 1e-15);
+    assert!((p.cached_read_per_token_usd - 0.2e-6).abs() < 1e-15);
+    assert!((p.cache_creation_per_token_usd - 5e-6).abs() < 1e-15);
+}
+#[test]
+fn parse_openrouter_pricing_is_per_token() {
+    let value = serde_json::json!({
+        "id": "x-ai/grok-4.6",
+        "pricing": { "prompt": "0.000002", "completion": "0.00001" }
+    });
+    let result = parse_remote_model_value(&value, "https://openrouter.ai/api/v1").unwrap();
+    assert!((result.pricing.input_per_token_usd - 2e-6).abs() < 1e-15);
+    assert!((result.pricing.output_per_token_usd - 1e-5).abs() < 1e-15);
+}
+#[test]
+fn parse_cost_in_an_unknown_unit_is_not_a_price() {
+    let value = serde_json::json!({
+        "id": "m",
+        "cost": [{ "type": "tokens", "unit": "per_fortnight", "input": 4, "output": 20 }]
+    });
+    let result = parse_remote_model_value(&value, "https://default.url").unwrap();
+    assert!(result.pricing.is_unusable());
+}
+#[test]
 fn models_list_url_for_openai_base() {
     // OpenAI-style base → its `/v1/models` listing.
     assert_eq!(

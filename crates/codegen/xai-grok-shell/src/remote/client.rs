@@ -735,12 +735,14 @@ pub(crate) fn parse_remote_model_value(
     // so a listing that emits only `context_length` still resolves a real
     // window instead of `DEFAULT_CONTEXT_WINDOW`.
     let top_provider = obj.get("top_provider").and_then(|v| v.as_object());
+    let capabilities = obj.get("capabilities").and_then(|v| v.as_object());
     let context_window = get_u64(obj, "contextWindow")
         .or_else(|| get_u64(obj, "context_window"))
         .or_else(|| meta.and_then(|m| get_u64(m, "contextWindow")))
         .or_else(|| meta.and_then(|m| get_u64(m, "totalContextTokens")))
         .or_else(|| get_u64(obj, "context_length"))
         .or_else(|| top_provider.and_then(|tp| get_u64(tp, "context_length")))
+        .or_else(|| capabilities.and_then(|c| get_u64(c, "context_length")))
         .or_else(|| get_u64(obj, "max_model_len"))
         .or_else(|| get_u64(obj, "max_input_tokens"))
         .or_else(|| get_u64(obj, "maxInputTokens"))
@@ -787,6 +789,7 @@ pub(crate) fn parse_remote_model_value(
         description: get_string(obj, "description"),
         max_completion_tokens: get_u64(obj, "maxCompletionTokens")
             .or_else(|| get_u64(obj, "max_completion_tokens"))
+            .or_else(|| capabilities.and_then(|c| get_u64(c, "max_output_tokens")))
             .and_then(|v| u32::try_from(v).ok()),
         temperature: get_f64(obj, "temperature").map(|v| v as f32),
         top_p: get_f64(obj, "topP").or_else(|| get_f64(obj, "top_p")).map(|v| v as f32),
@@ -923,9 +926,85 @@ pub(crate) fn parse_remote_model_value(
                 }
             })
             .unwrap_or_default(),
-        pricing: xai_grok_sampling_types::ModelPricing::default(),
+        pricing: parse_listing_pricing(obj),
         min_output_tokens_per_sec: None, ttft_timeout_secs: None,
     })
+}
+
+/// The per-token price a model listing states, or all zeros when it states none.
+///
+/// Shapes are read.
+/// `{type: "tokens", unit, input, output, cache_read, cache_write}`, where
+/// `unit` is `per_token`, `per_thousand_tokens` or `per_million_tokens`.
+/// OpenRouter's `pricing` object, whose values are USD per token.
+pub(crate) fn parse_listing_pricing(
+    obj: &serde_json::Map<String, serde_json::Value>,
+) -> xai_grok_sampling_types::ModelPricing {
+    let number = |v: Option<&serde_json::Value>| -> f64 {
+        match v {
+            Some(serde_json::Value::Number(n)) => n.as_f64().unwrap_or(0.0),
+            Some(serde_json::Value::String(s)) => s.trim().parse().unwrap_or(0.0),
+            _ => 0.0,
+        }
+    };
+    let costs: Vec<&serde_json::Map<String, serde_json::Value>> = match obj.get("cost") {
+        Some(serde_json::Value::Array(items)) => {
+            items.iter().filter_map(|v| v.as_object()).collect()
+        }
+        Some(serde_json::Value::Object(one)) => vec![one],
+        _ => Vec::new(),
+    };
+    for cost in costs {
+        if cost
+            .get("type")
+            .and_then(|v| v.as_str())
+            .is_some_and(|t| t != "tokens")
+        {
+            continue;
+        }
+        let unit = cost
+            .get("unit")
+            .and_then(|v| v.as_str())
+            .unwrap_or("per_token");
+        let divisor = match unit {
+            "per_token" => 1.0,
+            "per_thousand_tokens" | "per_1k_tokens" => 1_000.0,
+            "per_million_tokens" | "per_1m_tokens" => 1_000_000.0,
+            other => {
+                tracing::warn!(
+                    unit = other,
+                    "model listing names a cost unit this build cannot read; the price is ignored"
+                );
+                continue;
+            }
+        };
+        let currency = cost
+            .get("currency")
+            .and_then(|v| v.as_str())
+            .unwrap_or("USD");
+        if !currency.eq_ignore_ascii_case("USD") {
+            tracing::warn!(
+                currency,
+                "model listing prices in a currency other than USD; the price is ignored"
+            );
+            continue;
+        }
+        return xai_grok_sampling_types::ModelPricing {
+            input_per_token_usd: number(cost.get("input")) / divisor,
+            output_per_token_usd: number(cost.get("output")) / divisor,
+            cached_read_per_token_usd: number(cost.get("cache_read")) / divisor,
+            cache_creation_per_token_usd: number(cost.get("cache_write")) / divisor,
+        };
+    }
+    if let Some(pricing) = obj.get("pricing").and_then(|v| v.as_object()) {
+        return xai_grok_sampling_types::ModelPricing {
+            input_per_token_usd: number(pricing.get("prompt")),
+            output_per_token_usd: number(pricing.get("completion")),
+            cached_read_per_token_usd: number(pricing.get("input_cache_read")),
+            cache_creation_per_token_usd: number(pricing.get("input_cache_write")),
+        };
+    }
+    xai_grok_sampling_types::ModelPricing::default()
 }
 fn get_string(obj: &serde_json::Map<String, serde_json::Value>, key: &str) -> Option<String> {
     obj.get(key).and_then(|v| v.as_str()).map(|s| s.to_string())

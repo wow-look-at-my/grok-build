@@ -366,6 +366,11 @@ async fn discover_one_provider(
         }
     };
 
+    crate::agent::model_pricing::register_listed_prices(
+        listing
+            .iter()
+            .map(|listed| (listed.model.clone(), listed.pricing.clone())),
+    );
     let mut entries = IndexMap::with_capacity(listing.len());
     for listed in listing {
         let key = discovered_model_key(provider_id, &listed.model);
@@ -385,6 +390,8 @@ async fn discover_one_provider(
                 .context_window
                 .or_else(|| Some(listed.context_window.get())),
             model_provider: Some(provider_id.to_owned()),
+            max_completion_tokens: listed.max_completion_tokens,
+            pricing: (!listed.pricing.is_unusable()).then(|| listed.pricing.clone()),
             reasoning_efforts: listed.reasoning_efforts.clone(),
             supports_reasoning_effort: listed.supports_reasoning_effort.then_some(true),
             // A local runtime charges nothing and its model names are in no
