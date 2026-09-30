@@ -762,7 +762,8 @@ fn a_summarized_thought_stays_visible_inside_a_folded_run() {
         "the label still counts both reads: {rows:?}"
     );
     assert!(
-        rows.iter().any(|r| r.contains("Keep the lexer, fix the caller")),
+        rows.iter()
+            .any(|r| r.contains("Keep the lexer, fix the caller")),
         "the summary must be drawn: {rows:?}"
     );
 }
