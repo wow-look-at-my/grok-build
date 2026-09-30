@@ -1335,7 +1335,7 @@ pub async fn run_leader(
                                  (applies on next agent rebuild)"
                             );
                         }
-                        ConfigUpdate::Ui { theme, yolo, fork_secondary_model } => {
+                        ConfigUpdate::Ui { theme, yolo } => {
                             info!("UI config change detected by watcher");
                             let notification = serde_json::json!({
                                 "jsonrpc": "2.0",
@@ -1345,7 +1345,6 @@ pub async fn run_leader(
                                     "changes": {
                                         "theme": theme,
                                         "yolo": yolo,
-                                        "fork_secondary_model": fork_secondary_model,
                                     }
                                 }
                             });

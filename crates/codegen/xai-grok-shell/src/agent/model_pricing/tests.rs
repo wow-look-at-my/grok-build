@@ -61,6 +61,21 @@ fn the_catalog_document_maps_onto_the_four_billing_tiers() {
 }
 
 #[test]
+fn a_price_the_listing_stated_is_recalled_and_an_empty_one_is_not() {
+    let priced = ModelPricing {
+        input_per_token_usd: 4e-6,
+        output_per_token_usd: 20e-6,
+        ..Default::default()
+    };
+    register_listed_prices([
+        ("listed-priced-model".to_string(), priced.clone()),
+        ("listed-unpriced-model".to_string(), ModelPricing::default()),
+    ]);
+    assert_eq!(listed_price("listed-priced-model"), Some(priced));
+    assert_eq!(listed_price("listed-unpriced-model"), None);
+}
+
+#[test]
 fn a_null_cache_tier_reads_as_zero_and_leaves_the_rest_priced() {
     let document: ModelinfoDocument = serde_json::from_str(NO_CACHE_TIER_DOCUMENT).expect("parse");
     let pricing = document.to_pricing().expect("priced");

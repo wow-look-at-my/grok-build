@@ -1264,7 +1264,7 @@ pub struct ModelsConfig {
     pub subagent_default: Option<String>,
     /// Restricts which models are user-selectable for normal chat (picker, `/model`, `-m`).
     /// Non-matching models stay in the catalog but are never shown, defaulted to, or selectable.
-    /// Special/internal models (web_search, image_description, subagents, fork secondary) are exempt. User-config globs (`*`, `?`, `[...]`) match the catalog key or model id, case-sensitive. Empty = no restriction; an excluded explicit `default`/`-m` is rejected once the model catalog is fetched. Fleet pins live on [`Requirements::allowed_models`] and replace this list.
+    /// Special/internal models (web_search, image_description, subagents) are exempt. User-config globs (`*`, `?`, `[...]`) match the catalog key or model id, case-sensitive. Empty = no restriction; an excluded explicit `default`/`-m` is rejected once the model catalog is fetched. Fleet pins live on [`Requirements::allowed_models`] and replace this list.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub allowed_models: Option<Vec<String>>,
     /// Force `hidden = true` on these model IDs (still usable via `-m`).
@@ -3829,6 +3829,19 @@ pub(crate) fn entry_for_provider_model(
     fail_closed_on_provider_endpoint(&mut entry, provider_id);
     attach_trusted_auth_config(cfg, key, &mut entry);
     entry.info.model_provider = Some(provider_id.to_owned());
+    entry.info.derive_reasoning_effort_fields();
+    entry
+}
+
+/// Build one catalog entry for a `[model.<id>]` block that names no provider.
+/// It keeps its own URL and credentials. Nothing from a provider applies.
+pub(crate) fn entry_for_unrouted_block(
+    cfg: &Config,
+    key: &str,
+    model_override: &ConfigModelOverride,
+) -> ModelEntry {
+    let mut entry = model_override.apply(key, None, &cfg.endpoints);
+    attach_trusted_auth_config(cfg, key, &mut entry);
     entry.info.derive_reasoning_effort_fields();
     entry
 }

@@ -125,10 +125,6 @@ pub(crate) trait RetryableSpawnError {
     fn is_retryable(&self) -> bool;
 }
 
-/// Notice reason: the planner forks the session conversation to reuse its
-/// prompt cache, so it always runs on the session model.
-pub(crate) const GOAL_ROLE_NOTICE_PLANNER_FORKS_SESSION: &str = "planner_forks_session";
-
 /// Reports that a `/goal` role left the model the user configured for it.
 ///
 /// The event feeds telemetry. The notice reaches the pager, which shows it as
@@ -167,9 +163,8 @@ impl RoleFallbackReporter {
         );
     }
 
-    /// Send the pager notice alone. For a fallback that has no telemetry
-    /// reason, e.g. the planner that always forks the session model.
-    pub(crate) fn notify(
+    /// Send the pager notice.
+    fn notify(
         &self,
         role: &'static str,
         skeptic_idx: Option<u32>,

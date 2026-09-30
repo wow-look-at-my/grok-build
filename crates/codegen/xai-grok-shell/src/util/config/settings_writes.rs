@@ -341,25 +341,6 @@ pub(super) fn write_feature_override(
     })
 }
 
-/// Persist `[ui].fork_secondary_model` via `update_config`. Caller must validate against the model catalog. Empty string restores the built-in default. A length over [`MAX_DEFAULT_MODEL_LEN`] returns `Err`.
-pub async fn set_fork_secondary_model(value: String) -> Result<()> {
-    if value.len() > MAX_DEFAULT_MODEL_LEN {
-        anyhow::bail!(
-            "fork_secondary_model name too long ({} > {} bytes)",
-            value.len(),
-            MAX_DEFAULT_MODEL_LEN
-        );
-    }
-    update_config(|cfg| {
-        cfg.ui.fork_secondary_model = if value.is_empty() {
-            crate::models::default_model().to_string()
-        } else {
-            value
-        };
-    })
-    .await
-}
-
 /// Persist one harness model slot into `[models]` via `update_config`.
 ///
 /// An empty `value` clears the slot, and the slot goes back to what it
@@ -367,8 +348,7 @@ pub async fn set_fork_secondary_model(value: String) -> Result<()> {
 /// [`xai_grok_models::HARNESS_MODEL_SLOTS`] lists; any other id is an
 /// error rather than a silently ignored write.
 ///
-/// The caller validates the model against the catalog, the same as
-/// [`set_fork_secondary_model`].
+/// The caller validates the model against the catalog.
 pub async fn set_harness_model(slot_id: &str, value: String) -> Result<()> {
     if value.len() > MAX_DEFAULT_MODEL_LEN {
         anyhow::bail!(
