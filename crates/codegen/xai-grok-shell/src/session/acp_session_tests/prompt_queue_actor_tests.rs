@@ -2483,16 +2483,24 @@ async fn queue_input_auto_send_now_only_inside_wait_window() {
                 .collect();
             assert_eq!(
                 order,
-                vec!["running", "pre-wait", "d-mid"],
-                "mid-wait prompt appends behind existing held rows"
+                vec!["running"],
+                "a wait is a gap: the held rows go into the running turn, in order"
             );
+            drop(state);
+            let interjections: Vec<String> = actor
+                .pending_interjections
+                .drain_all()
+                .into_iter()
+                .map(|entry| entry.text)
+                .collect();
+            assert_eq!(interjections, vec!["early", "mid-wait"]);
         })
         .await;
 }
 
 #[tokio::test]
 #[serial_test::serial(follow_up_steer_cache)]
-async fn queue_input_queue_mode_wait_does_not_auto_send_now() {
+async fn queue_input_queue_mode_wait_delivers_without_cancelling() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
@@ -2523,14 +2531,21 @@ async fn queue_input_queue_mode_wait_does_not_auto_send_now() {
             assert_eq!(prompt_queue::take_queued_commit_count(), 1);
 
             let state = actor.state.lock().await;
-            let first = state
-                .pending_inputs
-                .iter()
-                .find(|i| i.prompt_id == "first")
-                .expect("queued");
             assert!(
-                !first.send_now,
-                "Queue mode wait prompt is a plain held append"
+                state.pending_inputs.iter().all(|i| i.prompt_id != "first"),
+                "a wait is a gap: the row must not stay held until the task ends"
+            );
+            drop(state);
+            let interjections: Vec<String> = actor
+                .pending_interjections
+                .drain_all()
+                .into_iter()
+                .map(|entry| entry.text)
+                .collect();
+            assert_eq!(
+                interjections,
+                vec!["first"],
+                "the row reaches the running turn as an interjection, which aborts the wait"
             );
         })
         .await;
@@ -2665,14 +2680,21 @@ async fn queue_input_auto_send_now_blocked_by_hidden_user_fallback() {
                 "hidden user fallback must block auto-send-now cancel"
             );
             let state = actor.state.lock().await;
-            let mid = state
-                .pending_inputs
-                .iter()
-                .find(|i| i.prompt_id == "d-mid")
-                .expect("mid-wait row queued");
             assert!(
-                !mid.send_now,
-                "mid-wait row must append as ordinary held work, not send-now"
+                state.pending_inputs.iter().all(|i| i.prompt_id != "d-mid"),
+                "mid-wait row is not held until the wait ends"
+            );
+            drop(state);
+            let interjections: Vec<String> = actor
+                .pending_interjections
+                .drain_all()
+                .into_iter()
+                .map(|entry| entry.text)
+                .collect();
+            assert_eq!(
+                interjections,
+                vec!["mid-wait"],
+                "the row reaches the running turn as an interjection, not a send-now"
             );
         })
         .await;
