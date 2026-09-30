@@ -701,14 +701,18 @@ impl SessionActor {
         let workflow_smoke_check_permits = Arc::new(tokio::sync::Semaphore::new(
             workflow_write_smoke_check::MAX_CONCURRENT_CHECKS,
         ));
+        let has_interruptible_wait = approved.iter().any(|prepared| {
+            is_interruptible_wait_tool(&prepared.tool_name, prepared.authored_arguments())
+        });
         if should_flush_held_queue_before_wait(
-            approved.iter().any(|prepared| {
-                is_interruptible_wait_tool(&prepared.tool_name, prepared.authored_arguments())
-            }),
+            has_interruptible_wait,
             crate::util::config::follow_up_steer_enabled().await,
             self.goal_loop_active(),
         ) {
             self.promote_queued_as_interjections().await;
+        } else if has_interruptible_wait && !self.goal_loop_active() {
+            // Queue mode: a blocking wait is a gap with no model request in it, so deliver what the turn loop would harvest there.
+            self.harvest_queued_prompts_into_interjections(false).await;
         }
         let pending_interjections = self.pending_interjections.clone();
         let (parent_interject, running_turn) = {
@@ -3722,7 +3726,7 @@ mod wait_interrupt_tests {
         assert!(should_flush_held_queue_before_wait(true, true, false));
         assert!(
             !should_flush_held_queue_before_wait(true, false, false),
-            "queue mode must keep follow-ups held across a wait"
+            "queue mode harvests instead of promoting"
         );
         assert!(
             !should_flush_held_queue_before_wait(true, true, true),

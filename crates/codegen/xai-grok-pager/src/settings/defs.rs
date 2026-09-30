@@ -196,7 +196,7 @@ const FOLLOW_UP_BEHAVIOR_CHOICES: &[EnumChoice] = &[
     EnumChoice {
         canonical: "queue",
         display: "Queue",
-        description: "Hold follow-ups until the current turn finishes.",
+        description: "Hold follow-ups until the turn finishes or blocks on a wait.",
     },
     EnumChoice {
         canonical: "steer",
@@ -630,7 +630,8 @@ pub fn default_settings() -> Vec<SettingMeta> {
             owner: SettingOwner::Shared,
             label: "Follow-up behavior",
             description: "What to do with messages you send while a turn is \
-                          running. Queue waits for the turn to finish; Steer \
+                          running. Queue waits for the turn to finish or to \
+                          block on a wait for a task; Steer \
                           injects them mid-turn at the next tool batch or \
                           model step. Default: Queue.",
             keywords: &[

@@ -114,6 +114,11 @@ Cross-clippy links nothing, but ring and aws-lc compile C in their build scripts
 - The gate is off for a subagent. A subagent does not own the branch. Sending one back over a failure its parent pushed has it fixing work it cannot see.
 - The switch is the persisted `[ui].stop_gate_ci_failing` toggle, default ON. The gate reads it before the `gh` call. So a session that turns the gate off spends nothing on it per turn end.
 
+## A blocking wait is a gap, in Queue mode too
+
+- The turn loop harvests queued follow-ups before each model request (`harvest_queued_prompts_into_interjections`). A turn parked in an interruptible wait tool (`get_task_output` with a wait, `wait_tasks`, `Await`) makes no request until the task ends. As a result, Queue mode held the row behind a task that can run for minutes.
+- The shell now harvests at the wait too: when the wait starts (`tool_calls.rs`) and when a row arrives during it (`queue_input`). The harvested row aborts the wait, never the turn. The pager's parked-wait release (`release_queued_prompt_from`) no longer checks the mode either. Steer keeps its own promote path. An active goal and a pending send-now are exempt.
+
 ## Compaction report
 
 - Every successful compaction writes `{session_dir}/compaction_reports/<checkpoint id>.md` (`helpers/compaction_report.rs`). It lists every item of the compacted history with its kind, bytes/4 estimate and a preview. It also holds the largest items, the full summary text, and the reseed arithmetic.

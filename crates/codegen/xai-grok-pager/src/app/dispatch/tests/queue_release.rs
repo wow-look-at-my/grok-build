@@ -176,8 +176,9 @@ fn btw_response_does_not_flush_an_unrelated_queued_prompt() {
     );
 }
 
+/// A parked wait is a gap, so Queue mode sends the held rows and the new one instead of waiting for the task.
 #[test]
-fn queue_mode_send_while_waiting_stays_queued() {
+fn queue_mode_send_while_waiting_flushes_into_the_wait() {
     let mut app = running_turn_app();
     let _mode = LocalFollowUp::queue(&mut app);
     enqueue_local(&mut app, AgentId(0), "queued while thinking");
@@ -189,18 +190,18 @@ fn queue_mode_send_while_waiting_stays_queued() {
 
     let effects = dispatch_send_prompt(&mut app, "just typed".into());
 
-    assert!(
-        sent_texts(&effects).is_empty(),
-        "Queue must not interject during a wait, got {effects:?}"
-    );
     assert_eq!(
+        sent_texts(&effects),
+        vec![
+            "queued while thinking".to_string(),
+            "just typed".to_string()
+        ]
+    );
+    assert!(
         agent_ref(&app, AgentId(0))
             .session
             .pending_prompts
-            .iter()
-            .map(|p| p.text.as_str())
-            .collect::<Vec<_>>(),
-        vec!["queued while thinking", "just typed"]
+            .is_empty()
     );
 }
 
@@ -259,7 +260,7 @@ fn queue_mode_send_while_waiting_with_empty_queue_goes_to_server_queue() {
 }
 
 #[test]
-fn parked_wait_does_not_flush_held_follow_ups_in_queue_mode() {
+fn parked_wait_flushes_held_follow_ups_in_queue_mode() {
     let mut app = running_turn_app();
     let _mode = LocalFollowUp::queue(&mut app);
     enqueue_local(&mut app, AgentId(0), "queued while thinking");
@@ -270,19 +271,33 @@ fn parked_wait_does_not_flush_held_follow_ups_in_queue_mode() {
 
     let effects = super::super::queue::flush_held_local_queue_into_wait(&mut app, Some(AgentId(0)));
 
-    assert!(
-        sent_texts(&effects).is_empty(),
-        "Queue mode must keep follow-ups held across a wait, got {effects:?}"
-    );
     assert_eq!(
+        sent_texts(&effects),
+        vec!["queued while thinking".to_string()],
+        "a parked wait is a gap, so Queue mode must not hold the follow-up"
+    );
+    assert!(
         agent_ref(&app, AgentId(0))
             .session
             .pending_prompts
-            .iter()
-            .map(|p| p.text.as_str())
-            .collect::<Vec<_>>(),
-        vec!["queued while thinking"]
+            .is_empty()
     );
+}
+
+/// Queue mode still holds a follow-up while the model is thinking: that is not a gap.
+#[test]
+fn thinking_turn_does_not_flush_held_follow_ups_in_queue_mode() {
+    let mut app = running_turn_app();
+    let _mode = LocalFollowUp::queue(&mut app);
+    enqueue_local(&mut app, AgentId(0), "queued while thinking");
+
+    let effects = super::super::queue::flush_held_local_queue_into_wait(&mut app, Some(AgentId(0)));
+
+    assert!(
+        sent_texts(&effects).is_empty(),
+        "no wait, no gap: got {effects:?}"
+    );
+    assert_eq!(agent_ref(&app, AgentId(0)).session.pending_prompts.len(), 1);
 }
 
 #[test]
