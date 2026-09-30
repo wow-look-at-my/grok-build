@@ -204,14 +204,13 @@ pub fn scheduler_tool_error(error: SchedulerError) -> xai_tool_runtime::ToolErro
 #[serde(rename_all = "camelCase")]
 pub struct ScheduledTask {
     pub id: String,
+    #[serde(deserialize_with = "deserialize_interval_secs")]
     pub interval_secs: u64,
     pub prompt: String,
     #[serde(default = "default_recurring")]
     pub recurring: bool,
     #[serde(default)]
     pub durable: bool,
-    #[serde(default)]
-    pub foreground: bool,
     pub created_at: DateTime<Utc>,
     pub last_fired_at: Option<DateTime<Utc>>,
     pub expires_at: Option<DateTime<Utc>>,
@@ -219,10 +218,9 @@ pub struct ScheduledTask {
     pub last_subagent_id: Option<String>,
     #[serde(default)]
     pub iterations_since_fresh: u32,
-    /// Set when the prompt is patched: the next fire starts a fresh
-    /// transcript instead of resuming the old task's. The anchor itself is
-    /// kept until then so the in-flight guard can still see a running
-    /// iteration.
+    /// Set when the prompt is patched: the next fire starts a fresh transcript instead of resuming
+    /// the old task's. The anchor itself is kept until then so the in-flight guard can still see a
+    /// running iteration.
     #[serde(default)]
     pub chain_reset_pending: bool,
 }
@@ -231,10 +229,42 @@ pub const LOOP_FRESH_CHAIN_EVERY: u32 = 10;
 
 pub const LOOP_COMPLETION_OUTPUT_CAP: usize = 4_000;
 
+/// How long a recurring scheduled task lives before auto-expiry. Single source of truth for the
+/// TTL: task construction stamps `expires_at = now + days(this)`, and user-facing copy (pager
+/// notice, tool descriptions) must read the same constant so the number cannot drift.
+pub const RECURRING_TASK_TTL_DAYS: i64 = 7;
+
 const MAX_SCHEDULER_TRANSITIONS: usize = 50;
 
 fn default_recurring() -> bool {
     true
+}
+
+/// The cadence as the duration a fire time is computed with.
+///
+/// `None` when the seconds have no `i64` second count, or no `chrono` duration.
+/// A cadence above `i64::MAX` seconds has no answer here, where a narrowing
+/// cast would hand back a negative duration and a schedule in the past.
+pub(crate) fn interval_duration(interval_secs: u64) -> Option<chrono::Duration> {
+    chrono::Duration::try_seconds(i64::try_from(interval_secs).ok()?)
+}
+
+/// `interval_secs` read back from persisted state. A stored value with no
+/// duration is refused with the number it read, so no task loads with a cadence
+/// that cannot become a fire time.
+fn deserialize_interval_secs<'de, D>(deserializer: D) -> Result<u64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::Error as _;
+    let interval_secs = u64::deserialize(deserializer)?;
+    interval_duration(interval_secs)
+        .map(|_| interval_secs)
+        .ok_or_else(|| {
+            D::Error::custom(format!(
+                "intervalSeconds {interval_secs} has no representable schedule"
+            ))
+        })
 }
 
 impl ScheduledTask {
@@ -250,24 +280,24 @@ impl ScheduledTask {
         fire_immediately: bool,
     ) -> Self {
         let now = Utc::now();
+        // An interval is validated where a task is created, where the create
+        // tool parses one, and where state loads, each of which refuses a value
+        // with no duration.
+        let cadence = interval_duration(interval_secs)
+            .unwrap_or_else(|| panic!("scheduled interval {interval_secs} s has no duration"));
         // When fire_immediately is true, anchor created_at in the past so that
         // next_fire_at() = created_at + interval = now, firing on the first tick.
-        let created_at = if fire_immediately {
-            now - chrono::Duration::seconds(interval_secs as i64)
-        } else {
-            now
-        };
+        let created_at = if fire_immediately { now - cadence } else { now };
         Self {
-            id: uuid::Uuid::now_v7().to_string().replace('-', "")[..12].to_string(),
+            id: uuid::Uuid::now_v7().to_string(),
             interval_secs,
             prompt,
             recurring,
             durable,
-            foreground: false,
             created_at,
             last_fired_at: None,
             expires_at: if recurring {
-                Some(now + chrono::Duration::days(7))
+                Some(now + chrono::Duration::days(RECURRING_TASK_TTL_DAYS))
             } else {
                 None
             },
@@ -280,12 +310,36 @@ impl ScheduledTask {
     /// Next fire time, computed from `last_fired_at` (or `created_at` if never fired).
     pub fn next_fire_at(&self) -> DateTime<Utc> {
         let anchor = self.last_fired_at.unwrap_or(self.created_at);
-        anchor + chrono::Duration::seconds(self.interval_secs as i64)
+        anchor
+            + interval_duration(self.interval_secs).unwrap_or_else(|| {
+                panic!(
+                    "scheduled interval {} s has no duration",
+                    self.interval_secs
+                )
+            })
+    }
+
+    /// Next moment the actor must wake for this task: the sooner of the next fire and the auto-expiry deadline. Sleeping
+    /// purely on `next_fire_at` would let a task whose interval stretches past `expires_at` outlive the TTL (an 8-day
+    /// interval must still expire at day 7, not when its first fire comes due).
+    pub fn next_wake_at(&self) -> DateTime<Utc> {
+        match self.expires_at {
+            Some(expires_at) => self.next_fire_at().min(expires_at),
+            None => self.next_fire_at(),
+        }
     }
 
     /// Whether this task has expired (recurring tasks only).
     pub fn is_expired(&self, now: DateTime<Utc>) -> bool {
         self.expires_at.is_some_and(|exp| now >= exp)
+    }
+
+    /// The next run still to come; `None` for an expired task or a one-shot that already ran.
+    pub fn pending_fire_at(&self, now: DateTime<Utc>) -> Option<DateTime<Utc>> {
+        if self.is_expired(now) || (!self.recurring && self.last_fired_at.is_some()) {
+            return None;
+        }
+        Some(self.next_fire_at())
     }
 }
 
@@ -342,12 +396,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn new_recurring_task_has_7_day_expiry() {
+    fn new_recurring_task_has_ttl_expiry() {
         let task = ScheduledTask::new(300, "check deploy".into(), true, false);
         assert!(task.expires_at.is_some());
         let expiry = task.expires_at.unwrap();
         let diff = expiry - task.created_at;
-        assert_eq!(diff.num_days(), 7);
+        assert_eq!(diff.num_days(), RECURRING_TASK_TTL_DAYS);
     }
 
     #[test]
@@ -401,9 +455,16 @@ mod tests {
     }
 
     #[test]
-    fn task_id_is_12_chars() {
-        let task = ScheduledTask::new(300, "test".into(), true, false);
-        assert_eq!(task.id.len(), 12);
+    fn task_ids_are_full_unique_uuid_v7_values() {
+        let first = ScheduledTask::new(300, "first".into(), true, false);
+        let second = ScheduledTask::new(300, "second".into(), true, false);
+
+        assert_ne!(first.id, second.id);
+        for id in [&first.id, &second.id] {
+            let parsed = uuid::Uuid::parse_str(id).unwrap();
+            assert_eq!(parsed.get_version_num(), 7);
+            assert_eq!(parsed.to_string(), *id);
+        }
     }
 
     #[test]
@@ -456,5 +517,43 @@ mod tests {
 
         assert!(result.is_err());
         assert_eq!(clock.snapshot(), before);
+    }
+
+    /// A persisted cadence with no `i64` second count is refused by the load,
+    /// naming the number it read. Stored anyway it would come back as a
+    /// negative duration and a task that fires every tick.
+    #[test]
+    fn a_persisted_interval_with_no_second_count_is_refused() {
+        let raw = format!(
+            r#"{{"id":"x","intervalSecs":{},"prompt":"p","createdAt":"2026-01-01T00:00:00Z",
+                 "lastFiredAt":null,"expiresAt":null}}"#,
+            u64::MAX
+        );
+        let err = serde_json::from_str::<ScheduledTask>(&raw)
+            .expect_err("u64::MAX seconds has no i64 second count");
+        assert!(
+            err.to_string().contains(&u64::MAX.to_string()),
+            "the error names the value: {err}"
+        );
+    }
+
+    /// A cadence with no second count never becomes a duration, and one with a
+    /// second count round-trips and adds to the anchor in the right direction.
+    #[test]
+    fn an_interval_with_no_second_count_is_not_a_negative_duration() {
+        assert!(interval_duration(u64::MAX).is_none());
+        assert!(interval_duration(u64::from(u32::MAX)).is_some());
+
+        let ten_years = 3650 * 86_400;
+        let fits: ScheduledTask = serde_json::from_str(&format!(
+            r#"{{"id":"x","intervalSecs":{ten_years},"prompt":"p","createdAt":"2026-01-01T00:00:00Z",
+                 "lastFiredAt":null,"expiresAt":null}}"#
+        ))
+        .expect("a cadence with a second count loads");
+        assert_eq!(fits.interval_secs, ten_years);
+        assert!(
+            fits.next_fire_at() > fits.created_at,
+            "the cadence is added to the anchor as a duration"
+        );
     }
 }

@@ -1,4 +1,14 @@
+#![allow(clippy::cast_lossless)] // 12 hits predate the gate
+#![allow(clippy::cast_possible_truncation)] // 53 hits predate the gate
+#![allow(clippy::cast_possible_wrap)] // 12 hits predate the gate
+#![allow(clippy::cast_precision_loss)] // 37 hits predate the gate
+#![allow(clippy::cast_sign_loss)] // 20 hits predate the gate
+#![allow(clippy::expect_used)] // 126 hits predate the gate
+#![allow(clippy::unwrap_used)] // 15 hits predate the gate
+
 //! Grok tools library.
+
+#![deny(clippy::indexing_slicing)]
 
 pub use xai_grok_version::version;
 
@@ -22,6 +32,8 @@ pub mod bridge;
 pub mod computer;
 pub mod gitignore;
 pub mod implementations;
+pub mod mcp_elicitation;
+pub mod media_gen_limits;
 pub mod normalization;
 pub mod notification;
 pub mod persistence;
@@ -36,3 +48,5 @@ pub mod versions;
 pub use attribution::{
     Auth401AttributionCallback, BEARER_SUFFIX_LEN, SharedAttributionCallback, ToolConsumer,
 };
+pub use implementations::grok_build::is_task_tool_id;
+pub use implementations::{SEARCH_TOOL_NAME, USE_TOOL_NAME};

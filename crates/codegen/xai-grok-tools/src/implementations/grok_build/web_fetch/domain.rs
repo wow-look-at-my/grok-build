@@ -58,9 +58,14 @@ impl DomainMatcher {
                 continue;
             }
 
-            // Split on first '/' to separate host from optional path.
+            // Split on first '/' to separate host from optional path. The
+            // separator is an ASCII byte, so `i` is a char boundary and both
+            // halves align.
             let (host, path) = match normalized.find('/') {
-                Some(i) => (normalized[..i].to_owned(), Some(&normalized[i..])),
+                Some(i) => match (normalized.get(..i), normalized.get(i..)) {
+                    (Some(host), path) => (host.to_owned(), path),
+                    _ => continue,
+                },
                 None => (normalized, None),
             };
 

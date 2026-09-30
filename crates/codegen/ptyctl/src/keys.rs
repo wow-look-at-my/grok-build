@@ -9,13 +9,7 @@ use anyhow::{Result, bail};
 use terminput::{Encoding, Event, KeyCode, KeyEvent, KeyModifiers};
 
 /// Parse a vim-notation key string into raw terminal bytes.
-///
-/// # Examples
-/// - `"hello"` -> literal bytes for h, e, l, l, o
-/// - `"<CR>"` or `"<Enter>"` -> `\r`
-/// - `"<C-c>"` -> Ctrl+C (0x03)
-/// - `"<Esc>:wq<CR>"` -> ESC, :, w, q, CR
-/// - `"<Up><Up><CR>"` -> up arrow, up arrow, CR
+/// Angle-bracket tokens (`<CR>`, `<C-c>`, `<Up>`) become control/escape sequences; other text is literal.
 pub fn parse_keys(input: &str) -> Result<Vec<u8>> {
     let events = parse_to_events(input)?;
     let mut bytes = Vec::new();
@@ -45,6 +39,9 @@ fn parse_to_events(input: &str) -> Result<Vec<KeyEvent>> {
             // Try to parse a special key notation.
             let start_pos: String = chars.clone().collect();
             if let Some(end) = start_pos.find('>') {
+                // The first character is the ASCII '<' this branch matched and
+                // `end` is the offset of an ASCII '>', so both bounds align.
+                #[allow(clippy::string_slice)] // between two matched ASCII delimiters
                 let notation = &start_pos[1..end]; // between < and >
                 // Consume chars including the >.
                 for _ in 0..=end {

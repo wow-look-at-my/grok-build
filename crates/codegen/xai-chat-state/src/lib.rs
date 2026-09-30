@@ -1,3 +1,9 @@
+#![allow(clippy::cast_possible_truncation)] // 2 hits predate the gate
+#![allow(clippy::cast_precision_loss)] // 3 hits predate the gate
+#![allow(clippy::cast_sign_loss)] // 1 hit predates the gate
+#![allow(clippy::expect_used)] // 1 hit predates the gate
+#![allow(clippy::unwrap_used)] // 3 hits predate the gate
+
 //! xai-chat-state — Actor-based chat state management for xAI agents.
 //!
 //! This crate extracts conversation state management from `xai-grok-shell`'s
@@ -23,14 +29,17 @@
 //!                                     └──────────────────────────────────────┘
 //! ```
 
+#![deny(clippy::indexing_slicing)]
+
 pub mod actor;
 pub mod commands;
+pub mod compaction_image_context;
 pub mod compaction_mode;
-pub mod compaction_transcript;
 pub mod compaction_utils;
 pub mod conversation_util;
 pub mod events;
 pub mod handle;
+pub mod image_budget;
 pub mod persistence;
 pub mod types;
 pub mod usage;
@@ -40,16 +49,18 @@ pub use actor::ChatStateActor;
 pub use actor::state::{
     estimate_conversation_tokens, estimate_item_tokens, estimate_messages_tokens,
     estimate_system_message_tokens, estimate_tool_definition_tokens,
-    estimate_tool_definitions_tokens,
+    estimate_tool_definitions_tokens, estimate_tool_specs_tokens,
 };
 pub use commands::{ModelMetadata, StrictAppendAck, StrictAppendError};
 pub use compaction_mode::CompactionMode;
-pub use compaction_transcript::CompactionDetail;
 pub use events::ChatStateEvent;
-pub use handle::ChatStateHandle;
+pub use handle::{ChatStateHandle, ChatStateMailboxClosed};
 pub use persistence::{
     ChatPersistence, MockChatPersistence, MockPersistenceReceiver, NullChatPersistence,
-    PersistenceRecord,
+    PersistenceRecord, StripOutcome,
 };
 pub use types::*;
 pub use usage::{UsageLedger, UsageTotals};
+// Re-exported so `xai_chat_state::CompactionDetail` stays a working path for
+// existing callers.
+pub use xai_compaction_transcript::CompactionDetail;

@@ -11,10 +11,13 @@ indexmap = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 strum = { workspace = true }
+toml = { workspace = true }
 tracing = { workspace = true }
 xai-grok-announcements = { workspace = true }
 xai-grok-config = { workspace = true }
 xai-grok-mcp = { workspace = true }
+# Wire-alias folding (`Aliases`) for config types a peer's bytes feed.
+xai-tool-types = { workspace = true }
 
 [features]
 default-bazel = []

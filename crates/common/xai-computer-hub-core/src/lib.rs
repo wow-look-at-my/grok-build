@@ -1,3 +1,5 @@
+#![allow(clippy::cast_possible_truncation)] // 1 hit predates the gate
+
 //! xAI Computer Hub — transport + registry + resolver core.
 //!
 //! Object-safe abstractions used by every router build: a [`Transport`]
@@ -8,6 +10,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod bot_tools;
 pub mod inner;
 pub mod local;
 pub mod registry;
@@ -15,6 +18,11 @@ pub mod remote;
 pub mod resolver;
 pub mod transport;
 
+pub use bot_tools::{
+    GROK_BOT_DEFAULT_TOOL_IDS, GROK_BOT_TOOL_DESCRIPTIONS, GROK_BOT_TOOL_IDS,
+    grok_bot_tool_arguments_schema, grok_bot_tool_description, is_grok_bot_default_tool,
+    is_grok_bot_tool,
+};
 pub use inner::InnerDispatchForResolver;
 pub use local::{LOCAL_INVOKE_SCOPE, LocalTransport};
 pub use registry::{

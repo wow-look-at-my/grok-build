@@ -1,7 +1,7 @@
 use anyhow::Result;
 use clap::Subcommand;
+use xai_grok_login::{AuthManager, try_ensure_fresh_auth};
 use xai_grok_shell::agent::config::Config as AgentConfig;
-use xai_grok_shell::auth::{AuthManager, try_ensure_fresh_auth};
 use xai_grok_shell::session::merge::MergedSession;
 use xai_grok_shell::util::grok_home::grok_home;
 #[derive(Debug, clap::Args, Clone)]
@@ -35,11 +35,16 @@ enum SessionsCommand {
 
 pub async fn run(args: SessionsArgs, agent_config: &AgentConfig) -> Result<()> {
     // Best-effort only: a cached credential is used if one exists, and the command never forces an interactive login.
-    let auth = try_ensure_fresh_auth(&agent_config.grok_com_config).await;
+    let auth = try_ensure_fresh_auth(
+        &agent_config.grok_com_config,
+        agent_config.endpoints.proxy_url(),
+    )
+    .await;
 
-    let auth_manager = std::sync::Arc::new(AuthManager::new(
+    let auth_manager = std::sync::Arc::new(AuthManager::new_with_proxy_base_url(
         &grok_home(),
         agent_config.grok_com_config.clone(),
+        agent_config.endpoints.proxy_url(),
     ));
 
     let client = xai_grok_shell::agent::session_registry_client::SessionRegistryClient::new(
@@ -59,6 +64,8 @@ pub async fn run(args: SessionsArgs, agent_config: &AgentConfig) -> Result<()> {
                 xai_grok_shell::session::merge::CwdScope::WithSiblings,
                 None,
                 limit,
+                // The CLI listing is an inventory, not the resume picker.
+                xai_grok_shell::session::visibility::HeadlessPolicy::Include,
             )
             .await;
             print_sessions_grouped(&sessions);
@@ -66,7 +73,12 @@ pub async fn run(args: SessionsArgs, agent_config: &AgentConfig) -> Result<()> {
         SessionsCommand::Search { query, limit } => {
             use std::collections::HashSet;
             use xai_grok_shell::session::merge::REMOTE_TIMEOUT;
-            use xai_grok_shell::session::storage::search::{SessionSearchRequest, execute_search};
+            use xai_grok_shell::session::storage::search::{
+                IndexDecision, SessionSearchRequest, execute_search,
+            };
+
+            // Search is the only subcommand that reads the index, so it is the only one to start one
+            let search = xai_grok_shell::session::storage::search::start_if_enabled(agent_config);
 
             let req = SessionSearchRequest {
                 query,
@@ -78,34 +90,36 @@ pub async fn run(args: SessionsArgs, agent_config: &AgentConfig) -> Result<()> {
             let root = grok_home();
 
             let remote_limit = (limit * 3).max(100) as i64;
-            let (local_resp, remote_results) = tokio::join!(execute_search(&root, &req), async {
-                tokio::time::timeout(
-                    REMOTE_TIMEOUT,
-                    client.search(Some(&req.query), remote_limit),
-                )
-                .await
-                .unwrap_or_else(|_| {
-                    eprintln!(
-                        "warning: remote session search timed out, showing local results only"
-                    );
-                    Ok(Vec::new())
-                })
-                .unwrap_or_else(|e| {
-                    eprintln!("warning: remote session search failed: {e}");
-                    Vec::new()
-                })
-            });
+            let (local_resp, remote_results) = tokio::join!(
+                execute_search(IndexDecision::settled(&search), &root, &req),
+                async {
+                    tokio::time::timeout(
+                        REMOTE_TIMEOUT,
+                        client.search(Some(&req.query), remote_limit),
+                    )
+                    .await
+                    .unwrap_or_else(|_| {
+                        eprintln!("warning: remote session search timed out");
+                        Ok(Vec::new())
+                    })
+                    .unwrap_or_else(|e| {
+                        eprintln!("warning: remote session search failed: {e}");
+                        Vec::new()
+                    })
+                }
+            );
 
             let resp = local_resp?;
+            if let Some(by) = search.off_reason() {
+                eprintln!(
+                    "warning: local session search is off ({by}); searched remote sessions only."
+                );
+            }
             let local_ids: HashSet<&str> =
                 resp.results.iter().map(|r| r.session_id.as_str()).collect();
 
             for hit in &resp.results {
-                let title = if hit.title.is_empty() {
-                    "(untitled)"
-                } else {
-                    &hit.title
-                };
+                let title = summary_or_untitled(&hit.title);
                 let time = chrono::DateTime::from_timestamp(hit.updated_at_unix, 0)
                     .map(|dt| {
                         dt.with_timezone(&chrono::Local)
@@ -132,11 +146,7 @@ pub async fn run(args: SessionsArgs, agent_config: &AgentConfig) -> Result<()> {
                 if local_ids.contains(r.session_id.as_str()) {
                     continue;
                 }
-                let title = if r.summary.is_empty() {
-                    "(untitled)"
-                } else {
-                    &r.summary
-                };
+                let title = summary_or_untitled(&r.summary);
                 let time = chrono::DateTime::parse_from_rfc3339(&r.updated_at)
                     .map(|dt| {
                         dt.with_timezone(&chrono::Local)
@@ -161,23 +171,20 @@ pub async fn run(args: SessionsArgs, agent_config: &AgentConfig) -> Result<()> {
             println!("\nTotal: {}", resp.results.len() + remote_shown);
         }
         SessionsCommand::Delete { id } => {
-            // Always attempt the remote delete when authenticated and not
-            // ZDR — `list` / `search` likewise query remote unconditionally
-            // rather than gating on storage mode (which the CLI cannot
-            // resolve here: it builds config without remote settings). The
-            // backend delete is idempotent (a `404` is treated as success),
-            // so this is safe for local-only sessions with no remote copy.
-            // ZDR teams never upload, so there is nothing remote to delete.
+            // Always attempt the remote delete when authenticated and not ZDR; `list` and `search` likewise query remote
+            // unconditionally. Gating on storage mode is impossible here: the CLI builds config without remote settings. ZDR
+            // teams never upload, so there is nothing remote to delete.
             let needs_remote = auth.as_ref().is_some_and(|a| !a.is_zdr_team());
 
-            // Pass `cwd = None` so the session is found by id regardless of
-            // which workspace it was created in; the local delete still uses
-            // the resolved per-session cwd.
+            // Pass `cwd = None` so the session is found by id regardless of which workspace it was created in
+            // The local delete still uses the resolved per-session cwd
+            // No search handle: the eviction inside prunes the row from another process's index, so a delete never needs one of its own
             let deletion = xai_grok_shell::session::persistence::delete_session_history(
                 &id,
                 None,
                 needs_remote,
                 auth_manager.clone(),
+                None,
             )
             .await?;
 
@@ -192,8 +199,16 @@ pub async fn run(args: SessionsArgs, agent_config: &AgentConfig) -> Result<()> {
     Ok(())
 }
 
-/// Print sessions grouped by worktree label, preserving the original table
-/// format with a `Label: <label>` header before each group.
+/// The placeholder every session listing shows for a blank title
+pub(crate) fn summary_or_untitled(title: &str) -> &str {
+    if title.trim().is_empty() {
+        "(untitled)"
+    } else {
+        title
+    }
+}
+
+/// Print sessions grouped by worktree label, preserving the original table format with a `Label: <label>` header before each group.
 fn print_sessions_grouped(sessions: &[MergedSession]) {
     if sessions.is_empty() {
         println!("No sessions found.");
@@ -233,8 +248,14 @@ fn print_sessions_grouped(sessions: &[MergedSession]) {
                 "(no summary)"
             };
             let truncated: String = summary.chars().take(50).collect();
-            let created = &s.created_at[..s.created_at.len().min(10)];
-            let updated = &s.updated_at[..s.updated_at.len().min(10)];
+            let created = s
+                .created_at
+                .get(..s.created_at.len().min(10))
+                .unwrap_or(s.created_at.as_str());
+            let updated = s
+                .updated_at
+                .get(..s.updated_at.len().min(10))
+                .unwrap_or(s.updated_at.as_str());
             println!(
                 "{}  {}  {}  {}  {}",
                 s.session_id, created, updated, s.source, truncated

@@ -13,6 +13,10 @@ pub mod state;
 #[cfg(test)]
 mod tests;
 
+use std::any::Any;
+use std::panic::AssertUnwindSafe;
+
+use futures_util::FutureExt;
 use tokio::sync::mpsc;
 use tracing::debug;
 
@@ -40,6 +44,21 @@ pub struct ChatStateActor {
     event_tx: mpsc::UnboundedSender<ChatStateEvent>,
     /// Cancellation token for graceful shutdown.
     cancellation_token: tokio_util::sync::CancellationToken,
+}
+
+/// Text describing what a panic carried, for a log line.
+///
+/// The two payloads `panic!` itself produces are a `&'static str` (a literal)
+/// and a `String` (a formatted one). Anything else is named as a non-message
+/// rather than reported as nothing.
+fn panic_payload(panic: &(dyn Any + Send)) -> String {
+    if let Some(text) = panic.downcast_ref::<&'static str>() {
+        return (*text).to_string();
+    }
+    if let Some(text) = panic.downcast_ref::<String>() {
+        return text.clone();
+    }
+    "panicked with a payload that is not a message".to_string()
 }
 
 impl ChatStateActor {
@@ -107,8 +126,30 @@ impl ChatStateActor {
                         debug!("ChatStateActor shutting down: all handles dropped");
                         break;
                     };
-                    self.handle_command(cmd).await;
+                    self.run_command(cmd).await;
                 }
+            }
+        }
+    }
+
+    /// Process one command, so a round that unwinds does not end the actor.
+    ///
+    /// The actor is the only writer of the session's conversation and the only
+    /// answerer of a handle's ack, so an actor lost to one command closes every
+    /// ack after it for the rest of the session. The panicked round's own ack
+    /// still closes: the sender unwinds with the command.
+    async fn run_command(&mut self, cmd: ChatStateCommand) {
+        match AssertUnwindSafe(self.handle_command(cmd))
+            .catch_unwind()
+            .await
+        {
+            Ok(()) => {}
+            Err(panic) => {
+                tracing::error!(
+                    task = "chat state command",
+                    panic = %panic_payload(&*panic),
+                    "chat state command panicked; the actor keeps serving"
+                );
             }
         }
     }
@@ -119,6 +160,17 @@ impl ChatStateActor {
             // ═══ Mutations ═══
             ChatStateCommand::PushUserMessage { item } => {
                 self.push_user_message(item);
+            }
+            ChatStateCommand::PushUserMessagesBatch { items } => {
+                for item in items {
+                    self.push_user_message(item);
+                }
+            }
+            ChatStateCommand::PushUserMessagesBatchAndAck { items, reply } => {
+                for item in items {
+                    self.push_user_message(item);
+                }
+                let _ = reply.send(());
             }
             ChatStateCommand::PushUserMessageAndAck { item, reply } => {
                 self.push_user_message(item);
@@ -131,6 +183,10 @@ impl ChatStateActor {
             } => {
                 let generation = cwd_generation.get();
                 let candidate = ConversationItem::working_directory_switch(content, generation);
+                // Pop a crash-stranded reminder BEFORE the strict append: the
+                // pop rewrites history from the in-memory image, which must
+                // not yet contain the acked append, or the rewrite erases it.
+                self.pop_stranded_continue_reminder();
                 let persist_rx = self
                     .persistence
                     .persist_working_directory_switch_and_ack(&candidate);
@@ -169,6 +225,12 @@ impl ChatStateActor {
             ChatStateCommand::PushToolResult { item } => {
                 self.push_message(item);
             }
+            ChatStateCommand::PushModelOutput { item } => {
+                self.push_model_output(item);
+            }
+            ChatStateCommand::PushUnreportedModelOutput { item } => {
+                self.push_unreported_model_output(item);
+            }
             ChatStateCommand::RecordTokenUsage { total_tokens } => {
                 self.record_token_usage(total_tokens);
             }
@@ -204,7 +266,7 @@ impl ChatStateActor {
                 self.increment_prompt_index();
             }
             ChatStateCommand::UpdateSamplingConfig { config } => {
-                self.state.sampling_config = config;
+                self.state.sampling_config = *config;
             }
             ChatStateCommand::RecordAgentEditedPath { path } => {
                 self.state.agent_edited_paths.insert(path);
@@ -240,6 +302,26 @@ impl ChatStateActor {
                 };
                 let _ = reply.send(result);
             }
+            ChatStateCommand::StripConversationImages { urls, reply } => {
+                match self.strip_conversation_images(&urls) {
+                    None => {
+                        let _ = reply.send(crate::StripOutcome::NoMatch);
+                    }
+                    Some((stripped, ack_rx)) => {
+                        // Await the disk ack off-actor: the persistence channel already
+                        // orders the write, and blocking here would stall reads behind an fsync.
+                        tokio::spawn(async move {
+                            let outcome = match ack_rx.await {
+                                Ok(Ok(())) => crate::StripOutcome::Applied { stripped },
+                                Ok(Err(_)) | Err(_) => {
+                                    crate::StripOutcome::WriteFailed { stripped }
+                                }
+                            };
+                            let _ = reply.send(outcome);
+                        });
+                    }
+                }
+            }
             ChatStateCommand::ReplaceSystemHead { prompt, reply } => {
                 let changed = self.replace_system_head(&prompt);
                 let _ = reply.send(changed);
@@ -272,16 +354,16 @@ impl ChatStateActor {
             ChatStateCommand::FlushHarnessTraceTurn => {
                 self.state.seal_harness_trace_turn();
             }
-            ChatStateCommand::RepairDanglingAfterHarnessHalt { class } => {
-                self.repair_dangling_after_harness_halt(class);
+            ChatStateCommand::RepairDanglingAfterHarnessHalt { class, answers } => {
+                self.repair_dangling_after_harness_halt(class, answers);
+            }
+            ChatStateCommand::PopStrandedContinueReminder => {
+                self.pop_stranded_continue_reminder();
             }
 
-            // ═══ Queries ═══
-            //
-            // Read queries are pure reads — repair only at write boundaries:
-            // `ChatState::new()` (startup) and `push_user_message()` (new turn).
-            // `BuildConversationRequest` retains the guard because it is only
-            // ever issued by the agent loop between turns, never by background tasks.
+            // Queries are pure reads — repair only at write boundaries
+            // (`ChatState::new`, `push_user_message`).
+            // `BuildConversationRequest` keeps the guard: it runs between turns, never from background tasks.
             ChatStateCommand::BuildConversationRequest {
                 tool_definitions,
                 memory_reminder,
@@ -334,6 +416,9 @@ impl ChatStateActor {
             ChatStateCommand::GetSamplingConfig { reply } => {
                 let _ = reply.send(self.state.sampling_config.clone());
             }
+            ChatStateCommand::ApplyTurnRequestPruning { items, reply } => {
+                let _ = reply.send(self.prune_items_for_turn_request(items));
+            }
             ChatStateCommand::GetAgentEditedPaths { reply } => {
                 let _ = reply.send(self.state.agent_edited_paths.clone());
             }
@@ -354,10 +439,9 @@ impl ChatStateActor {
                 self.truncate_to_prompt_index(target_prompt_index);
                 self.state.turn_capture = None;
                 self.state.prompt_usage = None;
-                // `harness_trace_buffer` / `harness_trace_turns` intentionally
-                // survive a rewind: the goal planner / verifier subagents
-                // genuinely ran, so their sealed trace turns stay uploadable as
-                // siblings even when the live turn that triggered them is undone.
+                // `harness_trace_buffer` / `harness_trace_turns` survive a rewind: the
+                // subagents genuinely ran, so their sealed traces stay uploadable even
+                // when the live turn that triggered them is undone.
                 let _ = reply.send(());
             }
             ChatStateCommand::CheckAutoCompactNeeded {
@@ -404,8 +488,14 @@ impl ChatStateActor {
             ChatStateCommand::GetLastAssistantText { reply } => {
                 let _ = reply.send(self.get_last_assistant_text());
             }
+            ChatStateCommand::GetTrailingAssistantReport { reply } => {
+                let _ = reply.send(self.get_trailing_assistant_report());
+            }
             ChatStateCommand::GetLastAssistantTextInTurn { reply } => {
                 let _ = reply.send(self.get_last_assistant_text_in_turn());
+            }
+            ChatStateCommand::GetAssistantTextInTurn { reply } => {
+                let _ = reply.send(self.get_assistant_text_in_turn());
             }
             ChatStateCommand::GetFirstUserText { reply } => {
                 let _ = reply.send(self.get_first_user_text());

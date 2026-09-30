@@ -1,8 +1,7 @@
 //! Anthropic Messages API (`/v1/messages`) wire types.
-//!
-//! These types represent the request/response format for the `/v1/messages` API.
 
 use serde::{Deserialize, Serialize};
+use xai_tool_types::Aliases;
 
 // ============================================================================
 // Request Types
@@ -136,10 +135,8 @@ pub enum ContentBlock {
         #[serde(default)]
         signature: String,
     },
-    /// Encrypted reasoning the model chose to redact. Carries only an opaque
-    /// `data` blob (never plaintext). Added so a stream that includes one
-    /// deserializes instead of failing the whole event parse; behavior-preserving
-    /// for producers (never constructed by request-building or the sampler).
+    /// Encrypted reasoning the model chose to redact: an opaque `data` blob, never plaintext.
+    /// Parsed so a stream carrying one deserializes instead of failing the whole event parse; request-building and the sampler never construct one.
     RedactedThinking { data: String },
 }
 
@@ -189,12 +186,8 @@ pub enum ToolChoiceParam {
     Tool { name: String },
 }
 
-/// Extended thinking configuration
-///
-/// Three modes per the Anthropic Messages API:
-/// - Adaptive: 4.6+ models, API decides budget
-/// - Enabled: 4.0-4.5 models, explicit budget_tokens
-/// - Disabled: pre-thinking models or thinking_budget=0
+/// Three modes per the Anthropic Messages API: Adaptive: 4.6+ models, API decides budget; Enabled: 4.0-4.5 models,
+/// explicit budget_tokens; Disabled: pre-thinking models or thinking_budget=0.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ThinkingDisplay {
@@ -210,7 +203,7 @@ pub enum ThinkingConfig {
     },
     Adaptive {
         // Newer thinking-capable models omit thinking content unless display = "summarized".
-        // Older models ignore this field. Skip when None to stay back-compat.
+        // Older models ignore this field; skipping `None` keeps the old wire shape
         #[serde(skip_serializing_if = "Option::is_none")]
         display: Option<ThinkingDisplay>,
     },
@@ -255,16 +248,32 @@ pub enum StopReason {
     Refusal,
     PauseTurn,
     ModelContextWindowExceeded,
-    /// Catch-all for stop reasons this client does not know yet, so a new
-    /// server-side value can never fail the terminal `message_delta` parse
-    /// and discard an already-streamed response. Preserves the wire string
-    /// for logging and faithful re-serialization; must stay the LAST variant
-    /// (serde tries the tagged variants above first).
+    /// Catch-all so a new server-side stop reason never fails the terminal `message_delta` parse and discards an already-streamed response.
+    /// Preserves the wire string for logging and faithful re-serialization.
+    /// Must stay the LAST variant: serde tries the tagged variants above first.
     #[serde(untagged)]
     Unknown(String),
 }
 
+impl StopReason {
+    /// The verbatim wire string, derived from the serde `snake_case` renames so it cannot drift from the wire contract.
+    /// `Unknown` yields its inner string unchanged.
+    pub fn wire_str(&self) -> String {
+        match serde_json::to_value(self) {
+            Ok(serde_json::Value::String(s)) => s,
+            other => {
+                debug_assert!(
+                    false,
+                    "StopReason must serialize to a string, got {other:?}"
+                );
+                "end_turn".to_string()
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(try_from = "MessagesUsageWire")]
 pub struct MessagesUsage {
     pub input_tokens: u32,
     pub output_tokens: u32,
@@ -277,15 +286,52 @@ pub struct MessagesUsage {
     /// these two fields its real number is thrown away for an estimate off
     /// the model's configured pricing. Ticks win over the float when a
     /// gateway sends both.
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        alias = "cost_usd_ticks"
-    )]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub cost_in_usd_ticks: Option<i64>,
     /// The same price as a USD float, the shape OpenRouter and Bifrost use.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cost: Option<crate::UsageCost>,
+}
+
+impl MessagesUsage {
+    /// The keys [`cost_in_usd_ticks`](Self::cost_in_usd_ticks) is read under.
+    /// The first is what this type writes; the rest are accepted on input only.
+    pub const COST_KEYS: Aliases = Aliases::new("cost_in_usd_ticks", &["cost_usd_ticks"]);
+}
+
+/// `MessagesUsage` as it arrives on the wire, with each cost-key spelling its
+/// own field, so a gateway naming both folds them instead of tripping serde's
+/// duplicate-field check. See [`MessagesUsage::COST_KEYS`].
+#[derive(Debug, Default, Deserialize)]
+struct MessagesUsageWire {
+    input_tokens: u32,
+    output_tokens: u32,
+    #[serde(default)]
+    cache_creation_input_tokens: u32,
+    #[serde(default)]
+    cache_read_input_tokens: u32,
+    #[serde(default)]
+    cost_in_usd_ticks: Option<i64>,
+    #[serde(default)]
+    cost_usd_ticks: Option<i64>,
+    #[serde(default)]
+    cost: Option<crate::UsageCost>,
+}
+
+impl TryFrom<MessagesUsageWire> for MessagesUsage {
+    type Error = xai_tool_types::AliasConflict;
+
+    fn try_from(wire: MessagesUsageWire) -> Result<Self, Self::Error> {
+        Ok(Self {
+            input_tokens: wire.input_tokens,
+            output_tokens: wire.output_tokens,
+            cache_creation_input_tokens: wire.cache_creation_input_tokens,
+            cache_read_input_tokens: wire.cache_read_input_tokens,
+            cost_in_usd_ticks: MessagesUsage::COST_KEYS
+                .fold(vec![wire.cost_in_usd_ticks, wire.cost_usd_ticks])?,
+            cost: wire.cost,
+        })
+    }
 }
 
 // ============================================================================
@@ -324,11 +370,9 @@ pub enum MessageStreamEvent {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MessageDeltaBody {
     pub stop_reason: Option<StopReason>,
-    /// The stop sequence that was matched, present only when
-    /// `stop_reason == "stop_sequence"`; `None` otherwise. Previously discarded
-    /// at parse — captured so consumers can echo the matched string (Messages
-    /// API `message.stop_sequence`). Optional so its absence never fails the
-    /// terminal parse.
+    /// The stop sequence that was matched, present only when `stop_reason == "stop_sequence"`; `None` otherwise.
+    /// Consumers echo it on the Messages API `message.stop_sequence`.
+    /// Optional so its absence never fails the terminal parse.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stop_sequence: Option<String>,
     /// Provider detail for the stop; on `refusal`, `explanation` carries the
@@ -337,8 +381,7 @@ pub struct MessageDeltaBody {
     pub stop_details: Option<StopDetails>,
 }
 
-/// Detail for a terminal `message_delta`, e.g.
-/// `{"type":"refusal","category":"frontier_llm","explanation":"..."}`.
+/// Detail for a terminal `message_delta`, e.g. `{"type":"refusal","category":"frontier_llm","explanation":"..."}`.
 /// All fields optional so an unknown shape never fails the terminal parse.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct StopDetails {
@@ -351,6 +394,7 @@ pub struct StopDetails {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(try_from = "MessageDeltaUsageWire")]
 pub struct MessageDeltaUsage {
     pub output_tokens: u32,
     #[serde(default)]
@@ -361,14 +405,51 @@ pub struct MessageDeltaUsage {
     pub cache_creation_input_tokens: Option<u32>,
     /// The terminal delta is where a gateway settles the price of the call —
     /// see [`MessagesUsage::cost_in_usd_ticks`].
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        alias = "cost_usd_ticks"
-    )]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub cost_in_usd_ticks: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cost: Option<crate::UsageCost>,
+}
+
+impl MessageDeltaUsage {
+    /// The keys [`cost_in_usd_ticks`](Self::cost_in_usd_ticks) is read under;
+    /// the same two spellings [`MessagesUsage::COST_KEYS`] folds.
+    pub const COST_KEYS: Aliases = MessagesUsage::COST_KEYS;
+}
+
+/// `MessageDeltaUsage` as it arrives on the wire, with each cost-key spelling
+/// its own field. See [`MessageDeltaUsage::COST_KEYS`].
+#[derive(Debug, Default, Deserialize)]
+struct MessageDeltaUsageWire {
+    output_tokens: u32,
+    #[serde(default)]
+    input_tokens: Option<u32>,
+    #[serde(default)]
+    cache_read_input_tokens: Option<u32>,
+    #[serde(default)]
+    cache_creation_input_tokens: Option<u32>,
+    #[serde(default)]
+    cost_in_usd_ticks: Option<i64>,
+    #[serde(default)]
+    cost_usd_ticks: Option<i64>,
+    #[serde(default)]
+    cost: Option<crate::UsageCost>,
+}
+
+impl TryFrom<MessageDeltaUsageWire> for MessageDeltaUsage {
+    type Error = xai_tool_types::AliasConflict;
+
+    fn try_from(wire: MessageDeltaUsageWire) -> Result<Self, Self::Error> {
+        Ok(Self {
+            output_tokens: wire.output_tokens,
+            input_tokens: wire.input_tokens,
+            cache_read_input_tokens: wire.cache_read_input_tokens,
+            cache_creation_input_tokens: wire.cache_creation_input_tokens,
+            cost_in_usd_ticks: MessageDeltaUsage::COST_KEYS
+                .fold(vec![wire.cost_in_usd_ticks, wire.cost_usd_ticks])?,
+            cost: wire.cost,
+        })
+    }
 }
 
 /// Content delta within a content_block_delta event
@@ -444,13 +525,23 @@ mod tests {
             StopReason::Unknown(s) => assert_eq!(s, "some_future_stop_reason"),
             other => panic!("unknown value must preserve the wire string, got {other:?}"),
         }
+
+        // wire_str is the inverse: known variants round-trip through the serde renames, Unknown yields its inner string unchanged
+        assert_eq!(StopReason::MaxTokens.wire_str(), "max_tokens");
+        assert_eq!(
+            StopReason::ModelContextWindowExceeded.wire_str(),
+            "model_context_window_exceeded"
+        );
+        assert_eq!(
+            StopReason::Unknown("some_future_stop_reason".to_string()).wire_str(),
+            "some_future_stop_reason"
+        );
         assert_eq!(
             serde_json::to_string(&StopReason::Unknown("some_future_stop_reason".into())).unwrap(),
             "\"some_future_stop_reason\"",
             "catch-all must re-serialize the wire string faithfully"
         );
-        // The catch-all must also work through the Option<StopReason> field
-        // it is parsed from in production.
+        // The catch-all must also work through the Option<StopReason> field it is parsed from in production
         let delta: MessageDeltaBody =
             serde_json::from_str(r#"{"stop_reason":"mystery_reason"}"#).unwrap();
         match delta.stop_reason {
@@ -459,9 +550,8 @@ mod tests {
         }
     }
 
-    /// The terminal `message_delta` of a refusal-terminated stream must parse
-    /// (the internally-tagged `MessageStreamEvent` wrapper is the actual
-    /// production parse site, hence the full-event fixture).
+    /// The terminal `message_delta` of a refusal-terminated stream must parse.
+    /// The fixture is a full event because the internally-tagged `MessageStreamEvent` wrapper is the production parse site.
     #[test]
     fn message_delta_with_refusal_stop_reason_parses() {
         let event: MessageStreamEvent = serde_json::from_str(
@@ -502,9 +592,8 @@ mod tests {
         }
     }
 
-    /// A `stop_sequence`-terminated `message_delta` must parse and preserve the
-    /// matched string (previously discarded), so consumers can echo it on the
-    /// Messages API `message.stop_sequence`.
+    /// A `stop_sequence`-terminated `message_delta` must parse and preserve the matched string.
+    /// Consumers echo it on the Messages API `message.stop_sequence`.
     #[test]
     fn message_delta_captures_matched_stop_sequence() {
         let event: MessageStreamEvent = serde_json::from_str(
@@ -532,9 +621,8 @@ mod tests {
         }
     }
 
-    /// A `redacted_thinking` content block must deserialize into the dedicated
-    /// variant (preserving the opaque `data`) instead of failing the whole
-    /// `content_block_start` parse and discarding an already-streamed response.
+    /// A `redacted_thinking` content block must deserialize into the dedicated variant, preserving the opaque `data`.
+    /// Failing the whole `content_block_start` parse would discard an already-streamed response.
     #[test]
     fn redacted_thinking_content_block_parses() {
         let event: MessageStreamEvent = serde_json::from_str(
@@ -554,8 +642,11 @@ mod tests {
         // Round-trips to Claude's wire shape.
         let json =
             serde_json::to_value(ContentBlock::RedactedThinking { data: "abc".into() }).unwrap();
-        assert_eq!(json["type"], "redacted_thinking");
-        assert_eq!(json["data"], "abc");
+        assert_eq!(
+            json.get("type"),
+            Some(&serde_json::json!("redacted_thinking"))
+        );
+        assert_eq!(json.get("data"), Some(&serde_json::json!("abc")));
     }
 
     /// Every wire shape a gateway prices a call with has to parse, and an
@@ -628,8 +719,11 @@ mod tests {
             schema: serde_json::json!({"type": "object", "properties": {"x": {"type": "string"}}}),
         };
         let json = serde_json::to_value(&fmt).unwrap();
-        assert_eq!(json["type"], "json_schema");
-        assert_eq!(json["schema"]["type"], "object");
+        assert_eq!(json.get("type"), Some(&serde_json::json!("json_schema")));
+        assert_eq!(
+            json.get("schema").and_then(|s| s.get("type")),
+            Some(&serde_json::json!("object"))
+        );
         assert!(json.get("name").is_none());
 
         let config = OutputConfig {
@@ -638,6 +732,79 @@ mod tests {
         };
         let json = serde_json::to_value(&config).unwrap();
         assert!(json.get("effort").is_none(), "effort omitted when None");
-        assert_eq!(json["format"]["type"], "json_schema");
+        assert_eq!(
+            json.get("format").and_then(|f| f.get("type")),
+            Some(&serde_json::json!("json_schema"))
+        );
+    }
+
+    /// Every cost-spelling assertion, run against both usage shapes. A gateway
+    /// prices the call on `message_start` and settles it on `message_delta`, so
+    /// either one can carry both keys. Both JSON bodies name `input_tokens` and
+    /// `output_tokens`, the two keys the stricter of the two structs requires.
+    fn assert_cost_key_folding<T>(
+        read: impl Fn(&T) -> Option<i64>,
+        build: impl Fn(Option<i64>) -> T,
+    ) where
+        T: serde::de::DeserializeOwned + serde::Serialize + std::fmt::Debug,
+    {
+        const PRICE: i64 = 1_000_000_000;
+        for (label, json) in [
+            (
+                "the canonical key alone",
+                r#"{"input_tokens":1,"output_tokens":2,"cost_in_usd_ticks":1000000000}"#,
+            ),
+            (
+                "the alias key alone",
+                r#"{"input_tokens":1,"output_tokens":2,"cost_usd_ticks":1000000000}"#,
+            ),
+            (
+                "both keys carrying one value",
+                r#"{"input_tokens":1,"output_tokens":2,"cost_usd_ticks":1000000000,"cost_in_usd_ticks":1000000000}"#,
+            ),
+        ] {
+            let parsed = serde_json::from_str::<T>(json)
+                .unwrap_or_else(|e| panic!("{label} must parse, got {json}: {e}"));
+            assert_eq!(read(&parsed), Some(PRICE), "{label}");
+        }
+
+        let contradictory = r#"{"input_tokens":1,"output_tokens":2,"cost_usd_ticks":1,"cost_in_usd_ticks":1000000000}"#;
+        let err = serde_json::from_str::<T>(contradictory)
+            .expect_err("differing prices must not resolve silently");
+        let message = err.to_string();
+        assert!(message.contains("cost_in_usd_ticks"), "{message}");
+        assert!(message.contains("cost_usd_ticks"), "{message}");
+
+        let written = serde_json::to_value(build(Some(PRICE))).unwrap();
+        assert_eq!(written["cost_in_usd_ticks"].as_i64(), Some(PRICE));
+        assert!(
+            written.get("cost_usd_ticks").is_none(),
+            "the alias key must never be written: {written}"
+        );
+    }
+
+    #[test]
+    fn messages_usage_cost_key_folds_its_alias() {
+        assert_cost_key_folding(
+            |u: &MessagesUsage| u.cost_in_usd_ticks,
+            |cost_in_usd_ticks| MessagesUsage {
+                input_tokens: 1,
+                output_tokens: 2,
+                cost_in_usd_ticks,
+                ..Default::default()
+            },
+        );
+    }
+
+    #[test]
+    fn message_delta_usage_cost_key_folds_its_alias() {
+        assert_cost_key_folding(
+            |u: &MessageDeltaUsage| u.cost_in_usd_ticks,
+            |cost_in_usd_ticks| MessageDeltaUsage {
+                output_tokens: 2,
+                cost_in_usd_ticks,
+                ..Default::default()
+            },
+        );
     }
 }

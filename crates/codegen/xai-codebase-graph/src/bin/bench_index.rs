@@ -1,4 +1,9 @@
+#![allow(clippy::cast_precision_loss)] // 1 hit predates the gate
+#![allow(clippy::expect_used)] // 1 hit predates the gate
+
 //! Benchmark binary for index building.
+
+#![deny(clippy::indexing_slicing)]
 
 use std::path::Path;
 use std::time::Instant;

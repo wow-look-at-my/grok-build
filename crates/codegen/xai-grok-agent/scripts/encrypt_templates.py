@@ -9,12 +9,10 @@ from pathlib import Path
 
 SEEDS = {
     "BASE_PROMPT_ENC": 0x5A,
-    "CODEX_PROMPT_ENC": 0x7B,
     "SUBAGENT_PROMPT_ENC": 0x3D,
 }
 TEMPLATES = {
     "BASE_PROMPT_ENC": "prompt.md",
-    "CODEX_PROMPT_ENC": "apply_patch_prompt.md",
     "SUBAGENT_PROMPT_ENC": "subagent_prompt.md",
 }
 

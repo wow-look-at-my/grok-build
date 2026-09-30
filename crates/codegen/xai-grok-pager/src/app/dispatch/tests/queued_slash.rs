@@ -306,6 +306,7 @@ fn send_now_on_a_pager_command_runs_the_command() {
         Action::SendPromptNow {
             text: "/plan implement the auth flow".into(),
             images: vec![],
+            image_notice: None,
             wire_blocks: None,
         },
         &mut app,
@@ -340,6 +341,7 @@ fn send_now_on_a_pager_command_with_an_image_runs_the_command() {
         Action::SendPromptNow {
             text: "/plan implement the auth flow".into(),
             images: vec![test_pasted_image()],
+            image_notice: None,
             wire_blocks: None,
         },
         &mut app,
@@ -462,6 +464,7 @@ fn send_now_on_a_shell_command_keeps_the_immediate_route() {
         Action::SendPromptNow {
             text: "/pr-cleanup fix the branch".into(),
             images: vec![],
+            image_notice: None,
             wire_blocks: None,
         },
         &mut app,

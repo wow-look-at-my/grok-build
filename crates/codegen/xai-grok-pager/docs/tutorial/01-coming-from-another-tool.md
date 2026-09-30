@@ -1,11 +1,11 @@
-# Coming from Claude, Cursor, or Codex?
+# Coming from Claude or Cursor?
 
 Fear not — your settings, rules, and skills come with you. Grok Build
 reads the same project conventions other agents use, and imports the rest.
 
 ## Picked up automatically
 
-- **Rules & instructions** — `AGENTS.md` (the Codex/OpenCode convention),
+- **Rules & instructions** — `AGENTS.md` (the OpenCode convention),
   `CLAUDE.md` (including nested ones), and `*.md` rules under
   `.claude/rules/` and `.cursor/rules/`.
 - **Skills & custom commands** — `~/.claude/skills/`, `~/.claude/commands/`,
@@ -24,8 +24,7 @@ writes the items you selected into your `.grok` config. Re-run it anytime.
 
 ## Pick up where you left off
 
-The **`/resume-claude`**, **`/resume-codex`**, and **`/resume-cursor`**
-skills continue a recent session from those tools right here.
+The **`/resume-claude`** and **`/resume-cursor`** skills continue a recent session from those tools right here.
 
 ## Check what was discovered
 

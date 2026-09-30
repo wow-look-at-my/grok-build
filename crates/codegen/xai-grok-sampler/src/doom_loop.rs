@@ -1,11 +1,9 @@
 //! Per-request transport for server-reported doom-loop signals.
 //!
-//! The wire shapes and tolerant parsers live in
-//! [`xai_grok_sampling_types::doom_loop`]; this module only moves the parsed
-//! signals across the layer boundary: the Layer-1 SSE decoder in
-//! [`crate::client`] records them as raw payloads arrive, and the Layer-2
-//! transform in [`crate::stream::responses`] drains them into the final
-//! `ConversationResponse`.
+//! The wire shapes and tolerant parsers live in [`xai_grok_sampling_types::doom_loop`].
+//! This module only moves the parsed signals across the layer boundary.
+//! The Layer-1 SSE decoder in [`crate::client`] records them as raw payloads arrive.
+//! The Layer-2 transform in [`crate::stream::responses`] drains them into the final `ConversationResponse`.
 
 use std::sync::{Arc, Mutex};
 
@@ -14,12 +12,11 @@ use xai_grok_sampling_types::doom_loop::{
     peek_doom_loop,
 };
 
-/// Cheap-to-clone accumulator shared between the SSE decode closure and the
-/// stream transform of one request attempt. Created fresh per attempt so
-/// signals from a failed attempt can never leak into the next one. Carries
-/// the policy so the stream transform can judge confidence for the
-/// mid-stream abort; the retry loop disarms the abort once the recovery
-/// budget is spent so the final attempt completes and can be accepted.
+pub(crate) const MAX_COLLECTED_DOOM_LOOP_SIGNALS: usize = 64;
+pub(crate) const MAX_DOOM_LOOP_SIGNAL_BYTES: usize = 256;
+
+/// Cheap-to-clone accumulator shared between the SSE decode closure and the stream transform of one request attempt.
+/// Created fresh per attempt so signals from a failed attempt can never leak into the next one.
 #[derive(Clone, Debug, Default)]
 pub struct DoomLoopSignalCollector {
     inner: Arc<Mutex<CollectorState>>,
@@ -35,26 +32,35 @@ struct CollectorState {
 }
 
 impl DoomLoopSignalCollector {
+    /// The accumulated state, whatever a prior holder was doing when it died.
+    ///
+    /// The signals are what the stream transform acts on and the policy is what
+    /// it judges them by, so either one going missing silently turns a reported
+    /// doom loop into a response read as clean. The state is a `Vec` and two
+    /// flags, which a panicked write leaves at least as usable as the empty
+    /// state a poison would report in its place.
+    #[allow(clippy::disallowed_methods)] // takes the state back as the doc above says
+    fn state(&self) -> std::sync::MutexGuard<'_, CollectorState> {
+        self.inner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     /// A fresh, armed collector judging confidence with `policy`.
     pub(crate) fn new(policy: DoomLoopRecoveryPolicy) -> Self {
         let collector = Self::default();
-        if let Ok(mut state) = collector.inner.lock() {
-            state.policy = policy;
-        }
+        collector.state().policy = policy;
         collector
     }
 
     /// Stop the mid-stream abort for this attempt; signals keep recording.
     pub(crate) fn disarm_abort(&self) {
-        if let Ok(mut state) = self.inner.lock() {
-            state.abort_disarmed = true;
-        }
+        self.state().abort_disarmed = true;
     }
 
-    /// While armed: the raw labels of the confident signals recorded so far
-    /// (non-draining), or `None` when there is nothing to act on.
+    /// While armed: the raw labels of the confident signals recorded so far (non-draining), or `None` when there is nothing to act on.
     pub(crate) fn abort_triggers(&self) -> Option<Vec<String>> {
-        let state = self.inner.lock().ok()?;
+        let state = self.state();
         if state.abort_disarmed {
             return None;
         }
@@ -62,15 +68,11 @@ impl DoomLoopSignalCollector {
         (!confident.is_empty()).then_some(confident)
     }
 
-    /// Inspect a raw SSE frame. Returns `true` when the frame is the
-    /// non-standard `response.doom_loop_check` event — by its SSE `event:`
-    /// name or its payload `type` — which the caller must swallow;
-    /// forwarding it would fail typed deserialization. Reported triggers
-    /// (mid-stream or on the terminal response object) are recorded,
-    /// deduplicated by raw label. Never fails.
+    /// Inspect a raw SSE frame.
+    /// The caller must swallow such a frame; forwarding it would fail typed deserialization.
+    /// Never fails.
     pub(crate) fn absorb(&self, event_name: &str, data: &str) -> bool {
-        // The name check keeps a check event with an unparseable payload
-        // from ever reaching the typed parser.
+        // The name check keeps a check event with an unparseable payload from ever reaching the typed parser
         let named = event_name == DOOM_LOOP_CHECK_EVENT_TYPE;
         let (signals, swallow) = match peek_doom_loop(data) {
             DoomLoopPeek::CheckEvent(signals) => (signals, true),
@@ -92,20 +94,22 @@ impl DoomLoopSignalCollector {
 
     /// Drain the recorded signals; empty when nothing was reported.
     pub(crate) fn take(&self) -> Vec<DoomLoopSignal> {
-        match self.inner.lock() {
-            Ok(mut state) => std::mem::take(&mut state.signals),
-            Err(_) => Vec::new(),
-        }
+        // The lock is taken through [`Self::state`], so a signal the decoder
+        // recorded is never dropped for having been held when something panicked.
+        std::mem::take(&mut self.state().signals)
     }
 
     fn record(&self, signals: Vec<DoomLoopSignal>) {
-        let Ok(mut state) = self.inner.lock() else {
-            return;
-        };
+        let mut state = self.state();
         // Cumulative sets are re-sent as they grow; the raw label is the
         // stable identity. Linear scan is fine for these tiny sets.
         for signal in signals {
-            if !state.signals.iter().any(|s| s.raw == signal.raw) {
+            if state.signals.len() >= MAX_COLLECTED_DOOM_LOOP_SIGNALS {
+                break;
+            }
+            if signal.raw.len() <= MAX_DOOM_LOOP_SIGNAL_BYTES
+                && !state.signals.iter().any(|s| s.raw == signal.raw)
+            {
                 state.signals.push(signal);
             }
         }
@@ -113,9 +117,7 @@ impl DoomLoopSignalCollector {
 
     /// Debug-log the first malformed payload per attempt (never per event).
     fn log_malformed_once(&self) {
-        let Ok(mut state) = self.inner.lock() else {
-            return;
-        };
+        let mut state = self.state();
         if !state.malformed_logged {
             state.malformed_logged = true;
             tracing::debug!("doom-loop check payload malformed or empty; ignoring");
@@ -136,11 +138,13 @@ mod tests {
         assert!(collector.absorb(DOOM_LOOP_CHECK_EVENT_TYPE, SAMPLE_CHECK_EVENT_DATA));
         let signals = collector.take();
         assert_eq!(signals.len(), 1);
-        assert_eq!(signals[0].kind, DoomLoopSignalKind::TailRepetition(4));
+        let Some(signal) = signals.first() else {
+            panic!("expected a signal");
+        };
+        assert_eq!(signal.kind, DoomLoopSignalKind::TailRepetition(4));
     }
 
-    /// Servers that omit the SSE `event:` name are still handled by the
-    /// payload `type` check.
+    /// Servers that omit the SSE `event:` name are still handled by the payload `type` check.
     #[test]
     fn absorb_swallows_check_event_without_sse_name() {
         let collector = DoomLoopSignalCollector::default();
@@ -158,8 +162,14 @@ mod tests {
         ));
         let signals = collector.take();
         assert_eq!(signals.len(), 2);
-        assert_eq!(signals[0].raw, "tail_repetition:4@response");
-        assert_eq!(signals[1].raw, "tail_repetition:2@response");
+        let Some(first) = signals.first() else {
+            panic!("expected first signal");
+        };
+        let Some(second) = signals.get(1) else {
+            panic!("expected second signal");
+        };
+        assert_eq!(first.raw, "tail_repetition:4@response");
+        assert_eq!(second.raw, "tail_repetition:2@response");
     }
 
     #[test]
@@ -184,9 +194,8 @@ mod tests {
         assert!(collector.take().is_empty());
     }
 
-    /// A frame with the check event's SSE name but an unparseable payload
-    /// (non-JSON, or JSON without the `type` tag) must still be swallowed —
-    /// forwarding it would fail the typed parse and the whole attempt.
+    /// A frame with the check event's SSE name but an unparseable payload (non-JSON, or JSON without the `type` tag) must still be swallowed.
+    /// Forwarding it would fail the typed parse and the whole attempt.
     #[test]
     fn named_event_with_garbage_payload_still_swallowed() {
         let collector = DoomLoopSignalCollector::default();
@@ -203,8 +212,29 @@ mod tests {
         assert!(collector.take().is_empty());
     }
 
-    /// `abort_triggers` fires only on confident signals, does not drain, and
-    /// goes quiet once disarmed (the spent-budget attempt must complete).
+    #[test]
+    fn wire_collector_bounds_signal_count_and_bytes() {
+        let collector = DoomLoopSignalCollector::default();
+        let signals = std::iter::once(DoomLoopSignal::parse(
+            &"x".repeat(MAX_DOOM_LOOP_SIGNAL_BYTES + 1),
+        ))
+        .chain(
+            (0..MAX_COLLECTED_DOOM_LOOP_SIGNALS + 20)
+                .map(|index| DoomLoopSignal::parse(&format!("unknown_{index}@thinking"))),
+        )
+        .collect();
+        collector.record(signals);
+
+        let retained = collector.take();
+        assert_eq!(MAX_COLLECTED_DOOM_LOOP_SIGNALS, retained.len());
+        assert!(
+            retained
+                .iter()
+                .all(|signal| signal.raw.len() <= MAX_DOOM_LOOP_SIGNAL_BYTES)
+        );
+    }
+
+    /// `abort_triggers` fires only on confident signals, does not drain, and goes quiet once disarmed (the spent-budget attempt must complete).
     #[test]
     fn abort_triggers_requires_confidence_and_honors_disarm() {
         let confident = r#"{"type":"response.doom_loop_check","doom_loop_check":{"triggers":["tail_repetition:8@thinking"]}}"#;
@@ -225,5 +255,40 @@ mod tests {
         collector.disarm_abort();
         assert!(collector.abort_triggers().is_none());
         assert_eq!(collector.take().len(), 2, "recording survives the disarm");
+    }
+
+    /// A panic inside one collector step silences nothing afterwards.
+    ///
+    /// Every step goes through [`DoomLoopSignalCollector::state`], which takes
+    /// the lock back whatever a prior holder was doing when it died. A poisoned
+    /// `std` lock instead leaves `disarm_abort` and `take` reporting the empty
+    /// answer, and an empty report is read as a response with nothing wrong
+    /// with it.
+    #[test]
+    fn a_panicking_holder_leaves_the_collector_working() {
+        let confident = r#"{"type":"response.doom_loop_check","doom_loop_check":{"triggers":["tail_repetition:8@thinking"]}}"#;
+        let collector = DoomLoopSignalCollector::new(DoomLoopRecoveryPolicy::default());
+        assert!(collector.absorb(DOOM_LOOP_CHECK_EVENT_TYPE, confident));
+        assert!(collector.abort_triggers().is_some());
+
+        let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _held = collector.state();
+            panic!("the decode died holding the collector");
+        }));
+        assert!(
+            panicked.is_err(),
+            "the test must actually have panicked while holding the lock"
+        );
+
+        collector.disarm_abort();
+        assert!(
+            collector.abort_triggers().is_none(),
+            "the disarm must reach the state a poisoned lock still holds"
+        );
+        assert_eq!(
+            collector.take().len(),
+            1,
+            "a signal recorded before the panic must survive it"
+        );
     }
 }

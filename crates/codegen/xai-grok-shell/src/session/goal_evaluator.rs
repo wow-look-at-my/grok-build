@@ -1,5 +1,6 @@
 use crate::sampling::{ConversationItem, ConversationRequest};
 use crate::session::goal_tracker::GoalMode;
+use xai_grok_sampling_types::SyntheticReason;
 
 const TRANSCRIPT_MAX_BYTES: usize = 32 * 1024;
 const ITEM_MAX_BYTES: usize = 4 * 1024;
@@ -129,14 +130,27 @@ pub(crate) fn bounded_goal_transcript(items: &[ConversationItem]) -> String {
     let mut used = 0usize;
 
     for item in items.iter().rev() {
-        let role = match item {
+        let (role, warning) = match item {
             ConversationItem::System(_) => continue,
-            ConversationItem::User(_) => "user",
-            ConversationItem::Assistant(_) => "assistant",
-            ConversationItem::ToolResult(_) => "tool",
+            ConversationItem::User(user)
+                if user.synthetic_reason == SyntheticReason::AgentMessage =>
+            {
+                (
+                    "agent_message",
+                    Some(xai_chat_state::compaction_utils::AGENT_MESSAGE_MODEL_LABEL),
+                )
+            }
+            ConversationItem::User(_) => ("user", None),
+            ConversationItem::Assistant(_) => ("assistant", None),
+            ConversationItem::ToolResult(_) => ("tool", None),
             ConversationItem::BackendToolCall(_) | ConversationItem::Reasoning(_) => continue,
         };
         let text = item.text_content();
+        let text = if let Some(warning) = warning {
+            format!("{warning} {text}")
+        } else {
+            text
+        };
         let trimmed = text.trim();
         if trimmed.is_empty() {
             continue;
@@ -173,9 +187,14 @@ pub(crate) fn build_goal_evaluator_request(
         // The retry must differ from the failed attempt, or a deterministic
         // sampling path repeats the same malformed reply until the retry
         // budget runs out.
-        input["correction"] = serde_json::json!(format!(
-            "Your previous reply was rejected: {error}. Reply again with exactly one JSON object containing only the required fields."
-        ));
+        if let Some(obj) = input.as_object_mut() {
+            obj.insert(
+                "correction".to_string(),
+                serde_json::json!(format!(
+                    "Your previous reply was rejected: {error}. Reply again with exactly one JSON object containing only the required fields."
+                )),
+            );
+        }
     }
     ConversationRequest {
         items: vec![
@@ -279,6 +298,19 @@ mod tests {
         assert!(!transcript.contains("secret system"));
         assert!(transcript.contains("[assistant] worked"));
         assert!(transcript.ends_with("[user] latest"));
+    }
+
+    #[test]
+    fn transcript_marks_agent_message_as_untrusted_not_human() {
+        let transcript =
+            bounded_goal_transcript(&[ConversationItem::agent_message("review this change")]);
+        assert_eq!(
+            transcript,
+            format!(
+                "[agent_message] {} review this change",
+                xai_chat_state::compaction_utils::AGENT_MESSAGE_MODEL_LABEL
+            )
+        );
     }
 
     #[test]

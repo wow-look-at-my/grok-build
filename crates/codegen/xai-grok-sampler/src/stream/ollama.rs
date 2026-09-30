@@ -97,6 +97,7 @@ pub fn stream_ollama<'a>(
                     model_metadata: None,
                     retry_after_secs: None,
                     should_retry: None,
+                    error_code: None,
                 };
                 yield SamplingEvent::Failed {
                     request_id: request_id.clone(),
@@ -243,13 +244,6 @@ pub fn stream_ollama<'a>(
             }
         };
 
-        if stop_reason == Some(StopReason::Length) {
-            yield SamplingEvent::Failed {
-                request_id: request_id.clone(),
-                error: SamplingErrorInfo::from(&SamplingError::MaxTokensTruncation),
-            };
-            return;
-        }
 
         let usage = (prompt_tokens > 0 || completion_tokens > 0).then(|| TokenUsage {
             prompt_tokens,

@@ -1,5 +1,9 @@
+#![allow(clippy::string_slice)] // 1 hit predates the gate
+
 //! Shared prompt-queue wire types, merge rules, and the one definition of
 //! "this queue row's text is a command".
+
+#![deny(clippy::indexing_slicing)]
 
 mod combine;
 mod types;
@@ -30,7 +34,12 @@ pub fn is_slash_invocation(text: &str) -> bool {
     };
     let name = without_slash
         .find(char::is_whitespace)
-        .map_or(without_slash, |idx| &without_slash[..idx]);
+        .map_or(without_slash, |idx| {
+            // `idx` is the byte offset of a whitespace character, hence a boundary.
+            #[allow(clippy::string_slice)] // up to a matched whitespace character
+            let before_space = &without_slash[..idx];
+            before_space
+        });
     !name.is_empty()
 }
 

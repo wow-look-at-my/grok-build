@@ -12,10 +12,9 @@ pub struct ExampleAnchors {
     pub grep_context: String,
 }
 
-/// Configurable parameters for the hashline anchor scheme.
-///
-/// Stored as a resource (`Params<HashlineSchemeParams>`) so all three
-/// hashline tools use the same scheme within a session.
+/// Configurable parameters for the hashline anchor scheme. Stored as a resource
+/// (`Params<HashlineSchemeParams>`) so all three hashline tools use the same scheme within a
+/// session.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct HashlineSchemeParams {
@@ -115,7 +114,11 @@ impl HashlineSchemeParams {
     /// Returns `(anchor, read_line1, read_line2, grep_match, grep_context)`.
     pub fn example_anchors(&self) -> ExampleAnchors {
         let len = self.hash_len.clamp(1, 4);
+        // `"abcd"` and `"rstu"` are ASCII literals and `len` is clamped to
+        // 1..=4, so every byte offset up to `len` is a char boundary.
+        #[allow(clippy::string_slice)]
         let hash = &"abcd"[..len];
+        #[allow(clippy::string_slice)]
         let ctx = &"rstu"[..len];
         match self.scheme.as_str() {
             "content_only" => ExampleAnchors {

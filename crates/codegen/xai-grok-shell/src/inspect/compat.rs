@@ -5,9 +5,8 @@
 use serde::Serialize;
 use xai_grok_tools::types::compat::{COMPAT_CELLS, CompatCell, CompatConfig};
 
-/// Derive the vendor origin from a file path. Returns `Some("cursor")` or
-/// `Some("claude")` when the path passes through a vendor config directory;
-/// `None` for native `.grok`/`.agents` paths.
+/// Derive the vendor origin from a file path.
+/// Returns `Some("cursor")` or `Some("claude")` when the path passes through a vendor config directory; `None` for native `.grok`/`.agents` paths.
 pub(super) fn derive_vendor(path: &str) -> Option<&'static str> {
     if path.contains("/.cursor/") || path.contains("\\.cursor\\") || path.ends_with("/.cursor") {
         Some("cursor")
@@ -130,7 +129,6 @@ pub(super) fn resolve_inspect_compat_with_env(
     let defaults = CompatConfig::default();
     let cells = COMPAT_CELLS
         .into_iter()
-        .filter(|cell| cell.is_runtime_supported())
         .map(|cell| {
             let config = crate::agent::config::compat_config_cell(effective_config, cell);
             resolve_compat_entry(cell, env_value(cell), config, defaults.value(cell))
@@ -167,8 +165,8 @@ fn resolve_compat_entry(
     };
 
     ExternalCompatEntry {
-        vendor: cell.vendor().as_str().to_owned(),
-        surface: cell.surface().as_str().to_owned(),
+        vendor: cell.vendor().as_ref().to_owned(),
+        surface: cell.surface().as_ref().to_owned(),
         enabled: resolved.value,
         source,
     }
@@ -200,31 +198,25 @@ mod tests {
         let report = resolve_without_env(Ok(&effective_config));
 
         assert!(!report.remote_settings_loaded);
-        assert_eq!(report.cells.len(), 13);
+        assert_eq!(report.cells.len(), 12);
         assert!(
             report
                 .cells
                 .iter()
                 .all(|cell| cell.enabled && cell.source == CompatSource::Default)
         );
-        assert_eq!(
-            report
-                .cells
-                .iter()
-                .filter(|entry| entry.vendor == "codex")
-                .map(|entry| entry.surface.as_str())
-                .collect::<Vec<_>>(),
-            vec!["sessions"]
-        );
-        let session = entry(&report, "codex", "sessions");
-        assert_eq!(session.enabled, CompatConfig::default().codex.sessions);
+        let session = entry(&report, "claude", "sessions");
+        assert_eq!(session.enabled, CompatConfig::default().claude.sessions);
         assert_eq!(session.source, CompatSource::Default);
         let json = serde_json::to_value(&report).unwrap();
-        assert_eq!(json["remoteSettingsLoaded"], false);
+        assert_eq!(
+            json.get("remoteSettingsLoaded"),
+            Some(&serde_json::Value::Bool(false))
+        );
         assert_eq!(
             serde_json::to_value(session).unwrap(),
             serde_json::json!({
-                "vendor": "codex",
+                "vendor": "claude",
                 "surface": "sessions",
                 "enabled": true,
                 "source": "default"

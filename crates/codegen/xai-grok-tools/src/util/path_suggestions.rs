@@ -51,12 +51,9 @@ impl fmt::Display for PathNotFoundHint {
     }
 }
 
-/// Build hints for a path-not-found error.
-///
-/// Returns [`PathNotFoundHint`].
-///
-/// `path` is the resolved (real) filesystem path that failed.
-/// `display_cwd` is the model-facing working directory (for the CWD note).
+/// Build hints for a path-not-found error. Returns [`PathNotFoundHint`]. `path` is the resolved
+/// (real) filesystem path that failed. `display_cwd` is the model-facing working directory (for the
+/// CWD note).
 #[tracing::instrument(name = "fs.path_not_found_hint", skip_all)]
 pub async fn path_not_found_hint(path: &Path, cwd: &Path, display_cwd: &Path) -> PathNotFoundHint {
     let cwd_note = format!(
@@ -76,7 +73,19 @@ pub async fn path_not_found_hint(path: &Path, cwd: &Path, display_cwd: &Path) ->
 
     let (suggestion, similar) = match result {
         Ok(Ok(val)) => val,
-        _ => (None, Vec::new()),
+        // Both arms leave the caller with no hint, which is what a hint is
+        // allowed to do. They are not the same event though: a probe that ran
+        // out of time is a slow disk, and a probe that unwound is a bug in the
+        // probe, so only the second one is reported.
+        Ok(Err(join)) => {
+            tracing::warn!(
+                task = "path not found hint",
+                join = %join,
+                "the path hint probe did not finish"
+            );
+            (None, Vec::new())
+        }
+        Err(_elapsed) => (None, Vec::new()),
     };
 
     // Remap resolved worktree path to display space so the model never
@@ -102,13 +111,8 @@ pub async fn path_not_found_hint(path: &Path, cwd: &Path, display_cwd: &Path) ->
     }
 }
 
-/// Format a path-not-found error message.
-///
-/// When `hints_enabled` is `false`, returns a bare error string.
-/// When `true`, appends CWD note, "did you mean?" correction, or similar-name
-/// suggestions via [`path_not_found_hint`].
-///
-/// `display_path` is the model-facing path (for the error message).
+/// Format a path-not-found error message. When `hints_enabled` is `false`, returns a bare error string. When `true`, appends CWD note, "did you
+/// mean?" correction, or similar-name suggestions via [`path_not_found_hint`]. `display_path` is the model-facing path (for the error message).
 /// `resolved_path` is the real filesystem path (for hint lookups).
 pub async fn format_not_found_error(
     display_path: &Path,
@@ -135,11 +139,9 @@ fn collect_hints(path: &Path, cwd: &Path) -> (Option<PathBuf>, Vec<PathBuf>) {
     (None, find_similar_entries(path))
 }
 
-/// Detect the "dropped repo folder" pattern.
-///
-/// If the model asks for `/parent/foo` but cwd is `/parent/repo`, check
-/// whether `/parent/repo/foo` exists. Only fires when the requested path
-/// is under cwd's parent but not already under cwd.
+/// Detect the "dropped repo folder" pattern. If the model asks for `/parent/foo` but cwd is
+/// `/parent/repo`, check whether `/parent/repo/foo` exists. Only fires when the requested path is
+/// under cwd's parent but not already under cwd.
 fn try_suggest_under_cwd(path: &Path, cwd: &Path) -> Option<PathBuf> {
     if !path.is_absolute() || path.starts_with(cwd) {
         return None;

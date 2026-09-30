@@ -11,10 +11,6 @@
 //! - `ToolOutput` — one variant per built-in tool + `Dynamic(Value)`.
 //!   `From` derive generates `From<TypedOutput>` for each inner type.
 use crate::implementations::BashToolInput;
-use crate::implementations::codex::apply_patch::tool::ApplyPatchInput;
-use crate::implementations::codex::grep_files::tool::CodexGrepFilesInput;
-use crate::implementations::codex::list_dir::tool::CodexListDirInput;
-use crate::implementations::codex::read_file::tool::CodexReadFileInput;
 use crate::implementations::grok_build::ask_user_question::AskUserQuestionInput;
 use crate::implementations::grok_build::copy_move::CopyMoveInput;
 use crate::implementations::grok_build::enter_plan_mode::EnterPlanModeInput;
@@ -25,6 +21,8 @@ use crate::implementations::grok_build::image_gen::ImageGenInput;
 use crate::implementations::grok_build::list_dir::ListDirInput;
 use crate::implementations::grok_build::read_file::ReadFileInput;
 use crate::implementations::grok_build::search_replace::SearchReplaceInput;
+use crate::implementations::grok_build::send_feedback::SendFeedbackInput;
+use crate::implementations::grok_build::send_subagent_message::SendSubagentMessageInput;
 use crate::implementations::grok_build::todo::TodoWriteInput;
 use crate::implementations::grok_build::update_goal::UpdateGoalInput;
 use crate::implementations::grok_build::video_gen::{ImageToVideoInput, ReferenceToVideoInput};
@@ -47,15 +45,9 @@ pub struct MCPToolInput {
     pub tool_name: String,
     pub tool_input: serde_json::Value,
 }
-/// Typed tool input — one variant per built-in tool, plus `Dynamic` for
-/// MCP/runtime-registered tools.
-///
-/// Each variant wraps the tool's existing input struct. The new `Tool` trait
-/// will use `TryFrom<ToolInput>` to extract the typed input.
-///
-/// `derive_more::TryInto` generates `TryFrom<ToolInput> for T` for each
-/// inner type, so e.g. `ReadFileInput::try_from(input)` extracts the `ReadFileInput`
-/// variant or returns an error.
+/// Typed tool input — one variant per built-in tool, plus `Dynamic` for MCP/runtime-registered
+/// tools. Each variant wraps the tool's existing input struct. The new `Tool` trait will use
+/// `TryFrom<ToolInput>` to extract the typed input.
 #[derive(Debug, Clone, Serialize, Deserialize, derive_more::TryInto, derive_more::From)]
 #[serde(tag = "variant")]
 pub enum ToolInput {
@@ -79,11 +71,7 @@ pub enum ToolInput {
     ReferenceToVideo(ReferenceToVideoInput),
     WebFetch(WebFetchInput),
     Write(WriteInput),
-    ApplyPatch(ApplyPatchInput),
     HashlineEdit(crate::implementations::grok_build_hashline::edit::types::HashlineEditInput),
-    CodexListDir(CodexListDirInput),
-    CodexGrepFiles(CodexGrepFilesInput),
-    CodexReadFile(CodexReadFileInput),
     MemorySearch(MemorySearchInput),
     MemoryGet(MemoryGetInput),
     SearchTool(SearchToolInput),
@@ -91,6 +79,9 @@ pub enum ToolInput {
     EnterPlanMode(EnterPlanModeInput),
     ExitPlanMode(ExitPlanModeInput),
     AskUserQuestion(AskUserQuestionInput),
+    #[serde(alias = "SendAgentMessage")]
+    SendSubagentMessage(SendSubagentMessageInput),
+    SendFeedback(SendFeedbackInput),
     Lsp(LspToolInput),
     Monitor(crate::implementations::grok_build::monitor::types::MonitorInput),
     SchedulerCreate(crate::implementations::grok_build::scheduler::create::SchedulerCreateInput),
@@ -104,14 +95,12 @@ pub enum ToolInput {
     Dynamic(serde_json::Value),
 }
 impl ToolInput {
-    /// The real target tool for *meta-dispatch* tools whose wire `function.name`
-    /// is only the wrapper (`use_tool`), or `None` for
-    /// ordinary tools (already named by `function.name`). Single source of truth
-    /// for hook matching / telemetry; callers fall back to `function.name` on
-    /// `None`. Add any new dispatcher here.
+    /// The real target tool for *meta-dispatch* tools whose wire `function.name` is only the wrapper (`use_tool`), or
+    /// `None` for ordinary tools (already named by `function.name`). Single source of truth for hook matching / telemetry;
+    /// callers fall back to `function.name` on `None`. Add any new dispatcher here.
     pub fn dispatch_target_name(&self) -> Option<String> {
         match self {
-            ToolInput::UseTool(input) => Some(input.tool_name.clone()),
+            ToolInput::UseTool(input) => input.target_name().map(str::to_owned),
             _ => None,
         }
     }
@@ -119,6 +108,20 @@ impl ToolInput {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn legacy_send_agent_message_input_envelope_deserializes() {
+        let input: ToolInput = serde_json::from_value(serde_json::json!({
+            "variant": "SendAgentMessage",
+            "subagent_id": "sub-1",
+            "text": "follow up",
+        }))
+        .expect("legacy input envelope must remain replayable");
+        let ToolInput::SendSubagentMessage(input) = input else {
+            panic!("expected renamed input variant");
+        };
+        assert_eq!(input.subagent_id, "sub-1");
+        assert_eq!(input.text, "follow up");
+    }
     #[test]
     fn try_into_input_succeeds_for_matching_variant() {
         let input = ToolInput::ListDir(ListDirInput {
@@ -130,10 +133,12 @@ mod tests {
     }
     #[test]
     fn dispatch_target_name_resolves_meta_dispatch_tools() {
-        let use_tool = ToolInput::UseTool(UseToolInput {
-            tool_name: "linear__save_issue".to_string(),
-            tool_input: serde_json::json!({}),
-        });
+        let use_tool = ToolInput::UseTool(UseToolInput::Inline(
+            crate::implementations::use_tool::InlineMcpInvocation {
+                tool_name: "linear__save_issue".to_string(),
+                tool_input: serde_json::json!({}),
+            },
+        ));
         assert_eq!(
             use_tool.dispatch_target_name().as_deref(),
             Some("linear__save_issue")
@@ -202,7 +207,7 @@ mod tests {
         let input = ToolInput::Dynamic(serde_json::json!({"custom": "data"}));
         match input {
             ToolInput::Dynamic(v) => {
-                assert_eq!(v["custom"], "data");
+                assert_eq!(v.get("custom").and_then(|x| x.as_str()), Some("data"));
             }
             _ => panic!("Expected Dynamic variant"),
         }

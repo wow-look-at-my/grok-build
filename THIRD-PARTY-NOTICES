@@ -8653,7 +8653,7 @@ Additional requirements / notices:
   Upstream license expression: MIT OR Apache-2.0. For this distribution, obligations are satisfied under: MIT.
 
 --------------------------------------------------------------------------------
-onig 6.5.1
+onig 6.5.2
 --------------------------------------------------------------------------------
 Source:  https://github.com/iwillspeak/rust-onig
 License: MIT
@@ -8664,7 +8664,7 @@ Copyright notice:
 License text: see Part II — MIT
 
 --------------------------------------------------------------------------------
-onig_sys 69.9.1
+onig_sys 69.9.3
 --------------------------------------------------------------------------------
 Source:  https://github.com/iwillspeak/rust-onig
 License: MIT
@@ -8673,6 +8673,33 @@ Copyright notice:
   > Copyright (c) 2015 Will Speak <will@willspeak.me>, Ivan Ivashchenko
 
 License text: see Part II — MIT
+
+Bundled native library: Oniguruma 6.9.10
+Source: https://github.com/kkos/oniguruma
+
+Copyright (c) 2002-2021 K.Kosako <kkosako0@gmail.com>
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions
+are met:
+1. Redistributions of source code must retain the above copyright
+   notice, this list of conditions and the following disclaimer.
+2. Redistributions in binary form must reproduce the above copyright
+   notice, this list of conditions and the following disclaimer in the
+   documentation and/or other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ARE DISCLAIMED. IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+SUCH DAMAGE.
 
 --------------------------------------------------------------------------------
 opaque-debug 0.3.1
@@ -16625,28 +16652,6 @@ APIs/runtimes, and extended); this section constitutes the prominent notice
 of those changes required by Apache License 2.0 §4(b). Full license texts are
 in Part II. A crate-local copy of these notices (with the same license bodies)
 ships at crates/codegen/xai-grok-tools/THIRD_PARTY_NOTICES.md.
-
-
---------------------------------------------------------------------------------
-openai/codex
---------------------------------------------------------------------------------
-Source:  https://github.com/openai/codex
-License: Apache-2.0
-Upstream paths: codex-rs/core/src/tools/handlers/ (and apply-patch crate)
-
-Copyright notice:
-  Copyright 2025 OpenAI
-
-License text: see Part II — Apache-2.0
-
-Additional requirements / notices:
-  Tool implementations under:
-    crates/codegen/xai-grok-tools/src/implementations/codex/
-  Modules: apply_patch, grep_files, list_dir, read_file.
-  These are derived/portions of openai/codex tool handlers, adapted to this
-  crate's Tool trait and runtime. Apache-2.0 §4 requires retention of
-  copyright, patent, trademark, and attribution notices, a copy of the
-  license, and a notice of changes (this entry).
 
 
 --------------------------------------------------------------------------------

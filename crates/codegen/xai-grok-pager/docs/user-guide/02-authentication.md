@@ -41,37 +41,6 @@ To sign out, run `grok logout`. It takes no flags and clears your cached credent
 
 ---
 
-## Codex / ChatGPT (Optional)
-
-You can add a Codex sign-in without replacing your Grok account:
-
-```text
-/login codex
-```
-
-This requires the official `codex` CLI to be installed and available on `PATH`.
-Grok starts the CLI's app server, opens the Codex browser sign-in, and asks it
-for the models available to your ChatGPT account. Codex owns OAuth and refresh
-token rotation; Grok keeps only the current short-lived access token in memory.
-The Codex CLI stores its credentials in `$CODEX_HOME/auth.json` (normally
-`~/.codex/auth.json`), with owner-only permissions on Unix.
-
-Codex is an additive provider. When you are also signed in to Grok or have
-custom endpoints configured, the model picker shows one combined catalog.
-Codex entries are labeled `Codex · …` and use provider-qualified IDs such as
-`codex/gpt-5.4`, so models from different providers cannot overwrite one
-another. Open the picker with `Ctrl+M` from the scrollback pane, or use
-`/model`.
-
-Regular `/login` and `grok logout` continue to manage the primary Grok
-account. To remove the file-backed Codex credential, close Grok and run:
-
-```bash
-codex logout -c 'cli_auth_credentials_store="file"'
-```
-
----
-
 ## API Key
 
 For CI/CD, automation, or environments without browser access, use an API key from [console.x.ai](https://console.x.ai):
@@ -331,6 +300,13 @@ During a session, the active method handles all mid-session refreshes.
 
 ---
 
+## Grove Git credentials (not this page's `grok login`)
+
+
+**`~/.grok/auth.json` is never read for Git.** `grok login` does not create a Git credential and `grok logout` does not revoke one; the daemon builds its own credential cell from `auth_mode` in Grove config. Those credentials are managed with `grove status` and `grove reload-credentials` -- see [grok clone](27-grok-clone.md#authentication) for the failure classes and their next steps.
+
+---
+
 ## Related settings
 
 Coding-data sharing — **Coding data, retention, and training** in Settings,
@@ -346,7 +322,8 @@ On team accounts, only a team admin can change coding-data sharing.
 Team admins can also enable or disable Zero Data Retention (ZDR) for their team.
 See [How to enable ZDR](https://docs.x.ai/developers/faq/security#how-to-enable-zdr).
 When ZDR is on, coding-data sharing cannot be changed at all — the settings
-row shows `ZDR` in place of the value.
+row shows `ZDR` in place of the value. ZDR does not turn off external OTEL
+or `user.email` — see [ZDR and this stream](24-monitoring-usage.md#zdr-and-this-stream).
 
 See [Monitoring Usage](24-monitoring-usage.md#related-settings) and [Configuration](05-configuration.md#telemetry).
 

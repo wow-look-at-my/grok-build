@@ -9,15 +9,15 @@
 //! versions live behind a shared handle rather than inside `LspClient`.
 
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::sync::Arc;
+
+use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use async_lsp::lsp_types::Position;
 
-/// The version a document is opened at.
-///
-/// Deliberately above [`super::diagnostics::NO_VERSION`], which is what a
-/// report about a document we have never opened is credited: were they equal,
-/// such a report would count as a verdict on our first edit to that file.
+/// The version a document is opened at. Deliberately above [`super::diagnostics::NO_VERSION`],
+/// which is what a report about a document we have never opened is credited: were they equal, such
+/// a report would count as a verdict on our first edit to that file.
 pub const FIRST_VERSION: i32 = 1;
 const _: () = assert!(FIRST_VERSION > super::diagnostics::NO_VERSION);
 
@@ -51,11 +51,7 @@ impl Update {
     }
 }
 
-/// Open documents for one server connection.
-///
-/// Cheap to clone (shared handle). Lock poisoning is recovered from in one
-/// place: a panicking writer leaves the map structurally intact, and a stale
-/// version beats no version at all.
+/// Open documents for one server connection. Cheap to clone (shared handle).
 #[derive(Debug, Clone, Default)]
 pub struct Documents {
     inner: Arc<RwLock<HashMap<String, Tracked>>>,
@@ -66,14 +62,9 @@ impl Documents {
         Self::default()
     }
 
-    /// What to send for `uri`, without recording it as sent.
-    ///
-    /// Deliberately separate from [`Self::commit`]: what is recorded there
-    /// describes the text the *server* has, so a notification that failed to go
-    /// out must not be left advanced — [`Self::restore`] takes it back.
-    /// Leaving it advanced would aim every later incremental range at a
-    /// revision the server never received — the same protocol violation the
-    /// range exists to avoid.
+    /// What to send for `uri`, without recording it as sent. Deliberately separate from [`Self::commit`]: what is recorded here describes the text
+    /// the *server* has, so a notification that failed to go out must not advance it. Advancing it anyway would aim every later incremental range
+    /// at a revision the server never received — the same protocol violation the range exists to avoid.
     pub fn plan(&self, uri: &str) -> Update {
         match self.read().get(uri) {
             Some(tracked) => Update::Change {
@@ -164,12 +155,17 @@ impl Documents {
         std::mem::take(&mut *self.write()).into_keys().collect()
     }
 
+    /// Forget one document. Returns whether it was open.
+    pub fn take(&self, uri: &str) -> bool {
+        self.write().remove(uri).is_some()
+    }
+
     fn read(&self) -> RwLockReadGuard<'_, HashMap<String, Tracked>> {
-        self.inner.read().unwrap_or_else(|e| e.into_inner())
+        self.inner.read()
     }
 
     fn write(&self) -> RwLockWriteGuard<'_, HashMap<String, Tracked>> {
-        self.inner.write().unwrap_or_else(|e| e.into_inner())
+        self.inner.write()
     }
 }
 
@@ -186,7 +182,11 @@ pub fn end_position(text: &str) -> Position {
         }
     }
     // LSP character offsets are UTF-16 code units.
-    let character = text[last_line_start..].encode_utf16().count() as u32;
+    let character = text
+        .get(last_line_start..)
+        .unwrap_or("")
+        .encode_utf16()
+        .count() as u32;
     Position { line, character }
 }
 
@@ -206,6 +206,44 @@ mod tests {
             }
         );
         assert_eq!(documents.version(A), None);
+    }
+
+    /// A writer that dies holding the lock holds it for nobody afterwards.
+    ///
+    /// The guard type is spelled out here rather than inferred: it is
+    /// `parking_lot`'s, which is the one that cannot report a poisoned lock at
+    /// all. A fallible acquisition would let a panic in one code path make
+    /// every later reader of the document versions fail.
+    #[test]
+    fn a_panicking_writer_leaves_the_map_open_to_the_next_acquirer() {
+        let documents = Documents::new();
+        documents.commit(A, 1, "csharp", end_position("one"));
+
+        let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let mut tracked = documents.write();
+            tracked.insert(
+                A.to_string(),
+                Tracked {
+                    version: 2,
+                    language_id: "csharp".to_string(),
+                    end: end_position("one\ntwo"),
+                },
+            );
+            panic!("the writer died holding the document map");
+        }));
+        assert!(
+            panicked.is_err(),
+            "the test must actually have panicked while holding the lock"
+        );
+
+        let guard: parking_lot::RwLockReadGuard<'_, HashMap<String, Tracked>> = documents.read();
+        assert_eq!(
+            guard.get(A).map(|tracked| tracked.version),
+            Some(2),
+            "the next acquirer gets the map, with what the panicked writer had written"
+        );
+        drop(guard);
+        assert_eq!(documents.version(A), Some(2));
     }
 
     #[test]

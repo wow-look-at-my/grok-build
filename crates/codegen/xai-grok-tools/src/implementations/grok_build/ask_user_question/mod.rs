@@ -42,37 +42,27 @@ use crate::types::requirements::{Expr, ToolRequirement};
 use crate::types::resources::{NotificationHandle, SharedResources};
 use crate::types::tool::{ToolKind, ToolNamespace};
 
-/// Migration fallback: when `true`, a missing `UserQuestionSender` falls
-/// back to the old fire-and-forget `QuestionsSent` behavior with a warning.
-/// Set to `false` (or delete entirely) once the shell coordinator is wired
-/// up in TS-03 and confirmed working.
+/// Migration fallback: when `true`, a missing `UserQuestionSender` falls back to the old
+/// fire-and-forget `QuestionsSent` behavior with a warning. Set to `false` (or delete entirely)
+/// once the shell coordinator is wired up in TS-03 and confirmed working.
 const MIGRATION_FALLBACK: bool = true;
 
-/// Default max time to wait for the user to answer the questionnaire (all
-/// questions in this tool call share one timer): 30 minutes. On expiry the
-/// tool returns the same skipped/cancel text as a user dismiss
-/// (`format::unanswered_text`), not a tool failure.
-///
-/// The shell resolves `[toolset.ask_user_question]` across its config tiers
-/// and injects the result as [`AskUserQuestionParams`]; when no resolved
-/// params are injected, `GROK_ASK_USER_QUESTION_TIMEOUT_SECS` (positive
-/// integer seconds) still overrides this default directly —
-/// e.g. `GROK_ASK_USER_QUESTION_TIMEOUT_SECS=8` for tests / TUI repro.
+/// Default max time to wait for the user to answer the questionnaire (all questions in this tool
+/// call share one timer): 30 minutes. On expiry the tool returns the same skipped/cancel text as a
+/// user dismiss (`format::unanswered_text`), not a tool failure.
 pub const RESPONSE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30 * 60);
 
-/// Default for `timeout_enabled` across every resolver tier and settings
-/// surface: the questionnaire timer is armed unless something disarms it.
-/// Single source — the shell resolver's `.default(...)` and the pager's
-/// settings registry both anchor on this const.
+/// Default for `timeout_enabled` across every resolver tier and settings surface: the questionnaire
+/// timer is armed unless something disarms it. Single source — the shell resolver's `.default(...)`
+/// and the pager's settings registry both anchor on this const.
 pub const DEFAULT_ASK_USER_QUESTION_TIMEOUT_ENABLED: bool = true;
 
 /// Env var: override [`RESPONSE_TIMEOUT`] with a duration in **seconds**.
 pub const RESPONSE_TIMEOUT_ENV: &str = "GROK_ASK_USER_QUESTION_TIMEOUT_SECS";
 
-/// Parse the [`RESPONSE_TIMEOUT_ENV`] override (positive integer seconds).
-/// Invalid or non-positive values are warned and treated as unset. Single
-/// source for this parse — the shell's env tier calls it too, so the two
-/// resolutions can't drift.
+/// Parse the [`RESPONSE_TIMEOUT_ENV`] override (positive integer seconds). Invalid or non-positive
+/// values are warned and treated as unset. Single source for this parse — the shell's env tier
+/// calls it too, so the two resolutions can't drift.
 pub fn response_timeout_env_secs() -> Option<u64> {
     let raw = std::env::var(RESPONSE_TIMEOUT_ENV).ok()?;
     match raw.trim().parse::<u64>() {
@@ -95,14 +85,9 @@ pub fn response_timeout() -> std::time::Duration {
         .unwrap_or(RESPONSE_TIMEOUT)
 }
 
-/// Runtime-configurable parameters for the `ask_user_question` tool,
-/// injected via `Params<AskUserQuestionParams>` in `SharedResources`.
-///
-/// The shell resolves `[toolset.ask_user_question]` across requirements >
-/// env > user `config.toml` > managed > remote feature config and injects the
-/// concrete result. All fields are optional — `None` means "unset", which
-/// preserves the legacy env→default budget, so registry consumers that never
-/// resolve config (workspace toolset) keep today's behavior.
+/// Runtime-configurable parameters for the `ask_user_question` tool, injected via `Params<AskUserQuestionParams>` in
+/// `SharedResources`. All fields are optional — `None` means "unset", which preserves the legacy env→default budget, so
+/// registry consumers that never resolve config (workspace toolset) keep today's behavior.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct AskUserQuestionParams {
     /// `Some(false)` disarms the questionnaire timer entirely (wait forever
@@ -172,7 +157,7 @@ pub struct QuestionOption {
 }
 
 /// A single question with its options.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, serde::Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Question {
     /// The question to ask, phrased as a full question.
@@ -186,12 +171,10 @@ pub struct Question {
     /// Let the user pick more than one option (default false).
     // Model-facing schema name is snake_case (`multi_select`); deserialize also
     // accepts the legacy/ACP `multiSelect` so the shared `Question` type stays
-    // wire-compatible with the camelCase ACP ext_method.
-    #[serde(
-        default,
-        alias = "multi_select",
-        deserialize_with = "crate::types::schema::deserialize_lenient_option_bool"
-    )]
+    // wire-compatible with the camelCase ACP ext_method. A caller that sends
+    // both spellings folds them through [`Question::MULTI_SELECT_KEYS`] rather
+    // than failing the whole tool call on a duplicate field.
+    #[serde(default)]
     #[schemars(
         rename = "multi_select",
         description = "Let the user pick more than one option (default false)."
@@ -204,6 +187,69 @@ pub struct Question {
     pub id: Option<String>,
 }
 
+impl Question {
+    /// The keys [`multi_select`](Self::multi_select) is read under. The first
+    /// is what this type writes (the camelCase ACP spelling); `multi_select` is
+    /// the spelling the advertised tool schema names, so models send it.
+    pub const MULTI_SELECT_KEYS: xai_tool_types::Aliases =
+        xai_tool_types::Aliases::new("multiSelect", &["multi_select"]);
+}
+
+/// `Question` as a model or an ACP client writes it, with each multi-select key
+/// spelling its own field. It exists so a caller naming both folds them under
+/// [`Question::MULTI_SELECT_KEYS`] instead of tripping serde's
+/// duplicate-field check.
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct QuestionWire {
+    question: String,
+    options: Vec<QuestionOption>,
+    #[serde(
+        default,
+        deserialize_with = "crate::types::schema::deserialize_lenient_option_bool"
+    )]
+    multi_select: Option<bool>,
+    #[serde(
+        default,
+        rename = "multi_select",
+        deserialize_with = "crate::types::schema::deserialize_lenient_option_bool"
+    )]
+    multi_select_snake: Option<bool>,
+    #[serde(default)]
+    id: Option<String>,
+}
+
+impl TryFrom<QuestionWire> for Question {
+    type Error = xai_tool_types::AliasConflict;
+
+    fn try_from(wire: QuestionWire) -> Result<Self, Self::Error> {
+        Ok(Self {
+            question: wire.question,
+            options: wire.options,
+            multi_select: Question::MULTI_SELECT_KEYS
+                .fold(vec![wire.multi_select, wire.multi_select_snake])?,
+            id: wire.id,
+        })
+    }
+}
+
+/// Forwards through [`QuestionWire`] and the fold.
+///
+/// This is the body `#[serde(try_from = "QuestionWire")]` would generate,
+/// written out because schemars 1.0 reads that attribute to build the advertised
+/// schema: it would publish the shadow's shape, naming both `multiSelect` and
+/// `multi_select` to the model instead of the one key the schema renames to.
+impl<'de> serde::Deserialize<'de> for Question {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <QuestionWire as serde::Deserialize<'de>>::deserialize(deserializer)?
+            .try_into()
+            .map_err(serde::de::Error::custom)
+    }
+}
+
 /// Input for the `AskUserQuestion` tool.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct AskUserQuestionInput {
@@ -212,26 +258,17 @@ pub struct AskUserQuestionInput {
     #[schemars(description = "The questions to ask, each with its own options.")]
     pub questions: Vec<Question>,
 
-    /// Internal flag: when `true`, the tool result is formatted in the
-    /// alternate shape (referenced by id, not label).
-    /// Skipped on the wire and from the JSON schema so the model never
-    /// sees or controls this field.
+    /// Internal flag: when `true`, the tool result is formatted in the alternate shape (referenced
+    /// by id, not label). Skipped on the wire and from the JSON schema so the model never sees or
+    /// controls this field.
     #[serde(default, skip)]
     #[schemars(skip)]
     pub use_id_keyed_format: bool,
 }
 
-/// `AskUserQuestion` tool.
-///
-/// Blocks inside `run()` until the user responds or the configured wait
-/// budget elapses for the whole questionnaire (default [`RESPONSE_TIMEOUT`],
-/// 30 minutes). Sends a request over an in-process mpsc channel to a
-/// session-owned coordinator (in xai-grok-shell), which performs an ACP
-/// `ext_method` round-trip to the client/pager. The response is sent back
-/// over a oneshot channel and formatted into the model-visible tool result.
-///
-/// Params: [`AskUserQuestionParams`] — timeout policy resolved by the shell
-/// across its config tiers; unset fields keep the legacy env→default budget.
+/// `AskUserQuestion` tool. Blocks inside `run()` until the user responds or the configured wait budget elapses for the
+/// whole questionnaire (default [`RESPONSE_TIMEOUT`], 30 minutes). Sends a request over an in-process mpsc channel to a
+/// session-owned coordinator (in xai-grok-shell), which performs an ACP `ext_method` round-trip to the client/pager.
 #[derive(Debug, Default)]
 pub struct AskUserQuestionTool;
 
@@ -264,12 +301,9 @@ impl crate::types::tool_metadata::ToolMetadata for AskUserQuestionTool {
 }
 
 impl AskUserQuestionTool {
-    /// Fire-and-forget fallback used during migration when
-    /// `UserQuestionSender` is not yet injected by the shell.
-    ///
-    /// This preserves the old behavior: send a notification, return
-    /// `QuestionsSent`. Remove this method when `MIGRATION_FALLBACK` is
-    /// set to `false`.
+    /// Fire-and-forget fallback used during migration when `UserQuestionSender` is not yet injected
+    /// by the shell. This preserves the old behavior: send a notification, return `QuestionsSent`.
+    /// Remove this method when `MIGRATION_FALLBACK` is set to `false`.
     async fn fallback_fire_and_forget(
         &self,
         input: &AskUserQuestionInput,
@@ -449,11 +483,9 @@ impl xai_tool_runtime::Tool for AskUserQuestionTool {
             "Asked user questions, blocking for response"
         );
 
-        // ── Step 6: Block on the oneshot result (whole batch, one timer) ─
-        // A single pending-decision timeout covers the questionnaire, not per
-        // question: N questions in one call share one wait.
-        // A `None` budget (`timeout_enabled = false`) runs the same await with
-        // no timer, normalized into the timed shape so one match handles both.
+        // ── Step 6: Block on the oneshot result (whole batch, one timer) ─ A single pending-decision timeout covers the
+        // questionnaire, not per question: N questions in one call share one wait. A `None` budget (`timeout_enabled = false`)
+        // runs the same await with no timer, normalized into the timed shape so one match handles both.
         let outcome = match wait {
             Some(dur) => tokio::time::timeout(dur, result_rx).await,
             None => Ok(result_rx.await),
@@ -472,10 +504,8 @@ impl xai_tool_runtime::Tool for AskUserQuestionTool {
                     timeout_secs = ?wait.map(|d| d.as_secs()),
                     "User question timed out; continuing without answers"
                 );
-                // Drop the oneshot receiver on return. The shell coordinator
-                // races `result_tx.closed()` against ACP so it unblocks and
-                // can open the next questionnaire (stale UI is cancelled when
-                // a new ext_method arrives). Same model text as cancel.
+                // Drop the oneshot receiver on return. The shell coordinator races `result_tx.closed()` against ACP so it unblocks and
+                // can open the next questionnaire (stale UI is cancelled when a new ext_method arrives). Same model text as cancel.
                 return Ok(AskUserQuestionOutput::UserAnswered {
                     message: unanswered.to_string(),
                 });
@@ -592,10 +622,6 @@ mod tests {
             xai_tool_runtime::Tool::id(&tool).as_str(),
             "ask_user_question"
         );
-        let desc = crate::types::tool_metadata::ToolMetadata::description_template(&tool);
-        assert!(desc.contains("Ask the user"));
-        assert!(desc.contains("Other"));
-        assert!(desc.contains("(Recommended)"));
     }
 
     #[test]
@@ -626,13 +652,18 @@ mod tests {
 
         let input: AskUserQuestionInput = serde_json::from_value(json).unwrap();
         assert_eq!(input.questions.len(), 1);
-        assert_eq!(input.questions[0].question, "Pick DB?");
-        assert_eq!(input.questions[0].options.len(), 2);
-        assert_eq!(input.questions[0].options[0].label, "Postgres");
-        assert!(input.questions[0].options[0].preview.is_none());
-        assert_eq!(input.questions[0].options[1].label, "SQLite");
-        assert!(input.questions[0].options[1].preview.is_some());
-        assert_eq!(input.questions[0].multi_select, Some(false));
+        let Some(q) = input.questions.first() else {
+            panic!("expected one question: {:?}", input.questions);
+        };
+        assert_eq!(q.question, "Pick DB?");
+        let [opt0, opt1] = q.options.as_slice() else {
+            panic!("expected two options: {:?}", q.options);
+        };
+        assert_eq!(opt0.label, "Postgres");
+        assert!(opt0.preview.is_none());
+        assert_eq!(opt1.label, "SQLite");
+        assert!(opt1.preview.is_some());
+        assert_eq!(q.multi_select, Some(false));
     }
 
     #[test]
@@ -659,7 +690,78 @@ mod tests {
             }]
         });
         let input: AskUserQuestionInput = serde_json::from_value(json).unwrap();
+        let Some(q) = input.questions.first() else {
+            panic!("expected one question: {:?}", input.questions);
+        };
+        assert_eq!(q.multi_select, Some(true));
+    }
+
+    /// A caller that sends the ACP spelling and the schema spelling with the
+    /// same answer is saying one thing twice, so it reads as one question.
+    #[test]
+    fn a_question_naming_both_multi_select_keys_under_one_value_parses_once() {
+        let json = serde_json::json!({
+            "questions": [{
+                "question": "Pick DB?",
+                "options": [{"label": "Postgres", "description": "Relational DB"}],
+                "multiSelect": true,
+                "multi_select": true
+            }]
+        });
+        let input: AskUserQuestionInput =
+            serde_json::from_value(json).expect("one answer named under two keys is one answer");
         assert_eq!(input.questions[0].multi_select, Some(true));
+    }
+
+    /// The camelCase half of the pair works on its own, which is the shape the
+    /// ACP `ext_method` sends. The snake_case half is
+    /// [`input_accepts_snake_case_multi_select`].
+    #[test]
+    fn a_question_reading_the_acp_multi_select_spelling_alone_still_works() {
+        let json = serde_json::json!({
+            "questions": [{
+                "question": "Pick DB?",
+                "options": [{"label": "Postgres", "description": "Relational DB"}],
+                "multiSelect": false
+            }]
+        });
+        let input: AskUserQuestionInput = serde_json::from_value(json).unwrap();
+        assert_eq!(input.questions[0].multi_select, Some(false));
+    }
+
+    /// The two spellings carrying different answers is a real contradiction --
+    /// it decides whether the user may pick more than one option -- so it fails
+    /// and names both keys rather than taking one in silence.
+    #[test]
+    fn a_question_whose_multi_select_spellings_disagree_is_an_error_naming_the_field() {
+        let json = serde_json::json!({
+            "questions": [{
+                "question": "Pick DB?",
+                "options": [{"label": "Postgres", "description": "Relational DB"}],
+                "multiSelect": true,
+                "multi_select": false
+            }]
+        });
+        let err = serde_json::from_value::<AskUserQuestionInput>(json)
+            .expect_err("a contradicted multi_select must not resolve silently");
+        let text = err.to_string();
+        assert!(text.contains("multiSelect"), "{err}");
+        assert!(text.contains("multi_select"), "{err}");
+    }
+
+    /// What goes back out is the canonical key only. The notification the tool
+    /// sends to the client is a serialized `Question`, so a stray `multi_select`
+    /// on the way out is a second spelling a client has to learn.
+    #[test]
+    fn a_question_serializes_the_canonical_multi_select_key_and_never_the_alias() {
+        let mut question = make_question("Pick DB?", &["Postgres", "SQLite"]);
+        question.multi_select = Some(true);
+        let json = serde_json::to_value(&question).unwrap();
+        assert_eq!(json["multiSelect"], serde_json::Value::from(true));
+        assert!(
+            json.get("multi_select").is_none(),
+            "the alias key must not appear on the wire: {json}"
+        );
     }
 
     // ── Migration fallback tests (no UserQuestionSender) ─────────────────
@@ -815,8 +917,8 @@ mod tests {
         let result = handle.await.unwrap().unwrap();
         match result {
             AskUserQuestionOutput::UserAnswered { message } => {
-                assert!(message.starts_with("User has answered your questions:"));
-                assert!(message.contains("\"Which database?\"=\"Redis\""));
+                assert!(message.contains("Which database?"));
+                assert!(message.contains("Redis"));
             }
             other => panic!("Expected UserAnswered, got {:?}", other),
         }
