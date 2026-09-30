@@ -249,10 +249,19 @@ pub(super) async fn reparent_surviving_child_tasks(
 }
 const INITIAL_PROMPT_ADMISSION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 const CHILD_COMPLETION_FLUSH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
-#[cfg(not(test))]
 const WAKE_START_FLUSH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+/// Only a harness whose acks never land shortens the deadline.
 #[cfg(test)]
-const WAKE_START_FLUSH_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(100);
+fn wake_flush_timeout(ctx: &SubagentSpawnContext) -> std::time::Duration {
+    ctx.run_shell_child_harness
+        .as_ref()
+        .and_then(|harness| harness.wake_flush_timeout)
+        .unwrap_or(WAKE_START_FLUSH_TIMEOUT)
+}
+#[cfg(not(test))]
+fn wake_flush_timeout(_ctx: &SubagentSpawnContext) -> std::time::Duration {
+    WAKE_START_FLUSH_TIMEOUT
+}
 #[derive(Clone)]
 enum WakePersistenceContext {
     Ordinary,
@@ -271,6 +280,7 @@ impl WakePersistenceContext {
         &self,
         persistence_tx: &mpsc::UnboundedSender<crate::session::persistence::PersistenceMsg>,
         hold_ack: bool,
+        timeout: std::time::Duration,
         subagent_id: &str,
         turn_number: u64,
     ) {
@@ -294,10 +304,7 @@ impl WakePersistenceContext {
                 response_rx.await
             }
         };
-        if tokio::time::timeout(WAKE_START_FLUSH_TIMEOUT, response)
-            .await
-            .is_err()
-        {
+        if tokio::time::timeout(timeout, response).await.is_err() {
             tracing::warn!(
                 subagent_id,
                 turn_number,
@@ -1869,7 +1876,7 @@ pub(crate) async fn run_shell_child(
                                 }
                             };
                             matches!(
-                                tokio::time::timeout(WAKE_START_FLUSH_TIMEOUT, response).await,
+                                tokio::time::timeout(wake_flush_timeout(&ctx), response).await,
                                 Ok(Ok(Ok(())))
                             )
                         }
@@ -1896,6 +1903,7 @@ pub(crate) async fn run_shell_child(
                             .abort(
                                 wake_persistence_tx,
                                 hold_wake_abort_flush_ack,
+                                wake_flush_timeout(&ctx),
                                 &request.id,
                                 turn_number,
                             )
@@ -1966,7 +1974,13 @@ pub(crate) async fn run_shell_child(
         if restore_wake_after_teardown {
             if let Some(wake_persistence_tx) = wake_persistence_tx.as_ref() {
                 wake_persistence
-                    .abort(wake_persistence_tx, false, &request.id, turn_number)
+                    .abort(
+                        wake_persistence_tx,
+                        false,
+                        wake_flush_timeout(&ctx),
+                        &request.id,
+                        turn_number,
+                    )
                     .await;
             }
             let _ = reporter.settle_deferred_start(false).await;

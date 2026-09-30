@@ -9,9 +9,6 @@ pub struct UiConfig {
     pub max_thoughts_width: u16,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub theme: Option<String>,
-    /// Model ID to use for the secondary agent when forking.
-    /// Defaults to the main default model (from default_models.json).
-    pub fork_secondary_model: String,
     /// The `[models]` harness model slots the user set, keyed by slot id
     /// (`xai_grok_models::HARNESS_MODEL_SLOTS`). A slot the user left alone
     /// is absent, and the settings modal shows it as "(no override)".
@@ -313,7 +310,6 @@ impl Default for UiConfig {
         Self {
             max_thoughts_width: DEFAULT_MAX_THOUGHTS_WIDTH,
             theme: None,
-            fork_secondary_model: xai_grok_models::default_model().to_string(),
             harness_models: std::collections::BTreeMap::new(),
             yolo: false,
             ui_theme: None,

@@ -1152,15 +1152,6 @@ pub(super) fn action_for_string(
                     .map(Action::SetDefaultModel)
             }
         }
-        "fork_secondary_model" => {
-            if value.is_empty() {
-                Some(Action::ClearForkSecondaryModel)
-            } else {
-                snapshot
-                    .resolve_model_name(&value)
-                    .map(Action::SetForkSecondaryModel)
-            }
-        }
         // Harness model slots. One action carries the slot id, so a new
         // slot needs no arm here. An empty buffer clears the slot rather
         // than taking a separate Clear action.

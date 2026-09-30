@@ -532,7 +532,7 @@ fn every_dynamic_enum_setting_has_action_for_string_arm() {
             continue;
         }
         // Discriminate on the Action variant, not just `is_some()`
-        // A refactor could swallow the typed `SetDefaultModel` / `SetForkSecondaryModel` into a generic `Action::DynamicSettingChanged(...)`
+        // A refactor could swallow the typed `SetDefaultModel` into a generic `Action::DynamicSettingChanged(...)`
         // That would pass `is_some()` while breaking the typed dispatch
         let empty_action = action_for_string(meta.key, String::new(), &snapshot);
         let nonempty_action = action_for_string(meta.key, "Test Model".to_string(), &snapshot);
@@ -547,18 +547,6 @@ fn every_dynamic_enum_setting_has_action_for_string_arm() {
                     matches!(nonempty_action, Some(Action::SetDefaultModel(_))),
                     "default_model non-empty canonical must produce \
                      SetDefaultModel(_), got {nonempty_action:?}",
-                );
-            }
-            "fork_secondary_model" => {
-                assert!(
-                    matches!(empty_action, Some(Action::ClearForkSecondaryModel)),
-                    "fork_secondary_model empty canonical must produce \
-                     ClearForkSecondaryModel, got {empty_action:?}",
-                );
-                assert!(
-                    matches!(nonempty_action, Some(Action::SetForkSecondaryModel(_))),
-                    "fork_secondary_model non-empty canonical must produce \
-                     SetForkSecondaryModel(_), got {nonempty_action:?}",
                 );
             }
             // A harness model slot has no separate Clear action: one action
@@ -809,7 +797,7 @@ fn rows_contain_categories_and_settings_through_pr_14() {
         .collect();
     // The harness model slots are spliced in from their own table below.
     // What this pins is WHERE they sit — under Models, after
-    // `fork_secondary_model` — and a literal list of them would go stale the
+    // `subagent_model_inheritance` — and a literal list of them would go stale the
     // moment a slot is added.
     let mut expected: Vec<SettingKey> = vec![
         // Booleans.
@@ -894,10 +882,6 @@ fn rows_contain_categories_and_settings_through_pr_14() {
         // SHELL-owned `[features]` row (Models category, registered right
         // after default_model).
         "subagent_model_inheritance",
-        // Models category. `default_reasoning_effort`,
-        // `web_search_model`, and `session_summary_model` are
-        // not exposed in the modal.
-        "fork_secondary_model",
     ];
     expected.extend(
         xai_grok_models::HARNESS_MODEL_SLOTS
@@ -3245,62 +3229,6 @@ fn try_enter_picking_enum_returns_false_for_non_enum_row() {
         matches!(s.mode(), SettingsModalMode::Browse),
         "mode must not change on non-Enum row"
     );
-}
-
-/// A persisted `fork_secondary_model` slug renders as the catalog display name.
-/// The picker seeds on that model's row, not the stale-value fallback (index 1).
-/// The catalog carries two models so a fallback seed and a genuine match land on different indices.
-#[test]
-fn fork_secondary_model_picker_opens_on_persisted_model() {
-    use agent_client_protocol as acp;
-    // Must differ from the baseline slug or the empty-fold arm hides the lookup.
-    let slug = "grok-4.5-fast";
-    assert_ne!(slug, xai_grok_shell::models::default_model());
-    let snapshot = PagerLocalSnapshot {
-        available_models: vec![
-            ("Grok 3".to_string(), acp::ModelId::new(Arc::from("grok-3"))),
-            (
-                "Grok 4.5 Fast".to_string(),
-                acp::ModelId::new(Arc::from(slug)),
-            ),
-        ],
-        ..PagerLocalSnapshot::default()
-    };
-    let ui = UiConfig {
-        fork_secondary_model: slug.to_string(),
-        ..UiConfig::default()
-    };
-    let mut s = SettingsModalState::new(Arc::new(SettingsRegistry::defaults()), ui, snapshot);
-
-    // Row value shows the display name, matching the default_model row.
-    assert_eq!(
-        s.value_for("fork_secondary_model"),
-        Some(SettingValue::String("Grok 4.5 Fast".to_string())),
-    );
-
-    assert!(s.focus_key("fork_secondary_model"));
-    assert!(s.try_enter_picking_enum());
-    match s.mode() {
-        SettingsModalMode::PickingEnum {
-            key,
-            choices_idx,
-            ref original_value,
-            ..
-        } => {
-            assert_eq!(key, "fork_secondary_model");
-            // Choices: [(no override), Grok 3, Grok 4.5 Fast], so idx 2
-            assert_eq!(
-                choices_idx, 2,
-                "picker must open on the persisted model, not the stale fallback",
-            );
-            assert_eq!(
-                original_value,
-                &SettingValue::String("Grok 4.5 Fast".to_string()),
-                "original_value must carry the display name so Esc-revert round-trips",
-            );
-        }
-        ref other => panic!("expected PickingEnum mode, got {other:?}"),
-    }
 }
 
 #[test]
