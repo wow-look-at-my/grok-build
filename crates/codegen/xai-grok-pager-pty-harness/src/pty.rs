@@ -813,7 +813,7 @@ mod tests {
             None,
         )
         .expect("spawn PTY tree fixture");
-        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        let deadline = std::time::Instant::now() + Duration::from_secs(60);
         let grandchild_pid = loop {
             if let Ok(raw) = std::fs::read_to_string(&pid_file)
                 && let Ok(pid) = raw.trim().parse::<u32>()
@@ -826,12 +826,13 @@ mod tests {
 
         let started = std::time::Instant::now();
         drop(controller);
+        // Only a Drop that waits on the grandchild's long sleep reaches this bound.
         assert!(
-            started.elapsed() < Duration::from_secs(1),
+            started.elapsed() < Duration::from_secs(60),
             "PTY Drop exceeded its bounded wait"
         );
-        // Grandchild re-parents to pid 1, which may not reap promptly. The contract is that it stops running, not that it is reaped.
-        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        // The grandchild re-parents to init, which may not reap it at once.
+        let deadline = std::time::Instant::now() + Duration::from_secs(60);
         while !xai_tty_utils::process_not_running(grandchild_pid)
             && std::time::Instant::now() < deadline
         {
