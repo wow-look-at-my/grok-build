@@ -160,6 +160,8 @@ pub(crate) struct RunShellChildHarnessConfig {
     hold_wake_start_flush_ack: bool,
     hold_wake_abort_flush_ack: bool,
     reject_deferred_start_commit: bool,
+    /// Set only with held acks, which never land, so it bounds the test's runtime.
+    wake_flush_timeout: Option<std::time::Duration>,
 }
 #[cfg(test)]
 impl RunShellChildHarnessConfig {
@@ -170,11 +172,13 @@ impl RunShellChildHarnessConfig {
             hold_wake_start_flush_ack: false,
             hold_wake_abort_flush_ack: false,
             reject_deferred_start_commit: false,
+            wake_flush_timeout: None,
         }
     }
     fn hold_wake_flush_acks(mut self) -> Self {
         self.hold_wake_start_flush_ack = true;
         self.hold_wake_abort_flush_ack = true;
+        self.wake_flush_timeout = Some(std::time::Duration::from_millis(100));
         self
     }
     fn reject_deferred_start_commit(mut self) -> Self {

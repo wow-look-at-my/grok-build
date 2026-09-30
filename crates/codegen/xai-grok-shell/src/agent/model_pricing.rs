@@ -144,6 +144,9 @@ pub(crate) fn resolve(model_id: &str) -> ModelPricing {
     if !configured.model.is_unusable() {
         return configured.model;
     }
+    if let Some(listed) = listed_price(model_id) {
+        return listed;
+    }
     if model_id.is_empty()
         || !configured.lookup_enabled
         || configured.catalog_url.trim().is_empty()
@@ -176,6 +179,27 @@ pub(crate) fn suppress_lookup_for(model_ids: impl IntoIterator<Item = String>) {
         return;
     };
     guard.extend(model_ids);
+}
+
+/// Prices a provider's own model listing stated, keyed by model id.
+/// `resolve_configured_pricing` reads config alone and never sees them.
+fn listed_prices() -> &'static std::sync::Mutex<std::collections::HashMap<String, ModelPricing>> {
+    static LISTED: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::HashMap<String, ModelPricing>>,
+    > = std::sync::OnceLock::new();
+    LISTED.get_or_init(Default::default)
+}
+
+/// Record the prices a model listing stated. An unusable price is skipped.
+pub(crate) fn register_listed_prices(prices: impl IntoIterator<Item = (String, ModelPricing)>) {
+    let Ok(mut guard) = listed_prices().lock() else {
+        return;
+    };
+    guard.extend(prices.into_iter().filter(|(_, p)| !p.is_unusable()));
+}
+
+fn listed_price(model_id: &str) -> Option<ModelPricing> {
+    listed_prices().lock().ok()?.get(model_id).cloned()
 }
 
 fn lookup_suppressed(model_id: &str) -> bool {

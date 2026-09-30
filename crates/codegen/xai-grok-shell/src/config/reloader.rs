@@ -47,11 +47,7 @@ pub enum ConfigUpdate {
     /// session re-reads its floor.
     OutputRateFloorChanged,
     /// Updated UI settings; the agent broadcasts `x.ai/config_changed` to IPC clients.
-    Ui {
-        theme: Option<String>,
-        yolo: bool,
-        fork_secondary_model: Option<String>,
-    },
+    Ui { theme: Option<String>, yolo: bool },
 }
 
 /// Runs on `tokio::spawn` (`Send`).
@@ -358,7 +354,7 @@ impl ConfigReloader {
                 .send(ConfigUpdate::OutputRateFloorChanged);
         }
 
-        // UI fields (theme, yolo, fork_secondary_model)
+        // UI fields (theme, yolo)
         let old_ui = extract_ui_fields(&self.last_global_config);
         let new_ui = extract_ui_fields(&new_global);
         if old_ui != new_ui {
@@ -366,7 +362,6 @@ impl ConfigReloader {
             let _ = self.config_update_tx.send(ConfigUpdate::Ui {
                 theme: new_ui.0,
                 yolo: new_ui.1,
-                fork_secondary_model: new_ui.2,
             });
         }
 
@@ -486,7 +481,7 @@ fn parse_compat_config(config: &toml::Value) -> xai_grok_tools::types::compat::C
         .unwrap_or_default()
 }
 
-fn extract_ui_fields(config: &toml::Value) -> (Option<String>, bool, Option<String>) {
+fn extract_ui_fields(config: &toml::Value) -> (Option<String>, bool) {
     let ui = config.get("ui").and_then(|v| v.as_table());
     let theme = ui
         .and_then(|u| u.get("theme"))
@@ -496,11 +491,7 @@ fn extract_ui_fields(config: &toml::Value) -> (Option<String>, bool, Option<Stri
         .and_then(|u| u.get("yolo"))
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
-    let fork = ui
-        .and_then(|u| u.get("fork_secondary_model"))
-        .and_then(|v| v.as_str())
-        .map(String::from);
-    (theme, yolo, fork)
+    (theme, yolo)
 }
 
 #[cfg(test)]
@@ -855,10 +846,9 @@ ignore = ["/tmp"]
     #[test]
     fn extract_ui_fields_empty() {
         let config = toml::Value::Table(toml::map::Map::new());
-        let (theme, yolo, fork) = extract_ui_fields(&config);
+        let (theme, yolo) = extract_ui_fields(&config);
         assert_eq!(theme, None);
         assert!(!yolo);
-        assert_eq!(fork, None);
     }
 
     #[test]
@@ -868,14 +858,12 @@ ignore = ["/tmp"]
 [ui]
 theme = "dark"
 yolo = true
-fork_secondary_model = "grok-4.5"
 "#,
         )
         .unwrap();
-        let (theme, yolo, fork) = extract_ui_fields(&config);
+        let (theme, yolo) = extract_ui_fields(&config);
         assert_eq!(theme.as_deref(), Some("dark"));
         assert!(yolo);
-        assert_eq!(fork.as_deref(), Some("grok-4.5"));
     }
 
     #[test]

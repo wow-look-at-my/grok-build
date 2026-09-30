@@ -4,6 +4,7 @@ use globset::{Glob, GlobSet, GlobSetBuilder};
 use indexmap::IndexMap;
 
 use crate::agent::config::{self, ModelEntry};
+use crate::agent::model_provider_discovery::pick_by_model_id;
 use agent_client_protocol as acp;
 use xai_grok_sampling_types::ReasoningEffort;
 
@@ -144,11 +145,13 @@ pub(crate) fn resolve_catalog_key(
     if models.contains_key(id_str) {
         return Some(id.clone());
     }
-    models
-        .iter()
-        .rev()
-        .find(|(_, entry)| entry.info.has_model_id(id_str))
-        .map(|(key, _)| acp::ModelId::new(key.clone()))
+    pick_by_model_id(
+        models
+            .iter()
+            .rev()
+            .filter(|(_, entry)| entry.info.has_model_id(id_str)),
+    )
+    .map(|(key, _)| acp::ModelId::new(key.clone()))
 }
 
 /// Catalog key for a persisted session model id, restricted to **selectable** entries.
@@ -161,10 +164,10 @@ pub(crate) fn selectable_catalog_key_for_persisted(
         return Some(id.clone());
     }
     let id_str = id.0.as_ref();
-    if let Some((key, _)) = models.iter().rev().find(|(key, entry)| {
+    if let Some((key, _)) = pick_by_model_id(models.iter().rev().filter(|(key, entry)| {
         available.contains_key(&acp::ModelId::new((*key).clone()))
             && entry.info.has_model_id(id_str)
-    }) {
+    })) {
         return Some(acp::ModelId::new(key.clone()));
     }
     resolve_catalog_key(models, id).filter(|key| available.contains_key(key))
@@ -229,9 +232,9 @@ pub(crate) fn resolve_default_model(
             (key, first, config::ConfigSource::Default)
         }
         Some(pref) => {
-            let found = visible
-                .get_key_value(&pref.value)
-                .or_else(|| visible.iter().find(|(_, m)| m.has_model_id(&pref.value)));
+            let found = visible.get_key_value(&pref.value).or_else(|| {
+                pick_by_model_id(visible.iter().filter(|(_, m)| m.has_model_id(&pref.value)))
+            });
 
             if let Some((key, entry)) = found {
                 (key.clone(), entry.clone(), pref.source)
