@@ -52,8 +52,7 @@ pub fn complete_partial_json(input: &str) -> Option<String> {
     let mut expect_key = false;
     let mut tail = Tail::Between;
     let mut i = 0usize;
-    while i < bytes.len() {
-        let b = bytes[i];
+    while let Some(&b) = bytes.get(i) {
         match tail {
             Tail::Str => {
                 if unicode_left > 0 {

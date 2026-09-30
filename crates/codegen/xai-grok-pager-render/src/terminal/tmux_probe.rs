@@ -1,13 +1,8 @@
-//! Shared tmux command protocol and result parsing.
-
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
 const TMUX_QUERY_TIMEOUT: Duration = Duration::from_secs(2);
-/// After the leader exits, allow this much additional time for process-group
-/// teardown and concurrent pipe drains so a near-deadline success is not turned
-/// into a drain timeout. The main process wait still uses only
-/// [`TMUX_QUERY_TIMEOUT`].
+/// After the leader exits, the group teardown and pipe drains get this much extra time, so a near-deadline success does not become a drain timeout.
 const POST_EXIT_CLEANUP_GRACE: Duration = Duration::from_millis(300);
 /// How long a signalled process group may take to empty before it is killed.
 const GROUP_EXIT_GRACE: Duration = Duration::from_millis(100);
@@ -146,16 +141,13 @@ fn terminate_tmux_tree(group: &xai_tty_utils::ProcessGroup, child: &mut std::pro
 }
 
 /// SIGTERM the group, then escalate to SIGKILL only if it outlives the grace.
-///
-/// Callers reach this with the leader already reaped, so the group is usually
-/// empty on the first check.
+/// Callers reach this with the leader already reaped, so the group is usually empty on the first check.
 fn terminate_owned_group(group: &xai_tty_utils::ProcessGroup) {
     let _ = group.terminate();
     let deadline = std::time::Instant::now() + GROUP_EXIT_GRACE;
     loop {
         if group.has_live_members() == Some(false) {
-            // `return`, not `break`: the reaped leader's pid may already
-            // belong to an unrelated group, so an empty group gets no SIGKILL.
+            // `return`, not `break`: the reaped leader's pid may already belong to an unrelated group, so an empty group gets no SIGKILL
             return;
         }
         if std::time::Instant::now() >= deadline {
@@ -214,17 +206,8 @@ fn query_option_support_with(runner: &dyn TmuxCommandRunner, option: &str) -> Tm
     }
 }
 
-/// The attached client's resolved terminal features, as a comma-separated list
-/// (`RGB`, `clipboard`, `focus`, …).
-///
-/// tmux resolves this once per client at attach time from the outer terminal's
-/// terminfo plus `terminal-features` / `terminal-overrides`, and it decides
-/// whether 24-bit SGR survives the multiplexer. `COLORTERM` inside the pane
-/// describes only what the pane's program emits, so it cannot answer that.
-///
-/// Empty output means the answer is unknown rather than negative: tmux before
-/// 3.2 has no `terminal-features` and renders the unknown format as an empty
-/// string, and a server with no attached client has nothing to report.
+/// Client features resolved at attach; this, not pane `COLORTERM`, decides whether 24-bit SGR survives tmux.
+/// Empty is unknown, not negative: pre-3.2 has no `terminal-features`, and a clientless server has nothing to report.
 pub fn query_client_features() -> TmuxQueryResult<String> {
     query_client_features_with(&LiveTmuxCommandRunner)
 }

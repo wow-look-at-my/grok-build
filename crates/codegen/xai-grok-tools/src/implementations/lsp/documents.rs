@@ -15,11 +15,9 @@ use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use async_lsp::lsp_types::Position;
 
-/// The version a document is opened at.
-///
-/// Deliberately above [`super::diagnostics::NO_VERSION`], which is what a
-/// report about a document we have never opened is credited: were they equal,
-/// such a report would count as a verdict on our first edit to that file.
+/// The version a document is opened at. Deliberately above [`super::diagnostics::NO_VERSION`],
+/// which is what a report about a document we have never opened is credited: were they equal, such
+/// a report would count as a verdict on our first edit to that file.
 pub const FIRST_VERSION: i32 = 1;
 const _: () = assert!(FIRST_VERSION > super::diagnostics::NO_VERSION);
 
@@ -53,11 +51,7 @@ impl Update {
     }
 }
 
-/// Open documents for one server connection.
-///
-/// Cheap to clone (shared handle). The lock is `parking_lot`'s, so it never
-/// poisons: a writer that panics leaves the map open to the next acquirer, and
-/// a stale version beats no version at all.
+/// Open documents for one server connection. Cheap to clone (shared handle).
 #[derive(Debug, Clone, Default)]
 pub struct Documents {
     inner: Arc<RwLock<HashMap<String, Tracked>>>,
@@ -68,14 +62,9 @@ impl Documents {
         Self::default()
     }
 
-    /// What to send for `uri`, without recording it as sent.
-    ///
-    /// Deliberately separate from [`Self::commit`]: what is recorded there
-    /// describes the text the *server* has, so a notification that failed to go
-    /// out must not be left advanced — [`Self::restore`] takes it back.
-    /// Leaving it advanced would aim every later incremental range at a
-    /// revision the server never received — the same protocol violation the
-    /// range exists to avoid.
+    /// What to send for `uri`, without recording it as sent. Deliberately separate from [`Self::commit`]: what is recorded here describes the text
+    /// the *server* has, so a notification that failed to go out must not advance it. Advancing it anyway would aim every later incremental range
+    /// at a revision the server never received — the same protocol violation the range exists to avoid.
     pub fn plan(&self, uri: &str) -> Update {
         match self.read().get(uri) {
             Some(tracked) => Update::Change {
@@ -166,6 +155,11 @@ impl Documents {
         std::mem::take(&mut *self.write()).into_keys().collect()
     }
 
+    /// Forget one document. Returns whether it was open.
+    pub fn take(&self, uri: &str) -> bool {
+        self.write().remove(uri).is_some()
+    }
+
     fn read(&self) -> RwLockReadGuard<'_, HashMap<String, Tracked>> {
         self.inner.read()
     }
@@ -188,11 +182,11 @@ pub fn end_position(text: &str) -> Position {
         }
     }
     // LSP character offsets are UTF-16 code units.
-    // `last_line_start` is a `char_indices` offset plus one for an ASCII `'\n'`,
-    // so it is a char boundary.
-    #[allow(clippy::string_slice)]
-    let rest_of_line = &text[last_line_start..];
-    let character = rest_of_line.encode_utf16().count() as u32;
+    let character = text
+        .get(last_line_start..)
+        .unwrap_or("")
+        .encode_utf16()
+        .count() as u32;
     Position { line, character }
 }
 

@@ -67,8 +67,8 @@ fn fake_managed_install(version: &str) {
 async fn disk_probe_preserves_prerelease_versions() {
     let _ = test_home();
     reset_home();
-    // An alpha install must read back as the full pre-release version —
-    // truncating to "0.1.220" would mask the alpha → stable update.
+    // An alpha install must read back as the full pre-release version
+    // Truncating to "0.1.220" would mask the update from alpha to stable
     fake_managed_install("0.1.220-alpha.4");
     assert_eq!(
         installed_on_disk_version().as_deref(),
@@ -79,10 +79,9 @@ async fn disk_probe_preserves_prerelease_versions() {
 #[tokio::test]
 #[serial]
 async fn disk_probe_rejects_dangling_symlink() {
-    // If the symlink survives but its target binary was deleted (manual
-    // ~/.grok/downloads cleanup), the probe must report None — otherwise
-    // every updater would claim "already up to date" forever while no
-    // runnable binary exists, and nothing would ever repair the install.
+    // If the symlink survives but its target binary was deleted (manual ~/.grok/downloads cleanup), the probe must report
+    // None — otherwise every updater would claim "already up to date" forever while no runnable binary exists, and nothing
+    // would ever repair the install.
     let home = test_home();
     reset_home();
     let platform = host_platform();

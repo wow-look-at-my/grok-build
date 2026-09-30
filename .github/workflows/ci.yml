@@ -105,7 +105,11 @@ jobs:
             # ${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', '**/Cargo.toml') }}
             export CARGO_BUILD_JOBS=3
             cargo test --locked --workspace --no-run --no-fail-fast
-            ci/cache-deps.sh prune target/debug
+            ci/cache-deps.sh prune target/debug "$RUNNER_TEMP/workspace-stash/debug"
+
+      # On a miss the step above compiled the workspace too. Putting it back keeps the next step from compiling it a second time.
+      - name: Put the workspace artifacts back
+        run: ci/cache-deps.sh unstash target/debug "$RUNNER_TEMP/workspace-stash/debug"
 
       # -j3 is the widest -j the runner's 15 GiB holds.
       - name: Build test harnesses (compile, no-run)
@@ -243,8 +247,14 @@ jobs:
           run: |
             # ${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', '**/Cargo.toml') }}
             cargo build --locked --release --target ${{ matrix.target }} -p xai-grok-pager-bin
-            ci/cache-deps.sh prune target/${{ matrix.target }}/release
-            ci/cache-deps.sh prune target/release
+            ci/cache-deps.sh prune target/${{ matrix.target }}/release "$RUNNER_TEMP/workspace-stash/target"
+            ci/cache-deps.sh prune target/release "$RUNNER_TEMP/workspace-stash/host"
+
+      # On a miss the step above compiled the workspace too. Putting it back keeps the next step from compiling it a second time.
+      - name: Put the workspace artifacts back
+        run: |
+          ci/cache-deps.sh unstash target/${{ matrix.target }}/release "$RUNNER_TEMP/workspace-stash/target"
+          ci/cache-deps.sh unstash target/release "$RUNNER_TEMP/workspace-stash/host"
 
       # On the darwin row the link at the end of this records itself into GROK_DARWIN_LINK_BUNDLE rather than running.
       - name: Build release binary
