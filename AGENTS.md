@@ -217,6 +217,14 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - A landed capture delivers a `<system-reminder>` to the main agent saying the user assigned the items. The list carries no provenance, so the agent read an item it did not write as somebody else's idea and cancelled it as out of scope. `/todo` reports the count only.`/TODO` names the items, because they are the next thing the agent does.
 - The capture's tasks-pane row is kept, finished, rather than removed (`finish_todo_capture_ui`). The row is what holds the streamed transcript (`SessionUpdate::TodoCaptureProgress`, stamped with the client-minted `capture_id` that names the row), and removing it is what made opening the row show a blank window.
 
+## Thinking-summary notes
+
+- Every non-empty thinking block gets a summary, subagents included (`acp_session_impl/thinking_summary.rs`). Thinking is drawn collapsed. As a result, the summary is the only part of a short block anyone reads.
+- It arrives after its model call ends, keyed by `stream_start_ms`. The root agent and the child-session handler both route it to `set_thinking_summary` on their own tracker.
+- A summarized thought is `RunStep::Transparent` in a verb-group run. It keeps its row rather than fold to height 0.
+- The minimal pager prints once. With `minimal_collapse_thinking` on, a fresh live thought waits at the frontier (`holds_for_summary`) until its summary lands or `SUMMARY_GRACE` runs out. A replayed block has no `finished_at`, so a reload never waits.
+- Headless `streaming-json` emits a `thinking_summary` line. The Messages format has no field for it and drops it.
+
 ## Streaming tool-call notes
 
 - A call's arguments reach the pager as the model writes them. The path is `SamplingEvent::ToolCallDelta` → `XaiSessionUpdate::ToolCallDeltaChunk` → `AcpUpdateTracker::handle_tool_call_delta`. The real `ToolCall` then adopts the row those deltas built. So a call keeps the position it held while it was typed.

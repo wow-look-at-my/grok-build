@@ -88,7 +88,12 @@ pub struct ThinkingBlock {
     started_at: Option<std::time::Instant>,
     /// Short summary shown after the collapsed header, on the same row.
     summary: Option<String>,
+    /// When a live block finished. A replayed block has none, so a reload never waits for a summary.
+    finished_at: Option<std::time::Instant>,
 }
+
+/// How long a finished thought may wait for its summary before a print-once surface gives up and draws it without one.
+pub const SUMMARY_GRACE: std::time::Duration = std::time::Duration::from_secs(8);
 impl ThinkingBlock {
     /// Create a new thinking block with complete text.
     pub fn new(text: impl Into<String>) -> Self {
@@ -97,6 +102,7 @@ impl ThinkingBlock {
             elapsed_time_ms: None,
             started_at: None,
             summary: None,
+            finished_at: None,
         }
     }
 
@@ -107,6 +113,7 @@ impl ThinkingBlock {
             elapsed_time_ms: None,
             started_at: Some(std::time::Instant::now()),
             summary: None,
+            finished_at: None,
         }
     }
 
@@ -126,6 +133,7 @@ impl ThinkingBlock {
             elapsed_time_ms: None,
             started_at: None,
             summary: None,
+            finished_at: None,
         }
     }
 
@@ -154,6 +162,17 @@ impl ThinkingBlock {
         {
             self.elapsed_time_ms = Some(start.elapsed().as_millis() as i64);
         }
+        if self.started_at.is_some() && self.finished_at.is_none() {
+            self.finished_at = Some(std::time::Instant::now());
+        }
+    }
+
+    /// Whether a live block finished recently and its summary may still arrive.
+    pub fn awaiting_summary(&self) -> bool {
+        self.summary.is_none()
+            && self
+                .finished_at
+                .is_some_and(|at| at.elapsed() < SUMMARY_GRACE)
     }
 
     /// Get the source text.

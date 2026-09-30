@@ -245,6 +245,10 @@ fn decode_session_notification(method: &str, params: &str) -> ExtEvent {
             #[serde(default)]
             signature: Option<String>,
         },
+        ThinkingSummary {
+            stream_start_ms: i64,
+            summary: String,
+        },
         ResponseCompleted {
             #[serde(default)]
             message_id: Option<String>,
@@ -316,6 +320,13 @@ fn decode_session_notification(method: &str, params: &str) -> ExtEvent {
         XaiUpdate::ReasoningCompleted { signature } => {
             ExtEvent::Stream(Box::new(StreamEvent::ReasoningCompleted { signature }))
         }
+        XaiUpdate::ThinkingSummary {
+            stream_start_ms,
+            summary,
+        } => ExtEvent::Stream(Box::new(StreamEvent::ThinkingSummary {
+            stream_start_ms,
+            summary,
+        })),
         XaiUpdate::ResponseCompleted {
             message_id,
             stop_reason,

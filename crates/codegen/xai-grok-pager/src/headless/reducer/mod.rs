@@ -63,6 +63,11 @@ pub(crate) enum StreamEvent {
     ReasoningCompleted {
         signature: Option<String>,
     },
+    /// A short summary of one model call's reasoning, keyed by that call's stream start.
+    ThinkingSummary {
+        stream_start_ms: i64,
+        summary: String,
+    },
     /// One model response finished; carries its stop reason, id, usage, signature, and stop sequence.
     ResponseCompleted {
         message_id: Option<String>,

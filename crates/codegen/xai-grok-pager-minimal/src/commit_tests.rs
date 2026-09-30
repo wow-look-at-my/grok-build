@@ -35,6 +35,37 @@ fn running(text: &str) -> ScrollbackEntry {
     ScrollbackEntry::running(RenderBlock::stub(text, Color::Blue))
 }
 
+/// A live thought that just finished waits for its summary, only where it commits collapsed.
+#[test]
+fn a_fresh_collapsed_thought_waits_for_its_summary() {
+    use xai_grok_pager::scrollback::blocks::ThinkingBlock;
+    let mut block = ThinkingBlock::streaming();
+    block.push_chunk("reasoning");
+    block.finish();
+    let mut entry = ScrollbackEntry::new(RenderBlock::Thinking(block));
+    assert!(holds_for_summary(&entry, &collapsed_appearance()));
+    assert!(
+        !holds_for_summary(&entry, &default_appearance()),
+        "an expanded commit prints the whole body and needs no summary"
+    );
+    let RenderBlock::Thinking(b) = &mut entry.block else {
+        unreachable!()
+    };
+    b.set_summary("Weigh the options".into());
+    assert!(!holds_for_summary(&entry, &collapsed_appearance()));
+
+    let replayed = ScrollbackEntry::new(RenderBlock::Thinking({
+        let mut b = ThinkingBlock::streaming_replay();
+        b.push_chunk("old reasoning");
+        b.finish();
+        b
+    }));
+    assert!(
+        !holds_for_summary(&replayed, &collapsed_appearance()),
+        "a replayed thought never waits"
+    );
+}
+
 fn default_appearance() -> AppearanceConfig {
     committed_appearance(&AppearanceConfig::default())
 }

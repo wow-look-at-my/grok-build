@@ -51,7 +51,7 @@ pub(crate) enum RunStep {
 /// member is [`RunStep::Transparent`] — it keeps its own rows inside the run
 /// instead of splitting it. Thinking never breaks a run: a finished
 /// collapsed thought folds in as [`RunStep::ThoughtMember`]; hidden,
-/// still-streaming, opened, or chrome-carrying thinking is
+/// still-streaming, opened, summarized.
 /// [`RunStep::Transparent`].
 pub(crate) fn run_step(entry: &ScrollbackEntry, show_thinking: bool) -> RunStep {
     // Prompt / `[hooks: N/M]` chrome must stay visible, so chrome-carrying
@@ -83,7 +83,9 @@ pub(crate) fn run_step(entry: &ScrollbackEntry, show_thinking: bool) -> RunStep 
             RunStep::Break
         }
     } else if entry.block.is_thinking() {
-        if show_thinking && !entry.is_running && claimable {
+        // A summary is the only part of a collapsed thought the user reads.
+        let summarized = matches!(&entry.block, RenderBlock::Thinking(b) if b.summary().is_some());
+        if show_thinking && !entry.is_running && claimable && !summarized {
             RunStep::ThoughtMember
         } else {
             RunStep::Transparent
