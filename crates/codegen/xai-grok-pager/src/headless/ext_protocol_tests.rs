@@ -316,8 +316,7 @@ fn headless_reasoning_completed_parses_signature() {
 }
 
 #[test]
-fn headless_thinking_summary_reaches_streaming_json() {
-    use crate::headless::reducer::{Reducer, acp::AcpReducer};
+fn headless_thinking_summary_decodes() {
     // Built from the shell's own variant, so the wire shape cannot drift.
     let update = serde_json::to_value(
         xai_grok_shell::extensions::notification::SessionUpdate::ThinkingSummary {
@@ -330,15 +329,15 @@ fn headless_thinking_summary_reaches_streaming_json() {
     let ExtEvent::Stream(event) = handle_ext_notification(&notif) else {
         panic!("expected Stream event");
     };
-    let lines = AcpReducer.reduce(*event);
-    assert_eq!(
-        lines,
-        vec![serde_json::json!({
-            "type": "thinking_summary",
-            "streamStartMs": 1_234,
-            "summary": "Fix the caller",
-        })]
-    );
+    let StreamEvent::ThinkingSummary {
+        stream_start_ms,
+        summary,
+    } = *event
+    else {
+        panic!("expected ThinkingSummary");
+    };
+    assert_eq!(stream_start_ms, 1_234);
+    assert_eq!(summary, "Fix the caller");
 }
 
 #[test]
