@@ -343,8 +343,14 @@ pub fn render_turn_status(
     // A rate describes a stream in flight, and a row that reports it is waiting
     // for the model has none. A reading left over from the previous model call
     // would sit under that label and read as the wait being slow.
-    let output_rate = output_rate
-        .filter(|_| !matches!(activity, Some(TurnActivity::Waiting(WaitingReason::Model))));
+    let output_rate = output_rate.filter(|_| {
+        !matches!(
+            activity,
+            Some(TurnActivity::Waiting(
+                WaitingReason::Model | WaitingReason::Queued(_)
+            ))
+        )
+    });
     let rate_str = output_rate.map(format_output_rate).unwrap_or_default();
     let rate_width = rate_str.width();
 
@@ -1125,6 +1131,14 @@ mod tests {
         let theme = Theme::current();
         let cases = [
             (WaitingReason::Model, "Waiting for response…"),
+            (
+                WaitingReason::Queued(crate::acp::tracker::RequestQueued { ahead: 0, limit: 7 }),
+                "Queued: 7 model requests already running…",
+            ),
+            (
+                WaitingReason::Queued(crate::acp::tracker::RequestQueued { ahead: 2, limit: 7 }),
+                "Queued behind 2 more: 7 model requests already running…",
+            ),
             (WaitingReason::subagent(), "Waiting on subagent…"),
             (
                 WaitingReason::Subagent {

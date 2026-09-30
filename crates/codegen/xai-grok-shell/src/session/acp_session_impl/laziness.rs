@@ -483,20 +483,35 @@ impl SessionActor {
             }
         };
 
-        // The sampler call is wrapped in a generation-poll loop and a wall-clock timeout
-        // Dropping the `conversation_collect` future on abort cancels the HTTP request, so no actor-side cleanup is needed
-        let timeout = tokio::time::sleep(std::time::Duration::from_millis(
-            LAZINESS_CLASSIFIER_TIMEOUT_MS,
-        ));
-        tokio::pin!(timeout);
-        let sampler_future = sampling_client.conversation_collect(request);
+        // A poll loop and a timeout that excludes the request queue wrap the call.
+        // Dropping the future on abort cancels the HTTP request.
+        let sampler_future = xai_grok_sampler::timeout_excluding_queue(
+            std::time::Duration::from_millis(LAZINESS_CLASSIFIER_TIMEOUT_MS),
+            sampling_client.conversation_collect(request),
+        );
         tokio::pin!(sampler_future);
         let response = loop {
             tokio::select! {
                 biased;
                 out = &mut sampler_future => match out {
-                    Ok(response) => break response,
-                    Err(err) => {
+                    Ok(Ok(response)) => break response,
+                    Err(_elapsed) => {
+                        let elapsed_ms = started.elapsed().as_millis() as u64;
+                        self.maybe_write_laziness_debug_log(
+                            meta.take(),
+                            &model_id,
+                            items_count_after_trim,
+                            elapsed_ms,
+                            LazinessFireOutcome::Aborted {
+                                reason: LazinessAbortReason::Timeout,
+                                error_detail: None,
+                            },
+                        )
+                        .await;
+                        self.emit_laziness_abort(LazinessAbortReason::Timeout);
+                        return;
+                    }
+                    Ok(Err(err)) => {
                         let detail = err.to_string();
                         tracing::debug!(error = %detail, "laziness classifier sampler call failed");
                         let elapsed_ms = started.elapsed().as_millis() as u64;
@@ -515,22 +530,6 @@ impl SessionActor {
                         return;
                     }
                 },
-                _ = &mut timeout => {
-                    let elapsed_ms = started.elapsed().as_millis() as u64;
-                    self.maybe_write_laziness_debug_log(
-                        meta.take(),
-                        &model_id,
-                        items_count_after_trim,
-                        elapsed_ms,
-                        LazinessFireOutcome::Aborted {
-                            reason: LazinessAbortReason::Timeout,
-                            error_detail: None,
-                        },
-                    )
-                    .await;
-                    self.emit_laziness_abort(LazinessAbortReason::Timeout);
-                    return;
-                }
                 _ = tokio::time::sleep(poll_interval) => {
                     if let Some(reason) = self.laziness_abort_check(abort_snapshot) {
                         let elapsed_ms = started.elapsed().as_millis() as u64;

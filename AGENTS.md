@@ -490,6 +490,15 @@ Every one of those is the test doing its job. Making them pass there means weake
 - `[models].force_reasoning_effort_models` is the override. Globs match the catalog key or the model id. It applies to the FINISHED catalog (`force_reasoning_effort_support`, called from `resolve_model_catalog` and from `merge_additive_catalog`). That is what makes it work where `[model.<key>]` cannot. A `[model.X]` table whose name matches no catalog key ADDS a model instead of overriding one. So a key/id mismatch leaves the real entry unflagged, in silence.
 - A forced model with no menu of its own gets the built-in low..xhigh fallback. That is what any flagged model gets when the server sent no `reasoningEfforts`.
 
+## Model-request parallelism cap
+
+- `[ui].max_parallel_requests` (default 7, `0` = no cap) is the most model requests one process sends at once (`xai-grok-sampler/src/request_slots.rs`). A request past it waits in a FIFO queue. Every config load applies it (`apply_max_parallel_requests` in `util/config/campaigns.rs`), so a reload changes it live. A lowered cap never cuts off a request in flight.
+- The slot is taken in the client's send methods and held until the response stream is dropped. So every caller is covered: the sampler actor, `conversation_collect`, and compaction's direct stream calls.
+- The actor takes its slot in `run_one_attempt` BEFORE `FirstTokenDeadline::start`, and runs the send under `with_slot_held` so the client takes no second one. The TTFT limit, the idle timeout and the rate gate therefore all start after the queue.
+- A caller's own deadline around a model call uses `timeout_excluding_queue`, not `tokio::time::timeout`. It moves the deadline by the time spent queued. The clock is a task-local, and `Submit` carries it to the actor's task by hand.
+- A rate-floor backup takes its own slot. With every slot in use it waits, and the slow original keeps streaming.
+- A queued attempt says so: `SamplingEvent::Queued`/`Dequeued` → transient `XaiSessionUpdate::RequestQueued`/`RequestDequeued` → `AcpUpdateTracker::request_queued`. The status row then reads `Queued: 7 model requests already running…` (`WaitingReason::Queued`) in place of "Waiting for response". Without it a queued turn looks like a stalled model.
+
 ## Workflow agent-concurrency notes
 
 - `WorkflowHostParams.agent_slots` is a semaphore owned by `WorkflowManager` and shared by every run it launches (`session/workflow/manager.rs`), not one fresh semaphore per run. Up to `WORKFLOW_MAX_ACTIVE_RUNS_PER_SESSION` runs can be active at once, so a per-run semaphore will let total live agent-spawned LLM requests scale with active run count instead of staying under the configured cap (`GROK_WORKFLOW_MAX_CONCURRENT_AGENTS` / `workflow_max_concurrent_agents`) — the knob operators lower to stay under a hard per-host concurrent-request limit.
