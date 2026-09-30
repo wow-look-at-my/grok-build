@@ -443,9 +443,7 @@ pub struct McpState {
     /// Servers whose background init failed (handshake error, `tools/list` error, or overall init timeout) even though a client object exists.
     /// Surfaced as `Unavailable` in status snapshots, so a server that never finished init does not show as `Ready`.
     pub init_failed: std::collections::HashMap<McpServerName, String>,
-    /// Servers whose last spawn failed because the endpoint was unreachable (connectivity, not auth; see [`McpError::Unreachable`]).
-    /// Its keys are a subset of [`Self::init_failed`]'s; cleared together with it.
-    /// Drives `retry_unreachable_servers` so a transient network blip in a handshake does not permanently strip the session of the server's tools.
+    /// Servers whose last spawn or handshake failed for any reason except auth. Each is respawned on a fixed cooldown.
     unreachable_retry: std::collections::HashMap<McpServerName, UnreachableRetry>,
     /// Monotonic source for [`UnreachableRetry::InFlight`] attempt tokens.
     unreachable_attempt_counter: u64,
@@ -919,14 +917,14 @@ impl McpState {
     }
 
     /// Minimum wait between spawn attempts for an unreachable server.
-    /// Retry triggers (tool batches, `x.ai/mcp/list` refreshes) cannot dogpile the OAuth-discovery and probe timeout budget while a server is down.
+    /// Retry triggers (the session's reconnect timer, tool batches, `x.ai/mcp/list` refreshes) cannot dogpile the OAuth-discovery and probe timeout budget while a server is down.
     pub const UNREACHABLE_RETRY_COOLDOWN: std::time::Duration = std::time::Duration::from_secs(60);
 
     /// Upper bound on an attempt's exclusivity (see [`UnreachableRetry`]).
     /// Far above any bounded spawn and handshake, so it only fires for attempts whose future was cancelled and can never settle.
     pub const UNREACHABLE_ATTEMPT_LEASE: std::time::Duration = std::time::Duration::from_secs(600);
 
-    /// Record a spawn failure caused by an unreachable endpoint ([`McpError::Unreachable`]); no-op for a stale `generation`.
+    /// Record a non-auth spawn or handshake failure and schedule a respawn after the cooldown.
     /// Never demotes an in-flight attempt: its settle call owns the next transition.
     pub fn record_unreachable_failure(&mut self, name: &str, detail: String) {
         self.record_unreachable_failure_at(
@@ -1030,7 +1028,7 @@ impl McpState {
         );
     }
 
-    /// Settle an attempt without keeping it retryable (terminal non-connectivity failure, or handoff to the auth-required flow).
+    /// Settle an attempt without keeping it retryable (handoff to the auth-required flow).
     /// Returns whether the attempt still owned the server so the caller knows its follow-up records are legitimate.
     /// The `init_failed` entry is left to the caller.
     pub fn settle_unreachable_attempt_unretryable(&mut self, name: &str, token: u64) -> bool {
