@@ -97,7 +97,6 @@ jobs:
         with:
           key: rustdeps-dev
           skip-on-hit: false
-          cargo: test --locked --workspace --no-run --no-fail-fast
           paths: |
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
@@ -231,7 +230,6 @@ jobs:
         with:
           key: rustdeps-release-${{ matrix.target }}
           skip-on-hit: false
-          cargo: build --locked --release --target ${{ matrix.target }} -p xai-grok-pager-bin
           paths: |
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
