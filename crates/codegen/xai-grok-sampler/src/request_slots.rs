@@ -108,10 +108,9 @@ impl RequestSlots {
             slots: self,
             clock: clock.as_deref(),
         };
-        let permit = Arc::clone(&self.semaphore)
-            .acquire_owned()
-            .await
-            .expect("the request-slot semaphore is never closed");
+        let Ok(permit) = Arc::clone(&self.semaphore).acquire_owned().await else {
+            unreachable!("nothing closes the request-slot semaphore");
+        };
         tracing::info!(
             target: crate::sampling_log::TARGET,
             waited_ms = queued_at.elapsed().as_millis() as u64,
