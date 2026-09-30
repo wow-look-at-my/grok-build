@@ -89,19 +89,15 @@ jobs:
           tar -xzf "$RUNNER_TEMP/nextest.tar.gz" -C "$RUNNER_TEMP/nextest-bin"
           echo "$RUNNER_TEMP/nextest-bin" >> "$GITHUB_PATH"
 
-      # The log lists every key input before the digest, so two runs can be diffed.
-      - name: Key the dependency cache
-        id: depkey
-        run: echo "key=$(ci/cache-deps.sh key)" >> "$GITHUB_OUTPUT"
-
-      # The registry dependencies. See AGENTS.md, "The dependency tar". The key comment in the script is what keys the entry, because cached-run digests the script text. A new key restores the newest older entry and compiles only the delta. The prune drops every unit this build did not use, so a fallback never grows the entry. The script runs on a hit too, so it builds the workspace here, and the stash hands those artifacts to the steps below.
+      # The registry dependencies, cached by cached-run's cargo mode. See AGENTS.md, "The dependency tar". The script runs on a hit too, so the workspace compiles here once and the next step finds it fresh.
       - name: Build the dependencies
-        id: deps
         uses: wow-look-at-my/actions@cached-run#latest
+        env:
+          CARGO_BUILD_JOBS: "3"
         with:
           key: rustdeps-dev
-          restore-keys: cached-run-v2-${{ runner.os }}-${{ runner.arch }}-rustdeps-dev-
           skip-on-hit: false
+          cargo: test --locked --workspace --no-run --no-fail-fast
           paths: |
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
@@ -109,20 +105,7 @@ jobs:
             target/debug/deps
             target/debug/build
             target/debug/.fingerprint
-          run: |
-            # ${{ steps.depkey.outputs.key }}
-            export CARGO_BUILD_JOBS=3
-            cargo test --locked --workspace --no-run --no-fail-fast \
-              --message-format=json-render-diagnostics > "$RUNNER_TEMP/deps-units.json"
-            ci/cache-deps.sh prune target/debug "$RUNNER_TEMP/workspace-stash/debug" "$RUNNER_TEMP/deps-units.json"
-
-      # The step above compiled the workspace too. Putting it back keeps the next step from compiling it a second time.
-      - name: Put the workspace artifacts back
-        run: ci/cache-deps.sh unstash target/debug "$RUNNER_TEMP/workspace-stash/debug"
-
-      - name: Check the dependency cache was complete
-        if: steps.deps.outputs.cache-hit == 'true'
-        run: ci/cache-deps.sh check-fresh "$RUNNER_TEMP/deps-units.json"
+          run: cargo test --locked --workspace --no-run --no-fail-fast
 
       # -j3 is the widest -j the runner's 15 GiB holds.
       - name: Build test harnesses (compile, no-run)
@@ -242,18 +225,13 @@ jobs:
           cargo build --locked --release -p xai-darwin-link
           echo "CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER=$PWD/target/release/xai-darwin-link" >> "$GITHUB_ENV"
 
-      - name: Key the dependency cache
-        id: depkey
-        run: echo "key=$(ci/cache-deps.sh key)" >> "$GITHUB_OUTPUT"
-
       # The registry dependencies for this row's target, the way build-test caches its own. The target is in the label so a fallback restore never takes the other row's entry.
       - name: Build the dependencies
-        id: deps
         uses: wow-look-at-my/actions@cached-run#latest
         with:
           key: rustdeps-release-${{ matrix.target }}
-          restore-keys: cached-run-v2-${{ runner.os }}-${{ runner.arch }}-rustdeps-release-${{ matrix.target }}-
           skip-on-hit: false
+          cargo: build --locked --release --target ${{ matrix.target }} -p xai-grok-pager-bin
           paths: |
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
@@ -264,22 +242,7 @@ jobs:
             target/release/deps
             target/release/build
             target/release/.fingerprint
-          run: |
-            # ${{ steps.depkey.outputs.key }}
-            cargo build --locked --release --target ${{ matrix.target }} -p xai-grok-pager-bin \
-              --message-format=json-render-diagnostics > "$RUNNER_TEMP/deps-units.json"
-            ci/cache-deps.sh prune target/${{ matrix.target }}/release "$RUNNER_TEMP/workspace-stash/target" "$RUNNER_TEMP/deps-units.json"
-            ci/cache-deps.sh prune target/release "$RUNNER_TEMP/workspace-stash/host" "$RUNNER_TEMP/deps-units.json"
-
-      # The step above compiled the workspace too. Putting it back keeps the next step from compiling it a second time.
-      - name: Put the workspace artifacts back
-        run: |
-          ci/cache-deps.sh unstash target/${{ matrix.target }}/release "$RUNNER_TEMP/workspace-stash/target"
-          ci/cache-deps.sh unstash target/release "$RUNNER_TEMP/workspace-stash/host"
-
-      - name: Check the dependency cache was complete
-        if: steps.deps.outputs.cache-hit == 'true'
-        run: ci/cache-deps.sh check-fresh "$RUNNER_TEMP/deps-units.json"
+          run: cargo build --locked --release --target ${{ matrix.target }} -p xai-grok-pager-bin
 
       # On the darwin row the link at the end of this records itself into GROK_DARWIN_LINK_BUNDLE rather than running.
       - name: Build release binary
