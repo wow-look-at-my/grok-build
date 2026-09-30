@@ -114,10 +114,11 @@ jobs:
             export CARGO_BUILD_JOBS=3
             cargo test --locked --workspace --no-run --no-fail-fast \
               --message-format=json-render-diagnostics > "$RUNNER_TEMP/deps-units.json"
-            ci/cache-deps.sh prune target/debug "$RUNNER_TEMP/deps-units.json" "$RUNNER_TEMP/ws-stash"
+            ci/cache-deps.sh prune target/debug "$RUNNER_TEMP/workspace-stash/debug" "$RUNNER_TEMP/deps-units.json"
 
-      - name: Restore the workspace artifacts
-        run: ci/cache-deps.sh unstash "$RUNNER_TEMP/ws-stash" target/debug
+      # The step above compiled the workspace too. Putting it back keeps the next step from compiling it a second time.
+      - name: Put the workspace artifacts back
+        run: ci/cache-deps.sh unstash target/debug "$RUNNER_TEMP/workspace-stash/debug"
 
       - name: Check the dependency cache was complete
         if: steps.deps.outputs.cache-hit == 'true'
@@ -267,13 +268,14 @@ jobs:
             # ${{ steps.depkey.outputs.key }}
             cargo build --locked --release --target ${{ matrix.target }} -p xai-grok-pager-bin \
               --message-format=json-render-diagnostics > "$RUNNER_TEMP/deps-units.json"
-            ci/cache-deps.sh prune target/${{ matrix.target }}/release "$RUNNER_TEMP/deps-units.json" "$RUNNER_TEMP/ws-stash-target"
-            ci/cache-deps.sh prune target/release "$RUNNER_TEMP/deps-units.json" "$RUNNER_TEMP/ws-stash-host"
+            ci/cache-deps.sh prune target/${{ matrix.target }}/release "$RUNNER_TEMP/workspace-stash/target" "$RUNNER_TEMP/deps-units.json"
+            ci/cache-deps.sh prune target/release "$RUNNER_TEMP/workspace-stash/host" "$RUNNER_TEMP/deps-units.json"
 
-      - name: Restore the workspace artifacts
+      # The step above compiled the workspace too. Putting it back keeps the next step from compiling it a second time.
+      - name: Put the workspace artifacts back
         run: |
-          ci/cache-deps.sh unstash "$RUNNER_TEMP/ws-stash-target" target/${{ matrix.target }}/release
-          ci/cache-deps.sh unstash "$RUNNER_TEMP/ws-stash-host" target/release
+          ci/cache-deps.sh unstash target/${{ matrix.target }}/release "$RUNNER_TEMP/workspace-stash/target"
+          ci/cache-deps.sh unstash target/release "$RUNNER_TEMP/workspace-stash/host"
 
       - name: Check the dependency cache was complete
         if: steps.deps.outputs.cache-hit == 'true'

@@ -221,6 +221,8 @@ fn tmux_config_and_reload_notes_output_is_stable() {
 
 #[test]
 fn limited_color_output_is_stable() {
+    // The theme list reads the `terminal` rollout gate, which is process-global and off by default.
+    let _guard = crate::theme::cache::pin_theme();
     let terminal = ghostty(false);
     let output = build_doctor(snapshot(
         &terminal,
@@ -240,7 +242,7 @@ fn limited_color_output_is_stable() {
             "  multiplexer  None detected\n",
             "  ssh          no\n",
             "  color        256\n",
-            "  themes       2/5: groknight, grokday\n",
+            "  themes       3/6: groknight, grokday, terminal\n",
             "\n",
             "Clipboard\n",
             "  native       local (pbcopy)\n",

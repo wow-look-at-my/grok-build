@@ -6,6 +6,8 @@
 //! Example:
 //!   fast-worktree create /path/to/repo /path/to/worktree --dirty --parallelism 8
 
+#![deny(clippy::indexing_slicing)]
+
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -167,7 +169,7 @@ fn main() -> Result<()> {
             println!("  Path:   {}", result.worktree_path.display());
             println!(
                 "  Commit: {}",
-                result.commit.get(..12).unwrap_or(&result.commit)
+                result.commit.get(..12).unwrap_or(result.commit.as_str())
             );
 
             // For snapshot methods (btrfs/overlay), files_copied will be 0

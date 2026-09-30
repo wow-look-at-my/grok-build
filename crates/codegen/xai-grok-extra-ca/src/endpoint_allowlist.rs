@@ -133,7 +133,7 @@ fn entry_covers(entry: &str, target: &reqwest::Url) -> bool {
         let suffix = suffix.to_ascii_lowercase();
         return host.len() > suffix.len() + 1
             && host.ends_with(&suffix)
-            && host.as_bytes()[host.len() - suffix.len() - 1] == b'.';
+            && host.as_bytes().get(host.len() - suffix.len() - 1) == Some(&b'.');
     }
     let Ok(allowed) = reqwest::Url::parse(&format!("any://{entry}")) else {
         return false;

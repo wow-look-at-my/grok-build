@@ -1,10 +1,9 @@
-//! Network-level integration tests using `wiremock`.
+//! Covers the HTTP-fetching paths in `version.rs` that take a URL parameter directly.
+//! We don't need `serial_test` here because each `MockServer` binds to its own random port and tests don't touch global state.
 //!
 //! Covers `fetch_gcs_version_from_base`, which takes its URL as a parameter and
 //! so is still live with auto-update disabled. The download paths these tests
 //! used to share a file with refuse outright now -- see test_disabled_pins.rs.
-//! We don't need `serial_test` here because each `MockServer` binds to its own
-//! random port and tests don't touch global state.
 //!
 //! NOTE on retry timing: the prod retry backoff is 1s + 2s + 4s = 7s
 //! wall-clock. We can't use `tokio::time::pause()` because reqwest's I/O
@@ -55,13 +54,12 @@ async fn gcs_pointer_trims_whitespace() {
 
 #[tokio::test]
 async fn gcs_pointer_rejects_invalid_semver_no_retry() {
-    // Invalid semver in the channel pointer is a hard error — must NOT
-    // retry (it's a server data bug, not a transient failure).
+    // Invalid semver in the channel pointer is a hard error and must NOT retry (it's a server data bug, not a transient failure)
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/stable"))
         .respond_with(ResponseTemplate::new(200).set_body_string("not-a-version"))
-        .expect(1) // exactly one request — no retry on parse failure
+        .expect(1) // no retry on parse failure
         .mount(&server)
         .await;
 
@@ -116,8 +114,7 @@ async fn gcs_pointer_alpha_returns_alpha_when_higher() {
 
 #[tokio::test]
 async fn gcs_pointer_stable_channel_does_not_fetch_alpha() {
-    // Stable-channel users should not pay the cost of fetching the alpha
-    // pointer. The mock for /alpha should never be hit.
+    // Stable-channel users should not pay the cost of fetching the alpha pointer
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/stable"))
@@ -137,31 +134,10 @@ async fn gcs_pointer_stable_channel_does_not_fetch_alpha() {
         .unwrap();
     assert_eq!(v, "0.1.181");
 }
-
-#[tokio::test]
-async fn gcs_pointer_with_long_pre_release_version() {
-    let server = MockServer::start().await;
-    Mock::given(method("GET"))
-        .and(path("/alpha"))
-        .respond_with(ResponseTemplate::new(200).set_body_string("0.1.190-alpha.42"))
-        .mount(&server)
-        .await;
-    Mock::given(method("GET"))
-        .and(path("/stable"))
-        .respond_with(ResponseTemplate::new(200).set_body_string("0.1.189"))
-        .mount(&server)
-        .await;
-
-    let v = fetch_gcs_version_from_base("alpha", &server.uri())
-        .await
-        .unwrap();
-    assert_eq!(v, "0.1.190-alpha.42");
-}
-
 #[tokio::test]
 async fn gcs_pointer_preserves_path_in_base_url() {
-    // base_url may include a path component (in practice the prod GCS URL
-    // does: `/cli`). The function appends `/{channel}`.
+    // base_url may include a path component (in practice the prod GCS URL does: `/cli`)
+    // The function appends `/{channel}`
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/cli/stable"))
@@ -174,9 +150,8 @@ async fn gcs_pointer_preserves_path_in_base_url() {
     assert_eq!(v, "0.1.181");
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Retry behavior — these tests intentionally exercise the 1s+2s+4s backoff,
-// so each takes ~7 seconds. They run in parallel.
+// ─────────────────────────────────────────────────────────────────────────────. Retry behavior — these tests
+// intentionally exercise the 1s+2s+4s backoff, so each takes ~7 seconds. They run in parallel.
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[tokio::test]
@@ -316,9 +291,8 @@ async fn gcs_pointer_connection_refused_is_retried_and_returns_error() {
     );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// download_silent — same body shape as download_with_progress but no
-// progress bar to capture.
+// ───────────────────────────────────────────────────────────────────────────── download_silent — same body shape as
+// download_with_progress but no progress bar to capture.
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -111,7 +111,9 @@ impl StreamingArgsTail {
                     self.push_char(ch);
                     return;
                 }
-                hex[len] = ch as u8;
+                if let Some(slot) = hex.get_mut(len) {
+                    *slot = ch as u8;
+                }
                 let len = len + 1;
                 if len < 4 {
                     self.escape = EscapeState::Unicode { hex, len };

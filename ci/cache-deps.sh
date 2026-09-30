@@ -2,7 +2,7 @@
 # Keys, prunes and restores the dependency cache entry. See AGENTS.md, "The dependency tar".
 set -euo pipefail
 
-usage='usage: cache-deps.sh key | prune <dir> <units.json> <stash> | unstash <stash> <dir> | check-fresh <units.json> | size <dir>'
+usage='usage: cache-deps.sh key | prune <dir> [stash] [units.json] | unstash <dir> <stash> | check-fresh <units.json> | size <dir>'
 op="${1:?$usage}"
 
 # Cargo names a deps/, build/ or .fingerprint/ entry with the hash its JSON messages print.
@@ -35,12 +35,34 @@ key)
 	} | tee /dev/stderr | sha256sum | cut -c1-40
 	echo '::endgroup::' >&2
 	;;
+unstash)
+	dir="${2:?$usage}"
+	stash="${3:?$usage}"
+	# No stash means the cached run was skipped on a hit, and it compiled no workspace crate.
+	if [ ! -d "$stash" ]; then
+		echo "cache-deps: no stash at $stash, so there is nothing to put back"
+		exit 0
+	fi
+	restored=0
+	while IFS= read -r -d '' entry; do
+		rel="${entry#"$stash"/}"
+		mkdir -p "$dir/$(dirname "$rel")"
+		# mv keeps the mtimes, which is what lets cargo read the artifacts as fresh.
+		mv "$entry" "$dir/$rel"
+		restored=$((restored + 1))
+	done < <(find "$stash" -mindepth 2 -maxdepth 2 -print0)
+	rm -rf "$stash"
+	printf 'cache-deps: put back %d workspace entries into %s\n' "$restored" "$dir"
+	;;
 prune)
 	dir="${2:?$usage}"
-	units="${3:?$usage}"
-	stash="${4:?$usage}"
+	stash="${3:-}"
+	units="${4:-}"
 	[ -d "$dir" ] || { echo "cache-deps: $dir does not exist" >&2; exit 1; }
-	[ -s "$units" ] || { echo "cache-deps: $units is missing or empty" >&2; exit 1; }
+	if [ -n "$stash" ]; then
+		rm -rf "$stash"
+		mkdir -p "$stash"
+	fi
 
 	# The manifest is the authority on membership.
 	members="$(cargo metadata --no-deps --format-version 1 --locked |
@@ -48,16 +70,18 @@ prune)
 	[ -n "$members" ] || { echo "cache-deps: cargo metadata named no members" >&2; exit 1; }
 
 	# Every unit this build used, fresh or compiled. An entry outside this set is left from an older dependency set.
-	live="$(jq -r '(.filenames // [])[], (.out_dir // empty), (.executable // empty)' "$units" |
-		grep -oE '/(deps|build)/[^/]*-[0-9a-f]{16}' | grep -oE '[0-9a-f]{16}$' | sort -u || true)"
-	[ -n "$live" ] || { echo "cache-deps: $units names no unit, so every entry reads as stale" >&2; exit 1; }
 	declare -A is_live=()
-	while IFS= read -r h; do is_live[$h]=1; done <<<"$live"
+	if [ -n "$units" ]; then
+		[ -s "$units" ] || { echo "cache-deps: $units is missing or empty" >&2; exit 1; }
+		live="$(jq -r '(.filenames // [])[], (.out_dir // empty), (.executable // empty)' "$units" |
+			grep -oE '/(deps|build)/[^/]*-[0-9a-f]{16}' | grep -oE '[0-9a-f]{16}$' | sort -u || true)"
+		[ -n "$live" ] || { echo "cache-deps: $units names no unit, so every entry reads as stale" >&2; exit 1; }
+		while IFS= read -r h; do is_live[$h]=1; done <<<"$live"
+	fi
 
 	before="$(du -sm "$dir" 2>/dev/null | cut -f1)"
-	mkdir -p "$stash"
 
-	# A workspace artifact cannot be restored, so it leaves the entry. The next step needs it, so it moves rather than goes.
+	# A workspace artifact cannot be restored, so it leaves the entry. With a stash it moves, because the next step needs it.
 	stashed=0
 	while IFS= read -r name; do
 		# .fingerprint and build/ keep the hyphens of the package name.
@@ -65,13 +89,13 @@ prune)
 		for stem in "$name-" "$under-" "lib$under-"; do
 			for sub in .fingerprint build deps; do
 				[ -d "$dir/$sub" ] || continue
-				while IFS= read -r -d '' entry; do
-					# A registry crate whose name only starts with a member's name is not a member.
-					rest="${entry##*/}"
-					rest="${rest#"$stem"}"
-					[[ "$rest" =~ ^[0-9a-f]{16}(\.[^/]*)?$ ]] || continue
-					mkdir -p "$stash/$sub"
-					mv "$entry" "$stash/$sub/"
+				while IFS= read -r -d '' victim; do
+					if [ -n "$stash" ]; then
+						mkdir -p "$stash/$sub"
+						mv "$victim" "$stash/$sub/"
+					else
+						rm -rf "$victim"
+					fi
 					stashed=$((stashed + 1))
 				done < <(find "$dir/$sub" -maxdepth 1 -name "$stem*" -print0)
 			done
@@ -80,6 +104,7 @@ prune)
 
 	stale=0
 	for sub in .fingerprint build deps; do
+		[ -n "$units" ] || break
 		[ -d "$dir/$sub" ] || continue
 		while IFS= read -r -d '' entry; do
 			h="$(entry_hash "${entry##*/}")" || continue
@@ -90,7 +115,7 @@ prune)
 	done
 
 	after="$(du -sm "$dir" 2>/dev/null | cut -f1)"
-	printf 'cache-deps: stashed %d workspace entries, removed %d stale entries, %s MB -> %s MB\n' \
+	printf 'cache-deps: took out %d workspace entries, removed %d stale entries, %s MB -> %s MB\n' \
 		"$stashed" "$stale" "$before" "$after"
 
 	# The entry is one tar. Only a per-group size says which group is worth an exclusion.
@@ -133,24 +158,6 @@ prune)
 	group 'cargo registry/index' "$cargo_home/registry/index" -type f
 	group 'cargo registry/cache' "$cargo_home/registry/cache" -type f
 	group 'cargo git/db' "$cargo_home/git/db" -type f
-	;;
-unstash)
-	stash="${2:?$usage}"
-	dir="${3:?$usage}"
-	[ -d "$stash" ] || { echo "cache-deps: $stash does not exist, so no prune ran before this" >&2; exit 1; }
-	moved=0
-	for sub in .fingerprint build deps; do
-		[ -d "$stash/$sub" ] || continue
-		mkdir -p "$dir/$sub"
-		while IFS= read -r -d '' entry; do
-			dest="$dir/$sub/${entry##*/}"
-			[ -e "$dest" ] && { echo "cache-deps: $dest already exists" >&2; exit 1; }
-			mv "$entry" "$dest"
-			moved=$((moved + 1))
-		done < <(find "$stash/$sub" -mindepth 1 -maxdepth 1 -print0)
-	done
-	rm -rf "$stash"
-	printf 'cache-deps: restored %d workspace entries to %s\n' "$moved" "$dir"
 	;;
 check-fresh)
 	units="${2:?$usage}"

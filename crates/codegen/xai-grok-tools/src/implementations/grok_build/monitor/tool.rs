@@ -31,6 +31,8 @@ impl crate::types::tool_metadata::ToolMetadata for MonitorTool {
 
 **Output volume**: Every stdout line is a main-agent wake. Print only `DONE`/`FAILED`/`CANCELLED`. No progress or CHANGE lines. Use `grep --line-buffered` in pipes (plain `grep` buffers and delays events by minutes).
 
+**Responsiveness**: Emit `FAILED` to notify immediately when any required item fails; never wait for unrelated work to finish. Include every tracked failure signal in this immediate failure condition.
+
 Set `persistent: true` for session-length watches (PR monitoring, log tails) -- the monitor runs${%- if tools.by_kind.kill_task_action %} until you call ${{ tools.by_kind.kill_task_action }} or${%- endif %} until the session ends. Otherwise it stops at `timeout_ms` (default 10h)."#
     }
 
@@ -145,10 +147,9 @@ impl xai_tool_runtime::Tool for MonitorTool {
         notification_handle.send_backgrounded(crate::notification::BashExecutionBackgrounded {
             base: crate::notification::BashNotificationBase {
                 tool_call_id: ctx.call_id.as_str().to_owned(),
-                // Send the real monitor command (so the block viewer shows the
-                // actual script). The human-readable description travels in
-                // `monitor_description` so the pager can render a "Monitor" tag
-                // instead of bash-highlighting a "[monitor] …" pseudo-command.
+                // Send the real monitor command (so the block viewer shows the actual script). The human-readable description travels
+                // in `monitor_description` so the pager can render a "Monitor" tag instead of bash-highlighting a "[monitor] …"
+                // pseudo-command.
                 command: input.command.clone(),
                 output: Vec::new(),
                 total_bytes: 0,
@@ -369,13 +370,9 @@ async fn run_monitor_pipeline(
                 .await;
             }
 
-            // Do NOT emit a terminal `[monitor ended: …]` MonitorEvent here.
-            // Natural exit auto-wakes via `TaskCompleted` → immediate Prompt
-            // (`format_monitor_completion` in the notification bridge). Emitting
-            // a terminal event as well produced a second NotificationDrain turn
-            // with the same ended signal. Stdout lines above still stream as
-            // events while the process is alive; the UI learns completion from
-            // `x.ai/task_completed`.
+            // Do NOT emit a terminal `[monitor ended: …]` MonitorEvent here. Natural exit auto-wakes via `TaskCompleted` →
+            // immediate Prompt (`format_monitor_completion` in the notification bridge). Emitting a terminal event as well
+            // produced a second NotificationDrain turn with the same ended signal.
 
             break;
         }
@@ -474,17 +471,9 @@ mod tests {
     use crate::computer::types::{TaskKind, TerminalBackend, TerminalRunRequest};
     use std::time::Duration;
 
-    /// A persistent monitor must not keep the session's terminal backend (and
-    /// thus the monitored process) alive after the session releases its handle.
-    ///
-    /// Regression for the cross-session monitor leak: the monitor pipeline held
-    /// a strong `Arc<dyn TerminalBackend>`, so on a shared runtime (hosts that
-    /// build one `LocalTerminalBackend` per session on one long-lived
-    /// multi-threaded runtime) a persistent monitor's pipeline kept the actor's
-    /// command channel open forever. The monitored process, the terminal actor,
-    /// and the pipeline all leaked once the session ended. The interactive CLI
-    /// only masked this because each session owns a dedicated thread+runtime
-    /// that is torn down on session exit.
+    /// A persistent monitor must not keep the session's terminal backend (and thus the monitored process) alive after the session releases its
+    /// handle. The monitored process, the terminal actor, and the pipeline all leaked once the session ended. The interactive CLI only masked this
+    /// because each session owns a dedicated thread+runtime that is torn down on session exit.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn persistent_monitor_released_when_session_drops_backend() {
         let tmp = tempfile::tempdir().unwrap();
@@ -563,10 +552,9 @@ mod tests {
         );
     }
 
-    /// On exit the pipeline must NOT emit a terminal `[monitor ended]` event
-    /// (wake is owned by `TaskCompleted` auto-wake). Stdout lines still stream
-    /// as MonitorEvents with the owner stamp so mid-run ticks reach the right
-    /// session.
+    /// On exit the pipeline must NOT emit a terminal `[monitor ended]` event (wake is owned by
+    /// `TaskCompleted` auto-wake). Stdout lines still stream as MonitorEvents with the owner stamp
+    /// so mid-run ticks reach the right session.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn monitor_exit_does_not_emit_terminal_ended_event() {
         let tmp = tempfile::tempdir().unwrap();
@@ -632,10 +620,9 @@ mod tests {
         );
     }
 
-    /// When a subagent dies, its monitor is reparented to the parent: the owner
-    /// flips to the parent and the pipeline is re-spawned on the parent's
-    /// handle. The re-spawned pipeline must stamp the PARENT owner so the
-    /// parent's bridge delivers the events instead of dropping them.
+    /// When a subagent dies, its monitor is reparented to the parent: the owner flips to the parent
+    /// and the pipeline is re-spawned on the parent's handle. The re-spawned pipeline must stamp
+    /// the PARENT owner so the parent's bridge delivers the events instead of dropping them.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn reparented_monitor_emits_events_with_parent_owner() {
         let tmp = tempfile::tempdir().unwrap();
