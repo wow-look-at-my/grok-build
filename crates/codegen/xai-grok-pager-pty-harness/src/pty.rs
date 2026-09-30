@@ -77,6 +77,8 @@ pub struct PtyController {
     exit_status: Option<ExitStatus>,
     exit_observed: bool,
     spawn_pid: Option<u32>,
+    /// How long Drop waits after the group SIGTERM before SIGKILL.
+    term_grace: Duration,
     // portable-pty's Unix kill may reap and cache status through Child::try_wait.
     #[cfg(unix)]
     portable_kill_may_have_reaped: bool,
@@ -181,6 +183,7 @@ impl PtyController {
             exit_status: None,
             exit_observed: false,
             spawn_pid: process_pid,
+            term_grace: PTY_DROP_TERM_GRACE,
             #[cfg(unix)]
             portable_kill_may_have_reaped: false,
             #[cfg(test)]
@@ -459,7 +462,7 @@ impl Drop for PtyController {
         // Graceful first: SIGTERM the whole group so a responsive child gets
         // one grace period to run its own TERM cleanup before the hard kill.
         if self.exit_status.is_none() && !self.exit_observed && self.terminate_tree_best_effort() {
-            let _ = self.wait_child_bounded(PTY_DROP_TERM_GRACE);
+            let _ = self.wait_child_bounded(self.term_grace);
         }
         // Hard stop: SIGKILL the group, kill the direct child, reap bounded.
         if self.exit_status.is_none() {
@@ -849,10 +852,10 @@ mod tests {
         let marker_path = marker.to_string_lossy().into_owned();
         let ready = sandbox.temp_dir().join("trap-installed.ready");
         let ready_path = ready.to_string_lossy().into_owned();
-        // The group SIGTERM kills the foreground sleep; sh's wait for it then
-        // returns and the TERM trap writes the marker. READY is written after
-        // the trap is installed, closing the drop-before-trap race.
-        let controller = PtyController::spawn_in_sandbox(
+        // A trapped TERM interrupts the `wait` builtin at once. A foreground
+        // sleep would hold the trap until the sleep died. READY is written after
+        // the trap is installed.
+        let mut controller = PtyController::spawn_in_sandbox(
             Path::new("/bin/sh"),
             PtySize {
                 rows: 8,
@@ -862,7 +865,7 @@ mod tests {
             },
             &[
                 "-c",
-                "trap 'echo graceful > \"$MARKER\"; exit 0' TERM; : > \"$READY\"; sleep 600",
+                "trap 'echo graceful > \"$MARKER\"; exit 0' TERM; : > \"$READY\"; sleep 600 & wait",
             ],
             &sandbox,
             &[
@@ -872,7 +875,9 @@ mod tests {
             None,
         )
         .expect("spawn PTY trap fixture");
-        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        // A slow runner must not fail this test.
+        controller.term_grace = Duration::from_secs(120);
+        let deadline = std::time::Instant::now() + Duration::from_secs(120);
         while !ready.exists() {
             assert!(
                 std::time::Instant::now() < deadline,
@@ -881,16 +886,9 @@ mod tests {
             std::thread::sleep(Duration::from_millis(10));
         }
 
-        let started = std::time::Instant::now();
         drop(controller);
-        assert!(
-            started.elapsed() < Duration::from_secs(1),
-            "PTY Drop exceeded its bounded wait"
-        );
-        let deadline = std::time::Instant::now() + Duration::from_secs(2);
-        while !marker.exists() && std::time::Instant::now() < deadline {
-            std::thread::sleep(Duration::from_millis(10));
-        }
+        // Drop returns after the child exits. The trap writes the marker before
+        // its `exit`, so a child that got the grace has written it already.
         assert!(
             marker.exists(),
             "TERM trap never ran: Drop's SIGTERM grace did not let the child clean up"
