@@ -740,6 +740,7 @@ mod tests {
 
     /// Step through every [`BACKOFF`] sleep, so all of them ladder attempts run.
     async fn drive_ladder() {
+        tokio::task::yield_now().await;
         for wait in BACKOFF {
             step(wait).await;
         }
