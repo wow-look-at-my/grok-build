@@ -1654,29 +1654,17 @@ impl SessionActor {
             .lock()
             .expect("current_prompt_id mutex poisoned")
             .clone();
-        // A mirror-child fork copies the parent conversation verbatim, so it must use the parent model to reuse the parent's cached prefix
-        let role_override = crate::session::goal_planner::RoleSpawnOverride::default();
+        // A pinned planner runs on its pin.
         let fallback = self.goal_role_fallback_reporter().await;
-        let configured_planner = match &self.goal_role_models.planner {
-            crate::agent::config::GoalRoleModelChoice::InheritCurrent => None,
-            crate::agent::config::GoalRoleModelChoice::ModelOnly(model) => Some(model.clone()),
-            crate::agent::config::GoalRoleModelChoice::Explicit(pair) => Some(pair.model.clone()),
-        };
-        if let Some(configured) = configured_planner {
-            fallback.notify(
+        let (role_override, tool_names, inherit_tool_names) = self
+            .resolve_goal_single_role_override(
                 "planner",
-                None,
-                &configured,
-                crate::session::goal_planner::GOAL_ROLE_NOTICE_PLANNER_FORKS_SESSION,
-                Some(
-                    "the planner forks this session's conversation to reuse its prompt cache, \
-                     so it always runs on the session model."
-                        .to_string(),
-                ),
-            );
-        }
-        let tool_names = self.resolve_inherit_role_tool_names().await;
-        let inherit_tool_names = tool_names.clone();
+                &self.goal_role_models.planner,
+                goal::RoleCapability::Strategist,
+                &event_tx,
+            )
+            .await;
+        let planner_model_override = role_override.model.clone();
         let spawner: std::sync::Arc<dyn crate::session::goal_planner::GoalPlannerSpawner> =
             std::sync::Arc::new(crate::session::goal_planner::ChannelSpawner {
                 event_tx,
@@ -1703,7 +1691,10 @@ impl SessionActor {
                 context: &context,
                 plan_file: &attempt_plan_file,
                 attempt,
-                model_id: crate::session::goal_planner::effective_role_model_id(None, &model_id),
+                model_id: crate::session::goal_planner::effective_role_model_id(
+                    planner_model_override.as_deref(),
+                    &model_id,
+                ),
                 tool_names: &tool_names,
                 inherit_tool_names: &inherit_tool_names,
             },

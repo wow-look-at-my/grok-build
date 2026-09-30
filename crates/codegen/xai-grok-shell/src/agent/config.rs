@@ -3833,6 +3833,19 @@ pub(crate) fn entry_for_provider_model(
     entry
 }
 
+/// Build one catalog entry for a `[model.<id>]` block that names no provider.
+/// It keeps its own URL and credentials. Nothing from a provider applies.
+pub(crate) fn entry_for_unrouted_block(
+    cfg: &Config,
+    key: &str,
+    model_override: &ConfigModelOverride,
+) -> ModelEntry {
+    let mut entry = model_override.apply(key, None, &cfg.endpoints);
+    attach_trusted_auth_config(cfg, key, &mut entry);
+    entry.info.derive_reasoning_effort_fields();
+    entry
+}
+
 /// The entry a `[model_providers.<id>]` block resolves to on its own, with no
 /// `[model.<id>]` behind it. The provider id stands in for the model id: it
 /// names no model, so nothing here asks the provider for a listing and nothing
