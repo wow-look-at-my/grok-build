@@ -1396,6 +1396,19 @@ pub(super) fn handle_child_session_notification(
             let rate_cleared = child_view.session.tracker.clear_output_rate();
             priced || cache_hit_set || total_changed || rate_cleared
         }
+        XaiSessionUpdate::ThinkingSummary {
+            stream_start_ms,
+            summary,
+        } => {
+            let Some(child_view) = agent.subagent_views.get_mut(child_sid) else {
+                return false;
+            };
+            child_view.session.tracker.set_thinking_summary(
+                &mut child_view.scrollback,
+                stream_start_ms,
+                &summary,
+            )
+        }
         XaiSessionUpdate::OutputRate {
             tokens_per_sec,
             window_secs,
