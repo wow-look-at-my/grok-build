@@ -381,7 +381,14 @@ impl SuggestionController {
                 if accept_end == 0 {
                     return None;
                 }
+<<<<<<< HEAD
                 let accepted = self.ghost.text.get(..accept_end)?.to_owned();
+=======
+                // `one_word_end` returns a `trim_start` prefix length plus a
+                // `find(char::is_whitespace)` offset: a char boundary.
+                #[allow(clippy::string_slice)]
+                let accepted = self.ghost.text[..accept_end].to_owned();
+>>>>>>> origin/master
                 self.ghost.text.drain(..accept_end);
                 if self.ghost.text.is_empty() {
                     self.ghost.full_text.clear();
@@ -545,11 +552,24 @@ impl SuggestionController {
         // Filling that would write a dangling backslash (line continuation)
         // Trim the incomplete escape; the strict-extension check below then decides whether anything is left to fill
         if lcp.bytes().rev().take_while(|&b| b == b'\\').count() % 2 == 1 {
+<<<<<<< HEAD
             let n = lcp.len().checked_sub(1)?;
             lcp = lcp.get(..n)?;
         }
         let range = self.validated_replace_range(range, lcp, current_text)?;
         let typed = current_text.get(range.clone())?;
+=======
+            // An odd run of trailing `\` means the last char is that one-byte
+            // ASCII escape, so `len - 1` lands on a boundary.
+            #[allow(clippy::string_slice)]
+            let trimmed = &lcp[..lcp.len() - 1];
+            lcp = trimmed;
+        }
+        let range = self.validated_replace_range(range, lcp, current_text)?;
+        // Both ends pass `is_char_boundary` inside `validated_replace_range`.
+        #[allow(clippy::string_slice)]
+        let typed = &current_text[range.clone()];
+>>>>>>> origin/master
         (lcp.len() > typed.len() && lcp.starts_with(typed)).then(|| (range, lcp.to_owned()))
     }
 
@@ -709,9 +729,16 @@ fn common_str_prefix<'a>(a: &'a str, b: &str) -> &'a str {
 /// A "word" is optional leading whitespace followed by a run of non-whitespace characters.
 fn one_word_end(s: &str) -> usize {
     let leading_ws = s.len() - s.trim_start().len();
+<<<<<<< HEAD
     let Some(after_ws) = s.get(leading_ws..) else {
         return s.len();
     };
+=======
+    // `trim_start` strips whole characters, so the bytes it removed end on a
+    // char boundary.
+    #[allow(clippy::string_slice)]
+    let after_ws = &s[leading_ws..];
+>>>>>>> origin/master
     let word_len = after_ws.find(char::is_whitespace).unwrap_or(after_ws.len());
     leading_ws + word_len
 }

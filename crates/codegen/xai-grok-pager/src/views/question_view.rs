@@ -659,8 +659,18 @@ pub fn chrome_height(
     }
 }
 
+<<<<<<< HEAD
 /// Split question text into a label (first paragraph) and description (rest). A paragraph break is
 /// `\n\n`. If no break exists, the full text is the label and the description is empty.
+=======
+/// Split question text into a label (first paragraph) and description (rest).
+///
+/// A paragraph break is `\n\n`. If no break exists, the full text is the
+/// label and the description is empty.
+// `pos` is a `find` offset for the two-byte ASCII needle `"\n\n"`, so both
+// `pos` and `pos + 2` are char boundaries.
+#[allow(clippy::string_slice)]
+>>>>>>> origin/master
 fn split_question_label_desc(text: &str) -> (&str, &str) {
     if let Some(pos) = text.find("\n\n") {
         (

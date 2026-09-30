@@ -351,10 +351,19 @@ pub(super) fn mcp_args_lines(req: &acp::RequestPermissionRequest) -> Vec<String>
     let mut lines: Vec<String> = pretty
         .lines()
         .map(|l| match l.char_indices().nth(MCP_ARGS_MAX_LINE_CHARS) {
+<<<<<<< HEAD
             Some((byte_idx, _)) => match l.get(..byte_idx) {
                 Some(prefix) => format!("{prefix}…"),
                 None => l.to_owned(),
             },
+=======
+            Some((byte_idx, _)) => {
+                // `byte_idx` is a `char_indices` offset, so a char boundary.
+                #[allow(clippy::string_slice)] // offset from char_indices().nth()
+                let head = &l[..byte_idx];
+                format!("{head}\u{2026}")
+            }
+>>>>>>> origin/master
             None => l.to_owned(),
         })
         .collect();

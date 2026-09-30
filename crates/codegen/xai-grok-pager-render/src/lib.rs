@@ -5,7 +5,10 @@
 #![allow(clippy::cast_sign_loss)] // 66 hits predate the gate
 #![allow(clippy::expect_used)] // 8 hits predate the gate
 #![allow(clippy::unwrap_used)] // 6 hits predate the gate
+<<<<<<< HEAD
 #![deny(clippy::indexing_slicing)]
+=======
+>>>>>>> origin/master
 
 pub mod appearance;
 pub mod clipboard;

@@ -22,6 +22,79 @@ use crate::sampling::SamplerConfig as SamplingConfig;
 use xai_grok_login::{AuthManager, GrokAuth, GrokComConfig};
 use xai_grok_sampling_types::{ReasoningEffort, ReasoningEffortOption};
 
+<<<<<<< HEAD:crates/codegen/xai-grok-shell/src/agent/remote_config/manager/mod.rs
+=======
+// ── Auth method for model fetching ──────────────────────────────────────────
+
+/// Credential for `/v1/models` fetching.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ModelFetchAuth {
+    Session,
+    ApiKey,
+    CustomEndpoint,
+}
+
+impl ModelFetchAuth {
+    /// custom_endpoint > session > API key.
+    pub(crate) fn resolve(endpoints: &config::EndpointsConfig, has_cached_session: bool) -> Self {
+        if endpoints.has_custom_endpoint() {
+            Self::CustomEndpoint
+        } else if has_cached_session {
+            Self::Session
+        } else if crate::agent::auth_method::has_xai_api_key_env() {
+            Self::ApiKey
+        } else {
+            Self::Session
+        }
+    }
+
+    fn cache_auth_method(&self) -> CacheAuthMethod {
+        match self {
+            Self::CustomEndpoint | Self::ApiKey => CacheAuthMethod::ApiKey,
+            Self::Session => CacheAuthMethod::Session,
+        }
+    }
+}
+
+#[derive(serde::Serialize, serde::Deserialize, PartialEq, Eq, Clone, Debug)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum CacheAuthMethod {
+    Session,
+    ApiKey,
+}
+
+pub(crate) fn task_model_error_for_catalog(
+    requested: &str,
+    available: &IndexMap<String, ModelEntry>,
+    is_session_auth: bool,
+) -> Option<String> {
+    let is_available = |entry: &ModelEntry| {
+        entry.info.user_selectable && entry.info.visible_for_auth(is_session_auth)
+    };
+    if config::find_model_by_id(available, requested).is_some_and(&is_available) {
+        return None;
+    }
+
+    let mut slugs = available
+        .iter()
+        .filter(|(_, entry)| is_available(entry))
+        .map(|(slug, _)| slug.as_str())
+        .collect::<Vec<_>>();
+    slugs.sort_unstable();
+    let guidance = if slugs.is_empty() {
+        "No valid model slugs are currently available. Omit `model` to inherit the parent model."
+            .to_string()
+    } else {
+        format!(
+            "Valid model slugs: {}. Omit `model` to inherit the parent model.",
+            slugs.join(", ")
+        )
+    };
+    Some(format!("Unknown Task.model slug '{requested}'. {guidance}"))
+}
+
+/// Thread-safe model manager.
+>>>>>>> origin/master:crates/codegen/xai-grok-shell/src/agent/models.rs
 #[derive(Clone)]
 pub struct ModelsManager {
     inner: Arc<Inner>,

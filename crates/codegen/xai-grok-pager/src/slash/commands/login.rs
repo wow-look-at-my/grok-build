@@ -10,6 +10,17 @@ impl SlashCommand for LoginCommand {
         usage: "/login",
     }
 
+<<<<<<< HEAD
+=======
+    fn description(&self) -> &str {
+        "Log in or re-authenticate with your account"
+    }
+
+    fn usage(&self) -> &str {
+        "/login"
+    }
+
+>>>>>>> origin/master
     fn run(&self, _ctx: &mut CommandExecCtx, _args: &str) -> CommandResult {
         CommandResult::Action(Action::Login)
     }

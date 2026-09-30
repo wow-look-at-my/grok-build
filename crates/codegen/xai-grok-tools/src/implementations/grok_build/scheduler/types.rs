@@ -289,7 +289,19 @@ impl ScheduledTask {
         // next_fire_at() = created_at + interval = now, firing on the first tick.
         let created_at = if fire_immediately { now - cadence } else { now };
         Self {
+<<<<<<< HEAD
             id: uuid::Uuid::now_v7().to_string(),
+=======
+            // A UUID with its dashes stripped is 32 ASCII hex chars; taking the
+            // first 12 characters is the same 12 bytes the previous byte slice
+            // took, without an offset that could split a character.
+            id: uuid::Uuid::now_v7()
+                .to_string()
+                .replace('-', "")
+                .chars()
+                .take(12)
+                .collect(),
+>>>>>>> origin/master
             interval_secs,
             prompt,
             recurring,
@@ -317,6 +329,7 @@ impl ScheduledTask {
                     self.interval_secs
                 )
             })
+<<<<<<< HEAD
     }
 
     /// Next moment the actor must wake for this task: the sooner of the next fire and the auto-expiry deadline. Sleeping
@@ -327,6 +340,8 @@ impl ScheduledTask {
             Some(expires_at) => self.next_fire_at().min(expires_at),
             None => self.next_fire_at(),
         }
+=======
+>>>>>>> origin/master
     }
 
     /// Whether this task has expired (recurring tasks only).

@@ -97,7 +97,17 @@ fn non_empty_str(s: Option<&str>) -> Option<&str> {
 fn strip_scheme<'a>(s: &'a str, scheme: &str) -> Option<&'a str> {
     s.get(..scheme.len())
         .filter(|p| p.eq_ignore_ascii_case(scheme))
+<<<<<<< HEAD
         .and_then(|_| s.get(scheme.len()..))
+=======
+        // The guard only passes when the first `scheme.len()` bytes are the
+        // ASCII scheme, so that offset ends an ASCII run.
+        .map(|_| {
+            #[allow(clippy::string_slice)] // past a matched ASCII scheme
+            let rest = &s[scheme.len()..];
+            rest
+        })
+>>>>>>> origin/master
 }
 
 fn ws_url(api_base: &str, path: &str) -> Result<String, VoiceError> {

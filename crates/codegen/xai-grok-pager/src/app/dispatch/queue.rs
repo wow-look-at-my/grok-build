@@ -33,9 +33,47 @@ fn combine_queued_prompts_enabled() -> bool {
     crate::appearance::cache::load_combine_queued_prompts()
 }
 
+<<<<<<< HEAD
 /// We must also not be mid-edit, mid-model-switch, or mid-replay.
 /// **Server-busy (`is_turn_running() || !shared_queue.is_empty()`):** the immediate-send path is for prompts that must queue server-side rather than start a turn locally.
 /// **FIFO guard (`pending_prompts.is_empty()`):** a prompt may only jump onto the server queue when the local drip-feed queue is empty.
+=======
+/// Whether a prompt/command submitted right now should take the
+/// server-authoritative immediate-send path: the **server is busy**
+/// (running a turn or still holding queued prompts), the session exists, the
+/// local drip-feed queue is empty, and we're not mid-edit / model-switch /
+/// replay. Kind-specific extras are checked by the caller.
+///
+/// **Server-busy — `is_turn_running() || !shared_queue.is_empty()`:** the
+/// immediate-send path is for prompts that must queue server-side rather than
+/// start a turn locally. It is NOT enough to check `is_turn_running()`: in
+/// leader mode there is a turn-end window where this client has processed the
+/// turn-end (so it is locally `Idle`, `current_prompt_id` cleared) but has not
+/// yet adopted the leader's broadcast that the next prompt was promoted. In
+/// that window `is_turn_running()` is false, yet the agent is busy and its
+/// queue is non-empty — which this client sees as a non-empty `shared_queue`
+/// mirror. Without the queue check, a prompt sent then takes the local
+/// drip-feed path and is optimistically promoted to a running turn on THIS
+/// client, while the leader appends it BEHIND the existing queue — it shows as
+/// running here but queued on every other client (confirmed via qtrace:
+/// `send_route_plain immediate=false is_turn_running=false shared_queue_len=5`
+/// followed by `local_drain`). Treating a non-empty `shared_queue` as
+/// server-busy routes it to the server queue, where the broadcast then drives
+/// adoption consistently for all clients.
+///
+/// **FIFO guard — `pending_prompts.is_empty()`:** a prompt may only jump onto
+/// the server queue when there is nothing ahead of it in the local drip-feed
+/// queue. The two queues are merged for display/drain as *server rows first,
+/// then local rows* ([`QueuePane::sync_from_merged`]), which is only correct
+/// while every server-queued prompt is older than every local one. That
+/// invariant breaks during the startup race: prompts typed while the session is
+/// still "Starting…" go local (no session/turn yet); once the first one drains
+/// and the turn starts, a newly-typed prompt would immediate-send onto the
+/// server queue and render *ahead* of the still-pending older local prompt
+/// (e.g. `[2, 3]` shown/run as `[3, 2]`). Requiring an empty local queue keeps
+/// later prompts behind the older ones (they join the local queue and drain in
+/// order), preserving FIFO.
+>>>>>>> origin/master
 ///
 /// **No leader gate:** the shell's queue is what makes a mid-turn prompt
 /// arrive at the next gap between tool calls / model requests — the turn loop
@@ -62,6 +100,7 @@ pub(super) fn immediate_server_send_eligible(agent: &AgentView) -> bool {
 /// Whether a local row carries only text and images, and so survives the trip
 /// through [`server_queue_send_effect`] without losing anything the model sees.
 ///
+<<<<<<< HEAD
 /// A skill's wire payload and combined display segments have no place in that
 /// effect, so a row holding either stays local. Chip elements do not block:
 /// they only style a rewind restore, and the immediate-send path drops them
@@ -69,6 +108,17 @@ pub(super) fn immediate_server_send_eligible(agent: &AgentView) -> bool {
 fn row_is_plain_text(prompt: &crate::app::agent::QueuedPrompt) -> bool {
     prompt.kind == crate::app::agent::QueueEntryKind::Prompt
         && prompt.wire_blocks.is_none()
+=======
+/// A skill's wire payload, a cron task's framing and combined display segments
+/// have no place in that effect, so a row holding any of them stays local.
+/// Chip elements do not block: they only style a rewind restore, and the
+/// immediate-send path drops them the same way.
+fn row_is_plain_text(prompt: &crate::app::agent::QueuedPrompt) -> bool {
+    prompt.kind == crate::app::agent::QueueEntryKind::Prompt
+        && prompt.wire_blocks.is_none()
+        && prompt.task_id.is_none()
+        && prompt.human_schedule.is_none()
+>>>>>>> origin/master
         && prompt.combined_texts.is_empty()
 }
 

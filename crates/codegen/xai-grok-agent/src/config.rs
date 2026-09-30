@@ -37,7 +37,13 @@ fn toolset_preset_registry()
 -> &'static Mutex<HashMap<String, (ToolsetPresetBuilder, PresetVisibility)>> {
     TOOLSET_PRESETS.get_or_init(|| Mutex::new(HashMap::new()))
 }
+<<<<<<< HEAD
 /// Register an out-of-tree **public** (product) toolset preset by name. See [`TOOLSET_PRESETS`].
+=======
+/// Register an out-of-tree **public** (product) toolset preset by name. Public
+/// presets are enumerated by [`preset_names`] / [`all_toolset_presets`] and
+/// resolvable via [`toolset_for_preset`]. See [`TOOLSET_PRESETS`].
+>>>>>>> origin/master
 #[allow(clippy::disallowed_methods)] // Recovers the map; see toolset_preset_registry.
 pub fn register_toolset_preset(name: &str, builder: ToolsetPresetBuilder) {
     toolset_preset_registry()
@@ -45,8 +51,17 @@ pub fn register_toolset_preset(name: &str, builder: ToolsetPresetBuilder) {
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .insert(name.to_string(), (builder, PresetVisibility::Public));
 }
+<<<<<<< HEAD
 /// Register an out-of-tree **internal** toolset preset by name; the shell / orchestrator spawn path resolves it via [`toolset_for_preset`].
 /// See [`TOOLSET_PRESETS`].
+=======
+/// Register an out-of-tree **internal** toolset preset by name. Internal presets
+/// are resolvable via [`toolset_for_preset`] (the shell / orchestrator spawn
+/// path resolves them by name) but are deliberately NOT enumerated by
+/// [`preset_names`] / [`all_toolset_presets`], so they never leak into public
+/// preset enumeration (manifest generation, product preset sets, …). See
+/// [`TOOLSET_PRESETS`].
+>>>>>>> origin/master
 #[allow(clippy::disallowed_methods)] // Recovers the map; see toolset_preset_registry.
 pub fn register_internal_toolset_preset(name: &str, builder: ToolsetPresetBuilder) {
     toolset_preset_registry()
@@ -64,7 +79,12 @@ fn registered_toolset_preset(name: &str) -> Option<ToolServerConfig> {
         .get(name)
         .map(|(f, _)| f())
 }
+<<<<<<< HEAD
 /// Names of externally-registered **public** presets only (internal presets are intentionally excluded from enumeration).
+=======
+/// Names of externally-registered **public** presets only (internal presets are
+/// intentionally excluded from enumeration).
+>>>>>>> origin/master
 #[allow(clippy::disallowed_methods)] // Recovers the map; see toolset_preset_registry.
 fn registered_public_toolset_preset_names() -> Vec<String> {
     toolset_preset_registry()
@@ -387,7 +407,11 @@ fn explore_toolset() -> ToolServerConfig {
 }
 /// The subagent types explore may spawn. Both are read-only, so explore stays read-only through its children.
 pub const EXPLORE_SUBAGENT_TYPES: &[&str] = &["explore", "plan"];
+<<<<<<< HEAD
 /// Plan-mode toolset: read-only inspection tools, no shell, no file-editing.
+=======
+/// Plan-mode toolset — read-only inspection tools, no shell, no file-editing.
+>>>>>>> origin/master
 ///
 /// Enforces read-only at the toolset: the agent may inspect the repo and keep a todo list but cannot mutate the workspace.
 fn plan_toolset() -> ToolServerConfig {
@@ -1290,6 +1314,7 @@ impl AgentDefinition {
                 "missing frontmatter delimiters".to_string(),
             ));
         }
+<<<<<<< HEAD
         let after_opening = trimmed.get(3..).ok_or_else(|| {
             AgentBuildError::ParseError("missing frontmatter delimiters".to_string())
         })?;
@@ -1299,6 +1324,18 @@ impl AgentDefinition {
         let yaml_content = after_opening.get(..closing_idx).ok_or_else(|| {
             AgentBuildError::ParseError("missing closing frontmatter delimiter".to_string())
         })?;
+=======
+        // `trimmed` starts with the ASCII literal `---`, so byte 3 is a
+        // boundary, and `closing_idx` is the offset of the ASCII `\n---` needle
+        // (plus that literal's width), so every offset below aligns.
+        #[allow(clippy::string_slice)]
+        let after_opening = &trimmed[3..];
+        let closing_idx = after_opening.find("\n---").ok_or_else(|| {
+            AgentBuildError::ParseError("missing closing frontmatter delimiter".to_string())
+        })?;
+        #[allow(clippy::string_slice)]
+        let yaml_content = &after_opening[..closing_idx];
+>>>>>>> origin/master
         let mut def: AgentDefinition = serde_yaml::from_str(yaml_content)
             .map_err(|e| AgentBuildError::ParseError(e.to_string()))?;
         def.prompt_body = None;
@@ -1316,6 +1353,7 @@ impl AgentDefinition {
                 "missing frontmatter delimiters".to_string(),
             ));
         }
+<<<<<<< HEAD
         let after_opening = trimmed.get(3..).ok_or_else(|| {
             AgentBuildError::ParseError("missing frontmatter delimiters".to_string())
         })?;
@@ -1330,6 +1368,23 @@ impl AgentDefinition {
         })?;
         let body_start = after_closing.find('\n').map(|i| i + 1).unwrap_or(0);
         let body = after_closing.get(body_start..).unwrap_or("").trim();
+=======
+        // Same frontmatter walk as `from_file_frontmatter_only`: `---` and
+        // `\n---` are ASCII literals and `body_start` follows an ASCII '\n', so
+        // every offset aligns.
+        #[allow(clippy::string_slice)]
+        let after_opening = &trimmed[3..];
+        let closing_idx = after_opening.find("\n---").ok_or_else(|| {
+            AgentBuildError::ParseError("missing closing frontmatter delimiter".to_string())
+        })?;
+        #[allow(clippy::string_slice)]
+        let yaml_content = &after_opening[..closing_idx];
+        #[allow(clippy::string_slice)]
+        let after_closing = &after_opening[closing_idx + 4..];
+        let body_start = after_closing.find('\n').map(|i| i + 1).unwrap_or(0);
+        #[allow(clippy::string_slice)]
+        let body = after_closing[body_start..].trim();
+>>>>>>> origin/master
         let prompt_body = if body.is_empty() {
             None
         } else {
@@ -1654,6 +1709,7 @@ impl AgentDefinition {
 #[cfg(test)]
 mod tests {
     use super::*;
+<<<<<<< HEAD
     /// Pins the `spawn_subagent` rename to the shared predicate.
     #[test]
     fn task_tool_rename_matches_task_tool_id_predicate() {
@@ -1673,6 +1729,9 @@ mod tests {
             Some(xai_grok_tools::types::tool::ToolKind::Execute)
         );
     }
+=======
+
+>>>>>>> origin/master
     /// The registry is read on every preset resolution, so what the lock does
     /// after a caller panicked while holding it decides whether one bad
     /// registration ends preset resolution for the rest of the process.
@@ -1697,6 +1756,10 @@ mod tests {
             "enumeration must read the same map the lookup did"
         );
     }
+<<<<<<< HEAD
+=======
+
+>>>>>>> origin/master
     /// Native presets only.
     #[test]
     fn toolset_for_preset_resolves_known_names() {
@@ -1737,6 +1800,7 @@ mod tests {
             AgentDefinition::explore().allowed_subagent_types,
             Some(vec!["explore".to_string(), "plan".to_string()])
         );
+<<<<<<< HEAD
     }
     fn feedback_tool_id() -> String {
         ToolConfig::from(&grok_build::SendFeedbackTool).id
@@ -1744,6 +1808,8 @@ mod tests {
     fn contains_feedback(config: &ToolServerConfig) -> bool {
         let id = feedback_tool_id();
         config.tools.iter().any(|tool| tool.id == id)
+=======
+>>>>>>> origin/master
     }
     fn grok_computer_exclusive_ids() -> Vec<String> {
         #[allow(unused_mut)]

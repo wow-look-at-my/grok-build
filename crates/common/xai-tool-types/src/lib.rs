@@ -2,7 +2,10 @@
 #![allow(clippy::unwrap_used)] // 1 hit predates the gate
 
 //! Canonical, extensible tool types.
+<<<<<<< HEAD
 pub mod definition;
+=======
+>>>>>>> origin/master
 
 mod alias;
 mod ext;

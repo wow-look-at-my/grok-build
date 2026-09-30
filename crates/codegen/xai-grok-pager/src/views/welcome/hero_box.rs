@@ -660,9 +660,15 @@ fn render_wrapped_text(
             } else {
                 let cut =
                     crate::render::line_utils::byte_offset_at_width(line, w.saturating_sub(1));
+<<<<<<< HEAD
                 let Some(head) = line.get(..cut) else {
                     continue;
                 };
+=======
+                // `byte_offset_at_width` returns a `char_indices` offset.
+                #[allow(clippy::string_slice)]
+                let head = &line[..cut];
+>>>>>>> origin/master
                 (head, x + head.width() as u16)
             };
             buf.set_span(x, row, &Span::styled(head, style), width);

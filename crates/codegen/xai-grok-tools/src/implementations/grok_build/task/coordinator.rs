@@ -347,6 +347,7 @@ impl<R: ChildRunner> SubagentCoordinator<R> {
                 }
                 Some((id, output)) = self.runs.next(), if !self.runs.is_empty() => {
                     match output {
+<<<<<<< HEAD
                         Ok(output) => self.begin_terminalization(&id, output),
                         Err(panic) => self.begin_panicked_terminalization(&id, &*panic),
                     }
@@ -367,6 +368,10 @@ impl<R: ChildRunner> SubagentCoordinator<R> {
                     match ingress {
                         Some(ingress) => self.handle_send_active_message(ingress),
                         None => active_message_ingress_open = false,
+=======
+                        Ok(output) => self.finish_child(&id, output),
+                        Err(panic) => self.finish_panicked_child(&id, &*panic),
+>>>>>>> origin/master
                     }
                 }
                 Some((respond_to, outcome)) = self.validations.next(), if !self.validations.is_empty() => {
@@ -1426,6 +1431,42 @@ impl<R: ChildRunner> SubagentCoordinator<R> {
         self.start_queued_within_capacity();
     }
 
+<<<<<<< HEAD
+=======
+    /// Fails a child whose run future panicked, naming what the panic carried.
+    ///
+    /// The unwinding itself is caught where the run is pushed, so the child is
+    /// already out of `runs` by the time this runs; what is left to do is say
+    /// why to whoever polls this task, because a bare "panicked" cannot tell a
+    /// broken runner apart from a broken tool call inside it.
+    fn finish_panicked_child(&mut self, id: &str, panic: &(dyn std::any::Any + Send)) {
+        let detail = crate::util::detached::panic_payload(panic);
+        let request = self
+            .active
+            .get(id)
+            .map(|child| child.request.clone())
+            .or_else(|| self.pending.get(id).map(|child| child.request.clone()));
+        let Some(request) = request else {
+            return;
+        };
+        tracing::error!(subagent_id = id, panic = %detail, "subagent child runner panicked");
+        self.finish_child(
+            id,
+            ChildRunOutput {
+                result: SubagentResult {
+                    success: false,
+                    error: Some(format!("Subagent runtime panicked: {detail}")),
+                    subagent_id: request.id.clone(),
+                    child_session_id: request.id,
+                    ..Default::default()
+                },
+                completion_data: R::CompletionData::default(),
+                snapshot_ref: None,
+            },
+        );
+    }
+
+>>>>>>> origin/master
     fn cancel_one(
         &mut self,
         id: &str,

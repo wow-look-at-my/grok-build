@@ -140,12 +140,15 @@ fn input_title(
         ),
         ToolInput::KillTask(kill_task) => format!("Kill task: {}", kill_task.task_id),
         ToolInput::Skill(skill) => format!("Skill: {}", skill.skill),
+<<<<<<< HEAD
         ToolInput::Dynamic(_)
             if wire_name
                 == xai_grok_tools::implementations::grok_build::SEND_FEEDBACK_TOOL_NAME =>
         {
             "Feedback drafted".to_string()
         }
+=======
+>>>>>>> origin/master
         ToolInput::Dynamic(args) => dynamic_tool_title(wire_name, kind, args, cwd),
         ToolInput::MemorySearch(ms) => {
             let end = ms

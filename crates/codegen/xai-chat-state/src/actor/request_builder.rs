@@ -225,6 +225,7 @@ pub(super) fn inject_memory_reminder(items: &mut Vec<ConversationItem>, reminder
 }
 
 fn upsert_memory_reminder_text(system_prompt: &mut std::sync::Arc<str>, reminder: &str) -> bool {
+<<<<<<< HEAD
     let existing_start = system_prompt.find(MEMORY_CONTEXT_OPEN_TAG).map(|idx| {
         system_prompt
             .get(..idx)
@@ -238,6 +239,19 @@ fn upsert_memory_reminder_text(system_prompt: &mut std::sync::Arc<str>, reminder
             .get(..prefix_len)
             .unwrap_or("")
             .trim_end_matches('\n');
+=======
+    // `idx` is the offset of the ASCII `<memory-context>` tag, so it is a char
+    // boundary, and trimming `'\n'` off the prefix before it ends on one too.
+    let existing_start = system_prompt.find(MEMORY_CONTEXT_OPEN_TAG).map(|idx| {
+        #[allow(clippy::string_slice)]
+        let prefix = &system_prompt[..idx];
+        prefix.trim_end_matches('\n').len()
+    });
+
+    let updated: String = if let Some(prefix_len) = existing_start {
+        #[allow(clippy::string_slice)] // `prefix_len` derives from that same offset
+        let prefix = system_prompt[..prefix_len].trim_end_matches('\n');
+>>>>>>> origin/master
         if prefix.is_empty() {
             reminder.to_string()
         } else {

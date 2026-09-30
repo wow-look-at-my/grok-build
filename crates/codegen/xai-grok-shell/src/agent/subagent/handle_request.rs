@@ -1063,6 +1063,30 @@ pub(crate) async fn run_shell_child(
         snapshot_ref: None,
         effective_model_id: Some(effective_model_id.0.to_string()),
     };
+<<<<<<< HEAD
+=======
+    write_subagent_meta(&subagent_meta_dir, &subagent_meta);
+    if let (Some(bucket_url), Some(upload_method)) = (&ctx.gcs_bucket_url, &ctx.gcs_upload_method) {
+        let gcs_meta = SubagentSessionMetadata::from_meta(
+            &subagent_meta,
+            Some(&*effective_model_id.0),
+            Some(&child_session_info.cwd),
+            None,
+            None,
+            None,
+            effective_runtime.reasoning_effort.as_deref(),
+            effective_runtime.role_name.as_deref(),
+            request.parent_prompt_id.as_deref(),
+            0,
+        );
+        let bucket = bucket_url.clone();
+        let method = upload_method.clone();
+        let auth_for_spawn = ctx.auth_manager.clone();
+        crate::upload::turn::spawn_upload_task("subagent metadata", async move {
+            upload_subagent_metadata(&gcs_meta, &bucket, method, auth_for_spawn).await;
+        });
+    }
+>>>>>>> origin/master
     let gcs_upload_ctx = GcsUploadContext {
         bucket_url: ctx.gcs_bucket_url.clone(),
         upload_method: ctx.gcs_upload_method.clone(),
@@ -1584,7 +1608,6 @@ pub(crate) async fn run_shell_child(
         false,
         subagent_fs_watch,
         crate::session::notifications::SessionClientCaps::new(false, true),
-        None,
         None,
         None,
         false,

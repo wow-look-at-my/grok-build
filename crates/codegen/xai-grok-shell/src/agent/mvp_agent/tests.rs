@@ -619,7 +619,11 @@ fn resolve_agent_definition_defaults_to_grok_build() {
         unsafe { std::env::set_var("GROK_AGENT", v) }
     }
 }
+<<<<<<< HEAD
 /// A model_agent_type that names a strict harness wins over the default chain.
+=======
+/// When model_agent_type names a strict harness.
+>>>>>>> origin/master
 #[test]
 #[serial_test::serial]
 fn resolve_agent_definition_model_agent_type_overrides_default() {

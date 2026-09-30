@@ -57,11 +57,19 @@ impl PatternEditState {
     }
 
     pub fn backspace(&mut self) {
+<<<<<<< HEAD
         if let Some(ch) = self
             .buffer
             .get(..self.cursor)
             .and_then(|s| s.chars().next_back())
         {
+=======
+        // `cursor` is only ever set to `buffer.len()`, 0, or moved by a char's
+        // `len_utf8` in this impl, so it names a char boundary.
+        #[allow(clippy::string_slice)] // cursor maintained at char boundaries by this impl
+        let before = &self.buffer[..self.cursor];
+        if let Some(ch) = before.chars().next_back() {
+>>>>>>> origin/master
             self.cursor -= ch.len_utf8();
             self.buffer.remove(self.cursor);
             self.dirty = true;
@@ -76,21 +84,33 @@ impl PatternEditState {
     }
 
     pub fn move_left(&mut self) {
+<<<<<<< HEAD
         if let Some(ch) = self
             .buffer
             .get(..self.cursor)
             .and_then(|s| s.chars().next_back())
         {
+=======
+        #[allow(clippy::string_slice)] // cursor maintained at char boundaries by this impl
+        let before = &self.buffer[..self.cursor];
+        if let Some(ch) = before.chars().next_back() {
+>>>>>>> origin/master
             self.cursor -= ch.len_utf8();
         }
     }
 
     pub fn move_right(&mut self) {
+<<<<<<< HEAD
         if let Some(ch) = self
             .buffer
             .get(self.cursor..)
             .and_then(|s| s.chars().next())
         {
+=======
+        #[allow(clippy::string_slice)] // cursor maintained at char boundaries by this impl
+        let after = &self.buffer[self.cursor..];
+        if let Some(ch) = after.chars().next() {
+>>>>>>> origin/master
             self.cursor += ch.len_utf8();
         }
     }
@@ -741,11 +761,18 @@ fn render_pattern_editor_line(
     }
 
     let chars: Vec<char> = edit.buffer.chars().collect();
+<<<<<<< HEAD
     let cursor_idx = edit
         .buffer
         .get(..edit.cursor)
         .map(|s| s.chars().count())
         .unwrap_or(0);
+=======
+    #[allow(clippy::string_slice)] // EditBuffer::cursor is kept on char boundaries
+    let before_cursor = &edit.buffer[..edit.cursor];
+    let cursor_idx = before_cursor.chars().count();
+    // Reserve one column for the caret so an end-of-line cursor is visible.
+>>>>>>> origin/master
     let start = (cursor_idx + 1).saturating_sub(window);
 
     let text_style = Style::default().fg(theme.text_primary);
@@ -865,9 +892,16 @@ fn prepare_bash_display_text(command: &str) -> String {
         out.push_str(line.trim_end());
     }
     while out.ends_with('\n') {
+<<<<<<< HEAD
         let Some(without) = out.len().checked_sub(1).and_then(|n| out.get(..n)) else {
             break;
         };
+=======
+        // The loop guard proves the last byte is a one-byte `'\n'`, so
+        // `len - 1` is a char boundary.
+        #[allow(clippy::string_slice)]
+        let without = &out[..out.len() - 1];
+>>>>>>> origin/master
         if without.ends_with('\\') {
             out.pop();
             break;
@@ -882,6 +916,27 @@ fn prepare_bash_display_text(command: &str) -> String {
     out
 }
 
+<<<<<<< HEAD
+=======
+/// Compute the display row string slices for one physical `line`: soft-wraps
+/// at tree-sitter-validated shell operators (`&&` / `||` / `|` / `;`) first,
+/// then quote-aware width wrap within each segment, keeping heredoc payload
+/// lines intact. Every returned slice is a sub-slice of `line` (so a caller
+/// can recover its byte offset via pointer arithmetic), which lets
+/// [`build_raw_bash_lines`] slice already-highlighted spans per row without
+/// ever re-lexing a wrap fragment.
+///
+/// At most `max_rows` rows are produced, and wrap work stops once the cap is
+/// reached — a collapsed huge one-liner is never fully wrapped, and its
+/// chunk boundaries are discovered lazily rather than materialized. The
+/// capped prefix is identical to the same rows of an uncapped call (packing
+/// is greedy left-to-right).
+// Every offset sliced on here is either a `bounds` value (the parse offsets
+// are filtered through `line.is_char_boundary` below, and the chain ends at
+// `line.len()`) or such an offset stepped over ASCII whitespace: all char
+// boundaries.
+#[allow(clippy::string_slice)]
+>>>>>>> origin/master
 fn soft_wrap_row_texts<'a>(
     line: &'a str,
     line_start: usize,
@@ -976,6 +1031,7 @@ fn soft_wrap_row_texts<'a>(
     out
 }
 
+<<<<<<< HEAD
 fn display_width_end(s: &str, start: usize, limit: usize, width: usize) -> usize {
     let Some(rest) = s.get(start..limit.min(s.len())) else {
         return start;
@@ -1019,6 +1075,24 @@ fn extend_display_width_rows<'a>(
     }
 }
 
+=======
+/// Word-wrap a bash fragment without breaking on whitespace that sits inside
+/// single- or double-quoted strings.
+///
+/// Break candidates are byte offsets *after* a run of whitespace that is not
+/// inside quotes. If a single unbreakable span (e.g. a long `'...'` literal)
+/// still exceeds `width`, it is emitted as one row (may overflow the panel —
+/// better than splitting `jq '.[] | ...'` mid-expression).
+///
+/// At most `max_rows` rows are produced; the scan returns as soon as the cap
+/// is reached and break points are discovered lazily, so a huge unquoted
+/// line costs only the candidate rows actually considered — never a
+/// full-line width scan or a full break-offset allocation.
+// Every offset sliced on here is a `QuoteAwareBreakPoints` value (the start of
+// an ASCII whitespace run, so a boundary), `line.len()`, or one of those stepped
+// over ASCII whitespace: all char boundaries.
+#[allow(clippy::string_slice)]
+>>>>>>> origin/master
 fn bash_quote_aware_wrap(line: &str, width: usize, max_rows: usize) -> Vec<&str> {
     if max_rows == 0 {
         return Vec::new();

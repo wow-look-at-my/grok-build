@@ -53,6 +53,7 @@ pub fn parse_install_source(input: &str, cwd: &Path) -> InstallSource {
             // SSH URL: git@host:user/repo.git@ref
             // The @ in git@ is part of the URL, look for @ after the first :
             if let Some(colon_pos) = main.find(':') {
+<<<<<<< HEAD
                 let Some(after_colon) = main.get(colon_pos + 1..) else {
                     return InstallSource::Git {
                         url: main.to_string(),
@@ -68,6 +69,17 @@ pub fn parse_install_source(input: &str, cwd: &Path) -> InstallSource {
                         after_colon.get(..at_pos).unwrap_or("")
                     );
                     let git_ref = after_colon.get(at_pos + 1..).unwrap_or("").to_string();
+=======
+                // `:` and `@` are both single-byte ASCII, so `colon_pos + 1`,
+                // `colon_pos`, `at_pos` and `at_pos + 1` are all char boundaries.
+                #[allow(clippy::string_slice)]
+                let after_colon = &main[colon_pos + 1..];
+                if let Some(at_pos) = after_colon.rfind('@') {
+                    #[allow(clippy::string_slice)]
+                    let url = format!("{}:{}", &main[..colon_pos], &after_colon[..at_pos]);
+                    #[allow(clippy::string_slice)]
+                    let git_ref = after_colon[at_pos + 1..].to_string();
+>>>>>>> origin/master
                     (url, Some(git_ref))
                 } else {
                     (main.to_string(), None)

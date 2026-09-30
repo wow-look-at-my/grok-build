@@ -265,6 +265,13 @@ fn add_directory_to_tar<W: std::io::Write>(
     Ok(count)
 }
 
+<<<<<<< HEAD
+=======
+// ---------------------------------------------------------------------------
+// Upload method diagnostics
+// ---------------------------------------------------------------------------
+
+>>>>>>> origin/master
 pub struct UploadMethodDisplay<'a> {
     pub method: &'a UploadMethod,
     pub bucket_url: &'a str,
@@ -402,6 +409,7 @@ async fn run_upload(
     let output = args.output.as_deref();
     let json = args.json;
 
+<<<<<<< HEAD
     let upload_method = match resolve_upload_gate(agent_config).await {
         UploadGate::Ready(method) => method,
         UploadGate::DataCollectionDisabled => {
@@ -426,6 +434,21 @@ async fn run_upload(
                 );
             }
             return run_export(args, session_dir, agent_config, Some("no_credentials")).await;
+=======
+    let upload_method = resolve_upload_method(agent_config).await;
+    let upload_method = match upload_method {
+        Some(method) => method,
+        None => {
+            tracing::warn!(
+                session_id = %session_id,
+                "trace_cmd: no upload credentials available"
+            );
+            anyhow::bail!(
+                "No upload credentials. Run `grok login`. \
+                 See {} for upload overrides.",
+                crate::util::display_user_grok_path("docs/user-guide")
+            );
+>>>>>>> origin/master
         }
     };
 

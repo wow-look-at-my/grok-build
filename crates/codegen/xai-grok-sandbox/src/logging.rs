@@ -51,6 +51,11 @@ impl SandboxLogger {
         &self.metrics
     }
 
+<<<<<<< HEAD
+=======
+    /// Take all accumulated events, draining the internal buffer.
+    #[allow(clippy::disallowed_methods)] // `unwrap_or_default` is the poison arm
+>>>>>>> origin/master
     pub fn take_events(&self) -> Vec<SandboxEvent> {
         self.events
             .lock()

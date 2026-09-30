@@ -2311,9 +2311,23 @@ mod tests {
             system_reminder_tag: crate::reminders::DEFAULT_REMINDER_TAG,
         }
     }
+<<<<<<< HEAD
     /// Regression test: `kind_params` must merge input params from ALL tools that share a `ToolKind`, not just the first one. Before the fix, the
     /// `kind_params` builder used `if map.is_empty()` to seed identity param-name mappings only from the **first** tool of each kind. At runtime,
     /// the template `${{ params.edit.replace_all }}` failed with "undefined value".
+=======
+    /// Regression test: `kind_params` must merge input params from ALL tools
+    /// that share a `ToolKind`, not just the first one.
+    ///
+    /// Before the fix, the `kind_params` builder used `if map.is_empty()` to
+    /// seed identity param-name mappings only from the **first** tool of each
+    /// kind. When `opencode:edit` (`ToolKind::Edit`, camelCase input:
+    /// `{ filePath, oldString, newString, replaceAll }`) appears before
+    /// `grok_build:search_replace` (`ToolKind::Edit`, input:
+    /// `{ file_path, old_string, new_string, replace_all }`), a first-tool-only
+    /// seed leaves `params.edit` without `replace_all`. The template
+    /// `${{ params.edit.replace_all }}` then fails with "undefined value".
+>>>>>>> origin/master
     #[tokio::test]
     async fn kind_params_merged_across_multiple_tools_of_same_kind() {
         let tmp = TempDir::new().unwrap();
@@ -3084,7 +3098,18 @@ mod tests {
             "unknown ids must be absent"
         );
     }
+<<<<<<< HEAD
     /// Regression test: `validate_config` must reject configurations where tools resolve to the same `client_name`.
+=======
+    /// Regression test: `validate_config` must reject configurations where
+    /// two tools resolve to the same `client_name`.
+    ///
+    /// Without `name_override`, the client_name defaults to `entry.id`
+    /// (e.g. `"read_file"`). If both `GrokBuild:read_file` and
+    /// `GrokBuildConcise:read_file` are in the config, both would get
+    /// `client_name = "read_file"`, making the second unreachable at
+    /// dispatch time.
+>>>>>>> origin/master
     #[test]
     fn validate_config_rejects_duplicate_client_name() {
         let builder = ToolRegistryBuilder::new();

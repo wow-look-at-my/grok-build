@@ -249,6 +249,7 @@ fn truncate_diff(raw: String) -> String {
         return raw;
     }
     let elided = raw.len().saturating_sub(GOAL_CLASSIFIER_DIFF_MAX_BYTES);
+<<<<<<< HEAD
     // Truncate at a UTF-8 boundary at or below the budget
     // `floor_char_boundary` is stable as of 1.79 but we use a manual scan to stay on the crate's MSRV path
     let mut cut = GOAL_CLASSIFIER_DIFF_MAX_BYTES;
@@ -260,6 +261,11 @@ fn truncate_diff(raw: String) -> String {
     };
     let mut out = String::with_capacity(cut + 64);
     out.push_str(prefix);
+=======
+    let head = truncate_bytes(&raw, GOAL_CLASSIFIER_DIFF_MAX_BYTES);
+    let mut out = String::with_capacity(head.len() + 64);
+    out.push_str(head);
+>>>>>>> origin/master
     out.push_str(&format!(
         "\n... (diff truncated, {elided} bytes elided) ...\n"
     ));

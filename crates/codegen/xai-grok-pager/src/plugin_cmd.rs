@@ -221,7 +221,15 @@ fn print_component_summary(manifest: &PluginManifest, root: &Path) {
 }
 
 fn abbreviated_commit(c: Option<&str>) -> &str {
+<<<<<<< HEAD
     c.and_then(|s| s.get(..7.min(s.len()))).unwrap_or("?")
+=======
+    // Truncating to a 7-char display abbreviation: the shared helper owns the
+    // char-boundary math, so a value that is not a plain hex OID cannot split a
+    // character here.
+    c.map(|s| xai_grok_tools::util::truncate_bytes(s, 7))
+        .unwrap_or("?")
+>>>>>>> origin/master
 }
 
 fn trust_prompt(subject: &str, source_arg: &str) -> String {

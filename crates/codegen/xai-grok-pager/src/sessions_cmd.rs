@@ -35,11 +35,15 @@ enum SessionsCommand {
 
 pub async fn run(args: SessionsArgs, agent_config: &AgentConfig) -> Result<()> {
     // Best-effort only: a cached credential is used if one exists, and the command never forces an interactive login.
+<<<<<<< HEAD
     let auth = try_ensure_fresh_auth(
         &agent_config.grok_com_config,
         agent_config.endpoints.proxy_url(),
     )
     .await;
+=======
+    let auth = try_ensure_fresh_auth(&agent_config.grok_com_config).await;
+>>>>>>> origin/master
 
     let auth_manager = std::sync::Arc::new(AuthManager::new_with_proxy_base_url(
         &grok_home(),
@@ -248,6 +252,7 @@ fn print_sessions_grouped(sessions: &[MergedSession]) {
                 "(no summary)"
             };
             let truncated: String = summary.chars().take(50).collect();
+<<<<<<< HEAD
             let created = s
                 .created_at
                 .get(..s.created_at.len().min(10))
@@ -256,6 +261,12 @@ fn print_sessions_grouped(sessions: &[MergedSession]) {
                 .updated_at
                 .get(..s.updated_at.len().min(10))
                 .unwrap_or(s.updated_at.as_str());
+=======
+            // Cutting the date half off an ISO timestamp for a column: the
+            // shared helper owns the boundary math.
+            let created = xai_grok_tools::util::truncate_bytes(&s.created_at, 10);
+            let updated = xai_grok_tools::util::truncate_bytes(&s.updated_at, 10);
+>>>>>>> origin/master
             println!(
                 "{}  {}  {}  {}  {}",
                 s.session_id, created, updated, s.source, truncated

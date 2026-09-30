@@ -91,6 +91,7 @@ impl BlockingWaitState {
     #[cfg(test)]
     pub(crate) fn set_depth_for_test(&self, depth: usize) {
         self.0.lock().depth = depth;
+<<<<<<< HEAD
     }
     pub(crate) fn generation(&self) -> u64 {
         self.0.lock().generation
@@ -129,6 +130,8 @@ impl BlockingWaitState {
     #[cfg(test)]
     pub(crate) fn interrupted_wait_ids(&self) -> Option<Vec<String>> {
         self.0.lock().interrupted_wait_ids.clone()
+=======
+>>>>>>> origin/master
     }
     pub(crate) fn reset(&self) {
         let mut state = self.0.lock();

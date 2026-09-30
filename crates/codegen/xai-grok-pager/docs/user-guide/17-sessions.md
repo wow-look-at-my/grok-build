@@ -350,7 +350,11 @@ A worktree made by this release sits inside its own repository, and one made by
 an older release sits under the grok home; both shapes appear here, and each row
 shows where that checkout actually is.
 
+<<<<<<< HEAD
 To reclaim space, run `grok worktree gc --max-age 7d --dry-run`, then the same command without `--dry-run`. Without `--max-age`, gc expires nothing, and it keeps a worktree whose work it cannot find elsewhere, naming each one.
+=======
+To reclaim space, run `grok worktree gc --max-age 7d --dry-run`, then the same command without `--dry-run`. Without `--max-age`, gc expires nothing.
+>>>>>>> origin/master
 Untracked rows are not in the registry, so gc never visits them. Remove one with `grok worktree rm --dry-run <path>`, then without `--dry-run`.
 ```
 

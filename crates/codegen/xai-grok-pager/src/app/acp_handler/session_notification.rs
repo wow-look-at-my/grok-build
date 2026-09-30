@@ -1454,6 +1454,7 @@ pub(super) fn handle_session_notification_with_origin(
                     slow_for: slow_for_ms.map(std::time::Duration::from_millis),
                 })
         }
+<<<<<<< HEAD
         XaiSessionUpdate::PlanKept { plan_uri, content } => {
             if meta.is_replay || agent.session.loading_replay {
                 false
@@ -1496,6 +1497,8 @@ pub(super) fn handle_session_notification_with_origin(
             status_snapshot_applied = true;
             false
         }
+=======
+>>>>>>> origin/master
         XaiSessionUpdate::ThinkingSummary {
             stream_start_ms,
             summary,
@@ -1919,7 +1922,11 @@ pub(super) fn apply_session_event(
                 breakdown: breakdown.clone(),
                 report_path: report_path.clone(),
             };
+<<<<<<< HEAD
             if session.loading_replay || session.state.is_switch_model_compact() {
+=======
+            if session.loading_replay {
+>>>>>>> origin/master
                 scrollback.push_block(RenderBlock::session_event(
                     SessionEvent::CompactionCompleted {
                         tokens_before: *tokens_before,

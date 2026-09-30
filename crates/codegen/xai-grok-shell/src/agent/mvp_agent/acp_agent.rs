@@ -33,6 +33,7 @@ fn tool_overrides_capability() -> serde_json::Value {
     serde_json::to_value(TOOL_OVERRIDES_CAPABILITY)
         .expect("ToolOverridesCapability is always serializable")
 }
+<<<<<<< HEAD
 impl MvpAgent {
     pub(crate) async fn set_model_gated(
         &self,
@@ -88,6 +89,8 @@ impl MvpAgent {
         res
     }
 }
+=======
+>>>>>>> origin/master
 /// True when a text block of `prompt` sets `ENABLE_FIREHOSE_META` to `true`.
 /// `/debug` sets it, so the process that runs the session logs its repro.
 fn prompt_requests_firehose(prompt: &[acp::ContentBlock]) -> bool {
@@ -480,6 +483,7 @@ impl acp::Agent for MvpAgent {
             Some(xai_grok_login::PreferredAuthMethod::ApiKey) => false,
             _ => has_cached_token,
         };
+<<<<<<< HEAD
         let built = {
             let _t = xai_grok_telemetry::instrumentation::timer(
                 "startup.acp_initialize.auth_methods",
@@ -495,6 +499,17 @@ impl acp::Agent for MvpAgent {
                 preferred_method,
             })
         };
+=======
+        let built = auth_method::build_auth_methods(auth_method::AuthMethodsBuildInputs {
+            has_external_api_key,
+            has_cached_token,
+            has_enterprise_oidc,
+            enterprise_oidc_issuer: enterprise_oidc_issuer.as_deref(),
+            login_label: login_label.as_deref(),
+            has_auth_provider_command: has_auth_provider,
+            preferred_method,
+        });
+>>>>>>> origin/master
         let auth_methods = built.methods;
         xai_grok_telemetry::unified_log::info(
             "auth: initialize() built auth_methods for ACP response",
@@ -1062,7 +1077,10 @@ impl acp::Agent for MvpAgent {
                 &serde_json::Value::Object(meta.clone()),
             );
         }
+<<<<<<< HEAD
         let preamble_span = region!("prompt.preamble", Parent::Inherit);
+=======
+>>>>>>> origin/master
         if prompt_requests_firehose(&arguments.prompt) {
             let status = xai_grok_telemetry::debug_log::enable_firehose();
             tracing::info!(

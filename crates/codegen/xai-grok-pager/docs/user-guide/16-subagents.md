@@ -225,7 +225,13 @@ Capability mode is not a spawn argument. A child's tools come from its **agent t
 | `read-only`  | Yes  | No    | No      | Read, search, and inspect (also web search and LSP); no file edits or shell. |
 | `read-write` | Yes  | Yes   | No      | Read, plus create, edit, delete, and move files. No shell. |
 | `execute`    | Yes  | No    | Yes     | Read, plus run shell commands and background tasks. No file edits. |
+<<<<<<< HEAD
 | `all`        | Yes  | Yes   | Yes     | Unrestricted tool access. Default for `general-purpose`. |
+=======
+| `all`        | Yes  | Yes   | Yes     | Unrestricted tool access.                    |
+
+If you omit `capability_mode`, the subagent uses its agent type's toolset. The built-in `explore` and `plan` types read and search but cannot edit files or run shell commands; `general-purpose` ships the full toolset.
+>>>>>>> origin/master
 
 ---
 

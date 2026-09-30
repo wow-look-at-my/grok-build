@@ -66,12 +66,40 @@ pub(crate) struct LineRange {
     pub end_line: usize,
 }
 
+/// `text[from..to]` for the match-position surgery in this module.
+///
+/// Every index handed here is the byte offset of a whole match (a `find` /
+/// `match_indices` result, or such an offset plus the matched needle's byte
+/// length), a `\n` offset plus one, `0`, or `text.len()`. A match never starts
+/// or ends inside a character and neither does the offset after a `'\n'`, so
+/// both ends of the range align.
+///
+/// The normalized-matching path adds one more source: [`offset_map`] entries
+/// indexed at a normalized char boundary, which map back to the start byte of
+/// the original character.
+///
+/// [`offset_map`]: crate::util::unicode_confusables::build_offset_map
+#[allow(clippy::string_slice)] // whole-match and newline offsets
+fn span(text: &str, from: usize, to: usize) -> &str {
+    &text[from..to]
+}
+
+/// `text[from..]`, the tail after the last match. Same proof as [`span`].
+#[allow(clippy::string_slice)] // `span`'s end, or 0
+fn span_to_end(text: &str, from: usize) -> &str {
+    &text[from..]
+}
+
 /// Compute the line range of the inserted text in the text
 pub(crate) fn compute_line_range(text: &str, start_pos: usize, inserted_text: &str) -> LineRange {
+<<<<<<< HEAD
     let start_line = text
         .get(..start_pos)
         .map(|prefix| prefix.matches('\n').count())
         .unwrap_or(0);
+=======
+    let start_line = span(text, 0, start_pos).matches('\n').count();
+>>>>>>> origin/master
     let lines_in_inserted = inserted_text.split_inclusive('\n').count().max(1);
     let end_line = start_line + lines_in_inserted - 1;
     LineRange {
@@ -92,19 +120,27 @@ pub(crate) fn replace_using_positions(
     let mut last_end: usize = 0;
 
     for &pos in match_positions {
+<<<<<<< HEAD
         let Some(chunk) = text.get(last_end..pos) else {
             return (text.to_owned(), Vec::new());
         };
         new_text.push_str(chunk);
+=======
+        new_text.push_str(span(text, last_end, pos));
+>>>>>>> origin/master
         new_positions.push(new_text.len());
         new_text.push_str(new_string);
         last_end = pos + old_string.len();
     }
 
+<<<<<<< HEAD
     match text.get(last_end..) {
         Some(tail) => new_text.push_str(tail),
         None => return (text.to_owned(), Vec::new()),
     }
+=======
+    new_text.push_str(span_to_end(text, last_end));
+>>>>>>> origin/master
     (new_text, new_positions)
 }
 
@@ -123,12 +159,20 @@ pub(crate) fn build_edit_details(
         let line_range_new = compute_line_range(new_text, start_pos, new_string);
         // Extract the leading text on the line before the match starts.
         // This is the text between the last '\n' before start_pos and start_pos itself.
+<<<<<<< HEAD
         let line_start = new_text
             .get(..start_pos)
             .and_then(|prefix| prefix.rfind('\n'))
             .map(|i| i + 1)
             .unwrap_or(0);
         let line_prefix = new_text.get(line_start..start_pos).unwrap_or("").to_owned();
+=======
+        let line_start = span(new_text, 0, start_pos)
+            .rfind('\n')
+            .map(|i| i + 1)
+            .unwrap_or(0);
+        let line_prefix = span(new_text, line_start, start_pos).to_owned();
+>>>>>>> origin/master
 
         details.push(SearchReplaceEditDetail {
             old_string: old_string.to_owned(),
@@ -208,10 +252,14 @@ pub(crate) fn find_normalized_match_positions(text: &str, pattern: &str) -> Norm
             continue;
         }
 
+<<<<<<< HEAD
         let Some(orig_slice) = text.get(orig_start..orig_end) else {
             had_rejected_candidates = true;
             continue;
         };
+=======
+        let orig_slice = span(text, orig_start, orig_end);
+>>>>>>> origin/master
 
         // Roundtrip validation: the normalized original slice must exactly
         // equal the normalized pattern.  This catches partial-expansion
@@ -264,19 +312,27 @@ pub(crate) fn replace_normalized_matches(
     let mut last_end: usize = 0;
 
     for m in matches {
+<<<<<<< HEAD
         let Some(chunk) = text.get(last_end..m.original_start) else {
             return (text.to_owned(), Vec::new());
         };
         result.push_str(chunk);
+=======
+        result.push_str(span(text, last_end, m.original_start));
+>>>>>>> origin/master
         new_positions.push(result.len());
         result.push_str(new_string);
         last_end = m.original_start + m.original_len;
     }
 
+<<<<<<< HEAD
     match text.get(last_end..) {
         Some(tail) => result.push_str(tail),
         None => return (text.to_owned(), Vec::new()),
     }
+=======
+    result.push_str(span_to_end(text, last_end));
+>>>>>>> origin/master
     (result, new_positions)
 }
 

@@ -2,8 +2,12 @@
 
 use crate::config::PromptSuggestModelPin;
 use crate::sampling::ConversationItem;
+<<<<<<< HEAD
 use xai_grok_sampling_types::ReasoningEffort;
 use xai_grok_tools::util::truncate_str;
+=======
+use xai_grok_tools::util::truncate_bytes;
+>>>>>>> origin/master
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct SuggestReasoning {
@@ -144,12 +148,20 @@ fn transcript_line(role: &str, text: &str, cap: usize) -> Option<String> {
     if text.is_empty() {
         return None;
     }
+<<<<<<< HEAD
     let body = if text.len() > cap {
         truncate_to(text, cap)
     } else {
         text.to_owned()
     };
     Some(format!("{role}: {body}"))
+=======
+    let mut text = text;
+    if text.len() > MESSAGE_CAP_CHARS {
+        text = truncate_bytes(text, MESSAGE_CAP_CHARS);
+    }
+    Some(format!("{role}: {text}"))
+>>>>>>> origin/master
 }
 
 /// Keeps genuine `User` messages (skipping runtime-synthesized ones) and `Assistant` text, newest-last.

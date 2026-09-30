@@ -169,7 +169,11 @@ fn main() -> Result<()> {
             println!("  Path:   {}", result.worktree_path.display());
             println!(
                 "  Commit: {}",
+<<<<<<< HEAD
                 result.commit.get(..12).unwrap_or(result.commit.as_str())
+=======
+                result.commit.get(..12).unwrap_or(&result.commit)
+>>>>>>> origin/master
             );
 
             // For snapshot methods (btrfs/overlay), files_copied will be 0

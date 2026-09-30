@@ -5689,6 +5689,7 @@ async fn repair_history_command_refused_while_turn_active() {
     assert_eq!(report.stripped_tool_result_ids, vec!["call_ORPHAN"]);
 }
 
+<<<<<<< HEAD
 #[tokio::test]
 async fn restore_snapshot_restores_all_fields() {
     let mut h = TestHarness::new();
@@ -5720,6 +5721,8 @@ async fn restore_snapshot_restores_all_fields() {
     assert_eq!(tokens, 500);
 }
 
+=======
+>>>>>>> origin/master
 /// Persistence that unwinds on the first item it is handed.
 struct PanickingPersistence {
     seen: std::sync::atomic::AtomicUsize,
@@ -5745,6 +5748,7 @@ impl crate::persistence::ChatPersistence for PanickingPersistence {
 
     fn replace_history(&mut self, _items: &[ConversationItem]) {}
 
+<<<<<<< HEAD
     fn replace_history_for_strip_and_ack(
         &mut self,
         _items: &[ConversationItem],
@@ -5754,6 +5758,8 @@ impl crate::persistence::ChatPersistence for PanickingPersistence {
         rx
     }
 
+=======
+>>>>>>> origin/master
     fn flush(&mut self) {}
 }
 

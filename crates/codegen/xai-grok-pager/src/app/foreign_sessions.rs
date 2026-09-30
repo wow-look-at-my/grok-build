@@ -207,6 +207,10 @@ pub(crate) enum ForeignPickerSource {
 }
 impl ForeignPickerSource {
     const ALL: [Self; 2] = [Self::Claude, Self::Cursor];
+<<<<<<< HEAD
+=======
+
+>>>>>>> origin/master
     pub(crate) fn from_tool(tool: ForeignSessionTool) -> Self {
         match tool {
             ForeignSessionTool::Claude => Self::Claude,

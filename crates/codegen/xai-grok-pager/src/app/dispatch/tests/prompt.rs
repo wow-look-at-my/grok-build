@@ -5165,9 +5165,15 @@ fn stranded_image_row_migrates_to_server_queue() {
     assert!(app.agents[&id].session.pending_prompts.is_empty());
 }
 
+<<<<<<< HEAD
 /// The local drip-feed drain must hold while a non-running server row exists.
 /// The shell owns the next turn (its `running_prompt_id` broadcast starts it).
 /// Draining locally would promote a bogus local turn that swallows the real turn's deltas.
+=======
+/// the shell owns the next turn (its `running_prompt_id` broadcast starts it).
+/// Draining locally would promote a bogus local turn that swallows the real
+/// turn's deltas.
+>>>>>>> origin/master
 #[test]
 fn local_drain_holds_while_server_row_queued() {
     use crate::app::dispatch::queue::maybe_drain_queue;

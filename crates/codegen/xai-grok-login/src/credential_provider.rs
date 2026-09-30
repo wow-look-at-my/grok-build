@@ -1,4 +1,5 @@
 use std::sync::Arc;
+<<<<<<< HEAD:crates/codegen/xai-grok-login/src/credential_provider.rs
 
 use reqwest::RequestBuilder;
 use xai_grok_auth::{AuthCredentialProvider, CredentialSnapshot, HttpAuth};
@@ -11,6 +12,15 @@ use crate::grok_auth_credentials::GrokAuthCredentials;
 /// `None` for non-API-key auth.
 fn api_key_id_for(auth: Option<&crate::GrokAuth>) -> Option<String> {
     auth.filter(|a| matches!(a.auth_mode, crate::AuthMode::ApiKey))
+=======
+use xai_grok_auth::{
+    AuthCredentialProvider, CredentialSnapshot, HttpAuth, StaticAuthCredentialProvider,
+};
+/// `api_key.id` for the active credential: hash the stable API key, never the
+/// OIDC bearer (which rotates). `None` for non-API-key auth.
+fn api_key_id_for(auth: Option<&crate::auth::GrokAuth>) -> Option<String> {
+    auth.filter(|a| matches!(a.auth_mode, crate::auth::AuthMode::ApiKey))
+>>>>>>> origin/master:crates/codegen/xai-grok-shell/src/auth/credential_provider.rs
         .map(|a| xai_grok_telemetry::config::key_id_from_key(&a.key))
 }
 
@@ -94,7 +104,11 @@ pub struct ShellAuthCredentialProvider {
 }
 
 impl ShellAuthCredentialProvider {
+<<<<<<< HEAD:crates/codegen/xai-grok-login/src/credential_provider.rs
     pub fn new(auth_manager: Arc<AuthManager>, alpha_test_key: Option<String>) -> Self {
+=======
+    pub(crate) fn new(auth_manager: Arc<AuthManager>, alpha_test_key: Option<String>) -> Self {
+>>>>>>> origin/master:crates/codegen/xai-grok-shell/src/auth/credential_provider.rs
         let mut static_credentials = GrokAuthCredentials::new(None);
         static_credentials.alpha_test_key = alpha_test_key;
         Self {
@@ -118,10 +132,14 @@ impl HttpAuth for ShellAuthCredentialProvider {
         // This trait is sync, so no refresh happens here: the proactive task keeps the cache hot and `refresh_after_unauthorized()` handles 401s
         // Wire-valid only: never stamp a hard-expired access token
         let mut creds = self.static_credentials.clone();
+<<<<<<< HEAD:crates/codegen/xai-grok-login/src/credential_provider.rs
         // A session minted elsewhere must not reach an xAI host.
         if ActiveAuthBackend::default().is_xai_authority()
             && let Some(auth) = self.auth_manager.current_wire_valid()
         {
+=======
+        if let Some(auth) = self.auth_manager.current_wire_valid() {
+>>>>>>> origin/master:crates/codegen/xai-grok-shell/src/auth/credential_provider.rs
             creds.user_token = Some(auth.key);
         }
         creds.apply(builder, base_url)
@@ -131,8 +149,11 @@ impl HttpAuth for ShellAuthCredentialProvider {
 #[async_trait::async_trait]
 impl AuthCredentialProvider for ShellAuthCredentialProvider {
     fn snapshot(&self) -> CredentialSnapshot {
+<<<<<<< HEAD:crates/codegen/xai-grok-login/src/credential_provider.rs
         // The token must match what `HttpAuth::apply` puts on the wire (wire-valid only)
         // Identity fields may still come from a soft-expired cache
+=======
+>>>>>>> origin/master:crates/codegen/xai-grok-shell/src/auth/credential_provider.rs
         let identity = self.auth_manager.current_or_expired();
         let user_id = identity.as_ref().map(|a| a.user_id.clone());
         let team_id = identity.as_ref().and_then(|a| a.team_id.clone());
@@ -175,10 +196,84 @@ pub fn embedding_session_credentials(
         api_key_provider,
     )
 }
+<<<<<<< HEAD:crates/codegen/xai-grok-login/src/credential_provider.rs
 
 /// Lets `StorageClient` (in xai-file-utils) emit shell's 401-attribution event without xai-file-utils depending on shell.
 /// Holds the live `AuthManager` so attribution events carry the correct user_id.
 pub struct StorageClientAttributionBridge {
+=======
+/// Build a `StorageClient` for proxy uploads (including the high-volume
+/// `batch_upload` used for repo context / `repo_changes_dedup`).
+///
+/// ### Client Identity (Important)
+///
+/// Every call site **must** pass the correct `client_identifier` so that
+/// the API proxy (and telemetry / metrics backends) can properly attribute requests:
+///
+/// - `"grok-shell"`   — classic Grok CLI / TUI (xai-grok-shell)
+/// - `"grok-pager"`   — new Grok Pager / TUI (xai-grok-pager)
+/// - `"grok-desktop"` — Grok Desktop app
+/// - `"grok-extension"` — VS Code / browser extension
+///
+/// The factory forwards both:
+/// - `x-grok-client-version`   (e.g. "0.1.210-alpha.5 (279ffacddb)")
+/// - `x-grok-client-identifier`
+///
+/// to the underlying `xai-file-utils::StorageClient` via
+/// `.with_client_identity(...)`. This is what powers the improved error
+/// logging on the request-attribution path.
+///
+/// - When `auth_manager` is `Some`, uses the live `ShellAuthCredentialProvider`
+///   (OIDC refresh, proactive refresh, 401 recovery via `unauthorized_recovery`).
+/// - When `auth_manager` is `None`, falls back to a static token:
+///     the non-production feature is enabled.
+///
+/// `user_token` is only for AuthManager-less one-shots; live paths (incl. pager
+/// restore) pass the AuthManager.
+pub fn build_storage_client_for_proxy(
+    proxy_base_url: &str,
+    alpha_test_key: Option<String>,
+    auth_manager: Option<Arc<AuthManager>>,
+    user_token: Option<String>,
+    session_id: Option<String>,
+    client_identifier: &str,
+) -> xai_file_utils::storage_client::StorageClient {
+    let http_client = crate::http::shared_upload_client();
+    if let Some(am) = auth_manager {
+        let provider: Arc<dyn AuthCredentialProvider> =
+            Arc::new(ShellAuthCredentialProvider::new(am.clone(), alpha_test_key));
+        let bridge: Arc<dyn xai_file_utils::storage_client::Auth401AttributionCallback> =
+            Arc::new(StorageClientAttributionBridge::new(am, session_id));
+        xai_file_utils::storage_client::StorageClient::with_provider(
+            proxy_base_url,
+            http_client,
+            provider,
+        )
+        .with_client_identity(xai_grok_version::version(), client_identifier)
+        .with_client_mode(crate::http::process_client_mode())
+        .with_attribution(bridge)
+    } else {
+        let mut creds = GrokAuthCredentials::new(user_token);
+        creds.alpha_test_key = alpha_test_key;
+        let wire_bearer = creds.user_token.clone();
+        let provider: Arc<dyn AuthCredentialProvider> = Arc::new(
+            StaticAuthCredentialProvider::new(Box::new(creds), wire_bearer),
+        );
+        xai_file_utils::storage_client::StorageClient::with_provider(
+            proxy_base_url,
+            http_client,
+            provider,
+        )
+        .with_client_identity(xai_grok_version::version(), client_identifier)
+        .with_client_mode(crate::http::process_client_mode())
+    }
+}
+/// Bridge that lets `StorageClient` (which lives in xai-file-utils)
+/// emit shell's 401-attribution event without the data-collector crate
+/// having a direct dependency on shell. Holds a reference to the live
+/// `AuthManager` so attribution events carry the correct user_id.
+pub(crate) struct StorageClientAttributionBridge {
+>>>>>>> origin/master:crates/codegen/xai-grok-shell/src/auth/credential_provider.rs
     auth_manager: Arc<AuthManager>,
     session_id: Option<String>,
 }
@@ -235,6 +330,7 @@ impl OtelAuthCredentialProvider {
     pub fn set_live(&self, auth_manager: Arc<AuthManager>) {
         self.live.store(Arc::new(Some(auth_manager)));
     }
+<<<<<<< HEAD:crates/codegen/xai-grok-login/src/credential_provider.rs
 
     /// Email for the external stream: OIDC/gateway only, never API-key,
     /// git, or blank. Identity, not a content gate.
@@ -245,6 +341,9 @@ impl OtelAuthCredentialProvider {
     }
 
     /// Loads `live` once, returning the live manager when set, else the bootstrap.
+=======
+    /// Single-load snapshot of the live/bootstrap state.
+>>>>>>> origin/master:crates/codegen/xai-grok-shell/src/auth/credential_provider.rs
     fn load_state(&self) -> (Arc<AuthManager>, bool) {
         let guard = self.live.load();
         match guard.as_ref() {
@@ -265,10 +364,13 @@ impl std::fmt::Debug for OtelAuthCredentialProvider {
 
 impl HttpAuth for OtelAuthCredentialProvider {
     fn apply(&self, builder: RequestBuilder, base_url: &str) -> RequestBuilder {
+<<<<<<< HEAD:crates/codegen/xai-grok-login/src/credential_provider.rs
         // The collector is an xAI host, so a session token from another authority must not be sent to it
         if !ActiveAuthBackend::default().is_xai_authority() {
             return builder;
         }
+=======
+>>>>>>> origin/master:crates/codegen/xai-grok-shell/src/auth/credential_provider.rs
         let snapshot = self.snapshot_inner();
         let creds = GrokAuthCredentials::new(snapshot.token);
         creds.apply(builder, base_url)
@@ -308,9 +410,12 @@ impl AuthCredentialProvider for OtelAuthCredentialProvider {
     }
 
     fn has_usable_credential(&self) -> bool {
+<<<<<<< HEAD:crates/codegen/xai-grok-login/src/credential_provider.rs
         if !ActiveAuthBackend::default().is_xai_authority() {
             return false;
         }
+=======
+>>>>>>> origin/master:crates/codegen/xai-grok-shell/src/auth/credential_provider.rs
         self.load_state().0.has_usable_token()
     }
 
@@ -364,6 +469,7 @@ pub fn sync_external_otel_identity() {
         xai_grok_telemetry::external::set_identity(attrs);
     }
 }
+<<<<<<< HEAD:crates/codegen/xai-grok-login/src/credential_provider.rs
 
 /// Bootstrap the OTel credential provider both pager and TUI need at tracing init. Starts disk-read-only.
 /// Call [`wire_otel_auth_manager`] after agent init to upgrade to the live `AuthManager` with active refresh.
@@ -372,6 +478,25 @@ pub fn install_bootstrap_otel_provider(
     proxy_base_url: String,
 ) -> (Arc<dyn AuthCredentialProvider>, String) {
     let grok_com_config = crate::GrokComConfig::default();
+=======
+/// Bootstrap helper: build the full [`OtelLayerConfig`] that both
+/// `xai-grok-pager` and `xai-grok-tui` need at tracing init time.
+///
+/// The credential provider starts in bootstrap mode (disk-read-only).
+/// Call [`wire_otel_auth_manager`] after agent init to upgrade to the
+/// live `AuthManager` with active refresh.
+pub fn build_default_otel_layer_config() -> xai_grok_telemetry::otel_layer::OtelLayerConfig {
+    let endpoints = crate::agent::config::EndpointsConfig::default();
+    let grok_com_config = crate::auth::GrokComConfig::default();
+    let exporter = xai_grok_telemetry::otel_layer::OtelExporterConfig {
+        traces_url: endpoints.resolve_otlp_traces_endpoint(),
+        extra_headers: endpoints.resolve_otlp_headers(),
+        export_interval: endpoints.resolve_otlp_export_interval(),
+        timeout: endpoints.resolve_otlp_timeout(),
+        enabled: endpoints.resolve_traces_export_enabled()
+            && !crate::agent::config::is_telemetry_explicitly_disabled_sync(),
+    };
+>>>>>>> origin/master:crates/codegen/xai-grok-shell/src/auth/credential_provider.rs
     let token_header_value = grok_com_config.token_header.clone();
 
     let grok_home = xai_grok_shell_base::util::grok_home::grok_home();
@@ -656,7 +781,10 @@ mod tests {
             Some(make_auth("live-token", ChronoDuration::hours(1))),
         );
         let provider = ShellAuthCredentialProvider::new(mgr, None);
+<<<<<<< HEAD:crates/codegen/xai-grok-login/src/credential_provider.rs
 
+=======
+>>>>>>> origin/master:crates/codegen/xai-grok-shell/src/auth/credential_provider.rs
         let snap = provider.snapshot();
         assert_eq!(snap.token.as_deref(), Some("live-token"));
         assert_eq!(snap.user_id.as_deref(), Some("test-user"));
@@ -675,9 +803,13 @@ mod tests {
         );
         assert!(mgr.current().is_none(), "buffer-window precondition");
         assert!(mgr.expired_auth().is_some(), "buffer-window precondition");
+<<<<<<< HEAD:crates/codegen/xai-grok-login/src/credential_provider.rs
 
         let provider = ShellAuthCredentialProvider::new(mgr, None);
 
+=======
+        let provider = ShellAuthCredentialProvider::new(mgr, None);
+>>>>>>> origin/master:crates/codegen/xai-grok-shell/src/auth/credential_provider.rs
         let snap = provider.snapshot();
         assert_eq!(
             snap.token.as_deref(),
@@ -695,7 +827,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mgr = make_manager(&dir, None);
         let provider = ShellAuthCredentialProvider::new(mgr, None);
+<<<<<<< HEAD:crates/codegen/xai-grok-login/src/credential_provider.rs
 
+=======
+>>>>>>> origin/master:crates/codegen/xai-grok-shell/src/auth/credential_provider.rs
         let snap = provider.snapshot();
         assert!(
             snap.token.is_none(),
@@ -748,7 +883,10 @@ mod tests {
         mgr.set_refresher(Arc::new(OkRefresher {
             calls: calls.clone(),
         }));
+<<<<<<< HEAD:crates/codegen/xai-grok-login/src/credential_provider.rs
 
+=======
+>>>>>>> origin/master:crates/codegen/xai-grok-shell/src/auth/credential_provider.rs
         let provider = ShellAuthCredentialProvider::new(mgr.clone(), None);
         assert!(provider.refresh_after_unauthorized().await);
         assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
@@ -793,13 +931,19 @@ mod tests {
         );
         assert!(!resolved.is_empty());
     }
+<<<<<<< HEAD:crates/codegen/xai-grok-login/src/credential_provider.rs
 
+=======
+>>>>>>> origin/master:crates/codegen/xai-grok-shell/src/auth/credential_provider.rs
     #[test]
     fn snapshot_populates_tenant_id_per_auth_mode() {
         use xai_grok_telemetry::config::key_id_from_key;
         let _guard = EarlyInvalidationGuard::pin_to_default();
         let dir = tempfile::tempdir().unwrap();
+<<<<<<< HEAD:crates/codegen/xai-grok-login/src/credential_provider.rs
 
+=======
+>>>>>>> origin/master:crates/codegen/xai-grok-shell/src/auth/credential_provider.rs
         let api_auth = GrokAuth {
             key: "sk-apikey-xyz".into(),
             auth_mode: crate::AuthMode::ApiKey,
@@ -812,12 +956,15 @@ mod tests {
             api.api_key_id.as_deref(),
             Some(key_id_from_key("sk-apikey-xyz").as_str())
         );
+<<<<<<< HEAD:crates/codegen/xai-grok-login/src/credential_provider.rs
         assert_eq!(
             api.user_id.as_deref(),
             Some("test-user"),
             "API-key sessions still carry the snapshot principal; emit attaches user.id"
         );
 
+=======
+>>>>>>> origin/master:crates/codegen/xai-grok-shell/src/auth/credential_provider.rs
         let oidc = ShellAuthCredentialProvider::new(
             make_manager(
                 &dir,
@@ -950,7 +1097,10 @@ mod tests {
         );
         assert_eq!(live_mgr.current().unwrap().key, "refreshed");
     }
+<<<<<<< HEAD:crates/codegen/xai-grok-login/src/credential_provider.rs
 
+=======
+>>>>>>> origin/master:crates/codegen/xai-grok-shell/src/auth/credential_provider.rs
     #[test]
     fn has_usable_credential_reflects_auth_state() {
         let _guard = EarlyInvalidationGuard::pin_to_default();
@@ -1013,6 +1163,7 @@ mod tests {
             "a buffer-window token is still wire-valid, so the gate keeps it usable"
         );
     }
+<<<<<<< HEAD:crates/codegen/xai-grok-login/src/credential_provider.rs
 
     #[test]
     fn oauth_gateway_email_oidc_and_external_only() {
@@ -1050,4 +1201,6 @@ mod tests {
         };
         assert_eq!(oauth_gateway_email_from_auth(&api), None);
     }
+=======
+>>>>>>> origin/master:crates/codegen/xai-grok-shell/src/auth/credential_provider.rs
 }

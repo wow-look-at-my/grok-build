@@ -187,9 +187,16 @@ pub fn session_log_path(dir: &Path, session_id: &str) -> PathBuf {
     dir.join(format!("{}.txt", sanitize_key(session_id)))
 }
 
+<<<<<<< HEAD:crates/codegen/xai-grok-telemetry/src/logs/debug_log.rs
 // `latest.txt` link and swap-temp name parts
 // Both `update_latest_symlink` (create/rename) and `prune_old_logs` (spare rule and orphan cleanup) use them, so the sites can never drift
 // Tests pin the literals on purpose: orphans created by already-shipped binaries must stay reapable across a rename of these consts
+=======
+// `latest.txt` link + swap-temp name parts, shared by `update_latest_symlink`
+// (create/rename) and `prune_old_logs` (spare rule + orphan cleanup) so the
+// sites can never drift. Tests pin the literals on purpose: orphans created by
+// already-shipped binaries must stay reapable across a rename of these consts.
+>>>>>>> origin/master:crates/codegen/xai-grok-telemetry/src/debug_log.rs
 const LATEST_LINK_NAME: &str = "latest.txt";
 const LATEST_TMP_PREFIX: &str = ".latest.";
 const LATEST_TMP_SUFFIX: &str = ".tmp";
@@ -459,8 +466,14 @@ pub enum FirehoseStatus {
 }
 
 /// Turn the firehose on for the rest of this process and say where it writes.
+<<<<<<< HEAD:crates/codegen/xai-grok-telemetry/src/logs/debug_log.rs
 /// With no startup target, [`install_firehose`] installs a dormant routing layer, and this call wakes it.
 /// A firehose that is already on stays as it is.
+=======
+///
+/// dormant routing layer, and this call wakes it. A firehose that is already on
+/// stays as it is.
+>>>>>>> origin/master:crates/codegen/xai-grok-telemetry/src/debug_log.rs
 pub fn enable_firehose() -> FirehoseStatus {
     match INSTALLED.get() {
         Some(Installed::PerSession { dir }) => FirehoseStatus::PerSession {
@@ -543,10 +556,23 @@ where
 
 // ── Install + lifecycle ──────────────────────────────────────────────────────
 
+<<<<<<< HEAD:crates/codegen/xai-grok-telemetry/src/logs/debug_log.rs
 /// Resolve the requested debug target and install the matching firehose layer on `registry`, then init the subscriber.
 /// PerSession installs the routing layer (firehose filter, RUST_LOG-immune) and prunes old session logs. With no
 /// target, the routing layer goes on dormant, for [`enable_firehose`] to wake.
 /// single-file case; routing open failures are per-file at write time and degrade gracefully.
+=======
+/// Resolve the requested debug target and install the matching firehose layer on
+/// `registry`, then init the subscriber.
+///
+/// PerSession installs the routing layer (firehose filter.
+/// prunes old session logs; SingleFile installs a flat `fmt` file picking the
+/// filter by source (GROK_LOG_FILE respects RUST_LOG). With no target.
+/// routing layer goes on dormant, for [`enable_firehose`] to wake. Open
+/// failures warn AFTER init in the single-file case.
+/// per-file at write time and degrade gracefully. `role` names the per-pid
+/// fallback file.
+>>>>>>> origin/master:crates/codegen/xai-grok-telemetry/src/debug_log.rs
 pub fn install_firehose<S>(registry: S, role: &str)
 where
     S: Subscriber + for<'span> LookupSpan<'span> + Send + Sync + 'static,

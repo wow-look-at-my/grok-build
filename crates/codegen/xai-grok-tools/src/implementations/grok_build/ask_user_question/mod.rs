@@ -713,6 +713,26 @@ mod tests {
         assert_eq!(input.questions[0].multi_select, Some(true));
     }
 
+<<<<<<< HEAD
+=======
+    /// A caller that sends the ACP spelling and the schema spelling with the
+    /// same answer is saying one thing twice, so it reads as one question.
+    #[test]
+    fn a_question_naming_both_multi_select_keys_under_one_value_parses_once() {
+        let json = serde_json::json!({
+            "questions": [{
+                "question": "Pick DB?",
+                "options": [{"label": "Postgres", "description": "Relational DB"}],
+                "multiSelect": true,
+                "multi_select": true
+            }]
+        });
+        let input: AskUserQuestionInput =
+            serde_json::from_value(json).expect("one answer named under two keys is one answer");
+        assert_eq!(input.questions[0].multi_select, Some(true));
+    }
+
+>>>>>>> origin/master
     /// The camelCase half of the pair works on its own, which is the shape the
     /// ACP `ext_method` sends. The snake_case half is
     /// [`input_accepts_snake_case_multi_select`].

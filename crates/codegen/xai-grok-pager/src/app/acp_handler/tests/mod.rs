@@ -1167,6 +1167,7 @@ pub(super) fn xai_response_completed_notif(
         std::sync::Arc::from(serde_json::value::to_raw_value(&payload).unwrap()),
     )
 }
+<<<<<<< HEAD
 /// Same as [`make_viewer_chunk_with_turn_start`] but stamped `isReplay`.
 pub(super) fn make_replay_chunk_with_turn_start(
     session_id: &str,
@@ -1265,6 +1266,8 @@ pub(super) fn send_replay_bash_tool_call(
         app,
     );
 }
+=======
+>>>>>>> origin/master
 /// Build a transient `OutputRate` update on the `x.ai/session/update` rail,
 /// the live tokens/sec the shell publishes while a response is streaming.
 /// Built through the typed `SessionNotification` so the wire shape can't drift
@@ -1290,8 +1293,14 @@ pub(super) fn xai_output_rate_notif(
         std::sync::Arc::from(serde_json::value::to_raw_value(&payload).unwrap()),
     )
 }
+<<<<<<< HEAD
 /// Build a durable `TurnCompleted` update on the `x.ai/session/update` rail, optionally stamped `isReplay`.
 /// Built through the typed `SessionNotification` so the wire shape can't drift from what the dispatch parses.
+=======
+/// Build a durable `TurnCompleted` update on the `x.ai/session/update` rail,
+/// optionally stamped `isReplay`. Built through the typed `SessionNotification`
+/// so the wire shape can't drift from what the dispatch parses.
+>>>>>>> origin/master
 pub(super) fn xai_turn_completed_notif(
     session_id: &str,
     prompt_id: &str,

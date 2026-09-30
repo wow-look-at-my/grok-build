@@ -975,7 +975,11 @@ impl SessionActor {
         objective: &str,
         token_budget: Option<i64>,
         mode: crate::session::goal_tracker::GoalMode,
+<<<<<<< HEAD
     ) -> GoalSetupOutcome {
+=======
+    ) -> String {
+>>>>>>> origin/master
         self.create_goal_orchestration(objective, token_budget)
             .await;
         {
@@ -987,6 +991,7 @@ impl SessionActor {
         }
         if self.goal_planner_on() {
             self.maybe_run_goal_planner(objective).await;
+<<<<<<< HEAD
             if let Some(msg) = self.planner_pause_short_circuit_message("Goal paused.") {
                 return GoalSetupOutcome::Message(msg);
             }
@@ -1007,6 +1012,12 @@ impl SessionActor {
         GoalSetupOutcome::Inference {
             reminder: format!("<system-reminder>\n{body}\nStart now.\n</system-reminder>\n\n"),
         }
+=======
+        }
+        let planner_enabled = self.goal_planner_on();
+        self.render_goal_start_reminder(objective, |o| goal_reminder_plan_path(planner_enabled, o))
+            .await
+>>>>>>> origin/master
     }
 
     /// Create the goal orchestration and announce it. Returns the new goal id.
@@ -1188,7 +1199,10 @@ impl SessionActor {
         self.goal_blocked_streak
             .store(0, std::sync::atomic::Ordering::Relaxed);
 
+<<<<<<< HEAD
         let mut planner_published = false;
+=======
+>>>>>>> origin/master
         if was_resumed && self.goal_planner_on() {
             let needs_retry = {
                 let tracker = self.goal_tracker.lock();

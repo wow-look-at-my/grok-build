@@ -11,8 +11,22 @@ impl<'a> Cursor<'a> {
         Self { src, pos: 0 }
     }
 
+    /// `src[from..to]`.
+    ///
+    /// Every index passed here is derived from `pos`, and `pos` only ever
+    /// advances by the `len_utf8()` of the char read at `pos` (`bump`), so it
+    /// names a char boundary; so does one byte back from an ASCII delimiter.
+    #[allow(clippy::string_slice)] // both ends are char boundaries
+    pub(super) fn bytes(&self, from: usize, to: usize) -> &'a str {
+        &self.src[from..to]
+    }
+
     pub(super) fn peek(&self) -> Option<char> {
+<<<<<<< HEAD
         self.src.get(self.pos..)?.chars().next()
+=======
+        self.bytes(self.pos, self.src.len()).chars().next()
+>>>>>>> origin/master
     }
 
     pub(super) fn bump(&mut self) -> Option<char> {
@@ -30,11 +44,19 @@ impl<'a> Cursor<'a> {
                 while matches!(self.peek(), Some(c) if c.is_ascii_alphabetic()) {
                     self.bump();
                 }
+<<<<<<< HEAD
                 self.src.get(start..self.pos).unwrap_or("")
             }
             Some(_) => {
                 self.bump();
                 self.src.get(start..self.pos).unwrap_or("")
+=======
+                self.bytes(start, self.pos)
+            }
+            Some(_) => {
+                self.bump();
+                self.bytes(start, self.pos)
+>>>>>>> origin/master
             }
             None => "",
         }
@@ -62,17 +84,25 @@ impl<'a> Cursor<'a> {
                 '}' => {
                     depth -= 1;
                     if depth == 0 {
+<<<<<<< HEAD
                         return self
                             .pos
                             .checked_sub(1)
                             .and_then(|end| self.src.get(start..end))
                             .unwrap_or("");
+=======
+                        return self.bytes(start, self.pos - 1);
+>>>>>>> origin/master
                     }
                 }
                 _ => {}
             }
         }
+<<<<<<< HEAD
         self.src.get(start..self.pos).unwrap_or("")
+=======
+        self.bytes(start, self.pos)
+>>>>>>> origin/master
     }
 
     /// Read the next "atom": a `{...}` group body, a `\command` (returned with backslash), or a single char. Skips leading whitespace.
@@ -87,11 +117,19 @@ impl<'a> Cursor<'a> {
             '\\' => {
                 self.bump();
                 self.read_command_name();
+<<<<<<< HEAD
                 Some(self.src.get(start..self.pos).unwrap_or(""))
             }
             _ => {
                 self.bump();
                 Some(self.src.get(start..self.pos).unwrap_or(""))
+=======
+                Some(self.bytes(start, self.pos))
+            }
+            _ => {
+                self.bump();
+                Some(self.bytes(start, self.pos))
+>>>>>>> origin/master
             }
         }
     }

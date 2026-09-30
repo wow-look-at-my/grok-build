@@ -503,7 +503,11 @@ fn foreign_resume_results_require_launch_token_and_canonical_cwd() {
             canonical_cwd: canonical_cwd.clone(),
             launch_token: launch_token + 1,
             hint: Some(foreign_resume_hint(
+<<<<<<< HEAD
                 xai_grok_foreign_sessions::ForeignSessionTool::Cursor,
+=======
+                xai_grok_workspace::foreign_sessions::ForeignSessionTool::Cursor,
+>>>>>>> origin/master
             )),
         }),
         &mut stale,

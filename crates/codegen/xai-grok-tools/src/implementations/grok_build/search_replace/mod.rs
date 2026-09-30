@@ -457,10 +457,21 @@ fn build_confusable_hint(
     let (norm_file, offset_map) = build_offset_map(file);
     let norm_old = normalize_confusables(old_string);
     let norm_start = norm_file.find(&norm_old)?;
+<<<<<<< HEAD
     let orig_start = *offset_map.get(norm_start)?;
     let orig_end = *offset_map.get(norm_start + norm_old.len())?;
     let match_start_line = file.get(..orig_start)?.matches('\n').count() + 1;
     let match_end_line = file.get(..orig_end)?.matches('\n').count() + 1;
+=======
+    let orig_start = offset_map[norm_start];
+    let orig_end = offset_map[norm_start + norm_old.len()];
+    // Both offsets are `build_offset_map` entries indexed at a normalized char
+    // boundary, which map back to the start byte of an original character.
+    #[allow(clippy::string_slice)]
+    let match_start_line = file[..orig_start].matches('\n').count() + 1;
+    #[allow(clippy::string_slice)]
+    let match_end_line = file[..orig_end].matches('\n').count() + 1;
+>>>>>>> origin/master
     let hits = detect_confusables(file);
     let mut affected_lines: Vec<usize> = hits
         .iter()

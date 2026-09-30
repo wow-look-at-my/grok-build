@@ -153,6 +153,55 @@ impl XSearchOptions {
             );
         }
         serde_json::Value::Object(entry)
+<<<<<<< HEAD
+=======
+    }
+}
+
+/// The entry this builds is spliced into the serialized `tools` array by the
+/// sampler client, so its keys are the wire contract with the provider.
+#[cfg(test)]
+mod x_search_entry_tests {
+    use super::{SearchDateBound, XSearchOptions};
+
+    #[test]
+    fn an_entry_with_no_dates_carries_only_the_type_tag() {
+        assert_eq!(
+            XSearchOptions::default().to_tool_entry(),
+            serde_json::json!({ "type": "x_search" })
+        );
+    }
+
+    #[test]
+    fn an_entry_ships_both_dates_it_was_given() {
+        let bound =
+            SearchDateBound::new(Some("2026-01-01".to_owned()), Some("2026-01-31".to_owned()))
+                .expect("a valid date window");
+        assert_eq!(
+            XSearchOptions {
+                date_bound: Some(bound),
+            }
+            .to_tool_entry(),
+            serde_json::json!({
+                "type": "x_search",
+                "from_date": "2026-01-01",
+                "to_date": "2026-01-31",
+            })
+        );
+    }
+
+    #[test]
+    fn a_one_sided_window_omits_the_date_it_does_not_have() {
+        let bound =
+            SearchDateBound::new(Some("2026-01-01".to_owned()), None).expect("a from-only window");
+        assert_eq!(
+            XSearchOptions {
+                date_bound: Some(bound),
+            }
+            .to_tool_entry(),
+            serde_json::json!({ "type": "x_search", "from_date": "2026-01-01" })
+        );
+>>>>>>> origin/master
     }
 }
 

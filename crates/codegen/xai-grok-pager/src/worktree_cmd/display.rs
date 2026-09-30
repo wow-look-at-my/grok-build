@@ -90,7 +90,12 @@ pub fn print_show(
         writeln!(out, "  Git Ref:        {git_ref}")?;
     }
     if let Some(ref commit) = rec.head_commit {
+<<<<<<< HEAD
         let short = commit.get(..12).unwrap_or(commit);
+=======
+        // Shorten the OID to 12 bytes; the shared helper owns the boundary math.
+        let short = xai_grok_tools::util::truncate_bytes(commit, 12);
+>>>>>>> origin/master
         writeln!(out, "  HEAD:           {short}")?;
     }
     writeln!(

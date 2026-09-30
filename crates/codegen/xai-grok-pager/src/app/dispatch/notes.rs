@@ -757,10 +757,17 @@ fn extract_session_context(agent: &AgentView) -> String {
                             .take_while(|&i| i <= 200)
                             .last()
                             .unwrap_or(0);
+<<<<<<< HEAD
                         match prompt.text.get(..end) {
                             Some(prefix) => format!("{prefix}..."),
                             None => prompt.text.clone(),
                         }
+=======
+                        // `end` came out of `char_indices`, so it is a boundary.
+                        #[allow(clippy::string_slice)] // offset from char_indices().last()
+                        let head = &prompt.text[..end];
+                        format!("{head}...")
+>>>>>>> origin/master
                     } else {
                         prompt.text.clone()
                     };

@@ -32,6 +32,7 @@ use std::sync::Arc;
 
 const STRUCTURED_OUTPUT_SCHEMA_NAME: &str = "structured_output";
 
+<<<<<<< HEAD
 /// Truncate to at most `max_bytes`, walking back to a char boundary.
 /// Plain `&s[..n]` panics when `n` lands inside a multi-byte character, which tool-call arguments routinely contain.
 /// Public because `xai-grok-shell` calls it.
@@ -47,6 +48,16 @@ pub fn truncate_bytes(s: &str, max_bytes: usize) -> &str {
         return "";
     };
     prefix
+=======
+/// Truncate to at most `max_bytes`, never splitting a character. Plain
+/// `&s[..n]` panics when `n` lands inside a multi-byte character, which
+/// tool-call arguments routinely contain.
+///
+/// The boundary math lives in `xai_grok_tools::util::truncate`; this crate
+/// depends on that one, so the two cannot drift. `pub` for `xai-grok-shell`.
+pub fn truncate_bytes(s: &str, max_bytes: usize) -> &str {
+    xai_grok_tools::util::truncate::truncate_bytes(s, max_bytes)
+>>>>>>> origin/master
 }
 
 /// A provider that validates `function.arguments` rejects the whole request, so one malformed call from an earlier turn breaks every turn after it.

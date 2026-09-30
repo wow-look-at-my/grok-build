@@ -1349,10 +1349,20 @@ pub(crate) async fn run(
         effective_config.as_ref().ok_or(()),
         remote_settings.as_ref(),
     );
+<<<<<<< HEAD
     app.foreign_session_compat = xai_grok_foreign_sessions::EnabledForeignSessionSources {
         claude: compat.claude.sessions,
         cursor: compat.cursor.sessions,
     };
+=======
+    app.foreign_session_compat =
+        xai_grok_workspace::foreign_sessions::EnabledForeignSessionSources {
+            claude: compat.claude.sessions,
+            cursor: compat.cursor.sessions,
+        };
+
+    // Load notification config from [ui.notifications] in config.toml.
+>>>>>>> origin/master
     if let Some(ref raw) = effective_config {
         app.notification_service = crate::notifications::NotificationService::new(
             crate::notifications::load_notification_config(raw),

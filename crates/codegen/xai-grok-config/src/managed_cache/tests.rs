@@ -41,7 +41,12 @@ fn signed_verdict_overrides_marker_both_ways() {
     ));
 }
 
+<<<<<<< HEAD
 /// A sidecar read BLIP is not absence: unlike NoAuthenticSidecar it never refuses on its own; the marker decision stands.
+=======
+/// A sidecar read BLIP is not absence: unlike NoAuthenticSidecar it never refuses on
+/// its own — the marker decision stands.
+>>>>>>> origin/master
 #[test]
 fn unreadable_sidecar_falls_back_to_marker() {
     use crate::signed_policy::SignedVerdict;
@@ -419,7 +424,10 @@ fn team_path_keys_on_principal_not_key_fingerprint() {
     std::fs::write(dir.join("requirements.toml"), "[features]\n").unwrap();
     let cache = read_managed_config_cache(&dir).unwrap();
     assert!(!cache_unusable_for(&cache, &dir, &team("team-a")));
+<<<<<<< HEAD
     // A team switch is detected via principal
+=======
+>>>>>>> origin/master
     assert!(cache_unusable_for(&cache, &dir, &team("team-b")));
     assert!(is_managed_config_hard_stale_for_at(&dir, &team("team-b")));
     let marker = std::fs::read_to_string(dir.join(MANAGED_CONFIG_CACHE_FILE)).unwrap();
@@ -453,7 +461,11 @@ fn identity_changed_only_on_confirmed_switch() {
     let dir = std::env::temp_dir().join(format!("grok-ident-changed-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
 
+<<<<<<< HEAD
     // No marker yet, so this is the first sync and there is nothing to evict
+=======
+    // No marker yet → first sync, nothing to evict.
+>>>>>>> origin/master
     assert!(!managed_config_identity_changed_at(&dir, Some("team-a")));
 
     // Team marker: the same team is no switch, a different team is a switch, and unknown (None) never evicts
@@ -473,8 +485,12 @@ fn identity_changed_only_on_confirmed_switch() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+<<<<<<< HEAD
 /// A blank/whitespace principal is "unknown", never a distinct identity, on EITHER side.
 /// A malformed `auth.json` or corrupt marker must not make the gate purge / apply eviction shed a real tenant's policy.
+=======
+/// A blank/whitespace principal is "unknown", never a distinct identity.
+>>>>>>> origin/master
 #[test]
 fn blank_principal_is_never_a_confirmed_switch() {
     let dir = std::env::temp_dir().join(format!("grok-ident-blank-{}", std::process::id()));
@@ -745,7 +761,51 @@ fn mark_keeps_fail_closed_armed_without_on_disk_file() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+<<<<<<< HEAD
 /// The offline purge detector fires only on a marker-recorded TEAM switch, returning the evicted principal.
+=======
+/// The gate's apply-race retry: a Compromised refusal that clears on the second
+/// evaluation (an in-flight apply settled) allows; real tamper stays refused; and
+/// non-Compromised refusals never retry.
+#[test]
+fn gate_retries_once_on_a_compromised_verdict() {
+    use crate::signed_policy::SignedVerdict;
+    // Racing apply: mismatch on the first read, settled on the second → allowed.
+    let mut calls = 0;
+    let allowed = !compromised_with_apply_race_retry(
+        || {
+            calls += 1;
+            match calls {
+                1 => (true, SignedVerdict::Compromised),
+                _ => (false, SignedVerdict::Trusted),
+            }
+        },
+        || {},
+    );
+    assert!(allowed, "a settled racing write must not refuse");
+    assert_eq!(calls, 2, "exactly one retry");
+
+    // Real tamper: Compromised on both evaluations → still refused.
+    assert!(compromised_with_apply_race_retry(
+        || (true, SignedVerdict::Compromised),
+        || {},
+    ));
+
+    // A non-Compromised refusal (e.g. a stripped sidecar) refuses without retrying.
+    let mut evals = 0;
+    let refused = compromised_with_apply_race_retry(
+        || {
+            evals += 1;
+            (true, SignedVerdict::NoAuthenticSidecar)
+        },
+        || panic!("no pause for non-Compromised refusals"),
+    );
+    assert!(refused);
+    assert_eq!(evals, 1);
+}
+
+/// The offline purge detector: fires only on a marker-recorded team switch, returning the evicted principal.
+>>>>>>> origin/master
 #[test]
 fn confirmed_team_switch_scopes_to_marker() {
     let dir = tempfile::tempdir().unwrap();

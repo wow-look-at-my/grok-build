@@ -865,6 +865,7 @@ fn shell_unescape(s: &str) -> std::borrow::Cow<'_, str> {
 /// Strip a single pair of matching ASCII single or double quotes that wrap `s`. Otherwise return `s` unchanged.
 fn strip_matching_quotes(s: &str) -> &str {
     let bytes = s.as_bytes();
+<<<<<<< HEAD
     if bytes.len() >= 2
         && let (Some(&first), Some(&last)) = (bytes.first(), bytes.last())
         && ((first == b'"' && last == b'"') || (first == b'\'' && last == b'\''))
@@ -876,6 +877,18 @@ fn strip_matching_quotes(s: &str) -> &str {
             Some(inner) => inner,
             None => s,
         };
+=======
+    if bytes.len() >= 2 {
+        let first = bytes[0];
+        let last = bytes[bytes.len() - 1];
+        if (first == b'"' && last == b'"') || (first == b'\'' && last == b'\'') {
+            // Both ends were just proven to be ASCII quote bytes, so each
+            // occupies exactly one byte: `1` and `len() - 1` are char boundaries.
+            #[allow(clippy::string_slice)] // one past an ASCII quote byte at each end
+            let inner = &s[1..s.len() - 1];
+            return inner;
+        }
+>>>>>>> origin/master
     }
     s
 }
@@ -967,6 +980,7 @@ fn split_space_before_path(s: &str) -> Vec<&str> {
     let mut start = 0;
     let mut i = 0;
     while i < bytes.len() {
+<<<<<<< HEAD
         if bytes.get(i) == Some(&b' ') && s.get(i + 1..).is_some_and(starts_with_drop_anchor) {
             if let Some(part) = s.get(start..i) {
                 parts.push(part);
@@ -978,6 +992,26 @@ fn split_space_before_path(s: &str) -> Vec<&str> {
     if let Some(part) = s.get(start..) {
         parts.push(part);
     }
+=======
+        if bytes[i] == b' ' {
+            // The byte at `i` was just checked to be an ASCII space, so it
+            // occupies byte `i` alone and both `i` and `i + 1` are char
+            // boundaries. `start` is 0 or one past such a space.
+            #[allow(clippy::string_slice)] // one past a byte just checked to be ASCII
+            let rest = &s[i + 1..];
+            #[allow(clippy::string_slice)] // 0 or one past a checked ASCII space, up to this space
+            let part = &s[start..i];
+            if starts_with_drop_anchor(rest) {
+                parts.push(part);
+                start = i + 1;
+            }
+        }
+        i += 1;
+    }
+    #[allow(clippy::string_slice)] // start is 0 or one past a checked ASCII space
+    let tail = &s[start..];
+    parts.push(tail);
+>>>>>>> origin/master
     parts
 }
 

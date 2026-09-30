@@ -1279,7 +1279,10 @@
                 max_retries: 3,
                 reason: "error decoding response body".into(),
                 retry_in_ms: Some(27_000),
+<<<<<<< HEAD
                 error_type: None,
+=======
+>>>>>>> origin/master
             }),
             &mut session,
             &mut scrollback,
@@ -1310,7 +1313,10 @@
             child_sid,
             &mut agent,
             false,
+<<<<<<< HEAD
             None,
+=======
+>>>>>>> origin/master
         );
         assert!(agent.subagent_views[child_sid]
             .session
@@ -1330,7 +1336,10 @@
             child_sid,
             &mut agent,
             false,
+<<<<<<< HEAD
             None,
+=======
+>>>>>>> origin/master
         );
         assert!(
             agent.subagent_views[child_sid]

@@ -80,7 +80,11 @@ impl UpdateConfig {
     pub fn from_environment(env: &GrokBuildEnvironment) -> Self {
         Self {
             proxy_base_url: env.cli_chat_proxy_base_url(),
+<<<<<<< HEAD
             auth_scope: xai_grok_login::GrokComConfig::default().auth_scope(),
+=======
+            auth_scope: xai_grok_shell::auth::GrokComConfig::default().auth_scope(),
+>>>>>>> origin/master
             alpha_test_key: None,
             channel: "stable".to_string(),
             npm_registry: None,

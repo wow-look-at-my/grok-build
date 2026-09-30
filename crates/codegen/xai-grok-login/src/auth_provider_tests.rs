@@ -743,8 +743,11 @@ async fn provider_helper_env_scrubs_first_party_credentials() {
     const EXPECTED: &[&str] = &[
         "GROK_AUTH",
         "GROK_AUTH_PATH",
+<<<<<<< HEAD:crates/codegen/xai-grok-login/src/auth_provider_tests.rs
         "XAI_API_KEY",
         "GROK_CODE_XAI_API_KEY",
+=======
+>>>>>>> origin/master:crates/codegen/xai-grok-shell/src/auth/auth_provider_tests.rs
         "GROK_EXTRA_AUTH_KEY",
         "GROK_TRACE_UPLOAD_CREDENTIALS_FILE",
         "OTEL_EXPORTER_OTLP_HEADERS",

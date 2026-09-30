@@ -200,8 +200,15 @@ pub(crate) fn header_level(line: &str) -> Option<usize> {
         return None;
     }
     let level = trimmed.chars().take_while(|&c| c == '#').count();
+<<<<<<< HEAD
     // The hashes must be followed by a space or end of line to count as a header
     let rest = trimmed.get(level..)?;
+=======
+    // Must be followed by a space or end of line to be a valid header
+    // `trimmed` leads with `level` ASCII '#' bytes, so `level` is a boundary.
+    #[allow(clippy::string_slice)]
+    let rest = &trimmed[level..];
+>>>>>>> origin/master
     if rest.is_empty() || rest.starts_with(' ') {
         Some(level)
     } else {

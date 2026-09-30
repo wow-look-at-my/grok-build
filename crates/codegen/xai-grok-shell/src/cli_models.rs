@@ -14,9 +14,18 @@ pub enum AuthStatus {
     NotAuthenticated,
 }
 impl AuthStatus {
+<<<<<<< HEAD
     /// Banner status precedence: env key, then session, then BYOK, then none.
     /// Differs from sampling (`resolve_credentials`: BYOK, then session, then env) so a logged-in user sees the login host.
     /// BYOK uses [`crate::agent::auth_method::should_advertise_xai_api_key`] so `disable_api_key_auth` is honored.
+=======
+    /// Banner status: env key → session → BYOK → none.
+    ///
+    /// Differs from sampling (`resolve_credentials`: BYOK → session → env) so a
+    /// logged-in user sees the login host. BYOK uses
+    /// [`crate::agent::auth_method::should_advertise_xai_api_key`] so
+    /// `disable_api_key_auth` is honored.
+>>>>>>> origin/master
     pub fn resolve(agent_config: &AgentConfig) -> Self {
         if crate::agent::auth_method::has_xai_api_key_env() {
             return Self::ApiKey;
@@ -115,7 +124,13 @@ mod tests {
         }
     }
     /// Isolate process-global auth sources that `AuthStatus::resolve` consults.
+<<<<<<< HEAD
     /// Uses `GROK_AUTH_PATH` (not `GROK_HOME`) so a OnceLock-cached real home with `auth.json` cannot leak into these tests.
+=======
+    ///
+    /// Uses `GROK_AUTH_PATH` (not `GROK_HOME`) so a OnceLock-cached real home
+    /// with `auth.json` cannot leak into these tests.
+>>>>>>> origin/master
     fn isolate_auth_sources() -> (tempfile::TempDir, [EnvGuard; 6]) {
         let dir = tempfile::tempdir().unwrap();
         let auth_path = dir.path().join("no-auth.json");
@@ -129,6 +144,10 @@ mod tests {
         ];
         (dir, guards)
     }
+<<<<<<< HEAD
+=======
+
+>>>>>>> origin/master
     fn byok_toml(model_id: &str) -> String {
         format!(
             r#"
@@ -209,6 +228,10 @@ mod tests {
             );
         }
     }
+<<<<<<< HEAD
+=======
+
+>>>>>>> origin/master
     #[test]
     fn models_list_response_round_trips() {
         let state = acp::SessionModelState::new(
@@ -260,6 +283,10 @@ mod tests {
             AuthStatus::LoggedIn(EXPECTED_LOGIN_HOST.to_owned())
         );
     }
+<<<<<<< HEAD
+=======
+
+>>>>>>> origin/master
     #[test]
     #[serial]
     fn resolve_disable_api_key_auth_suppresses_byok_banner() {
@@ -277,6 +304,10 @@ mod tests {
         ));
         assert_eq!(AuthStatus::resolve(&cfg), AuthStatus::NotAuthenticated);
     }
+<<<<<<< HEAD
+=======
+
+>>>>>>> origin/master
     #[test]
     #[serial]
     fn resolve_model_credentials_uses_first_catalog_key() {

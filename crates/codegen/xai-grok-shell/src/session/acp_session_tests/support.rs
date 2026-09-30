@@ -40,6 +40,7 @@ pub(crate) const PLAN_SEED_TODOS_PHRASE: &str =
 /// The replacement instruction: the plan's steps are already on the list.
 pub(crate) const PLAN_TODOS_ALREADY_SEEDED_PHRASE: &str =
     "The plan's steps are ALREADY on your todo list";
+<<<<<<< HEAD
 /// True when `events.jsonl` text `log` has a line of `type == ty` whose parsed JSON satisfies `predicate`.
 pub(crate) fn has_event_with(
     log: &str,
@@ -53,6 +54,8 @@ pub(crate) fn has_event_with(
         v.get("type").and_then(|t| t.as_str()) == Some(ty) && predicate(&v)
     })
 }
+=======
+>>>>>>> origin/master
 /// The instruction for a goal whose planner seeded nothing: put the steps on
 /// the list. The todo list is the only checklist either way.
 pub(crate) const PLAN_TODOS_TO_ADD_PHRASE: &str =
@@ -567,7 +570,10 @@ async fn create_test_actor_inner(
         title_refresh_generation: std::cell::Cell::new(0),
         next_title_refresh_idx: std::cell::Cell::new(0),
         turn_summary_enabled: false,
+<<<<<<< HEAD
         title_refresh_enabled: false,
+=======
+>>>>>>> origin/master
         thinking_summaries_enabled: false,
         session_turn_active: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         streaming_turn_capture: parking_lot::Mutex::new(StreamingTurnCapture::default()),

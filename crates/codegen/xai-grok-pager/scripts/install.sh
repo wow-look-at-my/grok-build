@@ -94,6 +94,7 @@ is_not_found() {
     [ "$code" = "404" ]
 }
 
+<<<<<<< HEAD
 fetch_compressed() {
     local url="$1" tmp="$2" out="$3"
     shift 3
@@ -127,6 +128,8 @@ fetch_binary() {
     download_file_parallel "$base" "$out"
 }
 
+=======
+>>>>>>> origin/master
 # Read a token from ~/.grok/auth.json for the given scope key.
 # Format: {"scope_url": {"key": "token"}, ...}
 read_grok_token() {

@@ -308,7 +308,11 @@ impl xai_tool_runtime::Tool for ReadTool {
                 }
                 format!(
                     "{}... (line truncated to {} chars)",
+<<<<<<< HEAD
                     line_text.get(..n).unwrap_or(""),
+=======
+                    crate::util::truncate_bytes(line_text, MAX_LINE_LENGTH),
+>>>>>>> origin/master
                     MAX_LINE_LENGTH
                 )
             } else {
@@ -1335,9 +1339,13 @@ mod tests {
                 assert!(
                     fc.content.starts_with("<path>"),
                     "Output should start with '<path>', got: {}",
+<<<<<<< HEAD
                     fc.content
                         .get(..fc.content.len().min(50))
                         .unwrap_or(fc.content.as_str()),
+=======
+                    crate::util::truncate_bytes(&fc.content, 50),
+>>>>>>> origin/master
                 );
                 assert!(
                     fc.content.contains("<type>file</type>"),
@@ -1350,9 +1358,13 @@ mod tests {
                 assert!(
                     fc.content.ends_with("</content>"),
                     "Output should end with '</content>', got tail: {}",
+<<<<<<< HEAD
                     fc.content
                         .get(fc.content.len().saturating_sub(30)..)
                         .unwrap_or(fc.content.as_str()),
+=======
+                    crate::util::tail_bytes(&fc.content, 30),
+>>>>>>> origin/master
                 );
                 // Verify line number format: "N: content".
                 assert!(

@@ -21,8 +21,22 @@ pub enum CompatVendor {
     Cursor,
     Claude,
 }
+<<<<<<< HEAD
 #[derive(Debug, Clone, Copy, PartialEq, Eq, strum::AsRefStr, strum::IntoStaticStr)]
 #[strum(serialize_all = "snake_case")]
+=======
+
+impl CompatVendor {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Cursor => "cursor",
+            Self::Claude => "claude",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+>>>>>>> origin/master
 pub enum CompatSurface {
     Skills,
     Rules,
@@ -254,6 +268,7 @@ impl Default for VendorCompat {
     }
 }
 
+<<<<<<< HEAD
 /// Bare file names, no path separators: read_file matches them against `Path::file_name()`; `agent_filenames()` prepends them to the vendor-gated `.claude/` paths.
 pub(crate) const INSTRUCTION_FILENAMES: &[&str] = &[
     "Agents.md",
@@ -265,6 +280,11 @@ pub(crate) const INSTRUCTION_FILENAMES: &[&str] = &[
 ];
 
 /// Resolved `[compat]` configuration threaded into compatibility consumers. Every cell defaults on.
+=======
+/// Resolved `[compat]` configuration threaded into compatibility consumers.
+///
+/// Every cell defaults on.
+>>>>>>> origin/master
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct CompatConfig {
     pub cursor: VendorCompat,
@@ -487,7 +507,13 @@ mod tests {
     #[test]
     fn toml_struct_deserializes_partial_cells() {
         // The raw TOML struct is parsed from `[compat]` in the shell crate
+<<<<<<< HEAD
         // (where `toml` is a dep).
+=======
+        // (where `toml` is a dep). Here we exercise the same serde shape via
+        // YAML (available in this crate) to pin the `Option<bool>` + `#[serde(default)]`
+        // semantics: unset cells stay `None`, unset vendors default-construct.
+>>>>>>> origin/master
         let parsed: CompatConfigToml =
             serde_yaml::from_str("cursor:\n  skills: false\n  sessions: true\n").unwrap();
         assert_eq!(parsed.cursor.skills, Some(false));

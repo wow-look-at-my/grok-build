@@ -1163,6 +1163,7 @@ async fn restore_session_from_remote(
     use xai_grok_shell::agent::session_registry_client::SessionRegistryClient;
     use xai_grok_shell::session::restore::{RestoreSessionOpts, restore_session_with_storage};
     use xai_grok_shell::util::grok_home::grok_home;
+<<<<<<< HEAD
     ensure_authenticated_or_noninteractive(
         &agent_config.grok_com_config,
         agent_config.login_device_flow,
@@ -1173,6 +1174,12 @@ async fn restore_session_from_remote(
     .await
     .map_err(|e| anyhow::anyhow!("Failed to authenticate for session restore: {}", e))?;
     let auth_manager = std::sync::Arc::new(AuthManager::new_with_proxy_base_url(
+=======
+    ensure_authenticated_or_noninteractive(&agent_config.grok_com_config, false, None)
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to authenticate for session restore: {}", e))?;
+    let auth_manager = std::sync::Arc::new(AuthManager::new(
+>>>>>>> origin/master
         &grok_home(),
         agent_config.grok_com_config.clone(),
         agent_config.endpoints.proxy_url(),

@@ -1943,7 +1943,11 @@ mod tests {
         let spec = make_shell_spec("printf '\\377\\376nope\\377done' >&2; exit 2");
         let envelope = make_envelope();
         let ctx = make_ctx();
+<<<<<<< HEAD
         let (result, _, _) = run_command_hook(&spec, &envelope, &ctx, GateKind::Stop).await;
+=======
+        let (result, _) = run_command_hook(&spec, &envelope, &ctx, GateKind::Stop).await;
+>>>>>>> origin/master
 
         let HookRunnerResult::Stop(outcome) = &result else {
             panic!("exit 2 with stderr must block the stop, got {result:?}");
@@ -1962,6 +1966,7 @@ mod tests {
         );
     }
 
+<<<<<<< HEAD
     #[test]
     fn post_tool_use_replacement_at_ceiling_survives_capture_and_parse() {
         let at_ceiling = "x".repeat(MAX_HOOK_OUTPUT_REPLACEMENT_CHARS);
@@ -1992,6 +1997,8 @@ mod tests {
         );
     }
 
+=======
+>>>>>>> origin/master
     #[test]
     fn resolve_command_path_variants() {
         let spec =

@@ -19,6 +19,7 @@ pub const MAX_CONTENT_BYTES: usize = 60 * 1024;
 /// File-extension attribute cap (`"rs"`, `"tsx"`, …).
 pub const MAX_FILE_EXTENSION_LEN: usize = 10;
 
+<<<<<<< HEAD
 fn floor_char_boundary(s: &str, max_bytes: usize) -> usize {
     if max_bytes >= s.len() {
         return s.len();
@@ -41,6 +42,11 @@ fn truncate_to(s: &str, max_bytes: usize) -> Option<String> {
 /// Standard truncation for attribute values.
 /// Strings whose `char` count exceeds [`MAX_STRING_LEN`] collapse to their first [`TRUNCATED_PREFIX_LEN`] chars plus [`TRUNCATION_MARKER`].
 /// Returns `None` when unchanged.
+=======
+/// Standard attribute-value truncation: strings whose `char` count exceeds
+/// [`MAX_STRING_LEN`] collapse to their first [`TRUNCATED_PREFIX_LEN`] chars
+/// plus [`TRUNCATION_MARKER`]. Returns `None` when unchanged.
+>>>>>>> origin/master
 pub fn truncate_value(s: &str) -> Option<String> {
     // Counting chars (not bytes) keeps the limit stable for non-ASCII text
     if s.chars().count() <= MAX_STRING_LEN {
@@ -57,7 +63,20 @@ pub fn truncate_value_owned(s: String) -> String {
 
 /// Cap gated prompt/content text at [`MAX_CONTENT_BYTES`] (UTF-8-safe).
 pub fn truncate_content(s: &str) -> Option<String> {
+<<<<<<< HEAD
     truncate_to(s, MAX_CONTENT_BYTES)
+=======
+    if s.len() <= MAX_CONTENT_BYTES {
+        return None;
+    }
+    // `str::floor_char_boundary` (stable since Rust 1.91) snaps the budget down
+    // to a char boundary. This crate caps text with std directly rather than
+    // depending on `xai-grok-tools`, whose truncation helpers sit behind a much
+    // heavier dependency edge for a logging engine.
+    #[allow(clippy::string_slice)] // the index is a char boundary
+    let head = &s[..s.floor_char_boundary(MAX_CONTENT_BYTES)];
+    Some(format!("{head}{TRUNCATION_MARKER}"))
+>>>>>>> origin/master
 }
 
 /// Cap DETAILS `tool_parameters` preview and CONTENT `error_message` at
@@ -82,8 +101,14 @@ pub fn reduce_tool_input(value: &serde_json::Value) -> String {
     }
     // Over budget even after structural reduction: clamp the serialized text.
     // The result may not be valid JSON, but it is bounded and marked.
+<<<<<<< HEAD
     let idx = floor_char_boundary(&serialized, MAX_TOOL_INPUT_JSON_BYTES);
     format!("{}{TRUNCATION_MARKER}", serialized.get(..idx).unwrap_or(""))
+=======
+    #[allow(clippy::string_slice)] // the index is a char boundary
+    let head = &serialized[..serialized.floor_char_boundary(MAX_TOOL_INPUT_JSON_BYTES)];
+    format!("{head}{TRUNCATION_MARKER}")
+>>>>>>> origin/master
 }
 
 fn reduce_json(value: &serde_json::Value, depth: usize) -> serde_json::Value {

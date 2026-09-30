@@ -1,5 +1,8 @@
 #![allow(clippy::cast_possible_truncation)] // 3 hits predate the gate
+<<<<<<< HEAD
 #![deny(clippy::indexing_slicing)]
+=======
+>>>>>>> origin/master
 
 pub mod engine;
 pub mod host;

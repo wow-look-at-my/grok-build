@@ -281,9 +281,17 @@ impl StreamingMarkdownRenderer {
         {
             tail_start += 1;
         }
+<<<<<<< HEAD
         let Some(tail) = self.source.get(tail_start..) else {
             return;
         };
+=======
+        // `frozen.source_bytes` accumulates checkpoint ends, which are
+        // pulldown-cmark source ranges, and the optional `+= 1` steps over a
+        // byte this branch just checked is an ASCII newline.
+        #[allow(clippy::string_slice)] // checkpoint boundary, or one past an ASCII '\n'
+        let tail = &self.source[tail_start..];
+>>>>>>> origin/master
         // Lazily create the incremental open-code cache once syntect is present.
         // It rebuilds itself on fence/offset change, so a stale cache from a previous tail (e.g. after a checkpoint advanced) is self-correcting.
         let open_code = match syntect {

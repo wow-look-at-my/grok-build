@@ -132,6 +132,7 @@ pub(crate) fn emit_segment_hyperlinks(
         if s_in >= e_in {
             continue;
         }
+<<<<<<< HEAD
         let Some(prefix) = segment.get(..s_in) else {
             continue;
         };
@@ -143,6 +144,14 @@ pub(crate) fn emit_segment_hyperlinks(
         let Some(lt) = link_targets.get(clr.link_idx) else {
             continue;
         };
+=======
+        // `s_in` and `e_in` were snapped to char boundaries just above.
+        #[allow(clippy::string_slice)]
+        let (before, matched) = (&segment[..s_in], &segment[s_in..e_in]);
+        let col_start = col + unicode_display_width(before);
+        let col_end = col_start + unicode_display_width(matched);
+        let lt = &link_targets[clr.link_idx];
+>>>>>>> origin/master
         out.push(HyperlinkTarget {
             line_index,
             column_range: col_start..col_end,

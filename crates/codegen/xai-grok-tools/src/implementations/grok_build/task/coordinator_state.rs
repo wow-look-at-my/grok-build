@@ -1060,6 +1060,15 @@ pub fn cap_completion_output(output: &Arc<str>, cap: usize) -> Arc<str> {
     } else {
         Arc::from(head)
     }
+<<<<<<< HEAD
+=======
+    let kept = crate::util::truncate_bytes(output, cap);
+    let end = kept.len();
+    Arc::from(format!(
+        "{kept}\n[output truncated: {end} of {} bytes shown]",
+        output.len()
+    ))
+>>>>>>> origin/master
 }
 
 /// Model-facing summary for a finished child, honoring the request's

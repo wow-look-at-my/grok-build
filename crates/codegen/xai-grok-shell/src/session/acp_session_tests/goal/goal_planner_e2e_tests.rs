@@ -571,11 +571,15 @@ async fn a_lite_goal_never_spawns_the_planner() {
                 spawn_planner_coordinator_capturing(scripted_planner_with_todos());
             let (actor, _tmp) = make_planner_actor(Some(tx), true).await;
 
+<<<<<<< HEAD
             let GoalSetupOutcome::Inference { reminder } =
                 actor.setup_goal("ship it", None, GoalMode::Lite).await
             else {
                 panic!("a lite goal must flow through to inference");
             };
+=======
+            let reminder = actor.setup_goal("ship it", None, GoalMode::Lite).await;
+>>>>>>> origin/master
             assert!(!reminder.contains("Plan:"), "no plan block: {reminder}");
             actor
                 .goal_tracker
@@ -690,12 +694,18 @@ async fn setup_goal_seeds_the_planners_own_items_without_a_model_turn() {
 
             // The whole point: `setup_goal` returns the reminder, so no model
             // turn has run — and the list is already populated when it does.
+<<<<<<< HEAD
             let GoalSetupOutcome::Inference { reminder } = actor
                 .setup_goal("ship the exporter", None, GoalMode::Full)
                 .await
             else {
                 panic!("a published plan must flow through to inference");
             };
+=======
+            let reminder = actor
+                .setup_goal("ship the exporter", None, GoalMode::Full)
+                .await;
+>>>>>>> origin/master
 
             let snap = actor.goal_tracker.lock().snapshot().cloned().unwrap();
             assert!(
@@ -2174,11 +2184,15 @@ async fn setup_goal_reminder_is_plan_aware_when_planner_enabled() {
             let (actor, _tmp) = make_planner_actor(Some(tx), true).await;
             let plan_path = actor.goal_tracker.lock().plan_path();
 
+<<<<<<< HEAD
             let GoalSetupOutcome::Inference { reminder } =
                 actor.setup_goal("ship it", None, GoalMode::Full).await
             else {
                 panic!("a published plan must flow through to inference");
             };
+=======
+            let reminder = actor.setup_goal("ship it", None, GoalMode::Full).await;
+>>>>>>> origin/master
             // Printed so `cargo test -- --nocapture` captures the exact reminder
             // text for review: the assertions below are the gate, this is the
             // artifact a reader (or the goal's verification) reads.
@@ -2200,6 +2214,13 @@ async fn setup_goal_reminder_is_plan_aware_when_planner_enabled() {
             assert!(
                 !reminder.contains(PLAN_TODOS_ALREADY_SEEDED_PHRASE),
                 "an unseeded goal must not be told its steps are on the list:\n{reminder}"
+<<<<<<< HEAD
+=======
+            );
+            assert!(
+                reminder.contains(PLAN_TODOS_TO_ADD_PHRASE),
+                "an unseeded goal must be told to put the steps on the list:\n{reminder}"
+>>>>>>> origin/master
             );
             assert!(
                 reminder.contains(PLAN_TODOS_TO_ADD_PHRASE),
@@ -2218,11 +2239,15 @@ async fn setup_goal_reminder_is_no_plan_when_planner_disabled() {
         .run_until(async {
             let (actor, _tmp) = make_planner_actor(None, false).await;
 
+<<<<<<< HEAD
             let GoalSetupOutcome::Inference { reminder } =
                 actor.setup_goal("ship it", None, GoalMode::Full).await
             else {
                 panic!("a disabled planner must flow through to inference");
             };
+=======
+            let reminder = actor.setup_goal("ship it", None, GoalMode::Full).await;
+>>>>>>> origin/master
             println!("=== no-plan setup_goal reminder ===\n{reminder}\n=== end ===\n");
 
             let snap = actor.goal_tracker.lock().snapshot().cloned().unwrap();
@@ -2284,6 +2309,7 @@ async fn goal_resume_reminder_is_plan_aware_when_planner_enabled() {
             assert!(
                 reminder.contains(PLAN_TODOS_TO_ADD_PHRASE),
                 "resume must tell the implementer to put the steps on the list:\n{reminder}"
+<<<<<<< HEAD
             );
         })
         .await;
@@ -2449,6 +2475,8 @@ async fn resume_with_planner_disabled_keeps_infra_recap() {
             assert!(
                 reminder.contains("Previous error: Turn failed: rate limit"),
                 "{reminder}"
+=======
+>>>>>>> origin/master
             );
         })
         .await;

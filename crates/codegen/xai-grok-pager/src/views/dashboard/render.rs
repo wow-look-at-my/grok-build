@@ -385,10 +385,16 @@ fn rename_editor_view(draft: &RenameDraft, width: u16) -> (&str, u16) {
     let prefix_width = UnicodeWidthStr::width(RENAME_PREFIX) as u16;
     let editor_width = width.saturating_sub(prefix_width);
     let viewport = draft.viewport(editor_width as usize);
+<<<<<<< HEAD
     let visible = draft
         .text()
         .get(viewport.visible_byte_range.clone())
         .unwrap_or("");
+=======
+    // The range is a ratatui `visible_byte_range`, a char boundary.
+    #[allow(clippy::string_slice)]
+    let visible = &draft.text()[viewport.visible_byte_range];
+>>>>>>> origin/master
     let cursor_offset = prefix_width
         .saturating_add(viewport.cursor_display_column as u16)
         .min(width.saturating_sub(1));
@@ -1492,6 +1498,7 @@ fn row_bg(theme: &Theme, state: &DashboardState, row: &DashboardRow) -> Color {
     }
 }
 
+<<<<<<< HEAD
 /// Dim metadata (subtitle, secondary line) over the row background, via `Theme::dim()`.
 /// That is a `gray_dim` fg on RGB themes, and the polarity-safe DIM attribute on the terminal theme — where `gray_dim` is the same bright black as the hover/selection band and would render the text invisible.
 fn row_dim_style(theme: &Theme, bg: Color) -> Style {
@@ -1499,6 +1506,37 @@ fn row_dim_style(theme: &Theme, bg: Color) -> Style {
 }
 
 /// A title-only row in a 3-cell rect renders as padding, title, padding.
+=======
+/// Render a row as a 2-line block plus a trailing padding line
+/// (`rect.height` is expected to be `>= 2`; the caller —
+/// `render_rows` — sizes the rect to either 2 or 3 lines depending
+/// on whether the padding is in budget).
+///
+/// Visual:
+///
+/// ```text
+///   ◆ Add responsiveness to /context · xai my-branch-2 worktree       4 mins
+///     Pending: plan approval plan.md
+/// ```
+///
+/// Line 1 (title): selection marker + icon + label + subtitle + age.
+/// Line 2 (secondary): aligned-under-label, dim text — the last
+/// tool call, the last assistant message, or a `Pending: …` preview
+/// of the front-most permission request.
+///
+/// The content block is vertically centered within the rect (see
+/// [`row_content_offset`]): a title-only row in a 3-cell rect renders
+/// as padding + title + padding.
+///
+/// Selection / hover backgrounds fill the CONTENT lines; the spacer
+/// lines around them are painted afterwards by `render_rows`'s
+/// half-block pass (see `render_spacer_halos`), which extends the
+/// highlight half a cell above and below so it reads as centered on
+/// the text.
+// Every slice in this fn is a full-range `&x[..]` on a `String`, whose ends
+// are the string's own char boundaries.
+#[allow(clippy::string_slice)]
+>>>>>>> origin/master
 fn render_row(
     buf: &mut Buffer,
     rect: Rect,
@@ -2258,11 +2296,17 @@ fn render_dispatch(
                 state.dispatch.cursor(),
             )
             .single_line_viewport(avail as usize);
+<<<<<<< HEAD
             let visible = state
                 .dispatch
                 .text()
                 .get(viewport.visible_byte_range.clone())
                 .unwrap_or("");
+=======
+            // The range is a ratatui `visible_byte_range`, a char boundary.
+            #[allow(clippy::string_slice)]
+            let visible = &state.dispatch.text()[viewport.visible_byte_range];
+>>>>>>> origin/master
             if avail > 0 {
                 buf.set_span(
                     editor_x,

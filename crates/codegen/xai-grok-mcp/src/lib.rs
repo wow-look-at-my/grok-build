@@ -2,6 +2,12 @@
 #![allow(clippy::expect_used)] // 1 hit predates the gate
 #![allow(clippy::string_slice)] // 3 hits predate the gate
 #![allow(clippy::unwrap_used)] // 2 hits predate the gate
+<<<<<<< HEAD
+=======
+
+//! MCP integration crate.
+//!
+>>>>>>> origin/master
 //! Two responsibilities:
 //!
 //! 1. **Quarantines `rmcp` 2.1 and `reqwest` 0.13.** `rmcp` 2.1 requires

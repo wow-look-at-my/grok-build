@@ -230,7 +230,60 @@ fn scope_kind_value(reply: &Value) -> Option<(&str, Option<String>)> {
         .map(str::to_owned);
     Some((kind, value))
 }
+<<<<<<< HEAD
 
+=======
+/// Map a hub-served tool name + JSON args onto an [`AccessKind`] for the
+/// permission gate in [`crate::hub::SessionRoutedToolHandler`]. Returns `None`
+/// for tools that never need a user prompt (reads / todos / dynamic).
+pub fn access_kind_for_hub_tool(tool_name: &str, args: &Value) -> Option<AccessKind> {
+    let name = tool_name.rsplit(':').next().unwrap_or(tool_name);
+    let name = name.strip_prefix("GrokBuild:").unwrap_or(name);
+    match name {
+        "run_terminal_command" | "run_terminal_cmd" | "bash" | "shell" => {
+            let cmd = args
+                .get("command")
+                .or_else(|| args.get("full_command"))
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_owned();
+            Some(AccessKind::Bash(cmd))
+        }
+        "search_replace" | "hashline_edit" => {
+            let path = args
+                .get("file_path")
+                .or_else(|| args.get("path"))
+                .and_then(Value::as_str)
+                .unwrap_or("unknown")
+                .to_owned();
+            Some(AccessKind::Edit(path))
+        }
+        "write" | "write_file" => {
+            let path = args
+                .get("file_path")
+                .or_else(|| args.get("path"))
+                .and_then(Value::as_str)
+                .unwrap_or("unknown")
+                .to_owned();
+            Some(AccessKind::Edit(path))
+        }
+        "web_fetch" => {
+            let url = args
+                .get("url")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_owned();
+            Some(AccessKind::WebFetch(url))
+        }
+        n if n.contains("__") || n.starts_with("mcp") => Some(AccessKind::MCPTool {
+            name: tool_name.to_owned(),
+            input: args.clone(),
+        }),
+        _ => None,
+    }
+}
+/// Whether a [`PromptOutcome`] allows the tool call to proceed.
+>>>>>>> origin/master
 pub fn prompt_outcome_allows(outcome: &PromptOutcome) -> bool {
     matches!(
         outcome,

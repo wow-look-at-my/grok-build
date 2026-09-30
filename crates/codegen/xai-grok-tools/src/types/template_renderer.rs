@@ -135,6 +135,7 @@ pub fn strip_markers_on_render_failure(raw: &str, err: &TemplateRenderError) -> 
 pub fn strip_template_markers(raw: &str) -> String {
     let mut out = String::with_capacity(raw.len());
     let mut rest = raw;
+<<<<<<< HEAD
     while let Some(start) = rest.find("${") {
         let Some(after) = rest.get(start + 2..) else {
             break;
@@ -155,6 +156,24 @@ pub fn strip_template_markers(raw: &str) -> String {
                 // `${` that is not a marker (or unterminated) — keep as-is.
                 out.push_str(rest.get(..start + 2).unwrap_or(""));
                 rest = rest.get(start + 2..).unwrap_or("");
+=======
+    // `split_once` returns both sides already sliced, so no byte offset is ever
+    // computed from a `find` and no slice can land inside a character.
+    while let Some((before, after)) = rest.split_once("${") {
+        out.push_str(before);
+        // The two marker forms are `${{ ... }}` and `${% ... %}`; the body is
+        // dropped and only the text after the closing marker keeps scanning.
+        let closed = after
+            .strip_prefix('{')
+            .and_then(|a| a.split_once("}}"))
+            .or_else(|| after.strip_prefix('%').and_then(|a| a.split_once("%}")));
+        match closed {
+            Some((_body, tail)) => rest = tail,
+            // `${` that is not a marker (or unterminated) — keep as-is.
+            None => {
+                out.push_str("${");
+                rest = after;
+>>>>>>> origin/master
             }
         }
     }

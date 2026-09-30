@@ -1,6 +1,9 @@
 #![allow(clippy::cast_possible_truncation)] // 17 hits predate the gate
 #![allow(clippy::cast_sign_loss)] // 7 hits predate the gate
+<<<<<<< HEAD
 #![deny(clippy::indexing_slicing)]
+=======
+>>>>>>> origin/master
 
 mod common;
 mod resize;

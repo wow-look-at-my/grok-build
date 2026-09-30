@@ -241,31 +241,51 @@ pub const WIRED: &[WireAlias] = &[
         aliases: &["session_id"],
     },
     WireAlias {
+<<<<<<< HEAD
         file: "crates/codegen/xai-grok-login/src/oidc/protocol.rs",
+=======
+        file: "crates/codegen/xai-grok-shell/src/auth/oidc/protocol.rs",
+>>>>>>> origin/master
         ty: "MinimalClaims",
         canonical: "principal_type",
         aliases: &["principalType"],
     },
     WireAlias {
+<<<<<<< HEAD
         file: "crates/codegen/xai-grok-login/src/oidc/protocol.rs",
+=======
+        file: "crates/codegen/xai-grok-shell/src/auth/oidc/protocol.rs",
+>>>>>>> origin/master
         ty: "MinimalClaims",
         canonical: "principal_id",
         aliases: &["principalId"],
     },
     WireAlias {
+<<<<<<< HEAD
         file: "crates/codegen/xai-grok-login/src/oidc/protocol.rs",
+=======
+        file: "crates/codegen/xai-grok-shell/src/auth/oidc/protocol.rs",
+>>>>>>> origin/master
         ty: "PrincipalIdClaim",
         canonical: "principal_id",
         aliases: &["principalId"],
     },
     WireAlias {
+<<<<<<< HEAD
         file: "crates/codegen/xai-grok-login/src/oidc/protocol.rs",
+=======
+        file: "crates/codegen/xai-grok-shell/src/auth/oidc/protocol.rs",
+>>>>>>> origin/master
         ty: "IdTokenClaims",
         canonical: "first_name",
         aliases: &["given_name"],
     },
     WireAlias {
+<<<<<<< HEAD
         file: "crates/codegen/xai-grok-login/src/oidc/protocol.rs",
+=======
+        file: "crates/codegen/xai-grok-shell/src/auth/oidc/protocol.rs",
+>>>>>>> origin/master
         ty: "IdTokenClaims",
         canonical: "last_name",
         aliases: &["family_name"],
@@ -289,6 +309,7 @@ pub const WIRED: &[WireAlias] = &[
         aliases: &["turnNumber"],
     },
     WireAlias {
+<<<<<<< HEAD
         file: "crates/codegen/xai-grok-shell/src/session/acp_types.rs",
         ty: "ClientFeedbackInput",
         canonical: "request_trace_upload_token",
@@ -326,6 +347,8 @@ pub const WIRED: &[WireAlias] = &[
         aliases: &["nfs_worktree"],
     },
     WireAlias {
+=======
+>>>>>>> origin/master
         file: "crates/codegen/xai-grok-pager/src/views/rewind.rs",
         ty: "RewindPointInfo",
         canonical: "prompt_index",
@@ -610,7 +633,11 @@ pub const ENUM_VARIANTS: &[EnumVariantAlias] = &[
         why: "a client type is one string key; see ToolNamespace",
     },
     EnumVariantAlias {
+<<<<<<< HEAD
         file: "crates/codegen/xai-grok-login/src/model.rs",
+=======
+        file: "crates/codegen/xai-grok-shell/src/auth/model.rs",
+>>>>>>> origin/master
         ty: "AuthMode",
         aliases: &["grok", "oidc"],
         why: "an auth mode is one string key, read from the auth.json this \
@@ -637,6 +664,7 @@ pub const ENUM_VARIANTS: &[EnumVariantAlias] = &[
         why: "a decision is one string key, and `#[serde(other)]` catches every \
               name this enum does not spell",
     },
+<<<<<<< HEAD
     EnumVariantAlias {
         file: "crates/codegen/xai-grok-config-types/src/permission.rs",
         ty: "ToolFilter",
@@ -682,6 +710,8 @@ pub const ENUM_VARIANTS: &[EnumVariantAlias] = &[
         why: "a variant name is one key of the enum's tag, so one value names \
               one variant; see ToolNamespace",
     },
+=======
+>>>>>>> origin/master
 ];
 
 #[cfg(test)]

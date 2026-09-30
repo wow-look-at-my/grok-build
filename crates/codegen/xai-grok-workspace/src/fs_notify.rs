@@ -85,6 +85,7 @@ async fn forward_fs_changes(
     events_tx: &broadcast::Sender<WorkspaceEvent>,
     root: &Path,
 ) {
+<<<<<<< HEAD
     loop {
         match rx.recv().await {
             Ok(FsEvent::FilesChanged { paths, kind }) => {
@@ -144,6 +145,61 @@ fn confine_to_root(
         );
     }
     confined
+=======
+    tokio::spawn(xai_grok_tools::util::detached::fire_and_forget(
+        "fs event forwarder",
+        async move {
+            loop {
+                tokio::select! {
+                    biased;
+                    _ = cancel.cancelled() => break,
+                    result = rx.recv() => {
+                        match result {
+                            Ok(FsEvent::FilesChanged { ref paths, kind }) => {
+                                // Forward to hunk tracker (hidden-dir filtered).
+                                forward_to_hunk_tracker(paths, kind, &hunk_tracker, &cwd);
+                                // Forward to codebase graph for incremental
+                                // index updates (hidden-dir paths are indexed
+                                // -- the graph's own ignore logic handles them).
+                                if let Some(ref idx) = codebase_index {
+                                    let graph_event = fs_event_to_codebase_graph_event(paths, kind);
+                                    if let Err(e) = idx.send_event(graph_event) {
+                                        tracing::debug!(
+                                            error = %e,
+                                            "failed to forward fs event to codebase graph"
+                                        );
+                                    }
+                                }
+                                // Broadcast per-path WorkspaceEvent::FsChanged.
+                                let ws_kind = to_workspace_event_kind(kind);
+                                for path in paths {
+                                    let _ = events_tx.send(
+                                        xai_grok_workspace_types::WorkspaceEvent::FsChanged {
+                                            path: path.clone(),
+                                            kind: ws_kind,
+                                        },
+                                    );
+                                }
+                            }
+                            Ok(other) => {
+                                // Git meta / operation events -- not yet bridged
+                                // to WorkspaceEvent::GitHeadChanged etc.
+                                tracing::trace!(?other, "fs event forwarder: unhandled event variant");
+                            }
+                            Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                                tracing::warn!(
+                                    lagged = n,
+                                    "fs event forwarder lagged; some events were dropped"
+                                );
+                            }
+                            Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                        }
+                    }
+                }
+            }
+        },
+    ));
+>>>>>>> origin/master
 }
 
 const GIT_DIFF_REBUILD_THRESHOLD: usize = 500;

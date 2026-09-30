@@ -88,9 +88,28 @@ pub(crate) fn expand_env_vars_with_process_skip(
     }
 }
 
+<<<<<<< HEAD
 /// Replace the leading `${` of every modifier-form `${...}` substring (valid identifier plus a parameter-expansion modifier) with `sentinel`.
 /// Plain `${VAR}` and bare `$VAR` references are NOT touched; they pass through to shellexpand for normal resolution.
 /// "Modifier" means anything inside the braces after the identifier: `:-`, `-`, `:=`, `=`, `:?`, `?`, `:+`, `+`, `%`, `#`, `/`, `:N`, `:N:M`, etc.
+=======
+/// Walk `input` and, for every `${...}` substring whose contents are a
+/// valid identifier followed by a parameter-expansion modifier, replace
+/// the leading `${` with `sentinel`. Plain `${VAR}` and bare `$VAR`
+/// references are NOT touched -- they are passed through to shellexpand
+/// for normal resolution.
+///
+/// "Modifier" here means anything inside the braces after the
+/// identifier name: `:-`, `-`, `:=`, `=`, `:?`, `?`, `:+`, `+`, `%`,
+/// `#`, `/`, `:N` (digit), `:N:M`, etc. This shares its detection
+/// logic with [`crate::runner::command::find_unresolved_env_vars`] via
+/// [`iter_env_var_references`].
+/// Every offset below comes from [`EnvVarRefIter`], which only ever returns
+/// positions at an ASCII `$`, `{`, `}` or identifier byte; the `cursor` copies
+/// run between two such positions. An ASCII byte is always a char boundary, so
+/// no cut here can land inside a multi-byte character.
+#[allow(clippy::string_slice)] // offsets are ASCII delimiter positions
+>>>>>>> origin/master
 fn mask_modifier_forms(input: &str, sentinel: &str) -> String {
     let mut out = String::with_capacity(input.len());
     let mut cursor: usize = 0;

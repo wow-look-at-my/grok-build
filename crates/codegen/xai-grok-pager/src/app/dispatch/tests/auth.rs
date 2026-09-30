@@ -451,7 +451,13 @@ fn pre_fix_compact_start_without_hold_cannot_stash_for_reauth() {
     );
 }
 
+<<<<<<< HEAD
 /// A second auth-failed turn with no rewindable prompt (`in_flight_prompt == None`) must not clobber the stash from an earlier auth failure.
+=======
+/// A second auth-failed turn with no rewindable prompt
+/// (`in_flight_prompt == None`) must not clobber the stash from an
+/// earlier 401.
+>>>>>>> origin/master
 #[test]
 fn second_auth_failure_does_not_clobber_reauth_stash() {
     use crate::scrollback::block::RenderBlock;

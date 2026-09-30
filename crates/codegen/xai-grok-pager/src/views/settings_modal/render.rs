@@ -1742,7 +1742,13 @@ pub(super) fn render_editing_value(
         );
     } else {
         let viewport = editor.viewport(buffer_room);
+<<<<<<< HEAD
         let visible = buffer.get(viewport.visible_byte_range).unwrap_or("");
+=======
+        // The range is a ratatui `visible_byte_range`, a char boundary.
+        #[allow(clippy::string_slice)]
+        let visible = &buffer[viewport.visible_byte_range];
+>>>>>>> origin/master
         let visible_width = (visible.width() as u16).min(buffer_room as u16);
         buf.set_span(
             input_x,

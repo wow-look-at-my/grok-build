@@ -1395,6 +1395,7 @@ impl AgentView {
         self.hit_context.rect = areas.get("context").copied();
         self.hit_credits.rect = areas.get("credits").copied();
         self.hit_plan_button.rect = areas.get("plan").copied();
+<<<<<<< HEAD
         let dropdown_open = self.prompt.any_dropdown_open();
         self.hit_dashboard
             .set_unless_dropdown(areas.get("dashboard").copied(), dropdown_open);
@@ -1411,6 +1412,138 @@ impl AgentView {
         );
         let short = crate::util::display_location_path(&self.session.cwd);
         let left_budget = areas
+=======
+        self.hit_queue_badge.rect = areas.get("queue").copied();
+        self.hit_badge.rect = areas.get("badge").copied();
+        let home = std::env::var("HOME").ok();
+        let display = self.session.cwd.display().to_string();
+        let short = match &home {
+            Some(h) if display.starts_with(h.as_str()) => {
+                // `starts_with` proved `h` is a byte prefix of `display`, so
+                // `h.len()` is where that prefix ends: a char boundary.
+                #[allow(clippy::string_slice)] // past a prefix starts_with confirmed
+                let rest = &display[h.len()..];
+                format!("~{rest}")
+            }
+            _ => display,
+        };
+        let cwd_style = Style::default().fg(theme.gray_dim).bg(theme.bg_base);
+        use unicode_width::UnicodeWidthStr;
+        let mut parts: Vec<Span> = Vec::new();
+        let mut path_offset: u16 = 0;
+        let lazy_git = crate::git_info::cwd_git_info_lazy(&self.session.cwd);
+        let branch = self
+            .current_branch
+            .clone()
+            .or_else(|| lazy_git.as_ref().and_then(|i| i.branch.clone()));
+        // Realtime CI-status dot (issue #40): a colored dot beside the branch
+        // whose state is polled from the `gh` CLI. The poll is throttled and
+        // off-thread (see `ci_status::ci_status_lazy`), so this render call is
+        // cheap; absent a real branch (detached/empty) or any CI signal, no
+        // dot is drawn — a graceful "no CI status" state.
+        let mut ci_dot: Option<Span<'static>> = None;
+        if let Some(b) = branch.as_deref()
+            && !b.is_empty()
+        {
+            ci_dot = crate::ci_status::ci_status_lazy(&self.session.cwd, b).and_then(|status| {
+                let fg = match status {
+                    crate::ci_status::CiStatus::Red => Some(theme.accent_error),
+                    crate::ci_status::CiStatus::Yellow => {
+                        // While CI is running, pulse the yellow dot's HSV
+                        // value so it visibly "thinks". The phase is wall-clock
+                        // time, not the animation tick: the tick cadence
+                        // follows whatever else the UI is doing (Slow on an
+                        // idle session, ~30 fps while streaming), so a
+                        // tick-counted pulse breathes at a different speed
+                        // depending on how busy the screen is.
+                        let dyn_col =
+                            crate::ci_status::in_progress_dot_color(rgb_of(theme.warning));
+                        Some(ratatui::style::Color::Rgb(dyn_col.0, dyn_col.1, dyn_col.2))
+                    }
+                    crate::ci_status::CiStatus::Green => Some(theme.accent_success),
+                    crate::ci_status::CiStatus::Off => None,
+                }?;
+                Some(Span::styled(
+                    "● ",
+                    Style::default().fg(fg).bg(theme.bg_base),
+                ))
+            });
+        }
+        if let Some(dot_span) = ci_dot {
+            path_offset += dot_span.width() as u16;
+            parts.push(dot_span);
+        }
+        let git_text = branch.map(|b| {
+            let icon = crate::git_info::branch_icon();
+            if b.is_empty() {
+                format!("{icon} detached")
+            } else {
+                format!("{icon} {b}")
+            }
+        });
+        if let Some(git_text) = git_text {
+            let git_style = Style::default()
+                .fg(theme.text_primary)
+                .bg(theme.bg_base)
+                .add_modifier(ratatui::style::Modifier::DIM);
+            path_offset += git_text.width() as u16;
+            parts.push(Span::styled(git_text, git_style));
+            let stats = crate::branch_stats::branch_stats_lazy(&self.session.cwd);
+            for (kind, text) in stats
+                .as_ref()
+                .map(crate::branch_stats::format_parts)
+                .unwrap_or_default()
+            {
+                let fg = match kind {
+                    crate::branch_stats::StatKind::Ahead
+                    | crate::branch_stats::StatKind::Behind => theme.gray_dim,
+                    crate::branch_stats::StatKind::Insertions => theme.accent_success,
+                    crate::branch_stats::StatKind::Deletions => theme.accent_error,
+                };
+                let text = format!(" {text}");
+                path_offset += text.width() as u16;
+                parts.push(Span::styled(
+                    text,
+                    Style::default().fg(fg).bg(theme.bg_base),
+                ));
+            }
+            path_offset += 1;
+            parts.push(Span::styled(" ", Style::default().bg(theme.bg_base)));
+        }
+        let show_worktree_label = self.is_worktree
+            || self.session.is_worktree
+            || lazy_git.as_ref().is_some_and(|i| i.is_worktree);
+        if show_worktree_label {
+            let label_style = Style::default().fg(theme.accent_user).bg(theme.bg_base);
+            path_offset += "worktree ".width() as u16;
+            parts.push(Span::styled("worktree ", label_style));
+        }
+        if let Some(profile) = xai_grok_sandbox::profile_name() {
+            let sandbox_text = format!("sandbox:{profile} ");
+            let sandbox_style = Style::default().fg(theme.warning).bg(theme.bg_base);
+            path_offset += sandbox_text.width() as u16;
+            parts.push(Span::styled(sandbox_text, sandbox_style));
+        }
+        let path_width = short.width() as u16;
+        let path_style = if self.hit_cwd.hovered {
+            Style::default().fg(theme.text_primary).bg(theme.bg_base)
+        } else {
+            cwd_style
+        };
+        parts.push(Span::styled(short, path_style));
+        let main_repo_display = self
+            .main_repo
+            .clone()
+            .or_else(|| lazy_git.as_ref().and_then(|i| i.main_repo.clone()));
+        if let Some(main_repo) = main_repo_display {
+            parts.push(Span::styled(
+                format!(" (worktree of {main_repo})"),
+                cwd_style,
+            ));
+        }
+        let cwd_line = Line::from(parts);
+        let max_cwd_width = areas
+>>>>>>> origin/master
             .values()
             .map(|r| r.x)
             .min()

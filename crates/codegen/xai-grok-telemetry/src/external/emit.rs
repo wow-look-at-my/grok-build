@@ -131,10 +131,26 @@ pub(crate) fn emit_record(ext: &ExternalTelemetry, mut record: ExternalRecord) {
             }
         }
         for (key, value) in &record.attrs {
+<<<<<<< HEAD
             log_record.add_attribute(
                 Into::<&'static str>::into(*key),
                 to_any_value(value.clone()),
             );
+=======
+            log_record.add_attribute(key.as_str(), to_any_value(value.clone()));
+        }
+        for (key, value) in [
+            (ExternalKey::UserId, identity.user_id.as_deref()),
+            (
+                ExternalKey::OrganizationId,
+                identity.organization_id.as_deref(),
+            ),
+            (ExternalKey::TeamId, identity.team_id.as_deref()),
+        ] {
+            if let Some(v) = value.filter(|v| !v.is_empty()) {
+                log_record.add_attribute(key.as_str(), v.to_owned());
+            }
+>>>>>>> origin/master
         }
         for_each_identity_attr(&identity, |key, value| {
             log_record.add_attribute(key, value);
@@ -173,7 +189,19 @@ fn add_increment(
     if ext.include_version_on_metrics && !ext.app_version.is_empty() {
         attrs.push(KeyValue::new("app.version", ext.app_version.clone()));
     }
+<<<<<<< HEAD
     for_each_identity_attr(identity, |key, value| attrs.push(KeyValue::new(key, value)));
+=======
+    for (key, value) in [
+        ("user.id", identity.user_id.as_deref()),
+        ("organization.id", identity.organization_id.as_deref()),
+        ("team.id", identity.team_id.as_deref()),
+    ] {
+        if let Some(v) = value.filter(|v| !v.is_empty()) {
+            attrs.push(KeyValue::new(key, v.to_owned()));
+        }
+    }
+>>>>>>> origin/master
 
     instruments.record_increment(increment, attrs);
 }

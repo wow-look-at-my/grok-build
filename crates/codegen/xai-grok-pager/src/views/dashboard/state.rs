@@ -760,8 +760,19 @@ impl LocationPickerState {
             || (cfg!(windows) && (q.contains('\\') || has_windows_drive_prefix(q)))
     }
 
+<<<<<<< HEAD
     /// Split a path-mode query into the `(parent_dir, partial_name)` to complete: everything up to the
     /// last separator resolves to a directory, and the trailing segment is the prefix to match.
+=======
+    /// Split a path-mode query into the `(parent_dir, partial_name)` to
+    /// complete: everything up to the last separator resolves to a directory,
+    /// and the trailing segment is the prefix to match. `~` expands to
+    /// home; relative parents join [`Self::base_cwd`]. The separator is `/`
+    /// on all hosts and additionally `\` on Windows.
+    // Every slice here keys off `sep`, a `rfind` offset: a char boundary, and
+    // `sep + 1` sits past an ASCII separator.
+    #[allow(clippy::string_slice)]
+>>>>>>> origin/master
     fn path_query_parts(&self) -> (PathBuf, String) {
         let q = self.picker.query();
         // Last path separator: `/` always; `\` additionally on Windows.

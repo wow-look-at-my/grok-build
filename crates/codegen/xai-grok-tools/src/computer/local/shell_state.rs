@@ -590,6 +590,7 @@ fn parse_dump(shell: ShellKind, raw: &str) -> Option<(PathBuf, String)> {
     }
 
     // Strip markers
+<<<<<<< HEAD
     let end = raw.len().checked_sub(end_line.len())?;
     let without_markers = raw.get(start_line.len()..end)?;
 
@@ -597,6 +598,15 @@ fn parse_dump(shell: ShellKind, raw: &str) -> Option<(PathBuf, String)> {
     let newline_pos = without_markers.find('\n')?;
     let cwd = without_markers.get(..newline_pos)?;
     let rest = without_markers.get(newline_pos..)?; // includes the leading \n
+=======
+    let without_markers = raw.strip_prefix(&start_line)?.strip_suffix(&end_line)?;
+
+    // First line is $PWD
+    let newline_pos = without_markers.find('\n')?;
+    // `newline_pos` is the offset of a `\n`, so splitting there is on a boundary;
+    // `rest` keeps the leading `\n`.
+    let (cwd, rest) = without_markers.split_at(newline_pos);
+>>>>>>> origin/master
 
     Some((PathBuf::from(cwd), rest.to_string()))
 }
@@ -605,10 +615,16 @@ fn parse_dump(shell: ShellKind, raw: &str) -> Option<(PathBuf, String)> {
 /// If the marker is not found, returns the full output.
 fn parse_after_marker<'a>(output: &'a str, marker: &str) -> &'a str {
     let needle = format!("{marker}\n");
+<<<<<<< HEAD
     match output.find(&needle) {
         Some(idx) => output.get(idx + needle.len()..).unwrap_or(""),
         None => output,
     }
+=======
+    output
+        .split_once(&needle)
+        .map_or(output, |(_before, after)| after)
+>>>>>>> origin/master
 }
 
 /// Write the snapshot to the state-in pipe, then close the fd.
@@ -841,10 +857,14 @@ mod tests {
         assert!(
             state.snapshot.contains("grok_snap_") || state.snapshot.is_empty(),
             "snapshot should contain encoded blocks or be empty: {:?}",
+<<<<<<< HEAD
             state
                 .snapshot
                 .get(..state.snapshot.len().min(200))
                 .unwrap_or(state.snapshot.as_str())
+=======
+            crate::util::truncate_bytes(&state.snapshot, 200)
+>>>>>>> origin/master
         );
     }
 
@@ -906,7 +926,11 @@ mod tests {
         assert!(
             state.update_from_dump(&dump),
             "dump should have valid markers, got: {:?}",
+<<<<<<< HEAD
             dump.get(..dump.len().min(500)).unwrap_or(dump.as_str())
+=======
+            crate::util::truncate_bytes(&dump, 500)
+>>>>>>> origin/master
         );
         // The snapshot contains base64-encoded env vars, so the variable name
         // won't appear in plaintext. Verify the dump was valid and non-empty.

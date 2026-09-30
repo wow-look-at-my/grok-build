@@ -20,9 +20,17 @@ pub enum TemplateOverride {
     /// A caller-provided custom template string.
     Custom(String),
 }
+<<<<<<< HEAD
 /// Backward-compatible deserialization: accepts the new tagged format (`"none"`, `{"custom": "..."}`).
 /// It also accepts the legacy format where `system_prompt` was `Option<String>` (a raw template string).
 /// `"codex"` names a removed template. It is an error, never a custom template with that literal text.
+=======
+/// Backward-compatible deserialization: accepts both the new tagged format
+/// (`"none"`, `{"custom".
+/// `system_prompt` was `Option<String>` (a raw template string).
+/// `"codex"` names a removed template. It is an error, never a custom
+/// template with that literal text.
+>>>>>>> origin/master
 impl<'de> Deserialize<'de> for TemplateOverride {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -92,6 +100,11 @@ pub struct PromptContext {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub include_browser_verification: bool,
     /// Which base template to use for `Extend` mode.
+<<<<<<< HEAD
+=======
+    /// `TemplateOverride::None` = standard base/subagent template.
+    /// `TemplateOverride::Custom` = caller-provided template string.
+>>>>>>> origin/master
     #[serde(default, skip_serializing_if = "is_template_override_none")]
     pub system_prompt: TemplateOverride,
     /// AGENTS.md files discovered during build, in precedence order (repo root to CWD; deeper files override).

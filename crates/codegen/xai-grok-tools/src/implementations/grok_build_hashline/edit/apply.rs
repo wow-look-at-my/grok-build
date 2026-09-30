@@ -21,17 +21,30 @@ const SNIPPET_CONTEXT: usize = 3;
 /// `"22:abc:rst"`) or only a local hash (e.g. `"22:abc"`).
 fn anchor_format_hint(scheme: &dyn AnchorScheme) -> (&'static str, String) {
     let len = scheme.hash_len().clamp(1, 4);
+<<<<<<< HEAD
     let Some(hash) = "abcd".get(..len) else {
         return ("LINE:HASH", "22:a".to_owned());
     };
+=======
+    // `"abcd"` is an ASCII literal and `len` is clamped to 1..=4, so the offset
+    // is a char boundary.
+    #[allow(clippy::string_slice)]
+    let hash = &"abcd"[..len];
+>>>>>>> origin/master
     let has_context = scheme
         .generate_anchors(&["x"])
         .first()
         .is_some_and(|a| a.context.is_some());
     if has_context {
+<<<<<<< HEAD
         let Some(ctx) = "rstu".get(..len) else {
             return ("LINE:HASH1:HASH2", format!("22:{hash}:r"));
         };
+=======
+        // `"rstu"` is ASCII too, for the same reason.
+        #[allow(clippy::string_slice)]
+        let ctx = &"rstu"[..len];
+>>>>>>> origin/master
         ("LINE:HASH1:HASH2", format!("22:{hash}:{ctx}"))
     } else {
         ("LINE:HASH", format!("22:{hash}"))
@@ -1007,7 +1020,11 @@ mod tests {
                 assert!(
                     result.snippet.contains("lines not shown"),
                     "Snippet should have gap markers between distant edits, got:\n{}",
+<<<<<<< HEAD
                     crate::util::truncate_str(&result.snippet, 500)
+=======
+                    crate::util::truncate_bytes(&result.snippet, 500)
+>>>>>>> origin/master
                 );
                 // The snippet should be MUCH smaller than the full span.
                 let snippet_lines = result.snippet.lines().count();

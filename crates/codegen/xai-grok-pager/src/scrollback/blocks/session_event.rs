@@ -26,6 +26,7 @@ use xai_grok_shell::extensions::notification::{
 /// Shared text-selection range id for recap body lines (header is excluded).
 const RECAP_BODY_RANGE: u16 = 0;
 
+<<<<<<< HEAD
 /// Which pager-local memory command a [`SessionEvent::MemoryCommandStarted`] marker belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MemoryCommandKind {
@@ -42,6 +43,8 @@ impl MemoryCommandKind {
     }
 }
 
+=======
+>>>>>>> origin/master
 /// The shell's account of one compaction: a one-line size breakdown and the path of the full report.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CompactionDetail {

@@ -218,12 +218,15 @@ pub(crate) async fn run_request_task(
                 response,
                 mut metrics,
             } => {
+<<<<<<< HEAD
                 completion.merge_doom_loop_signals(
                     response
                         .doom_loop_signals
                         .iter()
                         .map(|signal| signal.raw.clone()),
                 );
+=======
+>>>>>>> origin/master
                 metrics.attempts = retry_count
                     + doom_retry_count
                     + rate_retry_count.load(Ordering::Relaxed)
@@ -326,6 +329,7 @@ pub(crate) async fn run_request_task(
                     }
                     let backoff = retry_mod::doom_loop_backoff(doom_retry_count + 1);
                     doom_retry_count = doom_retry_count.saturating_add(1);
+<<<<<<< HEAD
                     let (recovery_triggers, aborted_at_chunk) = match &error {
                         SamplingError::DoomLoopDetected {
                             triggers,
@@ -335,6 +339,8 @@ pub(crate) async fn run_request_task(
                     };
                     completion.record_recovery_attempt(recovery_triggers, aborted_at_chunk);
                     append_recovery_context(&mut request, recovery_items);
+=======
+>>>>>>> origin/master
                     tracing::warn!(
                         target: crate::sampling_log::TARGET,
                         reason = %error,
@@ -801,7 +807,10 @@ async fn run_one_attempt(
                 ttft,
                 FailedResponseCapture::default(),
                 output_observed,
+<<<<<<< HEAD
                 length_policy,
+=======
+>>>>>>> origin/master
                 backup,
             )
             .await
@@ -846,7 +855,10 @@ async fn run_one_attempt(
                 ttft,
                 failed_response,
                 output_observed,
+<<<<<<< HEAD
                 length_policy,
+=======
+>>>>>>> origin/master
                 backup,
             )
             .await
@@ -872,7 +884,10 @@ async fn run_one_attempt(
                 ttft,
                 FailedResponseCapture::default(),
                 output_observed,
+<<<<<<< HEAD
                 length_policy,
+=======
+>>>>>>> origin/master
                 backup,
             )
             .await
@@ -896,7 +911,10 @@ async fn run_one_attempt(
                 ttft,
                 FailedResponseCapture::default(),
                 output_observed,
+<<<<<<< HEAD
                 length_policy,
+=======
+>>>>>>> origin/master
                 backup,
             )
             .await
@@ -976,12 +994,29 @@ fn tee_errors<'a, T: Send + 'a>(
     let cell_clone = Arc::clone(&cell);
     let teed = raw
         .map(move |item| {
+<<<<<<< HEAD
             if let Err(ref e) = item
                 && let Ok(mut guard) = cell_clone.lock()
                 && guard.is_none()
             {
                 // Capture only the first error; subsequent errors on a torn-down stream are usually secondary effects of the same disconnect
                 *guard = Some(clone_error(e));
+=======
+            if let Err(ref e) = item {
+                // The lock comes back even from a holder that died: this cell
+                // is the only record of why the attempt failed, and a skipped
+                // capture would have the turn report a synthesized reason.
+                #[allow(clippy::disallowed_methods)] // takes the cell back as above
+                let mut guard = cell_clone
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                // Capture only the first error -- subsequent errors
+                // on a torn-down stream are usually secondary effects
+                // of the same disconnect.
+                if guard.is_none() {
+                    *guard = Some(clone_error(e));
+                }
+>>>>>>> origin/master
             }
             item
         })
@@ -1017,7 +1052,10 @@ async fn drive_l2(
     ttft: FirstTokenDeadline,
     failed_response: FailedResponseCapture,
     output_observed: Arc<AtomicBool>,
+<<<<<<< HEAD
     length_policy: xai_grok_sampling_types::LengthPolicy,
+=======
+>>>>>>> origin/master
     backup: Option<&BackupLauncher<'_>>,
 ) -> AttemptOutcome {
     let mut l2 = pin!(l2);
@@ -1095,11 +1133,15 @@ async fn drive_l2(
                             window_secs: policy.window_secs,
                         };
                         let Some(launcher) = backup else {
+<<<<<<< HEAD
                             return AttemptOutcome::Failed {
                                 error,
                                 doom_loop_signals,
                                 recovery_items: Vec::new(),
                             };
+=======
+                            return AttemptOutcome::Failed { error };
+>>>>>>> origin/master
                         };
                         match launcher.launch(cancel_token, error) {
                             Some(b) => {
@@ -1166,6 +1208,7 @@ async fn drive_l2(
             next = l2.next() => match next {
                 Some(SamplingEvent::Completed { response, metrics, .. }) => {
                     output_observed.store(true, Ordering::Relaxed);
+<<<<<<< HEAD
                     await_first_output_span.take();
                     let mut all_triggers = Vec::new();
                     merge_signal_labels(
@@ -1186,6 +1229,9 @@ async fn drive_l2(
                         all_triggers,
                         &failed_response,
                     );
+=======
+                    let outcome = completed_outcome(response, metrics, doom_check);
+>>>>>>> origin/master
                     if let Some(b) = hedge.take() {
                         if !matches!(outcome, AttemptOutcome::Completed { .. }) {
                             return b
@@ -1197,7 +1243,10 @@ async fn drive_l2(
                     return outcome;
                 }
                 Some(SamplingEvent::Failed { error: info, .. }) => {
+<<<<<<< HEAD
                     await_first_output_span.take();
+=======
+>>>>>>> origin/master
                     if let Some(b) = hedge.take() {
                         return b
                             .adopt(&request_id, event_tx, cancel_token, "the original failed", None)
@@ -1311,9 +1360,12 @@ fn completed_outcome(
     response: Box<ConversationResponse>,
     metrics: InferenceLatencyStats,
     doom_check: Option<xai_grok_sampling_types::DoomLoopRecoveryPolicy>,
+<<<<<<< HEAD
     length_policy: xai_grok_sampling_types::LengthPolicy,
     doom_loop_signals: Vec<String>,
     failed_response: &FailedResponseCapture,
+=======
+>>>>>>> origin/master
 ) -> AttemptOutcome {
     // Doom outranks the truncation/empty classes: a confident loop poisons
     // the attempt whatever else it looks like.
@@ -1325,6 +1377,7 @@ fn completed_outcome(
                     triggers,
                     aborted_at_chunk: None,
                 },
+<<<<<<< HEAD
                 doom_loop_signals,
                 recovery_items: failed_response.take_items(),
             };
@@ -1342,15 +1395,29 @@ fn completed_outcome(
             };
         }
     };
+=======
+            };
+        }
+    }
+    if response.stop_reason == Some(xai_grok_sampling_types::StopReason::Length) {
+        return AttemptOutcome::Failed {
+            error: SamplingError::MaxTokensTruncation,
+        };
+    }
+>>>>>>> origin/master
     // A content filter's empty answer is deterministic. A resample repeats it.
     let content_filtered =
         response.stop_reason == Some(xai_grok_sampling_types::StopReason::ContentFilter);
     if !content_filtered && let Some(reason) = response.empty_reason() {
         let context = build_empty_context(reason, &response);
+<<<<<<< HEAD
         return AttemptOutcome::Empty {
             context,
             doom_loop_signals,
         };
+=======
+        return AttemptOutcome::Empty { context };
+>>>>>>> origin/master
     }
     AttemptOutcome::Completed { response, metrics }
 }
@@ -1371,8 +1438,13 @@ impl AttemptOutcome {
     fn describe(&self) -> String {
         match self {
             Self::Completed { .. } => "completed".to_string(),
+<<<<<<< HEAD
             Self::Empty { context, .. } => format!("empty: {}", context.reason),
             Self::Failed { error, .. } | Self::InitFailed { error } => error.to_string(),
+=======
+            Self::Empty { context } => format!("empty: {}", context.reason),
+            Self::Failed { error } | Self::InitFailed { error } => error.to_string(),
+>>>>>>> origin/master
             Self::Cancelled => "cancelled".to_string(),
         }
     }

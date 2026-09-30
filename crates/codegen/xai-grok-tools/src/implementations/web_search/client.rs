@@ -268,8 +268,39 @@ impl WebSearchClient {
                 pairs.into_iter().map(|(_title, url)| url).collect(),
             ));
         }
+<<<<<<< HEAD
         let (allowed, excluded) = self.resolve_filters(allowed_domains);
         let request = self.build_request_json(query, allowed, excluded)?;
+=======
+        let web_search = rs::WebSearchToolArgs::default()
+            .filters(rs::WebSearchToolFilters { allowed_domains })
+            .build()
+            .map_err(|e| {
+                xai_tool_runtime::ToolError::execution(
+                    xai_tool_protocol::ToolId::new("web_search").expect("valid"),
+                    format!("Failed to build web search tool: {e}"),
+                )
+            })?;
+        let request = rs::CreateResponseArgs::default()
+            .model(self.model.clone())
+            .input(query.to_string())
+            .tools(vec![rs::Tool::WebSearch(web_search)])
+            .store(false)
+            .temperature(0.1_f32)
+            .top_p(0.95_f32)
+            .max_output_tokens(8192u32)
+            .reasoning(rs::Reasoning {
+                effort: Some(rs::ReasoningEffort::None),
+                summary: None,
+            })
+            .build()
+            .map_err(|e| {
+                xai_tool_runtime::ToolError::execution(
+                    xai_tool_protocol::ToolId::new("web_search").expect("valid"),
+                    format!("Failed to build request: {e}"),
+                )
+            })?;
+>>>>>>> origin/master
         let url = format!("{}/responses", self.base_url.trim_end_matches('/'));
         allow_endpoint(&url)?;
         let sent_bearer = self.current_bearer().await;
@@ -337,8 +368,39 @@ impl WebSearchClient {
         if self.backend == SearchBackend::Kagi {
             return self.kagi_results(query, allowed_domains).await;
         }
+<<<<<<< HEAD
         let (allowed, excluded) = self.resolve_filters(allowed_domains);
         let request = self.build_request_json(query, allowed, excluded)?;
+=======
+        let web_search = rs::WebSearchToolArgs::default()
+            .filters(rs::WebSearchToolFilters { allowed_domains })
+            .build()
+            .map_err(|e| {
+                xai_tool_runtime::ToolError::execution(
+                    xai_tool_protocol::ToolId::new("web_search").expect("valid"),
+                    format!("Failed to build web search tool: {e}"),
+                )
+            })?;
+        let request = rs::CreateResponseArgs::default()
+            .model(self.model.clone())
+            .input(query.to_string())
+            .tools(vec![rs::Tool::WebSearch(web_search)])
+            .store(false)
+            .temperature(0.1_f32)
+            .top_p(0.95_f32)
+            .max_output_tokens(8192u32)
+            .reasoning(rs::Reasoning {
+                effort: Some(rs::ReasoningEffort::None),
+                summary: None,
+            })
+            .build()
+            .map_err(|e| {
+                xai_tool_runtime::ToolError::execution(
+                    xai_tool_protocol::ToolId::new("web_search").expect("valid"),
+                    format!("Failed to build request: {e}"),
+                )
+            })?;
+>>>>>>> origin/master
         let url = format!("{}/responses", self.base_url.trim_end_matches('/'));
         allow_endpoint(&url)?;
         let sent_bearer = self.current_bearer().await;

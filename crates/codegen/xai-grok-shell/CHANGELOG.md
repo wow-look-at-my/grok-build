@@ -4,6 +4,7 @@
 
 ## Features
 
+<<<<<<< HEAD
 - Worktrees grok creates now live inside the repository, under `.grok/worktrees/<name>`, instead of under `~/.grok/worktrees`. Checkouts made by earlier releases stay where they are and keep working
 
 # 1.0.41 — 2026-09-22
@@ -867,6 +868,9 @@
 - **Large git histories** no longer cause excessive memory use or unresponsiveness.
 - **History search** no longer leaks background threads in long sessions with many subagents.
 - **Resuming large sessions** is now significantly faster and the UI no longer shows an incomplete transcript while replay is still applying.
+=======
+- Worktrees grok creates now live inside the repository, under `.grok/worktrees/<name>`, instead of under `~/.grok/worktrees`; checkouts made by earlier releases stay where they are and keep working
+>>>>>>> origin/master
 
 # 1.0.0 — 2026-08-07
 

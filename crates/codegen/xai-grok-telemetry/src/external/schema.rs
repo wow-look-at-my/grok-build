@@ -195,8 +195,164 @@ pub enum ExternalKey {
 /// Every [`ExternalKey`] variant, in declaration order; the pinned `external_allowed_keys_are_pinned` test guards the wire names against drift.
 pub(crate) const ALL_KEYS: &[ExternalKey] = <ExternalKey as strum::VariantArray>::VARIANTS;
 
+<<<<<<< HEAD
 /// The runtime allowlist the export-time validators enforce: exactly the wire names of every [`ExternalKey`].
 /// Pinned by an independent literal copy in the test module (mirroring `otel_layer::redact::allowlist_contents_are_pinned`).
+=======
+impl ExternalKey {
+    /// Stable wire name for this key.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::SessionId => "session.id",
+            Self::TurnNumber => "turn_number",
+            Self::PromptId => "prompt.id",
+            Self::EventSequence => "event.sequence",
+            Self::UserId => "user.id",
+            Self::OrganizationId => "organization.id",
+            Self::TeamId => "team.id",
+            Self::Model => "model",
+            Self::PermissionMode => "permission_mode",
+            Self::McpServerCount => "mcp_server_count",
+            Self::PluginCount => "plugin_count",
+            Self::SkillCount => "skill_count",
+            Self::HookCount => "hook_count",
+            Self::MemoryEnabled => "memory_enabled",
+            Self::IsGitRepo => "is_git_repo",
+            Self::ClientIdentifier => "client_identifier",
+            Self::DurationSecs => "duration_secs",
+            Self::TurnCount => "turn_count",
+            Self::ToolCallCount => "tool_call_count",
+            Self::CompactionCount => "compaction_count",
+            Self::PromptLength => "prompt_length",
+            Self::Prompt => "prompt",
+            Self::ScreenMode => "screen_mode",
+            Self::Outcome => "outcome",
+            Self::DurationMs => "duration_ms",
+            Self::ErrorCategory => "error_category",
+            Self::CancellationCategory => "cancellation_category",
+            Self::StopReason => "stop_reason",
+            Self::InputTokens => "input_tokens",
+            Self::OutputTokens => "output_tokens",
+            Self::ReasoningTokens => "reasoning_tokens",
+            Self::CacheReadTokens => "cache_read_tokens",
+            Self::StatusCode => "status_code",
+            Self::ToolName => "tool_name",
+            Self::Success => "success",
+            Self::FileExtension => "file_extension",
+            Self::ToolParameters => "tool_parameters",
+            Self::FilePath => "file_path",
+            Self::Decision => "decision",
+            Self::AccessKind => "access_kind",
+            Self::Source => "source",
+            Self::Status => "status",
+            Self::TransportType => "transport_type",
+            Self::ToolCount => "tool_count",
+            Self::ErrorType => "error_type",
+            Self::McpServerName => "mcp_server.name",
+            Self::ToMode => "to_mode",
+            Self::Trigger => "trigger",
+            Self::SkillSource => "skill_source",
+            Self::SkillName => "skill.name",
+            Self::InstallKind => "install_kind",
+            Self::PluginScope => "plugin_scope",
+            Self::PluginName => "plugin_name",
+            Self::PluginVersion => "plugin_version",
+            Self::CompactionTrigger => "compaction_trigger",
+            Self::CompactionOutcome => "compaction_outcome",
+            Self::TokensBefore => "tokens_before",
+            Self::TokensAfter => "tokens_after",
+            Self::Phase => "phase",
+            Self::SubagentType => "subagent_type",
+            Self::AuthMethod => "auth_method",
+            Self::FromModel => "from_model",
+            Self::ToModel => "to_model",
+            Self::ErrorCode => "error_code",
+            Self::Tip => "tip",
+            Self::Action => "action",
+        }
+    }
+}
+
+/// Every [`ExternalKey`] variant, for allowlist construction. The
+/// `EnumCount` assertion below keeps it complete.
+pub(crate) const ALL_KEYS: &[ExternalKey] = &[
+    ExternalKey::SessionId,
+    ExternalKey::TurnNumber,
+    ExternalKey::PromptId,
+    ExternalKey::EventSequence,
+    ExternalKey::UserId,
+    ExternalKey::OrganizationId,
+    ExternalKey::TeamId,
+    ExternalKey::Model,
+    ExternalKey::PermissionMode,
+    ExternalKey::McpServerCount,
+    ExternalKey::PluginCount,
+    ExternalKey::SkillCount,
+    ExternalKey::HookCount,
+    ExternalKey::MemoryEnabled,
+    ExternalKey::IsGitRepo,
+    ExternalKey::ClientIdentifier,
+    ExternalKey::DurationSecs,
+    ExternalKey::TurnCount,
+    ExternalKey::ToolCallCount,
+    ExternalKey::CompactionCount,
+    ExternalKey::PromptLength,
+    ExternalKey::Prompt,
+    ExternalKey::ScreenMode,
+    ExternalKey::Outcome,
+    ExternalKey::DurationMs,
+    ExternalKey::ErrorCategory,
+    ExternalKey::CancellationCategory,
+    ExternalKey::StopReason,
+    ExternalKey::InputTokens,
+    ExternalKey::OutputTokens,
+    ExternalKey::ReasoningTokens,
+    ExternalKey::CacheReadTokens,
+    ExternalKey::StatusCode,
+    ExternalKey::ToolName,
+    ExternalKey::Success,
+    ExternalKey::FileExtension,
+    ExternalKey::ToolParameters,
+    ExternalKey::FilePath,
+    ExternalKey::Decision,
+    ExternalKey::AccessKind,
+    ExternalKey::Source,
+    ExternalKey::Status,
+    ExternalKey::TransportType,
+    ExternalKey::ToolCount,
+    ExternalKey::ErrorType,
+    ExternalKey::McpServerName,
+    ExternalKey::ToMode,
+    ExternalKey::Trigger,
+    ExternalKey::SkillSource,
+    ExternalKey::SkillName,
+    ExternalKey::InstallKind,
+    ExternalKey::PluginScope,
+    ExternalKey::PluginName,
+    ExternalKey::PluginVersion,
+    ExternalKey::CompactionTrigger,
+    ExternalKey::CompactionOutcome,
+    ExternalKey::TokensBefore,
+    ExternalKey::TokensAfter,
+    ExternalKey::Phase,
+    ExternalKey::SubagentType,
+    ExternalKey::AuthMethod,
+    ExternalKey::FromModel,
+    ExternalKey::ToModel,
+    ExternalKey::ErrorCode,
+    ExternalKey::Tip,
+    ExternalKey::Action,
+];
+
+/// Compile-time completeness guard: a new `ExternalKey` variant that is not
+/// listed in `ALL_KEYS` fails this assertion, so the allowlist can never
+/// silently miss a key.
+const _: () = assert!(ALL_KEYS.len() == <ExternalKey as strum::EnumCount>::COUNT);
+
+/// The runtime allowlist the export-time validators enforce: exactly the wire
+/// names of every [`ExternalKey`]. Pinned by an independent literal copy in
+/// the test module (mirroring `otel_layer::redact::allowlist_contents_are_pinned`).
+>>>>>>> origin/master
 pub(crate) fn external_allowed_keys() -> &'static std::collections::HashSet<&'static str> {
     static SET: std::sync::LazyLock<std::collections::HashSet<&'static str>> =
         std::sync::LazyLock::new(|| ALL_KEYS.iter().map(|k| k.as_ref()).collect());

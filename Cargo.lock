@@ -13674,6 +13674,7 @@ dependencies = [
  "xai-grok-config",
  "xai-grok-mcp",
  "xai-tool-types",
+<<<<<<< HEAD
 ]
 
 [[package]]
@@ -13703,6 +13704,8 @@ dependencies = [
  "tokio",
  "tracing",
  "xai-grok-version",
+=======
+>>>>>>> origin/master
 ]
 
 [[package]]
@@ -14832,7 +14835,10 @@ dependencies = [
  "xai-mixpanel",
  "xai-token-estimation",
  "xai-tool-types",
+<<<<<<< HEAD
  "xai-tty-utils",
+=======
+>>>>>>> origin/master
 ]
 
 [[package]]

@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 #![allow(clippy::cast_lossless)]
 #![allow(clippy::cast_possible_truncation)]
 #![allow(clippy::cast_possible_wrap)]
@@ -13,6 +14,17 @@
     dead_code
 )]
 //! xai-grok-pager: Grok Build TUI.
+=======
+#![allow(clippy::cast_lossless)] // 98 hits predate the gate
+#![allow(clippy::cast_possible_truncation)] // 785 hits predate the gate
+#![allow(clippy::cast_possible_wrap)] // 79 hits predate the gate
+#![allow(clippy::cast_precision_loss)] // 65 hits predate the gate
+#![allow(clippy::cast_sign_loss)] // 84 hits predate the gate
+#![allow(clippy::expect_used)] // 134 hits predate the gate
+#![allow(clippy::unwrap_used)] // 60 hits predate the gate
+
+//! xai-grok-pager — Grok Build TUI.
+>>>>>>> origin/master
 //!
 //! A clean-room implementation built on the v3 pager rendering engine.
 #![allow(clippy::string_slice)]
@@ -21,7 +33,10 @@ pub mod acp;
 pub mod actions;
 pub mod agent_runtime;
 pub mod app;
+<<<<<<< HEAD
 pub mod best_effort_stderr;
+=======
+>>>>>>> origin/master
 pub mod branch_stats;
 pub mod ci_status;
 pub mod client_identity;

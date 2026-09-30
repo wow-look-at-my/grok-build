@@ -80,6 +80,10 @@ impl FeedbackClient {
         self
     }
 
+<<<<<<< HEAD
+=======
+    /// Create a FeedbackClient with a custom reqwest Client.
+>>>>>>> origin/master
     pub fn with_client(
         http: reqwest::Client,
         base_url: impl Into<String>,
@@ -105,7 +109,12 @@ impl FeedbackClient {
         self
     }
 
+<<<<<<< HEAD
     /// Requires both an attached `AuthManager` and a `TokenRefresher`.
+=======
+    /// Whether this client can refresh credentials after an unauthorized
+    /// answer: it needs an `AuthManager` and a wired `TokenRefresher`.
+>>>>>>> origin/master
     pub(crate) fn has_token_refresher(&self) -> bool {
         self.credentials
             .auth_manager()

@@ -185,10 +185,21 @@ pub struct UiConfig {
     /// `None` means on (client default). Written by the pager's settings modal.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub show_thinking_blocks: Option<bool>,
+<<<<<<< HEAD
     /// Summarize each thinking block and show the summary under its collapsed header.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thinking_summaries: Option<bool>,
     /// Fold runs of consecutive non-destructive tool calls (reads, searches.
+=======
+    /// Summarize each thinking block and show the summary under its collapsed
+    /// header. `None` = on (client default). Written by the pager's settings
+    /// modal; resolved once per session, so a change takes effect next session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking_summaries: Option<bool>,
+    /// Fold runs of consecutive non-destructive tool calls (reads, searches,
+    /// lists) into one transcript row. `None` = on (client default). Written
+    /// by the pager's settings modal.
+>>>>>>> origin/master
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub group_tool_verbs: Option<bool>,
     /// Show Edit tool calls as a collapsed one-line `+N/-M` diffstat summary by default (expand for the diff).

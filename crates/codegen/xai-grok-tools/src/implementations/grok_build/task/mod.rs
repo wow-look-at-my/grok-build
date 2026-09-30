@@ -72,7 +72,14 @@ fn normalize_user_ask(raw: &str) -> Option<String> {
         return None;
     }
     if let Some(start) = t.find("<user_query>") {
+<<<<<<< HEAD
         let after = t.get(start + "<user_query>".len()..)?;
+=======
+        // `start` is the offset of an ASCII literal and the added width is that
+        // literal's byte length, so the offset is a char boundary.
+        #[allow(clippy::string_slice)]
+        let after = &t[start + "<user_query>".len()..];
+>>>>>>> origin/master
         let body = after.split("</user_query>").next().unwrap_or(after).trim();
         if body.is_empty() {
             return None;
@@ -658,6 +665,7 @@ impl xai_tool_runtime::Tool for TaskTool {
         // child session. `spawn()` stays the terminal result; late failures
         // are logged from a detached waiter.
         if input.run_in_background {
+<<<<<<< HEAD
             drop(foreground_wait);
             let (registered_tx, mut registered_rx) = tokio::sync::oneshot::channel();
             let spawn_backend = backend.clone();
@@ -667,6 +675,41 @@ impl xai_tool_runtime::Tool for TaskTool {
                     .spawn(request, Some(registered_tx))
                     .await
             });
+=======
+            let bg_backend = backend.clone();
+            let bg_id = id.clone();
+            let bg_type = input.subagent_type.clone();
+            // The tool has already answered with the task id, so this is the
+            // only place a late failure of the request itself can be seen. The
+            // coordinator, not this task, is what holds the child's result for
+            // `TaskOutput` polling.
+            // `fire_and_forget` logs the panic, and the transport error is
+            // reported by the task itself below.
+            #[allow(clippy::disallowed_methods)]
+            tokio::spawn(crate::util::detached::fire_and_forget(
+                "background subagent spawn",
+                async move {
+                    match bg_backend.backend().spawn(request).await {
+                        Err(e) => {
+                            tracing::error!(
+                                subagent_id = %bg_id,
+                                subagent_type = %bg_type,
+                                "background spawn transport error: {e:#}",
+                            );
+                        }
+                        Ok(r) if !r.success => {
+                            tracing::error!(
+                                subagent_id = %bg_id,
+                                subagent_type = %bg_type,
+                                error = ?r.error,
+                                "background spawn rejected by coordinator",
+                            );
+                        }
+                        Ok(_) => {}
+                    }
+                },
+            ));
+>>>>>>> origin/master
 
             let mut terminal_already_logged = false;
             let registered = tokio::select! {

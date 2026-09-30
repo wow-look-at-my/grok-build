@@ -1,8 +1,11 @@
 #![allow(clippy::cast_possible_truncation)] // 1 hit predates the gate
 #![allow(clippy::unwrap_used)] // 7 hits predate the gate
+<<<<<<< HEAD
 #![allow(clippy::cast_possible_wrap)]
 #![allow(clippy::string_slice)]
 #![deny(clippy::indexing_slicing)]
+=======
+>>>>>>> origin/master
 
 pub mod auto_update;
 mod cleanup_downloads;

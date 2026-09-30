@@ -74,12 +74,18 @@ async fn a_lite_goal_is_sent_back_with_the_reason_then_ends_on_the_evaluator_alo
             );
             let actor = goal_actor(&server).await;
 
+<<<<<<< HEAD
             let GoalSetupOutcome::Inference { reminder } = actor
                 .setup_goal("make the tests pass", None, GoalMode::Lite)
                 .await
             else {
                 panic!("a lite goal must flow through to inference");
             };
+=======
+            let reminder = actor
+                .setup_goal("make the tests pass", None, GoalMode::Lite)
+                .await;
+>>>>>>> origin/master
             assert!(
                 reminder.contains("When that check finds the work complete, the goal ends."),
                 "lite rules must say the check ends the goal: {reminder}"
@@ -128,12 +134,18 @@ async fn a_full_goal_still_hands_a_candidate_to_the_panel() {
             );
             let actor = goal_actor(&server).await;
 
+<<<<<<< HEAD
             let GoalSetupOutcome::Inference { reminder } = actor
                 .setup_goal("make the tests pass", None, GoalMode::Full)
                 .await
             else {
                 panic!("a full goal with the planner off must flow through to inference");
             };
+=======
+            let reminder = actor
+                .setup_goal("make the tests pass", None, GoalMode::Full)
+                .await;
+>>>>>>> origin/master
             assert!(reminder.contains("adversarial verification panel"));
 
             assert!(matches!(

@@ -51,7 +51,15 @@ impl Update {
     }
 }
 
+<<<<<<< HEAD
 /// Open documents for one server connection. Cheap to clone (shared handle).
+=======
+/// Open documents for one server connection.
+///
+/// Cheap to clone (shared handle). The lock is `parking_lot`'s, so it never
+/// poisons: a writer that panics leaves the map open to the next acquirer, and
+/// a stale version beats no version at all.
+>>>>>>> origin/master
 #[derive(Debug, Clone, Default)]
 pub struct Documents {
     inner: Arc<RwLock<HashMap<String, Tracked>>>,
@@ -182,11 +190,19 @@ pub fn end_position(text: &str) -> Position {
         }
     }
     // LSP character offsets are UTF-16 code units.
+<<<<<<< HEAD
     let character = text
         .get(last_line_start..)
         .unwrap_or("")
         .encode_utf16()
         .count() as u32;
+=======
+    // `last_line_start` is a `char_indices` offset plus one for an ASCII `'\n'`,
+    // so it is a char boundary.
+    #[allow(clippy::string_slice)]
+    let rest_of_line = &text[last_line_start..];
+    let character = rest_of_line.encode_utf16().count() as u32;
+>>>>>>> origin/master
     Position { line, character }
 }
 

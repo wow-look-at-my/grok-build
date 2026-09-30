@@ -162,10 +162,18 @@ pub fn fit_line_to_width<'a>(line: Line<'a>, width: usize) -> Line<'a> {
 
 /// Take the first `n` display columns from a string.
 fn take_width(s: &str, n: usize) -> String {
+<<<<<<< HEAD
     let Some(prefix) = s.get(..byte_offset_at_width(s, n)) else {
         return String::new();
     };
     prefix.to_owned()
+=======
+    // `byte_offset_at_width` returns either a `char_indices` offset or
+    // `s.len()`, so the cut always lands on a char boundary.
+    #[allow(clippy::string_slice)] // offset from byte_offset_at_width's char_indices walk
+    let head = &s[..byte_offset_at_width(s, n)];
+    head.to_string()
+>>>>>>> origin/master
 }
 
 /// Fit `(type, description, activity, meta)` in `avail`. Drop description first, then meta, then truncate activity, then type.

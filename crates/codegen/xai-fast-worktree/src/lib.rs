@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 #![allow(clippy::cast_lossless)]
 #![allow(clippy::cast_possible_truncation)]
 #![allow(clippy::cast_possible_wrap)]
@@ -11,6 +12,15 @@
     unreachable_code,
     dead_code
 )]
+=======
+#![allow(clippy::cast_lossless)] // 1 hit predates the gate
+#![allow(clippy::cast_possible_truncation)] // 17 hits predate the gate
+#![allow(clippy::cast_possible_wrap)] // 7 hits predate the gate
+#![allow(clippy::cast_sign_loss)] // 5 hits predate the gate
+#![allow(clippy::string_slice)] // 1 hit predates the gate
+#![allow(clippy::unwrap_used)] // 6 hits predate the gate
+
+>>>>>>> origin/master
 //! High-performance git worktree creation using CoW cloning.
 //!
 //! This crate provides fast worktree creation by:
@@ -33,9 +43,13 @@ pub mod db;
 #[cfg(feature = "metadata")]
 pub mod discovery;
 mod git;
+<<<<<<< HEAD
 mod grove_api;
 pub mod managed_root;
 mod metrics;
+=======
+pub mod managed_root;
+>>>>>>> origin/master
 #[cfg(target_os = "linux")]
 pub(crate) mod mount_info;
 #[path = "nfs_off.rs"]
@@ -78,7 +92,10 @@ pub use db::{
 pub use discovery::{
     RebuildReport, WORKTREE_POOL_DIR, discover_worktrees, managed_worktree_roots,
     path_under_managed_worktree_roots, path_under_worktree_roots, rebuild_worktree_db,
+<<<<<<< HEAD
     rebuild_worktree_db_with_grove_data,
+=======
+>>>>>>> origin/master
 };
 pub use git::checkout::{
     rehydrate_worktree_from_ref, snapshot_worktree_to_ref, transfer_snapshot_to_repo,
@@ -92,6 +109,7 @@ pub use managed_root::{
     exclude_managed_worktrees_dir, is_repo_worktrees_root, is_worktree_dir, is_worktree_entry_name,
     main_root_for_managed_path, managed_worktrees_boundary, repo_worktrees_root,
 };
+<<<<<<< HEAD
 pub use metrics::{
     DisposeMethod, grove_wt_create_count, grove_wt_create_last_duration_ns, record_grove_wt_create,
     record_grove_wt_dispose,
@@ -114,6 +132,8 @@ pub fn local_salvage(
 pub fn local_clean_artifacts(_dest: &std::path::Path) -> anyhow::Result<CleanArtifactsReply> {
     anyhow::bail!("not available in this build")
 }
+=======
+>>>>>>> origin/master
 pub use sync::{SourceDirtyState, SyncReport, WorktreeSync, collect_source_dirty_state};
 #[cfg(target_os = "linux")]
 pub use worktree::execute::cleanup_snapshot_git_state;

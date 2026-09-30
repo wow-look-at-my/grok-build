@@ -494,8 +494,20 @@ pub enum Action {
     /// Set whether agent thinking blocks are shown.
     /// SHELL-owned: updates the process-wide cache mirror and persists to `[ui].show_thinking_blocks` via `Effect::PersistSetting`.
     SetShowThinkingBlocks(bool),
+<<<<<<< HEAD
     SetThinkingSummaries(bool),
     /// Set whether runs of consecutive non-destructive tool calls.
+=======
+    /// Set whether a long thinking block gains a one-or-two-sentence summary
+    /// under its collapsed header. SHARED-owned: updates the `[ui]` mirror and
+    /// persists to `[ui].thinking_summaries` via `Effect::PersistSetting`. A
+    /// session resolves it once at spawn, so it takes effect next session.
+    SetThinkingSummaries(bool),
+    /// Set whether runs of consecutive non-destructive tool calls and
+    /// subagent rows are grouped into one row. SHELL-owned: updates the
+    /// process-wide cache mirror and persists to `[ui].group_tool_verbs`
+    /// via `Effect::PersistSetting`.
+>>>>>>> origin/master
     SetGroupToolVerbs(bool),
     /// Set whether Edit blocks default to the collapsed one-line diffstat summary.
     /// SHELL-owned: updates the process-wide cache mirror and persists to `[ui].collapsed_edit_blocks` via `Effect::PersistSetting`.
@@ -667,7 +679,14 @@ pub enum Action {
     SwitchAccount,
     /// User pressed login on the welcome screen.
     Login,
+<<<<<<< HEAD
     /// Abandon a mid-session login and return to the previous view, without quitting.
+=======
+    /// Cancel an in-progress login that was started from inside a session
+    /// (`/login` or a 401 re-auth prompt) and return to the previous view.
+    /// Distinct from `Quit`: abandoning a mid-session re-auth must not exit
+    /// the app or lose the open session.
+>>>>>>> origin/master
     CancelLogin,
     /// User submitted a manually-pasted auth token (loopback mode).
     SubmitAuthCode(String),

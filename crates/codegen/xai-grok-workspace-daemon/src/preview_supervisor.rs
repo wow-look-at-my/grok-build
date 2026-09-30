@@ -255,8 +255,16 @@ fn build_preview_command(cfg: &PreviewArgs) -> io::Result<tokio::process::Comman
                 if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL as libc::c_ulong) == -1 {
                     return Err(io::Error::last_os_error());
                 }
+<<<<<<< HEAD:crates/codegen/xai-grok-workspace-daemon/src/preview_supervisor.rs
                 // If the WS already exited (PDEATHSIG won't fire), exit
                 // before exec rather than orphan Compared as `pid_t`s.
+=======
+                // If the WS already exited (PDEATHSIG won't fire), bail before
+                // exec rather than orphan. Compared as `pid_t`s: `getppid`
+                // answers the kernel's signed type, and a parent pid that will
+                // not fit one is not this process's parent, so it bails exactly
+                // as a value that failed to compare did.
+>>>>>>> origin/master:crates/codegen/xai-grok-workspace/src/preview_supervisor.rs
                 let parent_matches =
                     i32::try_from(parent_pid).is_ok_and(|parent| libc::getppid() == parent);
                 if !parent_matches {

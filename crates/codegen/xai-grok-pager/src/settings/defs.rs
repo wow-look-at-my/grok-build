@@ -1275,7 +1275,15 @@ pub fn default_settings() -> Vec<SettingMeta> {
             restart_required: false,
             hidden_in_minimal: false,
         },
+<<<<<<< HEAD
         // SHARED: `[ui].thinking_summaries`.
+=======
+        // SHARED: `[ui].thinking_summaries`. The shell resolves it when a session
+        // is spawned, so a change applies to the next one. Sits immediately below
+        // collapsed_edit_blocks: the four rows above are pinned into one
+        // adjacency chain by the order tests. The one home for the default is
+        // UiConfig::thinking_summaries_enabled.
+>>>>>>> origin/master
         SettingMeta {
             key: "thinking_summaries",
             category: SettingCategory::Appearance,
@@ -1299,7 +1307,12 @@ pub fn default_settings() -> Vec<SettingMeta> {
             restart_required: true,
             hidden_in_minimal: false,
         },
+<<<<<<< HEAD
         // SHELL-owned: `[ui.display_refresh].auto_cadence_enabled`. Restart-required (cadence pinned at startup); hidden in minimal.
+=======
+        // SHELL-owned: `[ui.display_refresh].auto_cadence_enabled`. Restart-
+        // required (cadence pinned at startup); hidden in minimal.
+>>>>>>> origin/master
         SettingMeta {
             key: "display_refresh_auto_cadence",
             category: SettingCategory::Appearance,

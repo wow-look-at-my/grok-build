@@ -723,9 +723,17 @@ impl SessionActor {
                         mode,
                     } => {
                         xai_grok_telemetry::session_ctx::log_event(slash_used);
+<<<<<<< HEAD
                         match self
                             .setup_goal(&objective, token_budget, mode.unwrap_or_default())
                             .await
+=======
+                        let reminder = self
+                            .setup_goal(&objective, token_budget, mode.unwrap_or_default())
+                            .await;
+                        if self.goal_tracker.lock().status()
+                            != Some(crate::session::goal_tracker::GoalStatus::Active)
+>>>>>>> origin/master
                         {
                             GoalSetupOutcome::Inference { reminder } => {
                                 vec![text_block(reminder)]
@@ -3111,8 +3119,11 @@ impl SessionActor {
             request.x_grok_turn_idx =
                 Some(self.chat_state_handle.get_prompt_index().await.to_string());
             request.x_grok_agent_id = Some(xai_grok_telemetry::id::agent_id());
+<<<<<<< HEAD
             request.x_grok_transient_retry =
                 (transient_retry_attempts > 0).then(|| transient_retry_attempts.to_string());
+=======
+>>>>>>> origin/master
             if structured_output_native {
                 request.json_schema = json_schema.clone();
             }
@@ -3595,12 +3606,16 @@ impl SessionActor {
                 .await
                 .and_then(|m| m.stream_start_ms);
             self.spawn_thinking_summary(&response, stream_start_ms);
+<<<<<<< HEAD
             if let Some(mut pt) = prompt_timing.take() {
                 pt.record_stream_latency(latency.time_to_last_byte_ms);
                 pt.record_model_result(
                     latency.attempts,
                     response.usage.as_ref().map(|u| u.completion_tokens),
                 );
+=======
+            if let Some(pt) = prompt_timing.take() {
+>>>>>>> origin/master
                 let mcp_count = self.mcp_state.lock().await.configs.len() as u32;
                 let mcp_tools = self
                     .agent

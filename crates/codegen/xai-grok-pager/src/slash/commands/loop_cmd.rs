@@ -18,11 +18,21 @@ pub struct LoopCommand;
 /// Otherwise returns `None` and the model derives the real interval; there is no host-side default.
 fn parse_loop_args(args: &str) -> (Option<&str>, &str) {
     let trimmed = args.trim();
+<<<<<<< HEAD
     if let Some((first, rest)) = trimmed
         .find(char::is_whitespace)
         .and_then(|space| trimmed.split_at_checked(space))
     {
         let rest = rest.trim_start();
+=======
+    if let Some(space) = trimmed.find(char::is_whitespace) {
+        // `str::find` with a char predicate reports the offset of a char START,
+        // so `space` is a char boundary whichever end of the token it cuts.
+        #[allow(clippy::string_slice)] // ends at a str::find char-predicate offset
+        let first = &trimmed[..space];
+        #[allow(clippy::string_slice)] // starts at that same str::find offset
+        let rest = trimmed[space..].trim_start();
+>>>>>>> origin/master
         if is_interval_token(first) && !rest.is_empty() {
             return (Some(first), rest);
         }

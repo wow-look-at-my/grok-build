@@ -71,6 +71,7 @@ fn str_arg<'a>(args: &'a serde_json::Value, keys: &[&str]) -> Option<&'a str> {
     keys.iter().find_map(|k| args.get(*k)?.as_str())
 }
 
+<<<<<<< HEAD
 /// Extract the workspace path that a tool call targets, to serialize concurrent same-file edits inside `execute_tool_calls`.
 /// `file_path`: grok_build (`search_replace`), opencode (`EditTool`, `WriteTool`, `ReadTool`).
 /// `target_directory` is deliberately omitted: a directory listing isn't an edit and must not share a file lock.
@@ -107,6 +108,26 @@ fn canonicalize_existing_ancestor(path: &Path) -> Option<PathBuf> {
         suffix.push(ancestor.file_name()?.to_owned());
         ancestor = ancestor.parent()?;
     }
+=======
+/// Extract the workspace path that a tool call targets, for the purpose of
+/// serializing concurrent same-file edits inside `execute_tool_calls`.
+///
+/// Different toolsets advertise the path under different JSON keys:
+/// - `file_path` — grok_build (`search_replace`), opencode (`EditTool`,
+///   `WriteTool`, `ReadTool`), grok_build_hashline
+///   (`hashline_edit`)
+/// - `path` — alternate edit/read tools
+/// - `target_file` — grok_build (`read_file`, via `#[serde(rename)]`)
+///
+/// Returning the same string for two calls in a batch causes them to share a
+/// `tokio::sync::Mutex` and therefore run sequentially in model-emitted order.
+/// Returning `None` lets the call run fully concurrently with everything else.
+///
+/// `target_directory` is deliberately omitted — a directory listing isn't an
+/// edit and must not bucket into a file lock.
+pub(super) fn lock_path_for_args(args: &serde_json::Value) -> Option<&str> {
+    str_arg(args, &["file_path", "path", "target_file"])
+>>>>>>> origin/master
 }
 
 /// Pull the path a read/list tool targets and classify it against the store.

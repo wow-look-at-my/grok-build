@@ -54,13 +54,25 @@ fn strike_delim_text<'a>(
     let delim = if opening {
         let end = range.start + 1;
         debug_assert!(text.is_char_boundary(end) && end <= text.len());
+<<<<<<< HEAD
         (range.start..end, text.get(range.start..end).unwrap_or(""))
+=======
+        #[allow(clippy::string_slice)] // a `~` delimiter is one byte, so `end` is a boundary
+        let slice = &text[range.start..end];
+        (range.start..end, slice)
+>>>>>>> origin/master
     } else {
         let Some(start) = range.end.checked_sub(1) else {
             return (Event::Text("".into()), range.clone());
         };
         debug_assert!(text.is_char_boundary(start) && start < text.len());
+<<<<<<< HEAD
         (start..range.end, text.get(start..range.end).unwrap_or(""))
+=======
+        #[allow(clippy::string_slice)] // a `~` delimiter is one byte, so `start` is a boundary
+        let slice = &text[start..range.end];
+        (start..range.end, slice)
+>>>>>>> origin/master
     };
     (Event::Text(delim.1.into()), delim.0)
 }

@@ -21,9 +21,16 @@ use crate::storage_client::{
 /// Larger files use signed-URL multipart (parts go directly to storage) instead of streaming through the proxy.
 pub const MULTIPART_UPLOAD_THRESHOLD: u64 = 50 * 1024 * 1024;
 
+<<<<<<< HEAD
 /// Construct a `StorageClient` for proxy-mode uploads.
 /// Uses caller-provided refresh-aware credentials, else a `StaticGrokAuth` from the inline user token.
 /// Optional `http_client` lets the caller pass a shell-tuned client; `None` falls back to `Client::new()`.
+=======
+/// Construct a `StorageClient` for proxy-mode uploads. Uses the caller-provided
+/// refresh-aware credentials when present, otherwise falls back to a
+/// `StaticGrokAuth` carrying the inline user token from
+/// `UploadMethod::Proxy`.
+>>>>>>> origin/master
 fn build_proxy_client_with_fallback(
     proxy_base_url: &str,
     user_token: &str,

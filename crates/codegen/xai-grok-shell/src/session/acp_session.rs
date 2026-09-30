@@ -94,10 +94,17 @@ pub(crate) use types::*;
 pub use types::{TodoGateDecision, TodoGateReason};
 #[path = "acp_session_impl/goal.rs"]
 mod goal;
+<<<<<<< HEAD
 #[path = "acp_session_impl/named_workflow_args.rs"]
 mod named_workflow_args;
 #[path = "acp_session_impl/plan_goal.rs"]
 mod plan_goal;
+=======
+#[path = "acp_session_impl/plan_goal.rs"]
+mod plan_goal;
+#[path = "acp_session_impl/tool_layer_images.rs"]
+mod tool_layer_images;
+>>>>>>> origin/master
 #[path = "acp_session_impl/turn.rs"]
 mod turn;
 #[path = "acp_session_impl/workflow.rs"]
@@ -258,12 +265,17 @@ mod side_call;
 #[path = "acp_session_impl/todo_capture.rs"]
 mod todo_capture;
 pub use todo_capture::{TodoCaptureError, TodoCaptureOutcome};
+<<<<<<< HEAD
 #[path = "acp_session_impl/status_line.rs"]
 pub(crate) mod status_line;
 #[path = "acp_session_impl/thinking_summary.rs"]
 mod thinking_summary;
 #[path = "acp_session_impl/title_refresh.rs"]
 mod title_refresh;
+=======
+#[path = "acp_session_impl/thinking_summary.rs"]
+mod thinking_summary;
+>>>>>>> origin/master
 #[path = "acp_session_impl/turn_end.rs"]
 mod turn_end;
 #[path = "acp_session_impl/turn_summary.rs"]
@@ -1149,6 +1161,7 @@ pub(crate) struct SessionActor {
     pub(crate) turn_summary_generation: std::cell::Cell<u64>,
     /// Turn-summary gate, resolved once at spawn (env / config / remote settings, from the `turn_summary` feature).
     pub(crate) turn_summary_enabled: bool,
+<<<<<<< HEAD
     /// Early-session title-refresh gate, resolved once at spawn (defaults to `turn_summary_enabled`; see `Config::resolve_title_refresh`).
     pub(crate) title_refresh_enabled: bool,
     /// The in-flight title-refresh side-call, if any.
@@ -1167,6 +1180,16 @@ pub(crate) struct SessionActor {
     /// True while THIS session has a prompt turn in flight (RAII-guarded in `handle_prompt`).
     /// `tool_context.is_turn_active` is the agent-wide coordinator flag shared by all sessions, so it is unusable for per-session decisions.
     /// `Arc` so it can be re-checked inside the chat-state actor's `RepairHistory` handler.
+=======
+    /// `[ui].thinking_summaries` (`UiConfig::thinking_summaries_enabled`),
+    /// resolved a single time at spawn.
+    pub(crate) thinking_summaries_enabled: bool,
+    /// True while THIS session has a prompt turn in flight (RAII-guarded in
+    /// `handle_prompt`, like `tool_context.is_turn_active` — which is the
+    /// agent-wide coordinator flag shared by all sessions and so unusable
+    /// for per-session decisions). `Arc` so it can be re-checked inside the
+    /// chat-state actor's `RepairHistory` handler.
+>>>>>>> origin/master
     pub(crate) session_turn_active: Arc<std::sync::atomic::AtomicBool>,
     /// Out-of-band capture of streamed generations for trace upload; never returned by `BuildConversationRequest` or sent back to the model.
     /// `Completed` drops the in-progress generation without wiping earlier uncommitted ones, so a same-turn doomloop retry is preserved.
@@ -1302,7 +1325,9 @@ impl SessionActor {
         if !self.goal_runs_on_workflow_engine() {
             self.maybe_reconcile_active_goal_without_harness().await;
         }
-        self.maybe_reconcile_active_goal_without_plan().await;
+        if self.goal_planner_on() {
+            self.maybe_reconcile_active_goal_without_plan().await;
+        }
         availability
     }
     /// Compute command availability without workflow-manager reads or goal reconciliation.
@@ -1765,9 +1790,12 @@ mod observability_bridge_mapping_tests;
 #[path = "acp_session_tests/permission_auto_mode_tests.rs"]
 mod permission_auto_mode_tests;
 #[cfg(test)]
+<<<<<<< HEAD
 #[path = "acp_session_tests/permission_prompt_notification_tests.rs"]
 mod permission_prompt_notification_tests;
 #[cfg(test)]
+=======
+>>>>>>> origin/master
 #[path = "acp_session_tests/plan_approval_goal_tests.rs"]
 mod plan_approval_goal_tests;
 /// Resume re-park of the parked `exit_plan_mode` approval.
@@ -2342,9 +2370,12 @@ mod managed_gateway_tool_tests {
     }
 }
 #[cfg(test)]
+<<<<<<< HEAD
 #[path = "acp_session_tests/goal/goal_compaction_reseed_tests.rs"]
 mod goal_compaction_reseed_tests;
 #[cfg(test)]
+=======
+>>>>>>> origin/master
 #[path = "acp_session_tests/goal/goal_lite_mode_tests.rs"]
 mod goal_lite_mode_tests;
 #[cfg(test)]

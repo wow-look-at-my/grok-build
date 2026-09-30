@@ -224,7 +224,12 @@ fn redirect_targets(command: &str) -> Vec<String> {
     let tokens: Vec<&str> = command.split_whitespace().collect();
     let mut out = Vec::new();
     let mut i = 0;
+<<<<<<< HEAD
     while let Some(&t) = tokens.get(i) {
+=======
+    while i < tokens.len() {
+        let t = tokens[i];
+>>>>>>> origin/master
         let target = if t == "tee" || t == ">" || t == ">>" {
             let mut j = i + 1;
             while tokens.get(j).is_some_and(|a| a.starts_with('-')) {

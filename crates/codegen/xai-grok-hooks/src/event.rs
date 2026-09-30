@@ -623,10 +623,15 @@ pub fn truncate_payload(value: serde_json::Value) -> (serde_json::Value, bool) {
     while !serialized.is_char_boundary(end) {
         end -= 1;
     }
+<<<<<<< HEAD
     let Some(prefix) = serialized.get(..end) else {
         return (value, false);
     };
     let mut result = prefix.to_string();
+=======
+    #[allow(clippy::string_slice)] // `end` was walked down to a char boundary
+    let mut result = serialized[..end].to_string();
+>>>>>>> origin/master
     result.push_str(" [truncated]");
     (serde_json::Value::String(result), true)
 }

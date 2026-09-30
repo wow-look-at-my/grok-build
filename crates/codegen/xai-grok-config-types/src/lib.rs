@@ -17,6 +17,7 @@ mod mcp;
 pub use mcp::*;
 mod permission;
 pub use permission::*;
+<<<<<<< HEAD
 mod auth_provider;
 pub use auth_provider::*;
 pub mod retry_budget;
@@ -27,6 +28,20 @@ use xai_grok_config::deserialize::optional_bool as de_opt_bool_tolerant;
 /// A remote `campaigns[]` entry: an `id` gate plus a flattened patch that can set any config key.
 /// It is the JSON sibling of a `[[campaigns]]` TOML override.
 /// `campaign_id` folds through [`CampaignOverride::ID_KEYS`], so an entry naming both keys still parses.
+=======
+mod pool;
+pub use pool::*;
+pub mod retry_budget;
+use serde::{Deserialize, Serialize};
+use xai_grok_announcements::RemoteAnnouncement;
+/// A remote `campaigns[]` entry: an `id` gate plus a full-power
+/// flattened config patch (the JSON sibling of a `[[campaigns]]` TOML override).
+///
+/// The entry arrives over the wire, so `campaign_id` is folded through
+/// [`CampaignOverride::ID_KEYS`] rather than read as a serde alias: an
+/// `#[serde(alias)]` makes a second key a `duplicate field` error even when the
+/// two carry one value, which would drop the whole campaign.
+>>>>>>> origin/master
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(try_from = "CampaignOverrideWire")]
 pub struct CampaignOverride {
@@ -64,10 +79,20 @@ impl TryFrom<CampaignOverrideWire> for CampaignOverride {
         })
     }
 }
+<<<<<<< HEAD
 /// Doom-loop recovery settings: one struct serves both the local `[doom_loop_recovery]` TOML table and the remote `doom_loop_recovery` JSON object.
 /// Every field is `Option` with a per-field default, so a partial object parses and unknown future keys are ignored.
 /// Unset fields fall through per-field in `resolve_doom_loop_recovery`: env, then TOML, then remote, then default.
 /// The namespace is distinct from the removed legacy `doom_loop_*` keys.
+=======
+/// Doom-loop recovery settings: ONE struct serves both the local
+/// `[doom_loop_recovery]` TOML table and the remote settings
+/// `doom_loop_recovery` JSON object, so the two stay 1:1. All fields are
+/// `Option` with per-field defaults (a partial object never fails the parse,
+/// and unknown future keys are ignored); unset fields fall through per-field
+/// in `resolve_doom_loop_recovery` (env > TOML > remote > default). Distinct
+/// namespace from the removed legacy `doom_loop_*` keys.
+>>>>>>> origin/master
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct DoomLoopRecoverySettings {
@@ -1144,6 +1169,7 @@ where
 pub struct GoalRoleModel {
     /// Model id, e.g. "grok-4". It resolves against available models at spawn time; unknown or unauthorized fails open to the current model.
     pub model: String,
+<<<<<<< HEAD
     /// Harness `agent_type` (e.g. "cursor", "grok-build-plan") whose `AgentDefinition` decides the role subagent's harness flavor.
     /// The flavor (system prompt and cursor-vs-grok-build toolset) applies regardless of the session or parent agent.
     /// It is resolved by name (project/plugin/builtin lookup, then re-flavored by the subagent toolset resolver).
@@ -1151,6 +1177,19 @@ pub struct GoalRoleModel {
     /// It is not a subagent type: the role always spawns `general-purpose`, so the harness only re-flavors that toolset.
     /// An `agent_type` that doesn't resolve, or whose role toolset can't satisfy the role, fails open to the session model and harness before commit.
     /// One that resolves to a strict harness whose flavor the subagent system can't represent fails open the same way.
+=======
+    /// Harness `agent_type` (e.g. "cursor", "grok-build-plan") whose
+    /// `AgentDefinition` decides the role subagent's harness flavor (system
+    /// prompt + cursor-vs-grok-build toolset), applied REGARDLESS of the
+    /// session/parent agent. Resolved by NAME (project/plugin/builtin lookup,
+    /// then re-flavored by the subagent toolset resolver) — NOT via the main
+    /// session's env/ACP/strict-harness precedence chain. NOT a subagent type:
+    /// the role always spawns `general-purpose`, so the harness only re-flavors
+    /// that toolset. An `agent_type` that doesn't resolve, that resolves to a
+    /// strict harness whose flavor the subagent system can't represent, or
+    /// whose role toolset can't satisfy the role.
+    /// session model + harness before commit.
+>>>>>>> origin/master
     pub agent_type: String,
 }
 #[cfg(test)]
@@ -1206,6 +1245,7 @@ mod tests {
         assert!(json.get("campaign_id").is_none(), "{json}");
     }
 
+<<<<<<< HEAD
     #[test]
     fn remote_grove_worktree_reads_either_key_and_both_when_they_agree() {
         let parse = |json: &str| serde_json::from_str::<RemoteSettings>(json);
@@ -1233,6 +1273,8 @@ mod tests {
         assert!(out.get("nfs_worktree").is_none(), "{out}");
     }
 
+=======
+>>>>>>> origin/master
     #[test]
     fn worktree_auto_gc_partial_object_and_round_trip() {
         let json = r#"{"worktree_auto_gc":{"enabled":false}}"#;

@@ -299,6 +299,7 @@ impl ChildRunner for TestRunner {
                 };
             }
             let _ = started.send(request.id.clone());
+<<<<<<< HEAD
             if request.id == "stamp-queued-sibling" {
                 let _ = start.recv().await;
                 assert!(
@@ -308,6 +309,8 @@ impl ChildRunner for TestRunner {
                     "queued record must take the resolved type"
                 );
             }
+=======
+>>>>>>> origin/master
             if request.prompt == PANICKING_PROMPT {
                 panic!("{} died holding its reporter", request.id);
             }
@@ -4761,7 +4764,11 @@ async fn a_panicking_child_reports_what_it_died_of() {
         async move {
             let mut request = request("dead-child", true);
             request.prompt = PANICKING_PROMPT.to_owned();
+<<<<<<< HEAD
             backend.spawn(request, None).await
+=======
+            backend.spawn(request).await
+>>>>>>> origin/master
         }
     });
 

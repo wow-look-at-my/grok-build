@@ -241,12 +241,24 @@ fn format_running_tasks_warning(running: &[&TaskSnapshot], kill_task_name: Optio
 fn split_wrapped_monitor_event(event_text: &str) -> Option<(&str, &str)> {
     let rest = event_text.strip_prefix("<monitor-event description=\"")?;
     let open_end = rest.find(">\n")?;
+<<<<<<< HEAD
     let open_tag = rest.get(..open_end)?;
     let desc_end = open_tag.rfind("\" task_id=\"")?;
     let description = open_tag.get(..desc_end)?;
     let inner = rest
         .get(open_end + 2..)?
         .strip_suffix("\n</monitor-event>")?;
+=======
+    // `open_end` is the offset of the ASCII `>\n`, and `desc_end` the offset of
+    // the ASCII `" task_id="` within it, so each offset is a char boundary.
+    #[allow(clippy::string_slice)]
+    let open_tag = &rest[..open_end];
+    let desc_end = open_tag.rfind("\" task_id=\"")?;
+    #[allow(clippy::string_slice)]
+    let description = &open_tag[..desc_end];
+    #[allow(clippy::string_slice)]
+    let inner = rest[open_end + 2..].strip_suffix("\n</monitor-event>")?;
+>>>>>>> origin/master
     Some((description, inner))
 }
 /// Format drained [`MonitorEventNotification`]s for the turn loop's hidden synthetic user message. Model-facing only —
@@ -615,10 +627,20 @@ fn task_text_agent_id(text: &str) -> Option<&str> {
     let end = after
         .find(|c: char| c.is_whitespace())
         .unwrap_or(after.len());
+<<<<<<< HEAD
     if end == 0 { None } else { after.get(..end) }
 }
 fn wait_result_consumed(r: &TaskOutputResult) -> bool {
     r.is_terminal() && r.status != "cancelled"
+=======
+    if end == 0 {
+        return None;
+    }
+    // `find` on a `char` predicate reports the byte a character starts at.
+    #[allow(clippy::string_slice)]
+    let agent_id = &after[..end];
+    Some(agent_id)
+>>>>>>> origin/master
 }
 pub fn consumed_completion_ids(output: &ToolOutput) -> Vec<&str> {
     let mut ids = Vec::new();

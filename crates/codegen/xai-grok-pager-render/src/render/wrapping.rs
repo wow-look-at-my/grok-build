@@ -101,6 +101,7 @@ pub fn wrap_byte_ranges_matching(text: &str, width: usize) -> Vec<Range<usize>> 
     // Mirror that here so search-highlight breakpoints stay in sync with the visual rendering
     let bq_len = blockquote_prefix_len(text);
     let subsequent_width = if bq_len > 0 && bq_len < text.len() {
+<<<<<<< HEAD
         match text.get(..bq_len) {
             Some(prefix) => {
                 let prefix_display_width = prefix
@@ -111,6 +112,16 @@ pub fn wrap_byte_ranges_matching(text: &str, width: usize) -> Vec<Range<usize>> 
             }
             None => width,
         }
+=======
+        // `blockquote_prefix_len` only advances past whole `│ ` pairs it pulled
+        // off `chars()`, so the length it returns is a char boundary.
+        #[allow(clippy::string_slice)] // prefix length counted by chars() in blockquote_prefix_len
+        let prefix_display_width = text[..bq_len]
+            .chars()
+            .map(|c| c.width().unwrap_or(0))
+            .sum::<usize>();
+        width.saturating_sub(prefix_display_width).max(1)
+>>>>>>> origin/master
     } else {
         width
     };
@@ -129,6 +140,7 @@ pub fn wrap_byte_ranges_matching(text: &str, width: usize) -> Vec<Range<usize>> 
     let mut base = first.end;
 
     // Skip whitespace at the wrap boundary (mirrors word_wrap_line_with_joiners).
+<<<<<<< HEAD
     let skip = match text.get(base..) {
         Some(rest) => rest.chars().take_while(|c| *c == ' ').count(),
         None => 0,
@@ -139,6 +151,17 @@ pub fn wrap_byte_ranges_matching(text: &str, width: usize) -> Vec<Range<usize>> 
         let Some(remainder) = text.get(base..) else {
             return ranges;
         };
+=======
+    // `base` is a `textwrap` range end and `skip` counts ASCII spaces, each one
+    // byte, so `base` stays on a char boundary either way.
+    #[allow(clippy::string_slice)] // textwrap range end, advanced by an ASCII-space count
+    let skip = text[base..].chars().take_while(|c| *c == ' ').count();
+    base = base.saturating_add(skip);
+
+    if base < text.len() {
+        #[allow(clippy::string_slice)] // base is the textwrap range end plus ASCII spaces
+        let remainder = &text[base..];
+>>>>>>> origin/master
         let rem_opts = textwrap::Options::new(subsequent_width)
             .wrap_algorithm(textwrap::WrapAlgorithm::FirstFit)
             .word_splitter(textwrap::WordSplitter::HyphenSplitter)
@@ -403,6 +426,7 @@ where
     // counts ASCII spaces (one byte each), so every offset below stays on a
     // char boundary of `flat`.
     let mut base = first_line_range.end;
+<<<<<<< HEAD
     let skip_leading_spaces = match flat.get(base..) {
         Some(rest) => rest.chars().take_while(|c| *c == ' ').count(),
         None => 0,
@@ -413,14 +437,26 @@ where
         None => String::new(),
     };
     base = joiner_end;
+=======
+    #[allow(clippy::string_slice)] // textwrap range end, advanced by an ASCII-space count
+    let skip_leading_spaces = flat[base..].chars().take_while(|c| *c == ' ').count();
+    #[allow(clippy::string_slice)] // two char boundaries of `flat`, both offsets above
+    let joiner_first = flat[base..base.saturating_add(skip_leading_spaces)].to_string();
+    base = base.saturating_add(skip_leading_spaces);
+>>>>>>> origin/master
 
     let subsequent_width_available = opts
         .width
         .saturating_sub(rt_opts.subsequent_indent.width())
         .max(1);
+<<<<<<< HEAD
     let Some(remaining) = flat.get(base..) else {
         return (out, joiners);
     };
+=======
+    #[allow(clippy::string_slice)] // base advanced past ASCII spaces from a textwrap range end
+    let remaining = &flat[base..];
+>>>>>>> origin/master
     let remaining_wrapped = wrap_ranges_trim(remaining, opts.width(subsequent_width_available));
 
     let mut prev_end = 0usize;
@@ -432,10 +468,18 @@ where
         let joiner = if i == 0 {
             joiner_first.clone()
         } else {
+<<<<<<< HEAD
             match remaining.get(prev_end..r.start) {
                 Some(s) => s.to_string(),
                 None => String::new(),
             }
+=======
+            // Both bounds are offsets `wrap_ranges_trim` derived from
+            // `textwrap::wrap` over `remaining`, so they are char boundaries.
+            #[allow(clippy::string_slice)] // textwrap range ends over `remaining`
+            let gap_text = &remaining[prev_end..r.start];
+            gap_text.to_string()
+>>>>>>> origin/master
         };
         prev_end = r.end;
 
@@ -620,12 +664,24 @@ fn slice_line_spans<'a>(
         if seg_end > seg_start {
             let local_start = seg_start - s;
             let local_end = seg_end - s;
+<<<<<<< HEAD
             let Some(content) = original.spans.get(i).map(|s| s.content.as_ref()) else {
                 continue;
             };
             let Some(slice) = content.get(local_start..local_end) else {
                 continue;
             };
+=======
+            let content = original.spans[i].content.as_ref();
+            // `span_bounds` is built by accumulating each span's `len()` while
+            // concatenating them into `flat`, and `start_byte`/`end_byte` are
+            // `textwrap` boundaries of `flat`. The max/min of two boundaries is
+            // one, and subtracting the span's own start re-bases it into
+            // `content`, whose start is itself a boundary of `flat`.
+            #[allow(clippy::string_slice)]
+            // span/text boundaries of `flat`, re-based on the span's start
+            let slice = &content[local_start..local_end];
+>>>>>>> origin/master
             acc.push(Span {
                 style: *style,
                 content: Cow::Borrowed(slice),

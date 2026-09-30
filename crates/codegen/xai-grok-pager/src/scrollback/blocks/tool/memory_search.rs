@@ -303,7 +303,15 @@ fn shorten_path(path: &str) -> &str {
     if let Some(rest) = path.strip_prefix(&memory_prefix) {
         let rest = rest.strip_prefix('/').unwrap_or(rest);
         if let Some(after_slash) = rest.find('/') {
+<<<<<<< HEAD
             return rest.get(after_slash + 1..).unwrap_or(rest);
+=======
+            // `after_slash` is a `str::find` offset for the one-byte ASCII '/',
+            // so the offset past it is a char boundary.
+            #[allow(clippy::string_slice)] // one past a str::find('/') offset
+            let tail = &rest[after_slash + 1..];
+            return tail;
+>>>>>>> origin/master
         }
         return rest;
     }
@@ -332,6 +340,7 @@ pub fn parse_memory_results(output: &str) -> Vec<MemoryResult> {
 
         // Line 0: "1 (score: 0.72, source: global)"
         if let Some(first) = lines.first() {
+<<<<<<< HEAD
             if let Some(score_start) = first.find("score: ")
                 && let Some(after) = first.get(score_start + 7..)
                 && let Some(end) = after.find(',')
@@ -346,6 +355,26 @@ pub fn parse_memory_results(output: &str) -> Vec<MemoryResult> {
                 if let Some(src) = after.get(..end) {
                     source = src.to_string();
                 }
+=======
+            if let Some(score_start) = first.find("score: ") {
+                // Each offset below is a `str::find` result, optionally stepped
+                // past the ASCII needle it matched, so each is a char boundary.
+                #[allow(clippy::string_slice)] // past the ASCII "score: " str::find matched
+                let after = &first[score_start + 7..];
+                if let Some(end) = after.find(',') {
+                    #[allow(clippy::string_slice)] // ends at a str::find(',') offset
+                    let raw = &after[..end];
+                    score = raw.parse().unwrap_or(0.0);
+                }
+            }
+            if let Some(src_start) = first.find("source: ") {
+                #[allow(clippy::string_slice)] // past the ASCII "source: " str::find matched
+                let after = &first[src_start + 8..];
+                let end = after.find(')').unwrap_or(after.len());
+                #[allow(clippy::string_slice)] // ends at str::find(')') or after.len()
+                let raw = &after[..end];
+                source = raw.to_string();
+>>>>>>> origin/master
             }
         }
 
@@ -353,6 +382,7 @@ pub fn parse_memory_results(output: &str) -> Vec<MemoryResult> {
         for line in lines.iter().skip(1) {
             if let Some(rest) = line.strip_prefix("**File:** ") {
                 if let Some(paren) = rest.find(" (lines ") {
+<<<<<<< HEAD
                     let Some(path_str) = rest.get(..paren) else {
                         continue;
                     };
@@ -360,6 +390,15 @@ pub fn parse_memory_results(output: &str) -> Vec<MemoryResult> {
                     let Some(range_str) = rest.get(paren + 8..) else {
                         continue;
                     };
+=======
+                    #[allow(clippy::string_slice)] // ends at a str::find(" (lines ") offset
+                    let raw_path = &rest[..paren];
+                    path = raw_path.to_string();
+                    // `paren` is that `str::find` offset and the needle is 8
+                    // ASCII bytes, so the offset past it is a char boundary.
+                    #[allow(clippy::string_slice)] // past the ASCII " (lines " str::find matched
+                    let range_str = &rest[paren + 8..];
+>>>>>>> origin/master
                     let range_str = range_str.trim_end_matches(')');
                     if let Some((s, e)) = range_str.split_once('-') {
                         start_line = s.parse().unwrap_or(0);
@@ -373,12 +412,25 @@ pub fn parse_memory_results(output: &str) -> Vec<MemoryResult> {
 
         // Extract snippet between ``` markers
         let full = section;
+<<<<<<< HEAD
         if let Some(code_start) = full.find("```\n")
             && let Some(after_start) = full.get(code_start + 4..)
             && let Some(code_end) = after_start.find("\n```")
             && let Some(body) = after_start.get(..code_end)
         {
             snippet = body.to_string();
+=======
+        if let Some(code_start) = full.find("```\n") {
+            // `code_start` is a `str::find` offset and the needle is 4 ASCII
+            // bytes, so the offset past it is a char boundary.
+            #[allow(clippy::string_slice)] // past the ASCII "```\n" str::find matched
+            let after_start = &full[code_start + 4..];
+            if let Some(code_end) = after_start.find("\n```") {
+                #[allow(clippy::string_slice)] // ends at a str::find("\n```") offset
+                let raw_snippet = &after_start[..code_end];
+                snippet = raw_snippet.to_string();
+            }
+>>>>>>> origin/master
         }
 
         if !path.is_empty() || !snippet.is_empty() {

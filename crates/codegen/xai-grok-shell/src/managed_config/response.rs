@@ -1,5 +1,9 @@
+<<<<<<< HEAD
 //! The managed-config fetch/response contract: its errors, response parsing, and envelope picking.
 //! Also holds fetched-envelope verification and the apply outcome the sync orchestration consumes.
+=======
+//! The managed-config response contract, its errors, and envelope verification.
+>>>>>>> origin/master
 
 use serde::{Deserialize, Serialize};
 use xai_grok_config::signed_policy::now_unix;

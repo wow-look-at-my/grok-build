@@ -1170,7 +1170,12 @@ mod tests {
                         "show_thinking_blocks default drifts from UiConfig::default()"
                     );
                 }
+<<<<<<< HEAD
                 // thinking_summaries: Option<bool>; None = on (the resolver const is the only home for that default).
+=======
+                // thinking_summaries: Option<bool>; None = on (the resolver
+                // const is the only home for that default).
+>>>>>>> origin/master
                 ("thinking_summaries", SettingKind::Bool { default }) => {
                     assert_eq!(
                         *default,
@@ -1179,7 +1184,11 @@ mod tests {
                     );
                     assert!(*default, "thinking_summaries must default ON");
                 }
+<<<<<<< HEAD
                 // group_tool_verbs: Option<bool>; None reads as true (client default)
+=======
+                // group_tool_verbs: Option<bool>; None → true (client default).
+>>>>>>> origin/master
                 ("group_tool_verbs", SettingKind::Bool { default }) => {
                     assert_eq!(
                         *default,

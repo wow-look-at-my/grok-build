@@ -463,10 +463,15 @@ fn truncate_preview(s: &str) -> String {
             .last()
             .map(|(i, _)| i)
             .unwrap_or(0);
+<<<<<<< HEAD
         let Some(prefix) = trimmed.get(..boundary) else {
             return trimmed.to_string();
         };
         let mut preview = prefix.to_string();
+=======
+        #[allow(clippy::string_slice)] // `boundary` is a `char_indices` position
+        let mut preview = trimmed[..boundary].to_string();
+>>>>>>> origin/master
         preview.push_str("...");
         preview
     }

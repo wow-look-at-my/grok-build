@@ -194,11 +194,19 @@ fn item_kind(item: &ConversationItem) -> String {
     match item {
         ConversationItem::System(_) => "system prompt".into(),
         ConversationItem::User(u) => match &u.synthetic_reason {
+<<<<<<< HEAD
             SyntheticReason::Human => "user message".into(),
             SyntheticReason::CompactionMeta => "compaction meta".into(),
             SyntheticReason::SystemReminder => "system reminder".into(),
             SyntheticReason::ProjectInstructions => "project instructions".into(),
             other => format!("user ({other:?})"),
+=======
+            None => "user message".into(),
+            Some(SyntheticReason::CompactionMeta) => "compaction meta".into(),
+            Some(SyntheticReason::SystemReminder) => "system reminder".into(),
+            Some(SyntheticReason::ProjectInstructions) => "project instructions".into(),
+            Some(other) => format!("user ({other:?})"),
+>>>>>>> origin/master
         },
         ConversationItem::Assistant(a) if a.tool_calls.is_empty() => "assistant".into(),
         ConversationItem::Assistant(a) => format!("assistant, {} tool calls", a.tool_calls.len()),
@@ -299,7 +307,10 @@ mod tests {
         let history = vec![
             ConversationItem::System(SystemItem {
                 content: "sys".into(),
+<<<<<<< HEAD
                 synthetic_reason: SyntheticReason::Primary,
+=======
+>>>>>>> origin/master
             }),
             ConversationItem::user_meta("prefix"),
             tool_result(400_000),

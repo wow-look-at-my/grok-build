@@ -18,7 +18,10 @@ parking_lot = { workspace = true }
 git2 = { version = "0.21", default-features = false, features = ["vendored-libgit2"] }
 ignore = { workspace = true }
 regex = { workspace = true }
+<<<<<<< HEAD
 rand = { workspace = true }
+=======
+>>>>>>> origin/master
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

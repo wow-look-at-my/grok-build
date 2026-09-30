@@ -1110,10 +1110,43 @@ pub(super) fn dispatch_send_prompt_submission(
         effects.extend(dispatch(Action::Quit, app));
         return effects;
     } else {
+<<<<<<< HEAD
         // Server-authoritative immediate send (plain prompt only)
         // The agent appends it to its authoritative `pending_inputs` (turn starts never overlap) and drives the drain via `x.ai/queue/changed`
         // So the chips are cleared ONLY when the suggestion actually sends or enqueues
         agent.release_hook_block_hold();
+=======
+        // ── Server-authoritative immediate send (plain prompt only) ──
+        // A plain prompt typed while a turn is RUNNING is sent to the agent
+        // immediately instead of being held in the local drip-feed queue. The
+        // agent appends it to its authoritative `pending_inputs` (no concurrent
+        // turn starts — validated keystone) and drives the drain via
+        // `x.ai/queue/changed`. We render an optimistic echo into the shared
+        // queue keyed by `prompt_id`; the broadcast reconciles it by id.
+        //
+        // The IDLE case is unchanged (falls through to the local path below,
+        // which drains instantly and renders the user block) — preserving the
+        // byte-for-byte idle experience. Skill/editing/non-running cases also
+        // stay local. An image prompt takes the immediate path: the shell
+        // harvests its image blocks into the running turn with the text.
+        //
+        // A follow-up chip submission supersedes the current response's
+        // suggestions: clear the visible chips here — INSIDE the send/enqueue
+        // path, after the `reconnect_pending` and active-agent early-return
+        // guards — so the chips are cleared ONLY when the suggestion actually
+        // sends/enqueues. Placing it before those guards (the prior fix) cleared
+        // the chips even when `reconnect_pending` aborted with a toast and no
+        // send, losing both the chips and the submit. This single clear covers
+        // BOTH the immediate-send and enqueue subpaths below; `clear_follow_ups`
+        // is idempotent (so the immediate-send branch's own clear is a no-op)
+        // and keeps `follow_up_seen` (a stale re-delivery stays rejected).
+        //
+        // Gate on a BOUND session: with no `session_id`, the enqueue subpath
+        // below queues the text but `maybe_drain_queue` returns WITHOUT emitting
+        // `SendPrompt` (nothing can drain to an unbound session), so clearing the
+        // chips here would lose the click with nothing submitted. Leaving them
+        // shown preserves the suggestion for a retry once the session binds.
+>>>>>>> origin/master
         if is_follow_up && agent.session.session_id.is_some() {
             agent.clear_follow_ups();
         }
@@ -1189,14 +1222,22 @@ pub(super) fn dispatch_send_prompt_submission(
 
             // Take the images before `set_text`, which clears them.
             let images = if consume_input {
+<<<<<<< HEAD
                 app.pending_image_notices
                     .extend(agent.unbound_image_placeholder_notice());
+=======
+>>>>>>> origin/master
                 agent.prompt.drain_images()
             } else {
                 Vec::new()
             };
             if consume_input {
+<<<<<<< HEAD
                 // Clear the textarea and record up-arrow history (same as the local path's history insert)
+=======
+                // Clear textarea + record up-arrow history (same as the local
+                // path's history insert).
+>>>>>>> origin/master
                 agent.prompt.set_text("");
                 agent.note_draft_consumed();
                 agent.record_prompt_in_history(&text);
@@ -1222,7 +1263,11 @@ pub(super) fn dispatch_send_prompt_submission(
             {
                 maybe_show_send_now_tip(app);
             }
+<<<<<<< HEAD
             effects.push(super::queue::server_queue_send_effect(
+=======
+            return vec![super::queue::server_queue_send_effect(
+>>>>>>> origin/master
                 agent_id,
                 session_id,
                 text,
@@ -1230,8 +1275,12 @@ pub(super) fn dispatch_send_prompt_submission(
                 &cwd,
                 prompt_id,
                 skill_token_ranges,
+<<<<<<< HEAD
             ));
             return effects;
+=======
+            )];
+>>>>>>> origin/master
         }
 
         agent
@@ -1256,6 +1305,11 @@ pub(super) fn dispatch_send_prompt_submission(
             agent.prompt.set_text("");
             agent.note_draft_consumed();
         }
+<<<<<<< HEAD
+=======
+        // Local queue while a turn is running: tip after
+        // this branch so the agent mut-borrow is released first.
+>>>>>>> origin/master
         tip_send_now_after_queue = queued_while_running;
     }
 

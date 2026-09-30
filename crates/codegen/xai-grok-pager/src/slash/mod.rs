@@ -617,10 +617,20 @@ impl SlashController {
             return;
         };
 
+<<<<<<< HEAD
         let args_text_empty = input
             .args_range
             .as_ref()
             .is_some_and(|r| text.get(r.start..r.end).is_none_or(|s| s.trim().is_empty()));
+=======
+        let args_text_empty = input.args_range.as_ref().is_some_and(|r| {
+            // `args_range` is `start..args_end` from the slash tokenizer, whose
+            // edges are char boundaries of the same text.
+            #[allow(clippy::string_slice)] // slash-tokenizer range edges
+            let args_text = &text[r.start..r.end];
+            args_text.trim().is_empty()
+        });
+>>>>>>> origin/master
         let mut snapshot = SlashSnapshot {
             active: true,
             open: false,
@@ -800,26 +810,50 @@ impl SlashController {
             return snapshot;
         }
 
+<<<<<<< HEAD
         let Some(token_with_slash) = text.get(token.range.start..token.range.end) else {
             return snapshot;
         };
+=======
+        // Every offset below is an `InlineSlashToken::range` edge. The scanner
+        // that builds them walks `char_indices` and steps by `len_utf8`, so each
+        // edge is a char boundary of `text`.
+        #[allow(clippy::string_slice)] // slash-tokenizer range edges
+        let token_with_slash = &text[token.range.start..token.range.end];
+>>>>>>> origin/master
         if parse_invocation(token_with_slash).is_none() {
             return snapshot;
         }
 
         let args_start = token.range.end;
+<<<<<<< HEAD
         let first_is_whitespace = args_start < text.len()
             && text
                 .get(args_start..)
                 .and_then(|s| s.chars().next())
                 .is_some_and(|ch| ch.is_whitespace());
+=======
+        let first_is_whitespace = args_start < text.len() && {
+            #[allow(clippy::string_slice)] // slash-tokenizer range edge
+            let from_args_start = &text[args_start..];
+            from_args_start
+                .chars()
+                .next()
+                .is_some_and(|ch| ch.is_whitespace())
+        };
+>>>>>>> origin/master
         if !first_is_whitespace {
             return snapshot;
         }
 
         let mut start = args_start;
         while start < text.len() {
+<<<<<<< HEAD
             let ch = match text.get(start..).and_then(|s| s.chars().next()) {
+=======
+            #[allow(clippy::string_slice)] // start is a tokenizer edge, then stepped by len_utf8
+            let ch = match text[start..].chars().next() {
+>>>>>>> origin/master
                 Some(ch) => ch,
                 None => break,
             };
@@ -830,6 +864,7 @@ impl SlashController {
             }
         }
         let args_end = next_slash_token_start(all_tokens, token).unwrap_or(text.len());
+<<<<<<< HEAD
         let args_empty = start >= args_end
             || text
                 .get(start..args_end)
@@ -838,6 +873,24 @@ impl SlashController {
             text.get(start..cursor.min(args_end))
                 .unwrap_or("")
                 .to_owned()
+=======
+        // The `start >= args_end` arm must stay first: it short-circuits past the
+        // slice, which would be an inverted range when `start` is past `args_end`.
+        let args_empty = start >= args_end || {
+            #[allow(clippy::string_slice)]
+            // tokenizer edges: `start` above and another token's start
+            let args_body = &text[start..args_end];
+            args_body.trim().is_empty()
+        };
+        let args_query = if cursor > start {
+            // `cursor` is a textarea caret offset, not something this function
+            // computed, so snap the end down to a real boundary before cutting.
+            let query_end =
+                crate::render::line_utils::floor_char_boundary(text, cursor.min(args_end));
+            #[allow(clippy::string_slice)] // end is floor_char_boundary's own output
+            let query_text = &text[start..query_end];
+            query_text.to_string()
+>>>>>>> origin/master
         } else {
             String::new()
         };
@@ -1354,10 +1407,18 @@ fn analyze_input(text: &str, cursor: usize) -> Option<SlashInput> {
     }
 
     let cursor = cursor.min(text.len());
+<<<<<<< HEAD
     if text
         .get(1..)
         .is_none_or(|rest| rest.chars().all(char::is_whitespace))
     {
+=======
+    // The `starts_with('/')` above proved byte 0 is an ASCII '/', so 1 is a
+    // char boundary.
+    #[allow(clippy::string_slice)] // one past an ASCII '/' that starts_with confirmed
+    let after_slash = &text[1..];
+    if after_slash.chars().all(|ch| ch.is_whitespace()) {
+>>>>>>> origin/master
         return Some(SlashInput {
             command_range: 0..1,
             query: String::new(),
@@ -1382,7 +1443,16 @@ fn analyze_input(text: &str, cursor: usize) -> Option<SlashInput> {
     let query = if query_end <= 1 {
         String::new()
     } else {
+<<<<<<< HEAD
         text.get(1..query_end)?.to_owned()
+=======
+        // `cursor` is a textarea caret offset rather than something computed
+        // here, so snap the cut down to a real boundary first.
+        let cut = crate::render::line_utils::floor_char_boundary(text, query_end);
+        #[allow(clippy::string_slice)] // end is floor_char_boundary's own output
+        let query_text = &text[1..cut];
+        query_text.to_string()
+>>>>>>> origin/master
     };
 
     let cursor_in_command = cursor <= command_end;
@@ -1392,7 +1462,14 @@ fn analyze_input(text: &str, cursor: usize) -> Option<SlashInput> {
     if !cursor_in_command {
         let mut start = command_end;
         while start < text.len() {
+<<<<<<< HEAD
             let ch = match text.get(start..).and_then(|s| s.chars().next()) {
+=======
+            // `command_end` came out of `char_indices` above and `start` only
+            // advances by a char's `len_utf8`, so it stays on a boundary.
+            #[allow(clippy::string_slice)] // char_indices edge, stepped by len_utf8
+            let ch = match text[start..].chars().next() {
+>>>>>>> origin/master
                 Some(ch) => ch,
                 None => break,
             };
@@ -1405,7 +1482,16 @@ fn analyze_input(text: &str, cursor: usize) -> Option<SlashInput> {
         let end = text.len();
         let query_end = cursor.clamp(start, end);
         if query_end > start {
+<<<<<<< HEAD
             args_query = text.get(start..query_end)?.to_owned();
+=======
+            // `cursor` is a textarea caret offset, so snap the cut down to a
+            // real boundary before slicing.
+            let cut = crate::render::line_utils::floor_char_boundary(text, query_end);
+            #[allow(clippy::string_slice)] // end is floor_char_boundary's own output
+            let args_text = &text[start..cut];
+            args_query = args_text.to_string();
+>>>>>>> origin/master
         }
         args_range = Some(start..end);
     }
@@ -1443,12 +1529,25 @@ pub fn parse_invocation(line: &str) -> Option<SlashInvocation<'_>> {
             break;
         }
     }
+<<<<<<< HEAD
     let token = remainder.get(..command_end)?.trim();
+=======
+    // `command_end` is either a `char_indices` offset from the loop above or
+    // `remainder.len()`, so both cuts land between characters.
+    #[allow(clippy::string_slice)] // char_indices offset, or len()
+    let token = remainder[..command_end].trim();
+>>>>>>> origin/master
     if token.is_empty() {
         return None;
     }
     let args = if command_end < remainder.len() {
+<<<<<<< HEAD
         remainder.get(command_end..)?.trim_start()
+=======
+        #[allow(clippy::string_slice)] // same char_indices offset
+        let after_command = &remainder[command_end..];
+        after_command.trim_start()
+>>>>>>> origin/master
     } else {
         ""
     };
@@ -1661,9 +1760,17 @@ pub fn scan_inline_slash_tokens(text: &str, cursor: usize) -> Vec<InlineSlashTok
         if name_end <= name_start {
             continue; // bare `/` with nothing after
         }
+<<<<<<< HEAD
         let Some(name) = text.get(name_start..name_end).map(str::to_owned) else {
             continue;
         };
+=======
+        // `name_start` is a `char_indices` offset stepped over the `/`, and
+        // `name_end` is another `char_indices` offset stepped over its char, so
+        // both are boundaries.
+        #[allow(clippy::string_slice)] // char_indices offsets in this scan
+        let name = text[name_start..name_end].to_string();
+>>>>>>> origin/master
         let range = idx..name_end;
         let has_cursor = cursor >= range.start && cursor <= range.end;
         tokens.push(InlineSlashToken {

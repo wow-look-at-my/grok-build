@@ -161,6 +161,7 @@ pub(super) enum PlanEditGate {
     /// Grok-toolset edit outside the plan file (plan-file-only rule).
     RejectNonPlanFile,
 }
+<<<<<<< HEAD
 /// `send_feedback` maps to `AccessKind::Tool` when its input parses as `SendFeedback` or `Dynamic`.
 fn access_kind_for_resolved_tool(tool_name: &str, tool_input: &ToolInput) -> AccessKind {
     if tool_name == xai_grok_tools::implementations::grok_build::SEND_FEEDBACK_TOOL_NAME {
@@ -175,6 +176,30 @@ fn access_kind_for_resolved_tool(tool_name: &str, tool_input: &ToolInput) -> Acc
 }
 /// Compat-toolset `Delete` is not on the markdown carve-out: it maps to `AccessKind::Edit` and is plan-file-only (same as grok edits).
 /// `enter_plan_mode` / `exit_plan_mode` map to `AccessKind::Read` and are never gated.
+=======
+/// Gate edit-class tool calls while plan mode is active.
+///
+/// Plan mode is read-only **in every permission mode, including
+/// always-approve**: the permission manager's YOLO fast path deliberately
+/// knows nothing about plan mode, so this gate — not the permission system —
+/// is what enforces it. Two rules, matching the two toolsets' contracts:
+///
+/// - **Compat-toolset `Write`/`StrReplace`**: any markdown
+///   file is editable in plan mode (plan docs are written with these
+///   same tools); everything else is rejected. Pre-existing behavior.
+/// - **Compat-toolset `Delete`** is **not** on the markdown carve-out: it maps to
+///   `AccessKind::Edit` and is plan-file-only (same as grok edits). Deleting
+///   an arbitrary `.md` in plan mode must not pass.
+/// - **Every other edit tool** (`AccessKind::Edit`) is restricted to the plan
+///   file itself, via the same predicate that auto-approves plan-file edits
+///   ([`PlanModeTracker::should_auto_approve_edit`]) so the gate and the
+///   permission bypass can never disagree.
+///
+/// Non-edit tools (bash, read, grep, MCP, web) are never gated here; they
+/// flow to the normal permission path, where yolo may still auto-approve
+/// them. `enter_plan_mode` / `exit_plan_mode` map to `AccessKind::Read` and
+/// are likewise never gated.
+>>>>>>> origin/master
 pub(super) fn plan_mode_edit_gate(
     tracker: &crate::session::plan_mode::PlanModeTracker,
     tool_input: &ToolInput,
@@ -1745,6 +1770,75 @@ impl SessionActor {
                 self.handle_tool_not_executed(&call.id, &tool_call_id, msg)
                     .await?;
                 return Ok(Err(ToolLoop::Continue));
+<<<<<<< HEAD
+=======
+            }
+        }
+        let tool_call_display = self
+            .send_tool_call_start(&tool_call_id, &call.function.name, tool_input.clone())
+            .await;
+        let _recovered_raw_input = if concatenated_json_count > 0 {
+            Some(raw_input.clone())
+        } else {
+            None
+        };
+        let dispatch_target_name = tool_input.dispatch_target_name();
+        let resolved_tool_name = dispatch_target_name
+            .clone()
+            .unwrap_or_else(|| call.function.name.clone());
+        if self.hook_event_active(xai_grok_hooks::event::HookEventName::PreToolUse) {
+            let (hook_tool_input, hook_tool_input_truncated) =
+                xai_grok_hooks::event::truncate_payload(raw_input.clone());
+            let envelope = self.make_hook_envelope(
+                xai_grok_hooks::event::HookEventName::PreToolUse,
+                None,
+                xai_grok_hooks::event::HookPayload::PreToolUse {
+                    tool_name: resolved_tool_name.clone(),
+                    tool_use_id: call.id.clone(),
+                    tool_input: hook_tool_input,
+                    tool_input_truncated: hook_tool_input_truncated,
+                    subagent_type: self.subagent_type_label(),
+                },
+            );
+            let hook_registry_snapshot = self.hook_registry.borrow().clone();
+            if let Some(registry) = hook_registry_snapshot {
+                let ctx = self.hook_run_ctx();
+                let pre_result =
+                    xai_grok_hooks::dispatcher::dispatch_pre_tool_use(&registry, &envelope, &ctx)
+                        .await;
+                self.send_hook_execution(
+                    "pre_tool_use",
+                    Some(&resolved_tool_name),
+                    None,
+                    &pre_result.results,
+                )
+                .await;
+                self.emit_hook_executed_telemetry(
+                    "pre_tool_use",
+                    Some(&resolved_tool_name),
+                    &pre_result.results,
+                )
+                .await;
+                if let xai_grok_hooks::result::HookDecision::Deny { reason, hook_name } =
+                    pre_result.decision
+                {
+                    return Ok(Err(self
+                        .deny_tool(
+                            &call.id,
+                            &tool_call_id,
+                            resolved_tool_name.clone(),
+                            hook_name,
+                            reason,
+                        )
+                        .await?));
+                }
+            }
+            if let Some(denied) = self
+                .run_pre_tool_use_client_hook(&call, &tool_call_id, &envelope)
+                .await?
+            {
+                return Ok(Err(denied));
+>>>>>>> origin/master
             }
         }
         let tool_call_display = mcp_preparation
@@ -3574,6 +3668,7 @@ mod plan_mode_edit_gate_tests {
             PlanEditGate::Allow
         );
     }
+<<<<<<< HEAD
     #[test]
     fn task_not_gated_in_plan_mode() {
         use xai_tool_types::TaskToolInput;
@@ -3601,6 +3696,11 @@ mod plan_mode_edit_gate_tests {
     }
     /// Non-edit tools are never gated; they flow to the normal permission path (where yolo may auto-approve them).
     /// Plan mode blocks edits, not bash/reads.
+=======
+    /// Non-edit tools are never gated — they flow to the normal permission
+    /// path (where yolo may auto-approve them). Plan mode blocks
+    /// edits, not bash/reads.
+>>>>>>> origin/master
     #[test]
     fn non_edit_tools_not_gated() {
         use xai_grok_tools::implementations::BashToolInput;

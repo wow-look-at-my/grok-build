@@ -254,6 +254,47 @@ fn skill_group(skill: &SkillInfo) -> SkillGroup {
     }
 }
 
+<<<<<<< HEAD
+=======
+/// Word-wrap text into lines that fit within `max_w` characters.
+///
+/// Splits on newlines first, then wraps each paragraph at word boundaries.
+/// All slicing uses `char_indices` so multi-byte UTF-8 is never split.
+#[allow(clippy::string_slice)] // `byte_limit` is a `char_indices` offset, `cut` a `rfind` one
+fn word_wrap(text: &str, max_w: usize) -> Vec<&str> {
+    if max_w == 0 {
+        return vec![text];
+    }
+    let mut result = Vec::new();
+    for line in text.lines() {
+        if line.is_empty() {
+            result.push(line);
+            continue;
+        }
+        let mut remaining = line;
+        while !remaining.is_empty() {
+            if remaining.chars().count() <= max_w {
+                result.push(remaining);
+                break;
+            }
+            let byte_limit = remaining
+                .char_indices()
+                .nth(max_w)
+                .map(|(i, _)| i)
+                .unwrap_or(remaining.len());
+            let cut = remaining[..byte_limit]
+                .rfind(' ')
+                .filter(|&i| i > 0)
+                .map(|i| i + 1)
+                .unwrap_or(byte_limit);
+            result.push(remaining[..cut].trim_end());
+            remaining = remaining[cut..].trim_start();
+        }
+    }
+    result
+}
+
+>>>>>>> origin/master
 /// Test fixture: a minimal `PluginInfo` shared by the pager's plugin tests.
 #[cfg(test)]
 pub(crate) fn test_plugin_info(
@@ -840,11 +881,17 @@ impl ModalInput {
                     return ModalInputOutcome::Changed;
                 }
                 let completed = self.focused_field_mut().and_then(|field| {
+<<<<<<< HEAD
                     let partial = field
                         .text()
                         .get(..field.cursor_byte())
                         .unwrap_or("")
                         .to_owned();
+=======
+                    // `cursor_byte()` is the textarea's own cursor offset, a char boundary.
+                    #[allow(clippy::string_slice)]
+                    let partial = field.text()[..field.cursor_byte()].to_owned();
+>>>>>>> origin/master
                     tab_complete_path(&partial)
                 });
                 if let Some(completed) = completed {
@@ -4237,10 +4284,16 @@ fn render_input_form(buf: &mut Buffer, area: Rect, input: &ModalInput, theme: &T
             }
         } else {
             let viewport = field.viewport(max_text_w);
+<<<<<<< HEAD
             let visible = field
                 .text()
                 .get(viewport.visible_byte_range.clone())
                 .unwrap_or("");
+=======
+            // The range is a ratatui `visible_byte_range`, a char boundary.
+            #[allow(clippy::string_slice)]
+            let visible = &field.text()[viewport.visible_byte_range];
+>>>>>>> origin/master
             buf.set_string(text_x, content_y, visible, text_style);
 
             if is_focused {

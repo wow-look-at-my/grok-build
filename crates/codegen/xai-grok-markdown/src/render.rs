@@ -166,9 +166,18 @@ impl<'a, 'b> ParsedMarkdown<'a, 'b> {
             let t_end = transform.range.end.min(end);
 
             // Copy text before transform
+<<<<<<< HEAD
             if t_start > pos
                 && let Some(before) = text.get((pos - start)..(t_start - start))
             {
+=======
+            if t_start > pos {
+                // `text` is a window of the source starting at `start` and every
+                // transform range is a pulldown-cmark source range over that same
+                // source, so both offsets here name a char boundary of `text`.
+                #[allow(clippy::string_slice)] // source-range offsets relative to `start`
+                let before = &text[(pos - start)..(t_start - start)];
+>>>>>>> origin/master
                 result.push_str(before);
             }
 
@@ -182,10 +191,17 @@ impl<'a, 'b> ParsedMarkdown<'a, 'b> {
             Cow::Borrowed(text)
         } else {
             // Copy remaining text
+<<<<<<< HEAD
             if pos < end
                 && let Some(rest) = text.get(pos - start..)
             {
                 result.push_str(rest);
+=======
+            if pos < end {
+                #[allow(clippy::string_slice)]
+                // `pos` is a transform range end, relative to `start`
+                result.push_str(&text[(pos - start)..]);
+>>>>>>> origin/master
             }
             Cow::Owned(result)
         }
@@ -376,12 +392,21 @@ impl<'a, 'b> ParsedMarkdown<'a, 'b> {
                         &mut rendered_offset,
                     );
                 } else {
+<<<<<<< HEAD
                     let mut style = merge_styles(
                         hl_ids
                             .iter()
                             .filter_map(|&i| self.buffers.highlights.get(i).map(|h| h.style)),
                     );
                     let text = view_text.get(last_pos..ev.pos).unwrap_or("");
+=======
+                    let mut style =
+                        merge_styles(hl_ids.iter().map(|&i| self.buffers.highlights[i].style));
+                    // `last_pos` is a previous event position and `ev.pos` this one;
+                    // both are pulldown-cmark source offsets, hence char boundaries.
+                    #[allow(clippy::string_slice)] // between two event positions
+                    let text = &view_text[last_pos..ev.pos];
+>>>>>>> origin/master
                     let is_invert = style.get_effects().contains(Effects::INVERT);
                     if text.as_bytes().iter().all(|&ch| ch == b'\n')
                         || (text.as_bytes().iter().all(u8::is_ascii_whitespace)
@@ -660,12 +685,21 @@ impl<'a, 'b> ParsedMarkdown<'a, 'b> {
                             || self.text.as_bytes().get(range_start - 1) == Some(&b'\n');
                         if at_line_start {
                             // Check if this hidden block is a code fence (``` or ~~~).
+<<<<<<< HEAD
                             // Only code fences need separator handling; heading markers (#) are also hidden at line start but are unpaired
                             let hidden_text = self
                                 .text
                                 .get(range_start..range_end)
                                 .unwrap_or("")
                                 .trim_start();
+=======
+                            // Only code fences need separator handling — heading markers
+                            // (#) are also hidden at line start but are unpaired.
+                            // Both ends come from an event position, or from the
+                            // checkpoint offset snapped to a boundary above.
+                            #[allow(clippy::string_slice)] // event range over `self.text`
+                            let hidden_text = self.text[range_start..range_end].trim_start();
+>>>>>>> origin/master
                             let is_code_fence =
                                 hidden_text.starts_with("```") || hidden_text.starts_with("~~~");
 
@@ -684,6 +718,7 @@ impl<'a, 'b> ParsedMarkdown<'a, 'b> {
                             skip_leading_newline = true;
                         }
                     } else {
+<<<<<<< HEAD
                         let Some(mut text) = self.text.get(range_start..range_end) else {
                             continue;
                         };
@@ -691,6 +726,16 @@ impl<'a, 'b> ParsedMarkdown<'a, 'b> {
 
                         if skip_leading_newline && let Some(rest) = text.strip_prefix('\n') {
                             text = rest;
+=======
+                        #[allow(clippy::string_slice)] // event range over `self.text`
+                        let mut text = &self.text[range_start..range_end];
+                        let mut text_start = range_start;
+
+                        if skip_leading_newline && text.starts_with('\n') {
+                            text = text
+                                .strip_prefix('\n')
+                                .expect("starts_with('\\n') was just true");
+>>>>>>> origin/master
                             text_start += 1;
                         }
                         skip_leading_newline = false;
@@ -987,9 +1032,18 @@ impl<'a, 'b> ParsedMarkdown<'a, 'b> {
         // Handle remaining text
         let len = self.text.len();
         if last_pos < len {
+<<<<<<< HEAD
             // Apply force transforms only; non-force transforms have never been applied in this trailing path
             // Force transforms preserve byte length, so source offsets below stay valid
             let raw = self.text.get(last_pos..len).unwrap_or("");
+=======
+            // Apply force transforms only; non-force transforms have
+            // never been applied in this trailing path and force
+            // transforms preserve byte length so source offsets below
+            // stay valid.
+            #[allow(clippy::string_slice)] // `last_pos` is an event position, `len` is the end
+            let raw = &self.text[last_pos..len];
+>>>>>>> origin/master
             let transformed = self.apply_transforms(raw, last_pos, false);
             debug_assert_eq!(transformed.len(), raw.len());
             let text: &str = &transformed;
@@ -1106,11 +1160,15 @@ impl<'a, 'b> ParsedMarkdown<'a, 'b> {
             // Counted over bytes for the same reason as `count_newlines_in_range`:
             // `cp_byte` is a checkpoint offset that can land mid-character, and
             // '\n' (0x0A) never appears inside a multi-byte sequence.
+<<<<<<< HEAD
             let source_line_at_cp = self
                 .text
                 .as_bytes()
                 .get(..cp_byte.min(self.text.len()))
                 .unwrap_or_default()
+=======
+            let source_line_at_cp = self.text.as_bytes()[..cp_byte.min(self.text.len())]
+>>>>>>> origin/master
                 .iter()
                 .filter(|&&b| b == b'\n')
                 .count();

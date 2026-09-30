@@ -284,10 +284,17 @@ pub(crate) fn cell_word_separator<'a>(
         let mut ranges = Vec::new();
         let mut pos = 0;
         for token in line.split_whitespace() {
+<<<<<<< HEAD
             let Some(rel) = line.get(pos..).and_then(|rest| rest.find(token)) else {
                 break;
             };
             let start = rel + pos;
+=======
+            // `token` is a whole subslice of `line`, so `find` locates it at a
+            // char boundary; `pos` only ever takes that boundary or `end`.
+            #[allow(clippy::string_slice)]
+            let start = line[pos..].find(token).unwrap() + pos;
+>>>>>>> origin/master
             let end = start + token.len();
             if url::Url::parse(token).is_ok() {
                 ranges.push(start..end);
@@ -307,6 +314,10 @@ pub(crate) fn cell_word_separator<'a>(
     let mut split_positions: Vec<usize> = Vec::with_capacity(breaks.len());
     {
         let len = line.len();
+        // Pass 1 derives every break position from `line.char_indices()`, so
+        // each offset built from them names a char boundary.
+        #[allow(clippy::string_slice)]
+        let width_between = |from: usize, to: usize| unicode_display_width(&line[from..to]);
         for (i, &(attach_left, attach_right)) in breaks.iter().enumerate() {
             if attach_left == attach_right {
                 // Whitespace break, no choice
@@ -335,6 +346,7 @@ pub(crate) fn cell_word_separator<'a>(
                     len
                 };
 
+<<<<<<< HEAD
                 let Some(left_if_attach_left) =
                     line.get(seg_start..attach_left).map(unicode_display_width)
                 else {
@@ -357,6 +369,14 @@ pub(crate) fn cell_word_separator<'a>(
                 else {
                     continue;
                 };
+=======
+                let left_if_attach_left = width_between(seg_start, attach_left);
+                let right_if_attach_left = width_between(attach_left, seg_end);
+                let max_attach_left = left_if_attach_left.max(right_if_attach_left);
+
+                let left_if_attach_right = width_between(seg_start, attach_right);
+                let right_if_attach_right = width_between(attach_right, seg_end);
+>>>>>>> origin/master
                 let max_attach_right = left_if_attach_right.max(right_if_attach_right);
 
                 if max_attach_right < max_attach_left {
@@ -382,8 +402,15 @@ pub(crate) fn cell_word_separator<'a>(
         } else {
             line.len()
         };
+<<<<<<< HEAD
         let slice = line.get(pos..end)?;
         let word = textwrap::core::Word::from(slice);
+=======
+        // `end` is either a break position from pass 1's `char_indices()` scan
+        // or `line.len()`; `pos` is the previous `end`. Both are boundaries.
+        #[allow(clippy::string_slice)]
+        let word = textwrap::core::Word::from(&line[pos..end]);
+>>>>>>> origin/master
         pos = end;
         Some(word)
     }))
@@ -548,6 +575,28 @@ impl<'a, 'b, 'syn, 'oc> MarkdownParser<'a, 'b, 'syn, 'oc> {
             style,
             range: range.clone(),
         });
+    }
+
+    /// `self.text[range]` for a range this parser received from pulldown-cmark.
+    ///
+    /// pulldown-cmark reports every event/tag range with both bounds on a char
+    /// boundary, and the one place a bound is extended here steps past an ASCII
+    /// `"\r\n"` or `'\n'`, so slicing at these bounds never splits a character.
+    #[allow(clippy::string_slice)] // pulldown-cmark event ranges align to chars
+    fn source(&self, range: Range<usize>) -> &'a str {
+        &self.text[range]
+    }
+
+    /// `self.text[..index]` for an event range bound.
+    #[allow(clippy::string_slice)] // the bound of a pulldown-cmark event range
+    fn source_before(&self, index: usize) -> &'a str {
+        &self.text[..index]
+    }
+
+    /// `self.text[index..]` for an event range bound.
+    #[allow(clippy::string_slice)] // the bound of a pulldown-cmark event range
+    fn source_from(&self, index: usize) -> &'a str {
+        &self.text[index..]
     }
 
     fn on_event(&mut self, event: Event<'a>, range: Range<usize>) {
@@ -813,9 +862,14 @@ impl<'a, 'b, 'syn, 'oc> MarkdownParser<'a, 'b, 'syn, 'oc> {
                 } else {
                     // Fallback (conversion declined or nothing visible): highlight the TeX source as code
                     self.push_highlight(Some(self.ms.code_outer), &range);
+<<<<<<< HEAD
                     if let Some(outer_text) = self.text.get(range.clone())
                         && let Some(r) = find_substring(outer_text, &math, true, false)
                     {
+=======
+                    let outer_text = self.source(range.clone());
+                    if let Some(r) = find_substring(outer_text, &math, true, false) {
+>>>>>>> origin/master
                         let inner_range = (range.start + r.start)..(range.start + r.end);
                         if let Some(highlighted) = syntax_highlight_raw(self.syntect, "tex", &math)
                         {
@@ -835,6 +889,7 @@ impl<'a, 'b, 'syn, 'oc> MarkdownParser<'a, 'b, 'syn, 'oc> {
             Event::Rule => {
                 // Style and transform "---" to "───" (horizontal rule)
                 self.push_highlight(Some(self.ms.rule), &range);
+<<<<<<< HEAD
                 if let Some(rule_text) = self.text.get(range.clone()) {
                     if let Some(marker_end) = rule_text.find('\n') {
                         // Transform only up to the newline
@@ -851,6 +906,23 @@ impl<'a, 'b, 'syn, 'oc> MarkdownParser<'a, 'b, 'syn, 'oc> {
                             force: false,
                         });
                     }
+=======
+                let rule_text = self.source(range.clone());
+                if let Some(marker_end) = rule_text.find('\n') {
+                    // Transform only up to the newline
+                    self.buffers.transforms.push(Transform {
+                        range: range.start..range.start + marker_end,
+                        to: "───".to_string(),
+                        force: false,
+                    });
+                } else {
+                    // No trailing newline, transform the whole range
+                    self.buffers.transforms.push(Transform {
+                        range: range.clone(),
+                        to: "───".to_string(),
+                        force: false,
+                    });
+>>>>>>> origin/master
                 }
                 if self.depth == 0 {
                     self.last_checkpoint = Some((CheckpointKind::ThematicBreak, range.end));
@@ -884,11 +956,16 @@ impl<'a, 'b, 'syn, 'oc> MarkdownParser<'a, 'b, 'syn, 'oc> {
             Tag::Paragraph => None,
             Tag::Heading { level, .. } => {
                 let level_usize = (*level as usize).saturating_sub(1).min(5);
+<<<<<<< HEAD
                 let heading_outer = self.ms.heading_outer.get(level_usize).copied();
                 let heading_text = self.text.get(range.clone());
                 if let Some(marker_end) =
                     heading_text.and_then(|t| t.find(|c: char| c != '#' && c != ' '))
                 {
+=======
+                let heading_text = self.source(range.clone());
+                if let Some(marker_end) = heading_text.find(|c: char| c != '#' && c != ' ') {
+>>>>>>> origin/master
                     let marker_range = range.start..range.start + marker_end;
                     more.push(Highlight {
                         style: heading_outer,
@@ -901,10 +978,27 @@ impl<'a, 'b, 'syn, 'oc> MarkdownParser<'a, 'b, 'syn, 'oc> {
             }
             Tag::BlockQuote(_) => {
                 // Transform the `>` belonging to THIS blockquote level to `│`.
+<<<<<<< HEAD
                 // On those subsequent lines, the outer `>` is included in the inner range, so we must skip it
                 // A line starting at a real source line boundary skips (bq_depth-1) `>`s; one starting mid-line (the first fragment) skips none
                 if let Some(bq_text) = self.text.get(range.clone()) {
                     let mut pos = range.start;
+=======
+                //
+                // For nested blockquotes (`> > inner`), pulldown-cmark emits nested
+                // BlockQuote events.  The outer event's range covers all lines,
+                // so each line in the outer range has `>` at position 0.  The inner
+                // event's range starts mid-line on the first line (after `> `) but
+                // at column 0 on subsequent lines.  On those subsequent lines, the
+                // outer `>` is included in the inner range, so we must skip it.
+                //
+                // Strategy: on each line, determine how many `>` characters belong
+                // to outer blockquote levels (by checking if the line starts at a
+                // real line boundary in the source).  If it does, skip (bq_depth-1)
+                // `>`s.  If it starts mid-line (first fragment), skip none.
+                let bq_text = self.source(range.clone());
+                let mut pos = range.start;
+>>>>>>> origin/master
 
                     for line in bq_text.split_inclusive('\n') {
                         // Does this fragment start at a source line boundary?
@@ -948,9 +1042,14 @@ impl<'a, 'b, 'syn, 'oc> MarkdownParser<'a, 'b, 'syn, 'oc> {
                 self.pending_code_block = match code {
                     CodeBlockKind::Fenced(lang) => {
                         let body_start = self
+<<<<<<< HEAD
                             .text
                             .get(range.start..)
                             .and_then(|s| s.find('\n'))
+=======
+                            .source_from(range.start)
+                            .find('\n')
+>>>>>>> origin/master
                             .map_or(range.end, |nl| range.start + nl + 1);
                         Some(PendingCodeBlock {
                             info: lang.to_string(),
@@ -962,6 +1061,7 @@ impl<'a, 'b, 'syn, 'oc> MarkdownParser<'a, 'b, 'syn, 'oc> {
                     CodeBlockKind::Indented => None,
                 };
 
+<<<<<<< HEAD
                 // pulldown-cmark's code-block range starts at the fence marker (```) and excludes leading indentation on the opening-fence line
                 // Only extend when the prefix is pure whitespace so structural prefixes are left intact.
                 let line_start = self
@@ -973,6 +1073,28 @@ impl<'a, 'b, 'syn, 'oc> MarkdownParser<'a, 'b, 'syn, 'oc> {
                     .text
                     .get(line_start..range.start)
                     .is_some_and(|s| s.bytes().all(|b| b == b' ' || b == b'\t'))
+=======
+                // pulldown-cmark reports the code-block range starting at the
+                // fence marker (```), excluding any leading indentation on the
+                // opening-fence line. That indentation is present whenever the
+                // block is indented at the top level or nested inside a list.
+                // Extend the hidden `code_outer` highlight back over it so the
+                // whole fence line is hidden in pretty mode. Without this, the
+                // indentation leaks onto the first rendered code line, and the
+                // renderer's fence-start detection (which checks that the byte
+                // before the fence is a newline) misfires — mistaking the
+                // closing fence for an opening one and emitting a spurious
+                // blank line. Only extend when the prefix is pure whitespace so
+                // structural prefixes (e.g. a blockquote `> `) are left intact.
+                let line_start = self
+                    .source_before(range.start)
+                    .rfind('\n')
+                    .map_or(0, |p| p + 1);
+                #[allow(clippy::string_slice)] // `line_start` is one past a '\n' or 0
+                let fence_start = if self.text[line_start..range.start]
+                    .bytes()
+                    .all(|b| b == b' ' || b == b'\t')
+>>>>>>> origin/master
                 {
                     line_start
                 } else {
@@ -984,8 +1106,13 @@ impl<'a, 'b, 'syn, 'oc> MarkdownParser<'a, 'b, 'syn, 'oc> {
                 });
                 match code {
                     CodeBlockKind::Fenced(lang) if !lang.is_empty() => {
+<<<<<<< HEAD
                         if let Some(slice) = self.text.get(range.clone())
                             && let Some(r) = find_substring(slice, lang, true, false)
+=======
+                        if let Some(r) =
+                            find_substring(self.source(range.clone()), lang, true, false)
+>>>>>>> origin/master
                         {
                             let range = (r.start + range.start)..(r.end + range.start);
                             more.push(Highlight {
@@ -1006,6 +1133,7 @@ impl<'a, 'b, 'syn, 'oc> MarkdownParser<'a, 'b, 'syn, 'oc> {
             }
             Tag::List(_) => None,
             Tag::Item => {
+<<<<<<< HEAD
                 if let Some(item_text) = self.text.get(range.clone()) {
                     let trimmed = item_text.trim_start();
                     let leading_ws = item_text.len() - trimmed.len();
@@ -1025,6 +1153,31 @@ impl<'a, 'b, 'syn, 'oc> MarkdownParser<'a, 'b, 'syn, 'oc> {
                     } else {
                         0
                     };
+=======
+                let item_text = self.source(range.clone());
+                let trimmed = item_text.trim_start();
+                let leading_ws = item_text.len() - trimmed.len();
+
+                let marker_len = if trimmed.starts_with("- ") || trimmed.starts_with("* ") {
+                    2
+                } else if let Some(pos) = trimmed.find(". ") {
+                    #[allow(clippy::string_slice)] // `pos` is the offset of an ASCII '.'
+                    if pos > 0 && trimmed[..pos].chars().all(|c| c.is_ascii_digit()) {
+                        pos + 2
+                    } else {
+                        0
+                    }
+                } else if let Some(pos) = trimmed.find(") ") {
+                    #[allow(clippy::string_slice)] // `pos` is the offset of an ASCII ')'
+                    if pos > 0 && trimmed[..pos].chars().all(|c| c.is_ascii_digit()) {
+                        pos + 2
+                    } else {
+                        0
+                    }
+                } else {
+                    0
+                };
+>>>>>>> origin/master
 
                     if marker_len > 0 {
                         let marker_start = range.start + leading_ws;
@@ -1102,6 +1255,7 @@ impl<'a, 'b, 'syn, 'oc> MarkdownParser<'a, 'b, 'syn, 'oc> {
                     return;
                 }
 
+<<<<<<< HEAD
                 let Some(tag_str) = self.text.get(range.clone()) else {
                     self.buffers.link_targets.push(LinkTarget {
                         source_range: range.clone(),
@@ -1113,6 +1267,9 @@ impl<'a, 'b, 'syn, 'oc> MarkdownParser<'a, 'b, 'syn, 'oc> {
                     self.tag_stack.push(tag);
                     return;
                 };
+=======
+                let tag_str = self.source(range.clone());
+>>>>>>> origin/master
 
                 if !title.is_empty() {
                     for t in [format!("\"{title}\""), format!("'{title}'")].map(CowStr::from) {
@@ -1138,12 +1295,21 @@ impl<'a, 'b, 'syn, 'oc> MarkdownParser<'a, 'b, 'syn, 'oc> {
                     });
                 }
 
+<<<<<<< HEAD
                 let bracket_pos_opt = url_rel_opt.as_ref().and_then(|r| {
                     tag_str
                         .get(..r.start)
                         .and_then(|s| s.rfind("]("))
                         .map(|p| p..p + 2)
                 });
+=======
+                // `r.start` is the offset where `find_substring` matched a
+                // non-empty needle; a match cannot begin on a continuation
+                // byte, so the prefix cut lands on a char boundary.
+                #[allow(clippy::string_slice)]
+                let url_prefix = url_rel_opt.as_ref().map(|r| &tag_str[..r.start]);
+                let bracket_pos_opt = url_prefix.and_then(|pre| pre.rfind("](").map(|p| p..p + 2));
+>>>>>>> origin/master
                 if let Some(bracket_pos) = bracket_pos_opt {
                     let open_bracket = if tag_str.starts_with("![") { 1 } else { 0 };
                     if open_bracket > 0 {
@@ -1436,10 +1602,14 @@ impl<'a, 'b, 'syn, 'oc> MarkdownParser<'a, 'b, 'syn, 'oc> {
     /// Shared by `Event::Code` and the inline-math fallback path.
     fn style_inline_code_span(&mut self, code: &CowStr<'_>, range: &Range<usize>) {
         // Find the actual content range (excluding the delimiters).
+<<<<<<< HEAD
         let Some(outer_text) = self.text.get(range.clone()) else {
             self.push_highlight(Some(self.ms.inline_code_inner), range);
             return;
         };
+=======
+        let outer_text = self.source(range.clone());
+>>>>>>> origin/master
         if let Some(inner_range) = find_substring(outer_text, code, false, false)
             .or_else(|| find_substring(outer_text, code, true, false))
         {
@@ -1543,6 +1713,7 @@ impl<'a, 'b, 'syn, 'oc> MarkdownParser<'a, 'b, 'syn, 'oc> {
         // Without it, a batch render emits an extra blank line after the block (the source newline) that the streaming checkpoint+tail path does not
         // That breaks render convergence
         let mut range = range;
+<<<<<<< HEAD
         if self
             .text
             .get(range.end..)
@@ -1554,14 +1725,26 @@ impl<'a, 'b, 'syn, 'oc> MarkdownParser<'a, 'b, 'syn, 'oc> {
             .get(range.end..)
             .is_some_and(|s| s.starts_with('\n'))
         {
+=======
+        if self.source_from(range.end).starts_with("\r\n") {
+            range.end += 2;
+        } else if self.source_from(range.end).starts_with('\n') {
+>>>>>>> origin/master
             range.end += 1;
         }
         let style: ratatui::style::Style = self.ms.math.style_into();
         let src_newlines = self
+<<<<<<< HEAD
             .text
             .get(range.clone())
             .map(|s| s.bytes().filter(|&b| b == b'\n').count())
             .unwrap_or(0);
+=======
+            .source(range.clone())
+            .bytes()
+            .filter(|&b| b == b'\n')
+            .count();
+>>>>>>> origin/master
         let mut lines = Vec::with_capacity(rendered.len());
         let mut styled_lines = Vec::with_capacity(rendered.len());
         let mut line_source_offsets = Vec::with_capacity(rendered.len());

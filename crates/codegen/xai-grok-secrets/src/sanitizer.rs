@@ -28,7 +28,12 @@ static PEM_PRIVATE_KEY_REGEX: LazyLock<Regex> = LazyLock::new(|| {
 });
 static BEARER_TOKEN_REGEX: LazyLock<Regex> =
     LazyLock::new(|| compile(r"(?i)\bBearer\s+[A-Za-z0-9._\-]{16,}\b"));
+<<<<<<< HEAD
 /// Bare JWT (`eyJ...header.payload.signature`) with no `Bearer`/`sk-` prefix, the shape used by management keys and OIDC tokens.
+=======
+/// Bare JWT (`eyJ...header.payload.signature`) with no `Bearer`/`sk-` prefix —
+/// the shape used by management keys and OIDC tokens.
+>>>>>>> origin/master
 static JWT_REGEX: LazyLock<Regex> =
     LazyLock::new(|| compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b"));
 /// 8-char value floor to avoid false positives on short values.
@@ -229,12 +234,20 @@ fn replace_home_prefix(input: &str, home: &str) -> String {
     let mut out = String::with_capacity(input.len());
     let mut rest = input;
     while let Some(idx) = rest.find(home) {
+<<<<<<< HEAD
         let Some((before, tail)) = rest.split_at_checked(idx) else {
             break;
         };
         let Some(after) = tail.get(home.len()..) else {
             break;
         };
+=======
+        let (before, tail) = rest.split_at(idx);
+        // `tail` begins with `home` — `idx` is where `find` matched it — so
+        // `home.len()` is a char boundary of `tail`.
+        #[allow(clippy::string_slice)] // past a prefix that was just matched
+        let after = &tail[home.len()..];
+>>>>>>> origin/master
         let prev_ok = before.chars().last().is_none_or(is_segment_boundary);
         let next_ok = after.chars().next().is_none_or(is_segment_boundary);
         out.push_str(before);

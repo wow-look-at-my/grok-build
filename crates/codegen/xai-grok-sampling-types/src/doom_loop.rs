@@ -72,6 +72,7 @@ fn default_window_tokens() -> u32 {
 pub const THINKING_CHANNEL: &str = "thinking";
 
 impl DoomLoopRecoveryPolicy {
+<<<<<<< HEAD
     /// The detector reports no threshold under this, so a lower value never matches a trigger.
     pub const MIN_MAX_THRESHOLD: u32 = 2;
     pub const DEFAULT_MAX_THRESHOLD: u32 = 64;
@@ -81,6 +82,16 @@ impl DoomLoopRecoveryPolicy {
     pub const DEFAULT_RECOVERY_WINDOW_TOKENS: u32 = 1024;
     /// Inclusive range of `window_tokens` values honored on the wire.
     pub const WINDOW_TOKENS_RANGE: std::ops::RangeInclusive<u32> = 512..=4096;
+=======
+    /// The detector reports no threshold under this, so a lower value never
+    /// matches a trigger.
+    pub const MIN_MAX_THRESHOLD: u32 = 2;
+    /// Lowest common threshold across the backtest corpus of confirmed loops.
+    pub const DEFAULT_MAX_THRESHOLD: u32 = 8;
+    pub const DEFAULT_MAX_RETRIES: u32 = 2;
+    /// A `max_retries` of this value never runs out.
+    pub const UNLIMITED_RETRIES: u32 = u32::MAX;
+>>>>>>> origin/master
 
     /// Raises a configured `max_threshold` to [`Self::MIN_MAX_THRESHOLD`].
     pub fn clamp_max_threshold(value: u32) -> u32 {

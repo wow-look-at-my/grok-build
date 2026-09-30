@@ -1610,6 +1610,7 @@ mod tests {
         }
     }
 
+<<<<<<< HEAD
     /// Not-found hint for `"task-unknown"` as seen by session `"me"` when the
     /// shared terminal lists `tasks`.
     async fn owner_scoped_not_found_message(tasks: &[(&str, Option<&str>)]) -> String {
@@ -1673,6 +1674,8 @@ mod tests {
         );
     }
 
+=======
+>>>>>>> origin/master
     /// A terminal whose completion wait dies instead of answering.
     struct PanickingWaitTerminal;
 

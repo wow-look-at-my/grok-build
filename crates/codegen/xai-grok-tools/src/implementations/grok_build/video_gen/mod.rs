@@ -890,11 +890,17 @@ async fn resolve_image_reference(value: &str) -> Result<String, xai_tool_runtime
         let comma = value.find(',').ok_or_else(|| {
             xai_tool_runtime::ToolError::invalid_arguments("malformed data URL in image reference")
         })?;
+<<<<<<< HEAD
         let Some(header) = value.get(..comma) else {
             return Err(xai_tool_runtime::ToolError::invalid_arguments(
                 "malformed data URL in image reference",
             ));
         };
+=======
+        // `comma` is the offset of an ASCII `,`, so it is a char boundary.
+        #[allow(clippy::string_slice)]
+        let header = &value[..comma];
+>>>>>>> origin/master
         if !header.contains(";base64") {
             return Err(xai_tool_runtime::ToolError::invalid_arguments(
                 "image references only support base64 data URLs",

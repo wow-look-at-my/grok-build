@@ -89,9 +89,16 @@ pub(super) fn outer_block(
     path: &Path,
 ) -> Result<Option<String>, ManagedConfigError> {
     let parsed = parse_block(text, namespace, owned_item_prefix, comments, path)?;
+<<<<<<< HEAD
     Ok(parsed.outer_range.and_then(|(start, end)| {
         text.get(start..end)
             .map(|s| s.trim_end_matches(['\r', '\n']).to_owned())
+=======
+    Ok(parsed.outer_range.map(|(start, end)| {
+        managed_slice(text, start, end)
+            .trim_end_matches(['\r', '\n'])
+            .to_owned()
+>>>>>>> origin/master
     }))
 }
 
@@ -108,10 +115,14 @@ pub(super) fn item_state(
         return Ok(ManagedItemState::Absent);
     };
     let expected = item_section(item, comments, parsed.newline);
+<<<<<<< HEAD
     let Some(actual) = original.get(range.start..range.end) else {
         return Ok(ManagedItemState::NeedsUpdate);
     };
     let actual = actual.trim_end_matches(['\r', '\n']);
+=======
+    let actual = managed_slice(original, range.start, range.end).trim_end_matches(['\r', '\n']);
+>>>>>>> origin/master
     Ok(if actual == expected {
         ManagedItemState::Exact
     } else {
@@ -134,9 +145,13 @@ pub(super) fn render_update(
         let parsed = parse_block(&updated, namespace, owned_item_prefix, comments, path)?;
         let section = item_section(item, comments, parsed.newline);
         updated = if let Some(range) = parsed.items.get(&item.name) {
+<<<<<<< HEAD
             let keep_eol = updated
                 .get(range.start..range.end)
                 .is_some_and(|s| s.ends_with('\n'));
+=======
+            let keep_eol = managed_slice(&updated, range.start, range.end).ends_with('\n');
+>>>>>>> origin/master
             let replacement = if keep_eol {
                 format!("{section}{}", parsed.newline.as_ref())
             } else {
@@ -179,8 +194,13 @@ struct Line {
 }
 
 impl Line {
+<<<<<<< HEAD
     fn content<'a>(&self, text: &'a str) -> Option<&'a str> {
         text.get(self.start..self.content_end)
+=======
+    fn content<'a>(&self, text: &'a str) -> &'a str {
+        managed_slice(text, self.start, self.content_end)
+>>>>>>> origin/master
     }
 }
 
@@ -211,8 +231,13 @@ impl ParsedBlock {
             return text.to_owned();
         };
         let mut unmanaged = String::with_capacity(text.len() - (end - start));
+<<<<<<< HEAD
         unmanaged.push_str(head);
         unmanaged.push_str(tail);
+=======
+        unmanaged.push_str(managed_slice(text, 0, start));
+        unmanaged.push_str(managed_slice(text, end, text.len()));
+>>>>>>> origin/master
         unmanaged
     }
 }
@@ -225,10 +250,26 @@ fn replace_range(text: &str, start: usize, end: usize, replacement: &str) -> Str
         return text.to_owned();
     };
     let mut result = String::with_capacity(text.len() - (end - start) + replacement.len());
+<<<<<<< HEAD
     result.push_str(head);
     result.push_str(replacement);
     result.push_str(tail);
+=======
+    result.push_str(managed_slice(text, 0, start));
+    result.push_str(replacement);
+    result.push_str(managed_slice(text, end, text.len()));
+>>>>>>> origin/master
     result
+}
+
+/// `text[start..end]` for the offsets this module's parser produces.
+///
+/// Every range here is built from [`lines`], which splits on the ASCII `\n`
+/// byte (and the `\r` before it), so each offset it reports names a char
+/// boundary of valid UTF-8.
+#[allow(clippy::string_slice)] // both offsets come from `lines()`
+fn managed_slice(text: &str, start: usize, end: usize) -> &str {
+    &text[start..end]
 }
 
 fn append_outer(

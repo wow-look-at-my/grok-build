@@ -1,6 +1,18 @@
 use reqwest::RequestBuilder;
 use std::sync::Arc;
+<<<<<<< HEAD:crates/codegen/xai-grok-login/src/grok_auth_credentials.rs
 /// User token (xAI users) sends `Bearer` and `X-XAI-Token-Auth: xai-grok-cli`.
+=======
+/// Credentials for authenticating with grok backend services.
+///
+/// Two construction modes:
+/// - `with_auth_manager(am)` — live mode. `resolve_async()` drives
+///   `AuthManager::get_valid_token()` (memory -> disk -> OIDC refresh).
+/// - `new(token)` — static mode. For one-shot callers that don't have
+///   an `AuthManager` (visibility checks, bundle fetches, tests).
+///
+/// User token (xAI users) sends `Bearer` + `X-XAI-Token-Auth: xai-grok-cli`.
+>>>>>>> origin/master:crates/codegen/xai-grok-shell/src/util/grok_auth_credentials.rs
 #[derive(Clone)]
 pub struct GrokAuthCredentials {
     pub user_token: Option<String>,

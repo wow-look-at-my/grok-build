@@ -1,6 +1,9 @@
 use crate::sampling::{ConversationItem, ConversationRequest};
 use crate::session::goal_tracker::GoalMode;
+<<<<<<< HEAD
 use xai_grok_sampling_types::SyntheticReason;
+=======
+>>>>>>> origin/master
 
 const TRANSCRIPT_MAX_BYTES: usize = 32 * 1024;
 const ITEM_MAX_BYTES: usize = 4 * 1024;

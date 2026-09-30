@@ -1291,9 +1291,17 @@ fn tokenize_tmux_command<'a>(
                 "unterminated quoted tmux token",
             ));
         }
+<<<<<<< HEAD
         let Some(raw) = command.get(start..index) else {
             break;
         };
+=======
+        // `start` sits after a skipped ASCII whitespace byte and `index` stops on
+        // an ASCII whitespace byte or at `len()`. No UTF-8 continuation byte is
+        // ASCII, so both ends land on char boundaries.
+        #[allow(clippy::string_slice)] // both bounds are ASCII-delimited token edges
+        let raw = &command[start..index];
+>>>>>>> origin/master
         let value = raw
             .strip_prefix(['\'', '"'])
             .and_then(|value| value.strip_suffix(['\'', '"']))
@@ -1356,10 +1364,17 @@ fn classify_tmux_assignment(
             index += 1;
             break;
         }
+<<<<<<< HEAD
         let Some(flags) = token.value.get(1..) else {
             index += 1;
             continue;
         };
+=======
+        // The guard above proved the token starts with the ASCII `-`, which
+        // occupies byte 0 alone, so 1 is a char boundary.
+        #[allow(clippy::string_slice)] // one past an ASCII '-' that starts_with confirmed
+        let flags = &token.value[1..];
+>>>>>>> origin/master
         is_global |= flags.contains('g');
         if flags.contains('s') {
             explicit_scope = Some(TmuxOptionScope::Server);
@@ -1546,10 +1561,20 @@ fn is_posix_ssh_function_declaration(line: &str) -> bool {
     };
     let after_name = after_name.trim_start();
     after_name.starts_with("()")
+<<<<<<< HEAD
         || (after_name.starts_with('(')
             && after_name
                 .get(1..)
                 .is_some_and(|s| s.trim_start().starts_with(')')))
+=======
+        || (after_name.starts_with('(') && {
+            // `starts_with('(')` above proved byte 0 is an ASCII paren, so 1 is
+            // a char boundary.
+            #[allow(clippy::string_slice)] // one past an ASCII '(' that starts_with confirmed
+            let past_paren = &after_name[1..];
+            past_paren.trim_start().starts_with(')')
+        })
+>>>>>>> origin/master
 }
 
 fn token_is_exact_name(text: &str, name: &str) -> bool {

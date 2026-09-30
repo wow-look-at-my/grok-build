@@ -42,12 +42,23 @@ pub(crate) fn detect_plain_urls_with_offset(
             let col_end =
                 col_start + unicode_display_width(line_text.get(range.clone()).unwrap_or(""));
 
+<<<<<<< HEAD
             // Dedup: skip if any existing or already-added target overlaps on the same line
             let overlaps = existing.iter().chain(result.iter()).any(|h| {
                 h.line_index == line_index
                     && col_start < h.column_range.end
                     && h.column_range.start < col_end
             });
+=======
+            for link in finder.links(span_text) {
+                // `link.as_str()` is linkify's own `&text[start..end]` over these
+                // same offsets, so both are char boundaries by construction.
+                #[allow(clippy::string_slice)]
+                let (before, matched) = (
+                    &span_text[..link.start()],
+                    &span_text[link.start()..link.end()],
+                );
+>>>>>>> origin/master
 
             if !overlaps {
                 result.push(HyperlinkTarget {

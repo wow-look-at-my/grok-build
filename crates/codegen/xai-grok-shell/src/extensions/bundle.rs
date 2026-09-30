@@ -19,12 +19,30 @@ pub(crate) const BUNDLE_SYNC_TTL: Duration = Duration::from_secs(60 * 60);
 /// Hoisted to a constant so the user-facing wording stays identical across `sync_bundle`, `sync_bundle_to_root`, and any future call sites.
 pub(crate) const NO_BUNDLE_CREDENTIALS_ERROR: &str =
     "bundle sync requires an authenticated cli-chat-proxy session";
+<<<<<<< HEAD
 /// Whether the caller has any source of authentication that the cli-chat-proxy `/v1/subagents/bundle` endpoint will accept.
 /// Centralised so the auth gate predicate stays consistent across: `sync_bundle` (user-triggered ACP entrypoint) `sync_bundle_to_root` (defense-in-depth on the public function) `maybe_sync_bundle_to_root` (proactive wrapper, silent skip on miss) `MvpAgent::maybe_sync_bundle_in_background` (post-auth pre-spawn gate)
 /// All four call sites previously inlined the same predicate; a future auth-source addition (e.g., service-account token) only needs to land here.
 #[inline]
 pub(crate) fn has_bundle_credentials(
     auth_manager: Option<&std::sync::Arc<xai_grok_login::AuthManager>>,
+=======
+/// Whether the caller has any source of authentication that the
+/// cli-chat-proxy `/v1/subagents/bundle` endpoint will accept.
+///
+/// Centralised so the auth gate predicate stays consistent across:
+/// - `sync_bundle` (user-triggered ACP entrypoint)
+/// - `sync_bundle_to_root` (defense-in-depth on the public function)
+/// - `maybe_sync_bundle_to_root` (proactive wrapper, silent skip on miss)
+/// - `MvpAgent::maybe_sync_bundle_in_background` (post-auth pre-spawn gate)
+///
+/// All four call sites previously inlined the same predicate; a future
+/// auth-source addition (e.g., service-account token) only needs to land
+/// here.
+#[inline]
+pub(crate) fn has_bundle_credentials(
+    auth_manager: Option<&std::sync::Arc<crate::auth::AuthManager>>,
+>>>>>>> origin/master
 ) -> bool {
     auth_manager
         .as_ref()
@@ -130,7 +148,11 @@ pub(crate) fn bundle_cache_is_fresh(root: &Path, ttl: Duration) -> bool {
 pub(crate) async fn maybe_sync_bundle_to_root(
     root: &Path,
     proxy_base_url: &str,
+<<<<<<< HEAD
     auth_manager: Option<&std::sync::Arc<xai_grok_login::AuthManager>>,
+=======
+    auth_manager: Option<&std::sync::Arc<crate::auth::AuthManager>>,
+>>>>>>> origin/master
     alpha_test_key: Option<&str>,
     force: bool,
     ttl: Duration,
@@ -153,7 +175,11 @@ pub(crate) async fn maybe_sync_bundle_to_root(
 pub(crate) async fn sync_bundle_to_root(
     root: &Path,
     proxy_base_url: &str,
+<<<<<<< HEAD
     auth_manager: Option<&std::sync::Arc<xai_grok_login::AuthManager>>,
+=======
+    auth_manager: Option<&std::sync::Arc<crate::auth::AuthManager>>,
+>>>>>>> origin/master
     alpha_test_key: Option<&str>,
     _force: bool,
 ) -> anyhow::Result<BundleSyncResult> {
@@ -602,6 +628,10 @@ mod tests {
         assert_eq!(status.skills, Vec::<String>::new());
     }
     #[test]
+<<<<<<< HEAD
+=======
+    #[serial]
+>>>>>>> origin/master
     fn sync_requires_auth() {
         let tmp = TempDir::new().unwrap();
         let root = tmp.path().join("bundled");

@@ -171,9 +171,36 @@ fn strip_fork_noise(text: &str) -> String {
     result
 }
 
+<<<<<<< HEAD
 /// Remove all occurrences of `<tag...>...</tag>` from the input string. Same-name nesting is not supported: matches the
 /// first closing tag. See also: `xai-chat-state::compaction_utils::strip_system_tags`, which also leaves unclosed tags
 /// untouched for a different tag set.
+=======
+/// `text[at..]` for the tag surgery in this module.
+///
+/// Every index handed here is the offset at which a literal was found by
+/// `find`, or such an offset plus that literal's byte length. A matched literal
+/// occupies whole characters, so both forms land on a char boundary.
+#[allow(clippy::string_slice)] // matched-literal offsets
+fn matched_tail(text: &str, at: usize) -> &str {
+    &text[at..]
+}
+
+/// `text[..to]` for the same surgery, same proof as [`matched_tail`].
+#[allow(clippy::string_slice)] // matched-literal offsets
+fn matched_head(text: &str, to: usize) -> &str {
+    &text[..to]
+}
+
+/// Remove all occurrences of `<tag...>...</tag>` from the input string.
+/// Handles tags with attributes (e.g., `<tag attr="val">`).
+/// Unclosed tags are left untouched -- stripping to end-of-string would
+/// silently eat meaningful content on malformed input.
+/// Same-name nesting is not supported: matches the first closing tag.
+///
+/// See also: `xai-chat-state::compaction_utils::strip_system_tags` which
+/// uses the same leave-unclosed-untouched semantics for a different tag set.
+>>>>>>> origin/master
 fn strip_xml_block<'a>(text: &'a str, tag: &str) -> Cow<'a, str> {
     let open_prefix = format!("<{tag}");
     if !text.contains(&*open_prefix) {
@@ -184,6 +211,7 @@ fn strip_xml_block<'a>(text: &'a str, tag: &str) -> Cow<'a, str> {
     let mut remaining = text;
 
     while let Some(open_start) = remaining.find(&open_prefix) {
+<<<<<<< HEAD
         let Some(after_name) = remaining.get(open_start + open_prefix.len()..) else {
             break;
         };
@@ -206,6 +234,19 @@ fn strip_xml_block<'a>(text: &'a str, tag: &str) -> Cow<'a, str> {
             remaining = remaining
                 .get(open_start + close_rel + close_tag.len()..)
                 .unwrap_or("");
+=======
+        let after_open = matched_tail(remaining, open_start + open_prefix.len());
+        let is_tag = after_open.starts_with(|c: char| c == '>' || c.is_ascii_whitespace());
+        if !is_tag {
+            result.push_str(matched_head(remaining, open_start + open_prefix.len()));
+            remaining = after_open;
+            continue;
+        }
+
+        if let Some(close_rel) = matched_tail(remaining, open_start).find(&close_tag) {
+            result.push_str(matched_head(remaining, open_start));
+            remaining = matched_tail(remaining, open_start + close_rel + close_tag.len());
+>>>>>>> origin/master
         } else {
             tracing::warn!(
                 tag,
@@ -230,15 +271,25 @@ fn strip_skill_instructions<'a>(text: &'a str) -> Cow<'a, str> {
     };
     let after_marker = marker_pos + marker.len();
 
+<<<<<<< HEAD
     let end_pos = text
         .get(after_marker..)
         .and_then(|rest| rest.find("</user_query>"))
+=======
+    let end_pos = matched_tail(text, after_marker)
+        .find("</user_query>")
+>>>>>>> origin/master
         .map(|p| after_marker + p)
         .unwrap_or(text.len());
 
     let mut result = String::with_capacity(text.len());
+<<<<<<< HEAD
     result.push_str(text.get(..after_marker).unwrap_or(""));
     result.push_str(text.get(end_pos..).unwrap_or(""));
+=======
+    result.push_str(matched_head(text, after_marker));
+    result.push_str(matched_tail(text, end_pos));
+>>>>>>> origin/master
     Cow::Owned(result)
 }
 
@@ -355,9 +406,19 @@ fn render_summary(out: &mut String, items: &[&ConversationItem]) {
     }
 }
 
+<<<<<<< HEAD
 /// Truncate a string to at most `max_chars` Unicode characters. `char_indices` finds the byte offset of the Nth
 /// character, so multi-byte UTF-8 content (emoji, CJK) never splits mid-character. Returns the full string if it has
 /// `max_chars` or fewer characters.
+=======
+/// Truncate a string to at most `max_chars` Unicode characters.
+///
+/// Uses `char_indices` to find the byte offset of the Nth character,
+/// ensuring correct behavior with multi-byte UTF-8 content (e.g. emoji,
+/// CJK characters). Returns the full string if it has `max_chars` or
+/// fewer characters.
+#[allow(clippy::string_slice)] // `char_indices().nth` yields a char boundary
+>>>>>>> origin/master
 fn truncate_str(s: &str, max_chars: usize) -> &str {
     match s.char_indices().nth(max_chars) {
         Some((byte_offset, _)) => s.get(..byte_offset).unwrap_or(s),

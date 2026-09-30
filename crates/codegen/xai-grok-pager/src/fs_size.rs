@@ -4,7 +4,13 @@
 use std::collections::HashMap;
 use std::fs::Metadata;
 use std::path::{Path, PathBuf};
+<<<<<<< HEAD
 use xai_fast_worktree::is_worktree_dir;
+=======
+
+use xai_fast_worktree::is_worktree_dir;
+
+>>>>>>> origin/master
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct WalkIssues {
     pub(crate) unreadable_dirs: u64,
@@ -108,6 +114,14 @@ pub(crate) struct BucketedSizes {
 /// which is sized as part of it and never gets a row of its own.
 const BUCKET_DEPTH_RANGE: std::ops::RangeInclusive<usize> = 1..=2;
 
+<<<<<<< HEAD
+=======
+/// A grok worktree is a child of a managed root, or a child of that root's
+/// per-repository bucket. Deeper than that a directory is inside a checkout,
+/// which is sized as part of it and never gets a row of its own.
+const BUCKET_DEPTH_RANGE: std::ops::RangeInclusive<usize> = 1..=2;
+
+>>>>>>> origin/master
 /// Which checkout a walked file's bytes belong to, over one DFS walk.
 ///
 /// Depth-first pre-order visits every parent before its children, so at most one
@@ -165,10 +179,15 @@ impl BucketWalk {
             .collect()
     }
 }
+<<<<<<< HEAD
+=======
+
+>>>>>>> origin/master
 pub(crate) fn physical_buckets(root: &Path, volume: Volume) -> BucketedSizes {
     let mut buckets = BucketWalk::default();
     let mut total = BucketSize::default();
     let mut issues = WalkIssues::default();
+<<<<<<< HEAD
     let entered = walk(
         root,
         volume,
@@ -186,6 +205,18 @@ pub(crate) fn physical_buckets(root: &Path, volume: Volume) -> BucketedSizes {
             }
         },
     );
+=======
+    let entered = walk(root, volume, &mut issues, |entry| match entry {
+        Visit::Dir(entry) => buckets.visit_dir(entry.path(), entry.depth(), false),
+        Visit::Elsewhere(entry) => buckets.visit_dir(entry.path(), entry.depth(), true),
+        Visit::File(entry, meta) => {
+            let bytes = physical_file_size(meta);
+            total.bytes = total.bytes.saturating_add(bytes);
+            total.last_modified = total.last_modified.max(modified_at(meta));
+            buckets.visit_file(entry.depth(), bytes, modified_at(meta));
+        }
+    });
+>>>>>>> origin/master
     let buckets = buckets.into_buckets();
     BucketedSizes {
         total: if entered {

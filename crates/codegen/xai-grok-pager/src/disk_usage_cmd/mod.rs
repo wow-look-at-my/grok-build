@@ -461,6 +461,10 @@ fn collect_worktrees(
         if !known.insert(path.clone()) {
             continue;
         }
+<<<<<<< HEAD
+=======
+        // Manual records can live anywhere; outside the roots, never sized.
+>>>>>>> origin/master
         // A repository's own `.grok/worktrees/` is a managed root too, so a
         // checkout made there is sized rather than written off as unmanaged.
         if path_under_worktree_roots(&path, &roots)

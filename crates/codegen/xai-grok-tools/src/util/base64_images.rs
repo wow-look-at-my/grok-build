@@ -107,6 +107,24 @@ fn scan_payload_end(text: &str, start: usize, end_cap: usize) -> usize {
     i
 }
 
+/// `text[from..to]` for the data-URI surgery in this module.
+///
+/// Every index handed here is a regex match offset of a `data:...;base64,`
+/// prefix, the payload end [`scan_payload_end`] returns, or `0`. The prefix is
+/// ASCII text the regex matched, and the payload run it returns spans only
+/// ASCII base64, CR, LF, space and tab bytes; so each index is a char boundary
+/// and both ends of the range align.
+#[allow(clippy::string_slice)] // ASCII prefix offsets and payload ends
+fn payload_range(text: &str, from: usize, to: usize) -> &str {
+    &text[from..to]
+}
+
+/// `text[from..]`, the tail after a payload. Same proof as [`payload_range`].
+#[allow(clippy::string_slice)] // the offset is `payload_range`'s end or 0
+fn payload_tail(text: &str, from: usize) -> &str {
+    &text[from..]
+}
+
 /// Strip ASCII whitespace from a base64 payload; zero-alloc when clean.
 fn strip_b64_whitespace(s: &str) -> Cow<'_, str> {
     if !s.bytes().any(|b| b.is_ascii_whitespace()) {
@@ -155,14 +173,22 @@ fn strip_pdf_data_uris(text: &str) -> Option<String> {
         let Some(prefix) = caps.get(1) else { continue };
         let next_start = next_prefix_after(&prefix_positions, prefix.start()).unwrap_or(text.len());
         let payload_end = scan_payload_end(text, prefix.end(), next_start);
+<<<<<<< HEAD
         let payload_span = text.get(prefix.end()..payload_end).unwrap_or("");
+=======
+        let payload_span = payload_range(text, prefix.end(), payload_end);
+>>>>>>> origin/master
         let size_kb = if payload_span.len() > GROSS_PAYLOAD_PRE_CAP {
             payload_span.len() * 3 / 4 / 1024
         } else {
             strip_b64_whitespace(payload_span).len() * 3 / 4 / 1024
         };
         matched = true;
+<<<<<<< HEAD
         result.push_str(text.get(last_end..prefix.start()).unwrap_or(""));
+=======
+        result.push_str(payload_range(text, last_end, prefix.start()));
+>>>>>>> origin/master
         let _ = write!(result, "[PDF attachment removed \u{2014} {size_kb} KB]");
         last_end = payload_end;
     }
@@ -171,7 +197,11 @@ fn strip_pdf_data_uris(text: &str) -> Option<String> {
         return None;
     }
 
+<<<<<<< HEAD
     result.push_str(text.get(last_end..).unwrap_or(""));
+=======
+    result.push_str(payload_tail(text, last_end));
+>>>>>>> origin/master
     Some(result)
 }
 
@@ -193,10 +223,17 @@ fn scan_and_extract(s: &str) -> Option<(String, Vec<ExtractedImage>)> {
         };
         let next_start = next_prefix_after(&prefix_positions, prefix.start()).unwrap_or(s.len());
         let payload_end = scan_payload_end(s, prefix.end(), next_start);
+<<<<<<< HEAD
         let payload_span = s.get(prefix.end()..payload_end).unwrap_or("");
 
         if payload_span.len() > GROSS_PAYLOAD_PRE_CAP {
             result.push_str(s.get(last_end..prefix.start()).unwrap_or(""));
+=======
+        let payload_span = payload_range(s, prefix.end(), payload_end);
+
+        if payload_span.len() > GROSS_PAYLOAD_PRE_CAP {
+            result.push_str(payload_range(s, last_end, prefix.start()));
+>>>>>>> origin/master
             result.push_str("[large image removed]");
             last_end = payload_end;
             continue;
@@ -209,7 +246,11 @@ fn scan_and_extract(s: &str) -> Option<(String, Vec<ExtractedImage>)> {
         }
 
         let mime = mime_match.as_str().to_owned();
+<<<<<<< HEAD
         result.push_str(s.get(last_end..prefix.start()).unwrap_or(""));
+=======
+        result.push_str(payload_range(s, last_end, prefix.start()));
+>>>>>>> origin/master
 
         if payload_len > MAX_PAYLOAD_LEN {
             result.push_str("[large image removed]");
@@ -217,7 +258,14 @@ fn scan_and_extract(s: &str) -> Option<(String, Vec<ExtractedImage>)> {
             result.push_str("[additional image omitted]");
         } else {
             let data = match cleaned {
+<<<<<<< HEAD
                 Cow::Borrowed(b) => b.get(..payload_len).unwrap_or("").to_owned(),
+=======
+                // The payload run holds only ASCII base64 bytes, so rounding
+                // its length down to a multiple of 4 lands on a boundary.
+                #[allow(clippy::string_slice)] // ASCII payload, len rounded to 4
+                Cow::Borrowed(b) => b[..payload_len].to_owned(),
+>>>>>>> origin/master
                 Cow::Owned(mut o) => {
                     o.truncate(payload_len);
                     o
@@ -237,7 +285,11 @@ fn scan_and_extract(s: &str) -> Option<(String, Vec<ExtractedImage>)> {
         return None;
     }
 
+<<<<<<< HEAD
     result.push_str(s.get(last_end..).unwrap_or(""));
+=======
+    result.push_str(payload_tail(s, last_end));
+>>>>>>> origin/master
     Some((result, images))
 }
 

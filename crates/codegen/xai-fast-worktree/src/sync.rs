@@ -325,9 +325,16 @@ fn apply_porcelain_v2_entries(
             }
 
             let path = extract_ordinary_path(line);
+<<<<<<< HEAD
             let Some(xy) = line.get(2..4) else {
                 continue;
             };
+=======
+            // Git emits the XY status column as exactly two ASCII bytes, so
+            // offsets 2 and 4 are char boundaries whatever the path holds.
+            #[allow(clippy::string_slice)] // fixed-width ASCII status field
+            let xy = &line[2..4];
+>>>>>>> origin/master
             apply_file_change(xy, path, source, worktree, &mut copied, &mut deleted)?;
 
             // Track staged changes (X column != '.')
@@ -356,9 +363,16 @@ fn apply_porcelain_v2_entries(
             }
 
             let path = extract_ordinary_path(line);
+<<<<<<< HEAD
             let Some(xy) = line.get(2..4) else {
                 continue;
             };
+=======
+            // Git emits the XY status column as exactly two ASCII bytes, so
+            // offsets 2 and 4 are char boundaries whatever the path holds.
+            #[allow(clippy::string_slice)] // fixed-width ASCII status field
+            let xy = &line[2..4];
+>>>>>>> origin/master
 
             // Copy the new file
             apply_file_change(xy, path, source, worktree, &mut copied, &mut deleted)?;
@@ -437,7 +451,13 @@ fn extract_ordinary_path(line: &str) -> &str {
         if c == ' ' {
             spaces_seen += 1;
             if spaces_seen == prefix {
+<<<<<<< HEAD
                 return line.get(i + 1..).unwrap_or("");
+=======
+                // `i` is a `char_indices` position of an ASCII space.
+                #[allow(clippy::string_slice)] // one past a space at a char boundary
+                return &line[i + 1..];
+>>>>>>> origin/master
             }
         }
     }

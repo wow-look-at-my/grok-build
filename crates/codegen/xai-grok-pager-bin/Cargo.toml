@@ -55,8 +55,11 @@ xai-grok-extra-ca = { workspace = true }
 
 # Binary hardening: compile-time string + control-flow obfuscation.
 obfstr = { workspace = true }
+<<<<<<< HEAD
 
 [target.'cfg(target_os = "linux")'.dependencies]
+=======
+>>>>>>> origin/master
 
 [target.'cfg(unix)'.dependencies]
 libc = { workspace = true }
@@ -93,6 +96,7 @@ jemalloc = ["dep:tikv-jemallocator", "dep:tikv-jemalloc-sys", "dep:tikv-jemalloc
 # xai-grok-workspace no longer enables sandbox-enforce by default, so enable it here.
 sandbox-enforce = ["xai-grok-pager/sandbox-enforce", "xai-grok-workspace/sandbox-enforce"]
 local-workspace = ["xai-grok-pager/local-workspace"]
+<<<<<<< HEAD
 # Test-only, prod-inert seam: lets the e2e harness install a TEST-signed managed-policy key the
 # spawned pager trusts. Double locked out of production: absent from `default`, `default-bazel`, and
 # `release-dist`, and the install hook is additionally gated on `debug_assertions` (off in shipped
@@ -101,3 +105,9 @@ test-seams = []
 release-dist = [
     "xai-grok-pager/release-dist",
     ]
+=======
+release-dist = ["xai-grok-pager/release-dist"]
+
+[lints]
+workspace = true
+>>>>>>> origin/master

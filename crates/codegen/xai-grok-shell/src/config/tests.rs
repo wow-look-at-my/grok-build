@@ -3223,7 +3223,16 @@ fn model_provider_honored_only_from_trusted_disk_layers() {
             "its inline auth registers as a synthetic auth provider"
         );
 }
+<<<<<<< HEAD
 /// The merged enterprise layers route the managed-config fetch to cli-chat-proxy.
+=======
+/// REGRESSION: the real enterprise two-file merge —
+/// `managed_config.toml` (proxy + BYO model host) layered with
+/// `requirements.toml` (S3 trace upload) via the actual
+/// `ConfigLayers::effective_config()` path — must resolve the deployment-config
+/// fetch to cli-chat-proxy, never the model host.
+/// customer's S3 trace-upload endpoint.
+>>>>>>> origin/master
 #[test]
 #[serial_test::serial]
 fn enterprise_two_file_merge_routes_managed_config_to_proxy() {

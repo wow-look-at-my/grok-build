@@ -94,6 +94,7 @@ fn split_wke(message: String) -> (String, Option<String>) {
     let Some(start) = message.find(PREFIX) else {
         return (message, None);
     };
+<<<<<<< HEAD
     let Some(rest) = message.get(start + PREFIX.len()..) else {
         return (message, None);
     };
@@ -114,6 +115,25 @@ fn split_wke(message: String) -> (String, Option<String>) {
         return (message, None);
     };
     let cleaned = format!("{head}{tail}");
+=======
+    // `start` came from `find(PREFIX)` and PREFIX is ASCII, so the byte just
+    // past it is a char boundary.
+    #[allow(clippy::string_slice)]
+    let rest = &message[start + PREFIX.len()..];
+    let Some(end) = rest.find(']') else {
+        return (message, None);
+    };
+    // `end` is where `find` matched `]`, so the bytes before it are a whole
+    // number of characters.
+    #[allow(clippy::string_slice)]
+    let code = rest[..end].trim().to_owned();
+    if code.is_empty() {
+        return (message, None);
+    }
+    // Both ends come from the `find` results above, and `]` is one byte.
+    #[allow(clippy::string_slice)]
+    let cleaned = format!("{}{}", &message[..start], &rest[end + 1..]);
+>>>>>>> origin/master
     let cleaned = cleaned.trim().trim_end_matches('.').trim().to_owned();
     let cleaned = if cleaned.is_empty() {
         code.clone()

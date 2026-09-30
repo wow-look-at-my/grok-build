@@ -342,7 +342,13 @@ fn render_detail_editor(
     theme: &Theme,
 ) {
     let viewport = editor.viewport(width);
+<<<<<<< HEAD
     let visible = editor.text().get(viewport.visible_byte_range).unwrap_or("");
+=======
+    // The range is a ratatui `visible_byte_range`, a char boundary.
+    #[allow(clippy::string_slice)]
+    let visible = &editor.text()[viewport.visible_byte_range];
+>>>>>>> origin/master
     buf.set_string(x, y, visible, style);
     if width > 0 {
         let cursor_x = x + viewport.cursor_display_column as u16;

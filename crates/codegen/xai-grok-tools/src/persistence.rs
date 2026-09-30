@@ -217,14 +217,22 @@ impl ResourcesPersistence {
             // The writer went away, so nothing was written. Returning quietly
             // here would report a flush that never happened.
             tracing::error!(
+<<<<<<< HEAD
                 state_path = ?self.state_path,
+=======
+                state_path = %self.state_path.display(),
+>>>>>>> origin/master
                 "resources flush failed; the writer task is gone"
             );
             return;
         }
         if done_rx.await.is_err() {
             tracing::error!(
+<<<<<<< HEAD
                 state_path = ?self.state_path,
+=======
+                state_path = %self.state_path.display(),
+>>>>>>> origin/master
                 "resources flush failed; the writer stopped before acknowledging it"
             );
         }

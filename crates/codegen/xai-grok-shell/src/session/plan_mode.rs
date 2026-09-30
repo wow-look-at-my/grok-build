@@ -615,6 +615,54 @@ mod tests {
     }
     #[test]
     fn full_reminder_asks_for_the_goal_plan_format() {
+<<<<<<< HEAD
+=======
+        let r = test_renderer();
+        let text = render(
+            &r,
+            plan_mode_reminder_full_template(),
+            "/tmp/plan.md",
+            false,
+        );
+        for section in [
+            "# Plan:",
+            "## Acceptance criteria",
+            "## Verification plan",
+            "## Non-goals",
+            "## Assumed scope",
+            "## Implementation approach",
+            "## Task steps",
+        ] {
+            assert!(text.contains(section), "missing {section}: {text}");
+        }
+        assert!(!text.contains("ordered `- [ ]`"), "{text}");
+    }
+    #[test]
+    fn full_reminder_names_the_goal_contract_only_when_approval_makes_a_goal() {
+        let r = test_renderer();
+        let contract = "it becomes a goal with this plan as its contract";
+        let with_goal = r
+            .render_with_extra(
+                plan_mode_reminder_full_template(),
+                &serde_json::json!({
+                    "plan_path": "/tmp/plan.md",
+                    "plan_has_content": false,
+                    "goal_contract": true,
+                }),
+            )
+            .unwrap();
+        assert!(with_goal.contains(contract), "{with_goal}");
+        let without_goal = render(
+            &r,
+            plan_mode_reminder_full_template(),
+            "/tmp/plan.md",
+            false,
+        );
+        assert!(!without_goal.contains(contract), "{without_goal}");
+    }
+    #[test]
+    fn full_reminder_with_existing_plan() {
+>>>>>>> origin/master
         let r = test_renderer();
         let text = render(
             &r,

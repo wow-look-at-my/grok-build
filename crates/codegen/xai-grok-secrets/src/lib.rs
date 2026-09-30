@@ -1,5 +1,8 @@
 #![allow(clippy::expect_used)] // 1 hit predates the gate
+<<<<<<< HEAD
 #![deny(clippy::indexing_slicing)]
+=======
+>>>>>>> origin/master
 
 mod sanitizer;
 

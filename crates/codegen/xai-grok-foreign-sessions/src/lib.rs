@@ -6,7 +6,10 @@
     dead_code
 )]
 //! Bounded, metadata-only listing of foreign coding-agent sessions.
+<<<<<<< HEAD:crates/codegen/xai-grok-foreign-sessions/src/lib.rs
 #![deny(clippy::indexing_slicing)]
+=======
+>>>>>>> origin/master:crates/codegen/xai-grok-workspace/src/foreign_sessions/mod.rs
 use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -247,7 +250,11 @@ pub(crate) fn is_within(updated_at: SystemTime, now: SystemTime, within: Duratio
         Err(future) => future.duration() <= MAX_FUTURE_SKEW,
     }
 }
+<<<<<<< HEAD:crates/codegen/xai-grok-foreign-sessions/src/lib.rs
 pub(crate) fn normalize_title(value: &str) -> Option<String> {
+=======
+pub(super) fn normalize_title(value: &str) -> Option<String> {
+>>>>>>> origin/master:crates/codegen/xai-grok-workspace/src/foreign_sessions/mod.rs
     let normalized = value.split_whitespace().collect::<Vec<_>>().join(" ");
     if normalized.is_empty() {
         return None;

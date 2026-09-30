@@ -43,6 +43,7 @@ Or use the alias:
 Press `Ctrl+M` from the scrollback pane to open the model picker. It lists all available models, both built-in and custom, and lets you switch with a single keystroke. With the prompt focused, `Ctrl+M` toggles multiline input instead -- use `/model` to switch without leaving the prompt.
 
 Provider catalogs are combined rather than replaced. For example, models autodetected from a `[model_providers.<id>]` block appear alongside Grok and custom models with qualified IDs such as `ollama/llama3`. Refreshing or signing out of one provider does not erase models owned by another provider.
+<<<<<<< HEAD
 
 ### Fleet allowlist (`requirements.toml`)
 
@@ -55,6 +56,8 @@ allowed_models = ["grok-4.5", "grok-4*"]
 ```
 
 A fleet pin matches the **model id** (not a user-chosen catalog key), so a local `[model.<name>]` entry cannot widen the set. User-config `allowed_models` still matches catalog key or model id. Omit the key to leave user config standing. An empty array is unrestricted. A present-but-unreadable pin fail-closes (nothing selectable). A default or `-m` value outside the pinned set is rejected once the model catalog is fetched — contact your administrator; the list is not user-editable.
+=======
+>>>>>>> origin/master
 
 ### Config Default
 

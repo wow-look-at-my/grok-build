@@ -148,7 +148,13 @@ pub fn classify_compaction_path(path: &str) -> Option<CompactionArtifact> {
 /// the Python `text[:n]`). Char boundaries are respected so we never panic.
 fn truncate_chars(s: &str, max: usize, marker: &str) -> String {
     match s.char_indices().nth(max) {
+<<<<<<< HEAD:crates/codegen/xai-compaction-transcript/src/lib.rs
         Some((byte_idx, _)) => format!("{}{marker}", s.get(..byte_idx).unwrap_or(s)),
+=======
+        // `char_indices().nth` yields the byte a character starts at.
+        #[allow(clippy::string_slice)]
+        Some((byte_idx, _)) => format!("{}{marker}", &s[..byte_idx]),
+>>>>>>> origin/master:crates/codegen/xai-chat-state/src/compaction_transcript.rs
         None => s.to_string(),
     }
 }
@@ -582,6 +588,9 @@ pub fn extract_keywords(summary: &str) -> Vec<String> {
     let kw_re =
         KEYWORD_RE.get_or_init(|| Regex::new(r"[A-Z][A-Za-z0-9_]{3,}|[a-z][a-z0-9_]{5,}").unwrap());
 
+    // Every index in the match below is a regex match offset, which is a char
+    // boundary by construction.
+    #[allow(clippy::string_slice)]
     let text = match start_re.find(summary) {
         Some(m) => {
             let end = header_re

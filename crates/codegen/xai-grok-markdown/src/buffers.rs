@@ -247,14 +247,29 @@ pub fn unicode_display_width(s: &str) -> usize {
     s.width()
 }
 
+<<<<<<< HEAD
 /// Polyfill for `str::floor_char_boundary` (stable in Rust 1.91+).
 /// Replace with the std method once the workspace toolchain is bumped to 1.91+.
+=======
+/// Largest UTF-8 char boundary at or before `index` in `s`.
+///
+/// Delegates to [`str::floor_char_boundary`]. The wrapper stays so this crate
+/// keeps one name for the operation without depending on another workspace
+/// crate for it. Indices past the end of `s` are clamped to `s.len()`.
+>>>>>>> origin/master
 pub(crate) fn floor_char_boundary(s: &str, index: usize) -> usize {
     s.floor_char_boundary(index)
 }
 
+<<<<<<< HEAD
 /// Polyfill for `str::ceil_char_boundary` (stable in Rust 1.91+).
 /// Replace with the std method once the workspace toolchain is bumped to 1.91+.
+=======
+/// Smallest UTF-8 char boundary at or after `index` in `s`.
+///
+/// Delegates to [`str::ceil_char_boundary`]. Indices past the end of `s` are
+/// clamped to `s.len()`.
+>>>>>>> origin/master
 pub(crate) fn ceil_char_boundary(s: &str, index: usize) -> usize {
     s.ceil_char_boundary(index)
 }

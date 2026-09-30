@@ -1237,6 +1237,15 @@ impl SessionActor {
         let _planner_state = GoalPlannerStateGuard {
             tracker: &self.goal_tracker,
         };
+<<<<<<< HEAD
+=======
+        // A user Stop latches this session's Task spawns closed until a turn
+        // reopens them, and the planner runs off a slash command, not a turn.
+        // Without this, `/goal resume` after a Stop is rejected before a
+        // subagent is ever created — a fail-closed at latency 0 that repeats
+        // for every message the session has left.
+        self.open_subagent_spawn_admission();
+>>>>>>> origin/master
         // One planner attempt per call. Send Now steers the live planner rather
         // than starting a second one, and a cancel is terminal, so nothing here
         // loops; the block is a label so every early exit still reaches the
@@ -2143,6 +2152,7 @@ mod verification_scope_tests {
         assert!(closed.contains("no open item"), "{closed}");
         let empty = next_step_from_todos([], "todo_write");
         assert!(empty.contains("Put the plan's remaining steps"), "{empty}");
+<<<<<<< HEAD
     }
 }
 
@@ -2176,5 +2186,7 @@ mod compaction_goal_section_tests {
         let goal = out.find("A goal has been set: ship it").unwrap();
         assert!(bg < task && task < goal, "{out}");
         assert!(out.contains("</system-reminder>"));
+=======
+>>>>>>> origin/master
     }
 }

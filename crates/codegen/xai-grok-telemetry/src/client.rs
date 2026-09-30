@@ -3,8 +3,21 @@
 //! All calls route through [`track`].
 //! Precedence: env overrides config, config overrides remote config, remote config overrides the default.
 //!
+<<<<<<< HEAD
 //! The HTTP client is injected via [`init`]/[`init_if_needed`].
 //! That keeps this crate from depending on shell's `User-Agent` builder, which couples to the `permission` module.
+=======
+//! Extracted from `xai-grok-shell::agent::telemetry::track`. The HTTP client is
+//! injected via [`init`]/[`init_if_needed`] so this crate avoids depending on
+//! shell's `User-Agent` builder (which couples to the `permission` module).
+
+use std::sync::{Arc, OnceLock};
+
+use chrono::{Local, SecondsFormat};
+use serde_json::json;
+use xai_mixpanel::Mixpanel;
+
+>>>>>>> origin/master
 use crate::config::{TelemetryConfig, TelemetryMode};
 use crate::http::OriginClientInfo;
 use crate::session_ctx::EmitterOrigin;
@@ -386,6 +399,17 @@ pub fn sync_profile() {
     let Some(mixpanel) = client.mixpanel.clone() else {
         return;
     };
+<<<<<<< HEAD
+=======
+
+    let agent_id = crate::id::agent_id();
+    let user_id = client.user_id.as_deref().unwrap_or(&agent_id).to_owned();
+
+    // Nobody awaits this profile write: `sync_profile` is a sync entry point and
+    // the mixpanel `engage` reply has no reader in this process -- a lost write
+    // shows up as a stale analytics profile, not as a failed caller.
+    #[allow(clippy::disallowed_methods)]
+>>>>>>> origin/master
     tokio::spawn(async move {
         let agent_id = crate::id::agent_id_async().await;
         let user_id = client.user_id.as_deref().unwrap_or(&agent_id).to_owned();

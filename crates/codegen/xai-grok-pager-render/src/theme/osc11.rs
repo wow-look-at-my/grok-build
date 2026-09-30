@@ -76,7 +76,14 @@ pub(crate) fn classify_luminance(r: u8, g: u8, b: u8) -> SystemAppearance {
 /// Handles both 4-digit (`rgb:RRRR/GGGG/BBBB`) and 2-digit (`rgb:RR/GG/BB`) hex formats.
 pub(crate) fn parse_osc11_rgb(response: &str) -> Option<(u8, u8, u8)> {
     let rgb_start = response.find("rgb:")? + 4;
+<<<<<<< HEAD
     let rgb_part = response.get(rgb_start..)?;
+=======
+    // `find` returns a char boundary and `"rgb:"` is 4 ASCII bytes, so stepping
+    // past it lands on one too.
+    #[allow(clippy::string_slice)] // past the ASCII "rgb:" that str::find matched
+    let rgb_part = &response[rgb_start..];
+>>>>>>> origin/master
 
     // Split on channel separator `/` and terminators (BEL, ESC).
     let parts: Vec<&str> = rgb_part.split(['/', '\x07', '\x1b']).take(3).collect();

@@ -531,7 +531,13 @@ impl Theme {
             running: cyan,
             // The dark slot on both polarities: it reads on black and on white.
             thinking_summary: Color::Cyan,
+<<<<<<< HEAD
             // Yellow family: warning text, plan-mode gold, shell commands.
+=======
+            // Yellow family — warning text, plan-mode gold, shell
+            // commands, file paths. ANSI16 has no orange or gold slot,
+            // so warm accents all fold onto yellow.
+>>>>>>> origin/master
             command: yellow,
             warning: yellow,
             path: yellow,

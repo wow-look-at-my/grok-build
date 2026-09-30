@@ -488,6 +488,10 @@ fn absent_claim_is_skipped() {
     assert!(verified_claim_sidecar(&ManagedConfigResponse::default(), Some("team-007")).is_none());
 }
 
+<<<<<<< HEAD
+=======
+/// An unreadable `auth.json` labels `unknown`, never `personal`.
+>>>>>>> origin/master
 #[test]
 fn auth_mode_classification() {
     use xai_grok_telemetry::startup::AuthMode;
@@ -495,6 +499,7 @@ fn auth_mode_classification() {
     assert_eq!(auth_mode(&Ok(true)), AuthMode::Team);
     assert_eq!(auth_mode(&Ok(false)), AuthMode::Personal);
     assert_eq!(auth_mode(&Err(err())), AuthMode::Unknown);
+<<<<<<< HEAD
 }
 
 #[test]
@@ -519,4 +524,6 @@ fn managed_config_gate_ignores_the_overlay_in_both_directions() {
     layers.user = toml::Value::Table(Default::default());
     layers.env_overlay = Some(features_managed_config(false));
     assert_eq!(managed_config_enabled_from_layers(&layers), None);
+=======
+>>>>>>> origin/master
 }

@@ -262,12 +262,18 @@ impl BgTaskState {
         } else {
             let end =
                 crate::render::line_utils::floor_char_boundary(&new_stdout, BG_TASK_MAX_STDOUT);
+<<<<<<< HEAD
             let Some(head) = new_stdout.get(..end) else {
                 self.stdout = new_stdout;
                 self.stdout_line_count = self.stdout.lines().count();
                 return;
             };
             self.stdout = head.to_string();
+=======
+            #[allow(clippy::string_slice)] // floor_char_boundary's own output
+            let kept = &new_stdout[..end];
+            self.stdout = kept.to_string();
+>>>>>>> origin/master
             self.truncated = true;
         }
         self.stdout_line_count = self.stdout.lines().count();
@@ -286,10 +292,17 @@ impl BgTaskState {
             while start < self.stdout.len() && !self.stdout.is_char_boundary(start) {
                 start += 1;
             }
+<<<<<<< HEAD
             if let Some(tail) = self.stdout.get(start..) {
                 self.stdout = tail.to_string();
                 self.truncated = true;
             }
+=======
+            #[allow(clippy::string_slice)] // start stepped up until is_char_boundary held
+            let kept = &self.stdout[start..];
+            self.stdout = kept.to_string();
+            self.truncated = true;
+>>>>>>> origin/master
         }
         self.stdout_line_count = self.stdout.lines().count();
     }
@@ -335,9 +348,15 @@ impl BgTaskState {
                 &snapshot.output,
                 BG_TASK_MAX_STDOUT,
             );
+<<<<<<< HEAD
             if let Some(head) = snapshot.output.get(..end) {
                 tombstone.set_stdout(head.to_string());
             }
+=======
+            #[allow(clippy::string_slice)] // floor_char_boundary's own output
+            let kept = &snapshot.output[..end];
+            tombstone.set_stdout(kept.to_string());
+>>>>>>> origin/master
             if end < snapshot.output.len() {
                 tombstone.truncated = true;
             }

@@ -69,7 +69,11 @@ async fn approve_plan(actor: &SessionActor) -> Vec<ConversationItem> {
     };
     let mut deferred = Vec::new();
     let outcome = actor
+<<<<<<< HEAD
         .prepare_tool_call(call, &mut deferred, None)
+=======
+        .prepare_tool_call(call, &mut deferred)
+>>>>>>> origin/master
         .await
         .expect("prepare_tool_call should not error");
     assert!(

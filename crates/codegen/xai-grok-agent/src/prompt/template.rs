@@ -10,8 +10,17 @@ mod prompt_encrypted;
 use prompt_encrypted::*;
 
 /// Decrypt XOR-obfuscated template data (mirrors `scripts/encrypt_templates.py::xor_encrypt`).
+<<<<<<< HEAD
 /// Obfuscation only, not a security boundary.
 /// The strict decode is the integrity check: a lossy decode would hide a stale blob.
+=======
+/// Obfuscation only — not a security boundary.
+///
+/// The strict decode is the integrity check on the generated blob: a payload
+/// that no longer decodes is a `prompt_encrypted.rs` that is out of step with
+/// its source, and decoding it lossily would put replacement characters into
+/// every prompt instead of saying so.
+>>>>>>> origin/master
 #[allow(clippy::disallowed_methods)]
 fn decrypt(data: &[u8], seed: u8) -> Zeroizing<String> {
     let bytes: Vec<u8> = data
@@ -408,6 +417,27 @@ mod tests {
     // ── Web search disabled ─────────────────────────────────────────
 
     #[test]
+<<<<<<< HEAD
+=======
+    fn test_web_search_disabled_renders_without_crash() {
+        // No Fetch tool
+        let tools: HashMap<ToolKind, String> = [
+            (ToolKind::Read, "read_file".to_string()),
+            (ToolKind::Plan, "todo_write".to_string()),
+        ]
+        .into();
+        let r = TemplateRenderer::new(tools, HashMap::new());
+        let tmpl = base_template();
+        let result = r.render_with_extra(&tmpl, &default_placeholders());
+        assert!(
+            result.is_ok(),
+            "Must render without crash: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
+>>>>>>> origin/master
     fn test_subagent_template_deterministic_across_renders() {
         let r = default_renderer();
         let p = default_placeholders();

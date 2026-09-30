@@ -168,6 +168,7 @@ pub fn build_dream_user_message(
             if trimmed.len() <= cap {
                 buf.push_str(trimmed);
             } else {
+<<<<<<< HEAD
                 let mut end = cap;
                 while end > 0 && !trimmed.is_char_boundary(end) {
                     end -= 1;
@@ -175,6 +176,10 @@ pub fn build_dream_user_message(
                 if let Some(prefix) = trimmed.get(..end) {
                     buf.push_str(prefix);
                 }
+=======
+                let kept = xai_grok_tools::util::truncate_bytes(trimmed, cap);
+                buf.push_str(kept);
+>>>>>>> origin/master
                 tracing::warn!(
                     target: LOG,
                     original = trimmed.len(),

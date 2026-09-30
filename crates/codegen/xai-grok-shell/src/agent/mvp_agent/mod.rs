@@ -931,10 +931,22 @@ pub(crate) fn agent_name_after_model_switch(
         current_agent_name.to_owned()
     }
 }
+<<<<<<< HEAD
 /// Harness compatibility for zero-turn / mid-turn model switching. Stock
 /// (non-strict) agents are interchangeable: they share the default wire
 /// format and toolset. So switching e.g. `grok-build` to `grok-build-plan`
 /// doesn't require rebuilding the harness. A strict harness matches only itself.
+=======
+/// Harness compatibility for zero-turn / mid-turn model switching.
+///
+/// Two stock (non-strict) agents are interchangeable — they share the
+/// default wire format and toolset, so switching e.g. `grok-build` →
+/// `grok-build-plan` doesn't require rebuilding the harness and would
+/// destroy a client-supplied `_meta.agentProfile` if it did.
+///
+/// Strict harnesses (`grok-build-orchestrator`) are only compatible with
+/// themselves. Strict↔stock transitions are never compatible.
+>>>>>>> origin/master
 pub(crate) fn harnesses_are_compatible(active: &str, required: &str) -> bool {
     use xai_grok_agent::config::is_strict_harness_agent_type;
     match (

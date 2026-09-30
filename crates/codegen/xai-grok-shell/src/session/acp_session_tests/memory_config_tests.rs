@@ -399,7 +399,10 @@ pub(super) async fn create_test_actor_with_memory(
         title_refresh_generation: std::cell::Cell::new(0),
         next_title_refresh_idx: std::cell::Cell::new(0),
         turn_summary_enabled: false,
+<<<<<<< HEAD
         title_refresh_enabled: false,
+=======
+>>>>>>> origin/master
         thinking_summaries_enabled: false,
         session_turn_active: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         streaming_turn_capture: parking_lot::Mutex::new(StreamingTurnCapture::default()),

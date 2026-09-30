@@ -187,7 +187,12 @@ fn read_managed_config_cache(home: &Path) -> Option<ManagedConfigCache> {
 }
 
 /// Confirmed principal switch vs the marker (both sides known and differing).
+<<<<<<< HEAD
 /// A missing marker, a blank value, or a pre-upgrade marker never counts.
+=======
+/// Missing marker / blank / pre-upgrade never counts. Callers evict prior artifacts on true.
+/// Takes the apply-lock holder's `home` (same dir as the lock).
+>>>>>>> origin/master
 pub fn managed_config_identity_changed_at(home: &Path, new_principal: Option<&str>) -> bool {
     let Some(cache) = read_managed_config_cache(home) else {
         return false;
@@ -214,7 +219,11 @@ fn confirmed_switch<'a>(recorded: Option<&'a str>, current: Option<&str>) -> Opt
     }
 }
 
+<<<<<<< HEAD
 /// Offline tenant-purge detector: a confirmed team switch vs the marker returns the evicted principal.
+=======
+/// Offline tenant-purge detector: confirmed team switch vs marker → evicted principal.
+>>>>>>> origin/master
 pub fn confirmed_team_switch(new_team_id: &str) -> Option<String> {
     user_grok_home().and_then(|home| confirmed_team_switch_at(&home, new_team_id))
 }
@@ -261,9 +270,13 @@ fn serving_team_id(identity: &ServingIdentity) -> Option<&str> {
     }
 }
 
+<<<<<<< HEAD
 /// Tamper signals for the current identity, split ways: [`Self::needs_refetch`] (staleness) fires on ANY signal.
 /// [`Self::compromised_for_gate`] (gate) fires only on artifact-missing.
 /// A pure identity mismatch never compromises the gate: a foreign marker is rebound by the online refetch.
+=======
+/// Tamper signals for the current identity. Any signal means a refetch.
+>>>>>>> origin/master
 #[derive(Clone, Copy)]
 struct TamperSignals {
     artifact_missing: bool,
@@ -302,8 +315,14 @@ fn cache_unusable_for(cache: &ManagedConfigCache, home: &Path, identity: &Servin
     TamperSignals::evaluate(cache, home, identity).needs_refetch()
 }
 
+<<<<<<< HEAD
 /// The principal the SIGNED cache must be bound to: the live team id, else the marker principal.
 /// One derivation shared by the gate and both staleness checks, so a foreign-but-authentic cache reads foreign on every sibling path.
+=======
+/// The principal the SIGNED cache must be bound to: the live team id, else the marker
+/// principal. The gate and both staleness checks share it, so a foreign-but-authentic
+/// cache reads foreign on every path.
+>>>>>>> origin/master
 fn expected_signed_principal<'a>(
     cache: Option<&'a ManagedConfigCache>,
     identity: &'a ServingIdentity,
@@ -361,7 +380,11 @@ fn managed_policy_compromised_for_at(home: &Path, identity: &ServingIdentity) ->
     let now = effective_now(cache.as_ref());
     let signed_verdict =
         crate::signed_policy::signed_cache_compromised(home, expected_principal, now);
+<<<<<<< HEAD
     managed_policy_compromised_decision(
+=======
+    let compromised = managed_policy_compromised_decision(
+>>>>>>> origin/master
         signed_verdict,
         || crate::signed_policy::managed_identity_claim_imposes(home, expected_principal, now),
         cache.as_ref(),

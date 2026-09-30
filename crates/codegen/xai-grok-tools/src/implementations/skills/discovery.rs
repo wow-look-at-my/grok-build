@@ -375,9 +375,16 @@ fn quote_problematic_values(frontmatter: &str) -> String {
             let Some(colon) = line.find(':') else {
                 return line.to_string();
             };
+<<<<<<< HEAD
             let Some(key) = line.get(..colon) else {
                 return line.to_string();
             };
+=======
+            // `colon` is the offset of an ASCII `:`, so it and `colon + 1` are
+            // both char boundaries.
+            #[allow(clippy::string_slice)]
+            let key = &line[..colon];
+>>>>>>> origin/master
             if key.is_empty()
                 || !key
                     .bytes()
@@ -385,9 +392,14 @@ fn quote_problematic_values(frontmatter: &str) -> String {
             {
                 return line.to_string();
             }
+<<<<<<< HEAD
             let Some(after) = line.get(colon + 1..) else {
                 return line.to_string();
             };
+=======
+            #[allow(clippy::string_slice)]
+            let after = &line[colon + 1..];
+>>>>>>> origin/master
             let value = after.trim_start();
             // Require whitespace after the colon and a non-empty value.
             if value.is_empty() || value.len() == after.len() {
@@ -441,10 +453,24 @@ fn recover_scalar_fields(yaml: &str) -> std::collections::HashMap<String, serde_
         // A bare block-scalar indicator (`|`, `>`, `|-`, `>2`, …) keeps its content on
         // following indented lines we skip, so treat it as empty and let the body
         // fallback supply the description.
+<<<<<<< HEAD
         let block_marker = matches!(value.as_bytes().first(), Some(b'|' | b'>'))
             && value
                 .get(1..)
                 .is_some_and(|rest| rest.bytes().all(|b| matches!(b, b'+' | b'-' | b'0'..=b'9')));
+=======
+        let block_marker = match value.as_bytes().first() {
+            // The indicator is one ASCII byte, so byte 1 is a char boundary.
+            Some(b'|' | b'>') => {
+                #[allow(clippy::string_slice)]
+                let after_indicator = &value[1..];
+                after_indicator
+                    .bytes()
+                    .all(|b| matches!(b, b'+' | b'-' | b'0'..=b'9'))
+            }
+            _ => false,
+        };
+>>>>>>> origin/master
         if value.is_empty() || block_marker {
             continue;
         }
@@ -476,7 +502,13 @@ pub fn parse_skill_frontmatter(
     let closing_idx = after_first
         .find("\n---")
         .ok_or(SkillParseError::NoFrontmatter)?;
+<<<<<<< HEAD
     let yaml_content = after_first.get(..closing_idx).unwrap_or("").trim();
+=======
+    // `closing_idx` is the offset of the ASCII `\n---` needle, a char boundary.
+    #[allow(clippy::string_slice)]
+    let yaml_content = after_first[..closing_idx].trim();
+>>>>>>> origin/master
 
     // Untyped map coerced per-field so one mistyped field never drops its siblings; the quoting
     // retry recovers value-colon syntax errors; the final line-based recovery salvages top-level
@@ -766,8 +798,13 @@ pub fn parse_skill_files(skill_files: Vec<(PathBuf, SkillScope)>) -> Vec<SkillIn
                 if let Ok(full) = std::fs::read_to_string(&path) {
                     let body = extract_skill_body(&full);
                     let peek = if body.len() > MAX_BODY_PEEK_BYTES {
+<<<<<<< HEAD
                         let end = crate::util::floor_char_boundary(&body, MAX_BODY_PEEK_BYTES);
                         body.get(..end).unwrap_or(body.as_str())
+=======
+                        let end = crate::util::truncate_bytes(&body, MAX_BODY_PEEK_BYTES);
+                        end
+>>>>>>> origin/master
                     } else {
                         &body
                     };

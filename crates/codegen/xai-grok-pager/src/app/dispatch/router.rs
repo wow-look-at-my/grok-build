@@ -91,9 +91,15 @@ use super::settings::setters::{
     set_prompt_suggestions, set_remember_tool_approvals, set_render_mermaid,
     set_respect_manual_folds, set_screen_mode, set_scroll_lines, set_scroll_mode, set_scroll_speed,
     set_show_thinking_blocks, set_show_tips, set_simple_mode, set_stop_gate_ci_failing,
+<<<<<<< HEAD
     set_stop_gate_unfinished_todos, set_subagent_model_inheritance, set_theme,
     set_thinking_summaries, set_timeline, set_timestamps, set_ttft_timeout_secs, set_vim_mode,
     set_voice_capture_mode, set_voice_keybind_enabled, set_voice_stt_language,
+=======
+    set_stop_gate_unfinished_todos, set_theme, set_thinking_summaries, set_timeline,
+    set_timestamps, set_ttft_timeout_secs, set_vim_mode, set_voice_capture_mode,
+    set_voice_keybind_enabled, set_voice_stt_language,
+>>>>>>> origin/master
 };
 use super::settings::ui::{
     dispatch_confirm_reset_setting, dispatch_open_command_palette, dispatch_open_howto_guides,

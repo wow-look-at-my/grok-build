@@ -927,7 +927,11 @@ pub(crate) fn render_running_row(
         has_running_execute: false,
         total_tokens: None,
         output_rate: rate,
+<<<<<<< HEAD
         session_starting_since: None,
+=======
+        mcp_init_progress: None,
+>>>>>>> origin/master
         is_bash_turn: false,
         is_pending_user_input: false,
         goal_harness: None,

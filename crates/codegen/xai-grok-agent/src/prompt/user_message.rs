@@ -71,6 +71,7 @@ pub fn format_rules_section(
             out.push_str("\n\n");
         }
     }
+<<<<<<< HEAD
     if !user_rules.is_empty() {
         out.push_str(
             "<user_rules description=\"These are rules set by the user that you should follow if appropriate.\">\n",
@@ -102,6 +103,16 @@ pub fn append_rules_section(
     };
     if !prefix.is_empty() && !prefix.ends_with('\n') {
         prefix.push('\n');
+=======
+    let mut truncated = xai_grok_tools::util::truncate_bytes(status, GIT_STATUS_CHARACTER_LIMIT);
+    if let Some(nl) = truncated.rfind('\n')
+        && nl > 0
+    {
+        // A `'\n'` byte offset is a char boundary.
+        #[allow(clippy::string_slice)]
+        let at_newline = &truncated[..nl];
+        truncated = at_newline;
+>>>>>>> origin/master
     }
     prefix.push('\n');
     prefix.push_str(&block);

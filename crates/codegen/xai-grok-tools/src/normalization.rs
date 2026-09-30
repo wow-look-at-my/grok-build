@@ -46,9 +46,22 @@ pub fn norm_offset_i64(offset: Option<i64>) -> Option<u64> {
         _ => None,
     }
 }
+<<<<<<< HEAD
 /// Project a tool's **typed** input into the harness-independent `input` dict of the `x.ai/tool` `_meta` object. Equivalent tools across
 /// toolsets emit the same keys with the same meaning (a harness may add an extra key). Absent optional fields are omitted (never `null`). Bulky
 /// payload fields (edit `old_string`/`new_string`, full write contents) are never projected — consumers read them from `raw_input`.
+=======
+/// Project a tool's **typed** input into the harness-independent `input` dict of
+/// the `x.ai/tool` `_meta` object. Equivalent tools across toolsets emit the
+/// same keys with the same meaning (a harness may add an extra key).
+///
+/// Returns `None` for tools with no stable cross-harness shape (MCP / dynamic /
+/// hashline / media / control-flow); the caller then omits `input`.
+/// Absent optional fields are omitted (never `null`). Bulky payload fields
+/// (edit `old_string`/`new_string`, full write contents) are never projected —
+/// consumers read them from `raw_input`. Keys come from [`field`]; the match is
+/// exhaustive so a new `ToolInput` variant must decide here.
+>>>>>>> origin/master
 pub fn canonical_input(input: &ToolInput) -> Option<serde_json::Value> {
     use serde_json::Value;
     /// Required field — omitted on serialization failure (absent fields are

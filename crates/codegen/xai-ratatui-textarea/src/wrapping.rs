@@ -25,12 +25,19 @@ where
                 }
                 let start = slice_addr - text_start;
                 let end = start + slice.len();
+<<<<<<< HEAD
                 let trailing_spaces = text
                     .get(end..)
                     .unwrap_or("")
                     .chars()
                     .take_while(|c| *c == ' ')
                     .count();
+=======
+                // `end` is the offset just past a borrowed slice textwrap cut out
+                // of `text`, so it names a char boundary.
+                #[allow(clippy::string_slice)] // a textwrap slice boundary
+                let trailing_spaces = text[end..].chars().take_while(|c| *c == ' ').count();
+>>>>>>> origin/master
                 lines.push(start..end + trailing_spaces);
             }
             std::borrow::Cow::Owned(_) => panic!("wrap_ranges: unexpected owned string"),
@@ -228,21 +235,32 @@ where
 
     // Wrap the remainder using subsequent indent width and map back to original indices.
     let base = first_line_range.end;
+<<<<<<< HEAD
     let skip_leading_spaces = flat
         .get(base..)
         .unwrap_or("")
         .chars()
         .take_while(|c| *c == ' ')
         .count();
+=======
+    // `base` is a wrap-range end plus a run of ASCII spaces.
+    #[allow(clippy::string_slice)] // a wrap-range end advanced past ASCII spaces
+    let skip_leading_spaces = flat[base..].chars().take_while(|c| *c == ' ').count();
+>>>>>>> origin/master
     let base = base + skip_leading_spaces;
     let subsequent_width_available = opts
         .width
         .saturating_sub(rt_opts.subsequent_indent.width())
         .max(1);
+<<<<<<< HEAD
     let remaining_wrapped = wrap_ranges_trim(
         flat.get(base..).unwrap_or(""),
         opts.width(subsequent_width_available),
     );
+=======
+    #[allow(clippy::string_slice)] // `base` is a wrap-range end plus ASCII spaces
+    let remaining_wrapped = wrap_ranges_trim(&flat[base..], opts.width(subsequent_width_available));
+>>>>>>> origin/master
     for r in &remaining_wrapped {
         if r.is_empty() {
             continue;

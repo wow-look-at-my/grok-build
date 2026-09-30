@@ -197,9 +197,13 @@ impl MemoryStorage {
     ) -> std::io::Result<PathBuf> {
         self.require_legacy("daily session logs")?;
         let sessions_dir = self.sessions_dir();
+<<<<<<< HEAD
         let sid8 = session_id
             .get(..session_id.len().min(8))
             .unwrap_or(session_id);
+=======
+        let sid8 = xai_grok_tools::util::truncate_bytes(session_id, 8);
+>>>>>>> origin/master
         let filename = format!("{date}-{slug}-{sid8}.md");
         let path = sessions_dir.join(&filename);
 
@@ -677,8 +681,16 @@ pub fn normalize_memory_content(raw: &str) -> String {
 
         // Multi-line: promote the first line to a heading if it's short enough
         Some(pos) => {
+<<<<<<< HEAD
             let first_line = trimmed.get(..pos).unwrap_or("").trim();
             let rest = trimmed.get(pos..).unwrap_or("").trim();
+=======
+            // A `'\n'` byte offset is a char boundary, so both halves align.
+            #[allow(clippy::string_slice)]
+            let first_line = trimmed[..pos].trim();
+            #[allow(clippy::string_slice)]
+            let rest = trimmed[pos..].trim();
+>>>>>>> origin/master
 
             if first_line.len() <= 80 {
                 format!("## {first_line}\n\n{rest}")
@@ -742,8 +754,14 @@ fn compute_workspace_hash(cwd: &Path) -> String {
 
     let slug = if slug.is_empty() { "workspace" } else { &slug };
     let hash = blake3::hash(hash_input.as_bytes());
+<<<<<<< HEAD
     let hex = hash.to_hex();
     let hash8 = hex.get(..8).unwrap_or(&*hex);
+=======
+    // blake3 hex digests are lowercase ASCII, so byte 8 is a boundary.
+    #[allow(clippy::string_slice)]
+    let hash8 = &hash.to_hex()[..8];
+>>>>>>> origin/master
 
     format!("{slug}-{hash8}")
 }
@@ -763,11 +781,19 @@ pub(crate) fn extract_repo_identity(cwd: &Path) -> Option<String> {
 fn normalize_remote_url(url: &str) -> Option<String> {
     let path = if let Some(colon_pos) = url.find(':') {
         // SSH format: git@github.com:org/repo.git
+<<<<<<< HEAD
         if url
             .get(..colon_pos)
             .is_some_and(|h| h.contains('@') && !h.contains('/'))
         {
             url.get(colon_pos + 1..)?
+=======
+        // `colon_pos` is an ASCII ':' offset, so it and `colon_pos + 1` align.
+        #[allow(clippy::string_slice)]
+        let (scheme, after_colon) = (&url[..colon_pos], &url[colon_pos + 1..]);
+        if scheme.contains('@') && !scheme.contains('/') {
+            after_colon
+>>>>>>> origin/master
         } else {
             // HTTPS/SSH-with-scheme: https://github.com/org/repo.git
             url.split("//")

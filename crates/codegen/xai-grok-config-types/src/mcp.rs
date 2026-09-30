@@ -417,6 +417,7 @@ fn render_setup_template(
         // plus that two-byte ASCII literal's width, so each is a char boundary.
         let (prefix, after_start) = rest.split_at(start);
         out.push_str(prefix);
+<<<<<<< HEAD
         let Some(after_start) = after_start.strip_prefix("{{") else {
             return Err("unterminated setup variable template".to_string());
         };
@@ -427,10 +428,20 @@ fn render_setup_template(
             return Err("unterminated setup variable template".to_string());
         };
         let key = key.trim();
+=======
+        #[allow(clippy::string_slice)] // past the two-byte ASCII `{{`
+        let after_start = &after_start[2..];
+        let Some(end) = after_start.find("}}") else {
+            return Err("unterminated setup variable template".to_string());
+        };
+        #[allow(clippy::string_slice)] // start of the ASCII `}}` needle
+        let key = after_start[..end].trim();
+>>>>>>> origin/master
         let Some(value) = variables.get(key) else {
             return Err(format!("unresolved setup variable '{key}'"));
         };
         out.push_str(value);
+<<<<<<< HEAD
         let Some(remaining) = after_start.get(end..) else {
             return Err("unterminated setup variable template".to_string());
         };
@@ -438,6 +449,11 @@ fn render_setup_template(
             return Err("unterminated setup variable template".to_string());
         };
         rest = remaining;
+=======
+        #[allow(clippy::string_slice)] // past the ASCII `}}` needle
+        let remainder = &after_start[end + 2..];
+        rest = remainder;
+>>>>>>> origin/master
     }
     out.push_str(rest);
     Ok(out)

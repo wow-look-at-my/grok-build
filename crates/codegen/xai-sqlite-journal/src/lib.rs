@@ -284,7 +284,11 @@ fn hostname_raw() -> Option<String> {
     // so a partly-undecodable name still separates two hosts on a shared volume.
     // A strict decode would answer `None` and drop the discriminator entirely,
     // which is the collision this field exists to prevent.
+<<<<<<< HEAD
     Some(String::from_utf8_lossy(buf.get(..len)?).into_owned())
+=======
+    Some(String::from_utf8_lossy(&buf[..len]).into_owned())
+>>>>>>> origin/master
 }
 
 #[cfg(windows)]

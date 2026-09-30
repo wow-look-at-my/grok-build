@@ -414,8 +414,38 @@ pub(crate) fn execute(
                             }
                         };
                     }
+<<<<<<< HEAD
                     let worktree_id = worktree_session::new_worktree_id(
                         preferred_session_id.as_deref(),
+=======
+                    let worktree_id = preferred_session_id
+                        .clone()
+                        .unwrap_or_else(|| {
+                            let hex = uuid::Uuid::new_v4().simple().to_string();
+                            // `Uuid::simple()` renders 32 lowercase ASCII hex
+                            // characters, so a 12-byte prefix is a boundary.
+                            #[allow(clippy::string_slice)] // Uuid::simple() is ASCII hex
+                            let short = &hex[..12];
+                            format!("pager-{short}")
+                        });
+                    let copy_mode = if git_ref.is_some() { "clean" } else { "dirty" };
+                    let mut params = serde_json::json!({
+                    "sourceWorktreePath": cwd.to_string_lossy(),
+                    "newSessionId": worktree_id,
+                    "copyMode": copy_mode,
+                });
+                    if let Some(ref lbl) = label {
+                        params["label"] = serde_json::Value::String(lbl.clone());
+                    }
+                    if let Some(ref r) = git_ref {
+                        params["gitRef"] = serde_json::Value::String(r.clone());
+                    }
+                    let ext_req = acp::ExtRequest::new(
+                        "x.ai/git/worktree/create_from_worktree_sync",
+                        serde_json::value::to_raw_value(&params)
+                            .expect("serialize worktree params")
+                            .into(),
+>>>>>>> origin/master
                     );
                     let created = match worktree_session::create_worktree(
                             &tx,

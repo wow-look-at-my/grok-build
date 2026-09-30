@@ -902,6 +902,7 @@ impl AgentBuilder {
             tool_config.tools.retain(|tc| tc.id != task_tool_id);
             task_stripped = true;
         } else {
+<<<<<<< HEAD
             let mut subagents = {
                 let _subagent_timer = build_step_timer!("subagent_discovery");
                 crate::discovery::all_subagents_with_plugins(
@@ -910,6 +911,13 @@ impl AgentBuilder {
                     self.plugin_registry.as_deref(),
                 )
             };
+=======
+            let mut subagents = crate::discovery::all_subagents_with_plugins(
+                &self.working_directory,
+                &self.subagent_toggle,
+                self.plugin_registry.as_deref(),
+            );
+>>>>>>> origin/master
             if let Some(allowed) = &definition.allowed_subagent_types {
                 subagents.retain(|e| allowed.iter().any(|a| a.eq_ignore_ascii_case(&e.name)));
             }
@@ -1446,8 +1454,27 @@ pub(crate) fn task_tool_description(
     model_slugs: &[String],
     usage_frequency: xai_tool_types::AgentUsageFrequency,
 ) -> String {
+<<<<<<< HEAD
     let mut description = xai_tool_types::build_task_description(&TASK_TOOL_NAMING);
     description.push_str(&task_model_guidance(selection, model_slugs));
+=======
+    let descriptors: Vec<xai_tool_types::SubagentDescriptor> = subagents
+        .iter()
+        .map(|entry| {
+            let tools = match &entry.source {
+                SubagentSource::Builtin(b) => Some(builtin_tools_fragment(*b)),
+                SubagentSource::UserDefined { .. } => None,
+            };
+            xai_tool_types::SubagentDescriptor {
+                name: entry.name.clone(),
+                description: entry.description.clone(),
+                tools,
+            }
+        })
+        .collect();
+    let mut description = xai_tool_types::build_task_description(&descriptors, &TASK_TOOL_NAMING);
+    description.push_str(&task_model_guidance(model_slugs));
+>>>>>>> origin/master
     description.push_str(TASK_PERMISSION_NOTE);
     if let Some(note) = usage_frequency.task_tool_note() {
         description.push_str(note);
@@ -1460,6 +1487,13 @@ pub(crate) fn task_tool_description(
 const TASK_PERMISSION_NOTE: &str = "\n\nA sub-agent runs under this session's permission \
      rules, approvals and denials. A command denied to you is denied to it too, so do not \
      delegate a denied action.";
+<<<<<<< HEAD
+=======
+/// Resolve the shell name for the system prompt.
+///
+/// Unix: `$SHELL` env var (e.g. `/bin/zsh`).
+/// Windows: detected shell from the `detect_windows_shell` cascade.
+>>>>>>> origin/master
 fn resolve_shell_for_prompt() -> String {
     #[cfg(unix)]
     {
@@ -1803,9 +1837,34 @@ mod tests {
         );
     }
     #[test]
+<<<<<<< HEAD
     fn task_tool_description_says_permissions_carry_over() {
         let desc = task_tool_description(
             TaskModelSelection::Selectable,
+=======
+    fn build_task_description_says_permissions_carry_over() {
+        let subagents = vec![entry(
+            "general-purpose",
+            "GP agent.",
+            SubagentSource::Builtin(BuiltinAgentName::GeneralPurpose),
+        )];
+        let desc = build_task_description(
+            &subagents,
+            &[],
+            xai_tool_types::AgentUsageFrequency::default(),
+        );
+        assert!(desc.contains("denied to it too"), "{desc}");
+    }
+    #[test]
+    fn build_task_description_contains_resume_from_guidance() {
+        let subagents = vec![entry(
+            "general-purpose",
+            "GP agent.",
+            SubagentSource::Builtin(BuiltinAgentName::GeneralPurpose),
+        )];
+        let desc = build_task_description(
+            &subagents,
+>>>>>>> origin/master
             &[],
             xai_tool_types::AgentUsageFrequency::default(),
         );

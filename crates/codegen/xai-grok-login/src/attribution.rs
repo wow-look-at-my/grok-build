@@ -215,10 +215,32 @@ fn format_consumer(kind: ConsumerKind, op: &str) -> String {
     }
 }
 
+<<<<<<< HEAD:crates/codegen/xai-grok-login/src/attribution.rs
 /// Emit a single `auth 401 attribution` event for a per-consumer 401. Wraps [`record_auth_401`] with the canonical `consumer` formatting (e.g., `"StorageClient.upload"`, `"FeedbackClient.submit"`).
 /// All 401 emit sites in `xai-grok-shell` go through this helper.
 /// The per-client `record_401_attribution` wrappers in `agent/feedback_client.rs`, `agent/session_registry_client.rs`, and `upload/storage_client.rs` each resolve their bearer and call this with the right `(kind, op)`. `sent_bearer` may be a full bearer or a 12-char prefix. The sampler-side [`Auth401AttributionCallback`] boundary passes a prefix; the sampler scrubs before crossing the crate boundary.
 pub fn record_consumer_401(
+=======
+/// Emit a single `auth 401 attribution` event for a per-consumer 401.
+///
+/// Wraps [`record_auth_401`] with the design-doc `consumer` formatting
+/// (e.g., `"StorageClient.upload"`, `"FeedbackClient.submit"`).
+/// All 401 emit sites in `xai-grok-shell` go through this helper -- the
+/// per-client `record_401_attribution` wrappers in
+/// `agent/feedback_client.rs`, `agent/session_registry_client.rs`,
+/// and `upload/storage_client.rs` each
+/// resolve their bearer and call this with the right `(kind, op)`.
+///
+/// `sent_bearer` may be either a full bearer (passed by the
+/// non-sampler call sites listed above, which read directly from the
+/// client's `user_token` snapshot) or a 12-char
+/// prefix (passed by the sampler-side
+/// [`Auth401AttributionCallback`] boundary; the sampler scrubs to a
+/// prefix before crossing the crate boundary). The truncation inside
+/// [`record_auth_401`] / `compute_attribution_payload` is idempotent
+/// for the prefix case.
+pub(crate) fn record_consumer_401(
+>>>>>>> origin/master:crates/codegen/xai-grok-shell/src/auth/attribution.rs
     auth_manager: &AuthManager,
     session_id: Option<&str>,
     kind: ConsumerKind,

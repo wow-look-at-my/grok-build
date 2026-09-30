@@ -900,7 +900,25 @@ async fn run_cli_login_steps(
     };
     Ok(authenticated)
 }
+<<<<<<< HEAD:crates/codegen/xai-grok-login/src/flow.rs
 /// Result of a logout operation.
+=======
+
+/// Sync this principal's config now rather than waiting for the background
+/// tick. Stay quiet about absence/failure during login — confirm only when
+/// config was actually applied; `grok setup` reports the no-config case.
+async fn apply_post_login_config(authenticated: GrokAuth) -> anyhow::Result<()> {
+    let outcome = crate::managed_config::post_login_sync(Some(authenticated)).await;
+    if outcome == crate::managed_config::ManagedConfigSync::Updated {
+        eprintln!("Applied your team's managed configuration.");
+    }
+    Ok(())
+}
+
+/// Result of a logout operation. Used by both the CLI subcommand and
+/// the ACP `/logout` slash command so the presentation layer can format
+/// the outcome without duplicating the auth logic.
+>>>>>>> origin/master:crates/codegen/xai-grok-shell/src/auth/flow.rs
 pub struct LogoutResult {
     /// `true` if a cached OAuth session was found and cleared.
     pub was_logged_in: bool,
@@ -939,7 +957,13 @@ pub fn perform_logout(
         } else {
             auth_manager.clear()?;
         }
+<<<<<<< HEAD:crates/codegen/xai-grok-login/src/flow.rs
         clear_orphan_managed_config();
+=======
+        // Clear the synced files if no principal remains to own them. A scoped
+        // logout that leaves a team signed in keeps them.
+        crate::managed_config::clear_orphan();
+>>>>>>> origin/master:crates/codegen/xai-grok-shell/src/auth/flow.rs
     }
     Ok(LogoutResult {
         was_logged_in,

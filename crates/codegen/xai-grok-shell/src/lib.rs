@@ -34,9 +34,12 @@ pub mod claude_import;
 pub mod claude_import_state;
 pub mod cli_models;
 pub mod config;
+<<<<<<< HEAD
 #[cfg(all(test, feature = "config-docs"))]
 pub mod config_docs;
 pub mod credential_factory;
+=======
+>>>>>>> origin/master
 pub use xai_grok_shell_base::cpu_profile;
 pub use xai_grok_shell_base::env;
 pub mod extensions;

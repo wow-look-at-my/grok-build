@@ -443,7 +443,13 @@ fn strip_control_chars(s: &str) -> String {
 
 fn truncate_chars(s: &str, max_chars: usize) -> String {
     match s.char_indices().nth(max_chars) {
+<<<<<<< HEAD
         Some((idx, _)) => s.get(..idx).unwrap_or(s).to_string(),
+=======
+        // `idx` is a `char_indices` position, hence a char boundary.
+        #[allow(clippy::string_slice)]
+        Some((idx, _)) => s[..idx].to_string(),
+>>>>>>> origin/master
         None => s.to_string(),
     }
 }

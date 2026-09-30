@@ -169,10 +169,15 @@ impl OpenCodeHighlighter {
         // Walk only the not-yet-committed remainder.
         let highlighter = Highlighter::new(&syn.theme);
         let mut tentative: Option<HlLine> = None;
+<<<<<<< HEAD
         let Some(rest) = text.get(self.committed_len..) else {
             return Some(self.committed_lines.clone());
         };
         for line in LinesWithEndings::from(rest) {
+=======
+        #[allow(clippy::string_slice)] // committed_len only advances past '\n'-terminated lines
+        for line in LinesWithEndings::from(&text[self.committed_len..]) {
+>>>>>>> origin/master
             if line.ends_with('\n') {
                 // The line is final: highlight it once and permanently advance the persisted state
                 // On a (practically unreachable) parse error, invalidate the cache so the next pass rebuilds from scratch

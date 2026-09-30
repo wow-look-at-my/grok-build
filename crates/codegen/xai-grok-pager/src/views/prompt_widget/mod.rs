@@ -1379,6 +1379,7 @@ impl PromptWidget {
                     && self.textarea.text().is_char_boundary(range.start)
                     && self.textarea.text().is_char_boundary(range.end)
                 {
+<<<<<<< HEAD
                     // The row's trailing space is its args separator; absorb an existing plain-text one. Absorbing
                     // (rather than trimming the insert) lands the cursor after the separator, in the args phase.
                     let next_is_plain_space = self
@@ -1386,6 +1387,19 @@ impl PromptWidget {
                         .text()
                         .get(range.end..)
                         .is_some_and(|s| s.starts_with(' '))
+=======
+                    // The row's trailing space is its args separator; absorb
+                    // an existing plain-text one so accepting mid-token in
+                    // `/mod grok-4` yields `/model grok-4`, not `/model  grok-4`
+                    // — absorb (rather than trim the insert) so the cursor
+                    // lands after the separator, in the args phase. Never
+                    // absorb an element's byte: a chip's leading space is chip
+                    // data, and replace_range expands any overlap to the whole
+                    // element (the absorb would swallow the chip).
+                    // `range.end` passed `is_char_boundary` in the guard above.
+                    #[allow(clippy::string_slice)]
+                    let next_is_plain_space = self.textarea.text()[range.end..].starts_with(' ')
+>>>>>>> origin/master
                         && !self
                             .textarea
                             .elements()
@@ -1540,8 +1554,18 @@ impl PromptWidget {
             .any(|e| e.kind == KIND_FILE_REF && (cursor == e.range.start || cursor == e.range.end))
     }
 
+<<<<<<< HEAD
     /// Parse a file ref element into (path, optional line range). Element text is `@path` or `@path:10`
     /// or `@path:10-12`. Returns `(path, None)` or `(path, Some(10..11))` or `(path, Some(10..13))`.
+=======
+    /// Parse a file ref element into (path, optional line range).
+    ///
+    /// Element text is `@path` or `@path:10` or `@path:10-12`.
+    /// Returns `(path, None)` or `(path, Some(10..11))` or `(path, Some(10..13))`.
+    // `colon_pos` is a `rfind` offset for an ASCII `:`, so `colon_pos + 1` is a
+    // char boundary too.
+    #[allow(clippy::string_slice)]
+>>>>>>> origin/master
     fn parse_file_ref_element(text: &str) -> (String, Option<std::ops::Range<usize>>) {
         let text = text.strip_prefix('@').unwrap_or(text);
         if let Some(colon_pos) = text.rfind(':') {
@@ -1568,7 +1592,13 @@ impl PromptWidget {
                 continue;
             }
             if cursor >= elem.range.start && cursor <= elem.range.end + 1 {
+<<<<<<< HEAD
                 let text = self.textarea.get_range(elem.range.clone())?;
+=======
+                // `elem.range` is a textarea element range, kept on char boundaries.
+                #[allow(clippy::string_slice)]
+                let text = &self.textarea.text()[elem.range.clone()];
+>>>>>>> origin/master
                 return Some(Self::parse_file_ref_element(text));
             }
         }
@@ -1585,7 +1615,13 @@ impl PromptWidget {
                 continue;
             }
             if cursor == elem.range.end || cursor == elem.range.start {
+<<<<<<< HEAD
                 let text = self.textarea.get_range(elem.range.clone())?;
+=======
+                // `elem.range` is a textarea element range, kept on char boundaries.
+                #[allow(clippy::string_slice)]
+                let text = &self.textarea.text()[elem.range.clone()];
+>>>>>>> origin/master
                 return Some(Self::parse_file_ref_element(text));
             }
         }
@@ -2305,9 +2341,18 @@ impl PromptWidget {
         let replacing_selection = self.textarea.selection_range().is_some();
 
         // Repaste-to-expand: "paste didn't do what I want? paste again."
+<<<<<<< HEAD
         // Requires exact byte equality after the original insertion's canonicalization (normalize_line_breaks above and the textarea's tab expansion)
         // E.g. a trailing-newline difference is a different paste and takes the normal path below.
         let expanded = self.textarea.expand_tabs(text);
+=======
+        // Requires exact byte equality after the same canonicalization the
+        // original insertion applied (normalize_cr above + the textarea's
+        // tab expansion) — e.g. a trailing-newline difference is a
+        // different paste and takes the normal path below.
+        // `elem.range` is a textarea element range, kept on char boundaries.
+        #[allow(clippy::string_slice)]
+>>>>>>> origin/master
         if !replacing_selection
             && let Some(elem) = self.paste_element_near_cursor()
             && self.textarea.get_range(elem.range.clone()) == Some(expanded.as_ref())
@@ -2684,6 +2729,7 @@ impl PromptWidget {
             .filter(|e| e.kind == KIND_IMAGE)
             .map(|e| e.id)
             .collect();
+<<<<<<< HEAD
         let len_before = self.images.len();
         crate::prompt_images::reconcile(
             crate::prompt_images::SessionPathPolicy::Preserve,
@@ -2697,6 +2743,28 @@ impl PromptWidget {
                 removed,
                 "prompt_widget: image records without chip text discarded at drain",
             );
+=======
+        crate::prompt_images::reconcile(&mut self.images, &live_ids);
+        std::mem::take(&mut self.images)
+    }
+
+    /// Buffer text with `[Image #N]` chip placeholders removed, for
+    /// text-only surfaces (e.g. question/permission feedback) that must
+    /// not leak image tokens onto the wire.
+    // `prev_end` is 0 or a textarea element range end, and `elem.range.start` a
+    // range start: the textarea keeps both on char boundaries.
+    #[allow(clippy::string_slice)]
+    pub(crate) fn text_without_image_chips(&self) -> String {
+        let text = self.textarea.text();
+        let mut out = String::with_capacity(text.len());
+        let mut prev_end = 0usize;
+        for elem in self.textarea.elements() {
+            if elem.kind != KIND_IMAGE {
+                continue;
+            }
+            out.push_str(&text[prev_end..elem.range.start]);
+            prev_end = elem.range.end;
+>>>>>>> origin/master
         }
         &self.images
     }
@@ -2742,11 +2810,17 @@ impl PromptWidget {
             if elem.kind != KIND_IMAGE {
                 continue;
             }
+<<<<<<< HEAD
             if let Some(dn) = self
                 .textarea
                 .get_range(elem.range.clone())
                 .and_then(parse_image_display_number)
             {
+=======
+            // `elem.range` is a textarea element range, kept on char boundaries.
+            #[allow(clippy::string_slice)]
+            if let Some(dn) = parse_image_display_number(&buf[elem.range.clone()]) {
+>>>>>>> origin/master
                 if by_number.iter().any(|(seen_dn, _)| *seen_dn == dn) {
                     tracing::warn!(
                         target: PROMPT_IMAGES_TRACING_TARGET,
@@ -3678,9 +3752,21 @@ fn chip_placeholder_regex() -> &'static regex::Regex {
     &RE
 }
 
+<<<<<<< HEAD
 /// Build a copy of the buffer text with all element placeholder content removed, and compute the
 /// adjusted cursor position. This gives the slash system a clean view of just user-typed text.
 /// Element placeholders like `[Image #1]` (which contain spaces) then can't break command parsing.
+=======
+/// Build a copy of the buffer text with all element placeholder content
+/// removed, and compute the adjusted cursor position.
+///
+/// This gives the slash system a clean view of just user-typed text,
+/// so element placeholders like `[Image #1]` (which contain spaces)
+/// don't break command parsing.
+// `prev_end` is 0 or a textarea element range end, and `elem.range.start` a
+// range start: the textarea keeps both on char boundaries.
+#[allow(clippy::string_slice)]
+>>>>>>> origin/master
 fn strip_all_elements(
     text: &str,
     cursor: usize,

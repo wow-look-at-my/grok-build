@@ -69,6 +69,7 @@ fn detect_source_repo(worktree_path: &Path) -> Option<PathBuf> {
 /// One record per checkout under a managed root, and none for anything inside
 /// one.
 ///
+<<<<<<< HEAD
 /// Both shapes that root has ever been written in are read.
 /// consequence of the `.git` test rather than its definition: an unforked
 /// build's checkout is a direct child of the root, this fork's sits one level
@@ -82,12 +83,23 @@ fn scan_managed_root(
     report: &mut DiscoveryReport,
     skip_dests: &[PathBuf],
 ) {
+=======
+/// Both shapes that root has ever been written in are read, and the level is a
+/// consequence of the `.git` test rather than its definition: an unforked
+/// build's checkout is a direct child of the root, this fork's sits one level
+/// lower inside a per-repository bucket. Nothing below the bucket level is ever
+/// asked, because every directory further down is inside a checkout that was
+/// already reported -- so the walk still costs one listing of the root and one
+/// of each bucket, which is all the depth reading it costs.
+fn scan_managed_root(base_dir: &Path, kind: WorktreeKind, report: &mut DiscoveryReport) {
+>>>>>>> origin/master
     let Ok(entries) = std::fs::read_dir(base_dir) else {
         return;
     };
 
     for entry in entries.flatten() {
         let path = entry.path();
+<<<<<<< HEAD
         if is_skipped_dest(&path, skip_dests) {
             report.skipped += 1;
             continue;
@@ -120,13 +132,34 @@ fn scan_bucket(
     report: &mut DiscoveryReport,
     skip_dests: &[PathBuf],
 ) {
+=======
+        if !path.is_dir() || !is_worktree_entry_name(&path) {
+            report.skipped += 1;
+            continue;
+        }
+        if is_worktree_dir(&path) {
+            report.found.push(discovered(path, kind));
+            continue;
+        }
+        scan_bucket(&path, kind, report);
+    }
+}
+
+/// The bucketed shape: the bucket is never a checkout itself, and a plain
+/// directory among its children -- a leftover cache, say -- is not one either.
+fn scan_bucket(bucket: &Path, kind: WorktreeKind, report: &mut DiscoveryReport) {
+>>>>>>> origin/master
     let Ok(entries) = std::fs::read_dir(bucket) else {
         return;
     };
 
     for entry in entries.flatten() {
         let path = entry.path();
+<<<<<<< HEAD
         if is_skipped_dest(&path, skip_dests) || !is_worktree_dir(&path) {
+=======
+        if !is_worktree_dir(&path) {
+>>>>>>> origin/master
             report.skipped += 1;
             continue;
         }
@@ -811,6 +844,7 @@ mod tests {
         ));
     }
 
+<<<<<<< HEAD
     #[test]
     fn rebuild_skips_destless_nfs_identity() {
         let tmp = tempfile::TempDir::new().unwrap();
@@ -853,6 +887,8 @@ mod tests {
         );
     }
 
+=======
+>>>>>>> origin/master
     /// A real source repository with a commit and a subdirectory, so a checkout
     /// of it has something inside it for the scan to wrongly report.
     fn source_repo(temp: &tempfile::TempDir) -> PathBuf {

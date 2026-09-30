@@ -191,11 +191,29 @@ pub(crate) fn loading_spinner_active(
             })
         })
 }
+<<<<<<< HEAD
 /// Filter session entries by native, headless, remote, or external source. Default is
 /// [`Self::Grok`]: native Grok sessions only (local / remote / conversation).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SourceFilter {
     /// Native Grok sessions only; excludes Claude/Cursor foreign rows.
+=======
+
+// ---------------------------------------------------------------------------
+// Source filter
+// ---------------------------------------------------------------------------
+
+/// Filter session entries by native, remote, or external source.
+///
+/// Default is [`Self::Grok`]: native Grok sessions only (local / remote /
+/// conversation), so `/resume` does not mix Claude/Cursor foreign
+/// sessions into the list. `f` cycles Grok → External → All → Local →
+/// Remote — External first so one press from the default reveals foreign
+/// sessions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SourceFilter {
+    /// Native Grok sessions only — excludes Claude/Cursor foreign rows.
+>>>>>>> origin/master
     #[default]
     Grok,
     /// `grok -p` one-shots only (`session_kind == "headless"`).
@@ -231,6 +249,7 @@ impl SourceFilter {
     pub fn is_active(self) -> bool {
         self != Self::Grok
     }
+<<<<<<< HEAD
     /// Whether the deep content search is unavailable on this page: foreign stores are not FTS-indexed.
     /// The Headless page searches like every native page; the server filters hits by the page's headless policy.
     pub fn is_content_search_disabled(self) -> bool {
@@ -251,6 +270,16 @@ impl SourceFilter {
     /// pass only `Headless`; every other page excludes them, mirroring the server-side fetch policy.
     pub fn matches(self, source: &str, session_kind: Option<&str>) -> bool {
         let is_headless = session_kind == Some("headless");
+=======
+
+    /// Returns `true` if a session with the given `source` string passes the filter.
+    ///
+    /// grok.com conversations carry `source == "conversation"` and live remotely,
+    /// so they pass the `Remote` filter (and `Grok` / `All`) but not `Local`.
+    /// Foreign sources (`claude` / `cursor`) only pass `External` and
+    /// `All`.
+    pub fn matches(self, source: &str) -> bool {
+>>>>>>> origin/master
         match self {
             Self::Grok => !crate::app::is_foreign_picker_source(source) && !is_headless,
             Self::Headless => is_headless && !crate::app::is_foreign_picker_source(source),
@@ -882,7 +911,16 @@ pub(crate) fn build_content_header_label(
         String::new()
     }
 }
+<<<<<<< HEAD
 /// Hint for external sessions hidden on the Headless page.
+=======
+
+/// Hint shown on the default `Grok` view when the foreign-session scan loaded
+/// Claude/Cursor entries it hides. Grok-only: `next(Grok) == External`
+/// makes the copy literally true, and reaching Local/Remote already cycles
+/// through External/All, so the discovery hint is only needed on the default
+/// state.
+>>>>>>> origin/master
 pub(crate) fn hidden_external_hint(
     entries: Option<&[SessionPickerEntry]>,
     source_filter: SourceFilter,
@@ -1309,6 +1347,7 @@ mod tests {
     }
     #[test]
     fn source_filter_matches() {
+<<<<<<< HEAD
         assert!(SourceFilter::Grok.matches("local", None));
         assert!(SourceFilter::Grok.matches("remote", None));
         assert!(SourceFilter::Grok.matches("both", None));
@@ -1337,6 +1376,43 @@ mod tests {
         assert!(!SourceFilter::External.matches("remote", None));
         assert!(!SourceFilter::External.matches("both", None));
         assert!(!SourceFilter::External.matches("conversation", None));
+=======
+        // Default Grok filter: native only (not Claude/Cursor).
+        assert!(SourceFilter::Grok.matches("local"));
+        assert!(SourceFilter::Grok.matches("remote"));
+        assert!(SourceFilter::Grok.matches("both"));
+        assert!(SourceFilter::Grok.matches("conversation"));
+        assert!(!SourceFilter::Grok.matches("claude"));
+        assert!(!SourceFilter::Grok.matches("cursor"));
+
+        assert!(SourceFilter::All.matches("local"));
+        assert!(SourceFilter::All.matches("remote"));
+        assert!(SourceFilter::All.matches("both"));
+        assert!(SourceFilter::All.matches("claude"));
+        assert!(SourceFilter::All.matches("cursor"));
+
+        assert!(SourceFilter::Local.matches("local"));
+        assert!(SourceFilter::Local.matches("both"));
+        assert!(!SourceFilter::Local.matches("remote"));
+        assert!(!SourceFilter::Local.matches("claude"));
+
+        assert!(SourceFilter::Remote.matches("remote"));
+        assert!(SourceFilter::Remote.matches("both"));
+        assert!(!SourceFilter::Remote.matches("local"));
+        assert!(!SourceFilter::Remote.matches("cursor"));
+
+        // grok.com conversations are remote: visible under Grok + All + Remote, not Local.
+        assert!(SourceFilter::All.matches("conversation"));
+        assert!(SourceFilter::Remote.matches("conversation"));
+        assert!(!SourceFilter::Local.matches("conversation"));
+
+        assert!(SourceFilter::External.matches("claude"));
+        assert!(SourceFilter::External.matches("cursor"));
+        assert!(!SourceFilter::External.matches("local"));
+        assert!(!SourceFilter::External.matches("remote"));
+        assert!(!SourceFilter::External.matches("both"));
+        assert!(!SourceFilter::External.matches("conversation"));
+>>>>>>> origin/master
     }
     #[test]
     fn source_filter_cycles() {
@@ -1461,10 +1537,18 @@ mod tests {
         let mut state = PickerState::default();
         state.expanded.insert(0);
         let built = build_session_entry_data(&[entry], &[0], &state, 80);
+<<<<<<< HEAD
         assert_eq!(at(&built, 0).badge, "cursor");
         assert!(!at(&built, 0).collapsible);
         assert!(!at(&built, 0).is_expanded);
         assert!(at(&built, 0).field_data.is_empty());
+=======
+
+        assert_eq!(built[0].badge, "cursor");
+        assert!(!built[0].collapsible);
+        assert!(!built[0].is_expanded);
+        assert!(built[0].field_data.is_empty());
+>>>>>>> origin/master
     }
     #[test]
     fn source_filter_combined_with_text_query() {

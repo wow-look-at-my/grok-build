@@ -756,8 +756,15 @@ pub struct EditToolCallBlock {
     /// Header prefix (e.g. "Edit " or "Creating ").
     pub prefix: &'static str,
     pub display_name: Option<String>,
+<<<<<<< HEAD
     /// One-liner summary can't be trusted: the call touched multiple files, or the path fell back to the tool title.
     /// It suppresses the diffstat suffix, and `ScrollbackState` keeps such blocks expanded.
+=======
+    /// One-liner summary can't be trusted: the call touched multiple files
+    /// (one Diff per file, and only the first becomes hunks) or
+    /// the path fell back to the tool title. Suppresses the diffstat suffix;
+    /// `ScrollbackState`'s materialize policy keeps such blocks expanded.
+>>>>>>> origin/master
     pub summary_untrusted: bool,
     /// Cached `(insertions, deletions)` count, computed eagerly from hunks.
     change_counts: (usize, usize),
@@ -1053,7 +1060,23 @@ fn split_joiner_by_path(
 
     let local_start = owned_start - source_start;
     let local_end = owned_end - source_start;
+    // `path_range` is a caller-supplied byte range, so nothing here proves its
+    // edges fall between characters of `joiner`. Check them: a range that does
+    // not own whole characters owns none, which is what the no-overlap arm below
+    // already reports.
+    if !joiner.is_char_boundary(local_start) || !joiner.is_char_boundary(local_end) {
+        // `debug!` not `warn!`: this is on the scrollback render path and would
+        // repeat on every redraw of the row.
+        tracing::debug!(
+            local_start,
+            local_end,
+            joiner_len = joiner.len(),
+            "edit header: path range splits a character of the joiner; nothing selected"
+        );
+        return (joiner.to_owned(), String::new());
+    }
     let mut remainder = String::with_capacity(joiner.len() - (local_end - local_start));
+<<<<<<< HEAD
     let Some(before) = joiner.get(..local_start) else {
         return (joiner.to_owned(), String::new());
     };
@@ -1066,6 +1089,16 @@ fn split_joiner_by_path(
     remainder.push_str(before);
     remainder.push_str(after);
     (remainder, owned.to_owned())
+=======
+    // Guarded by the `is_char_boundary` checks immediately above.
+    #[allow(clippy::string_slice)] // both offsets proven char boundaries above
+    remainder.push_str(&joiner[..local_start]);
+    #[allow(clippy::string_slice)] // both offsets proven char boundaries above
+    remainder.push_str(&joiner[local_end..]);
+    #[allow(clippy::string_slice)] // both offsets proven char boundaries above
+    let owned = joiner[local_start..local_end].to_owned();
+    (remainder, owned)
+>>>>>>> origin/master
 }
 
 fn wrap_edit_header(
@@ -1199,12 +1232,30 @@ fn wrap_edit_header(
         && let Some(previous) = last_path_row.and_then(|index| rows.get_mut(index))
     {
         let suffix_start = source_offset.max(path_range.start) - path_range.start;
+<<<<<<< HEAD
         if let Some(suffix) = path_text.get(suffix_start..) {
+=======
+        // `path_range` edges arrive from the caller, so only cut when the offset
+        // actually falls between characters; otherwise the suffix is simply not
+        // extended, which is how the no-overlap case above already behaves.
+        if path_text.is_char_boundary(suffix_start) {
+            #[allow(clippy::string_slice)] // offset proven a char boundary just above
+            let suffix = &path_text[suffix_start..];
+>>>>>>> origin/master
             previous
                 .selection_boundary
                 .get_or_insert_with(EditSelectionBoundary::default)
                 .suffix
                 .push_str(suffix);
+<<<<<<< HEAD
+=======
+        } else {
+            tracing::debug!(
+                suffix_start,
+                path_len = path_text.len(),
+                "edit header: path range splits a character; suffix not extended"
+            );
+>>>>>>> origin/master
         }
     }
     rows

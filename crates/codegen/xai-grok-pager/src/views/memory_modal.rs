@@ -1950,7 +1950,13 @@ fn build_shortcuts(state: &MemoryModalState) -> Vec<Shortcut<'static>> {
 }
 
 /// Truncate a string to fit within `max_width` display columns.
+<<<<<<< HEAD
 /// Delegates to `render::line_utils::byte_offset_at_width` to avoid duplicating the Unicode-width scanning logic.
+=======
+/// Delegates to `render::line_utils::byte_offset_at_width` to avoid
+/// duplicating the Unicode-width scanning logic.
+#[allow(clippy::string_slice)] // `byte_offset_at_width` returns a `char_indices` offset
+>>>>>>> origin/master
 fn truncate_to_width(s: &str, max_width: usize) -> &str {
     let offset = crate::render::line_utils::byte_offset_at_width(s, max_width);
     s.get(..offset).unwrap_or("")

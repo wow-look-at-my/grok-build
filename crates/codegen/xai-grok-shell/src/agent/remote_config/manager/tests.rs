@@ -370,7 +370,12 @@ async fn etag_refresh_is_bounded_and_single_flighted() {
 
 #[tokio::test(start_paused = true)]
 async fn first_catalog_wait_unblocks_on_fetch_and_skips_dead_dwell() {
+<<<<<<< HEAD:crates/codegen/xai-grok-shell/src/agent/remote_config/manager/tests.rs
     // A custom models endpoint: a fetch can succeed without a session, so the wait dwells regardless of any API key in the environment
+=======
+    // A custom models endpoint: a fetch can succeed without a session, so
+    // the wait dwells regardless of ambient API-key env.
+>>>>>>> origin/master:crates/codegen/xai-grok-shell/src/agent/models/tests.rs
     let mgr = cold_manager(
         config_from_toml("[endpoints]\nmodels_base_url = \"https://models.example/v1\""),
         Arc::new(SlowEndpoint {
@@ -2400,6 +2405,11 @@ fn resolve_falls_back_to_session_when_nothing_set() {
     );
 }
 
+<<<<<<< HEAD:crates/codegen/xai-grok-shell/src/agent/remote_config/manager/tests.rs
+=======
+// ── remote_fetch gate: resolve_prefetch_env_from_parts ───────────
+
+>>>>>>> origin/master:crates/codegen/xai-grok-shell/src/agent/models/tests.rs
 #[test]
 #[serial]
 fn prefetch_env_none_when_remote_fetch_disabled_despite_credentials() {
@@ -2418,7 +2428,11 @@ fn prefetch_env_none_when_remote_fetch_disabled_despite_credentials() {
         "session auth must not re-arm the prefetch when remote_fetch is off",
     );
     assert!(
+<<<<<<< HEAD:crates/codegen/xai-grok-shell/src/agent/remote_config/manager/tests.rs
         resolve_prefetch_inputs_from_parts(None, endpoints, false).is_none(),
+=======
+        resolve_prefetch_env_from_parts(None, endpoints, false).is_none(),
+>>>>>>> origin/master:crates/codegen/xai-grok-shell/src/agent/models/tests.rs
         "API key / custom endpoint must not re-arm it either",
     );
 }

@@ -735,7 +735,12 @@ pub enum SessionUpdate {
         #[serde(default)]
         prompt_id: Option<String>,
     },
+<<<<<<< HEAD
     /// A short summary of the thinking in a single model call. Persisted, so a reload keeps it.
+=======
+    /// A short summary of the thinking in a single model call. Persisted,
+    /// so a reload keeps it.
+>>>>>>> origin/master
     ThinkingSummary {
         /// `streamStartMs` of the model call whose thinking this summarizes.
         stream_start_ms: i64,

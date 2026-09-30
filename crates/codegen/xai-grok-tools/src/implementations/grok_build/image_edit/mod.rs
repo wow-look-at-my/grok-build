@@ -120,21 +120,33 @@ async fn resolve_to_data_url(value: &str) -> Result<String, xai_tool_runtime::To
         let comma = value.find(',').ok_or_else(|| {
             xai_tool_runtime::ToolError::invalid_arguments("malformed data URL in image reference")
         })?;
+<<<<<<< HEAD
         let Some(header) = value.get(..comma) else {
             return Err(xai_tool_runtime::ToolError::invalid_arguments(
                 "malformed data URL in image reference",
             ));
         };
+=======
+        // `comma` is the offset of an ASCII `,`, so it and `comma + 1` are char
+        // boundaries.
+        #[allow(clippy::string_slice)]
+        let header = &value[..comma];
+>>>>>>> origin/master
         if !header.contains(";base64") {
             return Err(xai_tool_runtime::ToolError::invalid_arguments(
                 "image references only support base64 data URLs",
             ));
         }
+<<<<<<< HEAD
         let Some(payload) = value.get(comma + 1..) else {
             return Err(xai_tool_runtime::ToolError::invalid_arguments(
                 "malformed data URL in image reference",
             ));
         };
+=======
+        #[allow(clippy::string_slice)]
+        let payload = &value[comma + 1..];
+>>>>>>> origin/master
         base64::engine::general_purpose::STANDARD
             .decode(payload)
             .map_err(|e| {
@@ -181,10 +193,15 @@ fn parse_attachment_token(value: &str) -> Option<usize> {
     // `get(..5)` above is what proves it, since it returns `None` for an
     // offset that splits a character.
     let rest = match inner.get(..5).map(str::to_ascii_lowercase).as_deref() {
+<<<<<<< HEAD
         Some("image") => {
             let rest = inner.get(5..)?;
             rest.trim_start()
         }
+=======
+        #[allow(clippy::string_slice)] // `get(..5)` succeeded, so byte 5 aligns
+        Some("image") => inner[5..].trim_start(),
+>>>>>>> origin/master
         _ => inner,
     };
     // Require the `#` sigil followed by a bare positive integer.

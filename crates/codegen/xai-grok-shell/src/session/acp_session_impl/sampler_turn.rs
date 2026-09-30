@@ -786,8 +786,11 @@ impl SessionActor {
             // Attribute sampler 401s against the bearer sent on the wire.
             // `None` for sessions spawned without an `AuthManager` (BYOK direct, certain test fixtures)
             attribution_callback: self.attribution_callback.clone(),
+<<<<<<< HEAD
             // Per-request bearer override is only valid for session-token auth.
             // Explicit API-key/env-key models must keep their configured bearer and must not be overwritten by the interactive session token
+=======
+>>>>>>> origin/master
             bearer_resolver: if use_bearer_resolver {
                 self.auth_manager.as_ref().map(|am| {
                     xai_grok_login::credential_provider::WireValidBearerResolver::shared(am.clone())
@@ -960,10 +963,18 @@ impl SessionActor {
             "Wired live LLM permission auto-mode classifier (session sampling channel)"
         );
     }
+<<<<<<< HEAD
 
     /// Resolve a standalone aux-model `SamplerConfig` for `slug` via the shared catalog routing, gathering the session-local auth context once.
     /// The routing is Tier-1 catalog creds / Tier-2 xAI-proxy via session token / `XAI_API_KEY`.
     /// Shared by image-describe and the classifier so the gather can't drift.
+=======
+    /// Resolve a standalone aux-model `SamplerConfig` for `slug` via the shared
+    /// catalog routing (Tier-1 catalog creds / Tier-2 xAI-proxy via session token
+    /// / `XAI_API_KEY`), gathering the session-local auth context
+    /// once. Shared by image-describe and the classifier so the gather can't
+    /// drift. `None` ⇒ caller falls back to the session model.
+>>>>>>> origin/master
     pub(super) async fn resolve_aux_sampler_config(
         &self,
         slug: &str,
@@ -1320,7 +1331,20 @@ impl SessionActor {
             return Err(acp::Error::internal_error().data(message));
         }
         if self.tool_context.sampler_retry_only_before_output {
+<<<<<<< HEAD
             self.mark_turn_usage_unaccounted();
+=======
+            let handle = self.chat_state_handle.clone();
+            // Marking the usage incomplete is what keeps a failed child's spend
+            // from being read as final, and nobody awaits this round, so its
+            // failure has to be attributed rather than lost.
+            tokio::spawn(xai_grok_tools::util::detached::fire_and_forget(
+                "mark usage incomplete",
+                async move {
+                    let _ = handle.mark_usage_incomplete(true, true).await;
+                },
+            ));
+>>>>>>> origin/master
             let message = format!(
                 "workflow child model request failed; usage may understate real spend: {}",
                 error.message
@@ -2127,6 +2151,7 @@ impl SessionActor {
             }
         }
     }
+<<<<<<< HEAD
 
     async fn recover_from_sampling_failure(
         self: &Arc<Self>,
@@ -2234,6 +2259,17 @@ impl SessionActor {
     /// Proactively refresh the auth token if near expiry.
     /// Session-token path is best-effort: on success, update credentials and return.
     /// On failure, do not fall through to the JWT/config.toml branch when the session gate was active; that path is for BYOK JWTs only.
+=======
+    /// Proactively refresh the auth token if near expiry.
+    ///
+    /// Session-token path is best-effort: on success, update credentials and
+    /// return. On failure, do **not** fall through to the JWT/config.toml
+    /// branch when the session gate was active — that path is for BYOK JWTs
+    /// only. Falling through after a failed session refresh left hard-expired
+    /// opaque tokens (External/OIDC) on the wire and guaranteed a 401.
+    /// Soft failures with a still-usable access token still return here
+    /// (grace / optimistic send); 401 recovery remains the safety net.
+>>>>>>> origin/master
     pub(crate) async fn refresh_token_if_expired(&self) {
         if let Some(ref am) = self.auth_manager {
             let creds = self.chat_state_handle.get_credentials().await;
@@ -2457,12 +2493,31 @@ impl SessionActor {
             xai_grok_sampling_types::reported_cost_ticks(cost_ticks)
         } else if self.tool_context.task_output_token_budget.is_some() {
             self.tool_context.fail_task_output_usage_closed();
+<<<<<<< HEAD
             self.chat_state_handle
                 .mark_usage_incomplete_nowait(true, true);
             None
         } else if self.tool_context.sampler_retry_only_before_output {
             self.chat_state_handle
                 .mark_usage_incomplete_nowait(true, true);
+=======
+            let handle = self.chat_state_handle.clone();
+            tokio::spawn(xai_grok_tools::util::detached::fire_and_forget(
+                "mark usage incomplete",
+                async move {
+                    let _ = handle.mark_usage_incomplete(true, true).await;
+                },
+            ));
+            None
+        } else if self.tool_context.sampler_retry_only_before_output {
+            let handle = self.chat_state_handle.clone();
+            tokio::spawn(xai_grok_tools::util::detached::fire_and_forget(
+                "mark usage incomplete",
+                async move {
+                    let _ = handle.mark_usage_incomplete(true, true).await;
+                },
+            ));
+>>>>>>> origin/master
             None
         } else {
             // TODO: a `None` usage outside these contexts is left unmarked, so a genuine mid-turn omission understates spend with no incomplete flag

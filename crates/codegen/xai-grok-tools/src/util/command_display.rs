@@ -87,7 +87,14 @@ fn trim_wrapping_parens(s: &str) -> Option<&str> {
     if !t.starts_with('(') || !t.ends_with(')') || t.len() < 2 {
         return None;
     }
+<<<<<<< HEAD
     let inner = t.get(1..t.len() - 1)?;
+=======
+    // `t` starts with `(` and ends with `)`, both single-byte ASCII, so `1` and
+    // `t.len() - 1` are char boundaries.
+    #[allow(clippy::string_slice)]
+    let inner = &t[1..t.len() - 1];
+>>>>>>> origin/master
     if inner.contains('(') || inner.contains(')') {
         return None;
     }
@@ -172,7 +179,14 @@ fn take_shell_word(s: &str) -> Option<(&str, &str)> {
     if end == 0 {
         return None;
     }
+<<<<<<< HEAD
     Some((s.get(..end)?, s.get(end..)?))
+=======
+    // `end` is a `char_indices` offset or `s.len()`, so both halves align.
+    #[allow(clippy::string_slice)]
+    let split = (&s[..end], &s[end..]);
+    Some(split)
+>>>>>>> origin/master
 }
 
 /// Path token: quoted string or unquoted until whitespace / separator start.
@@ -186,8 +200,17 @@ fn take_path_token(s: &str) -> Option<(&str, &str)> {
         Some(quote @ (b'\'' | b'"')) => {
             let mut i = 1;
             while i < bytes.len() {
+<<<<<<< HEAD
                 if bytes.get(i) == Some(&quote) {
                     return Some((s.get(..=i)?, s.get(i + 1..)?));
+=======
+                if bytes[i] == quote {
+                    // The range ends one past an ASCII quote byte, which is
+                    // always a char boundary whatever precedes it.
+                    #[allow(clippy::string_slice)]
+                    let token = (&s[..=i], &s[i + 1..]);
+                    return Some(token);
+>>>>>>> origin/master
                 }
                 if bytes.get(i) == Some(&b'\\') && quote == b'"' && i + 1 < bytes.len() {
                     i += 2;
@@ -214,7 +237,15 @@ fn take_path_token(s: &str) -> Option<(&str, &str)> {
             if end == 0 {
                 return None;
             }
+<<<<<<< HEAD
             Some((s.get(..end)?, s.get(end..)?))
+=======
+            // `end` is either a `char_indices` offset or a `byte_i +
+            // len_utf8` of the previous char, so both are boundaries.
+            #[allow(clippy::string_slice)]
+            let token = (&s[..end], &s[end..]);
+            Some(token)
+>>>>>>> origin/master
         }
         None => None,
     }
@@ -224,11 +255,19 @@ fn unquote_path_token(token: &str) -> Option<&str> {
     let t = token.trim();
     if t.len() >= 2 {
         let b = t.as_bytes();
+<<<<<<< HEAD
         if matches!(
             (b.first().copied(), b.last().copied()),
             (Some(b'\''), Some(b'\'')) | (Some(b'"'), Some(b'"'))
         ) {
             return t.get(1..t.len() - 1);
+=======
+        if (b[0] == b'\'' && b[t.len() - 1] == b'\'') || (b[0] == b'"' && b[t.len() - 1] == b'"') {
+            // Both delimiters are ASCII quote bytes, so the inner range aligns.
+            #[allow(clippy::string_slice)]
+            let inner = &t[1..t.len() - 1];
+            return Some(inner);
+>>>>>>> origin/master
         }
         if matches!(b.first(), Some(&b'\'') | Some(&b'"')) {
             return None;

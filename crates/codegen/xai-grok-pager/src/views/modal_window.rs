@@ -508,9 +508,15 @@ fn render_tab_bar(
             let is_active = tab_idx == state.active_tab;
             // Minimal renders every element background-free, so the focused active tab uses accent text instead of a highlight band
             let is_embedded = embedded();
+<<<<<<< HEAD
             let display = label
                 .get(..byte_offset_at_width(label, remaining))
                 .unwrap_or("");
+=======
+            // `byte_offset_at_width` returns a `char_indices` offset.
+            #[allow(clippy::string_slice)]
+            let display = &label[..byte_offset_at_width(label, remaining)];
+>>>>>>> origin/master
             let label_w = display.width();
             // Inactive tab labels use `theme.gray` (secondary-text tier), not `theme.gray_dim`
             // At ANSI16 `gray_dim` collapses to the softer slot (silver on White), leaving text at ~1.2:1 contrast
@@ -542,9 +548,15 @@ fn render_tab_bar(
             if local_idx + 1 < row_indices.len() {
                 let sep_remaining = right_edge.saturating_sub(cur_x) as usize;
                 if sep_remaining > 0 {
+<<<<<<< HEAD
                     let sep_display = separator
                         .get(..byte_offset_at_width(separator, sep_remaining))
                         .unwrap_or("");
+=======
+                    // `byte_offset_at_width` returns a `char_indices` offset.
+                    #[allow(clippy::string_slice)]
+                    let sep_display = &separator[..byte_offset_at_width(separator, sep_remaining)];
+>>>>>>> origin/master
                     buf.set_string(cur_x, y, sep_display, Style::default().fg(theme.gray));
                     cur_x += sep_display.width() as u16;
                 }
@@ -693,10 +705,16 @@ pub fn render_modal_shortcuts(
                 break;
             }
 
+<<<<<<< HEAD
             let display = shortcut
                 .label
                 .get(..byte_offset_at_width(shortcut.label, remaining))
                 .unwrap_or("");
+=======
+            // `byte_offset_at_width` returns a `char_indices` offset.
+            #[allow(clippy::string_slice)]
+            let display = &shortcut.label[..byte_offset_at_width(shortcut.label, remaining)];
+>>>>>>> origin/master
             let visible_w = display.width() as u16;
             let is_hovered = hovered == Some(shortcut_idx);
 
@@ -767,9 +785,15 @@ pub fn render_modal_shortcuts(
                 if sep_remaining == 0 {
                     break;
                 }
+<<<<<<< HEAD
                 let sep_display = separator
                     .get(..byte_offset_at_width(separator, sep_remaining))
                     .unwrap_or("");
+=======
+                // `byte_offset_at_width` returns a `char_indices` offset.
+                #[allow(clippy::string_slice)]
+                let sep_display = &separator[..byte_offset_at_width(separator, sep_remaining)];
+>>>>>>> origin/master
                 buf.set_string(cur_x, y, sep_display, Style::default().fg(theme.gray_dim));
                 cur_x += sep_display.width() as u16;
             }

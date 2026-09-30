@@ -4,7 +4,12 @@
 #![allow(clippy::cast_precision_loss)] // 4 hits predate the gate
 #![allow(clippy::cast_sign_loss)] // 6 hits predate the gate
 #![allow(clippy::unwrap_used)] // 2 hits predate the gate
+<<<<<<< HEAD
 //! Cross-session memory for Grok.
+=======
+
+//! Memory system for cross-session knowledge persistence.
+>>>>>>> origin/master
 //!
 //! Two isolated pipelines. They do not share files, search, flush, or Dream.
 //! See the crate `AGENTS.md` before changing either path.

@@ -115,7 +115,11 @@ where
 
 /// The same leniency over `Option<Vec<String>>`, for a shadow struct that must
 /// tell a key the sender omitted from a key it sent as `null` or `[]` before
+<<<<<<< HEAD
 /// folding one field's spellings together. An omitted key yields `None`.
+=======
+/// folding one field's spellings together. An omitted key yields `None`; a
+>>>>>>> origin/master
 /// present `null` yields `Some(Vec::new())`, which is what the list form of the
 /// same key means.
 pub fn deserialize_lenient_string_list_opt<'de, D>(
@@ -134,6 +138,7 @@ where
         })
 }
 
+<<<<<<< HEAD
 const F64_EXACT_INTEGER_LIMIT: f64 = 9_007_199_254_740_992.0;
 
 fn parse_lenient_whole_f64(f: f64) -> Result<i64, String> {
@@ -263,6 +268,8 @@ where
     parse_lenient_i64_value(&value).map_err(serde::de::Error::custom)
 }
 
+=======
+>>>>>>> origin/master
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -384,7 +384,20 @@ impl ProcessState {
         }
     }
 
+<<<<<<< HEAD
     /// Front-and-back truncation by char count (not bytes); `to_result` re-joins the halves.
+=======
+    /// Front-and-back truncation using character counts.
+    ///
+    /// When the total char count of `output_buffer` exceeds `output_char_limit`:
+    /// 1. Freeze the first `half` chars into `front_buffer` (done once).
+    /// 2. Keep only the last `half` chars in `output_buffer`.
+    ///
+    /// The two halves are re-joined by `to_result()` with a separator.
+    // `front_end` and `tail_start_byte` come from `char_indices().nth`, which
+    // reports the byte a character starts at.
+    #[allow(clippy::string_slice)]
+>>>>>>> origin/master
     fn maybe_truncate(&mut self) {
         let s = String::from_utf8_lossy(&self.output_buffer);
         let char_count = s.chars().count();
@@ -928,6 +941,13 @@ impl LocalTerminalActor {
             },
         ));
 
+<<<<<<< HEAD
+=======
+        // Read new dump from fd 4 (state output pipe) in a background task.
+        // The handle is not dropped: it rides `SpawnResult` to the actor, which
+        // joins it and matches on the join error when the command exits.
+        #[allow(clippy::disallowed_methods)]
+>>>>>>> origin/master
         let dump_handle =
             tokio::spawn(
                 async move { shell_state::read_dump_from_pipe(prep.state_out_read).await },

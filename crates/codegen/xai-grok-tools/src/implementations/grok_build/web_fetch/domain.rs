@@ -62,10 +62,15 @@ impl DomainMatcher {
             // separator is an ASCII byte, so `i` is a char boundary and both
             // halves align.
             let (host, path) = match normalized.find('/') {
+<<<<<<< HEAD
                 Some(i) => match (normalized.get(..i), normalized.get(i..)) {
                     (Some(host), path) => (host.to_owned(), path),
                     _ => continue,
                 },
+=======
+                #[allow(clippy::string_slice)]
+                Some(i) => (normalized[..i].to_owned(), Some(&normalized[i..])),
+>>>>>>> origin/master
                 None => (normalized, None),
             };
 

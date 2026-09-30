@@ -117,8 +117,129 @@ impl Watcher {
         self.stage("running");
         self.serve(&mut debouncer, &mut armed, &cmd_rx);
 
+<<<<<<< HEAD
         self.publish_count(&armed);
         tracing::debug!("fs_notify stopped");
+=======
+    for entry in pruning_walker(subtree_root, custom_ignore, custom_include).flatten() {
+        let path = entry.path();
+        if entry.file_type().is_some_and(|ft| ft.is_dir()) {
+            if watched.contains(path) {
+                continue;
+            }
+            if watched.len() >= budget {
+                tracing::warn!(
+                    "fs_notify: watch budget ({budget}) reached while adding {:?}; deeper dirs unwatched",
+                    subtree_root
+                );
+                break;
+            }
+            match debouncer.watch(path, RecursiveMode::NonRecursive) {
+                Ok(()) => {
+                    watched.insert(path.to_path_buf());
+                }
+                Err(e) => tracing::warn!("failed to watch new dir {:?}: {:?}", path, e),
+            }
+        } else if entry.depth() > 0 && passes_custom_globs(path, custom_ignore, custom_include) {
+            backfill.push(path.to_path_buf());
+            if backfill.len() >= BACKFILL_BATCH {
+                flush(&mut backfill);
+            }
+        }
+    }
+    flush(&mut backfill);
+}
+
+/// Per-dir mode: drop bookkeeping (and best-effort OS watches) for a removed
+/// or renamed-away directory subtree. The kernel already dropped watches on
+/// deleted dirs (`IN_IGNORED`), but the explicit unwatch keeps notify's
+/// path-keyed bookkeeping clean and — crucially for renames — frees the watch
+/// descriptor *before* the destination path is re-watched (see
+/// [`WatchCommand::Update`] ordering).
+fn prune_subtree_watches(
+    debouncer: &mut Debouncer<notify::RecommendedWatcher, NoCache>,
+    watched: &mut HashSet<PathBuf>,
+    subtree_root: &Path,
+) {
+    let stale: Vec<PathBuf> = watched
+        .iter()
+        .filter(|p| p.starts_with(subtree_root))
+        .cloned()
+        .collect();
+    for dir in stale {
+        let _ = debouncer.unwatch(&dir); // Usually already gone; errors expected.
+        watched.remove(&dir);
+    }
+}
+
+pub(crate) fn start(
+    watch_path: PathBuf,
+    config: FsNotifyConfig,
+    sapling: bool,
+) -> Result<(mpsc::UnboundedReceiver<RawFsEvent>, FsNotifyHandle), crate::FsNotifyError> {
+    start_with_timeout(
+        watch_path,
+        config,
+        sapling,
+        watch_strategy(),
+        Duration::from_secs(WATCHER_INIT_TIMEOUT_SECS),
+    )
+}
+
+/// Start with a custom timeout and explicit strategy (tests pass these
+/// directly to avoid process-global env races). `sapling` is the resolved
+/// kill-switch, threaded from `FsEventSource::start_on`.
+pub(crate) fn start_with_timeout(
+    watch_path: PathBuf,
+    config: FsNotifyConfig,
+    sapling: bool,
+    strategy: WatchStrategy,
+    init_timeout: Duration,
+) -> Result<(mpsc::UnboundedReceiver<RawFsEvent>, FsNotifyHandle), crate::FsNotifyError> {
+    let progress = Arc::new(Mutex::new(StartProgress::new()));
+    let (tx, rx) = mpsc::unbounded_channel();
+    let debounce_duration = Duration::from_millis(config.debounce_ms);
+    // `.git/` (and, when `sapling`, `.sl/wlock`) pass through; the source
+    // classifies internally.
+    let watch_vcs = true;
+    let (custom_ignore, custom_include) = build_globsets(&config.ignore_patterns);
+    // Arc so the watcher thread and its debouncer callback share, not copy, them.
+    let custom_ignore = Arc::new(custom_ignore);
+    let custom_include = Arc::new(custom_include);
+
+    // Canonicalize once: notify echoes event paths under the watched path, but
+    // macOS FSEvents resolves symlinks, so a raw (symlinked/relative) root would
+    // never match `parent() == root` and dynamic watching would silently break.
+    let watch_path = dunce::canonicalize(&watch_path).unwrap_or(watch_path);
+
+    tracing::debug!("fs_notify: starting watcher under {:?}", watch_path);
+
+    // Channel to signal when watcher is ready
+    let (ready_tx, ready_rx) =
+        std::sync::mpsc::channel::<Result<(), Box<dyn std::error::Error + Send + Sync>>>();
+
+    // Carries reconcile requests from the debouncer callback to the owning
+    // thread, plus the shutdown signal from `FsNotifyHandle`.
+    let (cmd_tx, cmd_rx) = std::sync::mpsc::channel::<WatchCommand>();
+    let cmd_tx_cb = cmd_tx.clone();
+    let cmd_tx_for_handle = cmd_tx;
+
+    // Live OS-watch count, shared with the handle for stats/benchmarks.
+    let watch_count = Arc::new(AtomicUsize::new(0));
+    let watch_count_thread = Arc::clone(&watch_count);
+
+    // Synthetic-backfill sender for per-dir subtree adds (the debouncer
+    // callback owns the primary sender).
+    let backfill_tx = tx.clone();
+
+    // `progress` records startup stages for the timeout message only: a stage that
+    // is not recorded costs detail in one diagnostic, and neither the starting
+    // caller nor the watcher thread should die over it. `parking_lot::Mutex` is not
+    // a dependency of this crate.
+    #[allow(clippy::disallowed_methods)]
+    if let Ok(mut p) = progress.lock() {
+        p.set_stage("spawning_watcher_thread");
+>>>>>>> origin/master
     }
 
     /// The debouncer callback, which runs on notify's thread: it drops events
@@ -134,9 +255,90 @@ impl Watcher {
         let commands = self.commands.clone();
         let mut gitignore = GitignoreCache::default();
 
+<<<<<<< HEAD
         move |result: DebounceEventResult| {
             let batch = match result {
                 Ok(batch) => batch,
+=======
+    let watcher_loop = move || {
+        let update_stage = |stage: &'static str| {
+            // Best-effort stage recording; see the caller above.
+            #[allow(clippy::disallowed_methods)]
+            if let Ok(mut p) = progress_for_thread.lock() {
+                p.set_stage(stage);
+            }
+        };
+
+        update_stage("watcher_thread_started");
+
+        let mut gitignore_cache = GitignoreCache::default();
+        let watch_path_cb = watch_path.clone();
+        let custom_ignore_cb = Arc::clone(&custom_ignore);
+        let custom_include_cb = Arc::clone(&custom_include);
+
+        // Use NoCache to avoid walking the entire directory tree for file ID tracking.
+        // This prevents multi-GB memory usage on large repos. Trade-off: rename events
+        // may appear as Remove+Create pairs instead of a single Rename event.
+        update_stage("creating_debouncer");
+        let debouncer_result = new_debouncer_opt::<_, notify::RecommendedWatcher, _>(
+            debounce_duration,
+            None,
+            move |result: DebounceEventResult| match result {
+                Ok(events) => {
+                    // Per-path (not per-event) so gitignored paths can't leak via
+                    // multi-path debounced events.
+                    let mut needs_reconcile = false;
+                    let mut pruned: Vec<PathBuf> = Vec::new();
+                    let mut added: Vec<PathBuf> = Vec::new();
+                    for mut event in merge_events(events) {
+                        event.paths.retain(|path| {
+                            if let Some(ref include_set) = *custom_include_cb
+                                && include_set.is_match(path)
+                            {
+                                return true;
+                            }
+                            if gitignore_cache.is_ignored(path, watch_vcs, sapling) {
+                                return false;
+                            }
+                            if let Some(ref ignore_set) = *custom_ignore_cb
+                                && ignore_set.is_match(path)
+                            {
+                                return false;
+                            }
+                            true
+                        });
+                        if event.paths.is_empty() {
+                            continue;
+                        }
+                        // Post-retain, so ignored paths never grow the watch set.
+                        match strategy {
+                            WatchStrategy::Fanout => {
+                                if event_triggers_reconcile(
+                                    event.kind,
+                                    &event.paths,
+                                    &watch_path_cb,
+                                ) {
+                                    needs_reconcile = true;
+                                }
+                            }
+                            WatchStrategy::PerDir => scan_per_dir_updates(
+                                event.kind,
+                                &event.paths,
+                                &mut pruned,
+                                &mut added,
+                            ),
+                        }
+                        let _ = tx.send(event);
+                    }
+                    // One command per batch, not per event, to coalesce bursts.
+                    if needs_reconcile {
+                        let _ = cmd_tx_cb.send(WatchCommand::Reconcile);
+                    }
+                    if !pruned.is_empty() || !added.is_empty() {
+                        let _ = cmd_tx_cb.send(WatchCommand::Update { pruned, added });
+                    }
+                }
+>>>>>>> origin/master
                 Err(errors) => {
                     for e in errors {
                         tracing::warn!("fs_notify error: {e:?}");
@@ -399,7 +601,51 @@ impl Watcher {
             WatchCommand::Update { .. } => {}
             WatchCommand::Shutdown => return ControlFlow::Break(()),
         }
+<<<<<<< HEAD
         ControlFlow::Continue(())
+=======
+    };
+    let thread = std::thread::Builder::new()
+        .name("fsnotify-watcher".into())
+        .spawn(watcher_loop)
+        .map_err(|e| crate::FsNotifyError::WatcherStart(Box::new(e)))?;
+
+    // Wait for watcher to be ready (with timeout)
+    #[allow(clippy::disallowed_methods)] // best-effort stage recording
+    if let Ok(mut p) = progress.lock() {
+        p.set_stage("waiting_for_ready");
+    }
+    match ready_rx.recv_timeout(init_timeout) {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => return Err(crate::FsNotifyError::WatcherStart(e)),
+        Err(_) => {
+            // A poison answers the same tuple an unreadable progress would: the
+            // stage names are diagnostics, never the watcher's state.
+            #[allow(clippy::disallowed_methods)]
+            let (stage, stage_elapsed, total_elapsed, timeline) =
+                progress.lock().map(|p| p.snapshot()).unwrap_or((
+                    "unknown",
+                    Duration::from_secs(0),
+                    Duration::from_secs(0),
+                    Vec::new(),
+                ));
+            tracing::debug!(
+                "watcher start timed out ({}s): stage={}, stage_elapsed={:?}, total_elapsed={:?}, timeline={:?}",
+                init_timeout.as_secs(),
+                stage,
+                stage_elapsed,
+                total_elapsed,
+                timeline
+            );
+            // No `FsNotifyHandle` owns the thread on this path, so queue a
+            // Shutdown: when the slow setup finishes and the thread reaches its
+            // recv loop, it self-terminates and releases its watches instead of
+            // leaking (the callback holds the other sender, so it never
+            // disconnects on its own).
+            let _ = cmd_tx_for_handle.send(WatchCommand::Shutdown);
+            return Err(crate::FsNotifyError::Timeout);
+        }
+>>>>>>> origin/master
     }
 
     /// The root and the VCS directories are armed once at startup and never

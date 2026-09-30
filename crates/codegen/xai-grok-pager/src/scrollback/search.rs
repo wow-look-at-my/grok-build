@@ -107,10 +107,18 @@ fn scan_matches(entries: &[IndexedEntry], matcher: &TextMatcher) -> Vec<Scrollba
             if m.start() == m.end() {
                 continue;
             }
+<<<<<<< HEAD
             line += entry
                 .text
                 .get(counted_to..m.start())
                 .map_or(0, |chunk| chunk.matches('\n').count());
+=======
+            // `counted_to` is 0 or an earlier `m.start()`, and `m.start()` is a
+            // `regex::Match` offset, so both ends are char boundaries.
+            #[allow(clippy::string_slice)] // regex::Match offsets over entry.text
+            let scanned = &entry.text[counted_to..m.start()];
+            line += scanned.matches('\n').count();
+>>>>>>> origin/master
             counted_to = m.start();
             matches.push(ScrollbackMatch {
                 entry_id: entry.id,

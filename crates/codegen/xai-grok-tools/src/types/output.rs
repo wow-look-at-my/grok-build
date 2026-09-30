@@ -308,8 +308,15 @@ pub struct SearchReplaceEditDetail {
     #[serde(default)]
     pub line_prefix: String,
 }
+<<<<<<< HEAD
 /// Payload for `SearchReplaceOutput::NoMatchesFound`. Separate struct so consumers (reminders,
 /// outcome trackers) can extract the file path without needing to know the call-site context.
+=======
+/// Payload for `SearchReplaceOutput::NoMatchesFound`.
+///
+/// Separate struct so consumers (reminders, outcome trackers) can extract
+/// the file path without needing to know the call-site context.
+>>>>>>> origin/master
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct NoMatchesFoundError {
     /// Human-readable error message shown to the model.
@@ -594,12 +601,15 @@ impl ToolOutput {
             ToolOutput::Skill(s) => !s.success,
             ToolOutput::WebFetch(WebFetchOutput::Content(_)) => false,
             ToolOutput::WebFetch(_) => true,
+<<<<<<< HEAD
             ToolOutput::SendSubagentMessage(output) => {
                 matches!(
                 output.disposition(),
                 crate::implementations::grok_build::send_subagent_message::SendSubagentMessageDisposition::Rejected
             )
             }
+=======
+>>>>>>> origin/master
             ToolOutput::Todo(
                 TodoWriteOutput::DuplicateId(_) | TodoWriteOutput::InvalidArgument(_),
             ) => true,

@@ -20,7 +20,16 @@ Usually: a tangled unit that can't be tested in isolation (every fix breaks some
 
 ## Recommend STRUCTURAL change, not another patch
 
+<<<<<<< HEAD
 Change the HOW: refactor for testability, split a monolith into small pure units, extract the thing under test from its I/O, make an un-driveable behavior verifiable by reading the source plus a test of the shipped function in the project's existing suite, or rewrite one subsystem from a short spec. Prefer SMALL, mechanical, verifiable steps the implementer can execute one at a time. Never recommend a check script, test harness, probe, or shim of its own.
+=======
+Change the HOW: refactor for testability, split a monolith into small pure units,
+extract the thing under test from its I/O, make an un-driveable behavior
+verifiable by reading the source plus a test of the shipped function in the
+project's existing suite, or rewrite one subsystem from a short spec. Prefer
+SMALL, mechanical, verifiable steps the implementer can execute one at a time.
+Never recommend a check script, test harness, probe, or shim of its own.
+>>>>>>> origin/master
 
 ## Constraint
 

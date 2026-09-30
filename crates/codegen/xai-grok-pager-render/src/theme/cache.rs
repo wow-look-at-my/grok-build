@@ -166,8 +166,17 @@ pub fn auto_theme_config() -> AutoThemeConfig {
     *guard.get_or_insert_with(load_auto_theme_config)
 }
 
+<<<<<<< HEAD
 /// Call after updating `auto_dark_theme` or `auto_light_theme` in config so subsequent lookups see the new values.
 /// Used by the settings modal and the `/theme auto` slash command.
+=======
+/// Invalidate the cached auto-theme configuration.
+///
+/// Call after updating `auto_dark_theme` or `auto_light_theme` in config
+/// so subsequent lookups see the new values. Used by the settings modal
+/// and the `/theme auto` slash command.
+#[allow(clippy::disallowed_methods)] // Poison takes the cache back to drop it.
+>>>>>>> origin/master
 pub fn invalidate_auto_theme_config() {
     *AUTO_THEME_CONFIG.lock().unwrap_or_else(|e| e.into_inner()) = None;
 }

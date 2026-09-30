@@ -2753,6 +2753,7 @@ fn masked_auth_token_view(input: &str, cursor_byte: usize, width: usize) -> (Str
     let buffer =
         xai_ratatui_textarea::EditBuffer::from_parts(masked.display.as_str(), masked.cursor_byte);
     let viewport = buffer.single_line_viewport(width);
+<<<<<<< HEAD
     (
         masked
             .display
@@ -2761,6 +2762,12 @@ fn masked_auth_token_view(input: &str, cursor_byte: usize, width: usize) -> (Str
             .to_owned(),
         viewport.cursor_display_column,
     )
+=======
+    // The range is a ratatui `visible_byte_range`, a char boundary.
+    #[allow(clippy::string_slice)]
+    let visible = masked.display[viewport.visible_byte_range].to_owned();
+    (visible, viewport.cursor_display_column)
+>>>>>>> origin/master
 }
 
 #[cfg(test)]
