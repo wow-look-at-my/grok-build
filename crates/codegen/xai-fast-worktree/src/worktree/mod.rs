@@ -295,6 +295,89 @@ mod tests {
         assert!(!repo_path.join(".gitignore").exists());
     }
 
+    /// A repository's managed root is a descendant of the tree being copied,
+    /// so a second worktree must not receive a copy of the first one's tree,
+    /// nor of the destination it is being written into.
+    #[test]
+    fn test_second_worktree_copies_no_sibling() {
+        xai_test_utils::require_git!();
+        let temp = TempDir::new().unwrap();
+        let repo_path = temp.path().join("repo");
+        std::fs::create_dir(&repo_path).unwrap();
+        init_git_repo(&repo_path);
+        std::fs::write(repo_path.join("file.txt"), "content").unwrap();
+        git_commit_all(&repo_path, "initial");
+
+        let managed = repo_path.join(".grok").join("worktrees");
+        let first = managed.join("first");
+        let second = managed.join("second");
+        WorktreeBuilder::new(repo_path.clone(), first.clone())
+            .create()
+            .unwrap();
+        // Only the first worktree's own tree could be swept into the second.
+        std::fs::write(first.join("only-in-first.txt"), "sibling").unwrap();
+        let report = WorktreeBuilder::new(repo_path.clone(), second.clone())
+            .create()
+            .unwrap();
+
+        assert!(report.worktree_path.join("file.txt").exists());
+        assert!(
+            !second.join(".grok/worktrees").exists(),
+            "the managed root must be off the walk, or every new checkout \
+             carries the repository's other worktrees"
+        );
+        let mut siblings: Vec<String> = std::fs::read_dir(&managed)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            // Creation markers (`.ready`, `.claimed`) are not worktrees.
+            .filter(|name| !name.starts_with('.'))
+            .collect();
+        siblings.sort();
+        assert_eq!(
+            siblings,
+            vec!["first".to_owned(), "second".to_owned()],
+            "creating a worktree must not grow the tree it copies from"
+        );
+    }
+
+    /// The destination lives in the working tree, so creation registers it in
+    /// the repository's own exclude data and the main checkout's status stays
+    /// clean. The tracked `.gitignore` is never touched.
+    #[test]
+    fn test_worktree_creation_keeps_main_checkout_status_clean() {
+        xai_test_utils::require_git!();
+        let temp = TempDir::new().unwrap();
+        let repo_path = temp.path().join("repo");
+        std::fs::create_dir(&repo_path).unwrap();
+        init_git_repo(&repo_path);
+        std::fs::write(repo_path.join("file.txt"), "content").unwrap();
+        git_commit_all(&repo_path, "initial");
+
+        let managed = repo_path.join(".grok").join("worktrees");
+        WorktreeBuilder::new(repo_path.clone(), managed.join("one"))
+            .create()
+            .unwrap();
+        WorktreeBuilder::new(repo_path.clone(), managed.join("two"))
+            .create()
+            .unwrap();
+
+        assert_eq!(
+            xai_test_utils::git::run_git(&repo_path, &["status", "--porcelain"]),
+            "",
+            "git status must name neither `.grok/` nor `.grok/worktrees/`"
+        );
+        let exclude = std::fs::read_to_string(repo_path.join(".git/info/exclude")).unwrap();
+        assert_eq!(
+            exclude
+                .matches(crate::managed_root::WORKTREES_EXCLUDE_LINE)
+                .count(),
+            1,
+            "the exclusion is registered once, however many worktrees exist: {exclude:?}"
+        );
+        assert!(!repo_path.join(".gitignore").exists());
+    }
+
     #[test]
     fn test_create_worktree_creates_parent_dirs() {
         xai_test_utils::require_git!();

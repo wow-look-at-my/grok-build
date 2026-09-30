@@ -807,4 +807,74 @@ mod tests {
             },
         );
     }
+
+    /// Every cost-spelling assertion, run against both usage shapes. A gateway
+    /// prices the call on `message_start` and settles it on `message_delta`, so
+    /// either one can carry both keys. Both JSON bodies name `input_tokens` and
+    /// `output_tokens`, the two keys the stricter of the two structs requires.
+    fn assert_cost_key_folding<T>(
+        read: impl Fn(&T) -> Option<i64>,
+        build: impl Fn(Option<i64>) -> T,
+    ) where
+        T: serde::de::DeserializeOwned + serde::Serialize + std::fmt::Debug,
+    {
+        const PRICE: i64 = 1_000_000_000;
+        for (label, json) in [
+            (
+                "the canonical key alone",
+                r#"{"input_tokens":1,"output_tokens":2,"cost_in_usd_ticks":1000000000}"#,
+            ),
+            (
+                "the alias key alone",
+                r#"{"input_tokens":1,"output_tokens":2,"cost_usd_ticks":1000000000}"#,
+            ),
+            (
+                "both keys carrying one value",
+                r#"{"input_tokens":1,"output_tokens":2,"cost_usd_ticks":1000000000,"cost_in_usd_ticks":1000000000}"#,
+            ),
+        ] {
+            let parsed = serde_json::from_str::<T>(json)
+                .unwrap_or_else(|e| panic!("{label} must parse, got {json}: {e}"));
+            assert_eq!(read(&parsed), Some(PRICE), "{label}");
+        }
+
+        let contradictory = r#"{"input_tokens":1,"output_tokens":2,"cost_usd_ticks":1,"cost_in_usd_ticks":1000000000}"#;
+        let err = serde_json::from_str::<T>(contradictory)
+            .expect_err("differing prices must not resolve silently");
+        let message = err.to_string();
+        assert!(message.contains("cost_in_usd_ticks"), "{message}");
+        assert!(message.contains("cost_usd_ticks"), "{message}");
+
+        let written = serde_json::to_value(build(Some(PRICE))).unwrap();
+        assert_eq!(written["cost_in_usd_ticks"].as_i64(), Some(PRICE));
+        assert!(
+            written.get("cost_usd_ticks").is_none(),
+            "the alias key must never be written: {written}"
+        );
+    }
+
+    #[test]
+    fn messages_usage_cost_key_folds_its_alias() {
+        assert_cost_key_folding(
+            |u: &MessagesUsage| u.cost_in_usd_ticks,
+            |cost_in_usd_ticks| MessagesUsage {
+                input_tokens: 1,
+                output_tokens: 2,
+                cost_in_usd_ticks,
+                ..Default::default()
+            },
+        );
+    }
+
+    #[test]
+    fn message_delta_usage_cost_key_folds_its_alias() {
+        assert_cost_key_folding(
+            |u: &MessageDeltaUsage| u.cost_in_usd_ticks,
+            |cost_in_usd_ticks| MessageDeltaUsage {
+                output_tokens: 2,
+                cost_in_usd_ticks,
+                ..Default::default()
+            },
+        );
+    }
 }

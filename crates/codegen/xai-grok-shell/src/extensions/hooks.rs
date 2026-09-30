@@ -769,3 +769,52 @@ mod wire_alias_tests {
         assert_eq!(proceed.decision, super::ClientHookDecision::Continue);
     }
 }
+
+#[cfg(test)]
+mod wire_alias_tests {
+    use super::ClientHookResponse;
+
+    /// A client's hook reply names its message `reason` (the Claude Code hook
+    /// shape) or `systemMessage` (the ACP shape). Both are the same statement.
+    #[test]
+    fn a_hook_reply_reads_its_message_under_either_spelling() {
+        let deny: ClientHookResponse =
+            serde_json::from_str(r#"{"decision":"deny","reason":"no"}"#).unwrap();
+        assert_eq!(deny.system_message.as_deref(), Some("no"));
+
+        let deny: ClientHookResponse =
+            serde_json::from_str(r#"{"decision":"deny","systemMessage":"no"}"#).unwrap();
+        assert_eq!(deny.system_message.as_deref(), Some("no"));
+    }
+
+    #[test]
+    fn a_hook_reply_naming_both_under_one_value_parses_once() {
+        let deny: ClientHookResponse =
+            serde_json::from_str(r#"{"decision":"deny","systemMessage":"no","reason":"no"}"#)
+                .expect("one message named twice is one message");
+        assert_eq!(deny.system_message.as_deref(), Some("no"));
+        assert_eq!(deny.decision, super::ClientHookDecision::Deny);
+    }
+
+    /// Two different messages tell the user two different reasons to proceed.
+    #[test]
+    fn a_hook_reply_whose_message_spellings_disagree_is_an_error_naming_the_field() {
+        let err = serde_json::from_str::<ClientHookResponse>(
+            r#"{"decision":"deny","systemMessage":"a","reason":"b"}"#,
+        )
+        .expect_err("conflicting messages must not resolve silently");
+        let message = err.to_string();
+        assert!(message.contains("systemMessage"), "{message}");
+        assert!(message.contains("reason"), "{message}");
+    }
+
+    /// The reply is fail-open by default, and a body naming neither key is the
+    /// absent case, not an error.
+    #[test]
+    fn a_hook_reply_with_neither_message_key_still_proceeds() {
+        let proceed: ClientHookResponse = serde_json::from_str(r#"{"decision":"continue"}"#)
+            .expect("an absent message is the default");
+        assert_eq!(proceed.system_message, None);
+        assert_eq!(proceed.decision, super::ClientHookDecision::Continue);
+    }
+}

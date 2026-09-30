@@ -133,6 +133,8 @@ flate2 = { workspace = true }
 tar = { workspace = true }
 xai-grok-tools = { workspace = true }
 xai-grok-agent = { workspace = true }
+# Wire-alias folding for the ACP rewind payloads parsed in `views/rewind.rs`.
+xai-tool-types = { workspace = true }
 xai-grok-plugin-marketplace = { path = "../xai-grok-plugin-marketplace" }
 # Blocked-card copy: `hook_display_name` lives next to the hook-name grammar.
 xai-grok-hooks = { path = "../xai-grok-hooks" }

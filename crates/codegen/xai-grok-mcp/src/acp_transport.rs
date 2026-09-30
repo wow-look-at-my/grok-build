@@ -349,6 +349,74 @@ mod tests {
         assert_eq!(after["result"]["method"], "tools/list");
     }
 
+    /// Invoker whose round for the method `panic` unwinds instead of failing.
+    struct PanickingInvoker;
+
+    #[async_trait::async_trait]
+    impl AcpReverseInvoker for PanickingInvoker {
+        async fn invoke(
+            &self,
+            _server_id: &str,
+            message: Value,
+            _timeout: Duration,
+        ) -> Result<Value, String> {
+            let method = message.get("method").cloned().unwrap_or(Value::Null);
+            if method == "panic" {
+                panic!("the reverse invoke died");
+            }
+            let id = message.get("id").cloned().unwrap_or(Value::Null);
+            Ok(serde_json::json!({ "jsonrpc": "2.0", "id": id, "result": { "method": method } }))
+        }
+    }
+
+    /// A request whose round panics is answered, and the bridge keeps serving.
+    ///
+    /// The invoke task is the only thing that can ever write the response for
+    /// its id, so an unwound round has to produce that response itself. The
+    /// reader above is the test's stand-in for rmcp, which waits on the
+    /// response and has no way to see that the task died.
+    #[tokio::test]
+    async fn a_panicking_reverse_invoke_answers_its_request_and_the_bridge_keeps_serving() {
+        let (test_write, pump_read) = tokio::io::duplex(BRIDGE_BUF);
+        let (pump_write, test_read) = tokio::io::duplex(BRIDGE_BUF);
+        tokio::spawn(pump(
+            "srv".to_string(),
+            Arc::new(PanickingInvoker),
+            Duration::from_secs(60),
+            pump_read,
+            pump_write,
+        ));
+        let mut to_server = test_write;
+        let mut reader = BufReader::new(test_read);
+
+        to_server
+            .write_all(b"{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"panic\"}\n")
+            .await
+            .unwrap();
+        let answered = tokio::time::timeout(Duration::from_secs(5), read_line(&mut reader))
+            .await
+            .expect("the panicked round must answer its own request, not leave it waiting");
+        assert_eq!(answered["id"], 7);
+        let message = answered["error"]["message"]
+            .as_str()
+            .expect("a panicked round is an error response");
+        assert!(
+            message.contains("the reverse invoke died"),
+            "the response must carry the panic's own message, got {message:?}"
+        );
+
+        // The pump survives the round and answers a later request normally.
+        to_server
+            .write_all(b"{\"jsonrpc\":\"2.0\",\"id\":8,\"method\":\"tools/list\"}\n")
+            .await
+            .unwrap();
+        let after = tokio::time::timeout(Duration::from_secs(5), read_line(&mut reader))
+            .await
+            .expect("the bridge must still serve requests after a panicked round");
+        assert_eq!(after["id"], 8);
+        assert_eq!(after["result"]["method"], "tools/list");
+    }
+
     /// A slow request must not block a later fast one: the fast response comes back
     /// first even though its request was written second (head-of-line free).
     #[tokio::test]
