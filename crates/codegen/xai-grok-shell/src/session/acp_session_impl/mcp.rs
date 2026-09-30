@@ -597,7 +597,7 @@ impl SessionActor {
     }
     /// Settle a failed respawn attempt by error class.
     /// An auth rejection hands off to the auth-required flow, keeping the fresh client (when one exists) for its recovery paths.
-    /// Anything else (protocol rejection, malformed `tools/list`, redirect loops) is a terminal init failure.
+    /// Every other failure restarts the cooldown. An enabled server stays on the schedule until it connects or the user removes it.
     async fn settle_failed_unreachable_attempt(
         &self,
         server_name: &str,
@@ -617,13 +617,24 @@ impl SessionActor {
             }
             state.clear_init_failed(server_name);
             state.record_init_failure(server_name, true, None);
-        } else if error.is_transient_connectivity() {
-            state.settle_unreachable_attempt_failed(server_name, token, detail());
         } else {
-            if !state.settle_unreachable_attempt_unretryable(server_name, token) {
+            state.settle_unreachable_attempt_failed(server_name, token, detail());
+        }
+    }
+    /// How often the session checks for failed MCP servers that are due a reconnect.
+    pub(crate) const MCP_RECONNECT_TICK: std::time::Duration = std::time::Duration::from_secs(15);
+    /// Reconnect failed MCP servers without waiting for a tool call. An idle session otherwise keeps a failed server until the user toggles it.
+    /// The task ends at the first tick after the session is dropped.
+    pub(super) async fn run_mcp_reconnect_loop(session: std::sync::Weak<SessionActor>) {
+        let mut interval = tokio::time::interval(Self::MCP_RECONNECT_TICK);
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        interval.tick().await;
+        loop {
+            interval.tick().await;
+            let Some(session) = session.upgrade() else {
                 return;
-            }
-            state.record_init_failure(server_name, false, Some(detail()));
+            };
+            session.retry_unreachable_servers().await;
         }
     }
     /// Refresh the MCP tool/search snapshot from current tool bridge state.
@@ -1404,7 +1415,6 @@ impl SessionActor {
         tokio::task::yield_now().await;
         let mut spawn_auth_failures: Vec<String> = Vec::new();
         let mut spawn_failures: Vec<(String, String)> = Vec::new();
-        let mut spawn_unreachable_failures: Vec<(String, String)> = Vec::new();
         let mcp_clients: Vec<_> = mcp_results
             .into_iter()
             .filter_map(|result| match result {
@@ -1417,8 +1427,6 @@ impl SessionActor {
                     let sname = e.server_name().unwrap_or("unknown").to_string();
                     if e.is_auth_rejection() && sname != "unknown" {
                         spawn_auth_failures.push(sname.clone());
-                    } else if e.is_unreachable() && sname != "unknown" {
-                        spawn_unreachable_failures.push((sname.clone(), e.to_string()));
                     } else if sname != "unknown" {
                         // A spawn that never produced a client leaves nothing
                         // for `build_mcp_status` to report, so the reason is
@@ -1462,16 +1470,13 @@ impl SessionActor {
                     );
                     if spawn_auth_failures.iter().any(|n| n == name) {
                         mcp_state.record_init_failure(name, true, None);
-                    } else if let Some((_, detail)) =
-                        spawn_unreachable_failures.iter().find(|(n, _)| n == name)
-                    {
-                        mcp_state.record_unreachable_failure(name, detail.clone());
                     } else {
                         let detail = spawn_failures
                             .iter()
                             .find(|(n, _)| n == name)
-                            .map(|(_, reason)| reason.clone());
-                        mcp_state.record_init_failure(name, false, detail);
+                            .map(|(_, reason)| reason.clone())
+                            .unwrap_or_default();
+                        mcp_state.record_unreachable_failure(name, detail);
                     }
                     mcp_state.mark_server_ready(name);
                 }

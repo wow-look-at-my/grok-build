@@ -437,12 +437,11 @@ impl InitPass {
             xai_grok_tools::util::truncate_str_with_marker(&error.to_string(), 200).into_owned()
         });
 
-        let unreachable = !needs_auth && error.is_connect_failure();
         self.record_if_current(client, |pass, mcp_state, client| {
-            if unreachable {
-                mcp_state.record_unreachable_failure(&server, detail.unwrap_or_default());
+            if needs_auth {
+                mcp_state.record_init_failure(&server, true, None);
             } else {
-                mcp_state.record_init_failure(&server, needs_auth, detail);
+                mcp_state.record_unreachable_failure(&server, detail.unwrap_or_default());
             }
             pass.insert_client(mcp_state, &server, client);
         })
