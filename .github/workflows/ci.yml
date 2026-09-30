@@ -89,11 +89,19 @@ jobs:
           tar -xzf "$RUNNER_TEMP/nextest.tar.gz" -C "$RUNNER_TEMP/nextest-bin"
           echo "$RUNNER_TEMP/nextest-bin" >> "$GITHUB_PATH"
 
-      # The registry dependencies, which a lockfile determines and a push does not. Measured on run 35459915405: they are 1909 of build-test's 4161 compile CPU-seconds. The script builds the workspace to reach them, then prunes the workspace artifacts back out, so what the entry carries is the dependency tree alone. The hashFiles comment is what keys the entry: cached-run digests the script text, and the runner expands the expression before the action sees it. No restore-keys, so an entry holds one lockfile's dependencies and never accumulates.
+      # The log lists every key input before the digest, so two runs can be diffed.
+      - name: Key the dependency cache
+        id: depkey
+        run: echo "key=$(ci/cache-deps.sh key)" >> "$GITHUB_OUTPUT"
+
+      # The registry dependencies. See AGENTS.md, "The dependency tar". The key comment in the script is what keys the entry, because cached-run digests the script text. A new key restores the newest older entry and compiles only the delta. The prune drops every unit this build did not use, so a fallback never grows the entry. The script runs on a hit too, so it builds the workspace here, and the stash hands those artifacts to the steps below.
       - name: Build the dependencies
+        id: deps
         uses: wow-look-at-my/actions@cached-run#latest
         with:
           key: rustdeps-dev
+          restore-keys: cached-run-v2-${{ runner.os }}-${{ runner.arch }}-rustdeps-dev-
+          skip-on-hit: false
           paths: |
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
@@ -102,10 +110,18 @@ jobs:
             target/debug/build
             target/debug/.fingerprint
           run: |
-            # ${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', '**/Cargo.toml') }}
+            # ${{ steps.depkey.outputs.key }}
             export CARGO_BUILD_JOBS=3
-            cargo test --locked --workspace --no-run --no-fail-fast
-            ci/cache-deps.sh prune target/debug
+            cargo test --locked --workspace --no-run --no-fail-fast \
+              --message-format=json-render-diagnostics > "$RUNNER_TEMP/deps-units.json"
+            ci/cache-deps.sh prune target/debug "$RUNNER_TEMP/deps-units.json" "$RUNNER_TEMP/ws-stash"
+
+      - name: Restore the workspace artifacts
+        run: ci/cache-deps.sh unstash "$RUNNER_TEMP/ws-stash" target/debug
+
+      - name: Check the dependency cache was complete
+        if: steps.deps.outputs.cache-hit == 'true'
+        run: ci/cache-deps.sh check-fresh "$RUNNER_TEMP/deps-units.json"
 
       # -j3 is the widest -j the runner's 15 GiB holds.
       - name: Build test harnesses (compile, no-run)
@@ -225,11 +241,18 @@ jobs:
           cargo build --locked --release -p xai-darwin-link
           echo "CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER=$PWD/target/release/xai-darwin-link" >> "$GITHUB_ENV"
 
-      # The registry dependencies for this row's target, the way build-test caches its own. The digest covers the script text, and the target is in it, so each row keys its own entry without naming one.
+      - name: Key the dependency cache
+        id: depkey
+        run: echo "key=$(ci/cache-deps.sh key)" >> "$GITHUB_OUTPUT"
+
+      # The registry dependencies for this row's target, the way build-test caches its own. The target is in the label so a fallback restore never takes the other row's entry.
       - name: Build the dependencies
+        id: deps
         uses: wow-look-at-my/actions@cached-run#latest
         with:
-          key: rustdeps-release
+          key: rustdeps-release-${{ matrix.target }}
+          restore-keys: cached-run-v2-${{ runner.os }}-${{ runner.arch }}-rustdeps-release-${{ matrix.target }}-
+          skip-on-hit: false
           paths: |
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
@@ -241,10 +264,20 @@ jobs:
             target/release/build
             target/release/.fingerprint
           run: |
-            # ${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', '**/Cargo.toml') }}
-            cargo build --locked --release --target ${{ matrix.target }} -p xai-grok-pager-bin
-            ci/cache-deps.sh prune target/${{ matrix.target }}/release
-            ci/cache-deps.sh prune target/release
+            # ${{ steps.depkey.outputs.key }}
+            cargo build --locked --release --target ${{ matrix.target }} -p xai-grok-pager-bin \
+              --message-format=json-render-diagnostics > "$RUNNER_TEMP/deps-units.json"
+            ci/cache-deps.sh prune target/${{ matrix.target }}/release "$RUNNER_TEMP/deps-units.json" "$RUNNER_TEMP/ws-stash-target"
+            ci/cache-deps.sh prune target/release "$RUNNER_TEMP/deps-units.json" "$RUNNER_TEMP/ws-stash-host"
+
+      - name: Restore the workspace artifacts
+        run: |
+          ci/cache-deps.sh unstash "$RUNNER_TEMP/ws-stash-target" target/${{ matrix.target }}/release
+          ci/cache-deps.sh unstash "$RUNNER_TEMP/ws-stash-host" target/release
+
+      - name: Check the dependency cache was complete
+        if: steps.deps.outputs.cache-hit == 'true'
+        run: ci/cache-deps.sh check-fresh "$RUNNER_TEMP/deps-units.json"
 
       # On the darwin row the link at the end of this records itself into GROK_DARWIN_LINK_BUNDLE rather than running.
       - name: Build release binary
