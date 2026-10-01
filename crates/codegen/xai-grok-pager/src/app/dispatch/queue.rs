@@ -864,6 +864,31 @@ fn trailing_user_prompt_matching(
     found
 }
 
+/// The block an interjection-fallback turn's text already has, when output drawn after it hides it from
+/// [`trailing_user_prompt_matching`]. The shell paints an interjection on arrival, then reruns it as its
+/// own turn when the turn it aimed at ends first. Without this the pager paints that message a second time.
+/// The scan passes the run of earlier fallbacks at the tail and stops at the prompt of the turn it missed.
+/// The oldest match wins, because the shell flushes stranded interjections in arrival order.
+fn stranded_interjection_block(agent: &AgentView, text: &str) -> Option<EntryId> {
+    let mut in_trailing_run = true;
+    let mut found = None;
+    for idx in (0..agent.scrollback.len()).rev() {
+        let entry = agent.scrollback.entry(idx)?;
+        match &entry.block {
+            RenderBlock::UserPrompt(ub) if ub.is_interjection => {
+                if ub.text == text {
+                    found = Some(entry.id);
+                }
+            }
+            RenderBlock::UserPrompt(_) if in_trailing_run => {}
+            RenderBlock::UserPrompt(_) => break,
+            RenderBlock::SessionEvent(_) | RenderBlock::System(_) => {}
+            _ => in_trailing_run = false,
+        }
+    }
+    found
+}
+
 /// Last `n` non-interjection user prompts (oldest to newest), scanning back past turn chrome.
 /// Used to reuse multi-bubble paints when the echo already rendered.
 fn trailing_user_prompts(
@@ -1190,6 +1215,15 @@ pub(crate) fn apply_turn_start_shim(
         });
         if reused_echo && already_painted.is_some() {
             agent.send_now_echo_pending.remove(&prompt_id);
+        }
+        // The fallback turn's block below replaces the earlier interjection block. A reload draws it there too.
+        if already_painted.is_none()
+            && claim_interjection
+            && let Some(stale) = text
+                .as_deref()
+                .and_then(|t| stranded_interjection_block(agent, t))
+        {
+            agent.scrollback.remove_entry(stale);
         }
         let (prompt_idx, prompt_entry_id) = if let Some(found) = already_painted {
             if claim_interjection
@@ -2596,6 +2630,105 @@ mod tests {
             }
             other => panic!("expected user bubble, got {other:?}"),
         }
+    }
+
+    fn user_prompt_texts(agent: &AgentView) -> Vec<(String, bool)> {
+        (0..agent.scrollback.len())
+            .filter_map(|idx| match &agent.scrollback.entry(idx)?.block {
+                RenderBlock::UserPrompt(ub) => Some((ub.text.clone(), ub.is_interjection)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn shim_interject_fallback_after_turn_output_paints_the_message_once() {
+        let mut app = test_app_with_agent();
+        let agent = app.agents.get_mut(&AgentId(0)).unwrap();
+        agent
+            .scrollback
+            .push_block(RenderBlock::user_prompt("task"));
+        agent
+            .scrollback
+            .push_block(RenderBlock::interjection_prompt("steer"));
+        agent
+            .scrollback
+            .push_block(RenderBlock::agent_message("tool output"));
+        apply_turn_start_shim(
+            agent,
+            "interject-fallback-a".into(),
+            Some("steer".into()),
+            "prompt",
+            None,
+        );
+        assert_eq!(
+            user_prompt_texts(agent),
+            vec![("task".into(), false), ("steer".into(), false)],
+            "the stranded interjection must not be painted a second time"
+        );
+        let last = agent.scrollback.len() - 1;
+        assert!(
+            matches!(&agent.scrollback.entry(last).unwrap().block, RenderBlock::UserPrompt(ub) if ub.text == "steer"),
+            "the fallback turn's block starts the new turn"
+        );
+    }
+
+    #[test]
+    fn shim_interject_fallbacks_with_equal_text_after_turn_output_each_claim_one_block() {
+        let mut app = test_app_with_agent();
+        let agent = app.agents.get_mut(&AgentId(0)).unwrap();
+        agent
+            .scrollback
+            .push_block(RenderBlock::user_prompt("task"));
+        agent
+            .scrollback
+            .push_block(RenderBlock::interjection_prompt("again"));
+        agent
+            .scrollback
+            .push_block(RenderBlock::interjection_prompt("again"));
+        agent
+            .scrollback
+            .push_block(RenderBlock::agent_message("tool output"));
+        for id in ["interject-fallback-a", "interject-fallback-b"] {
+            apply_turn_start_shim(agent, id.into(), Some("again".into()), "prompt", None);
+        }
+        assert_eq!(
+            user_prompt_texts(agent),
+            vec![
+                ("task".into(), false),
+                ("again".into(), false),
+                ("again".into(), false)
+            ],
+        );
+    }
+
+    #[test]
+    fn shim_interject_fallback_never_claims_an_earlier_turns_interjection() {
+        let mut app = test_app_with_agent();
+        let agent = app.agents.get_mut(&AgentId(0)).unwrap();
+        agent
+            .scrollback
+            .push_block(RenderBlock::interjection_prompt("steer"));
+        agent.scrollback.push_block(RenderBlock::agent_message("a"));
+        agent
+            .scrollback
+            .push_block(RenderBlock::user_prompt("next"));
+        agent.scrollback.push_block(RenderBlock::agent_message("b"));
+        apply_turn_start_shim(
+            agent,
+            "interject-fallback-a".into(),
+            Some("steer".into()),
+            "prompt",
+            None,
+        );
+        assert_eq!(
+            user_prompt_texts(agent),
+            vec![
+                ("steer".into(), true),
+                ("next".into(), false),
+                ("steer".into(), false)
+            ],
+        );
     }
 
     #[test]
