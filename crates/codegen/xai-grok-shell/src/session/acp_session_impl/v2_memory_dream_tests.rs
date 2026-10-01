@@ -1,8 +1,9 @@
 use std::time::Duration;
 
 use super::{
-    MemoryDreamDisposition, V2CaptureFollowups, V2DreamInvocation, V2DreamLeaseGuard, dream_notice,
-    dream_plan_schema, parse_v2_dream_plan, v2_capture_followups, v2_dream_invocation_enabled,
+    MemoryDreamDisposition, V2_DREAM_SYSTEM_PROMPT, V2CaptureFollowups, V2DreamInvocation,
+    V2DreamLeaseGuard, dream_notice, dream_plan_schema, parse_v2_dream_plan, v2_capture_followups,
+    v2_dream_invocation_enabled,
 };
 use crate::session::memory_state::V2DreamWorkers;
 
@@ -118,6 +119,15 @@ fn dream_plan_schema_matches_the_decoder() {
     assert!(!validator.is_valid(
         &serde_json::json!({ "operations": [{"op":"format","path":"topics/a.md","evidence":[]}] })
     ));
+}
+
+#[test]
+fn the_prompt_states_the_evidence_cap_the_commit_enforces() {
+    let cap = xai_grok_memory::v2_consolidation::MAX_EVIDENCE_PER_OPERATION;
+    assert!(
+        V2_DREAM_SYSTEM_PROMPT.contains(&format!("at most {cap};")),
+        "the Dream prompt must tell the model the {cap}-path evidence cap that commit rejects past"
+    );
 }
 
 #[test]
