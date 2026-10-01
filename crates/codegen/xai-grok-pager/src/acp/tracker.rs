@@ -49,8 +49,9 @@ fn utc_ms_to_local(ms: i64) -> DateTime<Local> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WaitingReason {
     /// Waiting for the model to (re)start streaming.
-    /// This covers the gap before the first token after the prompt is sent, and the gap after a tool completes before the next inference step begins.
     Model,
+    /// The model request waits for a slot under the agent's request cap.
+    Queued(RequestQueued),
     /// Blocked on a running foreground subagent (`task` / `spawn_subagent`). The view fills it in; the tracker always
     /// leaves it `None`.
     Subagent { display: Option<String> },
@@ -118,6 +119,12 @@ impl WaitingReason {
     pub fn label(&self) -> String {
         match self {
             Self::Model => "Waiting for response…".to_string(),
+            Self::Queued(RequestQueued { ahead: 0, limit }) => {
+                format!("Queued: {limit} model requests already running…")
+            }
+            Self::Queued(RequestQueued { ahead, limit }) => {
+                format!("Queued behind {ahead} more: {limit} model requests already running…")
+            }
             Self::Subagent { display } => match display.as_deref().map(clamp_activity_subject) {
                 Some(display) if !display.is_empty() => format!("{display}…"),
                 _ => "Waiting on subagent…".to_string(),
@@ -140,6 +147,7 @@ impl WaitingReason {
     pub fn as_telemetry_label(&self) -> &'static str {
         match self {
             Self::Model => "waiting_model",
+            Self::Queued(_) => "waiting_request_slot",
             Self::Subagent { .. } => "waiting_subagent",
             Self::TaskOutput { .. } => "waiting_task_output",
             Self::TasksComplete => "waiting_tasks_complete",
@@ -356,6 +364,15 @@ impl OutputRate {
     }
 }
 
+/// A model request that waits for a slot under `[ui].max_parallel_requests`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RequestQueued {
+    /// Requests queued ahead of this one.
+    pub ahead: u64,
+    /// The cap the queue is behind.
+    pub limit: u32,
+}
+
 /// Names one batch on both `HookRunStarted` and `HookExecution`; an outcome ends the phase only for the batch that armed it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HookBatchId {
@@ -495,6 +512,8 @@ pub struct AcpUpdateTracker {
     /// in flight, and holding the last one under an idle session would show a
     /// number nothing is producing.
     output_rate: Option<OutputRate>,
+    /// The model request waits for a slot under the agent's request cap.
+    request_queued: Option<RequestQueued>,
 
     /// Pending agent toolset from the most recent `AvailableCommandsUpdate.meta`.
     /// Format on the wire: `{"tools": ["read_file", ...]}`.
@@ -733,7 +752,10 @@ impl AcpUpdateTracker {
                 WaitingReason::TasksComplete => 1,
                 WaitingReason::Sleep => 2,
                 WaitingReason::Subagent { .. } => 3,
-                WaitingReason::Model | WaitingReason::PromptAck | WaitingReason::Hooks { .. } => 4,
+                WaitingReason::Model
+                | WaitingReason::Queued(_)
+                | WaitingReason::PromptAck
+                | WaitingReason::Hooks { .. } => 4,
             })
             .map(|w| w.reason.clone())
     }
@@ -1184,6 +1206,7 @@ impl AcpUpdateTracker {
         self.epoch_at_last_finish = self.agent_output_epoch;
         // Nothing is streaming any more, so there is no rate to show.
         self.output_rate = None;
+        self.request_queued = None;
         self.finish_thinking(scrollback);
         scrollback.note_pin_reserve_turn_finished();
         if let Some(agent_id) = self.current_agent_msg.take() {
@@ -1526,6 +1549,24 @@ impl AcpUpdateTracker {
     /// The model's live output rate, or `None` between responses.
     pub fn output_rate(&self) -> Option<OutputRate> {
         self.output_rate
+    }
+
+    /// Record that the session's model request waits for a slot. Returns
+    /// whether the screen changed.
+    pub fn set_request_queued(&mut self, queued: RequestQueued) -> bool {
+        let changed = self.request_queued != Some(queued);
+        self.request_queued = Some(queued);
+        changed
+    }
+
+    /// Forget the queue wait: the request got its slot, or the call ended.
+    pub fn clear_request_queued(&mut self) -> bool {
+        self.request_queued.take().is_some()
+    }
+
+    /// The queue wait of the session's model request, if it has one.
+    pub fn request_queued(&self) -> Option<RequestQueued> {
+        self.request_queued
     }
 
     /// The agent-reported session total (USD ticks), or `None` if the agent has

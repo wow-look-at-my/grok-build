@@ -28,6 +28,7 @@ pub mod handle;
 pub mod metrics;
 mod prewarm;
 mod request_compression;
+pub mod request_slots;
 pub mod retry;
 pub mod sampling_log;
 mod shared_http;
@@ -54,6 +55,10 @@ pub use events::{
 pub use handle::{CollectedSamplingResult, DoomLoopRecoveryAttempt, SamplerHandle};
 pub use metrics::{InferenceLatencyStats, compute_percentiles};
 pub use prewarm::{PrewarmOutcome, PrewarmReport, prewarm_transport};
+pub use request_slots::{
+    DEFAULT_MAX_PARALLEL_REQUESTS, QueueAwareElapsed, set_max_parallel_requests,
+    timeout_excluding_queue,
+};
 pub use retry::{
     DEFAULT_MAX_RETRIES, MAX_RETRY_BACKOFF, RATE_LIMIT_RETRY_DISABLED, RATE_LIMIT_RETRY_THRESHOLD,
     RetryDecision, STREAM_INTERRUPT_MAX_RETRIES, classify_error, format_sampling_error,

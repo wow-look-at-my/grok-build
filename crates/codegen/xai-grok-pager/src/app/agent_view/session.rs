@@ -1127,6 +1127,8 @@ impl AgentView {
         }
         let reason = if self.has_running_foreground_subagent() {
             WaitingReason::subagent()
+        } else if let Some(queued) = self.session.tracker.request_queued() {
+            WaitingReason::Queued(queued)
         } else {
             WaitingReason::Model
         };
@@ -1692,6 +1694,22 @@ mod resolve_turn_activity_tests {
     #[test]
     fn running_with_no_stream_waits_on_model() {
         let view = running_view();
+        assert_eq!(
+            view.resolve_turn_activity(),
+            Some(TurnActivity::Waiting(WaitingReason::Model))
+        );
+    }
+    #[test]
+    fn a_queued_request_says_so_until_it_leaves_the_queue() {
+        use crate::acp::tracker::RequestQueued;
+        let mut view = running_view();
+        let queued = RequestQueued { ahead: 1, limit: 7 };
+        assert!(view.session.tracker.set_request_queued(queued));
+        assert_eq!(
+            view.resolve_turn_activity(),
+            Some(TurnActivity::Waiting(WaitingReason::Queued(queued)))
+        );
+        assert!(view.session.tracker.clear_request_queued());
         assert_eq!(
             view.resolve_turn_activity(),
             Some(TurnActivity::Waiting(WaitingReason::Model))

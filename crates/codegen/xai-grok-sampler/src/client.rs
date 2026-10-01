@@ -1201,6 +1201,7 @@ impl SamplingClient {
         request: ChatCompletionRequest,
     ) -> Result<ChatCompletionResponse> {
         let payload = self.apply_defaults(request)?;
+        let _slot = crate::request_slots::acquire_unless_held().await;
         let x_grok_conv_id = &payload.x_grok_conv_id.clone().unwrap_or_default();
         let x_grok_req_id = &payload.x_grok_req_id.clone().unwrap_or_default();
         let model_id = payload.model.clone().unwrap_or_default();
@@ -1317,20 +1318,22 @@ impl SamplingClient {
         BoxStream<'static, Result<ChatCompletionChunk>>,
         Option<ResponseModelMetadata>,
     )> {
+        let slot = crate::request_slots::acquire_unless_held().await;
         let region = crate::span_timing::stream_span!(
             "http.chat_completion_stream",
             endpoint = %self.endpoint("chat/completions"),
             model_id = request.model.as_deref().unwrap_or(""),
         );
         self.adopt_traceparent(region.span(), request.traceparent.as_deref());
-        if region.span().is_disabled() {
-            self.chat_completion_stream_inner(request, region).await
+        let (chunks, metadata) = if region.span().is_disabled() {
+            self.chat_completion_stream_inner(request, region).await?
         } else {
             let span = region.span().clone();
             self.chat_completion_stream_inner(request, region)
                 .instrument(span)
-                .await
-        }
+                .await?
+        };
+        Ok((hold_slot(chunks, slot), metadata))
     }
 
     async fn chat_completion_stream_inner(
@@ -1572,6 +1575,7 @@ impl SamplingClient {
         mut request: CreateResponseWrapper,
     ) -> Result<rs::Response> {
         self.apply_response_defaults(&mut request)?;
+        let _slot = crate::request_slots::acquire_unless_held().await;
 
         let x_grok_conv_id = request.x_grok_conv_id.as_deref().unwrap_or_default();
         let x_grok_req_id = request.x_grok_req_id.as_deref().unwrap_or_default();
@@ -1689,20 +1693,22 @@ impl SamplingClient {
         Option<ResponseModelMetadata>,
         Option<crate::doom_loop::DoomLoopSignalCollector>,
     )> {
+        let slot = crate::request_slots::acquire_unless_held().await;
         let region = crate::span_timing::stream_span!(
             "http.create_response_stream",
             endpoint = %self.endpoint("responses"),
             model_id = request.inner.model.as_deref().unwrap_or(""),
         );
         self.adopt_traceparent(region.span(), request.traceparent.as_deref());
-        if region.span().is_disabled() {
-            self.create_response_stream_inner(request, region).await
+        let (events, metadata, doom_loop) = if region.span().is_disabled() {
+            self.create_response_stream_inner(request, region).await?
         } else {
             let span = region.span().clone();
             self.create_response_stream_inner(request, region)
                 .instrument(span)
-                .await
-        }
+                .await?
+        };
+        Ok((hold_slot(events, slot), metadata, doom_loop))
     }
 
     #[allow(clippy::type_complexity)]
@@ -1944,6 +1950,7 @@ impl SamplingClient {
         mut request: MessagesRequestWrapper,
     ) -> Result<messages::MessagesResponse> {
         self.apply_message_defaults(&mut request)?;
+        let _slot = crate::request_slots::acquire_unless_held().await;
 
         let x_grok_conv_id = request.x_grok_conv_id.as_deref().unwrap_or_default();
         let x_grok_req_id = request.x_grok_req_id.as_deref().unwrap_or_default();
@@ -2055,20 +2062,22 @@ impl SamplingClient {
         BoxStream<'static, Result<messages::MessageStreamEvent>>,
         Option<ResponseModelMetadata>,
     )> {
+        let slot = crate::request_slots::acquire_unless_held().await;
         let region = crate::span_timing::stream_span!(
             "http.create_message_stream",
             endpoint = %self.endpoint("messages"),
             model_id = request.inner.model.as_str(),
         );
         self.adopt_traceparent(region.span(), request.traceparent.as_deref());
-        if region.span().is_disabled() {
-            self.create_message_stream_inner(request, region).await
+        let (events, metadata) = if region.span().is_disabled() {
+            self.create_message_stream_inner(request, region).await?
         } else {
             let span = region.span().clone();
             self.create_message_stream_inner(request, region)
                 .instrument(span)
-                .await
-        }
+                .await?
+        };
+        Ok((hold_slot(events, slot), metadata))
     }
 
     async fn create_message_stream_inner(
@@ -2488,6 +2497,7 @@ impl SamplingClient {
 
         let model_id = request.model.clone().unwrap_or_default();
         let chat_request = build_ollama_chat_request(&request);
+        let slot = crate::request_slots::acquire_unless_held().await;
 
         let mut body = serde_json::to_value(&chat_request).map_err(SamplingError::Serialization)?;
         // `keep_alive`, `truncate` and `options.num_ctx` reach the wire from
@@ -2559,7 +2569,7 @@ impl SamplingClient {
 
         let model_metadata = extract_model_metadata(response.headers());
         let chunks = ndjson_chunk_stream(response.bytes_stream()).boxed();
-        Ok((chunks, model_metadata))
+        Ok((hold_slot(chunks, slot), model_metadata))
     }
 
     /// Send a conversation request using the Anthropic Messages API (non-streaming).
@@ -2641,6 +2651,23 @@ impl SamplingClient {
             .map(|(response, _metrics)| response)
             .map_err(stream_collect_error)?;
         apply_length_policy(length_policy, response)
+    }
+}
+
+/// Keep `slot` until the stream is dropped: the request is in flight for as
+/// long as its body is read.
+fn hold_slot<T: Send + 'static>(
+    stream: BoxStream<'static, T>,
+    slot: Option<crate::request_slots::RequestSlot>,
+) -> BoxStream<'static, T> {
+    match slot {
+        None => stream,
+        Some(slot) => stream
+            .map(move |item| {
+                let _held = &slot;
+                item
+            })
+            .boxed(),
     }
 }
 

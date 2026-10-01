@@ -930,7 +930,7 @@ impl SessionActor {
                         ..ConversationRequest::default()
                     };
                     let fut = sampling_client.conversation_collect(request);
-                    let response = tokio::time::timeout(classify_timeout, fut)
+                    let response = xai_grok_sampler::timeout_excluding_queue(classify_timeout, fut)
                         .await
                         .map_err(|_| xai_grok_workspace::permission::ClassifierFailure::Timeout)?
                         .map_err(|e| {

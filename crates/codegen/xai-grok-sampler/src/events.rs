@@ -142,6 +142,20 @@ pub enum SamplingEvent {
         doom_loop_aborted_at_chunk: Option<u64>,
     },
 
+    /// The attempt waits for a slot under the process-wide request cap.
+    /// `ahead` counts the requests queued before it.
+    Queued {
+        request_id: RequestId,
+        ahead: usize,
+        limit: u32,
+    },
+
+    /// The queued attempt got its slot and goes to the model now.
+    Dequeued {
+        request_id: RequestId,
+        waited_ms: u64,
+    },
+
     /// Request failed (after exhausting retries or non-retryable error).
     Failed {
         request_id: RequestId,
@@ -188,6 +202,8 @@ impl SamplingEvent {
             | Self::DoomLoopSignals { request_id, .. }
             | Self::ImagesStripped { request_id, .. }
             | Self::Retrying { request_id, .. }
+            | Self::Queued { request_id, .. }
+            | Self::Dequeued { request_id, .. }
             | Self::Failed { request_id, .. }
             | Self::ModelMetadata { request_id, .. }
             | Self::BackendToolCallStarted { request_id, .. }

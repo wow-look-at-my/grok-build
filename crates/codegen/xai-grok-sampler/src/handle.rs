@@ -69,6 +69,7 @@ impl SamplerHandle {
             request: Box::new(request),
             config: None,
             completion_tx: None,
+            queue_clock: crate::request_slots::current_queue_clock(),
         });
     }
 
@@ -84,6 +85,7 @@ impl SamplerHandle {
             request: Box::new(request),
             config: Some(Box::new(config)),
             completion_tx: None,
+            queue_clock: crate::request_slots::current_queue_clock(),
         });
     }
 
@@ -165,6 +167,7 @@ impl SamplerHandle {
                 request: Box::new(request),
                 config: None,
                 completion_tx: Some(completion_tx),
+                queue_clock: crate::request_slots::current_queue_clock(),
             })
             .ok()
             .map(|_| CancelOnDrop {

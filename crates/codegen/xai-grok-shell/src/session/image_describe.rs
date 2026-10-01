@@ -341,15 +341,18 @@ pub(crate) async fn describe_user_images(
         .with_temperature(0.2)
         .with_max_output_tokens(4_096);
     const DESCRIBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(240);
-    let response = tokio::time::timeout(DESCRIBE_TIMEOUT, client.conversation_collect(request))
-        .await
-        .map_err(|_| {
-            DescribeError::Sampling(format!(
-                "image describe call timed out after {}s",
-                DESCRIBE_TIMEOUT.as_secs()
-            ))
-        })?
-        .map_err(|e| DescribeError::Sampling(format!("{e}")))?;
+    let response = xai_grok_sampler::timeout_excluding_queue(
+        DESCRIBE_TIMEOUT,
+        client.conversation_collect(request),
+    )
+    .await
+    .map_err(|_| {
+        DescribeError::Sampling(format!(
+            "image describe call timed out after {}s",
+            DESCRIBE_TIMEOUT.as_secs()
+        ))
+    })?
+    .map_err(|e| DescribeError::Sampling(format!("{e}")))?;
     let text = response
         .assistant()
         .map(|a| a.content.as_ref().to_owned())

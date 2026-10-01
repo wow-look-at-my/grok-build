@@ -142,7 +142,7 @@ impl SessionActor {
             req_id: format!("xai-title-refresh-{}", uuid::Uuid::new_v4()),
         });
 
-        let response = match tokio::time::timeout(
+        let response = match xai_grok_sampler::timeout_excluding_queue(
             TITLE_REFRESH_MODEL_TIMEOUT,
             setup.client.conversation_collect(request),
         )
