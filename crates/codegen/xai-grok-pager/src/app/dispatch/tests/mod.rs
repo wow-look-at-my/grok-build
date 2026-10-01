@@ -55,7 +55,6 @@ use super::session::lifecycle::{dispatch_new_session_inner, drain_startup_action
 use super::session::load::{dispatch_load_session_with_restore, reanchor_grouped_selection};
 use super::session::modal::{
     dispatch_rename_session, dispatch_reset_session_title, dispatch_sessions_confirm_close,
-    drop_other_agents_in_minimal,
 };
 use super::settings::handle_feature_override_persisted;
 use super::settings::setters::set_default_model_inner;
@@ -130,7 +129,6 @@ fn test_app() -> AppView {
         auto_mode_gate: true,
         yolo_policy_block: None,
         yolo_launch_block_notice: None,
-        screen_mode_switch_hint: None,
         require_plan_approval: false,
         plan_mode: false,
         chat_mode: false,
@@ -198,7 +196,6 @@ fn test_app() -> AppView {
         coding_data_pending_write: None,
         coding_data_write_seq: 0,
         show_tips: None,
-        auto_update: None,
         ask_user_question_timeout_enabled: None,
         subagent_model_inheritance: crate::settings::FeatureOverrideState::new(
             xai_grok_shell::agent::config::Feature::SubagentModelInheritance,
@@ -283,21 +280,15 @@ fn test_app() -> AppView {
         welcome_shimmer_frame: 0,
         startup_warnings: Vec::new(),
         is_api_key_auth: false,
-        pending_update_version: None,
         foreign_resume_launch_generation: 0,
         foreign_resume_launch: None,
-        quit_for_update: false,
         trust_quit_error: None,
-        relaunch: None,
         import_claude_modal: None,
         welcome_doc_viewer: None,
         screen_mode: crate::app::ScreenMode::Inline,
-        pending_screen_mode_switch: None,
         pending_effects: Vec::new(),
         pending_editor: None,
         pending_pager_path: None,
-        pending_pager_ansi: false,
-        minimal_state: crate::minimal_api::MinimalState::default(),
         reconnect_pending: false,
         show_resolved_model: true,
         sharing_enabled: false,

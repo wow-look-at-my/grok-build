@@ -314,9 +314,9 @@ fn setting_row_visible_gates_voice_capture_on_key_releases() {
     let voice = meta_for(&reg, "voice_capture_mode");
     let vim = meta_for(&reg, "vim_mode");
     // voice_mode = true; kitty_releases varies.
-    assert!(!setting_row_visible(voice, false, false, true));
-    assert!(setting_row_visible(voice, true, false, true));
-    assert!(setting_row_visible(vim, false, false, true));
+    assert!(!setting_row_visible(voice, false, true));
+    assert!(setting_row_visible(voice, true, true));
+    assert!(setting_row_visible(vim, false, true));
 }
 
 #[test]
@@ -326,18 +326,18 @@ fn setting_row_visible_hides_voice_rows_when_voice_mode_off() {
     let capture = meta_for(&reg, "voice_capture_mode");
     let language = meta_for(&reg, "voice_stt_language");
     let vim = meta_for(&reg, "vim_mode");
-    // Gate off: all voice rows gone even with kitty releases and full TUI
-    assert!(!setting_row_visible(keybind, true, false, false));
-    assert!(!setting_row_visible(capture, true, false, false));
-    assert!(!setting_row_visible(language, true, false, false));
+    // Gate off: all voice rows gone even with kitty releases
+    assert!(!setting_row_visible(keybind, true, false));
+    assert!(!setting_row_visible(capture, true, false));
+    assert!(!setting_row_visible(language, true, false));
     // Non-voice rows unaffected.
-    assert!(setting_row_visible(vim, true, false, false));
+    assert!(setting_row_visible(vim, true, false));
     // Gate on: all visible (kitty releases for capture).
-    assert!(setting_row_visible(keybind, true, false, true));
-    assert!(setting_row_visible(capture, true, false, true));
-    assert!(setting_row_visible(language, true, false, true));
+    assert!(setting_row_visible(keybind, true, true));
+    assert!(setting_row_visible(capture, true, true));
+    assert!(setting_row_visible(language, true, true));
     // The keybind row (unlike capture) doesn't need key-release reporting.
-    assert!(setting_row_visible(keybind, false, false, true));
+    assert!(setting_row_visible(keybind, false, true));
 }
 
 #[test]
@@ -368,69 +368,6 @@ fn rebuild_rows_drops_voice_settings_when_gate_turns_off() {
         "rebuild after gate off must hide voice_stt_language"
     );
     crate::app::set_voice_mode_enabled_for_test(prev);
-}
-
-#[test]
-fn setting_row_visible_hides_theme_rows_when_hide_appearance() {
-    let reg = SettingsRegistry::defaults();
-    for key in [
-        "theme",
-        "auto_dark_theme",
-        "auto_light_theme",
-        "display_refresh_auto_cadence",
-    ] {
-        let meta = meta_for(&reg, key);
-        assert!(meta.hidden_in_minimal, "{key} must declare the flag");
-        assert!(
-            !setting_row_visible(meta, true, true, true),
-            "{key} when hide_appearance"
-        );
-        assert!(
-            setting_row_visible(meta, true, false, true),
-            "{key} when appearance rows stay visible"
-        );
-    }
-    assert!(setting_row_visible(
-        meta_for(&reg, "vim_mode"),
-        true,
-        true,
-        true
-    ));
-}
-
-#[test]
-fn new_with_row_visibility_controls_theme_row() {
-    let registry = Arc::new(SettingsRegistry::defaults());
-    let shown = SettingsModalState::new_with_row_visibility(
-        Arc::clone(&registry),
-        UiConfig::default(),
-        PagerLocalSnapshot::default(),
-        RowVisibility {
-            hide_appearance: false,
-        },
-    );
-    let hidden = SettingsModalState::new_with_row_visibility(
-        registry,
-        UiConfig::default(),
-        PagerLocalSnapshot::default(),
-        RowVisibility {
-            hide_appearance: true,
-        },
-    );
-    assert!(
-        shown
-            .rows
-            .iter()
-            .any(|r| matches!(r, RowEntry::Setting { key: "theme", .. })),
-        "hide_appearance false must list theme"
-    );
-    assert!(
-        !hidden
-            .rows
-            .iter()
-            .any(|r| matches!(r, RowEntry::Setting { key: "theme", .. })),
-        "hide_appearance true must hide theme"
-    );
 }
 
 /// `action_for_bool` mirrors `current_value_for`: every registered Bool setting must have an arm here too.
@@ -632,7 +569,6 @@ fn render_setting_row_selected_is_reversed_on_terminal_theme() {
         keywords: &["test"],
         kind: SettingKind::Bool { default: false },
         restart_required: false,
-        hidden_in_minimal: false,
     };
     let area = Rect {
         x: 0,
@@ -707,7 +643,6 @@ fn render_setting_row_shows_full_label_when_one_line_fits() {
         keywords: &["test"],
         kind: SettingKind::Bool { default: false },
         restart_required: false,
-        hidden_in_minimal: false,
     };
     let area = Rect {
         x: 0,
@@ -750,8 +685,8 @@ fn render_setting_row_shows_full_label_when_one_line_fits() {
 /// (3 bools + 3 enums + 1 int = 7 entries), the Editor entry
 /// `multiline_mode`, the Agent entries `permission_mode` and
 /// `plan_mode`, the Privacy entry `coding_data_sharing`, the
-/// Models entry `default_model`, and the Advanced entries `show_tips` and
-/// `auto_update`. `default_reasoning_effort` and
+/// Models entry `default_model`, and the Advanced entry `show_tips`.
+/// `default_reasoning_effort` and
 /// `auto_compact_threshold_percent` are not exposed in the modal.
 #[test]
 fn rows_contain_categories_and_settings_through_pr_14() {
@@ -779,7 +714,7 @@ fn rows_contain_categories_and_settings_through_pr_14() {
             &SettingCategory::Privacy,
             &SettingCategory::Models,
             // The Session category has no registered settings, so its header is not emitted
-            // Advanced category (first entries: `show_tips`, `auto_update`)
+            // Advanced category (first entry: `show_tips`)
             &SettingCategory::Advanced,
         ]
     );
@@ -802,7 +737,6 @@ fn rows_contain_categories_and_settings_through_pr_14() {
     let mut expected: Vec<SettingKey> = vec![
         // Booleans.
         "compact_mode",
-        "screen_mode",
         "show_timestamps",
         "show_timeline",
         "dashboard_preview",
@@ -898,7 +832,6 @@ fn rows_contain_categories_and_settings_through_pr_14() {
         // (`contextual_hints.{undo,plan_mode,image_input}`) are hidden
         // from the top-level list and reached via the sub-sheet.
         "contextual_hints",
-        "auto_update",
         // SHELL-owned hunk_tracker_mode (Advanced; `off` disables it).
         "hunk_tracker_mode",
     ]);
@@ -1608,7 +1541,6 @@ fn render_setting_row_emits_restart_pill_when_required() {
         keywords: &["test"],
         kind: SettingKind::Bool { default: false },
         restart_required: true,
-        hidden_in_minimal: false,
     };
     let area = Rect {
         x: 0,
@@ -1681,7 +1613,6 @@ fn render_setting_row_hides_restart_pill_when_at_default_and_collapsed() {
         keywords: &["test"],
         kind: SettingKind::Bool { default: false },
         restart_required: true,
-        hidden_in_minimal: false,
     };
     let area = Rect {
         x: 0,
@@ -1736,7 +1667,6 @@ fn editor_render_fixture(buffer: &str, cursor_byte: usize) -> SettingsModalState
             validator: StringValidator::KnownModel,
         },
         restart_required: false,
-        hidden_in_minimal: false,
     };
     let registry = SettingsRegistry::from_entries(vec![synthetic_meta]);
     let snapshot = PagerLocalSnapshot {
@@ -2586,7 +2516,6 @@ fn synthetic_enum_meta() -> SettingMeta {
             supports_preview: true,
         },
         restart_required: false,
-        hidden_in_minimal: false,
     }
 }
 
@@ -3098,7 +3027,6 @@ fn picker_string_original_value_fills_committed_marker() {
             supports_preview: false,
         },
         restart_required: false,
-        hidden_in_minimal: false,
     }];
     let mut s2 = SettingsModalState::new(
         Arc::new(SettingsRegistry::from_entries(entries)),
@@ -3326,7 +3254,6 @@ fn render_picker_drops_description_when_wrap_block_exceeds_height() {
             supports_preview: false,
         },
         restart_required: false,
-        hidden_in_minimal: false,
     };
     let registry = SettingsRegistry::from_entries(vec![synthetic_meta]);
     let mut s = SettingsModalState::new(
@@ -3385,7 +3312,6 @@ fn render_picker_long_description_wraps_no_ellipsis() {
             supports_preview: true,
         },
         restart_required: false,
-        hidden_in_minimal: false,
     }];
     let mut s = SettingsModalState::new(
         Arc::new(SettingsRegistry::from_entries(entries)),
@@ -3461,7 +3387,6 @@ fn picker_long_description_wraps_to_multiple_lines() {
             supports_preview: false,
         },
         restart_required: false,
-        hidden_in_minimal: false,
     }];
     let mut s = SettingsModalState::new(
         Arc::new(SettingsRegistry::from_entries(entries)),
@@ -3583,7 +3508,6 @@ fn picker_short_description_stays_one_line() {
             supports_preview: true,
         },
         restart_required: false,
-        hidden_in_minimal: false,
     }];
     let mut s = SettingsModalState::new(
         Arc::new(SettingsRegistry::from_entries(entries)),
@@ -3651,7 +3575,6 @@ fn picker_no_description_renders_symbol_and_display_only() {
             supports_preview: true,
         },
         restart_required: false,
-        hidden_in_minimal: false,
     }];
     let mut s = SettingsModalState::new(
         Arc::new(SettingsRegistry::from_entries(entries)),
@@ -3720,7 +3643,6 @@ fn picker_multi_line_choice_hit_rect_spans_all_lines() {
             supports_preview: false,
         },
         restart_required: false,
-        hidden_in_minimal: false,
     }];
     let mut s = SettingsModalState::new(
         Arc::new(SettingsRegistry::from_entries(entries)),
@@ -3838,7 +3760,6 @@ fn picker_scroll_offset_accounts_for_variable_height() {
             supports_preview: true,
         },
         restart_required: false,
-        hidden_in_minimal: false,
     }];
     let registry = Arc::new(SettingsRegistry::from_entries(entries));
     // Focus the LAST choice (c4); the scroll math must keep it in view
@@ -3907,7 +3828,6 @@ fn render_picker_truncates_long_display_with_ellipsis() {
             supports_preview: true,
         },
         restart_required: false,
-        hidden_in_minimal: false,
     }];
     let mut s = SettingsModalState::new(
         Arc::new(SettingsRegistry::from_entries(entries)),
@@ -3957,7 +3877,6 @@ fn render_picker_truncates_long_title_with_ellipsis() {
             supports_preview: true,
         },
         restart_required: false,
-        hidden_in_minimal: false,
     }];
     let mut s = SettingsModalState::new(
         Arc::new(SettingsRegistry::from_entries(entries)),
@@ -4035,7 +3954,6 @@ fn render_picker_shows_more_indicator_when_choices_overflow() {
             supports_preview: true,
         },
         restart_required: false,
-        hidden_in_minimal: false,
     }];
     let mut s = SettingsModalState::new(
         Arc::new(SettingsRegistry::from_entries(entries)),
@@ -4868,7 +4786,6 @@ fn synthetic_long_label_meta() -> SettingMeta {
         keywords: &["test"],
         kind: SettingKind::Bool { default: false },
         restart_required: false,
-        hidden_in_minimal: false,
     }
 }
 
@@ -4886,7 +4803,6 @@ fn synthetic_enum_chevron_meta() -> SettingMeta {
             supports_preview: true,
         },
         restart_required: false,
-        hidden_in_minimal: false,
     }
 }
 
@@ -5646,7 +5562,6 @@ fn bool_off_value_renders_in_dim_color() {
         keywords: &[],
         kind: SettingKind::Bool { default: false },
         restart_required: false,
-        hidden_in_minimal: false,
     };
     let area = Rect {
         x: 0,
@@ -5731,7 +5646,6 @@ fn chevron_column_is_at_constant_right_offset() {
         keywords: &[],
         kind: SettingKind::Bool { default: false },
         restart_required: false,
-        hidden_in_minimal: false,
     };
     let enum_meta = synthetic_enum_chevron_meta();
     let area = Rect {
@@ -6094,7 +6008,6 @@ fn picker_description_word_wraps_no_ellipsis() {
             supports_preview: false,
         },
         restart_required: false,
-        hidden_in_minimal: false,
     };
     let registry = SettingsRegistry::from_entries(vec![synthetic_meta]);
     let mut s = SettingsModalState::new(
@@ -7276,7 +7189,6 @@ fn max_thoughts_width_preview_only_renders_for_max_thoughts_width_key() {
             max: 200,
         },
         restart_required: false,
-        hidden_in_minimal: false,
     };
     let registry = SettingsRegistry::from_entries(vec![synthetic_meta]);
     let mut s = SettingsModalState::new(

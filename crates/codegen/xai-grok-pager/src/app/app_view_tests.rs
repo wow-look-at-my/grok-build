@@ -119,7 +119,6 @@ pub(crate) fn test_app() -> AppView {
         auto_mode_gate: true,
         yolo_policy_block: None,
         yolo_launch_block_notice: None,
-        screen_mode_switch_hint: None,
         require_plan_approval: false,
         plan_mode: false,
         subagents: false,
@@ -184,7 +183,6 @@ pub(crate) fn test_app() -> AppView {
         coding_data_pending_write: None,
         coding_data_write_seq: 0,
         show_tips: None,
-        auto_update: None,
         ask_user_question_timeout_enabled: None,
         subagent_model_inheritance: crate::settings::FeatureOverrideState::new(
             xai_grok_shell::agent::config::Feature::SubagentModelInheritance,
@@ -269,22 +267,16 @@ pub(crate) fn test_app() -> AppView {
         welcome_shimmer_frame: 0,
         startup_warnings: Vec::new(),
         is_api_key_auth: false,
-        pending_update_version: None,
         foreign_resume_launch_generation: 0,
         foreign_resume_launch: None,
-        quit_for_update: false,
         trust_quit_error: None,
-        relaunch: None,
         has_claude_import: false,
         import_claude_modal: None,
         welcome_doc_viewer: None,
         screen_mode: ScreenMode::Inline,
-        pending_screen_mode_switch: None,
         pending_effects: Vec::new(),
         pending_editor: None,
         pending_pager_path: None,
-        pending_pager_ansi: false,
-        minimal_state: crate::minimal_api::MinimalState::default(),
         reconnect_pending: false,
         show_resolved_model: true,
         sharing_enabled: false,
@@ -580,7 +572,7 @@ fn key_event(code: KeyCode, mods: KeyModifiers) -> Event {
 }
 /// Build a registry pinned to the non-VSCode bindings so tests are deterministic regardless of the host terminal.
 fn pin_non_vscode_registry(app: &mut AppView) {
-    let mut actions = crate::actions::default_actions(ScreenMode::Fullscreen, false);
+    let mut actions = crate::actions::default_actions(false);
     for def in actions.iter_mut() {
         if def.id == ActionId::Quit {
             def.default_key = key!('q', CONTROL);
@@ -2397,103 +2389,11 @@ fn welcome_ctrl_u_update_keeps_priority_over_foreign_resume() {
         app.handle_input(&key),
         InputOutcome::Action(Action::ResumeForeignSession)
     ));
-    app.pending_update_version = Some("9.9.9".into());
-    assert!(matches!(
-        app.handle_input(&key),
-        InputOutcome::Action(Action::QuitForUpdate)
-    ));
 }
 #[test]
-fn minimal_ctrl_g_edits_prompt_while_full_tui_keeps_tasks() {
+fn ctrl_g_toggles_tasks_pane() {
     let event = key_event(KeyCode::Char('g'), KeyModifiers::CONTROL);
-    let mut minimal = test_app_with_agent();
-    minimal.screen_mode = ScreenMode::Minimal;
-    minimal.registry = ActionRegistry::defaults_for(ScreenMode::Minimal);
     let id = super::super::agent::AgentId(0);
-    minimal
-        .agents
-        .get_mut(&id)
-        .unwrap()
-        .prompt
-        .set_screen_mode(ScreenMode::Minimal);
-    minimal
-        .agents
-        .get_mut(&id)
-        .unwrap()
-        .set_input_mode(crate::views::agent::InputMode::Vim);
-    assert_eq!(
-        minimal
-            .agents
-            .get(&id)
-            .unwrap_or_else(|| panic!("missing map entry"))
-            .active_pane,
-        crate::views::agent::ActivePane::Scrollback,
-        "Vim startup leaves the legacy pane field on Scrollback"
-    );
-    let out = minimal.handle_input(&event);
-    assert!(matches!(
-        out,
-        InputOutcome::Action(Action::EditPromptExternal)
-    ));
-    assert!(
-        !minimal
-            .agents
-            .get(&id)
-            .unwrap_or_else(|| panic!("missing map entry"))
-            .tasks
-            .overlay
-            .visible
-    );
-    assert!(
-        !minimal
-            .agents
-            .get(&id)
-            .unwrap_or_else(|| panic!("missing map entry"))
-            .tasks
-            .overlay
-            .focused
-    );
-    minimal.pending_editor = Some(
-        crate::app::external_editor::PendingEditorRequest::PromptDraft {
-            agent_id: id,
-            original_text: "already pending".to_owned(),
-        },
-    );
-    assert!(matches!(
-        minimal.handle_input(&event),
-        InputOutcome::Unchanged
-    ));
-    let mut owned = test_app_with_agent();
-    owned.screen_mode = ScreenMode::Minimal;
-    owned.registry = ActionRegistry::defaults_for(ScreenMode::Minimal);
-    owned
-        .agents
-        .get_mut(&id)
-        .unwrap()
-        .prompt
-        .suggestions
-        .dropdown
-        .open = true;
-    assert!(matches!(owned.handle_input(&event), InputOutcome::Changed));
-    assert!(owned.pending_editor.is_none());
-    assert!(
-        !owned
-            .agents
-            .get(&id)
-            .unwrap_or_else(|| panic!("missing map entry"))
-            .tasks
-            .overlay
-            .visible
-    );
-    assert!(
-        !owned
-            .agents
-            .get(&id)
-            .unwrap_or_else(|| panic!("missing map entry"))
-            .tasks
-            .overlay
-            .focused
-    );
     let mut full = test_app_with_agent();
     full.screen_mode = ScreenMode::Fullscreen;
     let out = full.handle_input(&event);
@@ -2517,198 +2417,17 @@ fn minimal_ctrl_g_edits_prompt_while_full_tui_keeps_tasks() {
     assert!(full.pending_editor.is_none());
 }
 #[test]
-fn minimal_ctrl_backslash_is_inert_while_full_modes_open_dashboard() {
+fn ctrl_backslash_opens_dashboard() {
     let event = key_event(KeyCode::Char('\\'), KeyModifiers::CONTROL);
-    let mut minimal = test_app_with_agent();
-    minimal.screen_mode = ScreenMode::Minimal;
-    minimal.registry = ActionRegistry::defaults_for(ScreenMode::Minimal);
-    assert!(matches!(
-        minimal.handle_input(&event),
-        InputOutcome::Unchanged
-    ));
-    assert!(minimal.dashboard.is_none());
     for mode in [ScreenMode::Fullscreen, ScreenMode::Inline] {
         let mut app = test_app_with_agent();
         app.screen_mode = mode;
-        app.registry = ActionRegistry::defaults_for(mode);
+        app.registry = ActionRegistry::defaults();
         assert!(matches!(
             app.handle_input(&event),
             InputOutcome::Action(Action::OpenDashboard)
         ));
     }
-}
-#[test]
-fn minimal_ctrl_t_toggles_todo_panel() {
-    let mut app = test_app_with_agent();
-    app.screen_mode = ScreenMode::Minimal;
-    assert!(!app.minimal_state.show_todos);
-    let out = app.handle_input(&key_event(KeyCode::Char('t'), KeyModifiers::CONTROL));
-    assert!(matches!(out, InputOutcome::Changed));
-    assert!(
-        app.minimal_state.show_todos,
-        "Ctrl+T pins the panel visible"
-    );
-    let _ = app.handle_input(&key_event(KeyCode::Char('t'), KeyModifiers::CONTROL));
-    assert!(
-        !app.minimal_state.show_todos,
-        "Ctrl+T again unpins the panel"
-    );
-}
-#[test]
-fn non_minimal_ctrl_t_leaves_todo_panel_flag_untouched() {
-    let mut app = test_app_with_agent();
-    app.screen_mode = ScreenMode::Inline;
-    assert!(!app.minimal_state.show_todos);
-    let _ = app.handle_input(&key_event(KeyCode::Char('t'), KeyModifiers::CONTROL));
-    assert!(
-        !app.minimal_state.show_todos,
-        "the minimal todo-panel flag must never flip outside minimal mode"
-    );
-}
-/// The minimal info-row transcript hint and the Ctrl+O key remap are gated on the same predicate.
-/// Ctrl+O opens the transcript pager unless it is the interject chord (Apple Terminal) AND an interject would actually consume the press.
-/// At idle with an empty composer and no queue the interject path is a silent no-op, so the remap keeps the key (it looked dead before).
-#[test]
-fn minimal_ctrl_o_transcript_predicate_tracks_interject_binding() {
-    let mut app = test_app_with_agent();
-    app.registry = ActionRegistry::non_vscode_for_mode_for_test(ScreenMode::Minimal);
-    assert!(
-        crate::minimal_api::minimal_ctrl_o_opens_transcript(&app),
-        "Ctrl+O opens the transcript when interject doesn't own the chord"
-    );
-    app.registry = ActionRegistry::apple_terminal_for_mode_for_test(ScreenMode::Minimal);
-    assert!(
-        crate::minimal_api::minimal_ctrl_o_opens_transcript(&app),
-        "idle + empty composer: Ctrl+O must open the transcript, not no-op"
-    );
-    let id = super::super::agent::AgentId(0);
-    app.agents.get_mut(&id).unwrap().session.state = AgentState::TurnRunning;
-    assert!(
-        crate::minimal_api::minimal_ctrl_o_opens_transcript(&app),
-        "running turn + empty composer + empty queue: still no interjection"
-    );
-    {
-        let agent = app.agents.get_mut(&id).unwrap();
-        agent.prompt.set_text("");
-        agent.session.enqueue_prompt("queued follow-up".into());
-    }
-    assert!(
-        !crate::minimal_api::minimal_ctrl_o_opens_transcript(&app),
-        "running + empty composer + queue: Ctrl+O must yield to send-now"
-    );
-    app.agents
-        .get_mut(&id)
-        .unwrap()
-        .session
-        .pending_prompts
-        .clear();
-    {
-        let agent = app.agents.get_mut(&id).unwrap();
-        agent.session.state = AgentState::Idle;
-        agent.running_wake_turn = Some(crate::app::agent_view::RunningWakeTurn {
-            prompt_id: "task-completed-bg1".into(),
-            cancel_sent: false,
-        });
-        agent.session.enqueue_prompt("queued during wake".into());
-    }
-    assert!(
-        !crate::minimal_api::minimal_ctrl_o_opens_transcript(&app),
-        "automatic wake + queue: Ctrl+O must yield to send-now"
-    );
-    {
-        let agent = app.agents.get_mut(&id).unwrap();
-        agent.session.pending_prompts.clear();
-        agent.session.enqueue_bash_command("echo queued".into());
-    }
-    assert!(
-        crate::minimal_api::minimal_ctrl_o_opens_transcript(&app),
-        "automatic wake + non-sendable queue: Ctrl+O must open the transcript"
-    );
-    {
-        let agent = app.agents.get_mut(&id).unwrap();
-        agent.running_wake_turn = None;
-        agent.session.pending_prompts.clear();
-        agent.session.state = AgentState::TurnRunning;
-    }
-    app.agents.get_mut(&id).unwrap().prompt.set_text("steer it");
-    assert!(
-        !crate::minimal_api::minimal_ctrl_o_opens_transcript(&app),
-        "running turn + payload: Ctrl+O must yield to interject"
-    );
-    {
-        let agent = app.agents.get_mut(&id).unwrap();
-        agent.session.state = AgentState::Idle;
-        agent.prompt_mode = PromptMode::EditingQueued {
-            id: 1,
-            original: String::new(),
-            server_id: None,
-            kind: crate::app::agent::QueueEntryKind::Prompt,
-        };
-    }
-    assert!(
-        !crate::minimal_api::minimal_ctrl_o_opens_transcript(&app),
-        "editing a queued row: Ctrl+O must stay the interject/save key"
-    );
-}
-/// In minimal mode Ctrl+O routes to `Action::OpenTranscriptPager` unless interject owns the chord AND would consume the press.
-/// See the predicate test above.
-#[test]
-fn minimal_ctrl_o_opens_transcript_pager() {
-    let mut app = test_app_with_agent();
-    app.screen_mode = ScreenMode::Minimal;
-    app.registry = ActionRegistry::non_vscode_for_mode_for_test(ScreenMode::Minimal);
-    let out = app.handle_input(&key_event(KeyCode::Char('o'), KeyModifiers::CONTROL));
-    assert!(
-        matches!(out, InputOutcome::Action(Action::OpenTranscriptPager)),
-        "expected OpenTranscriptPager, got {out:?}"
-    );
-}
-/// Apple Terminal (where interject is Ctrl+O), minimal mode: at idle the interject path would silently no-op, so Ctrl+O must open the transcript.
-/// With a running turn and text in the composer the same key must send-now (cancel-and-send).
-#[test]
-fn minimal_ctrl_o_on_apple_terminal_transcript_at_idle_interject_with_payload() {
-    let mut app = test_app_with_agent();
-    app.screen_mode = ScreenMode::Minimal;
-    app.registry = ActionRegistry::apple_terminal_for_mode_for_test(ScreenMode::Minimal);
-    let out = app.handle_input(&key_event(KeyCode::Char('o'), KeyModifiers::CONTROL));
-    assert!(
-        matches!(out, InputOutcome::Action(Action::OpenTranscriptPager)),
-        "idle Apple-Terminal Ctrl+O must open the transcript, got {out:?}"
-    );
-    let id = super::super::agent::AgentId(0);
-    {
-        let agent = app.agents.get_mut(&id).unwrap();
-        agent.session.state = AgentState::TurnRunning;
-        agent.prompt.set_text("steer it");
-    }
-    let out = app.handle_input(&key_event(KeyCode::Char('o'), KeyModifiers::CONTROL));
-    assert!(
-        matches!(out, InputOutcome::Action(Action::SendPromptNow { ref text, .. }) if text == "steer it"),
-        "running Apple-Terminal Ctrl+O with payload must send-now, got {out:?}"
-    );
-    {
-        let agent = app.agents.get_mut(&id).unwrap();
-        agent.prompt.set_text("");
-        agent.session.enqueue_prompt("queued follow-up".into());
-    }
-    let out = app.handle_input(&key_event(KeyCode::Char('o'), KeyModifiers::CONTROL));
-    assert!(
-        matches!(
-            out,
-            InputOutcome::Action(Action::InterruptWithQueuedPrompts)
-        ),
-        "running + empty + queue: Apple-Terminal Ctrl+O must interrupt with the queue, \
-         got {out:?}"
-    );
-    assert!(
-        !app.agents
-            .get(&id)
-            .unwrap_or_else(|| panic!("missing map entry"))
-            .session
-            .pending_prompts
-            .is_empty(),
-        "the row leaves the queue in dispatch, not in the key handler"
-    );
 }
 fn assert_background_routing_for_mode(
     mode: ScreenMode,
@@ -2717,7 +2436,7 @@ fn assert_background_routing_for_mode(
 ) {
     let mut app = test_app_with_agent();
     app.screen_mode = mode;
-    app.registry = ActionRegistry::defaults_for(mode);
+    app.registry = ActionRegistry::defaults();
     let ActiveView::Agent(id) = app.active_view else {
         panic!("test app must start on an agent");
     };
@@ -2778,8 +2497,8 @@ fn assert_background_routing_for_mode(
     );
 }
 #[test]
-fn raw_ctrl_b_routes_like_canonical_in_full_and_minimal_modes() {
-    for mode in [ScreenMode::Fullscreen, ScreenMode::Minimal] {
+fn raw_ctrl_b_routes_like_canonical() {
+    for mode in [ScreenMode::Fullscreen] {
         for pane in [
             crate::app::agent_view::AgentPane::Prompt,
             crate::app::agent_view::AgentPane::Scrollback,
@@ -2791,24 +2510,6 @@ fn raw_ctrl_b_routes_like_canonical_in_full_and_minimal_modes() {
             );
         }
     }
-}
-/// Minimal maps the full-TUI queue chord to `/queue` because the pane is absent.
-#[test]
-fn minimal_toggle_queue_chord_shows_queue_block() {
-    let mut app = test_app_with_agent();
-    app.screen_mode = ScreenMode::Minimal;
-    app.registry = ActionRegistry::non_vscode_for_mode_for_test(ScreenMode::Minimal);
-    let out = app.handle_input(&key_event(KeyCode::Char(';'), KeyModifiers::CONTROL));
-    assert!(
-        matches!(out, InputOutcome::Action(Action::ShowQueue)),
-        "expected ShowQueue, got {out:?}"
-    );
-    app.screen_mode = ScreenMode::Fullscreen;
-    let out = app.handle_input(&key_event(KeyCode::Char(';'), KeyModifiers::CONTROL));
-    assert!(
-        !matches!(out, InputOutcome::Action(Action::ShowQueue)),
-        "full TUI must keep the queue-pane toggle, got {out:?}"
-    );
 }
 fn welcome_session_entry(id: &str) -> SessionPickerEntry {
     SessionPickerEntry {
@@ -3383,7 +3084,6 @@ fn prompt_paging_scope_matches_agent_surface() {
             Surface::Agent(ScreenMode::Fullscreen),
             true,
         ),
-        ("minimal agent", Surface::Agent(ScreenMode::Minimal), false),
         (
             "dashboard session overlay",
             Surface::DashboardOverlay,
@@ -3518,7 +3218,7 @@ fn ctrl_d_double_press_quits_from_prompt() {
 #[test]
 fn ctrl_d_in_vscode_quits_from_scrollback() {
     let mut app = test_app_with_agent();
-    let mut actions = crate::actions::default_actions(ScreenMode::Fullscreen, false);
+    let mut actions = crate::actions::default_actions(false);
     for def in actions.iter_mut() {
         if def.id == ActionId::Quit {
             def.default_key = key!('d', CONTROL);
@@ -3795,14 +3495,13 @@ fn ctrl_c_running_prompt_with_text_clears_text_and_preserves_turn() {
     );
 }
 /// Mid-turn Esc is swallowed at the app level too: no `CancelTurn`, no armed double-press, no trigger stamp, draft intact, and a toast naming Ctrl+C.
-/// Covers both panes, vim on and off, and the minimal screen mode (which used to Esc-cancel regardless of vim).
+/// Covers both panes, vim on and off.
 #[test]
 fn esc_mid_turn_hints_ctrl_c_instead_of_cancelling() {
-    for (vim_mode, minimal, pane) in [
-        (false, false, crate::views::agent::ActivePane::Prompt),
-        (true, false, crate::views::agent::ActivePane::Prompt),
-        (true, true, crate::views::agent::ActivePane::Prompt),
-        (false, false, crate::views::agent::ActivePane::Scrollback),
+    for (vim_mode, pane) in [
+        (false, crate::views::agent::ActivePane::Prompt),
+        (true, crate::views::agent::ActivePane::Prompt),
+        (false, crate::views::agent::ActivePane::Scrollback),
     ] {
         let mut app = test_app_with_agent();
         let id = super::super::agent::AgentId(0);
@@ -3810,14 +3509,9 @@ fn esc_mid_turn_hints_ctrl_c_instead_of_cancelling() {
         agent.session.state = AgentState::TurnRunning;
         agent.active_pane = pane;
         agent.vim_mode = vim_mode;
-        if minimal {
-            agent
-                .prompt
-                .set_screen_mode(crate::app::ScreenMode::Minimal);
-        }
         agent.prompt.textarea.set_text("draft while streaming");
         let outcome = app.handle_input(&key_event(KeyCode::Esc, KeyModifiers::NONE));
-        let ctx = format!("vim={vim_mode} minimal={minimal} pane={pane:?}");
+        let ctx = format!("vim={vim_mode} pane={pane:?}");
         assert!(
             matches!(outcome, InputOutcome::Changed),
             "{ctx}: mid-turn Esc must swallow, got {outcome:?}"
@@ -3853,27 +3547,16 @@ fn esc_mid_turn_hints_ctrl_c_instead_of_cancelling() {
                 .text(),
             "{ctx}: the draft is preserved"
         );
-        if minimal {
-            assert!(
-                app.agents
-                    .get(&id)
-                    .unwrap_or_else(|| panic!("missing map entry"))
-                    .toast
-                    .is_none(),
-                "{ctx}"
-            );
-        } else {
-            assert_eq!(
-                Some("Press Ctrl+c to cancel the turn"),
-                app.agents
-                    .get(&id)
-                    .unwrap_or_else(|| panic!("missing map entry"))
-                    .toast
-                    .as_ref()
-                    .map(|(msg, _)| msg.as_str()),
-                "{ctx}: the toast names the cancel key"
-            );
-        }
+        assert_eq!(
+            Some("Press Ctrl+c to cancel the turn"),
+            app.agents
+                .get(&id)
+                .unwrap_or_else(|| panic!("missing map entry"))
+                .toast
+                .as_ref()
+                .map(|(msg, _)| msg.as_str()),
+            "{ctx}: the toast names the cancel key"
+        );
     }
 }
 /// A manual `/compact` in flight (CommandRunning) and a streaming wake turn (pane state Idle) get the same hint, not a cancel.
@@ -3957,23 +3640,6 @@ fn esc_during_compact_or_wake_turn_hints_instead_of_cancelling() {
             .as_ref()
             .map(|(msg, _)| msg.as_str())
     );
-}
-#[test]
-fn streaming_wake_turn_counts_as_running_for_minimal_commit() {
-    let mut app = test_app_with_agent();
-    let id = super::super::agent::AgentId(0);
-    let agent = app.agents.get_mut(&id).unwrap();
-    assert!(agent.session.state.is_idle());
-    assert!(!crate::minimal_api::is_turn_or_wake_running(agent));
-    agent.note_streaming_wake_turn("subagent-completed-abc");
-    assert!(
-        crate::minimal_api::is_turn_or_wake_running(agent),
-        "a streaming wake turn must hold the minimal commit frontier"
-    );
-    agent.running_wake_turn = None;
-    assert!(!crate::minimal_api::is_turn_or_wake_running(agent));
-    agent.session.state = AgentState::TurnRunning;
-    assert!(crate::minimal_api::is_turn_or_wake_running(agent));
 }
 /// While "Cancelling…" Esc is swallowed silently: it neither re-sends the cancel nor hints at Ctrl+C (which escalates toward quit in this state).
 #[test]
@@ -4754,12 +4420,12 @@ fn running_bash_mode_empty_esc_exits_mode_not_cancel() {
     );
 }
 #[test]
-fn tab_from_prompt_follows_screen_mode_registry() {
+fn tab_from_prompt_focuses_scrollback() {
     let id = super::super::agent::AgentId(0);
     for mode in [ScreenMode::Fullscreen, ScreenMode::Inline] {
         let mut app = test_app_with_agent();
         app.screen_mode = mode;
-        app.registry = ActionRegistry::defaults_for(mode);
+        app.registry = ActionRegistry::defaults();
         app.agents.get_mut(&id).unwrap().active_pane = crate::views::agent::ActivePane::Prompt;
         let outcome = app.handle_input(&key_event(KeyCode::Tab, KeyModifiers::NONE));
         assert!(matches!(
@@ -4767,20 +4433,6 @@ fn tab_from_prompt_follows_screen_mode_registry() {
             InputOutcome::Action(Action::FocusScrollback)
         ));
     }
-    let mut minimal = test_app_with_agent();
-    minimal.screen_mode = ScreenMode::Minimal;
-    minimal.registry = ActionRegistry::defaults_for(ScreenMode::Minimal);
-    minimal.agents.get_mut(&id).unwrap().active_pane = crate::views::agent::ActivePane::Prompt;
-    let outcome = minimal.handle_input(&key_event(KeyCode::Tab, KeyModifiers::NONE));
-    assert!(matches!(outcome, InputOutcome::Unchanged));
-    assert_eq!(
-        minimal
-            .agents
-            .get(&id)
-            .unwrap_or_else(|| panic!("missing map entry"))
-            .active_pane,
-        crate::views::agent::ActivePane::Prompt
-    );
 }
 #[test]
 fn prompt_focused_printable_chars_still_go_to_textarea() {
@@ -7845,24 +7497,6 @@ fn plain_agent_ctrl_x_does_not_arm_overlay_stop() {
 /// When the attached agent disappears externally,
 /// the `handle_input` filter must clear `attached_agent`
 /// immediately rather than waiting for the next draw frame.
-#[test]
-fn minimal_double_ctrl_c_arms_then_quits() {
-    let prev = crate::app::minimal_mode_active();
-    crate::app::set_minimal_mode_active_for_test(true);
-    let mut app = test_app_with_agent();
-    if let ActiveView::Agent(id) = app.active_view {
-        app.agents.get_mut(&id).unwrap().active_pane = crate::views::agent::ActivePane::Prompt;
-    }
-    let o1 = app.handle_input(&key_event(KeyCode::Char('c'), KeyModifiers::CONTROL));
-    let armed = app.pending_action.is_some();
-    let o2 = app.handle_input(&key_event(KeyCode::Char('c'), KeyModifiers::CONTROL));
-    crate::app::set_minimal_mode_active_for_test(prev);
-    assert!(armed, "first Ctrl+C should arm quit (o1={o1:?})");
-    assert!(
-        matches!(o2, InputOutcome::Action(crate::app::actions::Action::Quit)),
-        "second Ctrl+C should quit (o2={o2:?})"
-    );
-}
 #[test]
 fn handle_input_clears_stale_attached_agent_on_input() {
     let mut app = test_app_with_agent();

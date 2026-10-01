@@ -479,10 +479,6 @@ pub(super) fn apply_recap_block(agent: &mut AgentView, auto: bool, recap_block: 
             .filter(|&id| agent.scrollback.get_by_id(id).is_some())
     };
     match fill_id {
-        Some(id) if agent.scrollback.is_committed(id) => {
-            agent.scrollback.remove_entry(id);
-            agent.scrollback.push_block(recap_block);
-        }
         Some(id) => {
             if let Some(entry) = agent.scrollback.get_by_id_mut(id) {
                 entry.block = recap_block;

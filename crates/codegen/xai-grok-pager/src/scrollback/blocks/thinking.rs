@@ -13,8 +13,7 @@ use super::markdown_content::MarkdownContent;
 use super::quote_bar::QuoteBarStrip;
 use crate::appearance::AppearanceConfig;
 
-/// TODO: hard-coded because `AppView::minimal_key_intercept` matches this chord literally instead of going through the keybinding registry.
-/// Resolve the label from the registry once it does, so a remap is advertised correctly.
+/// TODO: resolve the label from the keybinding registry, so a remap is advertised correctly.
 const EXPAND_HINT: &str = "ctrl+e to expand";
 
 const EXPAND_HINT_GAP: &str = "  ";

@@ -29,7 +29,6 @@ mod tests {
     use crate::acp::model_state::ModelState;
     use crate::app::bundle::BundleState;
     use crate::settings::PagerLocalSnapshot;
-    use crate::slash::ModeSupport;
 
     static DEFAULT_BUNDLE_STATE: BundleState = BundleState {
         has_cache: false,
@@ -55,7 +54,6 @@ mod tests {
                 workflows_available: available,
                 saved_workflows: &[],
                 workflow_runs: &[],
-                screen_mode: crate::app::ScreenMode::Fullscreen,
                 current_title: None,
             };
             assert!(WorkflowsCommand.visible(&ctx));
@@ -63,13 +61,12 @@ mod tests {
     }
 
     #[test]
-    fn workflows_opens_catalog_tab_in_both_modes() {
+    fn workflows_opens_catalog_tab() {
         let models = ModelState::default();
         let mut ctx = CommandExecCtx {
             models: &models,
             session_id: None,
             bundle_state: &DEFAULT_BUNDLE_STATE,
-            screen_mode: crate::app::ScreenMode::Minimal,
             billing_surface_visible: true,
             usage_command_visible: true,
             pager_state: PagerLocalSnapshot::default(),
@@ -81,7 +78,5 @@ mod tests {
                 trigger: ExtensionsModalTrigger::SlashCommand,
             })
         ));
-        // Parity with /skills: the modal renders in minimal mode too.
-        assert!(matches!(WorkflowsCommand.mode_support(), ModeSupport::Both));
     }
 }

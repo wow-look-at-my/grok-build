@@ -44,7 +44,6 @@ impl AgentView {
             self.last_applied_event_seq = None;
             self.last_applied_xai_event_seq = None;
             self.deferred_subagent_finishes.clear();
-            self.clear_minimal_btw_lifecycle();
             self.clear_kept_plan();
         }
         self.session.session_id = Some(session_id);
@@ -80,7 +79,6 @@ impl AgentView {
         if self.session.session_id.take().is_some() {
             self.session_binding_epoch = self.session_binding_epoch.wrapping_add(1);
             self.deferred_subagent_finishes.clear();
-            self.clear_minimal_btw_lifecycle();
             self.clear_kept_plan();
         }
     }
@@ -355,7 +353,6 @@ impl AgentView {
             agents_modal: None,
             persona_detail: None,
             btw_state: None,
-            minimal_btw_lifecycle: None,
             btw_focused: false,
             hit_btw_close: Default::default(),
             toast: None,
@@ -446,7 +443,6 @@ impl AgentView {
             input_log: crate::input_log::InputRingBuffer::new(),
             esc_pressed_at: None,
             rewind_suppress_deadline: None,
-            minimal_cancel_hint_turn: None,
             pending_first_prompt: None,
             pending_fork_banner: None,
             loading_placeholder_id: None,
@@ -605,10 +601,6 @@ impl AgentView {
         self.turn_paused_wall +=
             wall_since_ms(qv.opened_at_wall_ms, chrono::Utc::now().timestamp_millis());
     }
-    /// Invalidate and clear a minimal `/btw` lifecycle at a session boundary.
-    pub(crate) fn clear_minimal_btw_lifecycle(&mut self) {
-        crate::minimal_api::clear_minimal_btw(self);
-    }
     /// How long leftover `isReplay` updates stay accepted after `loading_replay` clears.
     /// Long enough for the FIFO to drain another session's ACP events from its head after the Unrelated firehose timeout releases the load barrier.
     pub(crate) const LATE_REPLAY_GRACE: std::time::Duration = std::time::Duration::from_secs(30);
@@ -626,7 +618,6 @@ impl AgentView {
     }
     /// Enter a `session/load` replay window: the fields coupled to that transition (including `cancel_latency`) reset together in one place.
     pub(crate) fn begin_replay_window(&mut self) {
-        self.clear_minimal_btw_lifecycle();
         self.session.loading_replay = true;
         self.replayed_terminal_prompts.clear();
         self.replayed_visible_prompts.clear();
@@ -1443,7 +1434,6 @@ impl AgentView {
         billing_surface_visible: bool,
         usage_command_visible: bool,
         chat_mode: bool,
-        screen_mode: crate::app::ScreenMode,
         announcements: &[xai_grok_announcements::RemoteAnnouncement],
         restricted_commands: &[String],
     ) {
@@ -1451,7 +1441,6 @@ impl AgentView {
         self.set_billing_surface_visible(billing_surface_visible);
         self.set_usage_command_visible(usage_command_visible);
         self.app_chat_mode = chat_mode;
-        self.prompt.set_screen_mode(screen_mode);
         self.set_dashboard_visible(crate::views::dashboard::dashboard_enabled());
         self.set_has_session_announcements(crate::views::announcements::has_session_announcements(
             announcements,
@@ -2415,31 +2404,6 @@ mod status_window_tests {
             "rebinding the same id is reconnect, not a new session"
         );
     }
-    #[test]
-    fn session_rebind_and_replay_invalidate_minimal_btw() {
-        let mut agent = test_agent_view(Some("s1"), std::path::PathBuf::from("/tmp"));
-        let old_request = crate::minimal_api::start_minimal_btw(&mut agent, "old question".into());
-        agent.bind_session_id(agent_client_protocol::SessionId::new("s2"));
-        assert!(agent.btw_state.is_none());
-        assert!(agent.minimal_btw_lifecycle.is_none());
-        assert!(!crate::minimal_api::finish_minimal_btw(
-            &mut agent,
-            old_request,
-            Ok("old answer".into())
-        ));
-        assert!(agent.btw_state.is_none());
-        let replay_request =
-            crate::minimal_api::start_minimal_btw(&mut agent, "pre-replay question".into());
-        agent.begin_replay_window();
-        assert!(agent.btw_state.is_none());
-        assert!(agent.minimal_btw_lifecycle.is_none());
-        assert!(!crate::minimal_api::finish_minimal_btw(
-            &mut agent,
-            replay_request,
-            Ok("pre-replay answer".into())
-        ));
-        assert!(agent.btw_state.is_none());
-    }
 }
 #[cfg(test)]
 mod reconnect_workflow_maps_tests {
@@ -2630,10 +2594,7 @@ mod auto_recap_eligibility_tests {
         assert!(!agent.is_eligible_for_auto_recap(), "running turn");
         agent.session.state = AgentState::Idle;
         agent.active_modal = Some(crate::views::modal::ActiveModal::CommandPalette {
-            entries: crate::views::modal::default_palette_entries(
-                agent.sharing_enabled,
-                &agent.prompt.slash_controller,
-            ),
+            entries: crate::views::modal::default_palette_entries(agent.sharing_enabled),
             state: crate::views::picker::PickerState::input_active(),
             window: crate::views::modal_window::ModalWindowState::new(),
         });

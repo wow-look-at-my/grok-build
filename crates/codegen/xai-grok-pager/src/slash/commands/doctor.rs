@@ -111,7 +111,6 @@ mod tests {
             models: &models,
             session_id: None,
             bundle_state: &bundle,
-            screen_mode: crate::app::ScreenMode::Inline,
             billing_surface_visible: true,
             usage_command_visible: true,
             pager_state: crate::settings::PagerLocalSnapshot::default(),
@@ -177,7 +176,6 @@ mod tests {
             workflows_available: false,
             saved_workflows: &[],
             workflow_runs: &[],
-            screen_mode: crate::app::ScreenMode::Inline,
             current_title: None,
         };
         let command = DoctorCommand;

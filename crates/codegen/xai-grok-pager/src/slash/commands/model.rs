@@ -477,7 +477,6 @@ mod tests {
             workflows_available: true,
             saved_workflows: &[],
             workflow_runs: &[],
-            screen_mode: crate::app::ScreenMode::Fullscreen,
             current_title: None,
         }
     }
@@ -730,7 +729,6 @@ mod tests {
             models,
             session_id: None,
             bundle_state: &EMPTY_BUNDLE,
-            screen_mode: crate::app::ScreenMode::Inline,
             billing_surface_visible: true,
             usage_command_visible: true,
             pager_state: crate::settings::PagerLocalSnapshot {
@@ -781,7 +779,6 @@ mod tests {
             workflows_available: true,
             saved_workflows: &[],
             workflow_runs: &[],
-            screen_mode: crate::app::ScreenMode::Fullscreen,
             current_title: None,
         };
         let items = cmd.suggest_args(&ctx, "").unwrap();
@@ -816,7 +813,6 @@ mod tests {
             workflows_available: true,
             saved_workflows: &[],
             workflow_runs: &[],
-            screen_mode: crate::app::ScreenMode::Fullscreen,
             current_title: None,
         };
         // The args query has a trailing space, so this is the effort phase
@@ -858,7 +854,6 @@ mod tests {
             workflows_available: true,
             saved_workflows: &[],
             workflow_runs: &[],
-            screen_mode: crate::app::ScreenMode::Fullscreen,
             current_title: None,
         };
         // The preselection must name a row `suggest_args` actually builds, or the consumers fall back to row 0
@@ -887,7 +882,6 @@ mod tests {
             workflows_available: true,
             saved_workflows: &[],
             workflow_runs: &[],
-            screen_mode: crate::app::ScreenMode::Fullscreen,
             current_title: None,
         };
         // Still in effort phase; the matcher upstream narrows to high and xhigh
@@ -911,7 +905,6 @@ mod tests {
             workflows_available: true,
             saved_workflows: &[],
             workflow_runs: &[],
-            screen_mode: crate::app::ScreenMode::Fullscreen,
             current_title: None,
         };
         // No trailing space: the user is still typing the model name

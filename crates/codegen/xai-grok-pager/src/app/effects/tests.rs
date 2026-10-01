@@ -164,10 +164,10 @@ fn plain_prompt_block_no_meta_when_ranges_empty() {
 /// With a screen mode, `_meta` carries both `promptId` and `screenMode` (the shell threads the latter into `prompt_submitted.screen_mode`).
 #[test]
 fn prompt_request_meta_stamps_screen_mode() {
-    let meta = prompt_request_meta("p-1", Some("minimal"));
+    let meta = prompt_request_meta("p-1", Some("inline"));
     assert_eq!(
             meta,
-            serde_json::json!({ "promptId": "p-1", "screenMode": "minimal" })
+            serde_json::json!({ "promptId": "p-1", "screenMode": "inline" })
         );
 }
 /// Without a screen mode (`SessionFlags::default()` in tests), the key is omitted; the legacy `{"promptId": …}` wire shape stays byte-identical.
@@ -2823,71 +2823,34 @@ fn make_session_info(
         },
     }
 }
-#[test]
-fn format_session_info_session_auth_ignores_api_key_env() {
-    let info = make_session_info("auto", None, 1000, 10000);
-    let text = format_session_info(&info, None, false, false, true);
-    assert!(text.contains("Auth method: OAuth"), "{text}");
-    assert!(!text.contains("Manage account and credits"), "{text}");
-    assert!(!text.contains("Also present: XAI_API_KEY"), "{text}");
-    assert!(!text.contains("console.x.ai"), "{text}");
-    assert!(!text.contains("grok login"), "{text}");
+/// One `Label: value` line per `/session-info` row.
+fn session_info_text(
+    info: &xai_grok_shell::session::SessionInfoResponse,
+    show_resolved_model: bool,
+) -> String {
+    session_info_fields(info, None, show_resolved_model)
+        .iter()
+        .map(|f| format!("{}: {}\n", f.label, f.value))
+        .collect()
 }
 #[test]
-fn format_session_info_api_key_without_env() {
-    let info = make_session_info("auto", None, 1000, 10000);
-    let text = format_session_info(&info, None, false, true, false);
-    assert!(text.contains("Auth method: API key\n"), "{text}");
-    assert!(!text.contains("XAI_API_KEY"), "{text}");
-    assert!(!text.contains("Manage account and credits"), "{text}");
-    assert!(
-            text.contains("Run `grok login` to use your SuperGrok subscription instead."),
-            "{text}"
-        );
-    assert!(!text.contains("grok.com"), "{text}");
-}
-#[test]
-fn format_session_info_api_key_auth_suggests_grok_login() {
-    let info = make_session_info("auto", None, 1000, 10000);
-    let text = format_session_info(&info, None, false, true, true);
-    assert!(text.contains("Auth method: API key (XAI_API_KEY)"), "{text}");
-    assert!(!text.contains("Manage account and credits"), "{text}");
-    assert!(
-            text.contains("Run `grok login` to use your SuperGrok subscription instead."),
-            "{text}"
-        );
-    assert!(!text.contains("Also present: XAI_API_KEY"), "{text}");
-    assert!(!text.contains("console.x.ai"), "{text}");
-    assert!(!text.contains("grok.com"), "{text}");
-}
-#[test]
-fn format_session_info_session_only_shows_oauth() {
-    let info = make_session_info("auto", None, 1000, 10000);
-    let text = format_session_info(&info, None, false, false, false);
-    assert!(text.contains("Auth method: OAuth"), "{text}");
-    assert!(!text.contains("Manage account and credits"), "{text}");
-    assert!(!text.contains("Also present: XAI_API_KEY"), "{text}");
-    assert!(!text.contains("console.x.ai"), "{text}");
-    assert!(!text.contains("grok login"), "{text}");
-}
-#[test]
-fn format_session_info_shows_conversation_id_when_present() {
+fn session_info_fields_shows_conversation_id_when_present() {
     let mut info = make_session_info("auto", None, 1000, 10000);
     info.data.conversation_id = Some("conv_abc123".into());
-    let text = format_session_info(&info, None, false, false, false);
+    let text = session_info_text(&info, false);
     assert!(text.contains("Conversation ID: conv_abc123"));
     assert!(text.contains("Session ID: test-session-id"));
 }
 #[test]
-fn format_session_info_shows_resolved_when_enabled_and_different() {
+fn session_info_fields_shows_resolved_when_enabled_and_different() {
     let info = make_session_info("grok-4.5", Some("grok-4.3"), 1000, 10000);
-    let text = format_session_info(&info, None, true, false, false);
+    let text = session_info_text(&info, true);
     assert!(text.contains("Model: grok-4.5 (grok-4.3)"));
 }
 #[test]
-fn format_session_info_hides_resolved_when_disabled() {
+fn session_info_fields_hides_resolved_when_disabled() {
     let info = make_session_info("grok-4.5", Some("grok-4.3"), 1000, 10000);
-    let text = format_session_info(&info, None, false, false, false);
+    let text = session_info_text(&info, false);
     assert!(text.contains("Model: grok-4.5"));
     assert!(!text.contains("grok-4.3"));
 }
@@ -2921,34 +2884,34 @@ async fn lookup_session_title_loads_single_summary_by_cwd() {
     assert_eq!(title.as_deref(), Some("Renamed title"));
 }
 #[test]
-fn format_session_info_no_parens_when_resolved_matches_requested() {
+fn session_info_fields_no_parens_when_resolved_matches_requested() {
     let info = make_session_info("grok-4.5", Some("grok-4.5"), 1000, 10000);
-    let text = format_session_info(&info, None, true, false, false);
+    let text = session_info_text(&info, true);
     assert!(text.contains("Model: grok-4.5"));
     assert!(!text.contains("(grok-4.5)"));
 }
 #[test]
-fn format_session_info_shows_model_hash_when_catalog_flag_set() {
+fn session_info_fields_shows_model_hash_when_catalog_flag_set() {
     let mut info = make_session_info("v9", None, 1000, 10000);
     info.data.model_fingerprint = Some("abc123".into());
     info.data.show_model_fingerprint = true;
-    let text = format_session_info(&info, None, false, false, false);
+    let text = session_info_text(&info, false);
     assert!(text.contains("Model Hash: abc123"));
 }
 #[test]
-fn format_session_info_hides_model_hash_for_noncoding_without_flag() {
+fn session_info_fields_hides_model_hash_for_noncoding_without_flag() {
     let mut info = make_session_info("v9", None, 1000, 10000);
     info.data.model_fingerprint = Some("abc123".into());
     info.data.show_model_fingerprint = false;
-    let text = format_session_info(&info, None, false, false, false);
+    let text = session_info_text(&info, false);
     assert!(!text.contains("Model Hash"));
 }
 #[test]
-fn format_session_info_hides_model_hash_for_coding_slug_without_flag() {
+fn session_info_fields_hides_model_hash_for_coding_slug_without_flag() {
     let mut info = make_session_info("grok-4.6", None, 1000, 10000);
     info.data.model_fingerprint = Some("abc123".into());
     info.data.show_model_fingerprint = false;
-    let text = format_session_info(&info, None, false, false, false);
+    let text = session_info_text(&info, false);
     assert!(!text.contains("Model Hash"));
 }
 #[test]

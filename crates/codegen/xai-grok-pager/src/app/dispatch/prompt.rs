@@ -667,15 +667,7 @@ pub(super) fn dispatch_send_prompt_submission(
                 && app.voice_recording_target()
                     == Some(crate::app::app_view::VoiceTarget::Agent(id));
             if let Some(refusal) = command.submission_refusal(invocation.args, voice_owns_prompt) {
-                if app.screen_mode.is_minimal() {
-                    with_active_agent(app, |agent| {
-                        agent
-                            .scrollback
-                            .push_block(RenderBlock::system(refusal.to_string()));
-                    });
-                } else {
-                    app.show_toast(refusal);
-                }
+                app.show_toast(refusal);
                 return vec![];
             }
         }
@@ -693,14 +685,12 @@ pub(super) fn dispatch_send_prompt_submission(
     let coding_data_sharing_opt_out_from_app = app.coding_data_retention_opt_out;
     let coding_data_sharing_lock_from_app = app.coding_data_sharing_lock();
     let show_tips_from_app = app.show_tips;
-    let auto_update_from_app = app.auto_update;
     let respect_manual_folds_from_app = app.appearance.scrollback.scroll.respect_manual_folds;
     let auto_mode_gate_from_app = app.auto_mode_gate;
     let ask_user_question_timeout_enabled_from_app = app.ask_user_question_timeout_enabled;
     let voice_stt_language_from_app = app.voice_config.language.clone();
     let subagent_model_inheritance_from_app = app.subagent_model_inheritance;
     let login_method_id_from_app = app.login_method_id.as_ref().map(|id| id.0.to_string());
-    let screen_mode_is_minimal = app.screen_mode.is_minimal();
     let Some(agent) = app.agents.get_mut(&id) else {
         return prelude;
     };
@@ -736,13 +726,7 @@ pub(super) fn dispatch_send_prompt_submission(
             agent.prompt.slash_controller.registry(),
         )
     {
-        if screen_mode_is_minimal {
-            agent.scrollback.push_block(RenderBlock::system(
-                crate::slash::mid_text_hoist::MID_TEXT_GOAL_NOTICE.to_owned(),
-            ));
-        } else {
-            agent.show_toast(crate::slash::mid_text_hoist::MID_TEXT_GOAL_NOTICE);
-        }
+        agent.show_toast(crate::slash::mid_text_hoist::MID_TEXT_GOAL_NOTICE);
         return prelude;
     }
     let hoisted = if is_plain_submission {
@@ -810,7 +794,6 @@ pub(super) fn dispatch_send_prompt_submission(
                 models: &agent.session.models,
                 session_id: agent.session.session_id.as_ref(),
                 bundle_state: &app.bundle_state,
-                screen_mode: app.screen_mode,
                 billing_surface_visible: app.usage_visible,
                 usage_command_visible: !app.has_external_auth_provider,
                 // PAGER-owned snapshot for slash commands.
@@ -831,7 +814,6 @@ pub(super) fn dispatch_send_prompt_submission(
                     // Prefer optimistic pending over confirmed active.
                     plan_mode_active: agent.plan_mode_pending.unwrap_or(agent.plan_mode_active),
                     show_tips: show_tips_from_app,
-                    auto_update: auto_update_from_app,
                     vim_mode: crate::appearance::cache::load_vim_mode(),
                     scroll_speed: crate::appearance::cache::load_scroll_speed(),
                     respect_manual_folds: respect_manual_folds_from_app,
@@ -864,23 +846,13 @@ pub(super) fn dispatch_send_prompt_submission(
                     });
                 }
                 if let Some(command) = command {
-                    // Central screen-mode gate
-                    // A fully-typed invocation thus earns a hint that names the way out instead of leaking to the model
-                    // A refusal added here must also extend the pre-check in `EditedCommandGate` (`dispatch::queue`)
-                    if let Some(refusal) = command
-                        .mode_support()
-                        .refusal(invocation.token, ctx.screen_mode)
-                    {
-                        CommandResult::Message(refusal)
-                    } else {
-                        agent
-                            .prompt
-                            .slash_controller
-                            .record_command_use(invocation.token, invocation.token);
-                        let args = parse_invocation(slash_input.trim())
-                            .map_or(invocation.args, |invocation| invocation.args);
-                        command.run_with_token(&mut ctx, invocation.token, args)
-                    }
+                    agent
+                        .prompt
+                        .slash_controller
+                        .record_command_use(invocation.token, invocation.token);
+                    let args = parse_invocation(slash_input.trim())
+                        .map_or(invocation.args, |invocation| invocation.args);
+                    command.run_with_token(&mut ctx, invocation.token, args)
                 } else {
                     // Unknown command: pass through to shell
                     CommandResult::PassThrough(text.clone())

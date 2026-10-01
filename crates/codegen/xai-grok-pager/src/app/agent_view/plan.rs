@@ -426,11 +426,7 @@ impl AgentView {
                     "Run the slash command in the notes with Enter, or clear it, before approving."
                 }
             };
-            if crate::app::minimal_mode_active() {
-                self.scrollback.push_block(RenderBlock::system(msg));
-            } else {
-                self.show_toast(msg);
-            }
+            self.show_toast(msg);
             return InputOutcome::Changed;
         }
         let post_turn = self
@@ -670,13 +666,6 @@ impl AgentView {
             Some(formatted)
         };
         let post_turn = pav.is_after_turn();
-        if !post_turn
-            && self.is_minimal_mode()
-            && let Some(msg) = to_send.as_deref().map(str::trim).filter(|s| !s.is_empty())
-        {
-            self.scrollback
-                .push_block(crate::scrollback::RenderBlock::user_prompt(msg.to_string()));
-        }
         if post_turn && to_send.as_deref().is_none_or(|text| text.trim().is_empty()) {
             self.show_toast("Type revision notes, or press a to approve.");
             return InputOutcome::Changed;
@@ -2362,16 +2351,6 @@ mod plan_approval_optimistic_mode_tests {
             "content-only keeps stay so the next EndTurn can reopen review"
         );
     }
-    fn user_prompt_texts(agent: &AgentView) -> Vec<String> {
-        agent
-            .scrollback
-            .iter_entries()
-            .filter_map(|(_, entry)| match &entry.block {
-                crate::scrollback::RenderBlock::UserPrompt(block) => Some(block.text.clone()),
-                _ => None,
-            })
-            .collect()
-    }
     #[test]
     fn in_turn_inline_revise_drops_snapshot_without_a_kept_path() {
         let (mut agent, _rx) = agent_in_plan_mode_with_approval();
@@ -2386,35 +2365,6 @@ mod plan_approval_optimistic_mode_tests {
         assert!(
             agent.kept_plan.body().is_none(),
             "Inline revise must drop the snapshot so preview reads plan.md"
-        );
-    }
-    #[test]
-    fn in_turn_revise_in_minimal_mode_pushes_one_user_row() {
-        let (mut agent, _rx) = agent_in_plan_mode_with_approval();
-        agent
-            .prompt
-            .set_screen_mode(crate::app::ScreenMode::Minimal);
-        agent.send_plan_feedback(Some("tighten the rollout".into()));
-        assert_eq!(
-            user_prompt_texts(&agent),
-            vec!["tighten the rollout".to_owned()],
-            "in-turn notes never become a prompt; minimal mode still needs one live row"
-        );
-    }
-    #[test]
-    fn post_turn_revise_in_minimal_mode_does_not_push_a_user_row() {
-        let mut agent = agent_with_post_turn_review();
-        agent
-            .prompt
-            .set_screen_mode(crate::app::ScreenMode::Minimal);
-        let outcome = agent.send_plan_feedback(Some("add a rollback".into()));
-        assert!(
-            matches!(outcome, InputOutcome::Action(Action::RevisePlan(_))),
-            "post-turn revise must dispatch a real prompt"
-        );
-        assert!(
-            user_prompt_texts(&agent).is_empty(),
-            "the send path echoes the revision; this function must not add a second row"
         );
     }
     #[test]

@@ -96,17 +96,6 @@ pub fn installed_semver() -> Result<Version, semver::Error> {
     Version::parse(&installed())
 }
 
-/// Formats the compiled version with a channel label for user-facing display, e.g. `"0.2.5 [stable]"`.
-/// `channel_label` is pre-formatted by `xai_grok_update::channel_label()`: `" [alpha]"`, `" [stable]"`, or `""` when no pointer is cached.
-pub fn display_version(channel_label: &str) -> String {
-    format!("{}{}", version(), channel_label)
-}
-
-/// Like [`display_version`], but for the full `"0.2.5 (abc1234)"` string.
-pub fn display_version_with_commit(version_with_commit: &str, channel_label: &str) -> String {
-    format!("{}{}", version_with_commit, channel_label)
-}
-
 /// The full 40-char commit hash the binary was built from, stamped by `build.rs`
 /// via `cargo:rustc-env=BUILD_COMMIT`. Falls back to `"unknown"` when the build
 /// ran outside a git worktree (e.g. a tarball).
@@ -146,34 +135,6 @@ pub fn commit_github_url(hash: &str) -> Option<String> {
 mod tests {
     use super::*;
 
-    /// Checks that the channel label is appended for alpha, stable, and empty labels.
-    #[test]
-    fn test_display_version_formatting_matrix() {
-        let cases: &[(&str, &str, &str)] = &[
-            // (version_with_commit,    label,        expected_suffix)
-            ("0.2.5 (abc1234)", " [alpha]", "0.2.5 (abc1234) [alpha]"),
-            ("0.2.5 (abc1234)", " [stable]", "0.2.5 (abc1234) [stable]"),
-            ("0.2.5 (abc1234)", "", "0.2.5 (abc1234)"),
-            (
-                "0.1.220-alpha.2 (def0)",
-                " [alpha]",
-                "0.1.220-alpha.2 (def0) [alpha]",
-            ),
-        ];
-        for (vwc, label, expected) in cases {
-            assert_eq!(
-                display_version_with_commit(vwc, label),
-                *expected,
-                "display_version_with_commit({:?}, {:?})",
-                vwc,
-                label,
-            );
-        }
-        // display_version reads the stamp — just verify the label appends
-        assert_eq!(display_version(""), version());
-        assert!(display_version(" [stable]").ends_with("[stable]"));
-    }
-
     /// The slot the stamper searches for must be in this binary, must carry the
     /// magic, and must read as unstamped until something writes a length.
     #[test]
@@ -188,7 +149,7 @@ mod tests {
     }
 
     /// `version_with_commit` is what `--version` prints, so it must carry both
-    /// halves in the shape the update checker parses back.
+    /// halves: `"<version> (<commit>)"`.
     #[test]
     fn version_with_commit_carries_version_and_commit() {
         let combined = version_with_commit();

@@ -256,7 +256,6 @@ Actions that affect the agent session, available from the agent screen.
 | `Ctrl+B` | Agent screen | Send the running foreground command to the background |
 | `Ctrl+T` | Agent screen | Toggle the todos pane |
 | `Ctrl+G` | Agent screen (full TUI) | Toggle the tasks pane |
-| `Ctrl+G` | Ordinary composer (minimal mode) | Edit the current draft in an external editor without sending it. If the terminal reserves this chord, choose **Edit Prompt in External Editor** from the command palette. |
 | `Ctrl+L` | Agent screen | Open the extensions modal (**non–VS Code family only**; on VS Code / Cursor / Windsurf / Zed, `Ctrl+L` is mid-turn **interject** and extensions open via `/plugins` / `/hooks`) |
 | `↑` | Prompt focused (empty prompt, normal input mode) | With prompts queued, move focus into the queue pane with the last row highlighted (`e` edits it, `Enter` sends it now). Otherwise open the history panel with your last prompt filled in; `↑`/`↓` step through entries (each lands in the input), `↓` at the newest closes the panel, and typing edits the recalled prompt in place. Recalled `!` shell commands re-enter shell mode. `↓` never opens history. |
 | `Ctrl+S` (alt: `Alt+S`) | Prompt focused | Stash / pop the draft, `git stash`-style. With text or images in the composer: stash it and start fresh. On an empty composer: restore the newest stash (images and `!` shell mode included). After restore, the cursor is at the end of the restored draft. `Ctrl+Z` pressed right after the stash restores it too (any other key you type into the prompt disarms that). A chord-stashed draft also **restores automatically after you send your next prompt** (a double-Esc-cleared draft stays stashed, since that gesture is a discard). One draft at a time: a new stash replaces the old one. |
@@ -268,9 +267,7 @@ Actions that affect the agent session, available from the agent screen.
 
 **Note:** `Ctrl+M` is context-dependent. When the prompt is focused, it toggles multiline input mode. Otherwise, it opens the model picker.
 
-**Note:** While a draft is stashed, the prompt's top border reads `Stashed` (next to the `/rename` title, if you set one). Minimal mode draws no border, so it prints a line in the scrollback each time you stash or restore. The stash lives in memory only: it is gone when you quit, and it does not travel to a resumed session. A new stash replaces the old one; the replaced draft is discarded.
-
-**Note:** External editing works in every render mode: minimal mode binds `Ctrl+G`, and the full TUI uses `/edit-prompt` or the command palette. Grok resolves `$VISUAL`, then `$EDITOR`, then `vi`. Values may include quoted arguments. Saving replaces only the draft (the final newline editors append on save is stripped); an empty file clears it. Drafts with pasted/file/image chips must be edited in the composer so attachments are not flattened.
+**Note:** While a draft is stashed, the prompt's top border reads `Stashed` (next to the `/rename` title, if you set one). The stash lives in memory only: it is gone when you quit, and it does not travel to a resumed session. A new stash replaces the old one; the replaced draft is discarded.
 
 **Note:** `Ctrl+'` is a Windows alt for `Ctrl+;` — some Windows consoles drop the `Ctrl` modifier on punctuation keys.
 

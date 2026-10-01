@@ -42,12 +42,6 @@ pub mod mcp_cmd;
 pub mod memory_cmd;
 pub mod memory_release;
 pub mod memory_trace;
-#[path = "minimal/api.rs"]
-pub mod minimal_api;
-#[path = "minimal/hook.rs"]
-pub mod minimal_hook;
-#[path = "minimal/reprint.rs"]
-pub mod minimal_reprint;
 pub mod models;
 pub mod notifications;
 #[allow(unused_imports, unused_macros)]

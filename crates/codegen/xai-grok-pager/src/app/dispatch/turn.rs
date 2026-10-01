@@ -309,12 +309,6 @@ fn cancel_agent_turn(
         return vec![];
     }
     // The UI then looks like the user never hit Send
-    // Minimal mode prints each committed block once into the terminal's native scrollback, and that print can't be "un-printed"
-    // A user-prompt block commits immediately (it is never `is_running`)
-    let in_flight_committed = match agent.session.in_flight_prompt.as_ref() {
-        Some(stashed) => agent.scrollback.is_committed(stashed.scrollback_entry),
-        None => false,
-    };
     // The rewind REPLACES the composer with the stashed in-flight prompt.
     // Esc (and the mouse stop / palette cancel) fire with the draft intact, unlike keyboard Ctrl+C, which only cancels on an empty prompt
     // A non-empty composer thus holds a NEWER draft the rewind would clobber
@@ -329,7 +323,6 @@ fn cancel_agent_turn(
     let rewinding = cancel_rewind_enabled
         && agent.session.in_flight_prompt.is_some()
         && !queue_held_behind_turn
-        && !in_flight_committed
         && !composer_has_draft
         && rewind_prompt_id.is_some();
     if rewinding
@@ -413,15 +406,12 @@ pub(super) fn rewind_in_flight_prompt(
             agent.prompt.set_cursor(merged.len());
         }
     }
-    // A block already printed into native scrollback (minimal mode) cannot be un-printed; the text still comes back
     for id in stashed
         .combined_scrollback_entries
         .into_iter()
         .chain([stashed.scrollback_entry])
     {
-        if !agent.scrollback.is_committed(id) {
-            agent.scrollback.remove_entry(id);
-        }
+        agent.scrollback.remove_entry(id);
     }
     agent.shared_queue.retain(|e| e.id != rewind_prompt_id);
     // Full state reset: tracker cleanup, state back to Idle, timing fields and current_prompt_id cleared

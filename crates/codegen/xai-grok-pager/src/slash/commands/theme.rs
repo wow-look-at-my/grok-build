@@ -11,7 +11,6 @@ use crate::app::actions::Action;
 use crate::slash::command::{
     AppCtx, ArgItem, CommandExecCtx, CommandResult, SlashCommand, slash_meta,
 };
-use crate::slash::{ModeSupport, Remedy};
 use crate::theme::{Theme, ThemeKind, cache as theme_cache};
 
 pub struct ThemeCommand;
@@ -32,9 +31,6 @@ impl SlashCommand for ThemeCommand {
         usage: "/theme <name>",
         takes_args: true,
         args_required: false,
-        mode_support: ModeSupport::FullscreenOnly(Remedy::SwitchMode {
-            why: "minimal renders with your terminal's own palette",
-        }),
         arg_placeholder: "<theme>",
     }
 
@@ -176,7 +172,6 @@ mod tests {
                 workflows_available: true,
                 saved_workflows: &[],
                 workflow_runs: &[],
-                screen_mode: crate::app::ScreenMode::Fullscreen,
                 current_title: None,
             };
             let items = cmd.suggest_args(&ctx, "").expect("should return items");
@@ -205,7 +200,6 @@ mod tests {
                 workflows_available: true,
                 saved_workflows: &[],
                 workflow_runs: &[],
-                screen_mode: crate::app::ScreenMode::Fullscreen,
                 current_title: None,
             };
             let items = cmd.suggest_args(&ctx, "").expect("should return items");
@@ -235,7 +229,6 @@ mod tests {
                 workflows_available: true,
                 saved_workflows: &[],
                 workflow_runs: &[],
-                screen_mode: crate::app::ScreenMode::Fullscreen,
                 current_title: None,
             };
             let items = cmd.suggest_args(&ctx, "").expect("should return items");
@@ -266,7 +259,6 @@ mod tests {
                 workflows_available: true,
                 saved_workflows: &[],
                 workflow_runs: &[],
-                screen_mode: crate::app::ScreenMode::Fullscreen,
                 current_title: None,
             };
             let items = cmd.suggest_args(&ctx, "").expect("should return items");
@@ -298,7 +290,6 @@ mod tests {
                 workflows_available: true,
                 saved_workflows: &[],
                 workflow_runs: &[],
-                screen_mode: crate::app::ScreenMode::Fullscreen,
                 current_title: None,
             };
             let items = cmd.suggest_args(&ctx, "").expect("should return items");
@@ -328,7 +319,6 @@ mod tests {
                 workflows_available: true,
                 saved_workflows: &[],
                 workflow_runs: &[],
-                screen_mode: crate::app::ScreenMode::Fullscreen,
                 current_title: None,
             };
             let items = cmd.suggest_args(&ctx, "").expect("should return items");
@@ -363,7 +353,6 @@ mod tests {
                 models: &models,
                 session_id: None,
                 bundle_state: &bundle,
-                screen_mode: crate::app::ScreenMode::Inline,
                 billing_surface_visible: true,
                 usage_command_visible: true,
                 pager_state: crate::settings::PagerLocalSnapshot {
@@ -394,7 +383,6 @@ mod tests {
                 models: &models,
                 session_id: None,
                 bundle_state: &bundle,
-                screen_mode: crate::app::ScreenMode::Inline,
                 billing_surface_visible: true,
                 usage_command_visible: true,
                 pager_state: crate::settings::PagerLocalSnapshot {
@@ -422,7 +410,6 @@ mod tests {
                 workflows_available: true,
                 saved_workflows: &[],
                 workflow_runs: &[],
-                screen_mode: crate::app::ScreenMode::Fullscreen,
                 current_title: None,
             };
             let items = cmd.suggest_args(&app_ctx, "").expect("should return items");
@@ -459,7 +446,6 @@ mod tests {
                 models: &models,
                 session_id: None,
                 bundle_state: &bundle,
-                screen_mode: crate::app::ScreenMode::Inline,
                 billing_surface_visible: true,
                 usage_command_visible: true,
                 pager_state: crate::settings::PagerLocalSnapshot {
@@ -493,7 +479,6 @@ mod tests {
                 models: &models,
                 session_id: None,
                 bundle_state: &bundle,
-                screen_mode: crate::app::ScreenMode::Inline,
                 billing_surface_visible: true,
                 usage_command_visible: true,
                 pager_state: crate::settings::PagerLocalSnapshot {
@@ -523,7 +508,6 @@ mod tests {
                 models: &models,
                 session_id: None,
                 bundle_state: &bundle,
-                screen_mode: crate::app::ScreenMode::Inline,
                 billing_surface_visible: true,
                 usage_command_visible: true,
                 pager_state: crate::settings::PagerLocalSnapshot {
@@ -627,7 +611,6 @@ mod tests {
                 models: &models,
                 session_id: None,
                 bundle_state: &bundle,
-                screen_mode: crate::app::ScreenMode::Inline,
                 billing_surface_visible: true,
                 usage_command_visible: true,
                 pager_state: crate::settings::PagerLocalSnapshot {
@@ -655,7 +638,6 @@ mod tests {
                 models: &models,
                 session_id: None,
                 bundle_state: &bundle,
-                screen_mode: crate::app::ScreenMode::Inline,
                 billing_surface_visible: true,
                 usage_command_visible: true,
                 pager_state: crate::settings::PagerLocalSnapshot {

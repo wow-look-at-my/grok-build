@@ -40,11 +40,7 @@ Verify the installation:
 grok --version
 ```
 
-Update to the latest version at any time:
-
-```bash
-grok update
-```
+To update, run the installer again. Grok does not update itself.
 
 If you installed Grok Build with WinGet, update it with WinGet instead. Quit
 Grok first, then run:
@@ -53,7 +49,6 @@ Grok first, then run:
 winget upgrade --id xAI.GrokBuild -e
 ```
 
-On a WinGet install, `grok update` prints this command and changes nothing.
 The WinGet package tracks the stable channel, and new releases can take a few
 days to reach it.
 
@@ -219,13 +214,6 @@ grok --resume <session-id>
 
 # Continue the most recent session
 grok -c
-
-# Experimental scrollback-native render mode. Sticky: plain `grok` reopens in
-# the mode last chosen via --minimal/--fullscreen (or /minimal//fullscreen).
-grok --minimal
-
-# Back to the standard fullscreen TUI (and make it sticky again)
-grok --fullscreen
 
 # Headless mode (for scripts)
 grok -p "Explain this codebase"

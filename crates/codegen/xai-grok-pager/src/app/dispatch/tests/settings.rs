@@ -950,7 +950,6 @@ fn open_settings_enter_picker_esc_stays_open_in_browse() {
     );
 }
 /// `ActionThenClose` closes the modal and forwards the preview-revert Action through `apply_settings_outcome` (handle_input path).
-/// Theme rows follow this AppView's screen mode (not `MINIMAL_MODE_ACTIVE`, which other tests flip in parallel).
 #[test]
 fn deep_link_preview_esc_closes_modal_and_forwards_revert_action() {
     use crate::app::app_view::InputOutcome;
@@ -984,32 +983,6 @@ fn deep_link_preview_esc_closes_modal_and_forwards_revert_action() {
         }
         other => panic!("expected Action(PreviewTheme), got {other:?}"),
     }
-}
-/// Theme visibility follows `AppView::screen_mode`, not the process-global minimal flag.
-#[test]
-fn open_settings_theme_row_follows_app_screen_mode() {
-    use crate::views::modal::ActiveModal;
-    let mut app = test_app_with_agent();
-    app.screen_mode = crate::app::ScreenMode::Inline;
-    let _ = dispatch(Action::OpenSettings, &mut app);
-    {
-        let agent = app.agents.get_mut(&AgentId(0)).unwrap();
-        let Some(ActiveModal::Settings { state }) = &mut agent.active_modal else {
-            panic!("settings modal must be open")
-        };
-        assert!(
-            state.focus_key("theme"),
-            "inline app must list theme even if another test flipped MINIMAL_MODE_ACTIVE"
-        );
-    }
-    app.agents.get_mut(&AgentId(0)).unwrap().active_modal = None;
-    app.screen_mode = crate::app::ScreenMode::Minimal;
-    let _ = dispatch(Action::OpenSettings, &mut app);
-    let agent = app.agents.get_mut(&AgentId(0)).unwrap();
-    let Some(ActiveModal::Settings { state }) = &mut agent.active_modal else {
-        panic!("settings modal must be open")
-    };
-    assert!(!state.focus_key("theme"), "minimal app must hide theme");
 }
 /// `dispatch_open_reset_confirm` moves the Settings modal state into the `ResetSettingsConfirm` variant so it survives the confirm dialog.
 /// The dispatch arm is only reachable from an open Settings modal (the `d` keystroke in `views/settings_modal.rs::handle_browse`).
@@ -1784,9 +1757,6 @@ fn move_setting_away_from_default(app: &mut AppView, key: crate::settings::Setti
         "show_tips" => {
             let _ = dispatch(Action::SetShowTips(false), app);
         }
-        "auto_update" => {
-            let _ = dispatch(Action::SetAutoUpdate(false), app);
-        }
         "vim_mode" => {
             let _ = dispatch(Action::SetVimMode(true), app);
         }
@@ -1845,9 +1815,6 @@ fn move_setting_away_from_default(app: &mut AppView, key: crate::settings::Setti
         }
         "hunk_tracker_mode" => {
             let _ = dispatch(Action::SetHunkTrackerMode("all_dirty".to_string()), app);
-        }
-        "screen_mode" => {
-            let _ = dispatch(Action::SetScreenMode("minimal".to_string()), app);
         }
         "voice_keybind_enabled" => {
             let _ = dispatch(Action::SetVoiceKeybindEnabled(false), app);

@@ -1,9 +1,7 @@
 //! `/transcript`: view the full conversation transcript in `$PAGER`.
 //!
 //! Renders the current session's transcript to a temp Markdown file and opens it in the user's pager (default `less`).
-//! The inline TUI is suspended until the pager exits.
-//! Primarily for minimal mode, where there is no interactive scrollback pane and older blocks have scrolled into native history.
-//! It works in every render mode, though.
+//! The TUI is suspended until the pager exits.
 
 use crate::app::actions::Action;
 use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand, slash_meta};
@@ -53,7 +51,6 @@ mod tests {
             models: &models,
             session_id: None,
             bundle_state: &DEFAULT_BUNDLE_STATE,
-            screen_mode: crate::app::ScreenMode::Minimal,
             billing_surface_visible: true,
             usage_command_visible: true,
             pager_state: PagerLocalSnapshot::default(),
@@ -72,7 +69,6 @@ mod tests {
             models: &models,
             session_id: Some(&sid),
             bundle_state: &DEFAULT_BUNDLE_STATE,
-            screen_mode: crate::app::ScreenMode::Minimal,
             billing_surface_visible: true,
             usage_command_visible: true,
             pager_state: PagerLocalSnapshot::default(),

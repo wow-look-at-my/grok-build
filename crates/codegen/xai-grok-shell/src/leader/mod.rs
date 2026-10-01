@@ -97,7 +97,7 @@ const RELAY_ON_DEMAND_FLAG: &str = "--relay-on-demand";
 fn client_leader_version() -> &'static str {
     xai_grok_version::version()
 }
-/// Max wait for an evicted leader to exit before force-killing (relaunch drain ~5s).
+/// Max wait for an evicted leader to exit before force-killing.
 const EVICT_WAIT_TIMEOUT: Duration = Duration::from_secs(8);
 /// How long the SAME live grok flock-holder may stay unconnectable before
 /// `connect_or_spawn` treats it as a "zombie leader" and evicts it.
@@ -864,7 +864,7 @@ impl LeaderConnection {
     }
     /// Returns a receiver for the most recent `ShuttingDown` reason sent by the server before a planned shutdown.
     /// `None`: no `ShuttingDown` message received yet (still connected or connection ended without a planned shutdown announcement).
-    /// `Some(AutoUpdate)`: leader is restarting to install a binary update; safe to reconnect immediately via `connect_or_spawn`. `Some(Manual)`: deliberately stopped or unspecified shutdown. This is the primary entry point for first-party callers (TUI bridge, headless path, reconnection logic) because `connect_or_spawn` returns `LeaderConnection`, not `LeaderClient` directly.
+    /// `Some(Manual)`: deliberately stopped or unspecified shutdown. This is the primary entry point for first-party callers (TUI bridge, headless path, reconnection logic) because `connect_or_spawn` returns `LeaderConnection`, not `LeaderClient` directly.
     pub fn shutting_down_reason(&self) -> watch::Receiver<Option<protocol::ShutdownReason>> {
         self.client.shutting_down_reason()
     }
@@ -1095,39 +1095,20 @@ fn should_evict_conn(conn: &LeaderConnection) -> bool {
         client_leader_version(),
     )
 }
-/// Ask a stale leader to vacate so it releases the flock: graceful `RelaunchForUpdate` if relaunch-capable (the leader dedupes concurrent requests
-/// and re-checks the directional guard, so this is idempotent and never downgrades), else SIGTERM its pid.
+/// Ask a stale leader to vacate so it releases the flock: SIGTERM its pid.
 /// Best-effort and non-waiting; the caller retries the spawn loop, where the replacement is created under the flock.
 async fn request_leader_vacate(conn: &LeaderConnection, pid: Option<u32>) {
     let leader_version = conn.registration().leader_binary_version.clone();
-    let (method, outcome) = if conn.registration().supports_relaunch() {
-        let outcome = match conn
-            .send_control(ControlCommand::RelaunchForUpdate {
-                to_version: client_leader_version().to_string(),
-            })
-            .await
-        {
-            Ok(Ok(ControlPayload::Relaunching { .. })) => "accepted",
-            Ok(Ok(ControlPayload::RelaunchDeclined { .. })) => "declined",
-            Ok(Ok(_)) | Ok(Err(_)) => "send_failed",
+    let method = "sigterm";
+    let outcome = match pid {
+        Some(pid) => match crate::util::kill_process_by_pid(pid) {
+            Ok(()) => "signaled",
             Err(e) => {
-                debug!(error = %e, "Relaunch request to stale leader failed");
-                "send_failed"
+                warn!(error = %e, pid, "Failed to signal stale leader to exit");
+                "signal_failed"
             }
-        };
-        ("relaunch", outcome)
-    } else {
-        let outcome = match pid {
-            Some(pid) => match crate::util::kill_process_by_pid(pid) {
-                Ok(()) => "signaled",
-                Err(e) => {
-                    warn!(error = %e, pid, "Failed to signal stale leader to exit");
-                    "signal_failed"
-                }
-            },
-            None => "signal_failed",
-        };
-        ("sigterm", outcome)
+        },
+        None => "signal_failed",
     };
     xai_grok_telemetry::unified_log::warn(
         "leader.evict.vacate_requested",
@@ -1567,8 +1548,8 @@ pub async fn connect_or_spawn(
         }
     }
 }
-/// For a **managed install** — the running binary lives under `grok_home` (e.g. `~/.grok/...`) — prefer the managed `~/.grok/bin/grok` symlink. After an auto-update or `grok update` atomically swaps that symlink, `current_exe()` still resolves (via `/proc/self/exe` on Linux) to the *old* versioned target, so spawning it would relaunch the stale binary.
-/// The symlink always points to the freshly-installed version.
+/// For a **managed install** — the running binary lives under `grok_home` (e.g. `~/.grok/...`) — prefer the managed `~/.grok/bin/grok` symlink. After a reinstall swaps that symlink, `current_exe()` still resolves (via `/proc/self/exe` on Linux) to the *old* versioned target, so spawning it would start the stale binary.
+/// The symlink always points to the installed version.
 /// For a **dev / out-of-tree binary** (`cargo run`, integration tests, installs not under `grok_home`), keep `current_exe()` so the spawned leader matches the calling binary. Falls back to `~/.grok/bin/grok` only when `current_exe()` is unavailable.
 fn resolve_exe_for_spawn() -> Result<std::path::PathBuf, ConnectionError> {
     resolve_binary_with_home(&crate::util::grok_home::grok_home())
@@ -2150,7 +2131,7 @@ mod tests {
                 sock_path.clone(),
                 FakeLeaderBehavior::Normal {
                     versions,
-                    caps: fake_caps(true, false),
+                    caps: fake_caps(true),
                 },
             )
             .await;

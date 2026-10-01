@@ -34,12 +34,6 @@ Contrast is only as good as your terminal profile: a profile with a very dark br
 
 The theme is rolling out gradually. Until the rollout reaches your account it is hidden from `/theme` and `/settings`, its names do not parse, and a configured `theme = "terminal"` falls back to the default theme. Set `GROK_TERMINAL_THEME=1` (or `[features] terminal_theme = true` in `config.toml`) to enable it locally ahead of the rollout.
 
-### Minimal Mode Has No Theming
-
-**Minimal mode** (`--minimal`) always renders with a single fixed terminal-native palette and ignores the `theme` settings entirely (they still apply to the full TUI). Minimal draws directly on your terminal's own background, so it uses your terminal's default foreground/background plus its 16-color ANSI palette — the same colors `git` or `ls` use — which stays readable on any light or dark terminal profile without detection or configuration. `/theme` and the theme rows in `/settings` are unavailable in minimal mode.
-
-Syntax highlighting in minimal mode does **not** switch between light and dark theme files (polarity detection is intentionally avoided). Near-gray tokens inherit the terminal default foreground; chromatic tokens use base ANSI accents (red/green/yellow/blue/magenta/cyan) so read-file output and fenced code stay legible on both light and dark profiles.
-
 ---
 
 ## Switching Themes

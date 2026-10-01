@@ -3511,7 +3511,6 @@ fn apply_requirements_value_overrides_user_settings() {
         );
 }
 /// Strict precedence: requirement always wins (covers from-None and from-higher-user cases).
-/// The enforced floor lives in `VersionPolicy`, not this field.
 #[test]
 fn apply_requirements_pins_minimum_version() {
     let source = RequirementSource::Requirements {

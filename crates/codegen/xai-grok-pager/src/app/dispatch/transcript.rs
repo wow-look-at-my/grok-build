@@ -223,15 +223,9 @@ pub(super) fn dispatch_export_conversation(
     });
 }
 
-/// Open the full transcript in `$PAGER`.
-/// The block model is also `!Send` (syntect's resumable highlighter state lives inside markdown blocks), so the work can't move to a worker either.
-/// So this only records the request; the minimal render loop builds the transcript in time-budgeted slices per frame (`full_view::pump_transcript`).
+/// Open the full transcript in `$PAGER` as a compact markdown export (string
+/// concatenation, no layout or highlighting — cheap enough to stay synchronous).
 pub(crate) fn dispatch_open_transcript_pager(app: &mut AppView) {
-    if app.screen_mode.is_minimal() {
-        crate::minimal_api::request_minimal_transcript(app);
-        return;
-    }
-
     let mut md = None;
     with_active_agent(app, |agent| {
         let blocks: Vec<_> = (0..agent.scrollback.len())
@@ -256,7 +250,6 @@ pub(crate) fn dispatch_open_transcript_pager(app: &mut AppView) {
     match std::fs::write(&path, content) {
         Ok(()) => {
             app.pending_pager_path = Some(path);
-            app.pending_pager_ansi = false;
         }
         Err(e) => {
             with_active_agent(app, |agent| {

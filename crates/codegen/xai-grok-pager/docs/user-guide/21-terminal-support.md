@@ -143,8 +143,7 @@ backup file so you can retrieve the text. Run `/doctor` for other copy options.
 Apple Terminal does not support OSC 52, so a remote copy cannot reach the local
 clipboard. Each copy is still saved to a backup file (`~/.grok/last-copy.txt` by
 default; override with `GROK_COPY_FILE`); the toast names that path when delivery
-is unverified or the clipboard is unreachable. You can also use `/copy <file>` or
-`/minimal`.
+is unverified or the clipboard is unreachable. You can also use `/copy <file>`.
 
 For direct clipboard forwarding, run the SSH command from the local computer
 through `grok wrap`, for example `grok wrap ssh user@host`. The same command can
@@ -188,11 +187,7 @@ later, use the **Unlock-First (non-colliding)** preset:
 3. Select **Unlock-First (non-colliding)**.
 4. Press `Enter` to apply it.
 
-Press `Ctrl+g` when you need Zellij's own pane or session controls. In minimal
-mode, if `Ctrl+G` still does not reach Grok, open the command palette and select
-**Edit Prompt in External Editor**. This preserves the current draft; typing
-`/edit-prompt` starts an empty editor draft because the command itself occupies
-the composer.
+Press `Ctrl+g` when you need Zellij's own pane or session controls.
 
 ### Ctrl+Enter does not interject in WezTerm
 

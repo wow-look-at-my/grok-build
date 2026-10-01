@@ -200,7 +200,6 @@ pub(in crate::app::dispatch) fn dispatch_fork_resolved(
             app.usage_visible,
             !app.has_external_auth_provider,
             app.chat_mode,
-            app.screen_mode,
             &app.active_announcements,
             &app.tier_restricted_commands,
         );
@@ -317,7 +316,7 @@ fn build_fork_placeholder(
     agent
 }
 /// Build the discoverability banner for the child agent: the child's session id, the full parent session id, and optionally a session-switch tip.
-/// The tip appears when `switch_hint` names a command: `/dashboard` normally, `/resume` in minimal mode where the dashboard is refused.
+/// The tip appears when `switch_hint` names a command (`/dashboard` while the dashboard is enabled).
 /// Called in `TaskResult::SessionLoaded` (not at dispatch time) because the child's session id is not known until the backend responds.
 pub(in crate::app::dispatch) fn build_child_fork_marker(
     session_id: &str,

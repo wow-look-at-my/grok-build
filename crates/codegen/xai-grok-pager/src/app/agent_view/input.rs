@@ -17,48 +17,7 @@ use crossterm::event::{
     Event, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
 use std::time::Instant;
-/// External-editor access to the ordinary composer.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ExternalPromptEditorAccess {
-    Ready,
-    Attachments,
-    PastePending,
-    OwnedElsewhere,
-}
 impl AgentView {
-    /// The composer is the editing target regardless of pane focus (like the other global chords); overlays and dropdowns still own input.
-    pub(crate) fn external_prompt_editor_access(&self) -> ExternalPromptEditorAccess {
-        let owned_elsewhere = !matches!(self.prompt_mode, super::PromptMode::Normal)
-            || self.active_subagent.is_some()
-            || self.active_modal.is_some()
-            || self.extensions_modal.is_some()
-            || self.feedback_modal.is_some()
-            || self.agents_modal.is_some()
-            || self.persona_detail.is_some()
-            || self.scrollback_search.is_some()
-            || self.line_viewer.is_some()
-            || self.image_viewer.is_some()
-            || self.video_viewer.is_some()
-            || self.block_viewer.is_some()
-            || self.gboom.is_some()
-            || self.show_goal_detail
-            || self.btw_focused
-            || self.blocking_card().is_some()
-            || self.plan_approval_view.is_some()
-            || self.casual_commenting_range.is_some()
-            || self.rewind_state.is_some()
-            || self.jump_state.is_some()
-            || self.prompt.any_dropdown_open();
-        if owned_elsewhere {
-            ExternalPromptEditorAccess::OwnedElsewhere
-        } else if self.paste_probe_in_flight > 0 || self.deferred_send.is_some() {
-            ExternalPromptEditorAccess::PastePending
-        } else if !self.prompt.textarea.elements().is_empty() || !self.prompt.images.is_empty() {
-            ExternalPromptEditorAccess::Attachments
-        } else {
-            ExternalPromptEditorAccess::Ready
-        }
-    }
     /// True when the scrollback pane is focused with nothing layered on top: no viewer, modal, btw, or open search.
     /// In this exact state a bare `q`/`Esc` closes the enclosing view (the subagent fullscreen view or the dashboard session overlay).
     /// Both close-key guards share this one predicate so a future sub-state addition can't make the mirrored checks drift apart.
@@ -136,12 +95,6 @@ impl AgentView {
             && self.rewind_state.is_none()
             && self.btw_state.is_none()
             && self.jump_state.is_none()
-    }
-    /// Effective screen mode of this process, injected per agent at session creation.
-    /// This checks per-agent input policy without touching the process global.
-    /// Tests opt in with `prompt.set_screen_mode(ScreenMode::Minimal)` instead of mutating the `MINIMAL_MODE_ACTIVE` process global.
-    pub(crate) fn is_minimal_mode(&self) -> bool {
-        self.prompt.slash_controller.screen_mode().is_minimal()
     }
     /// It only applies to an empty, Normal-mode composer with no per-pane Esc consumer pending.
     /// Used only in the overlay cascade; the full-screen Esc policy (clear / rewind while idle; mid-turn cancel or swallow) is untouched.
@@ -241,89 +194,6 @@ impl AgentView {
         registry: &ActionRegistry,
     ) -> InputOutcome {
         self.handle_input_inner(ev, registry, true)
-    }
-    /// Route minimal-only `/btw` ownership before the unchanged shared router.
-    pub(in crate::app) fn handle_minimal_input(
-        &mut self,
-        ev: &Event,
-        registry: &ActionRegistry,
-    ) -> InputOutcome {
-        match self.handle_minimal_btw_input(ev) {
-            crate::minimal_api::MinimalBtwInput::Handled(outcome) => *outcome,
-            crate::minimal_api::MinimalBtwInput::Occluded => {
-                let jump_dismissed = self.dismiss_jump_picker_if_suppressed();
-                let suspended = crate::minimal_api::suspend_minimal_btw(self);
-                let outcome = if jump_dismissed
-                    && matches!(
-                        ev,
-                        Event::Key(key)
-                            if key.kind != KeyEventKind::Release
-                                && key.code == KeyCode::Esc
-                                && key.modifiers.is_empty()
-                    ) {
-                    InputOutcome::Changed
-                } else {
-                    self.handle_input(ev, registry)
-                };
-                if let Some(suspended) = suspended {
-                    crate::minimal_api::restore_minimal_btw(self, suspended);
-                }
-                outcome
-            }
-            crate::minimal_api::MinimalBtwInput::Delegate => self.handle_input(ev, registry),
-        }
-    }
-    /// Handle only minimal `/btw` dismissal and keyboard scrolling.
-    fn handle_minimal_btw_input(&mut self, ev: &Event) -> crate::minimal_api::MinimalBtwInput {
-        use crate::minimal_api::MinimalBtwInput::{Delegate, Handled, Occluded};
-        if !crate::minimal_api::minimal_btw_surface_available(self) {
-            return Occluded;
-        }
-        if let Event::Key(key) = ev
-            && key.kind != KeyEventKind::Release
-            && key.code == KeyCode::Esc
-            && key.modifiers.is_empty()
-            && self.btw_state.is_some()
-        {
-            return Handled(Box::new(self.dismiss_btw_panel()));
-        }
-        if self.active_pane != AgentPane::Prompt
-            || !self.btw_focused
-            || !crate::minimal_api::minimal_btw_geometry_is_paintable(self.last_btw_area)
-        {
-            return Delegate;
-        }
-        let Some(btw_scroll_max) = self.btw_state.as_ref().and_then(|btw| {
-            matches!(btw, crate::views::btw_overlay::BtwOverlayState::Done { .. }).then(|| {
-                let content_width = self.last_btw_area.width.saturating_sub(4) as usize;
-                let max_body = self.last_btw_area.height.saturating_sub(2) as usize;
-                btw.max_scroll_offset(content_width, max_body)
-            })
-        }) else {
-            return Delegate;
-        };
-        if btw_scroll_max == 0 {
-            return Delegate;
-        }
-        let Event::Key(key) = ev else {
-            return Delegate;
-        };
-        if key.kind == KeyEventKind::Release || !key.modifiers.is_empty() {
-            return Delegate;
-        }
-        let page = self.last_btw_area.height.saturating_sub(2).max(1) as usize;
-        let Some(btw) = self.btw_state.as_mut() else {
-            return Delegate;
-        };
-        match key.code {
-            KeyCode::Up => btw.scroll_up(1),
-            KeyCode::Down => btw.scroll_down(1, btw_scroll_max),
-            KeyCode::PageUp => btw.scroll_up(page),
-            KeyCode::PageDown => btw.scroll_down(page, btw_scroll_max),
-            _ => return Delegate,
-        }
-        self.clear_btw_drag_state();
-        Handled(Box::new(InputOutcome::Changed))
     }
     pub(super) fn handle_input_inner(
         &mut self,
@@ -1104,10 +974,7 @@ impl AgentView {
                 || (key.code == KeyCode::Char('/') && key.modifiers.contains(KeyModifiers::SHIFT)))
         {
             self.active_modal = Some(crate::views::modal::ActiveModal::CommandPalette {
-                entries: crate::views::modal::default_palette_entries(
-                    self.sharing_enabled,
-                    &self.prompt.slash_controller,
-                ),
+                entries: crate::views::modal::default_palette_entries(self.sharing_enabled),
                 state: crate::views::picker::PickerState::input_active(),
                 window: crate::views::modal_window::ModalWindowState::new(),
             });
@@ -1214,12 +1081,6 @@ impl AgentView {
                 if self.any_cancel_pending() {
                     return InputOutcome::Action(Action::Quit);
                 }
-                if crate::app::minimal_mode_active()
-                    && self.session.state.is_idle()
-                    && self.prompt.text().is_empty()
-                {
-                    return InputOutcome::Action(Action::Quit);
-                }
                 InputOutcome::Unchanged
             }
             ActionId::ToggleYolo => {
@@ -1244,21 +1105,9 @@ impl AgentView {
                     InputOutcome::Changed
                 }
             }
-            ActionId::EditPromptExternal => {
-                if self.external_prompt_editor_access()
-                    == ExternalPromptEditorAccess::OwnedElsewhere
-                {
-                    InputOutcome::Changed
-                } else {
-                    InputOutcome::Action(Action::EditPromptExternal)
-                }
-            }
             ActionId::CommandPalette => {
                 self.active_modal = Some(crate::views::modal::ActiveModal::CommandPalette {
-                    entries: crate::views::modal::default_palette_entries(
-                        self.sharing_enabled,
-                        &self.prompt.slash_controller,
-                    ),
+                    entries: crate::views::modal::default_palette_entries(self.sharing_enabled),
                     state: crate::views::picker::PickerState::input_active(),
                     window: crate::views::modal_window::ModalWindowState::new(),
                 });
@@ -1638,29 +1487,6 @@ mod btw_focus_tests {
             .expect("btw panel present")
             .scroll_offset()
     }
-    fn minimal_btw_agent() -> AgentView {
-        let mut agent = prompt_focused_agent();
-        let request_id = crate::minimal_api::start_minimal_btw(&mut agent, "q".into());
-        assert!(crate::minimal_api::finish_minimal_btw(
-            &mut agent,
-            request_id,
-            Ok(long_btw_answer())
-        ));
-        agent
-    }
-    fn assert_minimal_btw_active(agent: &AgentView, surface: &str) {
-        assert!(
-            agent.btw_state.is_some(),
-            "{surface} Esc must leave the latent /btw panel intact"
-        );
-        assert!(
-            matches!(
-                agent.minimal_btw_lifecycle,
-                Some(crate::minimal_api::MinimalBtwLifecycle::Active { .. })
-            ),
-            "{surface} Esc must restore the complete minimal /btw lifecycle"
-        );
-    }
     fn session_info_modal() -> crate::views::modal::ActiveModal {
         crate::views::modal::ActiveModal::UsageInfo {
             state: Box::new(crate::views::usage_modal::UsageInfoModalState::new(
@@ -1852,90 +1678,6 @@ mod btw_focus_tests {
         assert!(!agent.btw_focused, "dismissing the panel clears its focus");
     }
     #[test]
-    fn minimal_permission_owns_esc_over_hidden_btw() {
-        let mut agent = minimal_btw_agent();
-        let reg = ActionRegistry::defaults();
-        agent
-            .permission_queue
-            .push_back(super::test_fixtures::make_followup_permission_state());
-        agent.handle_minimal_input(&key(KeyCode::Esc), &reg);
-        assert_minimal_btw_active(&agent, "permission");
-        assert_eq!(
-            agent.permission_queue.len(),
-            1,
-            "Esc preserves the pending permission"
-        );
-        assert_eq!(
-            agent
-                .permission_queue
-                .front()
-                .map(|permission| permission.focus),
-            Some(crate::views::permission_view::PermissionFocus::Options),
-            "permission handled Esc by returning focus to options"
-        );
-    }
-    #[test]
-    fn minimal_modal_and_viewers_own_esc_over_hidden_btw() {
-        let reg = ActionRegistry::defaults();
-        let mut agents = minimal_btw_agent();
-        agents.agents_modal = Some(crate::views::agents_modal::AgentsModalState::new(
-            std::path::Path::new("/nonexistent"),
-            &std::collections::HashMap::new(),
-            &crate::app::bundle::BundleState::default(),
-            None,
-            None,
-            None,
-        ));
-        agents.handle_minimal_input(&key(KeyCode::Esc), &reg);
-        assert!(agents.agents_modal.is_none(), "agents modal handled Esc");
-        assert_minimal_btw_active(&agents, "agents modal");
-        let mut block = minimal_btw_agent();
-        block.block_viewer = Some(crate::views::block_viewer::BlockViewerPane::for_plain_text(
-            "t", "content",
-        ));
-        block.handle_minimal_input(&key(KeyCode::Esc), &reg);
-        assert!(block.block_viewer.is_none(), "block viewer handled Esc");
-        assert_minimal_btw_active(&block, "block viewer");
-        let mut video = minimal_btw_agent();
-        video.video_viewer = Some(crate::prompt_images::VideoViewerState::test_stub());
-        video.handle_minimal_input(&key(KeyCode::Esc), &reg);
-        assert!(video.video_viewer.is_none(), "video viewer handled Esc");
-        assert_minimal_btw_active(&video, "video viewer");
-        let mut goal = minimal_btw_agent();
-        goal.goal_state = Some(crate::app::agent::GoalDisplayState::test_stub());
-        goal.show_goal_detail = true;
-        goal.handle_minimal_input(&key(KeyCode::Esc), &reg);
-        assert!(!goal.show_goal_detail, "goal detail handled Esc");
-        assert_minimal_btw_active(&goal, "goal detail");
-        let mut session_info = minimal_btw_agent();
-        session_info.active_modal = Some(session_info_modal());
-        session_info.handle_minimal_input(&key(KeyCode::Esc), &reg);
-        assert!(
-            session_info.active_modal.is_none(),
-            "session-info handled Esc"
-        );
-        assert_minimal_btw_active(&session_info, "session-info");
-    }
-    #[test]
-    fn minimal_btw_surface_owner_covers_shared_modal_cascade() {
-        let mut agent = minimal_btw_agent();
-        assert!(crate::minimal_api::minimal_btw_surface_available(&agent));
-        agent.image_viewer = Some(
-            crate::prompt_images::ImageViewerState::open_from_path_deferred(std::path::Path::new(
-                "x.png",
-            )),
-        );
-        assert!(!crate::minimal_api::minimal_btw_surface_available(&agent));
-        agent.image_viewer = None;
-        agent.gboom = Some(crate::gboom::GboomState::new());
-        assert!(!crate::minimal_api::minimal_btw_surface_available(&agent));
-        agent.gboom = None;
-        agent.block_viewer = Some(crate::views::block_viewer::BlockViewerPane::for_plain_text(
-            "t", "content",
-        ));
-        assert!(!crate::minimal_api::minimal_btw_surface_available(&agent));
-    }
-    #[test]
     fn fullscreen_keeps_btw_first_esc_precedence() {
         let mut agent = prompt_focused_agent();
         let reg = ActionRegistry::defaults();
@@ -1986,16 +1728,6 @@ mod btw_focus_tests {
             "Down must leave the painted modal open"
         );
         assert!(agent.btw_state.is_some());
-    }
-    #[test]
-    fn minimal_does_not_scroll_unpainted_btw_geometry() {
-        let mut agent = prompt_focused_agent();
-        let reg = ActionRegistry::defaults();
-        agent.btw_state = Some(BtwOverlayState::done("q".into(), long_btw_answer()));
-        agent.btw_focused = true;
-        agent.last_btw_area = Rect::default();
-        agent.handle_minimal_input(&key(KeyCode::Down), &reg);
-        assert_eq!(done_scroll_offset(&agent), 0);
     }
     /// A hidden `/jump` picker shadowed by the `/btw` panel must not let one Esc close both.
     /// The first Esc drops the shadowed picker (and is spent there), the panel survives, and only a second Esc dismisses it.
@@ -2129,10 +1861,7 @@ mod focus_gained_restore_tests {
         agent.session.state = AgentState::TurnRunning;
         with_permission(&mut agent);
         agent.active_modal = Some(ActiveModal::CommandPalette {
-            entries: crate::views::modal::default_palette_entries(
-                false,
-                &agent.prompt.slash_controller,
-            ),
+            entries: crate::views::modal::default_palette_entries(false),
             state: crate::views::picker::PickerState::input_active(),
             window: crate::views::modal_window::ModalWindowState::new(),
         });
@@ -2174,7 +1903,6 @@ mod mid_turn_esc_hint_tests {
     use crate::app::actions::Action;
     use crate::app::agent::AgentState;
     use crate::app::app_view::InputOutcome;
-    use crate::scrollback::block::RenderBlock;
     use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
     fn running_agent(vim_mode: bool) -> AgentView {
         let mut agent = make_agent();
@@ -2189,63 +1917,27 @@ mod mid_turn_esc_hint_tests {
             &ActionRegistry::defaults(),
         )
     }
-    fn count_hint_lines(agent: &AgentView) -> usize {
-        (0..agent.scrollback.len())
-            .filter(|&i| {
-                matches!(
-                    agent.scrollback.entry(i).map(|e| &e.block),
-                    Some(RenderBlock::System(system))
-                        if system.text == "Press Ctrl+c to cancel the turn"
-                )
-            })
-            .count()
-    }
     /// Esc never cancels a running turn; it names the registry cancel key instead, in every mode and from either pane.
     #[test]
     fn mid_turn_esc_shows_ctrl_c_hint_instead_of_cancelling() {
-        for (vim_mode, minimal, pane) in [
-            (false, false, AgentPane::Prompt),
-            (true, false, AgentPane::Prompt),
-            (true, true, AgentPane::Prompt),
-            (false, false, AgentPane::Scrollback),
+        for (vim_mode, pane) in [
+            (false, AgentPane::Prompt),
+            (true, AgentPane::Prompt),
+            (false, AgentPane::Scrollback),
         ] {
             let mut agent = running_agent(vim_mode);
             agent.active_pane = pane;
-            if minimal {
-                agent
-                    .prompt
-                    .set_screen_mode(crate::app::ScreenMode::Minimal);
-            }
             agent.prompt.set_text("draft");
             let outcome = press_esc(&mut agent);
             assert!(
                 matches!(outcome, InputOutcome::Changed),
-                "vim={vim_mode} minimal={minimal} pane={pane:?}: expected Changed, got {outcome:?}"
+                "vim={vim_mode} pane={pane:?}: expected Changed, got {outcome:?}"
             );
-            if minimal {
-                assert_eq!(None, agent.active_toast_message());
-                let _ = press_esc(&mut agent);
-                agent
-                    .scrollback
-                    .push_block(RenderBlock::system("streamed block between presses"));
-                let _ = press_esc(&mut agent);
-                assert_eq!(1, count_hint_lines(&agent), "one hint line per user turn");
-                agent
-                    .scrollback
-                    .push_block(RenderBlock::user_prompt("next prompt"));
-                let _ = press_esc(&mut agent);
-                assert_eq!(
-                    2,
-                    count_hint_lines(&agent),
-                    "a new user turn allows one more"
-                );
-            } else {
-                assert_eq!(
-                    Some("Press Ctrl+c to cancel the turn"),
-                    agent.active_toast_message(),
-                    "vim={vim_mode} pane={pane:?}"
-                );
-            }
+            assert_eq!(
+                Some("Press Ctrl+c to cancel the turn"),
+                agent.active_toast_message(),
+                "vim={vim_mode} pane={pane:?}"
+            );
             assert_eq!(None, agent.cancel_trigger_hint);
             assert!(agent.session.state.is_turn_running());
             assert_eq!("draft", agent.prompt.text(), "the draft is preserved");

@@ -360,7 +360,6 @@ fn baseline_env_from_parent(
         ("OTEL_SDK_DISABLED", "true"),
         ("DISABLE_TELEMETRY", "1"),
         ("DISABLE_FEEDBACK_COMMAND", "1"),
-        ("GROK_DISABLE_AUTOUPDATER", "1"),
         ("GROK_PROMPT_SUGGESTIONS", "false"),
         // Every sandbox has an empty `GROK_HOME`, so without this the agent id is
         // recomputed per test; on Windows that is a ~30s `powershell Get-WmiObject`
@@ -825,10 +824,6 @@ mod tests {
             Some(OsStr::new(TEST_API_KEY))
         );
         assert_eq!(
-            env_value(&sandbox, "GROK_DISABLE_AUTOUPDATER").as_deref(),
-            Some(OsStr::new("1"))
-        );
-        assert_eq!(
             env_value(&sandbox, "GROK_TELEMETRY_TRACE_UPLOAD").as_deref(),
             Some(OsStr::new("false"))
         );
@@ -918,7 +913,7 @@ mod tests {
             .set_env("TERM_PROGRAM", "vscode")
             .set_env("GROK_PROMPT_SUGGESTIONS", "true")
             .set_env("NO_PROXY", "override.invalid")
-            .remove_env("GROK_DISABLE_AUTOUPDATER");
+            .remove_env("GROK_TURN_SUMMARY");
         assert_eq!(
             env_value(&sandbox, "TERM_PROGRAM").as_deref(),
             Some(OsStr::new("vscode"))
@@ -931,7 +926,7 @@ mod tests {
             env_value(&sandbox, "NO_PROXY").as_deref(),
             Some(OsStr::new("override.invalid"))
         );
-        assert_eq!(env_value(&sandbox, "GROK_DISABLE_AUTOUPDATER"), None);
+        assert_eq!(env_value(&sandbox, "GROK_TURN_SUMMARY"), None);
     }
 
     #[test]

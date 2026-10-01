@@ -5,7 +5,6 @@
 use crate::acp::model_state::ModelState;
 use crate::app::actions::Action;
 use crate::app::bundle::BundleState;
-use crate::slash::mode_support::ModeSupport;
 use agent_client_protocol as acp;
 
 /// Provisional scheduled task info for immediate display in the tasks pane.
@@ -161,9 +160,6 @@ pub struct AppCtx<'a> {
     /// Live session runs.
     /// Backs `/workflow pause|resume|stop|save` name suggestions so a manage verb never auto-picks a run.
     pub workflow_runs: &'a [WorkflowRunChoice],
-    /// Effective render mode of this process (gates `/minimal` and `/fullscreen` visibility).
-    /// Same source of truth as [`CommandExecCtx::screen_mode`], carried by the owning [`SlashController`](crate::slash::SlashController).
-    pub(crate) screen_mode: crate::app::ScreenMode,
     /// Current session title for `/rename` ghost-prefill (`display_name`, else `generated_session_title`).
     /// `None` when there is no title yet.
     pub current_title: Option<&'a str>,
@@ -176,7 +172,6 @@ pub struct CommandExecCtx<'a> {
     pub models: &'a ModelState,
     pub session_id: Option<&'a acp::SessionId>,
     pub bundle_state: &'a BundleState,
-    pub(crate) screen_mode: crate::app::ScreenMode,
     /// Whether the consumer billing surface is visible (`AppView::usage_visible`); gates `/usage` subcommands.
     pub billing_surface_visible: bool,
     /// Whether `/usage` is offered and executable.
@@ -316,12 +311,6 @@ pub trait SlashCommand: Send + Sync {
         false
     }
 
-    /// A few commands exist only in minimal mode, because the full TUI solves the same problem with a pane or a chord.
-    /// Clipboard helpers like `/copy` stay `Both`: they read scrollback state and do not need the fullscreen pane.
-    fn mode_support(&self) -> ModeSupport {
-        ModeSupport::Both
-    }
-
     /// Placeholder text shown in the prompt when args are empty.
     /// E.g., `"[context]"` for `/compact`.
     fn arg_placeholder(&self) -> Option<&str> {
@@ -394,7 +383,6 @@ macro_rules! slash_meta {
         $(offered_when_session_less: $offered_when_session_less:expr,)?
         $(dashboard_only: $dashboard_only:expr,)?
         $(can_hoist_from_mid_text: $can_hoist_from_mid_text:expr,)?
-        $(mode_support: $mode_support:expr,)?
         $(arg_placeholder: $arg_placeholder:expr,)?
         $(required_tools: $required_tools:expr,)?
     ) => {
@@ -436,10 +424,6 @@ macro_rules! slash_meta {
 
         $(fn can_hoist_from_mid_text(&self) -> bool {
             $can_hoist_from_mid_text
-        })?
-
-        $(fn mode_support(&self) -> crate::slash::mode_support::ModeSupport {
-            $mode_support
         })?
 
         $(fn arg_placeholder(&self) -> Option<&str> {

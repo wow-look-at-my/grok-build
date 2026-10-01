@@ -1,10 +1,8 @@
-//! Send-safe view of the agent's in-flight work, shared with the leader's auto-update checker and `RelaunchForUpdate` drain.
-//! Those are `tokio::spawn` tasks and cannot read the `!Send` `MvpAgent` state on the `LocalSet`.
+//! Send-safe view of the agent's in-flight work, shared with the leader's `tokio::spawn` tasks.
+//! Those tasks cannot read the `!Send` `MvpAgent` state on the `LocalSet`.
 //!
 //! The leader's `agent_busy` flag only counts IPC (Unix-socket) requests.
 //! Relay (grok.com WebSocket) traffic is bridged straight into the agent's ACP stdin and never sets it.
-//! A relay-driven leader (devbox / remote) therefore always looked idle and got restarted mid-turn on every update.
-//! That failure showed up as "Subagent result channel dropped".
 //!
 //! [`AgentActivity::is_busy`] derives busyness from agent state regardless of transport.
 //! [`AgentActivity::flush_all_sessions`] lets the shutdown path end session actors gracefully instead of aborting them via `LocalSet` drop.
@@ -30,7 +28,7 @@ use crate::session::{SessionCommand, SessionHandle, ShutdownKind};
 /// How often [`AgentActivity::flush_all_sessions`] re-polls actors that have not yet exited.
 const FLUSH_POLL: Duration = Duration::from_millis(50);
 
-/// Default bound on a process-exit session flush ([`AgentActivity::flush_all_sessions`]). Leader auto-update shutdown and the in-process agent's `/exit` / headless-quit path both use it.
+/// Default bound on a process-exit session flush ([`AgentActivity::flush_all_sessions`]). Every exit path uses it.
 /// One wedged actor therefore delays exit by the same amount everywhere; sessions are normally idle and the flush completes in milliseconds.
 /// Known gap: a `SessionEnd` hook configured with a longer `timeout` than this is still cut off at the grace. Aligning the two needs the hook registry's configured timeouts at flush time, which this layer does not see.
 pub const SESSION_FLUSH_GRACE: Duration = Duration::from_secs(10);
@@ -148,7 +146,7 @@ impl AgentActivity {
     }
 
     /// Lock the session list, dropping entries whose actor has exited.
-    /// Purging happens only here, so in modes with no periodic reader (no auto-update checker) a dead entry lingers until the next register.
+    /// Purging happens only here, so with no periodic reader a dead entry lingers until the next register.
     /// The leak is bounded and tiny: a sender handle and two `Arc`s per entry.
     fn lock_live_sessions(&self) -> std::sync::MutexGuard<'_, Vec<SessionActivityEntry>> {
         let mut guard = self

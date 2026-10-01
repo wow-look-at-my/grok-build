@@ -1102,7 +1102,7 @@ fn merge_section_cli_auto_update_writes_under_cli_section() {
     assert_eq!(
         c.get("auto_update").and_then(|v| v.as_bool()),
         Some(false),
-        "set_auto_update must persist Some(false) at `[cli].auto_update`"
+        "Some(false) must persist at `[cli].auto_update`"
     );
 }
 #[test]

@@ -234,77 +234,6 @@ fn all_system_texts(app: &AppView, id: AgentId) -> Vec<String> {
         })
         .collect()
 }
-/// In minimal mode the `/new` session banner must advertise `/resume`, not `/dashboard`: the dashboard command is refused there.
-/// The result is deterministic regardless of the dashboard feature flag: the minimal branch of `session_switch_hint_command` never consults it.
-#[test]
-fn session_created_banner_advertises_resume_in_minimal_mode() {
-    let mut app = test_app_with_agent();
-    app.screen_mode = crate::app::ScreenMode::Minimal;
-    let id = AgentId(1);
-    let mut session = make_test_agent_session(&app, id, "unused");
-    session.session_id = None;
-    session.created_via_new = true;
-    app.agents
-        .insert(id, AgentView::new(session, ScrollbackState::new()));
-    dispatch(
-        Action::TaskComplete(TaskResult::SessionCreated {
-            agent_id: id,
-            session_id: "new-session-123".into(),
-            models: None,
-            modes: None,
-        }),
-        &mut app,
-    );
-    let texts = all_system_texts(&app, id);
-    let banner = texts
-        .iter()
-        .find(|t| t.contains("switch between sessions"))
-        .unwrap_or_else(|| panic!("expected a session-switch banner, got: {texts:?}"));
-    assert!(
-        banner.contains("Session new-session-123, use /resume to switch between sessions"),
-        "minimal mode must advertise /resume: {banner}"
-    );
-    assert!(
-        !texts.iter().any(|t| t.contains("/dashboard")),
-        "minimal mode must NOT advertise /dashboard: {texts:?}"
-    );
-}
-/// After a real minimal /new (prior AgentView dropped), the switch tip must still name /resume.
-#[test]
-fn session_created_banner_after_minimal_new_replacing_session() {
-    let mut app = test_app();
-    app.screen_mode = crate::app::ScreenMode::Minimal;
-    dispatch(Action::NewSession, &mut app);
-    dispatch(
-        Action::TaskComplete(TaskResult::SessionCreated {
-            agent_id: AgentId(0),
-            session_id: "sess-a".into(),
-            models: None,
-            modes: None,
-        }),
-        &mut app,
-    );
-    dispatch(Action::NewSession, &mut app);
-    let id = AgentId(1);
-    dispatch(
-        Action::TaskComplete(TaskResult::SessionCreated {
-            agent_id: id,
-            session_id: "sess-b".into(),
-            models: None,
-            modes: None,
-        }),
-        &mut app,
-    );
-    let texts = all_system_texts(&app, id);
-    let banner = texts
-        .iter()
-        .find(|t| t.contains("switch between sessions"))
-        .unwrap_or_else(|| panic!("expected a session-switch banner, got: {texts:?}"));
-    assert!(
-        banner.contains("Session sess-b, use /resume to switch between sessions"),
-        "minimal /new must still advertise /resume after dropping the prior view: {banner}"
-    );
-}
 #[test]
 fn global_cancel_subagents_pref_skips_panel_without_session_override() {
     let mut app = test_app_with_agent();
@@ -1100,33 +1029,6 @@ fn exit_session_unregisters_active_session() {
         "ExitSession must emit UnregisterActiveSession, got: {effects:?}"
     );
     assert!(matches!(app.active_view, ActiveView::Welcome));
-}
-/// Minimal has no welcome chrome; /exit must open an empty session like startup.
-#[test]
-fn exit_session_minimal_opens_new_session() {
-    let mut app = test_app_with_agent();
-    app.screen_mode = crate::app::ScreenMode::Minimal;
-    let effects = dispatch(Action::ExitSession, &mut app);
-    assert!(
-        effects
-            .iter()
-            .any(|e| matches!(e, Effect::UnregisterActiveSession { .. })),
-        "ExitSession must emit UnregisterActiveSession, got: {effects:?}"
-    );
-    assert!(
-        effects
-            .iter()
-            .any(|e| matches!(e, Effect::CreateSession { .. })),
-        "minimal /exit must dispatch NewSession, got {effects:?}"
-    );
-    let ActiveView::Agent(id) = app.active_view else {
-        panic!(
-            "minimal /exit must land on an agent, got {:?}",
-            app.active_view
-        );
-    };
-    assert_ne!(id, AgentId(0), "must not stay on the exited agent");
-    assert_eq!(expect_agent(&app, id).active_pane, ActivePane::Prompt);
 }
 #[test]
 fn slash_new_dispatches_new_session() {
@@ -2824,43 +2726,6 @@ fn delete_current_session_complete_welcome_and_guard() {
     assert!(matches!(app.active_view, ActiveView::Agent(id) if id == other));
     assert!(!app.agents.contains_key(&AgentId(0)));
     assert!(!effects.iter().any(|e| matches!(e, Effect::Quit)));
-}
-/// Minimal has no welcome chrome; /delete must open an empty session like startup.
-#[test]
-fn delete_current_session_complete_minimal_opens_new_session() {
-    use crate::app::actions::{AfterSessionDelete, TaskResult};
-    let mut app = test_app_with_agent();
-    app.screen_mode = crate::app::ScreenMode::Minimal;
-    app.agents.get_mut(&AgentId(0)).unwrap().session.session_id =
-        Some(acp::SessionId::new("sess-a"));
-    let effects = dispatch_task_result(
-        TaskResult::DeleteSessionComplete {
-            source: "current".into(),
-            session_id: "sess-a".into(),
-            after: AfterSessionDelete::Welcome,
-        },
-        &mut app,
-    );
-    assert!(
-        effects
-            .iter()
-            .any(|e| matches!(e, Effect::UnregisterActiveSession { .. }))
-    );
-    assert!(
-        effects
-            .iter()
-            .any(|e| matches!(e, Effect::CreateSession { .. })),
-        "minimal /delete must dispatch NewSession, got {effects:?}"
-    );
-    let ActiveView::Agent(id) = app.active_view else {
-        panic!(
-            "minimal /delete must land on an agent, got {:?}",
-            app.active_view
-        );
-    };
-    assert_ne!(id, AgentId(0), "must not stay on the deleted agent");
-    assert!(!app.agents.contains_key(&AgentId(0)));
-    assert_eq!(expect_agent(&app, id).active_pane, ActivePane::Prompt);
 }
 #[test]
 fn delete_current_session_complete_returns_to_dashboard() {

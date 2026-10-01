@@ -65,7 +65,6 @@ fn each_reason_to_repaint_asks_for_ticks() {
 fn suppressor_beats_every_reason_to_repaint() {
     let suppressors: [Tweak; 3] = [
         ("no agent attached", |i| i.has_agent = false),
-        // Minimal mode and a row that is off both reach here as one answer.
         ("no row is drawn", |i| i.row_is_drawn = false),
         // A run answers through its own task result, not through a tick.
         ("a run is outstanding", |i| i.run = RunSlot::WithinDeadline),

@@ -96,17 +96,17 @@ User-level configuration lives in `$GROK_HOME/config.toml` (default `~/.grok/con
 
 | Key | Type / Values | Requirements | Managed | Details |
 | --- | --- | --- | --- | --- |
-| `cli.auto_update` | `boolean` | `pin` | `user` | Check for CLI updates on launch. Also GROK_DISABLE_AUTOUPDATER to suppress. |
-| `cli.channel` | `stable / alpha` | `pin` | `user` | Release channel preference. |
+| `cli.auto_update` | `boolean` | `pin` | `user` | Still loads; has no effect. |
+| `cli.channel` | `stable / alpha` | `pin` | `user` | Still loads; has no effect. |
 | `cli.grove` | `boolean` or `grove` / `grove-fuse` / `grove-nfs` / `nfs` / `all` / `copy` / `true` / `false` / `1` / `0` / `on` / `off` | `yes` | `user` | Convenience that turns **both** `grok clone` and session / `-w` Grove on when the specific knobs are unset. Also `GROK_GROVE`. `false` / `copy` / `off` means enable-all is off (fall through); it does not force both surfaces off. `[cli] grove_worktree` and `GROK_WORKTREE_TYPE` still win for worktrees; `GROK_CLONE` still wins for clone. Remote `grove_worktree = false` still kills worktrees only. |
 | `cli.grove_worktree` | `boolean` or `grove` / `grove-fuse` / `grove-nfs` / `nfs` / `copy` / `true` / `false` / `1` / `0` / `on` / `off` | `yes` | `user` | Session / `-w` Grove vs copy. Default copy. Distinct from creation-mode `cli.worktree_type`. Also `GROK_WORKTREE_TYPE`. Layer order: request → env → local → enable-all (`GROK_GROVE` / `[cli] grove`) → remote-true; then kill last: remote `grove_worktree = false` → copy (`remote_kill`). Missing remote settings are not a kill: local/env/request/enable-all still apply. Does not enable `grok clone`. |
-| `cli.installer` | `string` | `—` | `user` | Which installer last set up this CLI, used to pick the update path. |
-| `cli.maximum_version` | `string` | `pin` | `user` | Highest CLI version that still runs without a hard block. Also GROK_MAXIMUM_VERSION. |
-| `cli.minimum_version` | `string` | `pin` | `user` | Lowest CLI version that still runs without a hard block. Also GROK_MINIMUM_VERSION. |
-| `cli.npm_registry` | `string` | `yes` | `user` | npm registry used by the auto-updater. |
+| `cli.installer` | `string` | `—` | `user` | Still loads; has no effect. |
+| `cli.maximum_version` | `string` | `pin` | `user` | Still loads; has no effect. |
+| `cli.minimum_version` | `string` | `pin` | `user` | Still loads; has no effect. |
+| `cli.npm_registry` | `string` | `yes` | `user` | Still loads; has no effect. |
 | `cli.nfs_worktree` | same as `cli.grove_worktree` | `yes` | `user` | Read alias of `cli.grove_worktree`. |
-| `cli.required_maximum_version` | `string` | `pin` | `user` | Hard maximum CLI version. Also GROK_REQUIRED_MAXIMUM_VERSION. |
-| `cli.required_minimum_version` | `string` | `pin` | `user` | Hard minimum CLI version. Also GROK_REQUIRED_MINIMUM_VERSION. |
+| `cli.required_maximum_version` | `string` | `pin` | `user` | Still loads; has no effect. |
+| `cli.required_minimum_version` | `string` | `pin` | `user` | Still loads; has no effect. |
 | `cli.session_picker_grouped` | `boolean` | `yes` | `user` | Group sessions by repo in the picker and CLI listings. |
 | `cli.session_registry` | `boolean` | `yes` | `user` | Participate in the cross-process session registry. |
 | `cli.show_tips` | `boolean` | `pin` | `user` | Startup tips. |
@@ -624,7 +624,7 @@ User-level configuration lives in `$GROK_HOME/config.toml` (default `~/.grok/con
 | `prompt_suggestions.reasoning_effort` | `none / minimal / low / medium / high` | `yes` | `user` | Reasoning effort for the suggestion call; default and `none` disable reasoning, while other values use a supported model effort. Remote-overridable. |
 | `ui.remember_tool_approvals` | `boolean` | `yes` | `user` | Show per-tool Always allow options. Also GROK_REMEMBER_TOOL_APPROVALS. |
 | `ui.render_mermaid` | `auto / on / off` | `yes` | `user` | How mermaid fences render: clickable open row or raw source. |
-| `ui.screen_mode` | `fullscreen / minimal` | `yes` | `user` | Default render mode for plain `grok`. Restart required. |
+| `ui.screen_mode` | `fullscreen / minimal` | `yes` | `user` | Still loads; has no effect. |
 | `ui.scroll_lines` | `integer` | `yes` | `user` | Lines per scroll tick (1–10). Also GROK_SCROLL_LINES. |
 | `ui.scroll_mode` | `auto / wheel / trackpad` | `yes` | `user` | Scroll input classification. Also GROK_SCROLL_MODE. |
 | `ui.scroll_speed` | `integer` | `yes` | `user` | Mouse/trackpad scroll speed multiplier (1–100). Also GROK_SCROLL_SPEED. |

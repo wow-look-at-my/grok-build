@@ -530,7 +530,7 @@ fn clipboard_delivery_findings_own_remediation_while_fix_fact_stays_compatible()
             },
             crate::clipboard::ClipboardDelivery::Unverified,
             crate::diagnostics::CLIPBOARD_DELIVERY_UNVERIFIED_ID,
-            "grok wrap <ssh command> or /minimal",
+            "grok wrap <ssh command>",
         ),
         (
             TerminalContext {
@@ -548,7 +548,7 @@ fn clipboard_delivery_findings_own_remediation_while_fix_fact_stays_compatible()
             },
             crate::clipboard::ClipboardDelivery::Failed,
             crate::diagnostics::CLIPBOARD_DELIVERY_UNAVAILABLE_ID,
-            "/minimal",
+            "/copy <file>",
         ),
     ];
 
@@ -598,22 +598,22 @@ fn iterm2_and_vscode_clipboard_caveats_are_named_recommendations() {
         (
             TerminalName::VsCode,
             crate::diagnostics::VSCODE_SSH_NON_ASCII_ID,
-            "/minimal",
+            "/copy <file>",
         ),
         (
             TerminalName::Cursor,
             crate::diagnostics::VSCODE_SSH_NON_ASCII_ID,
-            "/minimal",
+            "/copy <file>",
         ),
         (
             TerminalName::Windsurf,
             crate::diagnostics::VSCODE_SSH_NON_ASCII_ID,
-            "/minimal",
+            "/copy <file>",
         ),
         (
             TerminalName::Zed,
             crate::diagnostics::VSCODE_SSH_NON_ASCII_ID,
-            "/minimal",
+            "/copy <file>",
         ),
     ];
     for (brand, id, expected_guidance) in cases {

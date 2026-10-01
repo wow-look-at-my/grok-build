@@ -144,7 +144,6 @@ mod child_action_filter;
 mod cta;
 mod elicitation;
 mod input;
-pub(crate) use input::ExternalPromptEditorAccess;
 mod interactions;
 mod jump;
 mod key_owner;
@@ -1222,8 +1221,6 @@ pub struct AgentView {
     /// Active /btw side question overlay. When `Some`, renders as a dismissible
     /// overlay and captures keyboard input (Esc/Enter/Space to dismiss).
     pub btw_state: Option<crate::views::btw_overlay::BtwOverlayState>,
-    /// Minimal-only ownership/correlation for `btw_state`; absent in fullscreen.
-    pub(crate) minimal_btw_lifecycle: Option<crate::minimal_api::MinimalBtwLifecycle>,
     /// Whether the /btw panel holds keyboard focus. The panel is non-blocking, so Up/Down/PgUp/PgDn scroll it when focused and otherwise reach the prompt. Set on a `Done` answer; cleared when the user types in or clicks the prompt.
     pub(crate) btw_focused: bool,
     /// Hit area for the [Esc] close button in the /btw panel title.
@@ -1466,9 +1463,6 @@ pub struct AgentView {
     /// Mid-turn Esc grace deadline: while `now` is before it, the Esc policy holds the idle rewind ARM so Esc-mashing past a turn's end cannot silently arm the rewind picker. Set (`now + ESC_CANCEL_REWIND_GRACE`)
     /// by `suppress_rewind_arm` on every mid-turn Esc, consumed and retired-on-expiry by `rewind_arm_suppressed`. `pub(crate)` for policy tests.
     pub(crate) rewind_suppress_deadline: Option<std::time::Instant>,
-    /// Minimal only: the `scrollback.turn_count()` at which the mid-turn Esc hint was last committed.
-    /// The hint is a permanent scrollback line there, so a mash across streamed blocks must not add another before the next user turn.
-    pub(crate) minimal_cancel_hint_turn: Option<usize>,
     /// First prompt to enqueue once the session finishes loading replay.
     /// Set by `/fork` when a directive is provided; drained in the `TaskResult::SessionLoaded` arm via `enqueue_prompt_front` so the directive runs ahead of any prompts the user typed during the placeholder window.
     pub(crate) pending_first_prompt: Option<String>,
@@ -2028,7 +2022,6 @@ fn resolve_action(action_id: Option<ActionId>) -> Option<InputOutcome> {
         ActionId::OpenSettings => return None,
         ActionId::ToggleTodos
         | ActionId::ToggleTasks
-        | ActionId::EditPromptExternal
         | ActionId::ToggleQueue
         | ActionId::OpenSessions
         | ActionId::OpenExtensions

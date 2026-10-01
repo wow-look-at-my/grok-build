@@ -621,7 +621,7 @@ impl MvpAgent {
         }
     }
     /// Adopt the leader's [`AgentActivity`].
-    /// The auto-update checker then sees the agent's live view of running turns/subagents and can flush sessions at shutdown.
+    /// The leader then sees the agent's live view of running turns/subagents and can flush sessions at shutdown.
     /// Must be called right after construction: entries registered on the constructor-created default instance are NOT migrated.
     pub(crate) fn set_activity(
         &mut self,
@@ -631,7 +631,7 @@ impl MvpAgent {
     }
     /// Send [`SessionCommand::Shutdown`] to every live session actor and wait up to `grace` for them to exit (SessionEnd hooks, memory save, etc.).
     /// Call on non-leader process quit **after** the cancel token fires but **before** dropping the agent / exiting the process. Otherwise session actors are killed mid-hook.
-    /// Mirrors the leader auto-update / relaunch flush path ([`crate::agent::activity::AgentActivity::flush_all_sessions`]).
+    /// See [`crate::agent::activity::AgentActivity::flush_all_sessions`].
     pub async fn flush_all_sessions(&self, grace: std::time::Duration) {
         self.activity.flush_all_sessions(grace).await;
     }

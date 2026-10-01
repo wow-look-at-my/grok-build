@@ -383,15 +383,7 @@ pub(super) fn dispatch_rewind_success(
         crate::memory_release::release_retained_memory("rewind-truncate");
     }
 
-    const MSG: &str = "Reverted conversation";
-    if app.screen_mode.is_minimal() {
-        // Minimal has no toast area and can't erase committed lines, so the confirmation stays in scrollback there
-        agent
-            .scrollback
-            .push_block(RenderBlock::system(MSG.to_string()));
-    } else {
-        agent.show_toast(MSG);
-    }
+    agent.show_toast("Reverted conversation");
 
     if let Some(ref prompt_text) = response.prompt_text {
         agent.prompt.set_text_discarding_images(prompt_text);

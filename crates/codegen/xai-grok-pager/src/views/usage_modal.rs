@@ -1,5 +1,4 @@
 //! Tabbed usage and session-info modal, opened by `/usage`, `/session-info`, `/context`, and the context-bar click.
-//! Minimal mode keeps the scrollback blocks instead; this modal never opens there.
 //!
 //! The Session-info tab supports click-to-copy on value rows (with hover) and in-app drag-select after a movement threshold.
 //! `c` and `y` stay as programmatic copy.

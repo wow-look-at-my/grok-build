@@ -346,17 +346,14 @@ fn manage_run_items(ctx: &AppCtx, op: &str) -> Vec<ArgItem> {
 
 /// Ops the shell accepts, offered after advertised workflow names.
 const WORKFLOW_OPS: [(&str, &str); 5] = [
-    (
-        "runs",
-        "Show workflow runs (dashboard; text overview in minimal)",
-    ),
+    ("runs", "Show workflow runs"),
     ("pause", "Pause a running workflow"),
     ("resume", "Resume a paused workflow"),
     ("stop", "Stop a workflow run"),
     ("save", "Save a run's script as a named workflow"),
 ];
 
-/// `/workflow runs` toggles the run dashboard outside minimal mode; all other forms forward to the shell.
+/// `/workflow runs` toggles the run dashboard; all other forms forward to the shell.
 pub struct WorkflowCommand;
 
 impl SlashCommand for WorkflowCommand {
@@ -428,12 +425,10 @@ impl SlashCommand for WorkflowCommand {
         None
     }
 
-    fn run(&self, ctx: &mut CommandExecCtx, args: &str) -> CommandResult {
+    fn run(&self, _ctx: &mut CommandExecCtx, args: &str) -> CommandResult {
         let trimmed = args.trim();
         // Case-insensitive like the shell's `runs` op
-        // Fullscreen and inline both render the pane (the same non-minimal set FullscreenOnly gates on)
-        // Minimal falls through to the shell's text overview
-        if trimmed.eq_ignore_ascii_case("runs") && !ctx.screen_mode.is_minimal() {
+        if trimmed.eq_ignore_ascii_case("runs") {
             return CommandResult::Action(Action::ToggleWorkflows);
         }
         if trimmed.is_empty() {

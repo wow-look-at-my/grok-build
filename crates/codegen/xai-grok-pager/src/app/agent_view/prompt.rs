@@ -85,9 +85,6 @@ impl AgentView {
         self.handle_prompt_key(key, registry, false)
     }
 
-    // `pub(super)`: also called by `AppView::minimal_key_intercept` to route Apple Terminal's Ctrl+O interject chord straight to the prompt path
-    // Minimal's prompt is conceptually always focused, but `active_pane` can be Scrollback
-    // Scrollback's `When::AgentScreen` promotion would misroute the chord to `ToggleYolo`
     pub(in crate::app) fn handle_prompt_key(
         &mut self,
         key: &KeyEvent,
@@ -745,7 +742,6 @@ impl AgentView {
 
         // Structural keys declined by the widget.
         // Tab leaves the prompt only when this registry exposes the scrollback pane
-        // Minimal omits FocusScrollback, so an otherwise-unclaimed Tab stays with its logical composer
         match key.code {
             KeyCode::Tab if registry.find(ActionId::FocusScrollback).is_some() => {
                 InputOutcome::Action(Action::FocusScrollback)
@@ -826,7 +822,7 @@ impl AgentView {
                 && let Some(cancel_key) = registry.key_for(ActionId::CancelTurn)
             {
                 let cancel_key = cancel_key.display();
-                self.show_cancel_key_hint(&format!("Press {cancel_key} to cancel the turn"));
+                self.show_toast(&format!("Press {cancel_key} to cancel the turn"));
             }
             self.suppress_rewind_arm(std::time::Instant::now());
             return Some(InputOutcome::Changed);
@@ -869,20 +865,6 @@ impl AgentView {
         // The cases: a scrollback pane with a draft, an empty prompt with no turns, or the post-cancel grace
         // Also a scrollback Esc under a latent composer mode / pending needs-input overlay / open history search
         Some(InputOutcome::Changed)
-    }
-
-    /// Minimal has no toast slot and cannot erase committed lines, so the hint is a scrollback system line there.
-    /// Repeated Esc presses must not stack copies of it, even with streamed blocks in between: commit at most one per user turn.
-    fn show_cancel_key_hint(&mut self, msg: &str) {
-        if !self.is_minimal_mode() {
-            self.show_toast(msg);
-            return;
-        }
-        let turn = self.scrollback.turn_count();
-        if self.minimal_cancel_hint_turn != Some(turn) {
-            self.minimal_cancel_hint_turn = Some(turn);
-            self.scrollback.push_block(RenderBlock::system(msg));
-        }
     }
 
     /// Arm the mid-turn Esc grace: push the rewind-ARM suppression deadline out to `now + ESC_CANCEL_REWIND_GRACE`.
@@ -1101,24 +1083,13 @@ mod shift_tab_cycle_mode_tests {
     #[test]
     fn plain_tab_follows_focus_scrollback_registration() {
         let tab = KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE);
-        for mode in [
-            crate::app::ScreenMode::Fullscreen,
-            crate::app::ScreenMode::Inline,
-        ] {
-            let mut agent = super::test_fixtures::make_agent();
-            let registry = ActionRegistry::defaults_for(mode);
-            let outcome = agent.handle_prompt_key_with_registry_for_test(&tab, &registry);
-            assert!(
-                matches!(outcome, InputOutcome::Action(Action::FocusScrollback)),
-                "{mode:?} plain Tab must focus scrollback, got {outcome:?}",
-            );
-        }
-
-        let mut minimal = super::test_fixtures::make_agent();
-        let registry = ActionRegistry::defaults_for(crate::app::ScreenMode::Minimal);
-        let outcome = minimal.handle_prompt_key_with_registry_for_test(&tab, &registry);
-        assert!(matches!(outcome, InputOutcome::Unchanged));
-        assert_eq!(minimal.active_pane, AgentPane::Prompt);
+        let mut agent = super::test_fixtures::make_agent();
+        let registry = ActionRegistry::defaults();
+        let outcome = agent.handle_prompt_key_with_registry_for_test(&tab, &registry);
+        assert!(
+            matches!(outcome, InputOutcome::Action(Action::FocusScrollback)),
+            "plain Tab must focus scrollback, got {outcome:?}",
+        );
     }
 
     #[test]
@@ -1143,7 +1114,7 @@ mod shift_tab_cycle_mode_tests {
     }
 
     #[test]
-    fn minimal_slash_dropdown_still_consumes_tab() {
+    fn slash_dropdown_consumes_tab() {
         let mut agent = super::test_fixtures::make_agent();
         agent.prompt.set_text("/");
         agent.prompt.refresh_slash(&agent.session.models);
@@ -1152,7 +1123,7 @@ mod shift_tab_cycle_mode_tests {
             "precondition: slash dropdown open"
         );
 
-        let registry = ActionRegistry::defaults_for(crate::app::ScreenMode::Minimal);
+        let registry = ActionRegistry::defaults();
         let outcome = agent.handle_prompt_key_with_registry_for_test(
             &KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE),
             &registry,

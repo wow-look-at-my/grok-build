@@ -1,6 +1,6 @@
 //! Read-only system-block text for `/queue`, `/tasks`, and `/usage`.
 //!
-//! Plain text committed into scrollback; minimal mode has no interactive panes, so these blocks are its main way to inspect that state.
+//! Plain text committed into scrollback.
 //! The formatting lives outside `dispatch` so it is easy to unit test.
 
 use crate::app::agent::BgTaskStatus;

@@ -176,7 +176,7 @@ impl PtyHarness {
         }
     }
 
-    /// Off by default so probe tests can script replies. Minimal-mode tests need it or the startup `ESC[6n` times out and `--minimal` downgrades.
+    /// Off by default so probe tests can script replies. Inline-viewport tests need it or the startup `ESC[6n` times out.
     pub fn set_respond_to_queries(&mut self, enabled: bool) {
         self.respond_to_queries = enabled;
     }
@@ -519,7 +519,7 @@ impl PtyHarness {
         std::fs::write(path, out).with_context(|| format!("write cast {}", path.display()))
     }
 
-    // ── Scrollback queries (minimal mode commits blocks into native history) ──
+    // ── Scrollback queries ──
 
     /// The terminal's scrollback history as text (oldest line first).
     pub fn scrollback_text(&self) -> String {
@@ -527,7 +527,7 @@ impl PtyHarness {
     }
 
     /// Scrollback history plus the visible screen, joined oldest to newest.
-    /// Use for minimal-mode assertions: a committed block may be on-screen or scrolled above the pinned viewport.
+    /// Use when a block may be on-screen or scrolled above the viewport.
     /// Where it lands depends on how much has accumulated.
     pub fn full_text(&self) -> String {
         self.screen.full_text()
@@ -544,7 +544,7 @@ impl PtyHarness {
     }
 
     /// Block until scrollback plus visible screen contains `text`, or `timeout` expires.
-    /// The scrollback-aware companion to [`Self::wait_for_text`] for content that may have scrolled above the viewport (minimal mode).
+    /// The scrollback-aware companion to [`Self::wait_for_text`] for content that may have scrolled above the viewport.
     pub fn wait_for_full_text(&mut self, text: &str, timeout: Duration) -> Result<()> {
         let result = self.wait_until(&format!("full text {text:?}"), timeout, |h| {
             h.contains_full_text(text)

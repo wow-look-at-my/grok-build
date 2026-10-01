@@ -66,7 +66,7 @@ Plan mode is the interactive version of the `/goal` planner, and the plan uses t
 
 When the agent finishes planning, it calls the `exit_plan_mode` tool. The tool reads the plan file from disk, and the TUI opens a scrollable preview of the plan with an action bar along the bottom.
 
-If the agent exits without writing a plan (empty or missing `plan.md`), the same approval surface still opens with a clear empty-state message so you can approve and start implementing, request changes (send the agent back to planning), or quit. In minimal mode the empty notice is committed into scrollback and the controls strip header reads **No plan written yet**.
+If the agent exits without writing a plan (empty or missing `plan.md`), the same approval surface still opens with a clear empty-state message so you can approve and start implementing, request changes (send the agent back to planning), or quit.
 
 ### Reviewing the Plan
 

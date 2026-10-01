@@ -42,8 +42,6 @@ mod esc_mid_turn_hints_ctrl_c_from_prompt_preserves_draft;
 mod esc_mid_turn_hints_ctrl_c_from_scrollback;
 #[path = "pty_e2e/mid_turn_slash_dropdown_esc_dismisses_not_cancel.rs"]
 mod mid_turn_slash_dropdown_esc_dismisses_not_cancel;
-#[path = "pty_e2e/minimal/minimal_ctrl_o_interrupts_queued_apple_terminal.rs"]
-mod minimal_ctrl_o_interrupts_queued_apple_terminal;
 #[path = "pty_e2e/queue_and_interjection_lifecycle.rs"]
 mod queue_and_interjection_lifecycle;
 #[path = "pty_e2e/queue_reorder_local_row_above_server_row.rs"]

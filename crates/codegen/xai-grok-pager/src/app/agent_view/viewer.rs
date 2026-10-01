@@ -360,7 +360,6 @@ impl AgentView {
         } else {
             self.btw_state = None;
         }
-        self.minimal_btw_lifecycle = None;
         self.btw_focused = false;
         self.clear_btw_drag_state();
         // Panel gone: drop the held highlight. Scroll only cancels an in-flight drag.

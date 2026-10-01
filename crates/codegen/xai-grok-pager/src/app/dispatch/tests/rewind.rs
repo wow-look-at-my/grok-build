@@ -10,52 +10,6 @@ fn agent_ref(app: &AppView, id: AgentId) -> &AgentView {
 }
 
 #[test]
-fn cancel_does_not_rewind_when_in_flight_block_committed() {
-    // Minimal-mode regression: a user-prompt block commits to native scrollback immediately (it is never `is_running`)
-    // A committed block can't be "un-printed", so cancelling must not rewind it
-    // A rewind would `remove_entry` it from state while the printed copy stays on screen, then restore the text into the input, showing it twice
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-
-    dispatch(Action::SendPrompt("queued prompt".into()), &mut app);
-    assert!(agent_ref(&app, id).session.in_flight_prompt.is_some());
-    assert_eq!(agent_ref(&app, id).scrollback.len(), 1);
-
-    // Simulate minimal's commit pass printing the user block into native scrollback (sets the entry's `committed` flag)
-    let entry_id = agent_ref(&app, id)
-        .session
-        .in_flight_prompt
-        .as_ref()
-        .unwrap()
-        .scrollback_entry;
-    let idx = agent_ref(&app, id)
-        .scrollback
-        .index_of_id(entry_id)
-        .unwrap();
-    app.agents
-        .get_mut(&id)
-        .unwrap()
-        .scrollback
-        .mark_committed(idx);
-
-    let effects = dispatch(Action::CancelTurn, &mut app);
-    assert_eq!(effects.len(), 1);
-    assert!(matches!(effects.first(), Some(Effect::CancelTurn { .. })));
-
-    // Standard cancel, not the rewind: the prompt is not restored to the input and the committed block stays in scrollback (no duplicate)
-    assert!(
-        agent_ref(&app, id).prompt.text().is_empty(),
-        "committed in-flight block must not be rewound into the input"
-    );
-    assert_eq!(
-        agent_ref(&app, id).scrollback.len(),
-        1,
-        "committed block must stay in scrollback (it's already printed)"
-    );
-    assert!(agent_ref(&app, id).session.state.is_cancelling());
-}
-
-#[test]
 fn rewind_then_resubmit_drains_immediately_and_discards_orphan() {
     // After a rewind, state is Idle so a follow-up prompt can drain without waiting for the cancelled turn's PromptResponse
     let mut app = test_app_with_agent();
@@ -662,9 +616,9 @@ fn rewind_success_truncation_releases_retained_memory() {
     );
 }
 
-/// A successful rewind confirms via a toast in the full TUI; minimal mode keeps the scrollback system block (it never renders toasts).
+/// A successful rewind confirms via a toast, not a scrollback block.
 #[test]
-fn rewind_success_toasts_in_full_tui_and_commits_system_block_in_minimal() {
+fn rewind_success_toasts() {
     let response = crate::views::rewind::RewindResponse {
         success: true,
         target_prompt_index: 0,
@@ -685,7 +639,7 @@ fn rewind_success_toasts_in_full_tui_and_commits_system_block_in_minimal() {
     dispatch(
         Action::TaskComplete(TaskResult::RewindExecuteComplete {
             agent_id: id,
-            response: response.clone(),
+            response,
         }),
         &mut app,
     );
@@ -696,24 +650,8 @@ fn rewind_success_toasts_in_full_tui_and_commits_system_block_in_minimal() {
     assert_eq!(
         agent_ref(&app, id).scrollback.len(),
         0,
-        "the confirmation must not land in scrollback in the full TUI"
+        "the confirmation must not land in scrollback"
     );
-
-    let mut app = test_app_with_agent();
-    app.screen_mode = crate::app::ScreenMode::Minimal;
-    if let Some(agent) = app.agents.get_mut(&id) {
-        agent.scrollback.push_block(user_block("alpha", Some(0)));
-        agent.scrollback.push_block(RenderBlock::agent_message("a"));
-    }
-    dispatch(
-        Action::TaskComplete(TaskResult::RewindExecuteComplete {
-            agent_id: id,
-            response,
-        }),
-        &mut app,
-    );
-    assert!(agent_ref(&app, id).toast.is_none());
-    assert_eq!(last_system_text(&app, id), "Reverted conversation");
 }
 
 #[test]
