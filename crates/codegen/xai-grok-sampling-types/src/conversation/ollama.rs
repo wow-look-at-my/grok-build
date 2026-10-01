@@ -35,7 +35,7 @@ pub fn build_ollama_chat_request(req: &ConversationRequest) -> OllamaChatRequest
                 function: OllamaToolFunction {
                     name: tool.name.clone(),
                     description: tool.description.clone(),
-                    parameters: tool.parameters.clone(),
+                    parameters: req.tool_parameters(tool).into_owned(),
                 },
             })
             .collect::<Vec<_>>()

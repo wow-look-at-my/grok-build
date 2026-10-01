@@ -442,7 +442,7 @@ pub fn build_messages_request(req: &ConversationRequest) -> crate::messages::Mes
                 .map(|t| ToolParam {
                     name: t.name.clone(),
                     description: t.description.clone(),
-                    input_schema: t.parameters.clone(),
+                    input_schema: req.tool_parameters(t).into_owned(),
                     eager_input_streaming: crate::messages::True,
                 })
                 .collect(),

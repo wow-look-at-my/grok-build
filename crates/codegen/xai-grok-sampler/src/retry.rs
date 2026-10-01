@@ -186,6 +186,9 @@ pub enum RetryDecision {
     /// cannot take).
     RetryWithReasoningStrip,
 
+    /// Retry with the tool schemas in their fallback form.
+    RetryWithToolSchemaFallback,
+
     /// Retry after marking the target reasoning-mandatory and remapping a
     /// disabled/omitted requested effort to the lowest non-disabled tier (the
     /// provider answered our disabling body with its "reasoning is mandatory"
@@ -230,6 +233,12 @@ pub fn classify_error(
     // is left once the level is spent.
     if err.is_encrypted_content_error() || err.is_thinking_signature_error() {
         return RetryDecision::RetryWithReasoningStrip;
+    }
+
+    // The tool list rides every request, so the status-code arms below would
+    // fail every turn on the same schema.
+    if err.is_tool_schema_combinator_error() {
+        return RetryDecision::RetryWithToolSchemaFallback;
     }
 
     // Token overflows fail fast via the retry veto below; byte-coded rejections (413 or a byte-size code) strip images and retry
@@ -700,7 +709,26 @@ mod tests {
         ));
     }
 
-    /// OpenRouter's "reasoning is mandatory" is a 400, which every other rule
+    /// The fallback schema form is a different body, so it outranks the veto.
+    #[test]
+    fn classify_top_level_schema_combinator_falls_back() {
+        let err = SamplingError::Api {
+            status: StatusCode::BAD_REQUEST,
+            message: "invalid_request_error: tools.16.custom.input_schema: input_schema does not \
+                      support oneOf, allOf, or anyOf at the top level"
+                .to_string(),
+            model_metadata: None,
+            retry_after_secs: None,
+            should_retry: Some(false),
+            error_code: None,
+        };
+        assert!(matches!(
+            classify_error(&err, 0, 5, RATE_LIMIT_RETRY_THRESHOLD),
+            RetryDecision::RetryWithToolSchemaFallback
+        ));
+    }
+
+    /// OpenRouter's "reasoning is mandatory" is a bad-request status, which every other rule
     /// calls fatal. It has to remap instead: re-sending the same disabling
     /// body always fails, and nothing about the target is fixed by stripping
     /// history — the effort has to come back enabled.
