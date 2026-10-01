@@ -27,7 +27,7 @@ const MAX_TOPIC_INPUT_COUNT: usize = 128;
 const MAX_TOPIC_INPUT_BYTES: usize = 2 * 1024 * 1024;
 const MAX_TOPIC_OPERATIONS: usize = 128;
 const MAX_TOPIC_PATH_BYTES: usize = 240;
-const MAX_EVIDENCE_PER_OPERATION: usize = 64;
+pub const MAX_EVIDENCE_PER_OPERATION: usize = 64;
 const MAX_FAILURE_BYTES: usize = 512;
 /// Upper bound on unresumable durable plans one claim will abandon before it
 /// falls back to a fresh deterministic claim; the rest are handled next time.

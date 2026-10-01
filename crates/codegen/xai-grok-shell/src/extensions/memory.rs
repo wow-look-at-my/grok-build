@@ -61,11 +61,17 @@ pub enum MemoryDreamDisposition {
     Disabled,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// Longest failure text a `/dream` summary carries. A model error can echo the whole request.
+pub const DREAM_FAILURE_DETAIL_LIMIT: usize = 400;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MemoryDreamResponse {
     pub disposition: MemoryDreamDisposition,
     pub observation_count: usize,
     pub topics_affected: usize,
+    /// What failed, for `RetryRequired` and `Failed`. Without it the summary names no cause.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
 }
 
 impl MemoryDreamResponse {
@@ -74,6 +80,7 @@ impl MemoryDreamResponse {
             disposition,
             observation_count: 0,
             topics_affected: 0,
+            detail: None,
         }
     }
 
@@ -93,6 +100,7 @@ impl MemoryDreamResponse {
                 disposition: next.disposition,
                 observation_count: self.observation_count + next.observation_count,
                 topics_affected: self.topics_affected + next.topics_affected,
+                detail: next.detail,
             },
             (true, false) if next.disposition == MemoryDreamDisposition::NoWork => self,
             _ => next,
@@ -112,6 +120,23 @@ impl MemoryDreamResponse {
 
     /// One-line outcome for scrollback; shared by the pager and non-pager ACP clients.
     pub fn summary(&self) -> String {
+        let outcome = self.outcome_phrase();
+        let Some(detail) = self
+            .detail
+            .as_deref()
+            .map(str::trim)
+            .filter(|d| !d.is_empty())
+        else {
+            return outcome;
+        };
+        let detail = match detail.char_indices().nth(DREAM_FAILURE_DETAIL_LIMIT) {
+            Some((cut, _)) => format!("{}…", &detail[..cut]),
+            None => detail.to_owned(),
+        };
+        format!("{outcome} Cause: {detail}")
+    }
+
+    fn outcome_phrase(&self) -> String {
         match self.disposition {
             MemoryDreamDisposition::Completed if self.topics_affected > 0 => format!(
                 "Dream merged {} into {}.",
@@ -428,6 +453,7 @@ mod tests {
             disposition,
             observation_count: observations,
             topics_affected: topics,
+            detail: None,
         }
     }
 
@@ -435,8 +461,11 @@ mod tests {
     fn coalesced_dream_passes_keep_the_work_done() {
         use MemoryDreamDisposition::*;
         let merged = dream(Completed, 7, 3);
-        assert_eq!(merged.then(dream(NoWork, 0, 0)), merged);
-        assert_eq!(merged.then(dream(Completed, 2, 1)), dream(Completed, 9, 4));
+        assert_eq!(merged.clone().then(dream(NoWork, 0, 0)), merged);
+        assert_eq!(
+            merged.clone().then(dream(Completed, 2, 1)),
+            dream(Completed, 9, 4)
+        );
         assert_eq!(
             merged.then(dream(RetryRequired, 2, 0)).disposition,
             RetryRequired
@@ -445,5 +474,43 @@ mod tests {
             dream(Cancelled, 0, 0).then(dream(NoWork, 0, 0)).disposition,
             NoWork
         );
+    }
+
+    #[test]
+    fn a_retry_summary_names_its_cause() {
+        let mut response = dream(MemoryDreamDisposition::RetryRequired, 3, 0);
+        assert_eq!(
+            response.summary(),
+            "Dream did not finish; it will retry automatically."
+        );
+        response.detail = Some("invalid Dream plan: missing field `evidence`".to_owned());
+        assert_eq!(
+            response.summary(),
+            "Dream did not finish; it will retry automatically. \
+             Cause: invalid Dream plan: missing field `evidence`"
+        );
+    }
+
+    #[test]
+    fn a_long_cause_is_cut_on_a_character_boundary() {
+        let mut response = dream(MemoryDreamDisposition::Failed, 0, 0);
+        response.detail = Some("é".repeat(DREAM_FAILURE_DETAIL_LIMIT + 50));
+        let summary = response.summary();
+        let cause = summary.strip_prefix("Dream failed. Cause: ").unwrap();
+        assert_eq!(cause.chars().count(), DREAM_FAILURE_DETAIL_LIMIT + 1);
+        assert!(cause.ends_with('…'));
+    }
+
+    #[test]
+    fn a_response_without_a_cause_keeps_its_wire_shape() {
+        let json = serde_json::to_value(dream(MemoryDreamDisposition::NoWork, 0, 0)).unwrap();
+        assert!(json.get("detail").is_none());
+        let parsed: MemoryDreamResponse = serde_json::from_value(serde_json::json!({
+            "disposition": "retry_required",
+            "observation_count": 1,
+            "topics_affected": 0,
+        }))
+        .unwrap();
+        assert_eq!(parsed.detail, None);
     }
 }
