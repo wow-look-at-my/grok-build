@@ -119,6 +119,46 @@ fn a_broken_catalog_is_an_error_and_not_a_cached_absence() {
     assert!(error.contains("500"), "{error}");
 }
 
+/// With no config, Anthropic models have no other price source.
+#[test]
+fn the_default_catalog_is_set_and_needs_no_allowlist_entry() {
+    let catalog = crate::agent::config::PricingConfig::default().catalog_url;
+    assert_eq!(catalog, "https://modelinfo.pazer.ai");
+    let url = format!("{catalog}/v1/models/claude-opus-5-5");
+    assert_eq!(check_catalog_url(&url, Vec::new()), Ok(()));
+}
+
+/// Live: the real default catalog prices an Anthropic model with no config.
+#[test]
+#[ignore = "reaches the network"]
+fn the_default_catalog_prices_an_anthropic_model_with_no_config() {
+    let model = "claude-opus-5-5";
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    let pricing = loop {
+        let pricing = resolve(model);
+        if !pricing.is_unusable() || std::time::Instant::now() > deadline {
+            break pricing;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    };
+    assert!(!pricing.is_unusable(), "{model} stayed unpriced");
+    let usage = xai_grok_sampling_types::TokenUsage {
+        prompt_tokens: 10_000,
+        completion_tokens: 1_000,
+        total_tokens: 11_000,
+        ..Default::default()
+    };
+    let ticks = xai_grok_sampling_types::compute_cost_ticks(Some(&usage), &pricing);
+    assert!(ticks.is_some_and(|t| t > 0), "{pricing:?} gave {ticks:?}");
+}
+
+#[test]
+fn a_catalog_the_user_did_not_list_is_still_refused() {
+    let error =
+        check_catalog_url("https://catalog.invalid/v1/models/x", Vec::new()).expect_err("refused");
+    assert!(error.contains("catalog.invalid"), "{error}");
+}
+
 #[test]
 fn a_price_stays_fresh_far_longer_than_an_absence() {
     let now = Utc::now();

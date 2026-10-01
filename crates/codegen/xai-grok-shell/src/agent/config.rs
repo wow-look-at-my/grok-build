@@ -4605,17 +4605,18 @@ pub struct PricingConfig {
     /// Set false to keep the cost indicator off the network. A session then
     /// prices only the models config prices.
     pub lookup_enabled: bool,
-    /// Base URL of the catalog. The per-model document is read from
-    /// `<catalog_url>/v1/models/<model id>`. Blank by default, and a blank
-    /// catalog is never asked.
+    /// Base URL of the catalog. The per-model document is read from `<catalog_url>/v1/models/<model id>`.
     pub catalog_url: String,
 }
+
+/// The catalog the cost indicator reads when nothing else prices a model.
+pub const DEFAULT_PRICING_CATALOG_URL: &str = "https://modelinfo.pazer.ai";
 
 impl Default for PricingConfig {
     fn default() -> Self {
         Self {
             lookup_enabled: true,
-            catalog_url: String::new(),
+            catalog_url: DEFAULT_PRICING_CATALOG_URL.to_owned(),
         }
     }
 }
