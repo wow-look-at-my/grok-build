@@ -419,6 +419,17 @@ impl SessionActor {
                     slow_for_ms,
                 });
             }
+            SamplingEvent::Queued { ahead, limit, .. } => {
+                self.send_xai_notification_transient(XaiSessionUpdate::RequestQueued {
+                    ahead: ahead as u64,
+                    limit,
+                });
+            }
+            SamplingEvent::Dequeued { waited_ms, .. } => {
+                self.send_xai_notification_transient(XaiSessionUpdate::RequestDequeued {
+                    waited_ms,
+                });
+            }
             SamplingEvent::ImagesStripped {
                 request_id,
                 stripped_urls,

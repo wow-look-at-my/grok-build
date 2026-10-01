@@ -32,6 +32,7 @@ use crate::doom_loop_recovery::{FailedResponseCapture, append_recovery_context};
 use crate::events::{SamplingErrorInfo, SamplingErrorKind, SamplingEvent, StripReason};
 use crate::handle::CollectedSamplingResult;
 use crate::metrics::InferenceLatencyStats;
+use crate::request_slots::{RequestSlots, with_slot_held};
 use crate::retry::{
     self as retry_mod, RetryDecision, classify_error, clone_error, resolve_max_retries,
 };
@@ -99,6 +100,7 @@ pub(crate) async fn run_request_task(
     cancel_token: CancellationToken,
     completion: Option<oneshot::Sender<CollectedSamplingResult>>,
     rejections: ModelRejections,
+    slots: Arc<RequestSlots>,
 ) -> RequestId {
     let mut completion = CompletionState::new(completion);
     let idle_timeout = Duration::from_secs(
@@ -189,8 +191,10 @@ pub(crate) async fn run_request_task(
                 rate_policy,
                 spent: &rate_retry_count,
                 budget: rate_max_retries,
+                slots: &slots,
             });
         let outcome = run_one_attempt(
+            &slots,
             &client,
             request.clone(),
             request_id.clone(),
@@ -791,8 +795,12 @@ async fn sleep_or_cancel(
 ///
 /// A `None` for `doom_check` disarms the doom checks, so the response is kept.
 /// The `backup` launcher starts another generation on a rate-floor breach.
+///
+/// The attempt waits for a slot in `slots` first. Its clocks start after
+/// that, so the wait never counts toward the first-token limit.
 #[allow(clippy::too_many_arguments)]
 async fn run_one_attempt(
+    slots: &Arc<RequestSlots>,
     client: &SamplingClient,
     request: ConversationRequest,
     request_id: RequestId,
@@ -804,11 +812,35 @@ async fn run_one_attempt(
     output_observed: Arc<AtomicBool>,
     backup: Option<&BackupLauncher<'_>>,
 ) -> AttemptOutcome {
+    let _slot = match slots.try_acquire() {
+        Some(slot) => slot,
+        None => {
+            let queued_at = std::time::Instant::now();
+            let _ = event_tx.send(SamplingEvent::Queued {
+                request_id: request_id.clone(),
+                ahead: slots.waiting(),
+                limit: slots.limit(),
+            });
+            let slot = tokio::select! {
+                biased;
+                _ = cancel_token.cancelled() => return AttemptOutcome::Cancelled,
+                slot = slots.acquire() => slot,
+            };
+            let _ = event_tx.send(SamplingEvent::Dequeued {
+                request_id: request_id.clone(),
+                waited_ms: queued_at.elapsed().as_millis() as u64,
+            });
+            slot
+        }
+    };
     let ttft = FirstTokenDeadline::start(rate_check);
     let length_policy = request.length_policy;
     match client.api_backend() {
         ApiBackend::ChatCompletions => {
-            let (raw, metadata) = match ttft.init(client.conversation_stream(request)).await {
+            let (raw, metadata) = match ttft
+                .init(with_slot_held(client.conversation_stream(request)))
+                .await
+            {
                 Ok(pair) => pair,
                 Err(outcome) => return outcome,
             };
@@ -832,7 +864,9 @@ async fn run_one_attempt(
         }
         ApiBackend::Responses => {
             let (raw, metadata, doom_loop) = match ttft
-                .init(client.conversation_stream_responses(request))
+                .init(with_slot_held(
+                    client.conversation_stream_responses(request),
+                ))
                 .await
             {
                 Ok(parts) => parts,
@@ -877,7 +911,7 @@ async fn run_one_attempt(
         }
         ApiBackend::Messages => {
             let (raw, metadata) = match ttft
-                .init(client.conversation_stream_messages(request))
+                .init(with_slot_held(client.conversation_stream_messages(request)))
                 .await
             {
                 Ok(pair) => pair,
@@ -902,7 +936,9 @@ async fn run_one_attempt(
             .await
         }
         ApiBackend::Ollama => {
-            let (raw, metadata) = match ttft.init(client.conversation_stream_ollama(request)).await
+            let (raw, metadata) = match ttft
+                .init(with_slot_held(client.conversation_stream_ollama(request)))
+                .await
             {
                 Ok(pair) => pair,
                 Err(outcome) => return outcome,
@@ -1414,6 +1450,7 @@ pub(crate) struct BackupLauncher<'a> {
     rate_policy: OutputRateFloorPolicy,
     spent: &'a AtomicU32,
     budget: u32,
+    slots: &'a Arc<RequestSlots>,
 }
 
 impl<'a> BackupLauncher<'a> {
@@ -1441,8 +1478,10 @@ impl<'a> BackupLauncher<'a> {
         let request_id = self.request_id.clone();
         let idle_timeout = self.idle_timeout;
         let doom_check = self.doom_check;
+        let slots = self.slots;
         let run: BoxFuture<'a, AttemptOutcome> = Box::pin(async move {
             run_one_attempt(
+                slots,
                 client,
                 request,
                 request_id,

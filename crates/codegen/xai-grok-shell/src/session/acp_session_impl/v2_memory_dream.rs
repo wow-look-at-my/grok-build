@@ -1173,7 +1173,7 @@ impl SessionActor {
             x_grok_agent_id: Some(xai_grok_telemetry::id::agent_id()),
             ..Default::default()
         };
-        tokio::time::timeout(
+        xai_grok_sampler::timeout_excluding_queue(
             V2_DREAM_MODEL_TIMEOUT,
             sampling_client
                 .conversation_collect_with_idle_timeout(request, V2_DREAM_MODEL_IDLE_TIMEOUT),

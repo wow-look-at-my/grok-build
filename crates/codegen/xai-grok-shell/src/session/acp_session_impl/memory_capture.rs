@@ -1023,7 +1023,7 @@ impl SessionActor {
                 MemoryV2FailureClass::Convergence,
                 "capture worker cancelled".to_owned(),
             )),
-            result = tokio::time::timeout(
+            result = xai_grok_sampler::timeout_excluding_queue(
                 EXTRACTION_TIMEOUT,
                 sampling_client.conversation_collect(request),
             ) => result,
