@@ -128,6 +128,30 @@ fn the_default_catalog_is_set_and_needs_no_allowlist_entry() {
     assert_eq!(check_catalog_url(&url, Vec::new()), Ok(()));
 }
 
+/// Live: the real default catalog prices an Anthropic model with no config.
+#[test]
+#[ignore = "reaches the network"]
+fn the_default_catalog_prices_an_anthropic_model_with_no_config() {
+    let model = "claude-opus-5-5";
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    let pricing = loop {
+        let pricing = resolve(model);
+        if !pricing.is_unusable() || std::time::Instant::now() > deadline {
+            break pricing;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    };
+    assert!(!pricing.is_unusable(), "{model} stayed unpriced");
+    let usage = xai_grok_sampling_types::TokenUsage {
+        prompt_tokens: 10_000,
+        completion_tokens: 1_000,
+        total_tokens: 11_000,
+        ..Default::default()
+    };
+    let ticks = xai_grok_sampling_types::compute_cost_ticks(Some(&usage), &pricing);
+    assert!(ticks.is_some_and(|t| t > 0), "{pricing:?} gave {ticks:?}");
+}
+
 #[test]
 fn a_catalog_the_user_did_not_list_is_still_refused() {
     let error =
