@@ -643,17 +643,37 @@ pub struct CompactionInputs {
     pub scheduled_loops: Vec<ScheduledLoopSummary>,
     pub workflows: Vec<WorkflowRunSummary>,
     pub workflow_tool_name: Option<String>,
-    /// When set, used as `last_user_query` so compact cannot revive a stale pre-goal prompt.
+    /// The active goal's objective. It is `last_user_query` only while no real user turn follows the `/goal` turn.
     pub goal_objective: Option<String>,
+    /// `prompt_index` of the `/goal` turn. `None` when unknown.
+    pub goal_start_prompt_index: Option<usize>,
+}
+/// True when the `/goal` turn is newer than every real user turn.
+/// That turn carries only a reminder, so [`is_real_user_turn`] never selects it.
+/// The objective then stands in for it. A later prompt or interjection is the newer user text.
+fn goal_is_newest_user_text(
+    conversation: &[ConversationItem],
+    goal_start_prompt_index: Option<usize>,
+) -> bool {
+    let Some(last_real) = conversation.iter().rposition(is_real_user_turn) else {
+        return true;
+    };
+    let goal_turn = goal_start_prompt_index.and_then(|start| {
+        conversation.iter().position(|item| {
+            matches!(item, ConversationItem::User(u) if u.prompt_index.is_some_and(|i| i >= start))
+        })
+    });
+    goal_turn.is_some_and(|goal_turn| goal_turn > last_real)
 }
 impl CompactionStateContext {
     /// Build the state context from current session state.
-    /// Uses a typed compaction boundary; `last_user_query` prefers `inputs.goal_objective` when set.
+    /// `last_user_query` is the newest text the user sent: a prompt, an interjection, or the active goal's objective.
     pub async fn build(conversation: &[ConversationItem], inputs: CompactionInputs) -> Self {
-        let (last_user_query, mut images) = match inputs
-            .goal_objective
-            .filter(|objective| !objective.trim().is_empty())
-        {
+        let goal_start_prompt_index = inputs.goal_start_prompt_index;
+        let (last_user_query, mut images) = match inputs.goal_objective.filter(|objective| {
+            !objective.trim().is_empty()
+                && goal_is_newest_user_text(conversation, goal_start_prompt_index)
+        }) {
             Some(objective) => (Some(objective), CompactionImageContext::default()),
             None => {
                 let last = find_last_real_user_item(conversation);

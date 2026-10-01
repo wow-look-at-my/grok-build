@@ -1290,7 +1290,22 @@ impl SessionActor {
         }
     }
 
-    /// Seeds compacted `last_user_query` from the live objective.
+    /// The compaction inputs for an active goal: its objective and the `prompt_index` of its `/goal` turn.
+    pub(crate) fn goal_compaction_inputs(
+        &self,
+    ) -> crate::session::helpers::compaction_context::CompactionInputs {
+        crate::session::helpers::compaction_context::CompactionInputs {
+            goal_objective: self.goal_objective_for_compaction(),
+            goal_start_prompt_index: self
+                .goal_tracker
+                .lock()
+                .snapshot()
+                .and_then(|o| o.start_prompt_index),
+            ..Default::default()
+        }
+    }
+
+    /// Seeds compacted `last_user_query` from the live objective, unless the user sent text after the `/goal` turn.
     /// Paused / blocked / budget-limited goals leave the human prompt in place.
     pub(crate) fn goal_objective_for_compaction(&self) -> Option<String> {
         let tracker = self.goal_tracker.lock();
