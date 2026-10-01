@@ -286,7 +286,7 @@ Cross-clippy links nothing, but ring and aws-lc compile C in their build scripts
 ## Model-pricing resolution notes
 
 - `model_pricing::resolve` (`xai-grok-shell/src/agent/model_pricing.rs`) answers the `compute_cost_ticks` fallback for an endpoint that reports no price. It reads `[model.<id>].pricing` from config first. A price the user wrote is the price, and the catalog never overrides it. `config::resolve_configured_model_pricing` is that first tier.
-- The catalog is modelinfo. One model's document is at `<catalog_url>/v1/models/<model id>`. `[pricing].catalog_url` moves it and `[pricing].lookup_enabled = false` keeps the session off the network. The whole-catalogue `/v1/models` route answers with about 20 MB, so nothing fetches it.
+- The catalog is modelinfo (`https://modelinfo.pazer.ai` by default). One model's document is at `<catalog_url>/v1/models/<model id>`. `[pricing].catalog_url` moves it and `[pricing].lookup_enabled = false` keeps the session off the network. The whole-catalogue `/v1/models` route answers with about 20 MB, so nothing fetches it.
 - `resolve` runs on the turn path and is sync. So it never waits on the network. A model with no fresh cache entry answers as unpriced for that call and starts a background fetch. The price lands for the next call. `in_flight` holds one fetch per model. A second turn therefore starts no second request.
 - The cache is `$GROK_HOME/model_pricing_cache.json`, one entry per model. An absence is cached too, with a shorter TTL, or every turn on an unpriced model re-fetches. A failed lookup is NOT an absence and is not cached. Caching one pins an outage into the catalog for the whole TTL.
 - A document that prices no tier is recorded as an absence. Recording it as an all-zero price claims a price the catalog never gave.
@@ -527,7 +527,7 @@ Every one of those is the test doing its job. Making them pass there means weake
 
 ## Endpoint allowlist notes
 
-- No endpoint is compiled in as a default. The proxy, the xAI API, the grok.com clients, the env crate's hosts, voice and the pricing catalog all resolve to BLANK when unconfigured. A blank URL builds no request.
+- The pricing catalog is the one compiled-in endpoint (`DEFAULT_PRICING_CATALOG_URL`, modelinfo), and its request skips the allowlist (`check_catalog_url`). Nothing else prices an Anthropic model: the wire carries no cost and `/v1/models` lists no price. The proxy, the xAI API, the grok.com clients, the env crate's hosts and voice all resolve to BLANK when unconfigured. A blank URL builds no request.
 - A model request reaches only an endpoint in `[endpoints] allowed_endpoints` or `GROK_ALLOWED_ENDPOINTS` (`xai_grok_extra_ca::endpoint_allowlist`), or one the user or admin config names as a URL. Every `*url` string in those config layers adds its origin (`allow_urls_written_in_config` in `util/config/campaigns.rs`), so a provider's `base_url` needs no second entry. Campaigns and remote settings add nothing: nobody local wrote them. The check runs where each request is made. Those places are `SamplingClient::new`, the model listings, the local-runtime reads, web search, image and video generation, embeddings, voice, pricing and the updater.
 - A DNS resolver or a connector layer cannot enforce it. Behind a proxy the resolver sees the proxy's host, and reqwest keeps a connector's target URI private.
 - `.cargo/config.toml` sets `GROK_ALLOWED_ENDPOINTS` to loopback so tests reach their mock servers. An installed binary does not get it.

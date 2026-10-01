@@ -266,6 +266,14 @@ fn spawn_fetch(model_id: String, base_url: String) {
     }
 }
 
+/// The allowlist check for a catalog request. The default catalog needs no
+/// entry: the request carries only a model id.
+pub(crate) fn check_catalog_url(url: &str, mut allowed: Vec<String>) -> Result<(), String> {
+    allowed.push(crate::agent::config::DEFAULT_PRICING_CATALOG_URL.to_owned());
+    xai_grok_extra_ca::endpoint_allowlist::check_against(url, &allowed)
+        .map_err(|refusal| refusal.to_string())
+}
+
 /// `Ok(None)` means modelinfo answered and knows no price for this model.
 /// `Err` means the lookup itself failed, which is not an answer and is not
 /// cached.
@@ -278,7 +286,10 @@ pub(crate) fn fetch_pricing_blocking(
         base_url.trim_end_matches('/'),
         model_id.trim_start_matches('/')
     );
-    xai_grok_extra_ca::endpoint_allowlist::check(&url).map_err(|refusal| refusal.to_string())?;
+    check_catalog_url(
+        &url,
+        xai_grok_extra_ca::endpoint_allowlist::allowed_endpoints(),
+    )?;
     let client = reqwest::blocking::Client::builder()
         .timeout(FETCH_TIMEOUT)
         .build()

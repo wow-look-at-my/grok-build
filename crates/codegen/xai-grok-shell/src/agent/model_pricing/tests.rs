@@ -119,6 +119,22 @@ fn a_broken_catalog_is_an_error_and_not_a_cached_absence() {
     assert!(error.contains("500"), "{error}");
 }
 
+/// With no config, Anthropic models have no other price source.
+#[test]
+fn the_default_catalog_is_set_and_needs_no_allowlist_entry() {
+    let catalog = crate::agent::config::PricingConfig::default().catalog_url;
+    assert_eq!(catalog, "https://modelinfo.pazer.ai");
+    let url = format!("{catalog}/v1/models/claude-opus-5-5");
+    assert_eq!(check_catalog_url(&url, Vec::new()), Ok(()));
+}
+
+#[test]
+fn a_catalog_the_user_did_not_list_is_still_refused() {
+    let error =
+        check_catalog_url("https://catalog.invalid/v1/models/x", Vec::new()).expect_err("refused");
+    assert!(error.contains("catalog.invalid"), "{error}");
+}
+
 #[test]
 fn a_price_stays_fresh_far_longer_than_an_absence() {
     let now = Utc::now();
