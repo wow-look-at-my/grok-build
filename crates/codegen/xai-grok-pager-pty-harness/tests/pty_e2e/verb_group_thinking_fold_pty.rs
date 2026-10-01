@@ -20,9 +20,10 @@ async fn verb_group_thinking_fold_pty() {
     let content = ContentController::start().await.expect("start content");
     // Both opt-ins are explicit so the test doesn't depend on rollout defaults
     // Folding is the feature under test, and thinking must be shown for thought entries to exist at all (ingestion gate)
+    // A summarized thought keeps its row, so this test turns summaries off to cover the fold of a thought with no summary
     seed_ui_config(
         &content,
-        "group_tool_verbs = true\nshow_thinking_blocks = true",
+        "group_tool_verbs = true\nshow_thinking_blocks = true\nthinking_summaries = false",
     );
 
     // Seed real files under the isolated HOME so the reads succeed.
