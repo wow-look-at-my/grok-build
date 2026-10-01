@@ -108,6 +108,9 @@ pub struct UiConfig {
     /// `[model.<id>]` override it. (`[ui].ttft_timeout_secs`.)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ttft_timeout_secs: Option<u32>,
+    /// The most model requests this process sends at once.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_parallel_requests: Option<u32>,
     /// Theme to use when the OS is in dark mode. Written by the pager's theme persist module.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auto_dark_theme: Option<String>,
@@ -327,6 +330,7 @@ impl Default for UiConfig {
             output_rate_window_secs: None,
             output_rate_max_retries: None,
             ttft_timeout_secs: None,
+            max_parallel_requests: None,
             auto_dark_theme: None,
             auto_light_theme: None,
             scroll_speed: None,
@@ -462,6 +466,14 @@ impl UiConfig {
     pub fn ttft_timeout_secs_value(&self) -> u32 {
         self.ttft_timeout_secs
             .unwrap_or(Self::TTFT_TIMEOUT_SECS_DEFAULT)
+    }
+
+    /// Default for [`Self::max_parallel_requests`] when unset.
+    pub const MAX_PARALLEL_REQUESTS_DEFAULT: u32 = 7;
+
+    pub fn max_parallel_requests_value(&self) -> u32 {
+        self.max_parallel_requests
+            .unwrap_or(Self::MAX_PARALLEL_REQUESTS_DEFAULT)
     }
 
     /// Fill the `[ui]` window and retry budget from a legacy

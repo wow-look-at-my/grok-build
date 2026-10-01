@@ -1,12 +1,15 @@
 //! `SamplerCommand` is `pub(crate)` because it is the wire between [`SamplerHandle`](crate::handle::SamplerHandle) and the actor task.
 //! External callers always go through `SamplerHandle`.
 
+use std::sync::Arc;
+
 use tokio::sync::oneshot;
 
 use xai_grok_sampling_types::ConversationRequest;
 
 use crate::config::SamplerConfig;
 use crate::handle::CollectedSamplingResult;
+use crate::request_slots::QueueClock;
 use crate::types::RequestId;
 
 /// Commands sent from a [`SamplerHandle`](crate::handle::SamplerHandle) to the actor task.
@@ -20,6 +23,8 @@ pub(crate) enum SamplerCommand {
         request: Box<ConversationRequest>,
         config: Option<Box<SamplerConfig>>,
         completion_tx: Option<oneshot::Sender<CollectedSamplingResult>>,
+        /// The submitter's [`timeout_excluding_queue`](crate::request_slots::timeout_excluding_queue) clock.
+        queue_clock: Option<Arc<QueueClock>>,
     },
 
     Cancel {

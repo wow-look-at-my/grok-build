@@ -1454,6 +1454,17 @@ pub(super) fn handle_session_notification_with_origin(
                     slow_for: slow_for_ms.map(std::time::Duration::from_millis),
                 })
         }
+        // A queue wait is happening now, so a replayed one is dropped.
+        XaiSessionUpdate::RequestQueued { ahead, limit } => {
+            if meta.is_replay {
+                return false;
+            }
+            agent
+                .session
+                .tracker
+                .set_request_queued(crate::acp::tracker::RequestQueued { ahead, limit })
+        }
+        XaiSessionUpdate::RequestDequeued { .. } => agent.session.tracker.clear_request_queued(),
         XaiSessionUpdate::PlanKept { plan_uri, content } => {
             if meta.is_replay || agent.session.loading_replay {
                 false
@@ -1726,6 +1737,24 @@ pub(super) fn handle_child_session_notification(
                     floor_tokens_per_sec,
                     slow_for: slow_for_ms.map(std::time::Duration::from_millis),
                 })
+        }
+        XaiSessionUpdate::RequestQueued { ahead, limit } => {
+            let Some(child_view) = agent.subagent_views.get_mut(child_sid) else {
+                return false;
+            };
+            if child_view.session.loading_replay {
+                return false;
+            }
+            child_view
+                .session
+                .tracker
+                .set_request_queued(crate::acp::tracker::RequestQueued { ahead, limit })
+        }
+        XaiSessionUpdate::RequestDequeued { .. } => {
+            let Some(child_view) = agent.subagent_views.get_mut(child_sid) else {
+                return false;
+            };
+            child_view.session.tracker.clear_request_queued()
         }
         XaiSessionUpdate::ToolCallDeltaChunk {
             ref name,
@@ -2048,6 +2077,7 @@ pub(super) fn apply_retry_state(
     // reading it last reported describes a stream nothing is producing. The
     // backoff that follows is a wait, not a slow response.
     session.tracker.clear_output_rate();
+    session.tracker.clear_request_queued();
     let mut is_credit_limit = false;
     let mut is_reauth = false;
     use xai_grok_shell::extensions::notification::RetryState;
