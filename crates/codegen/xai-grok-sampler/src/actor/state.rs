@@ -10,7 +10,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 use tokio_util::sync::CancellationToken;
-use xai_grok_sampling_types::{ConversationRequest, ImageStripReason};
+use xai_grok_sampling_types::{ConversationRequest, ImageStripReason, ToolSchemaForm};
 
 use crate::config::{RetryPolicy, SamplerConfig};
 use crate::types::RequestId;
@@ -70,6 +70,37 @@ impl ImageInputRejections {
     }
 }
 
+/// Models observed to reject a top-level `oneOf`/`anyOf`/`allOf` in a tool schema.
+#[derive(Clone, Default)]
+pub(crate) struct ToolSchemaRejections(Arc<Mutex<HashSet<String>>>);
+
+impl ToolSchemaRejections {
+    #[allow(clippy::disallowed_methods)] // as `ImageInputRejections::rejections`
+    fn rejections(&self) -> std::sync::MutexGuard<'_, HashSet<String>> {
+        self.0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    pub(crate) fn mark(&self, model: &str) {
+        self.rejections().insert(model.to_owned());
+    }
+
+    /// Start `request` in the fallback form when `model` rejected the native one.
+    pub(crate) fn apply(&self, model: &str, request: &mut ConversationRequest) {
+        if self.rejections().contains(model) {
+            request.tool_schema_form = ToolSchemaForm::NoTopLevelCombinators;
+        }
+    }
+}
+
+/// What each model has rejected, shared by the actor and its request tasks.
+#[derive(Clone, Default)]
+pub(crate) struct ModelRejections {
+    pub(crate) images: ImageInputRejections,
+    pub(crate) tool_schemas: ToolSchemaRejections,
+}
+
 /// `cancel_token` is owned by the actor (cloned into the spawned per-request task).
 /// The completion oneshot is moved into the per-request task at spawn time and is therefore not stored here.
 pub(crate) struct ActiveRequest {
@@ -80,7 +111,7 @@ pub(crate) struct ActorState {
     pub(crate) active_requests: HashMap<RequestId, ActiveRequest>,
     pub(crate) config: SamplerConfig,
     pub(crate) retry_policy: RetryPolicy,
-    pub(crate) image_input_rejections: ImageInputRejections,
+    pub(crate) rejections: ModelRejections,
 }
 
 impl ActorState {
@@ -89,7 +120,7 @@ impl ActorState {
             active_requests: HashMap::new(),
             config,
             retry_policy,
-            image_input_rejections: ImageInputRejections::default(),
+            rejections: ModelRejections::default(),
         }
     }
 
@@ -174,6 +205,23 @@ mod tests {
         rejections.mark("no-vision");
         let mut request = request_with_image();
         assert_eq!(rejections.strip_if_rejected("has-vision", &mut request), 0);
+    }
+
+    #[test]
+    fn a_marked_model_starts_in_the_fallback_schema_form() {
+        let rejections = ToolSchemaRejections::default();
+        let mut request = ConversationRequest::default();
+        rejections.apply("strict", &mut request);
+        assert_eq!(request.tool_schema_form, ToolSchemaForm::Native);
+
+        rejections.mark("strict");
+        rejections.apply("other", &mut request);
+        assert_eq!(request.tool_schema_form, ToolSchemaForm::Native);
+        rejections.apply("strict", &mut request);
+        assert_eq!(
+            request.tool_schema_form,
+            ToolSchemaForm::NoTopLevelCombinators
+        );
     }
 
     #[test]

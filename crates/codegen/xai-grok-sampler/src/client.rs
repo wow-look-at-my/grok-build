@@ -25,9 +25,18 @@ use serde::Serialize;
 use tracing::Instrument;
 
 use xai_grok_sampling_types::error::{
-    api_error_message_for_endpoint, error_chain, parse_error_code, try_parse_stream_error,
-    user_facing_api_error_message,
+    api_error_message_for_endpoint, error_chain, name_tool_indices, parse_error_code,
+    try_parse_stream_error, user_facing_api_error_message,
 };
+
+/// The provider message with each `tools.N` path naming the tool at `N`.
+fn name_rejected_tools<'a>(message: String, names: impl Iterator<Item = &'a str>) -> String {
+    let names: Vec<&str> = names.collect();
+    if names.is_empty() {
+        return message;
+    }
+    name_tool_indices(&message, &names)
+}
 use xai_grok_sampling_types::{
     ChatCompletionChunk, ChatCompletionRequest, ChatCompletionResponse, ConversationRequest,
     ConversationResponse, CreateResponseWrapper, DEFAULT_EXACT_REPETITION_MIN_TOKENS,
@@ -1415,7 +1424,14 @@ impl SamplingClient {
             }
 
             let bytes = read_body(response, status).await?;
-            let message = api_error_message_for_endpoint(status, bytes.as_ref(), &request_url);
+            let message = name_rejected_tools(
+                api_error_message_for_endpoint(status, bytes.as_ref(), &request_url),
+                payload
+                    .tools
+                    .iter()
+                    .flatten()
+                    .map(|t| t.function.name.as_str()),
+            );
             span_timing.span().record(ERROR, message.as_str());
             tracing::error!(
                 status = %status,
@@ -1992,7 +2008,15 @@ impl SamplingClient {
                 ));
             }
 
-            let message = api_error_message_for_endpoint(status, bytes.as_ref(), &request_url);
+            let message = name_rejected_tools(
+                api_error_message_for_endpoint(status, bytes.as_ref(), &request_url),
+                request
+                    .inner
+                    .tools
+                    .iter()
+                    .flatten()
+                    .map(|t| t.name.as_str()),
+            );
             tracing::warn!(
                 status = %status,
                 error_message = %message,
@@ -2137,7 +2161,15 @@ impl SamplingClient {
             let retry_after_secs = extract_retry_after(response.headers());
             let should_retry = extract_should_retry(response.headers());
             let bytes = read_body(response, status).await?;
-            let message = api_error_message_for_endpoint(status, bytes.as_ref(), &request_url);
+            let message = name_rejected_tools(
+                api_error_message_for_endpoint(status, bytes.as_ref(), &request_url),
+                request
+                    .inner
+                    .tools
+                    .iter()
+                    .flatten()
+                    .map(|t| t.name.as_str()),
+            );
             span_timing.span().record(ERROR, message.as_str());
             tracing::error!(
                 status = %status,
@@ -2501,7 +2533,14 @@ impl SamplingClient {
             let retry_after_secs = extract_retry_after(response.headers());
             let should_retry = extract_should_retry(response.headers());
             let bytes = read_body(response, status).await?;
-            let message = api_error_message_for_endpoint(status, bytes.as_ref(), &request_url);
+            let message = name_rejected_tools(
+                api_error_message_for_endpoint(status, bytes.as_ref(), &request_url),
+                chat_request
+                    .tools
+                    .iter()
+                    .flatten()
+                    .map(|t| t.function.name.as_str()),
+            );
             tracing::error!(
                 status = %status,
                 error_message = %message,
