@@ -21,6 +21,29 @@ pub(crate) fn discovered_model_key(provider_id: &str, slug: &str) -> String {
     format!("{provider_id}/{slug}")
 }
 
+/// Whether a catalog entry is a listed model that no `[model.<id>]` block claims.
+pub(crate) fn is_unclaimed_listing(key: &str, info: &config::ModelInfo) -> bool {
+    info.model_provider
+        .as_deref()
+        .is_some_and(|provider| key == discovered_model_key(provider, &info.model))
+}
+
+/// Pick the entry for a bare model id. Several entries can send that id.
+/// An entry from the user's config wins over an unclaimed listing.
+/// restart never moves a session off the block the user wrote.
+pub(crate) fn pick_by_model_id<'a>(
+    mut matches: impl Iterator<Item = (&'a String, &'a ModelEntry)>,
+) -> Option<(&'a String, &'a ModelEntry)> {
+    let mut listing = None;
+    for (key, entry) in matches.by_ref() {
+        if !is_unclaimed_listing(key, &entry.info) {
+            return Some((key, entry));
+        }
+        listing.get_or_insert((key, entry));
+    }
+    listing
+}
+
 /// One model a provider's listing named, before any config is merged into it.
 ///
 /// The entry is built at catalog rebuild time from the CURRENT config
@@ -53,6 +76,7 @@ pub(crate) fn resolve_discovered_models(
     discovered: &IndexMap<String, DiscoveredModel>,
 ) -> IndexMap<String, ModelEntry> {
     let mut entries = IndexMap::with_capacity(discovered.len());
+    let mut claimed = std::collections::HashSet::new();
     for (discovered_key, model) in discovered {
         let Some(provider) = cfg.model_providers.get(&model.provider_id) else {
             // A reload removed the provider. Its models go with it.
@@ -63,12 +87,48 @@ pub(crate) fn resolve_discovered_models(
             );
             continue;
         };
-        let (key, merged) = match claiming_block(cfg, &model.provider_id, model.slug()) {
-            Some((block_key, block)) => (block_key.clone(), block.laid_over(&model.listed)),
-            None => (discovered_key.clone(), model.listed.clone()),
+        let claim = claiming_block(cfg, &model.provider_id, model.slug())
+            .filter(|claim| claimed.insert(claim.key.clone()));
+        let (key, mut entry) = match claim {
+            Some(Claim {
+                key,
+                block,
+                routes_to_provider: true,
+            }) => {
+                let merged = block.laid_over(&model.listed);
+                let entry = config::entry_for_provider_model(
+                    cfg,
+                    key,
+                    &model.provider_id,
+                    provider,
+                    &merged,
+                );
+                (key.clone(), entry)
+            }
+            Some(Claim { key, block, .. }) => {
+                // The block sends to its own URL. The listing adds only facts
+                // about the model; the provider's URL and key must not apply.
+                let listed = ConfigModelOverride {
+                    model_provider: None,
+                    ..model.listed.clone()
+                };
+                let merged = block.laid_over(&listed);
+                (
+                    key.clone(),
+                    config::entry_for_unrouted_block(cfg, key, &merged),
+                )
+            }
+            None => {
+                let entry = config::entry_for_provider_model(
+                    cfg,
+                    discovered_key,
+                    &model.provider_id,
+                    provider,
+                    &model.listed,
+                );
+                (discovered_key.clone(), entry)
+            }
         };
-        let mut entry =
-            config::entry_for_provider_model(cfg, &key, &model.provider_id, provider, &merged);
         entry.info.loaded_in_vram = model.loaded_in_vram;
         entries.insert(key, entry);
     }
@@ -82,7 +142,9 @@ impl ConfigModelOverride {
     pub(crate) fn laid_over(&self, base: &ConfigModelOverride) -> ConfigModelOverride {
         let ConfigModelOverride {
             model,
+            model_family,
             base_url,
+            mtls_cert_dir,
             name,
             description,
             api_key,
@@ -98,12 +160,15 @@ impl ConfigModelOverride {
             query_params,
             env_http_headers,
             context_window,
+            max_request_bytes,
             auto_compact_threshold_percent,
             system_prompt_label,
             use_concise,
             agent_type,
             inference_idle_timeout_secs,
             max_retries,
+            rate_limit_retry_threshold,
+            subagent_rate_limit_max_attempts,
             hidden,
             supported_in_api,
             reasoning_effort,
@@ -120,6 +185,7 @@ impl ConfigModelOverride {
             ttft_timeout_secs,
             extra_body,
             pricing_lookup_enabled,
+            reasoning_summary,
         } = self.clone();
 
         let sets_own_auth = api_key.as_deref().is_some_and(|k| !k.trim().is_empty())
@@ -156,7 +222,9 @@ impl ConfigModelOverride {
 
         ConfigModelOverride {
             model: model.or_else(|| base.model.clone()),
+            model_family: model_family.or_else(|| base.model_family.clone()),
             base_url: base_url.or_else(|| base.base_url.clone()),
+            mtls_cert_dir: mtls_cert_dir.or_else(|| base.mtls_cert_dir.clone()),
             name: name.or_else(|| base.name.clone()),
             description: description.or_else(|| base.description.clone()),
             api_key,
@@ -172,6 +240,7 @@ impl ConfigModelOverride {
             query_params: merged_query,
             env_http_headers: merged_env_headers,
             context_window: context_window.or(base.context_window),
+            max_request_bytes: max_request_bytes.or(base.max_request_bytes),
             auto_compact_threshold_percent: auto_compact_threshold_percent
                 .or(base.auto_compact_threshold_percent),
             system_prompt_label: system_prompt_label.or_else(|| base.system_prompt_label.clone()),
@@ -180,6 +249,10 @@ impl ConfigModelOverride {
             inference_idle_timeout_secs: inference_idle_timeout_secs
                 .or(base.inference_idle_timeout_secs),
             max_retries: max_retries.or(base.max_retries),
+            rate_limit_retry_threshold: rate_limit_retry_threshold
+                .or(base.rate_limit_retry_threshold),
+            subagent_rate_limit_max_attempts: subagent_rate_limit_max_attempts
+                .or(base.subagent_rate_limit_max_attempts),
             hidden: hidden.or(base.hidden),
             supported_in_api: supported_in_api.or(base.supported_in_api),
             reasoning_effort: reasoning_effort.or(base.reasoning_effort),
@@ -204,6 +277,7 @@ impl ConfigModelOverride {
             ttft_timeout_secs: ttft_timeout_secs.or(base.ttft_timeout_secs),
             extra_body: merged_body,
             pricing_lookup_enabled: pricing_lookup_enabled.or(base.pricing_lookup_enabled),
+            reasoning_summary: reasoning_summary.or(base.reasoning_summary),
         }
     }
 }
@@ -292,6 +366,11 @@ async fn discover_one_provider(
         }
     };
 
+    crate::agent::model_pricing::register_listed_prices(
+        listing
+            .iter()
+            .map(|listed| (listed.model.clone(), listed.pricing.clone())),
+    );
     let mut entries = IndexMap::with_capacity(listing.len());
     for listed in listing {
         let key = discovered_model_key(provider_id, &listed.model);
@@ -311,6 +390,8 @@ async fn discover_one_provider(
                 .context_window
                 .or_else(|| Some(listed.context_window.get())),
             model_provider: Some(provider_id.to_owned()),
+            max_completion_tokens: listed.max_completion_tokens,
+            pricing: (!listed.pricing.is_unusable()).then(|| listed.pricing.clone()),
             reasoning_efforts: listed.reasoning_efforts.clone(),
             supports_reasoning_effort: listed.supports_reasoning_effort.then_some(true),
             // A local runtime charges nothing and its model names are in no
@@ -406,29 +487,44 @@ pub(crate) async fn refresh_local_residency(cfg: &config::Config) -> IndexMap<St
     out
 }
 
-/// The `[model.<id>]` block that routes to `slug` on this provider, if any.
+struct Claim<'a> {
+    key: &'a String,
+    block: &'a ConfigModelOverride,
+    /// The block sends to this provider, so the provider's URL and key apply.
+    routes_to_provider: bool,
+}
+
+/// The `[model.<id>]` block that owns a listed model. The model id decides.
 ///
-/// The block's own key counts too: `[model.claude-sonnet] model_provider =
-/// "gateway"` with no `model` field routes to the key.
-///
-/// A block that names no provider also claims the model when its URL is the
-/// provider's URL. It routes to the same endpoint and slug, so without the
-/// claim the picker shows the same model twice.
-fn claiming_block<'a>(
-    cfg: &'a config::Config,
-    provider_id: &str,
-    slug: &str,
-) -> Option<(&'a String, &'a ConfigModelOverride)> {
-    let provider = cfg.model_providers.get(provider_id);
-    cfg.config_models.iter().find(|(key, model_override)| {
-        if model_override.model.as_deref().unwrap_or(key.as_str()) != slug {
-            return false;
-        }
-        match model_override.model_provider.as_deref() {
-            Some(named) => named == provider_id,
-            None => provider.is_some_and(|p| same_endpoint(model_override, p)),
-        }
-    })
+/// A block that names another provider does not claim. A block that names no
+/// provider claims the listing of the provider on its URL.
+/// its URL, it claims the first listing of its model id. The caller lets one
+/// block claim one listing only.
+fn claiming_block<'a>(cfg: &'a config::Config, provider_id: &str, slug: &str) -> Option<Claim<'a>> {
+    let provider = cfg.model_providers.get(provider_id)?;
+    cfg.config_models
+        .iter()
+        .filter(|(key, block)| block.model.as_deref().unwrap_or(key.as_str()) == slug)
+        .find_map(|(key, block)| {
+            let routes_to_provider = match block.model_provider.as_deref() {
+                Some(named) if named == provider_id => true,
+                Some(_) => return None,
+                None if same_endpoint(block, provider) => true,
+                None if cfg
+                    .model_providers
+                    .values()
+                    .any(|other| same_endpoint(block, other)) =>
+                {
+                    return None;
+                }
+                None => false,
+            };
+            Some(Claim {
+                key,
+                block,
+                routes_to_provider,
+            })
+        })
 }
 
 /// Whether a block with no provider points at this provider's endpoint.
@@ -997,15 +1093,17 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn a_block_on_another_url_does_not_claim_the_model() {
+    async fn a_block_on_another_url_merges_by_model_id_and_keeps_its_route() {
         let (base, server) = start_listing_server(two_model_listing()).await;
         let cfg = config_from(&format!(
             r#"
             [model_providers.gateway]
             base_url = "{base}/v1"
+            api_key = "gateway-key"
 
             [model.big-elsewhere]
             model = "big-one"
+            name = "Big Elsewhere"
             base_url = "https://elsewhere.example/v1"
             "#
         ));
@@ -1014,10 +1112,56 @@ mod tests {
         server.abort();
 
         assert!(
-            discovered.contains_key("gateway/big-one"),
-            "another endpoint is another route, so both stay"
+            !discovered.contains_key("gateway/big-one"),
+            "the model id matches, so the block owns the listing"
         );
-        assert!(!discovered.contains_key("big-elsewhere"));
+        let merged = &discovered["big-elsewhere"];
+        assert_eq!(merged.info.name.as_deref(), Some("Big Elsewhere"));
+        assert_eq!(merged.info.context_window.get(), 1_000_000);
+        assert_eq!(merged.info.base_url, "https://elsewhere.example/v1");
+        assert_eq!(
+            merged.api_key, None,
+            "the provider's key must never go to another URL"
+        );
+        assert_eq!(merged.info.model_provider, None);
+    }
+
+    /// providers on one gateway list the same id. The block names one of them.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_bare_model_id_resolves_to_the_users_block() {
+        let (base, server) = start_listing_server(two_model_listing()).await;
+        let cfg = config_from(&format!(
+            r#"
+            [model_providers.messages]
+            base_url = "{base}/v1"
+
+            [model_providers.chat]
+            base_url = "{base}/v1/"
+
+            [model."big-1.0"]
+            model = "big-one"
+            model_provider = "messages"
+            context_window = 500000
+            name = "Big One"
+            "#
+        ));
+
+        let discovered = resolve_discovered_models(&cfg, &discover_provider_models(&cfg).await);
+        server.abort();
+
+        let mut catalog = crate::agent::remote_config::resolve_model_catalog(&cfg, None);
+        catalog.extend(discovered);
+        assert!(
+            catalog.contains_key("chat/big-one"),
+            "the other route stays"
+        );
+        let key = crate::agent::remote_config::resolve_catalog_key(
+            &catalog,
+            &agent_client_protocol::ModelId::new("big-one"),
+        )
+        .expect("resolves");
+        assert_eq!(key.0.as_ref(), "big-1.0");
+        assert_eq!(catalog["big-1.0"].info.context_window.get(), 500_000);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

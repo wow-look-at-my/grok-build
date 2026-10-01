@@ -1,7 +1,4 @@
-//! Per-request streaming task.
-//!
-//! Spawned by the actor's `Submit` handler. Owns the retry loop and
-//! consumes a Layer 2 stream from the matching backend transform.
+//! The actor's `Submit` handler spawns this task; it owns the retry loop and consumes a Layer 2 stream from the matching backend transform.
 //! Cancellation is cooperative via `CancellationToken`.
 
 use std::pin::pin;
@@ -19,17 +16,23 @@ use tokio_util::sync::CancellationToken;
 use tracing::Instrument;
 
 use xai_grok_sampling_types::{
-    ConversationRequest, ConversationResponse, EmptyResponseContext, ImageStripReason,
-    OutputRateFloorPolicy, OutputRateGate, RateTick, SamplingError, SentCredential,
-    error::Result as SamplingResult,
+    ApiErrorCode, ConversationRequest, ConversationResponse, EmptyResponseContext,
+    ImageStripReason, OutputRateFloorPolicy, OutputRateGate, RateTick, SamplingError,
+    SentCredential, error::Result as SamplingResult,
 };
 
-use crate::actor::state::ImageInputRejections;
+use crate::actor::state::ModelRejections;
 
+use crate::actor::request_metadata::{
+    CompletionState, SamplingResultWithMetrics, merge_signal_labels,
+};
 use crate::client::{ApiBackend, SamplingClient};
 use crate::config::{RetryPolicy, SamplerConfig};
-use crate::events::{SamplingErrorInfo, SamplingErrorKind, SamplingEvent};
+use crate::doom_loop_recovery::{FailedResponseCapture, append_recovery_context};
+use crate::events::{SamplingErrorInfo, SamplingErrorKind, SamplingEvent, StripReason};
+use crate::handle::CollectedSamplingResult;
 use crate::metrics::InferenceLatencyStats;
+use crate::request_slots::{RequestSlots, with_slot_held};
 use crate::retry::{
     self as retry_mod, RetryDecision, classify_error, clone_error, resolve_max_retries,
 };
@@ -37,10 +40,9 @@ use crate::stream::responses::stream_responses_tracked;
 use crate::stream::{stream_chat_completions, stream_messages, stream_ollama};
 use crate::types::RequestId;
 
-/// Default per-chunk idle timeout when neither config nor caller
-/// supplies one. Matches the shell's session-level default
-/// (5 minutes -- long enough for cold-start reasoning, short enough
-/// to detect dead streams before the user gives up).
+/// Default per-chunk idle timeout when neither config nor caller supplies one.
+/// Matches the shell's session-level default of 5 minutes.
+/// That is long enough for cold-start reasoning and short enough to detect dead streams before the user gives up.
 const DEFAULT_IDLE_TIMEOUT_SECS: u64 = 300;
 
 /// How often the output-rate meter is read: it judges the floor and publishes
@@ -54,45 +56,41 @@ const RATE_TICK: Duration = Duration::from_millis(250);
 /// and every event costs a repaint.
 const RATE_EVENT_EPSILON: f64 = 0.5;
 
-/// Result type for the `submit_and_collect` oneshot. Carries the rich
-/// `SamplingError` so callers can inspect retryability, status code,
-/// etc., without losing information through the
-/// `SamplingErrorInfo` round trip.
-pub(crate) type CompletionResult =
-    Result<(ConversationResponse, InferenceLatencyStats), SamplingError>;
+/// Public result returned by `SamplerHandle::submit_and_collect`.
+pub type CompletionResult = Result<(ConversationResponse, InferenceLatencyStats), SamplingError>;
 
-/// Outcome of a single attempt within the retry loop.
+#[derive(Debug)]
 enum AttemptOutcome {
-    /// Stream emitted [`SamplingEvent::Completed`] with a non-empty
-    /// response.
+    /// Stream emitted [`SamplingEvent::Completed`] with a non-empty response.
     Completed {
         response: Box<ConversationResponse>,
         metrics: InferenceLatencyStats,
     },
-    /// Stream emitted [`SamplingEvent::Completed`] but the response
-    /// was empty (no text, no tool calls). The retry loop treats this
-    /// as a transient failure (the model returned reasoning-only or
-    /// the stream was truncated). Metrics from the empty attempt are
-    /// discarded; a successful retry produces fresh ones.
-    Empty { context: EmptyResponseContext },
-    /// Stream emitted [`SamplingEvent::Failed`]. The captured raw
-    /// error is what the retry loop classifies; if no rich error was
-    /// captured (e.g. the failure was synthesised inside the L2
-    /// transform), `error` was reconstructed from the
-    /// [`SamplingErrorInfo`].
-    Failed { error: SamplingError },
-    /// `cancel_token` fired mid-attempt. The retry loop bails out
-    /// without further attempts.
+    /// Stream emitted [`SamplingEvent::Completed`] but the response was empty (no text, no tool calls).
+    /// The retry loop treats this as a transient failure (the model returned reasoning-only or the stream was truncated).
+    /// Metrics from the empty attempt are discarded; a successful retry produces fresh ones.
+    Empty {
+        context: EmptyResponseContext,
+        doom_loop_signals: Vec<String>,
+    },
+    /// Stream emitted [`SamplingEvent::Failed`].
+    /// The captured raw error is what the retry loop classifies.
+    /// If no rich error was captured (e.g. the failure was synthesised inside the L2 transform), `error` was rebuilt from the [`SamplingErrorInfo`].
+    Failed {
+        error: SamplingError,
+        doom_loop_signals: Vec<String>,
+        recovery_items: Vec<xai_grok_sampling_types::ConversationItem>,
+    },
+    /// `cancel_token` fired mid-attempt.
+    /// The retry loop bails out without further attempts.
     Cancelled,
-    /// Failed to construct the underlying raw stream (e.g., HTTP
-    /// connect error before any chunks arrive).
+    /// Failed to construct the underlying raw stream (e.g., HTTP connect error before any chunks arrive).
     InitFailed { error: SamplingError },
 }
 
 /// Run a single sampling request to completion (or final failure).
 ///
-/// Returns the request id so the actor can clean it up from
-/// `active_requests` via [`tokio::task::JoinSet::join_next`].
+/// Returns the request id so the actor can clean it up from `active_requests` via [`tokio::task::JoinSet::join_next`].
 pub(crate) async fn run_request_task(
     request_id: RequestId,
     request: ConversationRequest,
@@ -100,10 +98,11 @@ pub(crate) async fn run_request_task(
     retry_policy: RetryPolicy,
     event_tx: mpsc::UnboundedSender<SamplingEvent>,
     cancel_token: CancellationToken,
-    completion_tx: Option<oneshot::Sender<CompletionResult>>,
-    image_input_rejections: ImageInputRejections,
+    completion: Option<oneshot::Sender<CollectedSamplingResult>>,
+    rejections: ModelRejections,
+    slots: Arc<RequestSlots>,
 ) -> RequestId {
-    let mut completion_tx = completion_tx;
+    let mut completion = CompletionState::new(completion);
     let idle_timeout = Duration::from_secs(
         config
             .idle_timeout_secs
@@ -116,13 +115,13 @@ pub(crate) async fn run_request_task(
         resolve_max_retries(configured_max_retries)
     };
 
-    // Build the initial client. Configuration errors here are fatal
-    // (no point retrying with the same broken config).
+    // Build the initial client
+    // Configuration errors here are fatal (no point retrying with the same broken config)
     let mut client = match SamplingClient::new(config.clone()) {
         Ok(c) => c,
         Err(err) => {
-            emit_failed(&event_tx, &request_id, &err);
-            send_completion(&mut completion_tx, Err(err));
+            let terminal_event_queued = emit_failed(&event_tx, &request_id, &err);
+            send_completion(&mut completion, Err(err), terminal_event_queued);
             return request_id;
         }
     };
@@ -135,16 +134,13 @@ pub(crate) async fn run_request_task(
         &client.auth_info(),
     );
     if let Some(eff) = config.reasoning_effort {
-        sampling_span.record("reasoning_effort", eff.as_str());
+        sampling_span.record("reasoning_effort", eff.as_ref());
     }
 
     let mut request = request;
     let mut retry_count: u32 = 0;
-    // Doom-loop recovery keeps its own resample budget, independent of the
-    // transport/empty budget above.
-    let doom_policy = (max_retries > 0)
-        .then_some(config.doom_loop_recovery)
-        .flatten();
+    // Doom-loop recovery keeps its own resample budget, independent of the transport/empty budget above
+    let doom_policy = config.doom_loop_recovery;
     let doom_max_retries = doom_policy.map_or(0, |p| p.max_retries);
     let mut doom_retry_count: u32 = 0;
     // The output-rate floor keeps a third budget, for the same reason the
@@ -165,8 +161,12 @@ pub(crate) async fn run_request_task(
     let output_observed = Arc::new(AtomicBool::new(false));
 
     loop {
+        sampling_span.record(
+            "total_attempts",
+            (retry_count + doom_retry_count + 1) as i64,
+        );
         if cancel_token.is_cancelled() {
-            handle_cancellation(&event_tx, &request_id, &mut completion_tx);
+            handle_cancellation(&event_tx, &request_id, &mut completion);
             return request_id;
         }
 
@@ -191,8 +191,10 @@ pub(crate) async fn run_request_task(
                 rate_policy,
                 spent: &rate_retry_count,
                 budget: rate_max_retries,
+                slots: &slots,
             });
         let outcome = run_one_attempt(
+            &slots,
             &client,
             request.clone(),
             request_id.clone(),
@@ -220,6 +222,12 @@ pub(crate) async fn run_request_task(
                 response,
                 mut metrics,
             } => {
+                completion.merge_doom_loop_signals(
+                    response
+                        .doom_loop_signals
+                        .iter()
+                        .map(|signal| signal.raw.clone()),
+                );
                 metrics.attempts = retry_count
                     + doom_retry_count
                     + rate_retry_count.load(Ordering::Relaxed)
@@ -237,27 +245,35 @@ pub(crate) async fn run_request_task(
                         );
                     }
                 }
-                // Surface token usage on the sampling span alongside effort.
+                // Record token usage on the sampling span alongside effort
                 if let Some(usage) = response.usage.as_ref() {
                     sampling_span.record("output_tokens", usage.completion_tokens);
                     sampling_span.record("reasoning_tokens", usage.reasoning_tokens);
                 }
-                // Emit Completed only after the loop succeeds; the L2
-                // stream's terminal event was suppressed by
-                // `run_one_attempt`.
-                let _ = event_tx.send(SamplingEvent::Completed {
-                    request_id: request_id.clone(),
-                    response: response.clone(),
-                    metrics: metrics.clone(),
-                });
-                send_completion(&mut completion_tx, Ok((*response, metrics)));
+                // Emit Completed only after the loop succeeds; the L2 stream's terminal event was suppressed by `run_one_attempt`
+                let terminal_event_queued = event_tx
+                    .send(SamplingEvent::Completed {
+                        request_id: request_id.clone(),
+                        response: response.clone(),
+                        metrics: metrics.clone(),
+                    })
+                    .is_ok();
+                send_completion(
+                    &mut completion,
+                    Ok((*response, metrics)),
+                    terminal_event_queued,
+                );
                 return request_id;
             }
-            AttemptOutcome::Empty { context } => {
+            AttemptOutcome::Empty {
+                context,
+                doom_loop_signals,
+            } => {
+                completion.merge_doom_loop_signals(doom_loop_signals);
                 tracing::warn!(
                     target: crate::sampling_log::TARGET,
                     empty_response = true,
-                    empty_reason = context.reason.as_str(),
+                    empty_reason = context.reason.as_ref(),
                     had_reasoning = context.had_reasoning,
                     content_len = context.content_len,
                     tool_call_count = context.tool_call_count,
@@ -281,35 +297,55 @@ pub(crate) async fn run_request_task(
                     &mut client,
                     &config,
                     &cancel_token,
-                    &mut completion_tx,
-                    &image_input_rejections,
+                    &mut completion,
+                    &rejections,
+                    &sampling_span,
                 )
                 .await
                 {
                     return request_id;
                 }
             }
-            AttemptOutcome::Failed { error } => {
-                // Doom-loop resamples run on their own budget and never
-                // consult the transport classifier, so no classifier change
-                // can silently debit the transport budget for a doom failure.
+            AttemptOutcome::Failed {
+                error,
+                doom_loop_signals,
+                recovery_items,
+            } => {
+                completion.merge_doom_loop_signals(doom_loop_signals);
+                // Doom-loop resamples run on their own budget and never consult the transport classifier
+                // No classifier change can silently debit the transport budget for a doom failure
                 if let SamplingError::DoomLoopDetected { .. } = &error {
+                    // Callers that opted into `retry_only_before_output` cannot retract text already handed to them
+                    // A resample would leave the poisoned prefix in the accepted output, so fail the request instead
                     if retry_policy.retry_only_before_output
                         && output_observed.load(Ordering::Relaxed)
                     {
-                        emit_failed(&event_tx, &request_id, &error);
-                        send_completion(&mut completion_tx, Err(clone_error(&error)));
+                        let terminal_event_queued = emit_failed(&event_tx, &request_id, &error);
+                        send_completion(
+                            &mut completion,
+                            Err(clone_error(&error)),
+                            terminal_event_queued,
+                        );
                         return request_id;
                     }
                     let backoff = retry_mod::doom_loop_backoff(doom_retry_count + 1);
                     doom_retry_count = doom_retry_count.saturating_add(1);
+                    let (recovery_triggers, aborted_at_chunk) = match &error {
+                        SamplingError::DoomLoopDetected {
+                            triggers,
+                            aborted_at_chunk,
+                        } => (triggers.clone(), *aborted_at_chunk),
+                        _ => unreachable!("doom-loop branch requires DoomLoopDetected"),
+                    };
+                    completion.record_recovery_attempt(recovery_triggers, aborted_at_chunk);
+                    append_recovery_context(&mut request, recovery_items);
                     tracing::warn!(
                         target: crate::sampling_log::TARGET,
                         reason = %error,
                         attempt = doom_retry_count,
                         max_retries = doom_max_retries,
-                        outcome = "resampled",
-                        "doom-loop recovery: discarding the poisoned attempt and resampling"
+                        outcome = "resampled_with_reminder",
+                        "doom-loop recovery: retaining the failed response and retrying with guidance"
                     );
                     emit_retrying(
                         &event_tx,
@@ -319,10 +355,12 @@ pub(crate) async fn run_request_task(
                         &error,
                         Some(backoff),
                     );
-                    if sleep_or_cancel(backoff, &cancel_token).await {
+                    if sleep_or_cancel(backoff, &cancel_token, doom_retry_count, &sampling_span)
+                        .await
+                    {
                         continue;
                     }
-                    handle_cancellation(&event_tx, &request_id, &mut completion_tx);
+                    handle_cancellation(&event_tx, &request_id, &mut completion);
                     return request_id;
                 }
                 if matches!(
@@ -336,8 +374,12 @@ pub(crate) async fn run_request_task(
                     if retry_policy.retry_only_before_output
                         && output_observed.load(Ordering::Relaxed)
                     {
-                        emit_failed(&event_tx, &request_id, &error);
-                        send_completion(&mut completion_tx, Err(clone_error(&error)));
+                        let terminal_event_queued = emit_failed(&event_tx, &request_id, &error);
+                        send_completion(
+                            &mut completion,
+                            Err(clone_error(&error)),
+                            terminal_event_queued,
+                        );
                         return request_id;
                     }
                     let rate_retry_count = rate_retry_count.fetch_add(1, Ordering::Relaxed) + 1;
@@ -379,10 +421,12 @@ pub(crate) async fn run_request_task(
                         &error,
                         Some(backoff),
                     );
-                    if sleep_or_cancel(backoff, &cancel_token).await {
+                    if sleep_or_cancel(backoff, &cancel_token, rate_retry_count, &sampling_span)
+                        .await
+                    {
                         continue;
                     }
-                    handle_cancellation(&event_tx, &request_id, &mut completion_tx);
+                    handle_cancellation(&event_tx, &request_id, &mut completion);
                     return request_id;
                 }
                 let (attempt_count, attempt_budget) = if error.is_stream_interrupted() {
@@ -404,8 +448,9 @@ pub(crate) async fn run_request_task(
                     &mut client,
                     &config,
                     &cancel_token,
-                    &mut completion_tx,
-                    &image_input_rejections,
+                    &mut completion,
+                    &rejections,
+                    &sampling_span,
                 )
                 .await
                 {
@@ -413,7 +458,7 @@ pub(crate) async fn run_request_task(
                 }
             }
             AttemptOutcome::Cancelled => {
-                handle_cancellation(&event_tx, &request_id, &mut completion_tx);
+                handle_cancellation(&event_tx, &request_id, &mut completion);
                 return request_id;
             }
             AttemptOutcome::InitFailed { error } => {
@@ -436,8 +481,9 @@ pub(crate) async fn run_request_task(
                     &mut client,
                     &config,
                     &cancel_token,
-                    &mut completion_tx,
-                    &image_input_rejections,
+                    &mut completion,
+                    &rejections,
+                    &sampling_span,
                 )
                 .await
                 {
@@ -448,11 +494,8 @@ pub(crate) async fn run_request_task(
     }
 }
 
-/// Apply a [`RetryDecision`]. Returns `true` if the loop should
-/// continue, `false` if the request is finished (either fatal or
-/// emit-to-session). Performs the side-effects of the decision:
-/// sleeping, rebuilding the client, stripping images, emitting the
-/// `Retrying` event.
+/// Apply a [`RetryDecision`]. Returns `true` if the loop should continue, `false` if the request is finished (either fatal or emit-to-session).
+/// Performs the side-effects of the decision: sleeping, rebuilding the client, stripping images, emitting the `Retrying` event.
 #[allow(clippy::too_many_arguments)]
 async fn apply_retry_decision(
     err: &SamplingError,
@@ -465,26 +508,37 @@ async fn apply_retry_decision(
     client: &mut SamplingClient,
     config: &SamplerConfig,
     cancel_token: &CancellationToken,
-    completion_tx: &mut Option<oneshot::Sender<CompletionResult>>,
-    image_input_rejections: &ImageInputRejections,
+    completion: &mut CompletionState,
+    rejections: &ModelRejections,
+    parent: &tracing::Span,
 ) -> bool {
-    let rate_limit_threshold = if retry_policy.rate_limit_retry_threshold == 0 {
-        retry_mod::RATE_LIMIT_RETRY_THRESHOLD
-    } else {
-        retry_policy.rate_limit_retry_threshold
-    };
+    let rate_limit_threshold = config
+        .rate_limit_retry_threshold
+        .unwrap_or(retry_policy.rate_limit_retry_threshold);
     let decision = classify_error(err, *retry_count, max_retries, rate_limit_threshold);
 
-    // Connection-reset / broken-pipe on body upload often means nginx
-    // rejected an oversized payload before responding 413. Strip
-    // images proactively before any retry of those errors so we don't
-    // burn budget re-uploading the same large body.
-    if err.is_likely_body_rejected() {
-        let stripped = request.strip_images(ImageStripReason::PayloadRejected);
-        if stripped > 0 {
+    // Connection-reset / broken-pipe on body upload often means nginx rejected an oversized payload before responding 413
+    // Strip images proactively before any retry of those errors so we don't burn budget re-uploading the same large body
+    // A Fatal (budget exhausted) must not mutate the request or tell the user images were "left out of the retry"
+    let will_retry = matches!(
+        decision,
+        RetryDecision::Retry { .. }
+            | RetryDecision::RetryWithBackoff { .. }
+            | RetryDecision::RetryWithClientRebuild { .. }
+    );
+    if will_retry && err.is_likely_body_rejected() {
+        let stripped_urls = request.strip_images(ImageStripReason::PayloadRejected);
+        if !stripped_urls.is_empty() {
             tracing::warn!(
-                stripped,
-                "stripped {stripped} image(s) before retry (likely nginx 413 via connection reset)"
+                stripped = stripped_urls.len(),
+                "stripped {} image(s) before retry (likely nginx 413 via connection reset)",
+                stripped_urls.len()
+            );
+            emit_images_stripped(
+                event_tx,
+                request_id,
+                stripped_urls,
+                StripReason::PayloadHeuristic,
             );
         }
     }
@@ -500,10 +554,10 @@ async fn apply_retry_decision(
                 err,
                 Some(backoff),
             );
-            if sleep_or_cancel(backoff, cancel_token).await {
+            if sleep_or_cancel(backoff, cancel_token, *retry_count, parent).await {
                 true
             } else {
-                handle_cancellation(event_tx, request_id, completion_tx);
+                handle_cancellation(event_tx, request_id, completion);
                 false
             }
         }
@@ -517,10 +571,10 @@ async fn apply_retry_decision(
                 err,
                 Some(backoff),
             );
-            if sleep_or_cancel(backoff, cancel_token).await {
+            if sleep_or_cancel(backoff, cancel_token, *retry_count, parent).await {
                 true
             } else {
-                handle_cancellation(event_tx, request_id, completion_tx);
+                handle_cancellation(event_tx, request_id, completion);
                 false
             }
         }
@@ -529,7 +583,7 @@ async fn apply_retry_decision(
                 // Remember the model, not just this request: the images live on
                 // in conversation history, and every later turn would re-upload
                 // them for the same rejection.
-                image_input_rejections.mark(&config.model);
+                rejections.images.mark(&config.model);
                 tracing::warn!(
                     model = %config.model,
                     reason = %err,
@@ -539,13 +593,22 @@ async fn apply_retry_decision(
             } else {
                 ImageStripReason::PayloadRejected
             };
-            let stripped = request.strip_images(reason);
-            if stripped == 0 {
+            let stripped_urls = request.strip_images(reason);
+            if stripped_urls.is_empty() {
                 // Nothing left to strip; upgrade to fatal.
-                emit_failed(event_tx, request_id, err);
-                send_completion(completion_tx, Err(clone_error(err)));
+                let terminal_event_queued = emit_failed(event_tx, request_id, err);
+                send_completion(completion, Err(clone_error(err)), terminal_event_queued);
                 return false;
             }
+            let reason = strip_reason_for_image_error(err);
+            tracing::warn!(
+                stripped = stripped_urls.len(),
+                reason = reason.as_ref(),
+                error = %err,
+                "stripped {} image(s) after an image-related error; retrying without them",
+                stripped_urls.len()
+            );
+            emit_images_stripped(event_tx, request_id, stripped_urls, reason);
             *retry_count += 1;
             emit_retrying(event_tx, request_id, *retry_count, max_retries, err, None);
             true
@@ -554,8 +617,8 @@ async fn apply_retry_decision(
             if !request.degrade_thinking_replay() {
                 // The ladder is spent, or there was no reasoning to begin
                 // with. The session reads the error and flattens or reports.
-                emit_failed(event_tx, request_id, err);
-                send_completion(completion_tx, Err(clone_error(err)));
+                let terminal_event_queued = emit_failed(event_tx, request_id, err);
+                send_completion(completion, Err(clone_error(err)), terminal_event_queued);
                 return false;
             }
             tracing::warn!(
@@ -563,6 +626,30 @@ async fn apply_retry_decision(
                 model = %config.model,
                 reason = %err,
                 "model rejected replayed thinking; stepping the replay level down for this turn"
+            );
+            *retry_count += 1;
+            emit_retrying(event_tx, request_id, *retry_count, max_retries, err, None);
+            true
+        }
+        RetryDecision::RetryWithToolSchemaFallback => {
+            let affected = request
+                .tools_with_top_level_combinators()
+                .into_iter()
+                .map(str::to_owned)
+                .collect::<Vec<_>>();
+            if !request.degrade_tool_schemas() {
+                // Already in the fallback form, or no schema it would change.
+                let terminal_event_queued = emit_failed(event_tx, request_id, err);
+                send_completion(completion, Err(clone_error(err)), terminal_event_queued);
+                return false;
+            }
+            rejections.tool_schemas.mark(&config.model);
+            tracing::warn!(
+                model = %config.model,
+                tools = ?affected,
+                reason = %err,
+                "provider rejected a top-level oneOf/anyOf/allOf tool schema; \
+                 sending the merged object form for this and later requests"
             );
             *retry_count += 1;
             emit_retrying(event_tx, request_id, *retry_count, max_retries, err, None);
@@ -581,8 +668,8 @@ async fn apply_retry_decision(
             if !stripped {
                 // Already as narrow as this recovery can make it; the property
                 // must be something else, so re-sending would fail identically.
-                emit_failed(event_tx, request_id, err);
-                send_completion(completion_tx, Err(clone_error(err)));
+                let terminal_event_queued = emit_failed(event_tx, request_id, err);
+                send_completion(completion, Err(clone_error(err)), terminal_event_queued);
                 return false;
             }
             tracing::warn!(
@@ -620,13 +707,12 @@ async fn apply_retry_decision(
                 err,
                 Some(backoff),
             );
-            if !sleep_or_cancel(backoff, cancel_token).await {
-                handle_cancellation(event_tx, request_id, completion_tx);
+            if !sleep_or_cancel(backoff, cancel_token, *retry_count, parent).await {
+                handle_cancellation(event_tx, request_id, completion);
                 return false;
             }
 
-            // Rebuild client with HTTP/1.1 fallback to escape poisoned
-            // HTTP/2 connection pools.
+            // Rebuild client with HTTP/1.1 fallback to escape poisoned HTTP/2 connection pools
             let mut http1_config = config.clone();
             http1_config.force_http1 = true;
             match SamplingClient::new(http1_config) {
@@ -644,15 +730,13 @@ async fn apply_retry_decision(
             true
         }
         RetryDecision::EmitToSession(emitted_err) => {
-            emit_failed(event_tx, request_id, &emitted_err);
-            send_completion(completion_tx, Err(emitted_err));
+            let terminal_event_queued = emit_failed(event_tx, request_id, &emitted_err);
+            send_completion(completion, Err(emitted_err), terminal_event_queued);
             false
         }
         RetryDecision::Fatal(fatal_err) => {
-            // Emit only on true budget exhaustion (hit the retry / rate-limit
-            // cap), mirroring `classify_error`'s Fatal conditions — NOT on a
-            // server `x-should-retry: false` or a non-retryable error, which
-            // are also Fatal but are not "exhausted".
+            // Emit only on true budget exhaustion (hit the retry / rate-limit cap), mirroring `classify_error`'s Fatal conditions
+            // A server `x-should-retry: false` or a non-retryable error is also Fatal but is not "exhausted"
             let next_attempt = *retry_count + 1;
             let server_said_stop = matches!(err.should_retry_header(), Some(false));
             let budget_exhausted = !server_said_stop
@@ -679,14 +763,25 @@ async fn apply_retry_decision(
                 }
                 exhausted_span.in_scope(|| {});
             }
-            emit_failed(event_tx, request_id, &fatal_err);
-            send_completion(completion_tx, Err(fatal_err));
+            let terminal_event_queued = emit_failed(event_tx, request_id, &fatal_err);
+            send_completion(completion, Err(fatal_err), terminal_event_queued);
             false
         }
     }
 }
 
-async fn sleep_or_cancel(duration: Duration, cancel_token: &CancellationToken) -> bool {
+async fn sleep_or_cancel(
+    duration: Duration,
+    cancel_token: &CancellationToken,
+    attempt: u32,
+    parent: &tracing::Span,
+) -> bool {
+    let _backoff = crate::span_timing::Region::from_span(tracing::info_span!(
+        parent: parent,
+        "sampling.retry_backoff",
+        attempt = attempt as i64,
+        backoff_ms = duration.as_millis() as i64,
+    ));
     tokio::select! {
         biased;
         _ = cancel_token.cancelled() => false,
@@ -700,8 +795,12 @@ async fn sleep_or_cancel(duration: Duration, cancel_token: &CancellationToken) -
 ///
 /// A `None` for `doom_check` disarms the doom checks, so the response is kept.
 /// The `backup` launcher starts another generation on a rate-floor breach.
+///
+/// The attempt waits for a slot in `slots` first. Its clocks start after
+/// that, so the wait never counts toward the first-token limit.
 #[allow(clippy::too_many_arguments)]
 async fn run_one_attempt(
+    slots: &Arc<RequestSlots>,
     client: &SamplingClient,
     request: ConversationRequest,
     request_id: RequestId,
@@ -713,10 +812,35 @@ async fn run_one_attempt(
     output_observed: Arc<AtomicBool>,
     backup: Option<&BackupLauncher<'_>>,
 ) -> AttemptOutcome {
+    let _slot = match slots.try_acquire() {
+        Some(slot) => slot,
+        None => {
+            let queued_at = std::time::Instant::now();
+            let _ = event_tx.send(SamplingEvent::Queued {
+                request_id: request_id.clone(),
+                ahead: slots.waiting(),
+                limit: slots.limit(),
+            });
+            let slot = tokio::select! {
+                biased;
+                _ = cancel_token.cancelled() => return AttemptOutcome::Cancelled,
+                slot = slots.acquire() => slot,
+            };
+            let _ = event_tx.send(SamplingEvent::Dequeued {
+                request_id: request_id.clone(),
+                waited_ms: queued_at.elapsed().as_millis() as u64,
+            });
+            slot
+        }
+    };
     let ttft = FirstTokenDeadline::start(rate_check);
+    let length_policy = request.length_policy;
     match client.api_backend() {
         ApiBackend::ChatCompletions => {
-            let (raw, metadata) = match ttft.init(client.conversation_stream(request)).await {
+            let (raw, metadata) = match ttft
+                .init(with_slot_held(client.conversation_stream(request)))
+                .await
+            {
                 Ok(pair) => pair,
                 Err(outcome) => return outcome,
             };
@@ -731,14 +855,18 @@ async fn run_one_attempt(
                 None,
                 rate_check,
                 ttft,
+                FailedResponseCapture::default(),
                 output_observed,
+                length_policy,
                 backup,
             )
             .await
         }
         ApiBackend::Responses => {
             let (raw, metadata, doom_loop) = match ttft
-                .init(client.conversation_stream_responses(request))
+                .init(with_slot_held(
+                    client.conversation_stream_responses(request),
+                ))
                 .await
             {
                 Ok(parts) => parts,
@@ -750,6 +878,12 @@ async fn run_one_attempt(
                 collector.disarm_abort();
             }
             let (teed, captured) = tee_errors(raw);
+            // Only an armed attempt can replay its failed turn, so only an armed attempt pays for buffering it
+            let failed_response = if doom_check.is_some() {
+                FailedResponseCapture::armed()
+            } else {
+                FailedResponseCapture::default()
+            };
             let l2 = stream_responses_tracked(
                 teed,
                 metadata,
@@ -757,6 +891,7 @@ async fn run_one_attempt(
                 idle_timeout,
                 doom_loop,
                 Arc::clone(&output_observed),
+                failed_response.clone(),
             );
             drive_l2(
                 l2,
@@ -767,14 +902,16 @@ async fn run_one_attempt(
                 doom_check,
                 rate_check,
                 ttft,
+                failed_response,
                 output_observed,
+                length_policy,
                 backup,
             )
             .await
         }
         ApiBackend::Messages => {
             let (raw, metadata) = match ttft
-                .init(client.conversation_stream_messages(request))
+                .init(with_slot_held(client.conversation_stream_messages(request)))
                 .await
             {
                 Ok(pair) => pair,
@@ -791,13 +928,17 @@ async fn run_one_attempt(
                 None,
                 rate_check,
                 ttft,
+                FailedResponseCapture::default(),
                 output_observed,
+                length_policy,
                 backup,
             )
             .await
         }
         ApiBackend::Ollama => {
-            let (raw, metadata) = match ttft.init(client.conversation_stream_ollama(request)).await
+            let (raw, metadata) = match ttft
+                .init(with_slot_held(client.conversation_stream_ollama(request)))
+                .await
             {
                 Ok(pair) => pair,
                 Err(outcome) => return outcome,
@@ -813,7 +954,9 @@ async fn run_one_attempt(
                 None,
                 rate_check,
                 ttft,
+                FailedResponseCapture::default(),
                 output_observed,
+                length_policy,
                 backup,
             )
             .await
@@ -874,18 +1017,18 @@ impl FirstTokenDeadline {
                 waited_secs: waited.as_secs(),
                 limit_secs,
             },
+            doom_loop_signals: Vec::new(),
+            recovery_items: Vec::new(),
         }
     }
 }
 
-/// Captured-error cell shared between the tee adapter and the
-/// per-request task.
+/// Captured-error cell shared between the tee adapter and the per-request task.
 type ErrorCell = Arc<Mutex<Option<SamplingError>>>;
 
-/// Wrap a raw chunk stream so its first error is captured into a
-/// shared cell. The wrapped stream still yields the original
-/// `Result<T, SamplingError>` items unchanged so the L2 transform sees
-/// them and converts them to `SamplingErrorInfo` for events.
+/// Wrap a raw chunk stream so its first error is captured into a shared cell.
+/// The wrapped stream still yields the original `Result<T, SamplingError>` items unchanged.
+/// The L2 transform sees them and converts them to `SamplingErrorInfo` for events.
 fn tee_errors<'a, T: Send + 'a>(
     raw: BoxStream<'a, SamplingResult<T>>,
 ) -> (BoxStream<'a, SamplingResult<T>>, ErrorCell) {
@@ -893,20 +1036,12 @@ fn tee_errors<'a, T: Send + 'a>(
     let cell_clone = Arc::clone(&cell);
     let teed = raw
         .map(move |item| {
-            if let Err(ref e) = item {
-                // The lock comes back even from a holder that died: this cell
-                // is the only record of why the attempt failed, and a skipped
-                // capture would have the turn report a synthesized reason.
-                #[allow(clippy::disallowed_methods)] // takes the cell back as above
-                let mut guard = cell_clone
-                    .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner());
-                // Capture only the first error -- subsequent errors
-                // on a torn-down stream are usually secondary effects
-                // of the same disconnect.
-                if guard.is_none() {
-                    *guard = Some(clone_error(e));
-                }
+            if let Err(ref e) = item
+                && let Ok(mut guard) = cell_clone.lock()
+                && guard.is_none()
+            {
+                // Capture only the first error; subsequent errors on a torn-down stream are usually secondary effects of the same disconnect
+                *guard = Some(clone_error(e));
             }
             item
         })
@@ -914,11 +1049,8 @@ fn tee_errors<'a, T: Send + 'a>(
     (teed, cell)
 }
 
-/// Drive an L2 event stream: forward non-terminal events to
-/// `event_tx`, watch `cancel_token`, return `AttemptOutcome` based on
-/// the terminal event (or cancellation). `doom_check`, when set, turns a
-/// completed response carrying confident doom-loop signals into a
-/// retryable failure (belt-and-braces behind the mid-stream abort).
+/// Drive an L2 event stream: forward non-terminal events to `event_tx` and watch `cancel_token`.
+/// `doom_check`, when set, turns a completed response carrying confident doom-loop signals into a retryable failure.
 ///
 /// The output-rate meter runs here rather than inside a backend transform:
 /// every backend's tokens and tool-call arguments pass through this loop, so
@@ -943,7 +1075,9 @@ async fn drive_l2(
     doom_check: Option<xai_grok_sampling_types::DoomLoopRecoveryPolicy>,
     rate_check: Option<OutputRateFloorPolicy>,
     ttft: FirstTokenDeadline,
+    failed_response: FailedResponseCapture,
     output_observed: Arc<AtomicBool>,
+    length_policy: xai_grok_sampling_types::LengthPolicy,
     backup: Option<&BackupLauncher<'_>>,
 ) -> AttemptOutcome {
     let mut l2 = pin!(l2);
@@ -960,6 +1094,8 @@ async fn drive_l2(
     let mut rate_ticker = tokio::time::interval(RATE_TICK);
     rate_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut last_published: Option<PublishedRate> = None;
+    let mut doom_loop_signals = Vec::new();
+    let mut await_first_output_span = Some(tracing::info_span!("sampling.await_first_output"));
     loop {
         tokio::select! {
             biased;
@@ -1019,7 +1155,11 @@ async fn drive_l2(
                             window_secs: policy.window_secs,
                         };
                         let Some(launcher) = backup else {
-                            return AttemptOutcome::Failed { error };
+                            return AttemptOutcome::Failed {
+                                error,
+                                doom_loop_signals,
+                                recovery_items: Vec::new(),
+                            };
                         };
                         match launcher.launch(cancel_token, error) {
                             Some(b) => {
@@ -1086,7 +1226,26 @@ async fn drive_l2(
             next = l2.next() => match next {
                 Some(SamplingEvent::Completed { response, metrics, .. }) => {
                     output_observed.store(true, Ordering::Relaxed);
-                    let outcome = completed_outcome(response, metrics, doom_check);
+                    await_first_output_span.take();
+                    let mut all_triggers = Vec::new();
+                    merge_signal_labels(
+                        &mut all_triggers,
+                        response.doom_loop_signals.iter().map(|signal| &signal.raw),
+                    );
+                    if !all_triggers.is_empty() {
+                        let _ = event_tx.send(SamplingEvent::DoomLoopSignals {
+                            request_id: request_id.clone(),
+                            triggers: all_triggers.clone(),
+                        });
+                    }
+                    let outcome = completed_outcome(
+                        response,
+                        metrics,
+                        doom_check,
+                        length_policy,
+                        all_triggers,
+                        &failed_response,
+                    );
                     if let Some(b) = hedge.take() {
                         if !matches!(outcome, AttemptOutcome::Completed { .. }) {
                             return b
@@ -1098,6 +1257,7 @@ async fn drive_l2(
                     return outcome;
                 }
                 Some(SamplingEvent::Failed { error: info, .. }) => {
+                    await_first_output_span.take();
                     if let Some(b) = hedge.take() {
                         return b
                             .adopt(&request_id, event_tx, cancel_token, "the original failed", None)
@@ -1112,7 +1272,23 @@ async fn drive_l2(
                         .unwrap_or_else(|poisoned| poisoned.into_inner())
                         .take();
                     let error = raw.unwrap_or_else(|| synthesize_from_info(&info));
-                    return AttemptOutcome::Failed { error };
+                    let recovery_items = if matches!(error, SamplingError::DoomLoopDetected { .. }) {
+                        failed_response.take_items()
+                    } else {
+                        Vec::new()
+                    };
+                    return AttemptOutcome::Failed {
+                        error,
+                        doom_loop_signals,
+                        recovery_items,
+                    };
+                }
+                Some(SamplingEvent::DoomLoopSignals { triggers, .. }) => {
+                    merge_signal_labels(&mut doom_loop_signals, triggers.iter().cloned());
+                    let _ = event_tx.send(SamplingEvent::DoomLoopSignals {
+                        request_id: request_id.clone(),
+                        triggers,
+                    });
                 }
                 Some(other) => {
                     if matches!(
@@ -1125,6 +1301,7 @@ async fn drive_l2(
                     ) {
                         output_observed.store(true, Ordering::Relaxed);
                         first_output_seen = true;
+                        await_first_output_span.take();
                     }
                     // A backend-hosted tool call is the server's time, not the
                     // stream's: the model generates nothing from the start of
@@ -1180,6 +1357,8 @@ async fn drive_l2(
                         error: SamplingError::EventStreamError(
                             "stream dropped without terminal event".to_string(),
                         ),
+                        doom_loop_signals,
+                        recovery_items: Vec::new(),
                     };
                 }
             }
@@ -1192,6 +1371,9 @@ fn completed_outcome(
     response: Box<ConversationResponse>,
     metrics: InferenceLatencyStats,
     doom_check: Option<xai_grok_sampling_types::DoomLoopRecoveryPolicy>,
+    length_policy: xai_grok_sampling_types::LengthPolicy,
+    doom_loop_signals: Vec<String>,
+    failed_response: &FailedResponseCapture,
 ) -> AttemptOutcome {
     // Doom outranks the truncation/empty classes: a confident loop poisons
     // the attempt whatever else it looks like.
@@ -1203,20 +1385,32 @@ fn completed_outcome(
                     triggers,
                     aborted_at_chunk: None,
                 },
+                doom_loop_signals,
+                recovery_items: failed_response.take_items(),
             };
         }
     }
-    if response.stop_reason == Some(xai_grok_sampling_types::StopReason::Length) {
-        return AttemptOutcome::Failed {
-            error: SamplingError::MaxTokensTruncation,
-        };
-    }
+    // `apply_length_policy` decides fail or salvage. A salvaged response has
+    // no empty reason, so it reaches `Completed`.
+    let response = match crate::client::apply_length_policy(length_policy, *response) {
+        Ok(response) => Box::new(response),
+        Err(error) => {
+            return AttemptOutcome::Failed {
+                error,
+                doom_loop_signals,
+                recovery_items: Vec::new(),
+            };
+        }
+    };
     // A content filter's empty answer is deterministic. A resample repeats it.
     let content_filtered =
         response.stop_reason == Some(xai_grok_sampling_types::StopReason::ContentFilter);
     if !content_filtered && let Some(reason) = response.empty_reason() {
         let context = build_empty_context(reason, &response);
-        return AttemptOutcome::Empty { context };
+        return AttemptOutcome::Empty {
+            context,
+            doom_loop_signals,
+        };
     }
     AttemptOutcome::Completed { response, metrics }
 }
@@ -1237,8 +1431,8 @@ impl AttemptOutcome {
     fn describe(&self) -> String {
         match self {
             Self::Completed { .. } => "completed".to_string(),
-            Self::Empty { context } => format!("empty: {}", context.reason),
-            Self::Failed { error } | Self::InitFailed { error } => error.to_string(),
+            Self::Empty { context, .. } => format!("empty: {}", context.reason),
+            Self::Failed { error, .. } | Self::InitFailed { error } => error.to_string(),
             Self::Cancelled => "cancelled".to_string(),
         }
     }
@@ -1256,6 +1450,7 @@ pub(crate) struct BackupLauncher<'a> {
     rate_policy: OutputRateFloorPolicy,
     spent: &'a AtomicU32,
     budget: u32,
+    slots: &'a Arc<RequestSlots>,
 }
 
 impl<'a> BackupLauncher<'a> {
@@ -1283,8 +1478,10 @@ impl<'a> BackupLauncher<'a> {
         let request_id = self.request_id.clone();
         let idle_timeout = self.idle_timeout;
         let doom_check = self.doom_check;
+        let slots = self.slots;
         let run: BoxFuture<'a, AttemptOutcome> = Box::pin(async move {
             run_one_attempt(
+                slots,
                 client,
                 request,
                 request_id,
@@ -1480,17 +1677,14 @@ struct PublishedRate {
     health: xai_grok_sampling_types::OutputRateHealth,
 }
 
-/// Re-tag a forwarded event with the canonical request_id. The L2
-/// transform tags events with the id we passed in, so this is
-/// usually a no-op; keeping the helper makes the data-flow explicit.
+/// Re-tag a forwarded event with the canonical request_id.
+/// The L2 transform tags events with the id we passed in, so this is usually a no-op; keeping the helper makes the data-flow explicit.
 fn retag(event: SamplingEvent, _request_id: &RequestId) -> SamplingEvent {
     event
 }
 
-/// Reconstruct a [`SamplingError`] from a [`SamplingErrorInfo`] when
-/// the L2 transform fired a synthesised Failed event (idle timeout,
-/// `ResponseFailed`, server error event) and there is no captured raw
-/// error in the cell.
+/// Reconstruct a [`SamplingError`] from a [`SamplingErrorInfo`] when there is no captured raw error in the cell.
+/// The L2 transform fires synthesised Failed events for idle timeouts, `ResponseFailed`, and server error events.
 fn synthesize_from_info(info: &SamplingErrorInfo) -> SamplingError {
     match info.kind {
         SamplingErrorKind::IdleTimeout => SamplingError::IdleTimeout {
@@ -1504,10 +1698,8 @@ fn synthesize_from_info(info: &SamplingErrorInfo) -> SamplingError {
             message: info.message.clone(),
             credential: info.credential,
         },
-        // Must stay Serialization: EventStreamError is retryable, and a
-        // response-parse failure is deterministic on retry. `info.message`
-        // is the variant's rendered Display, so rebuild via the constructor
-        // that owns the prefix-stripping.
+        // Must stay Serialization: EventStreamError is retryable, and a response-parse failure is deterministic on retry
+        // `info.message` is the variant's rendered Display, so rebuild via the constructor that owns the prefix-stripping
         SamplingErrorKind::Serialization => {
             SamplingError::serialization_from_rendered(&info.message)
         }
@@ -1523,6 +1715,7 @@ fn synthesize_from_info(info: &SamplingErrorInfo) -> SamplingError {
                 model_metadata: info.model_metadata.clone(),
                 retry_after_secs: info.retry_after_secs,
                 should_retry: info.should_retry,
+                error_code: info.error_code.clone(),
             }
         }
         SamplingErrorKind::EmptyResponse => {
@@ -1589,7 +1782,7 @@ fn build_empty_context(
         None => (0, 0, String::new(), false),
     };
 
-    let finish_reason = response.stop_reason.map(|sr| sr.as_str().to_owned());
+    let finish_reason = response.stop_reason.map(|sr| sr.as_ref().to_owned());
     let (completion_tokens, reasoning_tokens, prompt_tokens) = response
         .usage
         .as_ref()
@@ -1620,12 +1813,14 @@ fn emit_failed(
     event_tx: &mpsc::UnboundedSender<SamplingEvent>,
     request_id: &RequestId,
     err: &SamplingError,
-) {
+) -> bool {
     let info = SamplingErrorInfo::from(err);
-    let _ = event_tx.send(SamplingEvent::Failed {
-        request_id: request_id.clone(),
-        error: info,
-    });
+    event_tx
+        .send(SamplingEvent::Failed {
+            request_id: request_id.clone(),
+            error: info,
+        })
+        .is_ok()
 }
 
 fn emit_retrying(
@@ -1642,21 +1837,64 @@ fn emit_retrying(
         attempt,
         max_retries,
         kind: info.kind,
-        reason: err.to_string(),
+        reason: err.detail_with_causes(),
         retry_in_ms: retry_in.map(|d| d.as_millis() as u64),
         doom_loop_triggers: info.doom_loop_triggers,
         doom_loop_aborted_at_chunk: info.doom_loop_aborted_at_chunk,
     });
 }
 
+/// Coded `invalid_image` is `ServerRejected` at any status, including a
+/// synthesized Responses 500. Exhaustive so a new `SamplingError` variant
+/// must pick a label instead of falling through.
+fn strip_reason_for_image_error(err: &SamplingError) -> StripReason {
+    match err {
+        SamplingError::Api {
+            error_code: Some(ApiErrorCode::InvalidImage),
+            ..
+        }
+        | SamplingError::StreamError {
+            code: Some(ApiErrorCode::InvalidImage),
+            ..
+        } => StripReason::ServerRejected,
+        SamplingError::Api { .. }
+        | SamplingError::StreamError { .. }
+        | SamplingError::Auth { .. }
+        | SamplingError::InvalidConfiguration(_)
+        | SamplingError::MtlsConfiguration(_)
+        | SamplingError::Http(_)
+        | SamplingError::Serialization(_)
+        | SamplingError::EventStreamError(_)
+        | SamplingError::IdleTimeout { .. }
+        | SamplingError::EmptyResponse { .. }
+        | SamplingError::MaxTokensTruncation
+        | SamplingError::DoomLoopDetected { .. }
+        | SamplingError::EndpointNotAllowed(_)
+        | SamplingError::OutputRateCollapsed { .. }
+        | SamplingError::FirstTokenTimeout { .. } => StripReason::PayloadHeuristic,
+    }
+}
+
+fn emit_images_stripped(
+    event_tx: &mpsc::UnboundedSender<SamplingEvent>,
+    request_id: &RequestId,
+    stripped_urls: Vec<std::sync::Arc<str>>,
+    reason: StripReason,
+) {
+    let _ = event_tx.send(SamplingEvent::ImagesStripped {
+        request_id: request_id.clone(),
+        stripped_urls,
+        reason,
+    });
+}
+
 fn handle_cancellation(
     event_tx: &mpsc::UnboundedSender<SamplingEvent>,
     request_id: &RequestId,
-    completion_tx: &mut Option<oneshot::Sender<CompletionResult>>,
+    completion: &mut CompletionState,
 ) {
-    // No status code, no upstream API error -- this is a client-side
-    // termination. Use kind=Api so consumers that switch on kind have
-    // a sensible default; the message clearly identifies it.
+    // No status code, no upstream API error: this is a client-side termination
+    // Use kind=Api so consumers that switch on kind have a sensible default; the message clearly identifies it
     let info = SamplingErrorInfo {
         kind: SamplingErrorKind::Api,
         status_code: None,
@@ -1664,6 +1902,7 @@ fn handle_cancellation(
         is_retryable: false,
         retry_after_secs: None,
         should_retry: None,
+        error_code: None,
         model_metadata: None,
         empty_response_context: None,
         doom_loop_triggers: None,
@@ -1671,29 +1910,353 @@ fn handle_cancellation(
         output_rate: None,
         credential: SentCredential::Unknown,
     };
-    let _ = event_tx.send(SamplingEvent::Failed {
-        request_id: request_id.clone(),
-        error: info,
-    });
+    let terminal_event_queued = event_tx
+        .send(SamplingEvent::Failed {
+            request_id: request_id.clone(),
+            error: info,
+        })
+        .is_ok();
     send_completion(
-        completion_tx,
+        completion,
         Err(SamplingError::auth_unknown("request cancelled")),
+        terminal_event_queued,
     );
 }
 
 fn send_completion(
-    completion_tx: &mut Option<oneshot::Sender<CompletionResult>>,
-    result: CompletionResult,
+    completion: &mut CompletionState,
+    result: SamplingResultWithMetrics,
+    terminal_event_queued: bool,
 ) {
-    if let Some(tx) = completion_tx.take() {
-        let _ = tx.send(result);
-    }
+    completion.send(result, terminal_event_queued);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use futures_util::stream;
+    use reqwest::StatusCode;
+    use xai_grok_sampling_types::ApiErrorCode;
+
+    #[test]
+    fn strip_reason_invalid_image_is_server_rejected_on_api_and_stream() {
+        let api_400 = SamplingError::Api {
+            status: StatusCode::BAD_REQUEST,
+            message: "Invalid PNG image.".into(),
+            model_metadata: None,
+            retry_after_secs: None,
+            should_retry: None,
+            error_code: Some(ApiErrorCode::InvalidImage),
+        };
+        assert_eq!(
+            strip_reason_for_image_error(&api_400),
+            StripReason::ServerRejected
+        );
+
+        // Responses `response.failed` is synthesized as Api 500 with the wire code.
+        let api_500 = SamplingError::Api {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            message: "invalid_image: Invalid PNG image.".into(),
+            model_metadata: None,
+            retry_after_secs: None,
+            should_retry: None,
+            error_code: Some(ApiErrorCode::InvalidImage),
+        };
+        assert_eq!(
+            strip_reason_for_image_error(&api_500),
+            StripReason::ServerRejected
+        );
+
+        let stream = SamplingError::StreamError {
+            error_type: "invalid_request_error".into(),
+            message: "Invalid PNG image.".into(),
+            code: Some(ApiErrorCode::InvalidImage),
+        };
+        assert_eq!(
+            strip_reason_for_image_error(&stream),
+            StripReason::ServerRejected
+        );
+
+        let heuristic = SamplingError::StreamError {
+            error_type: "overloaded_error".into(),
+            message: "The server is overloaded.".into(),
+            code: None,
+        };
+        assert_eq!(
+            strip_reason_for_image_error(&heuristic),
+            StripReason::PayloadHeuristic
+        );
+    }
+
+    fn completed_response(
+        stop_reason: Option<xai_grok_sampling_types::StopReason>,
+        content: &str,
+    ) -> ConversationResponse {
+        ConversationResponse {
+            items: vec![xai_grok_sampling_types::ConversationItem::assistant(
+                content,
+            )],
+            stop_reason,
+            usage: None,
+            cost_usd_ticks: None,
+            message_chunks_emitted: u64::from(!content.is_empty()),
+            doom_loop_signals: vec![xai_grok_sampling_types::doom_loop::DoomLoopSignal::parse(
+                "exact_repetition:42x3@thinking",
+            )],
+            stop_message: None,
+            message_id: None,
+            raw_stop_reason: None,
+            stop_sequence: None,
+        }
+    }
+
+    fn length_completed_event(text: &str) -> SamplingEvent {
+        let mut response =
+            completed_response(Some(xai_grok_sampling_types::StopReason::Length), text);
+        response.doom_loop_signals.clear();
+        SamplingEvent::Completed {
+            request_id: RequestId::random(),
+            response: Box::new(response),
+            metrics: Default::default(),
+        }
+    }
+
+    async fn drive_length_event(
+        event: SamplingEvent,
+        policy: xai_grok_sampling_types::LengthPolicy,
+    ) -> AttemptOutcome {
+        let (event_tx, _event_rx) = mpsc::unbounded_channel();
+        drive_l2(
+            stream::iter([event]),
+            RequestId::random(),
+            &event_tx,
+            &CancellationToken::new(),
+            Arc::new(Mutex::new(None)),
+            None,
+            None,
+            FirstTokenDeadline::start(None),
+            FailedResponseCapture::default(),
+            Arc::new(AtomicBool::new(false)),
+            policy,
+            None,
+        )
+        .await
+    }
+
+    async fn terminal_outcome(response: ConversationResponse) -> AttemptOutcome {
+        let (event_tx, _event_rx) = mpsc::unbounded_channel();
+        drive_l2(
+            stream::iter([SamplingEvent::Completed {
+                request_id: RequestId::from("terminal-signals"),
+                response: Box::new(response),
+                metrics: InferenceLatencyStats::default(),
+            }]),
+            RequestId::from("terminal-signals"),
+            &event_tx,
+            &CancellationToken::new(),
+            Arc::new(Mutex::new(None)),
+            None,
+            None,
+            FirstTokenDeadline::start(None),
+            FailedResponseCapture::default(),
+            Arc::new(AtomicBool::new(false)),
+            xai_grok_sampling_types::LengthPolicy::Fail,
+            None,
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn length_and_empty_outcomes_retain_terminal_detector_signals() {
+        let length = terminal_outcome(completed_response(
+            Some(xai_grok_sampling_types::StopReason::Length),
+            "truncated",
+        ))
+        .await;
+        assert!(matches!(
+            length,
+            AttemptOutcome::Failed {
+                doom_loop_signals,
+                ..
+            } if doom_loop_signals == ["exact_repetition:42x3@thinking".to_string()]
+        ));
+
+        let empty = terminal_outcome(completed_response(None, "")).await;
+        assert!(matches!(
+            empty,
+            AttemptOutcome::Empty {
+                doom_loop_signals,
+                ..
+            } if doom_loop_signals == ["exact_repetition:42x3@thinking".to_string()]
+        ));
+    }
+
+    #[tokio::test]
+    async fn terminal_detector_signals_are_bounded_before_forwarding() {
+        use crate::doom_loop::{MAX_COLLECTED_DOOM_LOOP_SIGNALS, MAX_DOOM_LOOP_SIGNAL_BYTES};
+
+        let mut response = completed_response(
+            Some(xai_grok_sampling_types::StopReason::Length),
+            "truncated",
+        );
+        response.doom_loop_signals =
+            std::iter::once(xai_grok_sampling_types::doom_loop::DoomLoopSignal::parse(
+                &"x".repeat(MAX_DOOM_LOOP_SIGNAL_BYTES + 1),
+            ))
+            .chain((0..MAX_COLLECTED_DOOM_LOOP_SIGNALS + 20).map(|index| {
+                xai_grok_sampling_types::doom_loop::DoomLoopSignal::parse(&format!(
+                    "unknown_{index}@thinking"
+                ))
+            }))
+            .collect();
+
+        let (event_tx, mut event_rx) = mpsc::unbounded_channel();
+        let outcome = drive_l2(
+            stream::iter([SamplingEvent::Completed {
+                request_id: RequestId::from("bounded-terminal-signals"),
+                response: Box::new(response),
+                metrics: InferenceLatencyStats::default(),
+            }]),
+            RequestId::from("bounded-terminal-signals"),
+            &event_tx,
+            &CancellationToken::new(),
+            Arc::new(Mutex::new(None)),
+            None,
+            None,
+            FirstTokenDeadline::start(None),
+            FailedResponseCapture::default(),
+            Arc::new(AtomicBool::new(false)),
+            xai_grok_sampling_types::LengthPolicy::Fail,
+            None,
+        )
+        .await;
+
+        let AttemptOutcome::Failed {
+            doom_loop_signals, ..
+        } = outcome
+        else {
+            panic!("length completion must fail");
+        };
+        assert_eq!(MAX_COLLECTED_DOOM_LOOP_SIGNALS, doom_loop_signals.len());
+        assert!(
+            doom_loop_signals
+                .iter()
+                .all(|label| label.len() <= MAX_DOOM_LOOP_SIGNAL_BYTES)
+        );
+        let SamplingEvent::DoomLoopSignals { triggers, .. } =
+            event_rx.try_recv().expect("bounded signal event")
+        else {
+            panic!("expected detector signal event");
+        };
+        assert_eq!(doom_loop_signals, triggers);
+    }
+
+    #[tokio::test]
+    async fn length_policy_fail_converts_completed_to_failed() {
+        let outcome = drive_length_event(
+            length_completed_event("partial"),
+            xai_grok_sampling_types::LengthPolicy::Fail,
+        )
+        .await;
+        assert!(matches!(
+            outcome,
+            AttemptOutcome::Failed {
+                error: SamplingError::MaxTokensTruncation,
+                ..
+            }
+        ));
+    }
+
+    #[tokio::test]
+    async fn length_policy_salvage_completes_with_partial_content() {
+        let outcome = drive_length_event(
+            length_completed_event("partial"),
+            xai_grok_sampling_types::LengthPolicy::CompletePartial,
+        )
+        .await;
+        let AttemptOutcome::Completed { response, .. } = outcome else {
+            panic!("expected completed partial response");
+        };
+        assert_eq!(response.assistant_text(), "partial");
+        assert_eq!(
+            response.stop_reason,
+            Some(xai_grok_sampling_types::StopReason::Length)
+        );
+    }
+
+    fn with_tool_call(mut event: SamplingEvent, arguments: &str) -> SamplingEvent {
+        let SamplingEvent::Completed { response, .. } = &mut event else {
+            unreachable!("helper builds Completed");
+        };
+        let Some(xai_grok_sampling_types::ConversationItem::Assistant(a)) =
+            response.items.last_mut()
+        else {
+            unreachable!("helper builds a trailing Assistant item");
+        };
+        a.tool_calls = vec![xai_grok_sampling_types::ToolCall {
+            id: "call_1".into(),
+            name: "do_thing".into(),
+            arguments: arguments.into(),
+            vendor: Default::default(),
+        }];
+        event
+    }
+
+    /// Argument-truncated tool calls never execute; both salvaging policies still fail them.
+    #[tokio::test]
+    async fn length_policy_truncated_tool_call_arguments_still_fail() {
+        for policy in [
+            xai_grok_sampling_types::LengthPolicy::CompleteToolCalls,
+            xai_grok_sampling_types::LengthPolicy::CompletePartial,
+        ] {
+            let event = with_tool_call(length_completed_event("partial"), "{\"x\": \"trunc");
+            let outcome = drive_length_event(event, policy).await;
+            match outcome {
+                AttemptOutcome::Failed { error, .. } => {
+                    assert!(matches!(error, SamplingError::MaxTokensTruncation));
+                }
+                other => panic!("expected Failed(MaxTokensTruncation), got {other:?}"),
+            }
+        }
+    }
+
+    /// Default policy: Length with completed tool calls is delivered for execution, with the Length stop reason kept visible for telemetry.
+    #[tokio::test]
+    async fn length_policy_default_completes_with_completed_tool_calls() {
+        let event = with_tool_call(length_completed_event("partial"), "{\"x\": 1}");
+        let outcome =
+            drive_length_event(event, xai_grok_sampling_types::LengthPolicy::default()).await;
+        match outcome {
+            AttemptOutcome::Completed { response, .. } => {
+                assert_eq!(response.tool_calls().len(), 1);
+                let Some(call) = response.tool_calls().first() else {
+                    panic!("expected a tool call");
+                };
+                assert_eq!(call.arguments.as_ref(), "{\"x\": 1}");
+                assert_eq!(
+                    response.stop_reason,
+                    Some(xai_grok_sampling_types::StopReason::Length)
+                );
+            }
+            other => panic!("expected Completed, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn length_policy_salvage_empty_still_fails() {
+        let outcome = drive_length_event(
+            length_completed_event(""),
+            xai_grok_sampling_types::LengthPolicy::CompletePartial,
+        )
+        .await;
+        assert!(matches!(
+            outcome,
+            AttemptOutcome::Failed {
+                error: SamplingError::MaxTokensTruncation,
+                ..
+            }
+        ));
+    }
 
     #[test]
     fn synthesize_idle_timeout_extracts_elapsed_secs() {
@@ -1704,6 +2267,7 @@ mod tests {
             is_retryable: false,
             retry_after_secs: None,
             should_retry: None,
+            error_code: None,
             model_metadata: None,
             empty_response_context: None,
             doom_loop_triggers: None,
@@ -1727,6 +2291,7 @@ mod tests {
             is_retryable: true,
             retry_after_secs: None,
             should_retry: Some(false),
+            error_code: None,
             model_metadata: None,
             empty_response_context: None,
             doom_loop_triggers: None,
@@ -1750,6 +2315,52 @@ mod tests {
         }
     }
 
+    /// A coded invalid-image error must survive the info round trip.
+    /// The message alone would not classify, so losing the code would silently disable strip recovery on synthesized failures.
+    #[test]
+    fn synthesize_preserves_error_code_and_image_classification() {
+        let original = SamplingError::Api {
+            status: reqwest::StatusCode::BAD_REQUEST,
+            message: "some future wording without the legacy phrase".to_string(),
+            model_metadata: None,
+            retry_after_secs: None,
+            should_retry: None,
+            error_code: Some(ApiErrorCode::InvalidImage),
+        };
+        assert!(original.is_image_processing_error());
+
+        let info = SamplingErrorInfo::from(&original);
+        assert_eq!(info.error_code, Some(ApiErrorCode::InvalidImage));
+
+        let round_tripped = synthesize_from_info(&info);
+        assert!(
+            round_tripped.is_image_processing_error(),
+            "round-tripped error must still classify: {round_tripped:?}"
+        );
+    }
+
+    /// A StreamError-sourced info has `status_code: None`; synthesis falls back to a 500 Api error.
+    /// That fallback must stay inside the classifier's 400|500 gate.
+    /// Otherwise coded mid-stream image rejections silently stop stripping after the round trip.
+    #[test]
+    fn synthesize_stream_sourced_info_still_classifies_for_strip() {
+        let original = SamplingError::StreamError {
+            error_type: "invalid_request_error".into(),
+            message: "bad image".into(),
+            code: Some(ApiErrorCode::InvalidImage),
+        };
+        assert!(original.is_image_processing_error());
+
+        let info = SamplingErrorInfo::from(&original);
+        assert_eq!(info.status_code, None, "stream errors carry no status");
+
+        let round_tripped = synthesize_from_info(&info);
+        assert!(
+            round_tripped.is_image_processing_error(),
+            "stream-sourced round trip must still classify: {round_tripped:?}"
+        );
+    }
+
     #[test]
     fn synthesize_rate_limited_preserves_retry_after() {
         let info = SamplingErrorInfo {
@@ -1759,6 +2370,7 @@ mod tests {
             is_retryable: true,
             retry_after_secs: Some(7),
             should_retry: None,
+            error_code: None,
             model_metadata: None,
             empty_response_context: None,
             doom_loop_triggers: None,
@@ -1782,8 +2394,7 @@ mod tests {
 
     #[test]
     fn synthesize_serialization_stays_serialization() {
-        // Round-trip a REAL error's Display so a Display-template rewording
-        // cannot silently reintroduce double-prefixing.
+        // Round-trip a REAL error's Display so a Display-template rewording cannot silently reintroduce double-prefixing
         let original = SamplingError::Serialization(
             serde_json::from_str::<i32>("missing field `delta`").unwrap_err(),
         );
@@ -1804,7 +2415,8 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn retry_sleep_returns_immediately_on_cancellation() {
         let cancel_token = CancellationToken::new();
-        let sleeper = sleep_or_cancel(Duration::from_secs(120), &cancel_token);
+        let parent = tracing::Span::none();
+        let sleeper = sleep_or_cancel(Duration::from_secs(120), &cancel_token, 1, &parent);
         tokio::pin!(sleeper);
 
         cancel_token.cancel();
@@ -1817,7 +2429,7 @@ mod tests {
         cancel_token.cancel();
         let (event_tx, mut event_rx) = mpsc::unbounded_channel();
         let (completion_tx, completion_rx) = oneshot::channel();
-        let mut completion_tx = Some(completion_tx);
+        let mut completion = CompletionState::new(Some(completion_tx));
         let mut retry_count = 0;
         let mut request = ConversationRequest::default();
         let config = SamplerConfig {
@@ -1840,8 +2452,9 @@ mod tests {
             &mut client,
             &config,
             &cancel_token,
-            &mut completion_tx,
-            &ImageInputRejections::default(),
+            &mut completion,
+            &ModelRejections::default(),
+            &tracing::Span::none(),
         )
         .await;
 
@@ -1867,7 +2480,13 @@ mod tests {
             event_rx.recv().await,
             Some(SamplingEvent::Failed { .. })
         ));
-        assert!(completion_rx.await.expect("completion sent").is_err());
+        assert!(
+            completion_rx
+                .await
+                .expect("completion sent")
+                .result
+                .is_err()
+        );
     }
 
     #[tokio::test]

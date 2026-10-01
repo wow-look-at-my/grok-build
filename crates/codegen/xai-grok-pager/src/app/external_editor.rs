@@ -55,16 +55,16 @@ fn editor_argv() -> Result<Vec<String>, String> {
 
 pub(crate) fn prepare(
     request: PendingEditorRequest,
-) -> Result<Option<PreparedEditorRequest>, PrepareError> {
+) -> Result<PreparedEditorRequest, PrepareError> {
     let argv = editor_argv().map_err(|message| PrepareError { message })?;
     match request {
         PendingEditorRequest::ConfigFile {
             path,
             refresh_agents_modal,
-        } => Ok(Some(PreparedEditorRequest::ConfigFile {
+        } => Ok(PreparedEditorRequest::ConfigFile {
             launch: EditorLaunch { argv, path },
             refresh_agents_modal,
-        })),
+        }),
     }
 }
 
@@ -107,6 +107,16 @@ mod tests {
     use super::*;
     use crate::app::agent::AgentId;
 
+    fn get_agent(
+        app: &AppView,
+        id: crate::app::agent::AgentId,
+    ) -> &crate::app::agent_view::AgentView {
+        let Some(a) = app.agents.get(&id) else {
+            panic!("missing agent {id:?}");
+        };
+        a
+    }
+
     #[test]
     fn editor_resolution_and_parsing_follow_visual_editor_vi_order() {
         assert_eq!(
@@ -139,7 +149,7 @@ mod tests {
             },
         );
         assert_eq!(
-            app.agents[&id]
+            get_agent(&app, id)
                 .toast
                 .as_ref()
                 .map(|(text, _)| text.as_str()),

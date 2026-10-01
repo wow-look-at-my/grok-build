@@ -4,26 +4,17 @@
 //! only way the tutorial opens — it never auto-shows.
 
 use crate::app::actions::Action;
-use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand};
+use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand, slash_meta};
 
 /// Open the onboarding tutorial.
 pub struct TutorialCommand;
 
 impl SlashCommand for TutorialCommand {
-    fn name(&self) -> &str {
-        "tutorial"
-    }
-
-    fn aliases(&self) -> &[&str] {
-        &["tour", "onboarding"]
-    }
-
-    fn description(&self) -> &str {
-        "Quick tips to get the most out of Grok Build"
-    }
-
-    fn usage(&self) -> &str {
-        "/tutorial"
+    slash_meta! {
+        name: "tutorial",
+        aliases: ["tour", "onboarding"],
+        description: "Quick tips to get the most out of Grok Build",
+        usage: "/tutorial",
     }
 
     fn run(&self, _ctx: &mut CommandExecCtx, _args: &str) -> CommandResult {

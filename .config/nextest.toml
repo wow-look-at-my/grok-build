@@ -43,7 +43,15 @@ slow-timeout = { period = "300s", terminate-after = 1 }
 
 [test-groups]
 scroll-matrix = { max-threads = 1 }
+disabled-hooks-file = { max-threads = 1 }
 
 [[profile.default.overrides]]
 filter = 'binary(scroll_matrix_curated)'
 test-group = 'scroll-matrix'
+
+# These tests write the real user `$GROK_HOME/disabled-hooks`. `grok_home()`
+# is cached per process, so a temp home cannot isolate them. Their
+# `serial(disabled_hooks_file)` lock holds only inside a single process.
+[[profile.default.overrides]]
+filter = 'test(/managed_hooks_tests::/)'
+test-group = 'disabled-hooks-file'

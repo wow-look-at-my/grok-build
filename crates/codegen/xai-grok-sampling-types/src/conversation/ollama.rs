@@ -35,7 +35,7 @@ pub fn build_ollama_chat_request(req: &ConversationRequest) -> OllamaChatRequest
                 function: OllamaToolFunction {
                     name: tool.name.clone(),
                     description: tool.description.clone(),
-                    parameters: tool.parameters.clone(),
+                    parameters: req.tool_parameters(tool).into_owned(),
                 },
             })
             .collect::<Vec<_>>()
@@ -84,7 +84,7 @@ fn ollama_think_value(req: &ConversationRequest) -> Option<serde_json::Value> {
     Some(match effort {
         // Ollama has no "off" level: a bool is how thinking is disabled.
         crate::ReasoningEffort::None => serde_json::Value::Bool(false),
-        other => serde_json::Value::String(other.as_str().to_owned()),
+        other => serde_json::Value::String(other.as_ref().to_owned()),
     })
 }
 
@@ -204,16 +204,17 @@ fn build_ollama_messages(
 /// model's own template.
 fn merge_thinking_into_following_assistant(messages: &mut Vec<OllamaMessage>) {
     let mut idx = 0;
-    while idx + 1 < messages.len() {
-        let is_thinking_only = messages[idx].role == "assistant"
-            && messages[idx].thinking.is_some()
-            && messages[idx].content.is_empty()
-            && messages[idx].tool_calls.is_empty();
-        let next_is_assistant =
-            messages[idx + 1].role == "assistant" && messages[idx + 1].thinking.is_none();
+    while let (Some(cur), Some(next)) = (messages.get(idx), messages.get(idx + 1)) {
+        let is_thinking_only = cur.role == "assistant"
+            && cur.thinking.is_some()
+            && cur.content.is_empty()
+            && cur.tool_calls.is_empty();
+        let next_is_assistant = next.role == "assistant" && next.thinking.is_none();
         if is_thinking_only && next_is_assistant {
             let thinking = messages.remove(idx).thinking;
-            messages[idx].thinking = thinking;
+            if let Some(merged) = messages.get_mut(idx) {
+                merged.thinking = thinking;
+            }
         }
         idx += 1;
     }

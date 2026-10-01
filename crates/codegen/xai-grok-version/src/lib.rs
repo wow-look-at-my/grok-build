@@ -1,7 +1,10 @@
-//! Installed grok CLI version, lockstepped with shipping binaries.
+//! Installed grok CLI version, kept in sync with the shipping binaries.
+
+#![deny(clippy::indexing_slicing)]
+
+use std::sync::OnceLock;
 
 use semver::Version;
-use std::sync::OnceLock;
 
 pub const TEST_VERSION_ENV: &str = "GROK_TEST_VERSION";
 
@@ -27,7 +30,11 @@ pub const STAMP_SLOT_LEN: usize = STAMP_MAGIC.len() + 1 + STAMP_PAYLOAD_LEN;
 #[used]
 pub static STAMP_SLOT: [u8; STAMP_SLOT_LEN] = build_stamp_slot();
 
-/// The magic followed by a zero length and zero payload.
+/// The magic followed by a empty length and empty payload.
+#[allow(
+    clippy::indexing_slicing,
+    reason = "const fn; i stays below STAMP_MAGIC.len()"
+)]
 const fn build_stamp_slot() -> [u8; STAMP_SLOT_LEN] {
     let mut slot = [0u8; STAMP_SLOT_LEN];
     let mut i = 0;
@@ -48,12 +55,12 @@ fn stamped() -> Option<&'static str> {
     STAMPED
         .get_or_init(|| {
             let slot = unsafe { std::ptr::read_volatile(&STAMP_SLOT) };
-            let len = usize::from(slot[STAMP_MAGIC.len()]);
+            let len = usize::from(*slot.get(STAMP_MAGIC.len())?);
             if len == 0 || len > STAMP_PAYLOAD_LEN {
                 return None;
             }
             let start = STAMP_MAGIC.len() + 1;
-            let text = std::str::from_utf8(&slot[start..start + len]).ok()?;
+            let text = std::str::from_utf8(slot.get(start..start + len)?).ok()?;
             Some(text.to_string())
         })
         .as_deref()
@@ -131,6 +138,7 @@ mod tests {
     /// The slot the stamper searches for must be in this binary, must carry the
     /// magic, and must read as unstamped until something writes a length.
     #[test]
+    #[allow(clippy::indexing_slicing, reason = "fixed-size slot, constant offsets")]
     fn an_unstamped_slot_reads_as_no_release() {
         let slot = unsafe { std::ptr::read_volatile(&STAMP_SLOT) };
         assert_eq!(&slot[..STAMP_MAGIC.len()], &STAMP_MAGIC[..]);

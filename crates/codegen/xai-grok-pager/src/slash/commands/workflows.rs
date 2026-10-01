@@ -1,27 +1,25 @@
-use crate::app::actions::Action;
-use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand};
+//! `/workflows`: browse the workflow catalog in the extensions modal.
 
+use crate::app::actions::Action;
+use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand, slash_meta};
+use crate::views::extensions_modal::ExtensionsTab;
+use xai_grok_telemetry::events::ExtensionsModalTrigger;
+
+/// Open the extensions modal on the Workflows catalog tab.
 pub struct WorkflowsCommand;
 
 impl SlashCommand for WorkflowsCommand {
-    fn name(&self) -> &str {
-        "workflows"
-    }
-
-    fn description(&self) -> &str {
-        "Show workflow runs (phases, agents, progress)"
-    }
-
-    fn usage(&self) -> &str {
-        "/workflows"
-    }
-
-    fn visible(&self, _ctx: &crate::slash::command::AppCtx) -> bool {
-        true
+    slash_meta! {
+        name: "workflows",
+        description: "Browse installed workflows",
+        usage: "/workflows",
     }
 
     fn run(&self, _ctx: &mut CommandExecCtx, _args: &str) -> CommandResult {
-        CommandResult::Action(Action::ToggleWorkflows)
+        CommandResult::Action(Action::OpenExtensionsModal {
+            tab: ExtensionsTab::Workflows,
+            trigger: ExtensionsModalTrigger::SlashCommand,
+        })
     }
 }
 
@@ -54,13 +52,16 @@ mod tests {
                 billing_surface_visible: true,
                 usage_command_visible: true,
                 workflows_available: available,
+                saved_workflows: &[],
+                workflow_runs: &[],
+                current_title: None,
             };
             assert!(WorkflowsCommand.visible(&ctx));
         }
     }
 
     #[test]
-    fn dispatches_toggle_workflows() {
+    fn workflows_opens_catalog_tab() {
         let models = ModelState::default();
         let mut ctx = CommandExecCtx {
             models: &models,
@@ -72,7 +73,10 @@ mod tests {
         };
         assert!(matches!(
             WorkflowsCommand.run(&mut ctx, ""),
-            CommandResult::Action(Action::ToggleWorkflows)
+            CommandResult::Action(Action::OpenExtensionsModal {
+                tab: ExtensionsTab::Workflows,
+                trigger: ExtensionsModalTrigger::SlashCommand,
+            })
         ));
     }
 }

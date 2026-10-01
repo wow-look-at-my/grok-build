@@ -1,24 +1,18 @@
-//! `/help` -- open the command palette (the command + shortcut browser).
+//! `/help`: open the command palette (the command and shortcut browser).
 //!
-//! It opens the same command palette as Ctrl+P.
+//! It opens the same command palette as Ctrl+P, hosted inline by the overlay app-modal host.
 
 use crate::app::actions::Action;
-use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand};
+use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand, slash_meta};
 
 /// Open the command palette.
 pub struct HelpCommand;
 
 impl SlashCommand for HelpCommand {
-    fn name(&self) -> &str {
-        "help"
-    }
-
-    fn description(&self) -> &str {
-        "Browse commands and keyboard shortcuts"
-    }
-
-    fn usage(&self) -> &str {
-        "/help"
+    slash_meta! {
+        name: "help",
+        description: "Browse commands and keyboard shortcuts",
+        usage: "/help",
     }
 
     fn run(&self, _ctx: &mut CommandExecCtx, _args: &str) -> CommandResult {

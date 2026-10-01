@@ -1,23 +1,14 @@
 use crate::app::actions::Action;
-use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand};
+use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand, slash_meta};
 
 pub struct JumpCommand;
 
 impl SlashCommand for JumpCommand {
-    fn name(&self) -> &str {
-        "jump"
-    }
-
-    fn description(&self) -> &str {
-        "Jump to a turn in the conversation"
-    }
-
-    fn session_scoped(&self) -> bool {
-        true
-    }
-
-    fn usage(&self) -> &str {
-        "/jump"
+    slash_meta! {
+        name: "jump",
+        description: "Jump to a turn in the conversation",
+        usage: "/jump",
+        session_scoped: true,
     }
 
     fn run(&self, _ctx: &mut CommandExecCtx, _args: &str) -> CommandResult {
