@@ -1026,7 +1026,11 @@ pub fn name_tool_indices(message: &str, tool_names: &[&str]) -> String {
     while let Some(found) = message[search..].find("tools") {
         let start = search + found;
         search = start + "tools".len();
-        if start > 0 && (bytes[start - 1].is_ascii_alphanumeric() || bytes[start - 1] == b'_') {
+        let inside_a_word = start
+            .checked_sub(1)
+            .and_then(|i| bytes.get(i))
+            .is_some_and(|b| b.is_ascii_alphanumeric() || *b == b'_');
+        if inside_a_word {
             continue;
         }
         let Some(index_end) = indexed_segment_end(bytes, search) else {
@@ -1054,7 +1058,8 @@ fn indexed_segment_end(bytes: &[u8], at: usize) -> Option<usize> {
     if open != b'.' && open != b'[' {
         return None;
     }
-    let digits = bytes[at + 1..]
+    let digits = bytes
+        .get(at + 1..)?
         .iter()
         .take_while(|b| b.is_ascii_digit())
         .count();
