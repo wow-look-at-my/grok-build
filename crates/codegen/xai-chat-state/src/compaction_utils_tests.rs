@@ -931,35 +931,93 @@ async fn test_compaction_state_context_build() {
     assert_eq!(ctx.running_tasks.len(), 1);
     assert_eq!(at(&ctx.running_tasks, 0).command, "cargo test");
 }
+/// The `/goal` turn as the shell pushes it: a reminder only, stamped with its prompt index.
+fn goal_turn(prompt_index: usize) -> ConversationItem {
+    let mut item = ConversationItem::user(
+        "<system-reminder>\nA goal has been set: ssh to device-001 and test the genbw meter.\nStart now.\n</system-reminder>\n\n",
+    );
+    item.set_prompt_index(prompt_index);
+    item
+}
+fn prompt_at(text: &str, prompt_index: usize) -> ConversationItem {
+    let mut item = ConversationItem::user(format!("<user_query>\n{text}\n</user_query>"));
+    item.set_prompt_index(prompt_index);
+    item
+}
+const GOAL_OBJECTIVE: &str =
+    "ssh to device-001 and test that genbw meter does NOT produce aggregate data";
+fn goal_inputs() -> CompactionInputs {
+    CompactionInputs {
+        goal_objective: Some(GOAL_OBJECTIVE.into()),
+        goal_start_prompt_index: Some(1),
+        ..Default::default()
+    }
+}
 #[tokio::test]
 async fn build_prefers_goal_objective_over_stale_pre_goal_query() {
     let conversation = vec![
-        ConversationItem::user(
-            "<user_query>\nplease review the PR for config-json-go\n</user_query>",
-        ),
+        prompt_at("please review the PR for config-json-go", 0),
         ConversationItem::assistant("I'll start the code review."),
-        ConversationItem::system_reminder(
-            "A goal has been set: ssh to device-001 and test the genbw meter. Start now.",
-        ),
+        goal_turn(1),
+        ConversationItem::assistant("working on the goal"),
     ];
-    let ctx = CompactionStateContext::build(
-        &conversation,
-        CompactionInputs {
-            goal_objective: Some(
-                "ssh to device-001 and test that genbw meter does NOT produce aggregate data"
-                    .into(),
-            ),
-            ..Default::default()
-        },
-    )
-    .await;
+    let ctx = CompactionStateContext::build(&conversation, goal_inputs()).await;
     assert_eq!(
         ctx.last_user_query.as_deref(),
-        Some("ssh to device-001 and test that genbw meter does NOT produce aggregate data"),
+        Some(GOAL_OBJECTIVE),
         "active goal must seed last_user_query, not the stale pre-goal human prompt"
     );
     let compacted = ctx.for_compaction();
     assert_eq!(compacted.last_user_query, ctx.last_user_query);
+}
+#[tokio::test]
+async fn an_interjection_after_the_goal_turn_is_the_last_user_query() {
+    let conversation = vec![
+        prompt_at("please review the PR for config-json-go", 0),
+        ConversationItem::assistant("I'll start the code review."),
+        goal_turn(1),
+        ConversationItem::assistant("working on the goal"),
+        ConversationItem::interjection(
+            "The user sent a message while you were working:\n<user_query>\nskip the modbus half\n</user_query>",
+        ),
+        ConversationItem::assistant("skipping modbus"),
+    ];
+    let ctx = CompactionStateContext::build(&conversation, goal_inputs()).await;
+    assert_eq!(
+        ctx.last_user_query.as_deref(),
+        Some("skip the modbus half"),
+        "the newest user text is the interjection, not the goal objective sent while idle"
+    );
+}
+#[tokio::test]
+async fn a_prompt_after_the_goal_turn_is_the_last_user_query() {
+    let conversation = vec![
+        goal_turn(1),
+        ConversationItem::assistant("working on the goal"),
+        prompt_at("also check dnp3 timeouts", 2),
+        ConversationItem::assistant("checking"),
+    ];
+    let ctx = CompactionStateContext::build(&conversation, goal_inputs()).await;
+    assert_eq!(
+        ctx.last_user_query.as_deref(),
+        Some("also check dnp3 timeouts")
+    );
+}
+#[tokio::test]
+async fn a_compacted_goal_history_keeps_the_newest_user_text() {
+    // A prior compaction left the objective as a plain prompt and dropped the `/goal` turn.
+    let compacted_once = vec![
+        ConversationItem::user(wrap_user_query(GOAL_OBJECTIVE)),
+        ConversationItem::assistant("working on the goal"),
+    ];
+    let ctx = CompactionStateContext::build(&compacted_once, goal_inputs()).await;
+    assert_eq!(ctx.last_user_query.as_deref(), Some(GOAL_OBJECTIVE));
+    let mut later = compacted_once;
+    later.push(ConversationItem::interjection(
+        "The user sent a message while you were working:\n<user_query>\nstop after dnp3\n</user_query>",
+    ));
+    let ctx = CompactionStateContext::build(&later, goal_inputs()).await;
+    assert_eq!(ctx.last_user_query.as_deref(), Some("stop after dnp3"));
 }
 #[tokio::test]
 async fn build_ignores_empty_goal_objective() {
@@ -2655,11 +2713,13 @@ async fn goal_objective_query_carries_no_images() {
         ConversationItem::system("sys"),
         image_prompt("what is this?", &["data:image/png;base64,human"]),
         ConversationItem::assistant("looking"),
+        goal_turn(1),
     ];
     let state_context = CompactionStateContext::build(
         &conversation,
         CompactionInputs {
             goal_objective: Some("ship the release".into()),
+            goal_start_prompt_index: Some(1),
             ..Default::default()
         },
     )
