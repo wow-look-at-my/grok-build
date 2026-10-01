@@ -36,18 +36,28 @@ fn start_device_test_goal(actor: &SessionActor) {
         "2026-08-06T00:00:00Z".into(),
         None,
     );
+    if let Some(o) = actor.goal_tracker.lock().snapshot_mut() {
+        o.start_prompt_index = Some(GOAL_PROMPT_INDEX);
+    }
 }
 
+const GOAL_PROMPT_INDEX: usize = 1;
+
+/// A pre-goal prompt, then the `/goal` turn as the shell pushes it: a reminder only.
 fn stale_pre_goal_conversation() -> Vec<ConversationItem> {
+    let mut code_review = ConversationItem::user(format!(
+        "<user_info>OS: linux</user_info>\n\n<user_query>\n{STALE_CODE_REVIEW}\n</user_query>"
+    ));
+    code_review.set_prompt_index(0);
+    let mut goal_turn = ConversationItem::user(format!(
+        "<system-reminder>\nA goal has been set: {DEVICE_TEST_OBJECTIVE}\nStart now.\n</system-reminder>\n\n"
+    ));
+    goal_turn.set_prompt_index(GOAL_PROMPT_INDEX);
     vec![
         ConversationItem::system("You are Grok."),
-        ConversationItem::user(format!(
-            "<user_info>OS: linux</user_info>\n\n<user_query>\n{STALE_CODE_REVIEW}\n</user_query>"
-        )),
+        code_review,
         ConversationItem::assistant("I'll start the branch code review."),
-        ConversationItem::system_reminder(format!(
-            "A goal has been set: {DEVICE_TEST_OBJECTIVE}\nStart now."
-        )),
+        goal_turn,
     ]
 }
 
@@ -68,18 +78,37 @@ async fn last_user_query_seeds_from_active_goal_not_stale_pre_goal_prompt() {
                 "without the goal field, compact would revive the pre-goal code review"
             );
 
-            let with_goal = CompactionStateContext::build(
-                &conversation,
-                CompactionInputs {
-                    goal_objective: actor.goal_objective_for_compaction(),
-                    ..Default::default()
-                },
-            )
-            .await;
+            let with_goal =
+                CompactionStateContext::build(&conversation, actor.goal_compaction_inputs()).await;
             assert_eq!(
                 with_goal.last_user_query.as_deref(),
                 Some(DEVICE_TEST_OBJECTIVE),
                 "active goal must seed last_user_query from GoalTracker.objective"
+            );
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn interjection_after_goal_start_outranks_the_objective() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (actor, _tmp) = make_goal_actor().await;
+            start_device_test_goal(&actor);
+            let mut conversation = stale_pre_goal_conversation();
+            conversation.push(ConversationItem::assistant("connecting to the device"));
+            conversation.push(ConversationItem::interjection(
+                "The user sent a message while you were working:\n<user_query>\nuse the staging meter instead\n</user_query>",
+            ));
+            conversation.push(ConversationItem::assistant("switching meters"));
+
+            let ctx =
+                CompactionStateContext::build(&conversation, actor.goal_compaction_inputs()).await;
+            assert_eq!(
+                ctx.last_user_query.as_deref(),
+                Some("use the staging meter instead"),
+                "compaction must re-send the newest user text, not the idle-sent /goal objective"
             );
         })
         .await;
@@ -155,15 +184,10 @@ async fn post_compact_history_keeps_objective_and_goal_summary_continuation() {
                 .replace_conversation(conversation.clone());
             let _ = actor.chat_state_handle.get_conversation().await;
 
-            let state_context = CompactionStateContext::build(
-                &conversation,
-                CompactionInputs {
-                    goal_objective: actor.goal_objective_for_compaction(),
-                    ..Default::default()
-                },
-            )
-            .await
-            .for_compaction();
+            let state_context =
+                CompactionStateContext::build(&conversation, actor.goal_compaction_inputs())
+                    .await
+                    .for_compaction();
             assert_eq!(
                 state_context.last_user_query.as_deref(),
                 Some(DEVICE_TEST_OBJECTIVE)
@@ -287,14 +311,8 @@ async fn paused_goal_does_not_override_later_human_query() {
             assert_eq!(actor.merge_goal_compaction_user_context(None).await, None);
 
             let conversation = stale_pre_goal_conversation();
-            let ctx = CompactionStateContext::build(
-                &conversation,
-                CompactionInputs {
-                    goal_objective: actor.goal_objective_for_compaction(),
-                    ..Default::default()
-                },
-            )
-            .await;
+            let ctx =
+                CompactionStateContext::build(&conversation, actor.goal_compaction_inputs()).await;
             assert_eq!(
                 ctx.last_user_query.as_deref(),
                 Some(STALE_CODE_REVIEW),
