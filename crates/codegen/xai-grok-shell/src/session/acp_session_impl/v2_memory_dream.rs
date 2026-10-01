@@ -708,6 +708,20 @@ impl SessionActor {
         }
     }
 
+    /// `finish_v2_dream` for a pass that wrote nothing, with the cause the summary reports.
+    async fn fail_v2_dream(
+        &self,
+        disposition: MemoryDreamDisposition,
+        observation_count: usize,
+        detail: String,
+    ) -> V2DreamPass {
+        let mut pass = self
+            .finish_v2_dream(disposition, observation_count, 0, false)
+            .await;
+        pass.outcome.detail = Some(detail);
+        pass
+    }
+
     /// Execute one claim. `coalesced` is set when a trigger that arrived during
     /// the pass requires another iteration in the same tracked caller task.
     async fn execute_v2_dream(
@@ -813,7 +827,11 @@ impl SessionActor {
                 );
                 tracing::warn!(error = %error, "memory-v2 Dream claim failed");
                 return self
-                    .finish_v2_dream(MemoryDreamDisposition::Failed, 0, 0, false)
+                    .fail_v2_dream(
+                        MemoryDreamDisposition::Failed,
+                        0,
+                        format!("Dream claim failed: {error}"),
+                    )
                     .await;
             }
             Err(error) => {
@@ -826,7 +844,11 @@ impl SessionActor {
                 );
                 tracing::warn!(error = %error, "memory-v2 Dream claim task panicked");
                 return self
-                    .finish_v2_dream(MemoryDreamDisposition::Failed, 0, 0, false)
+                    .fail_v2_dream(
+                        MemoryDreamDisposition::Failed,
+                        0,
+                        format!("Dream claim task panicked: {error}"),
+                    )
                     .await;
             }
         };
@@ -907,11 +929,10 @@ impl SessionActor {
                 self.memory.record_dream_result(false);
                 tracing::warn!(error = %detail, "memory-v2 Dream model or plan failed");
                 return self
-                    .finish_v2_dream(
+                    .fail_v2_dream(
                         MemoryDreamDisposition::RetryRequired,
                         observation_count,
-                        0,
-                        false,
+                        detail,
                     )
                     .await;
             }
@@ -975,11 +996,10 @@ impl SessionActor {
                         usage.clone(),
                     );
                     tracing::warn!(error = %error, "memory-v2 shadow completion failed");
-                    self.finish_v2_dream(
+                    self.fail_v2_dream(
                         MemoryDreamDisposition::RetryRequired,
                         observation_count,
-                        0,
-                        false,
+                        format!("Dream shadow completion failed: {error}"),
                     )
                     .await
                 }
@@ -995,11 +1015,10 @@ impl SessionActor {
                         usage.clone(),
                     );
                     tracing::warn!(error = %error, "memory-v2 shadow completion task panicked");
-                    self.finish_v2_dream(
+                    self.fail_v2_dream(
                         MemoryDreamDisposition::Failed,
                         observation_count,
-                        0,
-                        false,
+                        format!("Dream shadow completion task panicked: {error}"),
                     )
                     .await
                 }
@@ -1050,11 +1069,10 @@ impl SessionActor {
                 );
                 self.memory.record_dream_result(false);
                 tracing::warn!(error = %error, "memory-v2 Dream commit failed");
-                self.finish_v2_dream(
+                self.fail_v2_dream(
                     MemoryDreamDisposition::RetryRequired,
                     observation_count,
-                    0,
-                    false,
+                    format!("Dream commit failed: {error}"),
                 )
                 .await
             }
@@ -1070,8 +1088,12 @@ impl SessionActor {
                 );
                 self.memory.record_dream_result(false);
                 tracing::warn!(error = %error, "memory-v2 Dream commit task panicked");
-                self.finish_v2_dream(MemoryDreamDisposition::Failed, observation_count, 0, false)
-                    .await
+                self.fail_v2_dream(
+                    MemoryDreamDisposition::Failed,
+                    observation_count,
+                    format!("Dream commit task panicked: {error}"),
+                )
+                .await
             }
         }
     }

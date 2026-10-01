@@ -1537,6 +1537,7 @@ mod tests {
                     disposition: MemoryDreamDisposition::Completed,
                     observation_count: 7,
                     topics_affected: 3,
+                    detail: None,
                 }),
             },
             &mut app,
