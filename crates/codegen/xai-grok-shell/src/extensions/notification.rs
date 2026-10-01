@@ -1271,6 +1271,10 @@ pub enum SessionUpdate {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         slow_for_ms: Option<u64>,
     },
+    /// A model request waits for a slot under `[ui].max_parallel_requests`.
+    RequestQueued { ahead: u64, limit: u32 },
+    /// The queued request got its slot and is on its way to the model.
+    RequestDequeued { waited_ms: u64 },
     /// Catch-all for unrecognized session update types.
     /// Allows forward/backward compatibility when variants are added or removed.
     /// All fields from the unrecognized variant are discarded during deserialization.

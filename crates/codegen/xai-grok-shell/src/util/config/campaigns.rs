@@ -226,6 +226,7 @@ pub fn load_effective_config_with_layers() -> std::io::Result<(EffectiveConfigLa
     let mut effective = layers.effective_config_base();
     let active = resolve_active_campaigns_from_layers(&layers, &effective, &remote, &dismissed);
     layers.apply_campaign_overrides(&mut effective, &active);
+    apply_max_parallel_requests(&effective);
     Ok((
         EffectiveConfigLayers {
             layers,
@@ -241,7 +242,46 @@ pub fn load_effective_config_with_layers() -> std::io::Result<(EffectiveConfigLa
 pub fn load_effective_config_disk_only() -> std::io::Result<toml::Value> {
     let layers = ConfigLayers::load()?;
     allow_urls_written_in_config(&layers);
-    Ok(layers.effective_config_disk_only())
+    let effective = layers.effective_config_disk_only();
+    apply_max_parallel_requests(&effective);
+    Ok(effective)
+}
+
+/// Every load of the config sets the process-wide request cap, so a startup
+/// and a reload both apply `[ui].max_parallel_requests`.
+fn apply_max_parallel_requests(effective: &toml::Value) {
+    match max_parallel_requests(effective) {
+        Ok(limit) => xai_grok_sampler::set_max_parallel_requests(limit),
+        Err(value) => {
+            static REPORTED: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+            #[allow(clippy::disallowed_methods)]
+            let mut reported = REPORTED
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if reported.as_deref() != Some(value.as_str()) {
+                tracing::error!(
+                    value = %value,
+                    limit = xai_grok_sampler::request_slots::global().limit(),
+                    "[ui].max_parallel_requests must be a whole number, 0 or more; the cap keeps its current value"
+                );
+                *reported = Some(value);
+            }
+        }
+    }
+}
+
+/// `[ui].max_parallel_requests`, or the default when unset.
+fn max_parallel_requests(effective: &toml::Value) -> Result<u32, String> {
+    let Some(value) = effective
+        .get("ui")
+        .and_then(|ui| ui.get("max_parallel_requests"))
+    else {
+        return Ok(crate::agent::config::UiConfig::MAX_PARALLEL_REQUESTS_DEFAULT);
+    };
+    value
+        .as_integer()
+        .and_then(|n| u32::try_from(n).ok())
+        .ok_or_else(|| value.to_string())
 }
 
 /// A URL the user or their admin wrote in a config file is an endpoint they
@@ -536,6 +576,21 @@ mod tests {
     use tempfile::tempdir;
     use xai_grok_config::ConfigLayers;
     use xai_grok_test_support::EnvGuard;
+
+    #[test]
+    fn max_parallel_requests_reads_the_ui_key() {
+        let parse = |text: &str| max_parallel_requests(&toml::from_str(text).unwrap());
+        assert_eq!(parse(""), Ok(7), "unset is the default of 7");
+        assert_eq!(
+            crate::agent::config::UiConfig::MAX_PARALLEL_REQUESTS_DEFAULT,
+            xai_grok_sampler::DEFAULT_MAX_PARALLEL_REQUESTS,
+            "the config default and the sampler's startup default must agree"
+        );
+        assert_eq!(parse("[ui]\nmax_parallel_requests = 3"), Ok(3));
+        assert_eq!(parse("[ui]\nmax_parallel_requests = 0"), Ok(0));
+        assert!(parse("[ui]\nmax_parallel_requests = -1").is_err());
+        assert!(parse("[ui]\nmax_parallel_requests = \"4\"").is_err());
+    }
 
     fn models_default_patch(default: &str) -> toml::Table {
         let mut models = toml::map::Map::new();

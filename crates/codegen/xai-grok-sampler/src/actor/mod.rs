@@ -8,6 +8,7 @@ pub(crate) mod state;
 use std::any::Any;
 use std::future::Future;
 use std::panic::AssertUnwindSafe;
+use std::sync::Arc;
 
 use futures_util::FutureExt;
 use tokio::sync::mpsc;
@@ -18,6 +19,7 @@ use crate::commands::SamplerCommand;
 use crate::config::{RetryPolicy, SamplerConfig};
 use crate::events::SamplingEvent;
 use crate::handle::SamplerHandle;
+use crate::request_slots;
 use state::{ActiveRequest, ActorState};
 
 use crate::types::RequestId;
@@ -197,6 +199,7 @@ impl SamplerActor {
                 request,
                 config,
                 completion_tx,
+                queue_clock,
             } => {
                 let cancel_token = CancellationToken::new();
                 let active = ActiveRequest {
@@ -225,18 +228,24 @@ impl SamplerActor {
                 // `active_requests`, so the round is spawned through
                 // `spawn_tracked_round` rather than bare.
                 let tracked_id = request_id.clone();
+                // The round runs on its own task, so the submitter's queue
+                // clock is carried over by hand.
                 spawn_tracked_round(
                     &mut self.tasks,
                     tracked_id,
-                    request_task::run_request_task(
-                        request_id,
-                        request_inner,
-                        effective_config,
-                        retry_policy,
-                        event_tx,
-                        cancel_token,
-                        completion_tx,
-                        rejections,
+                    request_slots::in_queue_clock(
+                        queue_clock,
+                        request_task::run_request_task(
+                            request_id,
+                            request_inner,
+                            effective_config,
+                            retry_policy,
+                            event_tx,
+                            cancel_token,
+                            completion_tx,
+                            rejections,
+                            Arc::clone(request_slots::global()),
+                        ),
                     ),
                 );
             }
