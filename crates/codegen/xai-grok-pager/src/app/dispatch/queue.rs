@@ -1782,6 +1782,143 @@ mod tests {
         )
     }
 
+    /// A builtin whose submission is always refused. No shipped command refuses on the queue path.
+    struct RefusingCommand;
+
+    impl crate::slash::command::SlashCommand for RefusingCommand {
+        crate::slash::command::slash_meta! {
+            name: "refuse-test",
+            description: "Always refused",
+            usage: "/refuse-test",
+            takes_args: false,
+        }
+
+        fn submission_refusal(
+            &self,
+            _args: &str,
+            _voice_owns_prompt: bool,
+        ) -> Option<&'static str> {
+            Some("refused for the test")
+        }
+
+        fn run(
+            &self,
+            _ctx: &mut crate::slash::command::CommandExecCtx,
+            _args: &str,
+        ) -> crate::slash::command::CommandResult {
+            panic!("a refused command must not run")
+        }
+    }
+
+    fn install_refusing_command(app: &mut AppView, id: AgentId) {
+        let mut commands = crate::slash::commands::builtin_commands();
+        commands.push(std::sync::Arc::new(RefusingCommand));
+        *app.agents
+            .get_mut(&id)
+            .unwrap()
+            .prompt
+            .slash_controller
+            .registry_mut() = crate::slash::registry::CommandRegistry::new(commands);
+    }
+
+    /// A refused edit disarms only row-owned temps; a newly pasted file is still deleted on drop.
+    #[test]
+    fn refused_edit_deletes_new_pasted_temps_not_row_owned() {
+        let mut app = test_app_with_agent();
+        let id = AgentId(0);
+        install_refusing_command(&mut app, id);
+        app.agents.get_mut(&id).unwrap().session.state = AgentState::TurnRunning;
+        enqueue_local(&mut app, id, "what is the default");
+        let Some(local_id) = test_agent(&app, id)
+            .session
+            .pending_prompts
+            .front()
+            .map(|p| p.id)
+        else {
+            panic!("expected queued prompt");
+        };
+
+        let dir = tempfile::tempdir().unwrap();
+        let owned_path = dir.path().join("owned.png");
+        let pasted_path = dir.path().join("pasted.png");
+        std::fs::write(&owned_path, b"owned").unwrap();
+        std::fs::write(&pasted_path, b"pasted").unwrap();
+
+        let png = crate::clipboard::ImageData {
+            data: vec![
+                0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0, 0, 0, 0, 0,
+            ],
+            mime_type: "image/png".to_owned(),
+        };
+        let mut owned = crate::prompt_images::from_clipboard_data(&png);
+        owned.staged_temp_path = Some(owned_path.clone());
+        let mut pasted = crate::prompt_images::from_clipboard_data(&png);
+        pasted.staged_temp_path = Some(pasted_path.clone());
+        let Some(front) = app
+            .agents
+            .get_mut(&id)
+            .unwrap()
+            .session
+            .pending_prompts
+            .front_mut()
+        else {
+            panic!("expected queued prompt");
+        };
+        front.images = vec![owned.clone()];
+
+        let submission = crate::views::prompt_widget::StashedPrompt::from_submission(
+            "/refuse-test".into(),
+            vec![owned, pasted],
+            Vec::new(),
+        );
+        let _ = run_edited_queued_submission(&mut app, local_id, None, submission);
+
+        assert!(
+            owned_path.exists(),
+            "row-owned temp must not be double-deleted"
+        );
+        assert!(
+            !pasted_path.exists(),
+            "edit-only pasted temp must be deleted"
+        );
+        assert_eq!(
+            test_agent(&app, id)
+                .session
+                .pending_prompts
+                .front()
+                .map(|p| p.text.as_str()),
+            Some("what is the default"),
+            "refusal must keep the row"
+        );
+    }
+
+    /// A refusal releases the edit lock too, so the queue must not park behind the row that was not removed.
+    #[test]
+    fn run_edited_queued_command_refusal_still_drains_the_queue() {
+        let mut app = test_app_with_agent();
+        let id = AgentId(0);
+        install_refusing_command(&mut app, id);
+        enqueue_local(&mut app, id, "what is the default");
+        let Some(local_id) = test_agent(&app, id)
+            .session
+            .pending_prompts
+            .front()
+            .map(|p| p.id)
+        else {
+            panic!("expected queued prompt");
+        };
+
+        let effects = run_edited_queued_command(&mut app, local_id, None, "/refuse-test");
+
+        assert!(
+            matches!(
+                effects.as_slice(),
+                [Effect::SendPrompt { text, .. }] if text == "what is the default"
+            ),
+            "expected the kept row to drain"
+        );
+    }
+
     /// The fixture's shared queue with one row, `p1` at version 2.
     fn seed_shared_row(app: &mut AppView, id: AgentId) {
         app.agents.get_mut(&id).unwrap().shared_queue =
