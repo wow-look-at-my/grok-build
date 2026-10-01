@@ -1542,14 +1542,9 @@ impl SessionActor {
         let (discovered_agents_md, all_skills_for_compaction, _edited_paths, mut state_context) =
             if use_short_prompt {
                 let empty_edited: std::collections::BTreeSet<String> = Default::default();
-                let ctx = CompactionStateContext::build(
-                    &conversation,
-                    CompactionInputs {
-                        goal_objective: self.goal_objective_for_compaction(),
-                        ..Default::default()
-                    },
-                )
-                .await;
+                let ctx =
+                    CompactionStateContext::build(&conversation, self.goal_compaction_inputs())
+                        .await;
                 (Vec::<std::path::PathBuf>::new(), vec![], empty_edited, ctx)
             } else {
                 let agents_md: Vec<std::path::PathBuf> = self
@@ -1743,8 +1738,7 @@ impl SessionActor {
                             scheduled_loops,
                             workflows,
                             workflow_tool_name,
-                            goal_objective: self.goal_objective_for_compaction(),
-                            ..Default::default()
+                            ..self.goal_compaction_inputs()
                         },
                     )
                     .await
