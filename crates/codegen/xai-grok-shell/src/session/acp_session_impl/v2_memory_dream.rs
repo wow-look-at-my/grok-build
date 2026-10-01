@@ -703,6 +703,7 @@ impl SessionActor {
                 disposition,
                 observation_count,
                 topics_affected,
+                detail: None,
             },
             coalesced,
         }
