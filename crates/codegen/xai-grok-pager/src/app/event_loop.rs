@@ -214,10 +214,6 @@ fn replay_startup_typeahead(
 pub(crate) struct TerminalState {
     pub is_control_mode: bool,
     pub screen_mode: super::ScreenMode,
-    /// One-shot `/minimal` re-exec (env override already consumed).
-    pub relaunched_into_minimal: bool,
-    /// One-shot `/fullscreen` re-exec (env override already consumed).
-    pub relaunched_into_fullscreen: bool,
     /// Do NOT re-resolve via `theme::cache::resolve_initial_theme()` here: its OSC 11 fallback reads stdin and competes with the input reader.
     pub initial_theme: ThemeKind,
     /// Type-ahead captured by `init_terminal` AFTER raw mode was enabled (the one field here computed post-takeover).
@@ -227,12 +223,8 @@ pub(crate) struct TerminalState {
 /// Result of the event loop run.
 pub(crate) struct RunResult {
     pub exit_info: Option<super::ExitInfo>,
-    pub quit_for_update: bool,
     /// stderr line to print after the TUI is restored (failed Welcome trust save).
     pub trust_quit_error: Option<String>,
-    /// When set, the process should re-exec into the other screen mode after terminal restore.
-    /// See `/minimal` and `/fullscreen`.
-    pub relaunch: Option<super::app_view::ScreenModeRelaunch>,
 }
 /// In-flight reconnect re-initialization, tied to the agents whose reload windows it opened.
 /// Completion lands on them even if the user switches views (or closes one) while the re-init runs.
@@ -373,7 +365,6 @@ pub(crate) fn seed_consent_state_from_gate(
             .map(|(id, version)| (id.as_str(), *version)),
         answers: &stored.answers,
         account: app.account_email.as_deref(),
-        minimal: app.screen_mode.is_minimal(),
     });
 }
 /// Pause terminal input and wait up to `timeout` for the reader to acknowledge.
@@ -402,7 +393,7 @@ fn suspend_for_child(
     reader_parked: &std::sync::atomic::AtomicBool,
     input_rx: &mut tokio::sync::mpsc::UnboundedReceiver<TimedInputEvent>,
     run_child: impl FnOnce(),
-) -> std::io::Result<Option<(u16, u16)>> {
+) -> std::io::Result<()> {
     use std::sync::atomic::Ordering;
     if !park_input_reader(input_paused, reader_parked, Duration::from_millis(500)) {
         input_paused.store(false, Ordering::Release);
@@ -426,10 +417,6 @@ fn suspend_for_child(
             return Err(error);
         }
     }
-    let pre_cursor = screen_mode
-        .is_minimal()
-        .then(|| crossterm::cursor::position().ok())
-        .flatten();
     let kitty_pushed = crate::app::kitty_flags_pushed();
     let mouse_captured = crate::app::MOUSE_CAPTURE_ENABLED.load(Ordering::Acquire);
     xai_grok_shell::util::with_locked_stderr(|stderr| {
@@ -474,13 +461,9 @@ fn suspend_for_child(
     while crossterm::event::poll(Duration::from_millis(0)).unwrap_or(false) {
         let _ = crossterm::event::read();
     }
-    let moved_cursor = pre_cursor.and_then(|pre| {
-        let post = crossterm::cursor::position().ok()?;
-        (post != pre).then_some(post)
-    });
     while input_rx.try_recv().is_ok() {}
     input_paused.store(false, Ordering::Release);
-    Ok(moved_cursor)
+    Ok(())
 }
 /// How long the writer thread may sit on unwritten payloads before it is reported blocked.
 /// Healthy writes land in milliseconds; seconds mean the terminal stopped reading the pty.
@@ -694,66 +677,8 @@ fn defer_suspend_retry(
 }
 const EDITOR_SUSPEND_WAIT: &str = "Editor is waiting for a safe terminal handoff";
 const TRANSCRIPT_SUSPEND_WAIT: &str = "Transcript is waiting for a safe terminal handoff";
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum SuspendWaitSink {
-    Toast,
-    SystemBlock,
-}
-fn suspend_wait_sink(screen_mode: crate::app::ScreenMode) -> SuspendWaitSink {
-    if screen_mode.is_minimal() {
-        SuspendWaitSink::SystemBlock
-    } else {
-        SuspendWaitSink::Toast
-    }
-}
-/// Report a handoff wait through the sink visible in the current screen mode.
-/// The caller deduplicates reports across retries per handoff request.
-fn report_suspend_wait(app: &mut AppView, message: &str) {
-    match suspend_wait_sink(app.screen_mode) {
-        SuspendWaitSink::Toast => app.show_toast(message),
-        SuspendWaitSink::SystemBlock => {
-            if let ActiveView::Agent(id) = app.active_view
-                && let Some(agent) = app.agents.get_mut(&id)
-            {
-                let block = crate::scrollback::block::RenderBlock::system(message);
-                if let Some(child_sid) = agent.active_subagent.clone()
-                    && let Some(child) = agent.subagent_views.get_mut(&child_sid)
-                {
-                    child.scrollback.push_block(block);
-                } else {
-                    agent.scrollback.push_block(block);
-                }
-            }
-        }
-    }
-}
 fn requeue_after_suspend_timeout<T>(pending: &mut Option<T>, request: T) {
     *pending = Some(request);
-}
-/// Restore presentation after a child releases the tty.
-/// A cat-style child leaves minimal mode's cursor below appended main-screen output, so re-anchor the live viewport there.
-/// The caller then requests a full repaint because the child's writes bypassed ratatui's diff.
-fn restore_after_child(
-    terminal: &mut PagerTerminal,
-    screen_mode: crate::app::ScreenMode,
-    moved_cursor: Option<(u16, u16)>,
-) {
-    use ratatui::backend::Backend as _;
-    if let Some((_x, y)) = moved_cursor
-        && screen_mode.is_minimal()
-    {
-        let screen = terminal.last_known_area();
-        let cur = terminal.viewport_area();
-        let vh = cur.height.max(1).min(screen.height.max(1));
-        let _ = terminal.backend_mut().append_lines(vh.saturating_sub(1));
-        let available = screen.height.saturating_sub(y).saturating_sub(1);
-        let top = y.saturating_sub(vh.saturating_sub(1).saturating_sub(available));
-        terminal.set_viewport_area(ratatui::layout::Rect {
-            y: top,
-            height: vh,
-            ..cur
-        });
-    }
 }
 /// Consume a pending `$EDITOR` / `$PAGER` suspend request, if any.
 /// A timeout leaves the one-shot request pending and reports once.
@@ -782,14 +707,14 @@ fn run_pending_suspends(
     *suspend_retry_after = None;
     if let Some(request) = app.pending_editor.take() {
         let retry_request = request.clone();
-        match crate::app::external_editor::prepare(app, request) {
-            Ok(Some(prepared)) => {
+        match crate::app::external_editor::prepare(request) {
+            Ok(prepared) => {
                 let launch = prepared.launch();
                 let mut editor_result = Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidInput,
                     "invalid editor command",
                 ));
-                let moved_cursor = match suspend_for_child(
+                match suspend_for_child(
                     app.screen_mode,
                     terminal,
                     input_paused,
@@ -808,7 +733,7 @@ fn run_pending_suspends(
                         };
                     },
                 ) {
-                    Ok(moved_cursor) => moved_cursor,
+                    Ok(()) => {}
                     Err(error) if error.kind() == std::io::ErrorKind::TimedOut => {
                         drop(prepared);
                         requeue_after_suspend_timeout(&mut app.pending_editor, retry_request);
@@ -818,7 +743,7 @@ fn run_pending_suspends(
                             Instant::now(),
                         );
                         if first_timeout {
-                            report_suspend_wait(app, EDITOR_SUSPEND_WAIT);
+                            app.show_toast(EDITOR_SUSPEND_WAIT);
                             presenter.request_presentation(app, terminal, false);
                         }
                         return Ok(());
@@ -826,12 +751,7 @@ fn run_pending_suspends(
                     Err(error) => return Err(error.into()),
                 };
                 crate::app::external_editor::finish(app, prepared, editor_result);
-                restore_after_child(terminal, app.screen_mode, moved_cursor);
                 presenter.request_presentation(app, terminal, true);
-                suspend_wait_reports.editor_reported = false;
-            }
-            Ok(None) => {
-                presenter.request_presentation(app, terminal, false);
                 suspend_wait_reports.editor_reported = false;
             }
             Err(error) => {
@@ -842,12 +762,11 @@ fn run_pending_suspends(
         }
     }
     if let Some(path) = app.pending_pager_path.take() {
-        let ansi = std::mem::take(&mut app.pending_pager_ansi);
         let pager = std::env::var("PAGER")
             .ok()
             .filter(|p| !p.trim().is_empty())
             .unwrap_or_else(|| "less".to_string());
-        let moved_cursor = match suspend_for_child(
+        match suspend_for_child(
             app.screen_mode,
             terminal,
             input_paused,
@@ -856,35 +775,15 @@ fn run_pending_suspends(
             || {
                 let mut parts = pager.split_whitespace();
                 if let Some(prog) = parts.next() {
-                    let mut args: Vec<String> = parts.map(str::to_string).collect();
-                    let is_less = std::path::Path::new(prog)
-                        .file_name()
-                        .and_then(|n| n.to_str())
-                        == Some("less");
-                    if ansi
-                        && is_less
-                        && !args.iter().any(|a| {
-                            matches!(
-                                a.as_str(),
-                                "-R" | "-r" | "--RAW-CONTROL-CHARS" | "--raw-control-chars"
-                            )
-                        })
-                    {
-                        args.push("-R".to_string());
-                    }
-                    if ansi && is_less && !args.iter().any(|a| a == "+G") {
-                        args.push("+G".to_string());
-                    }
                     let _ = std::process::Command::new(prog)
-                        .args(&args)
+                        .args(parts)
                         .arg(&path)
                         .status();
                 }
             },
         ) {
-            Ok(moved_cursor) => moved_cursor,
+            Ok(()) => {}
             Err(error) if error.kind() == std::io::ErrorKind::TimedOut => {
-                app.pending_pager_ansi = ansi;
                 requeue_after_suspend_timeout(&mut app.pending_pager_path, path);
                 let first_timeout = defer_suspend_retry(
                     suspend_retry_after,
@@ -892,7 +791,7 @@ fn run_pending_suspends(
                     Instant::now(),
                 );
                 if first_timeout {
-                    report_suspend_wait(app, TRANSCRIPT_SUSPEND_WAIT);
+                    app.show_toast(TRANSCRIPT_SUSPEND_WAIT);
                     presenter.request_presentation(app, terminal, false);
                 }
                 return Ok(());
@@ -900,135 +799,13 @@ fn run_pending_suspends(
             Err(error) => return Err(error.into()),
         };
         let _ = std::fs::remove_file(&path);
-        restore_after_child(terminal, app.screen_mode, moved_cursor);
         presenter.request_presentation(app, terminal, true);
         suspend_wait_reports.pager_reported = false;
     }
     Ok(())
 }
-/// Consume a pending in-process switch between `/minimal` and `/fullscreen`.
-/// Returns `true` when the caller must quit (exec fallback armed on `app.relaunch`).
-#[allow(clippy::too_many_arguments)]
-fn run_pending_mode_switch(
-    app: &mut AppView,
-    terminal: &mut PagerTerminal,
-    minimal_live_rows: u16,
-    input_paused: &std::sync::atomic::AtomicBool,
-    reader_parked: &std::sync::atomic::AtomicBool,
-    input_rx: &mut tokio::sync::mpsc::UnboundedReceiver<TimedInputEvent>,
-    presenter: &mut Presenter,
-    tasks: &mut JoinSet<TaskResult>,
-    progress_tx: &tokio::sync::mpsc::UnboundedSender<effects::RestoreProgressMsg>,
-    status_line_refresh_interval: &mut Option<Duration>,
-    status_line_refresh_at: &mut Option<Instant>,
-) -> bool {
-    let Some(target) = app.pending_screen_mode_switch.take() else {
-        return false;
-    };
-    let from = app.screen_mode;
-    if target == from {
-        return false;
-    }
-    match crate::app::mode_switch::transition_terminal(
-        terminal,
-        from,
-        target,
-        minimal_live_rows,
-        input_paused,
-        reader_parked,
-        input_rx,
-    ) {
-        crate::app::mode_switch::ModeSwitchOutcome::Switched => {
-            crate::app::mode_switch::reseed_screen_mode(app, target);
-            *status_line_refresh_interval =
-                if super::status_line::draws_a_row(&app.current_ui.status_line) {
-                    app.status_line_refresh_interval()
-                } else {
-                    None
-                };
-            *status_line_refresh_at = status_line_refresh_interval.map(|iv| Instant::now() + iv);
-            if target.is_minimal() {
-                crate::app::mode_switch::dismiss_fullscreen_only_surfaces(app);
-                super::MINIMAL_SHOW_SWITCH_BACK_TO_FULLSCREEN
-                    .store(true, std::sync::atomic::Ordering::Release);
-                if let ActiveView::Agent(id) = app.active_view
-                    && let Some(agent) = app.agents.get_mut(&id)
-                {
-                    crate::app::mode_switch::push_block_behind_live_stream(
-                        &mut agent.scrollback,
-                        crate::scrollback::block::RenderBlock::system(
-                            "Switched to minimal mode · /fullscreen to go back",
-                        ),
-                    );
-                }
-            } else {
-                super::MINIMAL_SHOW_SWITCH_BACK_TO_FULLSCREEN
-                    .store(false, std::sync::atomic::Ordering::Release);
-                for agent in app.agents.values_mut() {
-                    agent.set_sticky_toast_recursive(None);
-                }
-                if let ActiveView::Agent(id) = app.active_view
-                    && let Some(agent) = app.agents.get_mut(&id)
-                {
-                    agent.show_toast("Switched to fullscreen mode · /minimal to go back");
-                }
-            }
-            tracing::info!(
-                from = from.meta_label(),
-                to = target.meta_label(),
-                "in-process screen-mode switch"
-            );
-            presenter.request_presentation(app, terminal, true);
-            false
-        }
-        crate::app::mode_switch::ModeSwitchOutcome::Aborted(reason) => {
-            tracing::warn!(%reason, "screen-mode switch aborted; staying in current mode");
-            if let ActiveView::Agent(id) = app.active_view
-                && let Some(agent) = app.agents.get_mut(&id)
-            {
-                crate::app::mode_switch::push_block_behind_live_stream(
-                    &mut agent.scrollback,
-                    crate::scrollback::block::RenderBlock::system(format!(
-                        "Couldn't switch to {} mode: {reason}",
-                        target.meta_label()
-                    )),
-                );
-            }
-            presenter.request_presentation(app, terminal, true);
-            false
-        }
-        crate::app::mode_switch::ModeSwitchOutcome::NeedsExecFallback(reason) => {
-            tracing::error!(%reason, "screen-mode switch failed; falling back to exec relaunch");
-            if let Some(session_id) = app.active_session_id().map(str::to_owned) {
-                app.relaunch = Some(crate::app::app_view::ScreenModeRelaunch {
-                    minimal: target.is_minimal(),
-                    session_id,
-                });
-            }
-            let effs: Vec<super::actions::Effect> = app
-                .agents
-                .values()
-                .filter_map(|a| {
-                    a.session.session_id.as_ref().map(|sid| {
-                        super::actions::Effect::UnregisterActiveSession {
-                            session_id: sid.clone(),
-                        }
-                    })
-                })
-                .collect();
-            let _ = process_effects(effs, tasks, app, progress_tx);
-            true
-        }
-    }
-}
-/// Minimal mode opens an empty session after the welcome branch (now, or post-auth via the deferred drain), so that session create ends startup.
-fn minimal_will_open_session(term_state: &TerminalState, app: &AppView) -> bool {
-    term_state.screen_mode.is_minimal()
-        && matches!(app.active_view, ActiveView::Welcome)
-        && !app.is_zdr_blocked()
-}
 /// Run the main event loop until quit.
-/// Returns a [`RunResult`] with optional exit info (for the resume hint) and a flag for restarting the binary to pick up a downloaded update.
+/// Returns a [`RunResult`] with optional exit info (for the resume hint).
 /// The initial theme MUST come from `term_state.initial_theme`; see [`TerminalState::initial_theme`] for why.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn run(
@@ -1042,9 +819,6 @@ pub(crate) async fn run(
     remote_settings: Option<xai_grok_shell::util::config::RemoteSettings>,
     mut term_state: TerminalState,
     materialized: crate::app::session_startup::MaterializedStartup,
-    bg_update_rx: Option<
-        tokio::sync::oneshot::Receiver<Option<xai_grok_update::auto_update::UpdateAvailable>>,
-    >,
     mut writer_event_rx: tokio::sync::mpsc::UnboundedReceiver<WriterEvent>,
     reader_thread: &mut ReaderThread,
 ) -> anyhow::Result<RunResult> {
@@ -1065,16 +839,6 @@ pub(crate) async fn run(
     app.last_known_terminal_rows = crossterm::terminal::size().map(|(_, r)| r).unwrap_or(0);
     app.leader_mode = connection.leader_status_rx.is_some();
     app.screen_mode = term_state.screen_mode;
-    app.registry = crate::actions::ActionRegistry::defaults_for(term_state.screen_mode);
-    app.welcome_prompt.set_screen_mode(term_state.screen_mode);
-    if app.screen_mode.is_minimal() && term_state.relaunched_into_minimal {
-        app.minimal_state.welcome_pending = true;
-    }
-    if term_state.relaunched_into_minimal && app.screen_mode.is_minimal() {
-        app.screen_mode_switch_hint = Some("Switched to minimal mode · /fullscreen to go back");
-    } else if term_state.relaunched_into_fullscreen && !app.screen_mode.is_minimal() {
-        app.screen_mode_switch_hint = Some("Switched to fullscreen mode · /minimal to go back");
-    }
     let remote_permission_mode = remote_settings
         .as_ref()
         .and_then(|s| s.permission_mode.as_deref());
@@ -1577,10 +1341,7 @@ pub(crate) async fn run(
         effective_config.as_ref(),
         &app.current_ui,
     );
-    app.registry = crate::actions::ActionRegistry::defaults_with_config_for(
-        term_state.screen_mode,
-        mouse_toggle.value,
-    );
+    app.registry = crate::actions::ActionRegistry::defaults_with_config(mouse_toggle.value);
     crate::app::MOUSE_REPORTING_TOGGLE_ENABLED
         .store(mouse_toggle.value, std::sync::atomic::Ordering::Release);
     let action_registered = app
@@ -1603,7 +1364,6 @@ pub(crate) async fn run(
     );
     let config_session_bools = load_initial_config_session_bools();
     app.show_tips = config_session_bools.show_tips;
-    app.auto_update = config_session_bools.auto_update;
     app.ask_user_question_timeout_enabled = config_session_bools.ask_user_question_timeout_enabled;
     crate::appearance::cache::prime(&app.current_ui);
     crate::appearance::cache::apply_remote_keep_text_selection_default(
@@ -1802,7 +1562,7 @@ pub(crate) async fn run(
             return Ok(finish_run(&mut app));
         }
         presenter.request_presentation(&mut app, terminal, false);
-    } else if args.initial_prompt().is_none() && !minimal_will_open_session(&term_state, &app) {
+    } else if args.initial_prompt().is_none() {
         app.finish_startup(xai_grok_telemetry::startup::StartupOutcome::Ok);
     }
     if let Some(initial_prompt) = args.initial_prompt() {
@@ -1830,17 +1590,6 @@ pub(crate) async fn run(
             app.deferred_startup.open_dashboard = true;
         }
     }
-    if minimal_will_open_session(&term_state, &app) {
-        if app.session_startup_allowed() {
-            let effs = dispatch::dispatch(Action::NewSession, &mut app);
-            if process_effects(effs, &mut tasks, &mut app, &progress_tx) {
-                return Ok(finish_run(&mut app));
-            }
-            presenter.request_presentation(&mut app, terminal, false);
-        } else {
-            app.deferred_startup.new_session = true;
-        }
-    }
     if should_create_home_on_authenticated_startup(&app) {
         let effs = dispatch::maybe_create_home_session(&mut app);
         if process_effects(effs, &mut tasks, &mut app, &progress_tx) {
@@ -1863,7 +1612,6 @@ pub(crate) async fn run(
     let mut csi_filter = super::csi_filter::CsiFragmentFilter::new();
     let mut x10_filter = super::x10_filter::X10ReassemblyFilter::new();
     let mut xt_filter = super::xt_filter::XtversionFilter::new();
-    let mut bg_update_rx = bg_update_rx;
     debug_assert_eq!(term_state.initial_theme, theme_cache::current_kind());
     let mut appearance_watcher =
         SystemAppearanceWatcher::start_if_auto(theme_cache::is_auto_mode());
@@ -1927,21 +1675,6 @@ pub(crate) async fn run(
             app.finish_startup(xai_grok_telemetry::startup::StartupOutcome::Error);
             flush_pending_stall(&mut stall_rollup);
             return Err(e);
-        }
-        if run_pending_mode_switch(
-            &mut app,
-            terminal,
-            config_watcher.current().minimal_live_rows,
-            &input_paused,
-            &reader_parked,
-            &mut input_rx,
-            &mut presenter,
-            &mut tasks,
-            &progress_tx,
-            &mut status_line_refresh_interval,
-            &mut status_line_refresh_at,
-        ) {
-            break;
         }
         if let VoiceState::ColdStart { hold, target } = app.voice_state {
             if app.voice_cmd_tx.is_none() && app.voice_can_start_pipeline() {
@@ -2313,32 +2046,6 @@ pub(crate) async fn run(
                     break;
                 }
                 presenter.request(false);
-            }
-
-            // Background update check completed.
-            result = async {
-                match bg_update_rx.as_mut() {
-                    Some(rx) => rx.await.ok().flatten(),
-                    None => std::future::pending().await,
-                }
-            } => {
-                // Consume the receiver so this arm becomes inert.
-                bg_update_rx = None;
-                if let Some(update) = result {
-                    tracing::info!(
-                        latest_version = %update.latest_version,
-                        "Background update check: newer version available"
-                    );
-                    let latest = update.latest_version;
-                    app.pending_update_version = Some(latest.clone());
-                    // The full TUI shows this on the welcome screen, which minimal has none of Commit a one-line update notice into native scrollback instead `app`, not `term_state`: the mode can switch at runtime
-                    // Commit a one-line update notice into native scrollback instead
-                    // `app`, not `term_state`: the mode can switch at runtime
-                    if app.screen_mode.is_minimal() {
-                        dispatch::commit_minimal_update_notice(&mut app, &latest);
-                    }
-                    presenter.request(false);
-                }
             }
 
             maybe_ev = input_rx.recv() => {
@@ -3040,7 +2747,6 @@ pub(crate) fn load_initial_ui_config() -> xai_grok_shell::agent::config::UiConfi
 #[derive(Default)]
 struct InitialConfigSessionBools {
     show_tips: Option<bool>,
-    auto_update: Option<bool>,
     ask_user_question_timeout_enabled: Option<bool>,
 }
 fn load_initial_config_session_bools() -> InitialConfigSessionBools {
@@ -3050,7 +2756,6 @@ fn load_initial_config_session_bools() -> InitialConfigSessionBools {
     let cli_bool = |key: &str| -> Option<bool> { root.get("cli")?.get(key)?.as_bool() };
     InitialConfigSessionBools {
         show_tips: cli_bool("show_tips"),
-        auto_update: cli_bool("auto_update"),
         ask_user_question_timeout_enabled: root
             .get("toolset")
             .and_then(|t| t.get("ask_user_question"))
@@ -3207,15 +2912,12 @@ fn finish_run(app: &mut AppView) -> RunResult {
         };
         Some(super::ExitInfo {
             session_id: sid.0.to_string(),
-            minimal: app.screen_mode.is_minimal(),
             summary,
         })
     });
     RunResult {
         exit_info,
-        quit_for_update: app.quit_for_update,
         trust_quit_error: app.trust_quit_error.clone(),
-        relaunch: app.relaunch.clone(),
     }
 }
 /// Result of draining and processing terminal events.
@@ -4642,9 +4344,9 @@ mod tests {
     async fn handled_counts_only_events_processed_before_suspend_break() {
         let mut app = crate::app::app_view::tests::test_app();
         app.pending_editor = Some(
-            crate::app::external_editor::PendingEditorRequest::PromptDraft {
-                agent_id: crate::app::agent::AgentId(0),
-                original_text: "draft".to_owned(),
+            crate::app::external_editor::PendingEditorRequest::ConfigFile {
+                path: std::path::PathBuf::from("/tmp/agents.toml"),
+                refresh_agents_modal: None,
             },
         );
         let (acp_tx, _acp_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -4741,9 +4443,9 @@ mod tests {
         let mut app = crate::app::app_view::tests::test_app();
         assert!(!tty_suspend_armed(&app));
         app.pending_editor = Some(
-            crate::app::external_editor::PendingEditorRequest::PromptDraft {
-                agent_id: crate::app::agent::AgentId(0),
-                original_text: "draft".to_owned(),
+            crate::app::external_editor::PendingEditorRequest::ConfigFile {
+                path: std::path::PathBuf::from("/tmp/agent-config.md"),
+                refresh_agents_modal: None,
             },
         );
         assert!(tty_suspend_armed(&app));
@@ -5152,55 +4854,6 @@ mod tests {
             &mut reports.pager_reported,
             now
         ));
-    }
-    #[test]
-    fn suspend_wait_sink_is_mode_appropriate() {
-        assert_eq!(
-            suspend_wait_sink(crate::app::ScreenMode::Minimal),
-            SuspendWaitSink::SystemBlock
-        );
-        assert_eq!(
-            suspend_wait_sink(crate::app::ScreenMode::Inline),
-            SuspendWaitSink::Toast
-        );
-        assert_eq!(
-            suspend_wait_sink(crate::app::ScreenMode::Fullscreen),
-            SuspendWaitSink::Toast
-        );
-    }
-    #[test]
-    fn suspend_wait_report_uses_system_block_in_minimal_mode() {
-        use crate::scrollback::block::RenderBlock;
-        let mut app = crate::app::app_view::tests::test_app();
-        let id = crate::app::agent::AgentId(0);
-        let agent = crate::test_util::make_agent_view(Some("session"), "/tmp");
-        app.agents.insert(id, agent);
-        app.active_view = ActiveView::Agent(id);
-        app.screen_mode = crate::app::ScreenMode::Minimal;
-        report_suspend_wait(&mut app, EDITOR_SUSPEND_WAIT);
-        let agent = app.agents.get(&id).expect("active agent");
-        let entry = agent.scrollback.last().expect("system block");
-        assert!(matches!(
-            &entry.block,
-            RenderBlock::System(block) if block.text == EDITOR_SUSPEND_WAIT
-        ));
-        assert!(agent.toast.is_none());
-    }
-    #[test]
-    fn suspend_wait_report_uses_toast_outside_minimal_mode() {
-        let mut app = crate::app::app_view::tests::test_app();
-        let id = crate::app::agent::AgentId(0);
-        let agent = crate::test_util::make_agent_view(Some("session"), "/tmp");
-        app.agents.insert(id, agent);
-        app.active_view = ActiveView::Agent(id);
-        app.screen_mode = crate::app::ScreenMode::Inline;
-        report_suspend_wait(&mut app, EDITOR_SUSPEND_WAIT);
-        let agent = app.agents.get(&id).expect("active agent");
-        assert_eq!(
-            agent.toast.as_ref().map(|(message, _)| message.as_str()),
-            Some(EDITOR_SUSPEND_WAIT)
-        );
-        assert!(agent.scrollback.last().is_none());
     }
     #[test]
     fn writer_failure_event_returns_original_error() {
@@ -6136,7 +5789,6 @@ mod tests {
         let mut app = seeded_quit_app(crate::app::ScreenMode::Fullscreen);
         let info = finish_run(&mut app).exit_info.expect("agent exit info");
         assert_eq!(info.session_id, "test-session");
-        assert!(!info.minimal);
         let summary = info.summary.expect("summary on fullscreen quit");
         assert_eq!(summary.title, "fix the flaky CI test");
         assert_eq!(
@@ -6166,15 +5818,10 @@ mod tests {
         assert!(summary.last_response.is_none());
     }
     #[test]
-    fn finish_run_inline_and_minimal_quits_omit_summary() {
+    fn finish_run_inline_quit_omits_summary() {
         let mut app = seeded_quit_app(crate::app::ScreenMode::Inline);
         let info = finish_run(&mut app).exit_info.expect("agent exit info");
         assert!(info.summary.is_none());
-        assert!(!info.minimal);
-        let mut app = seeded_quit_app(crate::app::ScreenMode::Minimal);
-        let info = finish_run(&mut app).exit_info.expect("agent exit info");
-        assert!(info.summary.is_none());
-        assert!(info.minimal);
     }
     #[test]
     fn finish_run_empty_session_omits_summary() {

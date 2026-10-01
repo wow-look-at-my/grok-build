@@ -1,7 +1,5 @@
 //! `/queue` lists the queued prompts as a committed system block.
 //!
-//! Minimal mode has no interactive `QueuePane`, so `/queue` is the way to inspect what's waiting behind the running turn.
-//! It works in every render mode.
 //! The dispatcher (`dispatch_show_queue`) reads the merged server and local queue and commits a read-only list.
 //! Editing the queue is out of scope here (use the queue pane in the full TUI).
 
@@ -49,7 +47,6 @@ mod tests {
             models,
             session_id: sid,
             bundle_state: &DEFAULT_BUNDLE_STATE,
-            screen_mode: crate::app::ScreenMode::Minimal,
             billing_surface_visible: true,
             usage_command_visible: true,
             pager_state: PagerLocalSnapshot::default(),

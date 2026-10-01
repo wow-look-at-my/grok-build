@@ -202,12 +202,6 @@ pub(super) fn mode_is_consent_chooser(mode: &SettingsMode) -> bool {
     )
 }
 
-/// Settings-domain visibility policy, snapshotted at OpenSettings.
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct RowVisibility {
-    pub hide_appearance: bool,
-}
-
 /// Settings modal state. Boxed inside `ActiveModal::Settings` to avoid clippy `large_enum_variant`.
 pub struct SettingsModalState {
     pub window: ModalWindowState,
@@ -258,36 +252,15 @@ pub struct SettingsModalState {
     pub(super) group_return: Option<(SettingKey, usize)>,
     /// Last left-click on a picker radio: `(choice index, when)`.
     pub(super) picker_last_click: Option<(usize, std::time::Instant)>,
-    /// Row visibility policy, snapshotted at open.
-    visibility: RowVisibility,
 }
 
 impl SettingsModalState {
-    /// Appearance rows stay visible. Test helpers use this; production open
-    /// passes a [`RowVisibility`] snapshot via [`Self::new_with_row_visibility`].
     pub fn new(
         registry: Arc<SettingsRegistry>,
         ui_snapshot: UiConfig,
         pager_snapshot: PagerLocalSnapshot,
     ) -> Self {
-        Self::new_with_row_visibility(
-            registry,
-            ui_snapshot,
-            pager_snapshot,
-            RowVisibility {
-                hide_appearance: false,
-            },
-        )
-    }
-
-    /// Like [`Self::new`], but `visibility` controls which registry rows are dropped.
-    pub(crate) fn new_with_row_visibility(
-        registry: Arc<SettingsRegistry>,
-        ui_snapshot: UiConfig,
-        pager_snapshot: PagerLocalSnapshot,
-        visibility: RowVisibility,
-    ) -> Self {
-        let rows = build_rows(&registry, visibility);
+        let rows = build_rows(&registry);
         // Start on the first selectable (non-header) row.
         let selected = rows
             .iter()
@@ -319,7 +292,6 @@ impl SettingsModalState {
             close_on_picker_exit: false,
             group_return: None,
             picker_last_click: None,
-            visibility,
         }
     }
 
@@ -370,7 +342,7 @@ impl SettingsModalState {
         &self.filtered_cache
     }
 
-    /// Rebuild rows from current process gates (voice / kitty) and the open-time visibility snapshot.
+    /// Rebuild rows from current process gates (voice / kitty).
     /// Keeps focus on the same key when possible; exits sub-panes if the key vanished.
     pub fn rebuild_rows(&mut self) {
         let prev_key = self.focused_setting().map(|(k, _)| k);
@@ -382,7 +354,7 @@ impl SettingsModalState {
             SettingsMode::Browse | SettingsMode::FilterFocused => None,
         };
 
-        self.rows = build_rows(&self.registry, self.visibility);
+        self.rows = build_rows(&self.registry);
         self.invalidate_filter();
 
         if let Some(key) = subpane_key {
@@ -949,13 +921,11 @@ pub(super) fn compute_filtered(
     result
 }
 
-/// Row visibility: voice rows need the voice gate; capture needs key releases;
-/// `hidden_in_minimal` rows drop when `hide_appearance` is set.
+/// Row visibility: voice rows need the voice gate; capture needs key releases.
 /// Pure for unit tests.
 pub(super) fn setting_row_visible(
     meta: &SettingMeta,
     kitty_releases: bool,
-    hide_appearance: bool,
     voice_mode: bool,
 ) -> bool {
     if !voice_mode
@@ -969,13 +939,10 @@ pub(super) fn setting_row_visible(
     if meta.key == "voice_capture_mode" && !kitty_releases {
         return false;
     }
-    if hide_appearance && meta.hidden_in_minimal {
-        return false;
-    }
     true
 }
 
-fn build_rows(registry: &SettingsRegistry, visibility: RowVisibility) -> Vec<RowEntry> {
+fn build_rows(registry: &SettingsRegistry) -> Vec<RowEntry> {
     let kitty_releases = crate::app::kitty_releases_reported();
     let voice_mode = crate::app::voice_mode_enabled();
     // Keys that belong to a group sub-sheet are rendered only inside that sheet, never as their own top-level rows
@@ -996,7 +963,7 @@ fn build_rows(registry: &SettingsRegistry, visibility: RowVisibility) -> Vec<Row
             if meta.category != *cat {
                 continue;
             }
-            if !setting_row_visible(meta, kitty_releases, visibility.hide_appearance, voice_mode) {
+            if !setting_row_visible(meta, kitty_releases, voice_mode) {
                 continue;
             }
             if group_children.contains(meta.key) {
@@ -1053,7 +1020,6 @@ pub(super) fn action_for_bool(key: SettingKey, new: bool) -> Option<Action> {
 
         "invert_scroll" => Some(Action::SetInvertScroll(new)),
         "show_tips" => Some(Action::SetShowTips(new)),
-        "auto_update" => Some(Action::SetAutoUpdate(new)),
         "display_refresh_auto_cadence" => Some(Action::SetDisplayRefreshAutoCadence(new)),
         _ => None,
     }
@@ -1113,7 +1079,6 @@ pub(super) fn action_for_enum_commit(key: SettingKey, choice: &'static str) -> O
             _ => None,
         },
         "hunk_tracker_mode" => Some(Action::SetHunkTrackerMode(choice.to_string())),
-        "screen_mode" => Some(Action::SetScreenMode(choice.to_string())),
         "voice_capture_mode" => Some(Action::SetVoiceCaptureMode(choice.to_string())),
         "voice_stt_language" => Some(Action::SetVoiceSttLanguage(choice.to_string())),
         "render_mermaid" => {

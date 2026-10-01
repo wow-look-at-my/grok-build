@@ -1,6 +1,5 @@
 use super::*;
 use crate::acp::model_state::ModelState;
-use crate::app::ScreenMode;
 use crate::app::bundle::BundleState;
 use crate::settings::PagerLocalSnapshot;
 
@@ -48,17 +47,15 @@ fn app_ctx<'a>(
         workflows_available: true,
         saved_workflows,
         workflow_runs: &[],
-        screen_mode: ScreenMode::Fullscreen,
         current_title: None,
     }
 }
 
-fn exec_ctx(models: &ModelState, screen_mode: ScreenMode) -> CommandExecCtx<'_> {
+fn exec_ctx(models: &ModelState) -> CommandExecCtx<'_> {
     CommandExecCtx {
         models,
         session_id: None,
         bundle_state: &DEFAULT_BUNDLE_STATE,
-        screen_mode,
         billing_surface_visible: true,
         usage_command_visible: true,
         pager_state: PagerLocalSnapshot::default(),
@@ -78,7 +75,6 @@ fn hidden_until_shell_advertises_workflow_support() {
             workflows_available: available,
             saved_workflows: &[],
             workflow_runs: &[],
-            screen_mode: ScreenMode::Fullscreen,
             current_title: None,
         };
         assert_eq!(WorkflowCommand.visible(&ctx), want);
@@ -86,31 +82,18 @@ fn hidden_until_shell_advertises_workflow_support() {
 }
 
 #[test]
-fn runs_form_toggles_dashboard_in_fullscreen_and_inline() {
+fn runs_form_toggles_dashboard() {
     let models = ModelState::default();
-    // Inline (--no-alt-screen) renders the pane too; it counts as fullscreen for mode gating
-    for screen_mode in [ScreenMode::Fullscreen, ScreenMode::Inline] {
-        let mut ctx = exec_ctx(&models, screen_mode);
-        for args in ["runs", "RUNS", "  runs  "] {
-            assert!(
-                matches!(
-                    WorkflowCommand.run(&mut ctx, args),
-                    CommandResult::Action(Action::ToggleWorkflows)
-                ),
-                "screen_mode: {screen_mode:?}, args: {args:?}"
-            );
-        }
+    let mut ctx = exec_ctx(&models);
+    for args in ["runs", "RUNS", "  runs  "] {
+        assert!(
+            matches!(
+                WorkflowCommand.run(&mut ctx, args),
+                CommandResult::Action(Action::ToggleWorkflows)
+            ),
+            "args: {args:?}"
+        );
     }
-}
-
-#[test]
-fn runs_form_passes_through_in_minimal() {
-    let models = ModelState::default();
-    let mut ctx = exec_ctx(&models, ScreenMode::Minimal);
-    assert!(matches!(
-        WorkflowCommand.run(&mut ctx, "runs"),
-        CommandResult::PassThrough(text) if text == "/workflow runs"
-    ));
 }
 
 #[test]
@@ -128,7 +111,6 @@ fn takes_args_so_placeholder_and_ops_surface() {
         workflows_available: true,
         saved_workflows: &[],
         workflow_runs: &[],
-        screen_mode: ScreenMode::Fullscreen,
         current_title: None,
     };
     let items = WorkflowCommand
@@ -160,7 +142,6 @@ fn suggest_args_lists_saved_workflows_then_ops() {
         workflows_available: true,
         saved_workflows: &saved,
         workflow_runs: &[],
-        screen_mode: ScreenMode::Fullscreen,
         current_title: None,
     };
     let items = WorkflowCommand
@@ -200,7 +181,6 @@ fn launch_name_suggests_budget_and_effort_flags() {
         workflows_available: true,
         saved_workflows: &saved,
         workflow_runs: &[],
-        screen_mode: ScreenMode::Fullscreen,
         current_title: None,
     };
     let items = WorkflowCommand
@@ -446,7 +426,6 @@ fn manage_op_suggests_stoppable_run_names() {
         workflows_available: true,
         saved_workflows: &[],
         workflow_runs: &runs,
-        screen_mode: ScreenMode::Fullscreen,
         current_title: None,
     };
     let items = WorkflowCommand
@@ -510,7 +489,6 @@ fn resume_lists_budget_limited_and_save_skips_builtins() {
         workflows_available: true,
         saved_workflows: &catalog,
         workflow_runs: &runs,
-        screen_mode: ScreenMode::Fullscreen,
         current_title: None,
     };
     let resume_items = WorkflowCommand
@@ -550,7 +528,6 @@ fn resume_lists_budget_limited_and_save_skips_builtins() {
         workflows_available: true,
         saved_workflows: &catalog,
         workflow_runs: &numbered,
-        screen_mode: ScreenMode::Fullscreen,
         current_title: None,
     };
     let save_numbered_items = WorkflowCommand
@@ -877,7 +854,7 @@ fn resume_prefix_keeps_matching_run_names_open() {
 #[test]
 fn other_forms_pass_through_unchanged() {
     let models = ModelState::default();
-    let mut ctx = exec_ctx(&models, ScreenMode::Fullscreen);
+    let mut ctx = exec_ctx(&models);
     for (args, forwarded) in [
         ("", "/workflow"),
         ("pr-review {\"pr\": 1}", "/workflow pr-review {\"pr\": 1}"),

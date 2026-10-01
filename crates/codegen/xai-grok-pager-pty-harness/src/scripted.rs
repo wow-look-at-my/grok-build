@@ -90,7 +90,7 @@ pub struct TerminalConfig {
     pub rows: u16,
     #[serde(default = "default_cols")]
     pub cols: u16,
-    /// Off by default. Required for `--minimal` or the startup cursor-position probe times out and the mode silently downgrades.
+    /// Off by default. An inline viewport needs it, or its startup cursor-position probe times out.
     #[serde(default)]
     pub respond_to_queries: bool,
 }

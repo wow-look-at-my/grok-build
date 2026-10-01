@@ -42,9 +42,6 @@ Location: `~/.grok/config.toml`. If the file is missing, Grok uses its built-in 
 ### General settings
 
 ```toml
-[cli]
-auto_update = true                     # check for updates on launch
-
 [agent]
 # name = "grok-build"                  # default agent on interactive `grok` (no --plan / --agent-profile)
 # definition = "/path/to/agent.md"     # path wins over name if both are set
@@ -92,8 +89,6 @@ page_flip_on_send = true               # pin a just-sent prompt at the top of th
 follow_up_behavior = "queue"           # mid-turn follow-ups: "queue" (wait for turn end; default) or
                                        # "steer" (plain Enter still queues visibly, then injects at the
                                        # next tool/model safe gap). See Keyboard Shortcuts → Mid-turn.
-screen_mode = "fullscreen"             # default render mode: "fullscreen" | "minimal"
-                                       # (unset → fullscreen); set via /settings → Default screen mode
 
 [features]
 telemetry = false                      # anonymous usage telemetry
@@ -185,18 +180,6 @@ You can also override this with `GROK_DEFAULT_SELECTED_PERMISSION`, which is han
 | `true` | All vim-style scrollback bindings are active, exactly as listed in [Keyboard Shortcuts](03-keyboard-shortcuts.md). Esc behavior is the same in both settings. |
 
 Toggle it at runtime with `/vim-mode`, or from `/settings` → **Vim scrollback navigation**. Grok writes the change to `[ui] vim_mode` immediately and applies it to every future pager session, including new agents and subagents in the same process. There's no per-session override — `config.toml` is the source of truth on next launch. `vim_mode` is independent of `simple_mode`.
-
-#### Screen mode
-
-`[ui] screen_mode` is the **default render mode** for plain `grok` launches. Set it from `/settings` → **Default screen mode** (restart required) or edit `config.toml` by hand — both write the file. CLI flags (`--minimal` / `--fullscreen`) and slash commands (`/minimal` / `/fullscreen`) are session-scoped and do **not** write this key; after a slash switch, the reverse command returns you for that session only.
-
-| Value | Behavior |
-|-------|----------|
-| unset | Settings shows **Fullscreen**. There's no sticky preference at startup: legacy `pager.toml` `[terminal] minimal` can still force minimal, and terminals that leak mouse reports (JediTerm/Windows) may auto-open minimal until you set an explicit value. Otherwise the alt-screen policy picks fullscreen vs inline. |
-| `"fullscreen"` | Sticky non-minimal. Fullscreen-vs-inline still follows the alt-screen policy (`--no-alt-screen`, `[terminal] alt_screen`, terminal auto-detection). |
-| `"minimal"` | Sticky minimal (scrollback-native) mode. |
-
-A CLI flag always wins over the config value for that invocation.
 
 #### Snap prompt to top on send
 
@@ -651,8 +634,6 @@ items = ["cwd", "model", "context"]
 
 The other keys are `items` (which built-in segments to show, in order), `command`, `padding`, and `refresh_interval` (in seconds; re-runs a `command` row on a timer, so an incident page or a CI status reaches an idle session). The [Status Line guide](25-status-line.md) documents all of them, along with the JSON contract a `command` script reads on stdin and an example script.
 
-Minimal mode has no status-line row; it uses the terminal tab title instead (see [Notifications](#notifications) `title.items`).
-
 ### Keyboard shortcuts
 
 Keyboard shortcuts are **not** configurable — all bindings are built in. See [Keyboard Shortcuts](03-keyboard-shortcuts.md) for the complete reference.
@@ -701,49 +682,17 @@ process env (destination lock). `managed_config.toml` does not. There is no
 `headers` key — collector tokens stay in `OTEL_EXPORTER_OTLP_HEADERS`. See
 [Monitoring & Usage](24-monitoring-usage.md).
 
-### Version pinning
+### Removed keys
 
-Control which versions the CLI may auto-update to and which versions may run. Set
-these in `[cli]`, or in a managed layer for fleet-wide policy. Each has an
-environment override that can only tighten the bound, for CI and testing.
+Grok has no built-in updater. To update, run the installer again. These `[cli]` keys still load. As a result, an old `config.toml` keeps working. However, they have no effect: `auto_update`, `channel`, `dismissed_version`, `npm_registry`, `minimum_version`, `maximum_version`, `required_minimum_version` and `required_maximum_version`. The `GROK_*_VERSION` environment overrides for those bounds are ignored too.
 
-> **Changed:** `minimum_version` no longer blocks startup. It is now a soft
-> anti-downgrade floor for the updater. For a hard floor that prevents old
-> versions from starting, use `required_minimum_version`.
-
-```toml
-[cli]
-minimum_version = "0.2.109"          # updater won't downgrade below this
-maximum_version = "0.2.180"          # updater won't install above this
-required_minimum_version = "0.2.100" # refuse to start below this
-required_maximum_version = "0.2.200" # refuse to start above this
-```
-
-- `minimum_version` (`GROK_MINIMUM_VERSION`) is a soft anti-downgrade floor. The
-  updater skips a target below it and keeps the current version. It never blocks
-  startup.
-- `maximum_version` (`GROK_MAXIMUM_VERSION`) is a soft ceiling. The updater caps
-  its target at it and never installs above it.
-- `required_minimum_version` (`GROK_REQUIRED_MINIMUM_VERSION`) and
-  `required_maximum_version` (`GROK_REQUIRED_MAXIMUM_VERSION`) are hard bounds. If
-  the running version is outside the range, the CLI exits at startup and instructs
-  the user to install an approved version. `grok update` and `grok --version` keep
-  working so an out-of-range install can recover.
-- Bounds resolve across config layers by tightening only: a floor takes the
-  highest value and a ceiling the lowest, so a managed bound can't be loosened,
-  and a user or environment bound can't cancel a managed hard bound. An invalid
-  value is ignored so a bad policy can't block startup.
-- An explicit `grok update --version X` is allowed above the ceiling, to recover
-  from a too-new install, and rejected below the hard floor.
+`[ui] screen_mode` also still loads and has no effect. Grok has one render mode. `[ui] alt_screen` decides whether it draws on the alternate screen.
 
 ### Enterprise deployment
 
 A complete config for enterprise use:
 
 ```toml
-[cli]
-auto_update = false
-
 [auth]
 auth_provider_command = "/usr/local/bin/my-company-auth-provider"
 auth_provider_label = "Acme Corp"

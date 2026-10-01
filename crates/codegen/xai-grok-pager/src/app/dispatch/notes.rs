@@ -26,20 +26,7 @@ fn next_rewrite_nonce() -> u64 {
 pub(crate) const FEEDBACK_THANKS_NOTICE: &str =
     "Thanks for the feedback! The Grok Build team is on it.";
 
-/// Minimal mode cannot show a toast, so the notice goes to the transcript instead.
-fn feedback_notice(app: &mut AppView, message: &str) {
-    if app.screen_mode.is_minimal() {
-        with_active_agent(app, |agent| {
-            agent
-                .scrollback
-                .push_block(RenderBlock::system(message.to_string()));
-        });
-    } else {
-        app.show_toast(message);
-    }
-}
-
-/// Open the feedback modal (every screen mode; minimal hosts it in its live band).
+/// Open the feedback modal.
 /// Every refusal is visible (voice notice, blocker notice, or no-session notice); the state is never set invisibly.
 /// Early exits drop `open`, whose image owner cleans up the staged temp files.
 pub(super) fn dispatch_open_feedback_modal(
@@ -59,7 +46,7 @@ pub(super) fn dispatch_open_feedback_modal(
         app.voice_recording_target(),
         Some(crate::app::app_view::VoiceTarget::Agent(target)) if target == id
     ) {
-        feedback_notice(app, "Stop voice input before opening the feedback form");
+        app.show_toast("Stop voice input before opening the feedback form");
         return vec![];
     }
     let blocked = {
@@ -75,7 +62,7 @@ pub(super) fn dispatch_open_feedback_modal(
         })
     };
     if let Some(message) = blocked {
-        feedback_notice(app, message);
+        app.show_toast(message);
         return vec![];
     }
     let Some(agent) = app.agents.get_mut(&id) else {
@@ -167,8 +154,7 @@ pub(super) fn dispatch_submit_feedback_modal(
         && !app.coding_data_retention_opt_out
         && app.coding_data_sharing_lock().is_none()
         && app.team_name.is_none()
-        && !app.is_zdr
-        && !app.screen_mode.is_minimal();
+        && !app.is_zdr;
     // Modal copy never discloses re-enabling coding-data sharing (one archive, this report only).
     // Unlike the legacy AlwaysUpload card, this path does not call `set_coding_data_sharing`.
     let trace_reenables_sharing = false;
@@ -838,42 +824,24 @@ pub(super) fn dispatch_send_btw(
     let ActiveView::Agent(id) = app.active_view else {
         return vec![];
     };
-    let minimal = app.screen_mode.is_minimal();
-    let (session_id, minimal_request_id, cwd) = {
+    let (session_id, cwd) = {
         let Some(agent) = app.agents.get_mut(&id) else {
             return vec![];
         };
         let Some(session_id) = agent.session.session_id.clone() else {
-            if minimal {
-                agent
-                    .scrollback
-                    .push_block(crate::scrollback::block::RenderBlock::system(
-                        NO_SESSION_NOTICE,
-                    ));
-            } else {
-                agent.show_toast(NO_SESSION_NOTICE);
-            }
+            agent.show_toast(NO_SESSION_NOTICE);
             return vec![];
         };
         let cwd = std::path::PathBuf::from(&agent.session.cwd);
 
-        // Composer clearing belongs to the submit funnel: `dispatch_send_prompt_inner` clears it when `consume_input` is set
-        // Draft-preserving callers (the palette, an edited queue row) keep theirs
-        let minimal_request_id = if minimal {
-            Some(crate::minimal_api::start_minimal_btw(
-                agent,
-                question.clone(),
-            ))
-        } else {
-            agent.clear_btw_owned_selection();
-            agent.btw_state = Some(crate::views::btw_overlay::BtwOverlayState::Loading {
-                question: question.clone(),
-            });
-            // Prompt keeps focus while the answer is in flight (panel focuses on Done).
-            agent.btw_focused = false;
-            None
-        };
-        (session_id, minimal_request_id, cwd)
+        // Composer clearing belongs to the submit funnel.
+        agent.clear_btw_owned_selection();
+        agent.btw_state = Some(crate::views::btw_overlay::BtwOverlayState::Loading {
+            question: question.clone(),
+        });
+        // Prompt keeps focus while the answer is in flight (panel focuses on Done).
+        agent.btw_focused = false;
+        (session_id, cwd)
     };
 
     vec![Effect::SendBtw {
@@ -882,7 +850,6 @@ pub(super) fn dispatch_send_btw(
         question,
         images: images.into_inner(),
         cwd,
-        minimal_request_id,
     }]
 }
 
@@ -973,20 +940,13 @@ pub(super) fn dispatch_send_todo(app: &mut AppView, request: String, urgent: boo
     let ActiveView::Agent(id) = app.active_view else {
         return vec![];
     };
-    let minimal = app.screen_mode.is_minimal();
     let capture_id = uuid::Uuid::new_v4().to_string();
     let session_id = {
         let Some(agent) = app.agents.get_mut(&id) else {
             return vec![];
         };
         let Some(session_id) = agent.session.session_id.clone() else {
-            if minimal {
-                agent
-                    .scrollback
-                    .push_block(RenderBlock::system(NO_SESSION_NOTICE));
-            } else {
-                agent.show_toast(NO_SESSION_NOTICE);
-            }
+            agent.show_toast(NO_SESSION_NOTICE);
             return vec![];
         };
         agent.prompt.set_text("");
@@ -1308,21 +1268,11 @@ pub(super) fn handle_btw_response(
     app: &mut AppView,
     agent_id: AgentId,
     result: Result<String, String>,
-    minimal_request_id: Option<uuid::Uuid>,
     image_notice: Option<String>,
     skipped_image_numbers: &[usize],
 ) -> Vec<Effect> {
     if let Some(agent) = app.agents.get_mut(&agent_id) {
         use crate::views::btw_overlay::BtwOverlayState;
-        if let Some(request_id) = minimal_request_id {
-            // A dismissed or stale request ignores the answer. Don't toast either.
-            if crate::minimal_api::finish_minimal_btw(agent, request_id, result) {
-                app.pending_image_notices.extend(image_notice);
-                app.pending_image_notices
-                    .extend(agent.skipped_image_send_notice(skipped_image_numbers));
-            }
-            return vec![];
-        }
         // Cap drops and read failures are disjoint sets; the flush shows them as one message.
         app.pending_image_notices.extend(image_notice);
         app.pending_image_notices

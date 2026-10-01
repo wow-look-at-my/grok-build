@@ -28,7 +28,6 @@ impl AppView {
             && self.only_unused_home_or_empty()
             && !self.chat_mode
             && !self.is_zdr_blocked()
-            && self.pending_update_version.is_none()
     }
     fn pristine_foreign_resume_welcome(&self) -> bool {
         self.foreign_resume_launch_welcome() && !self.has_foreign_resume_startup_conflict()

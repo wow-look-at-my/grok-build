@@ -13,50 +13,10 @@ pub fn ctrl_dot_unreliable() -> bool {
     terminal_context().ctrl_dot_unreliable() || cfg!(target_os = "windows") || crate::host::is_wsl()
 }
 
-/// Choose the one agent-screen action that owns Ctrl+G for this mode.
-fn mode_ctrl_g_action(screen_mode: crate::app::ScreenMode) -> ActionDef {
-    if screen_mode.is_minimal() {
-        ActionDef {
-            id: ActionId::EditPromptExternal,
-            label: "edit prompt",
-            description: "Edit prompt in external editor",
-            default_key: key!('g', CONTROL),
-            alt_keys: vec![],
-            category: Category::Input,
-            context: When::AgentScreen,
-            hint_priority: None,
-            hint_key_display: None,
-            requires_confirmation: false,
-            long_help: Some(
-                "Opens the current prompt draft in $VISUAL or $EDITOR, falling back to vi when neither is set.\nSaving and closing the editor returns the updated text to the composer; it does not send the prompt.\nAvailable in minimal mode for ordinary attachment-free drafts.",
-            ),
-        }
-    } else {
-        ActionDef {
-            id: ActionId::ToggleTasks,
-            label: "tasks",
-            description: "Toggle tasks pane",
-            default_key: key!('g', CONTROL),
-            alt_keys: vec![],
-            category: Category::Panels,
-            context: When::AgentScreen,
-            hint_priority: None,
-            hint_key_display: None,
-            requires_confirmation: false,
-            long_help: Some(
-                "Shows or hides the tasks pane, which lists background tasks and their status.\nUse it to monitor or return to work you sent to the background with Ctrl+B.\nA side pane; toggle off to reclaim width.",
-            ),
-        }
-    }
-}
-
-/// Build the default action definitions for a screen mode.
+/// Build the default action definitions.
 ///
 /// `mouse_reporting_toggle_enabled` gates the opt-in `ToggleMouseCapture` shortcut (see below); pass `false` for the standard set.
-pub(super) fn default_actions(
-    screen_mode: crate::app::ScreenMode,
-    mouse_reporting_toggle_enabled: bool,
-) -> Vec<ActionDef> {
+pub(super) fn default_actions(mouse_reporting_toggle_enabled: bool) -> Vec<ActionDef> {
     let ctx = terminal_context();
     // xterm.js embeds have no KKP and the host often steals Ctrl+I
     // Share one family flag for quit / half-page / interject so VS Code-family embeds match VS Code
@@ -66,11 +26,7 @@ pub(super) fn default_actions(
     // Shared by ToggleQueue (Ctrl+4 primary) and OpenDashboard (omit Ctrl+4 alt).
     let local_mac_vscode = in_vscode_family && !ctx.is_ssh && cfg!(target_os = "macos");
     let ctrl_dot_unreliable = ctrl_dot_unreliable();
-    let send_to_background_help = if screen_mode.is_minimal() {
-        "Detaches the running foreground Execute so it keeps working in the background while you read, queue prompts, or start something else.\nTrack background work with /tasks.\nOnly meaningful while a foreground Execute is actually running."
-    } else {
-        "Detaches the running foreground Execute so it keeps working in the background while you read, queue prompts, or start something else.\nTrack and resume it from the tasks pane (Ctrl+G).\nOnly meaningful while a foreground Execute is actually running."
-    };
+    let send_to_background_help = "Detaches the running foreground Execute so it keeps working in the background while you read, queue prompts, or start something else.\nTrack and resume it from the tasks pane (Ctrl+G).\nOnly meaningful while a foreground Execute is actually running.";
 
     let mut actions = vec![
         // ── Navigation (scrollback) ─────────────────────────────────
@@ -528,7 +484,21 @@ pub(super) fn default_actions(
             ),
         },
         // ── Panes (agent-level: toggle side panes) ─────────────────
-        mode_ctrl_g_action(screen_mode),
+        ActionDef {
+            id: ActionId::ToggleTasks,
+            label: "tasks",
+            description: "Toggle tasks pane",
+            default_key: key!('g', CONTROL),
+            alt_keys: vec![],
+            category: Category::Panels,
+            context: When::AgentScreen,
+            hint_priority: None,
+            hint_key_display: None,
+            requires_confirmation: false,
+            long_help: Some(
+                "Shows or hides the tasks pane, which lists background tasks and their status.\nUse it to monitor or return to work you sent to the background with Ctrl+B.\nA side pane; toggle off to reclaim width.",
+            ),
+        },
         ActionDef {
             id: ActionId::ToggleTodos,
             label: "todos",
@@ -1190,18 +1160,6 @@ pub(super) fn default_actions(
             ),
         },
     ]);
-
-    // Minimal has no interactive scrollback and no dashboard
-    // Keep its logical prompt, agent-screen, and legitimate global actions
-    // Do not register bindings whose target UI cannot exist in this process mode
-    if screen_mode.is_minimal() {
-        actions.retain(|def| {
-            !matches!(
-                def.context,
-                When::ScrollbackFocused | When::DashboardFocused | When::DashboardOverlay
-            ) && !matches!(def.id, ActionId::OpenDashboard | ActionId::FocusScrollback)
-        });
-    }
 
     actions
 }

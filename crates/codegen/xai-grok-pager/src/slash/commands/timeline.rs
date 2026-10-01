@@ -4,7 +4,6 @@
 
 use crate::app::actions::Action;
 use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand, slash_meta};
-use crate::slash::{ModeSupport, Remedy};
 
 pub struct TimelineCommand;
 
@@ -13,9 +12,6 @@ impl SlashCommand for TimelineCommand {
         name: "timeline",
         description: "Toggle the timeline sidebar",
         usage: "/timeline",
-        mode_support: ModeSupport::FullscreenOnly(Remedy::SwitchMode {
-            why: "the timeline rail needs the interactive scrollback pane",
-        }),
     }
 
     fn run(&self, _ctx: &mut CommandExecCtx, _args: &str) -> CommandResult {

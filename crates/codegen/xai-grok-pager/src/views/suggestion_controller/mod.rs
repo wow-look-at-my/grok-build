@@ -48,7 +48,6 @@ pub struct GhostSuggestionParsed {
 
 /// A single completion item from an ACP `x.ai/suggest` response.
 // `Default` (empty item) exists for downstream test fixtures
-// With `..Default::default()`, out-of-crate literals (e.g. xai-grok-pager-minimal's) keep compiling when optional fields are added.
 #[derive(Debug, Clone, Default)]
 pub struct CompletionItemParsed {
     pub display: String,

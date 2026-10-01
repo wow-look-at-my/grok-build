@@ -330,12 +330,12 @@ impl ClipboardFeedback {
             Self::CopiedOscContainer => "Copied via OSC 52 from the container.",
             Self::CopiedOscRemote => "Copied via OSC 52.",
             Self::UnverifiedOscRemote | Self::UnverifiedOscContainer => {
-                "Copy sent. If paste fails, use grok wrap or /minimal."
+                "Copy sent. If paste fails, use grok wrap."
             }
             Self::VsCodeSshNonAscii => {
-                "Copied. VS Code over SSH may garble non-ASCII; use /minimal if needed."
+                "Copied. VS Code over SSH may garble non-ASCII; use /copy <file> if needed."
             }
-            Self::FailedRemote | Self::Failed => "Copy failed. Try /doctor or /minimal.",
+            Self::FailedRemote | Self::Failed => "Copy failed. Try /doctor.",
         }
     }
 
@@ -2266,35 +2266,35 @@ mod tests {
             (
                 ClipboardFeedback::UnverifiedOscRemote,
                 ClipboardDelivery::Unverified,
-                "Copy sent. If paste fails, use grok wrap or /minimal.",
+                "Copy sent. If paste fails, use grok wrap.",
                 "unverified_osc_remote",
                 120,
             ),
             (
                 ClipboardFeedback::UnverifiedOscContainer,
                 ClipboardDelivery::Unverified,
-                "Copy sent. If paste fails, use grok wrap or /minimal.",
+                "Copy sent. If paste fails, use grok wrap.",
                 "unverified_osc_container",
                 120,
             ),
             (
                 ClipboardFeedback::VsCodeSshNonAscii,
                 ClipboardDelivery::Confirmed,
-                "Copied. VS Code over SSH may garble non-ASCII; use /minimal if needed.",
+                "Copied. VS Code over SSH may garble non-ASCII; use /copy <file> if needed.",
                 "vs_code_ssh_non_ascii",
                 120,
             ),
             (
                 ClipboardFeedback::FailedRemote,
                 ClipboardDelivery::Failed,
-                "Copy failed. Try /doctor or /minimal.",
+                "Copy failed. Try /doctor.",
                 "failed_remote",
                 120,
             ),
             (
                 ClipboardFeedback::Failed,
                 ClipboardDelivery::Failed,
-                "Copy failed. Try /doctor or /minimal.",
+                "Copy failed. Try /doctor.",
                 "failed",
                 120,
             ),

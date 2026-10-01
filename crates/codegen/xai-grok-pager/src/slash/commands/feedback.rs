@@ -3,7 +3,7 @@
 use crate::app::actions::Action;
 use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand, slash_meta};
 
-/// Bare `/feedback` opens the feedback modal in every screen mode; `/feedback <text>` sends immediately,
+/// Bare `/feedback` opens the feedback modal; `/feedback <text>` sends immediately,
 /// without a model turn and without waiting on the prompt queue.
 pub struct FeedbackCommand;
 
@@ -44,7 +44,6 @@ impl SlashCommand for FeedbackCommand {
             "feedback.command",
             ctx.session_id.map(|s| s.0.as_ref()),
             Some(serde_json::json!({
-                "screen_mode": ctx.screen_mode.meta_label(),
                 "arg_chars": user_text.chars().count(),
                 "action": action,
             })),
@@ -64,7 +63,6 @@ mod tests {
             models,
             session_id: None,
             bundle_state: bundle,
-            screen_mode: crate::app::ScreenMode::Inline,
             billing_surface_visible: true,
             usage_command_visible: true,
             pager_state: crate::settings::PagerLocalSnapshot::default(),

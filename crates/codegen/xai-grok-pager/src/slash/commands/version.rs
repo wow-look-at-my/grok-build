@@ -28,7 +28,6 @@ impl SlashCommand for VersionCommand {
             &xai_grok_version::installed(),
             xai_grok_version::BUILD_COMMIT_SHORT,
             xai_grok_version::BUILD_COMMIT,
-            xai_grok_update::channel_label(),
             &binary_identity(),
         ))
     }
@@ -40,10 +39,9 @@ fn version_report(
     version: &str,
     commit_short: &str,
     commit_full: &str,
-    channel_label: &str,
     identity: &BinaryIdentity,
 ) -> String {
-    let mut out = format!("grok {version}{channel_label}");
+    let mut out = format!("grok {version}");
     if commit_short == "unknown" {
         // A build from outside a git worktree; say so rather than printing a
         // word that reads like a commit.
@@ -112,11 +110,10 @@ mod tests {
             "0.2.7",
             "324f371",
             "324f371aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            " [stable]",
             &identity(BinaryFreshness::Current),
         );
         assert!(
-            report.starts_with("grok 0.2.7 [stable] (commit 324f371)"),
+            report.starts_with("grok 0.2.7 (commit 324f371)"),
             "{report}"
         );
         assert!(
@@ -139,7 +136,6 @@ mod tests {
             "0.2.7",
             "324f371",
             "324f371aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            "",
             &identity(BinaryFreshness::Stale {
                 installed: PathBuf::from("/h/.grok/versions/0.2.8/grok"),
             }),
@@ -156,7 +152,6 @@ mod tests {
             "0.2.7",
             "unknown",
             "unknown",
-            "",
             &identity(BinaryFreshness::Unmanaged),
         );
         assert!(report.contains("no commit stamped"), "{report}");

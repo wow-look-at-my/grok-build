@@ -1819,22 +1819,6 @@ fn errored_edit_does_not_coalesce() {
     .unwrap();
 }
 #[test]
-fn committed_edit_does_not_coalesce() {
-    std::thread::spawn(|| {
-        crate::appearance::cache::set_collapsed_edit_blocks(true);
-        let mut sb = ScrollbackState::new();
-        let mut tracker = AcpUpdateTracker::new();
-        run_edit(&mut tracker, &mut sb, "e1", "foo.rs", 5);
-        sb.mark_committed(0);
-        run_edit(&mut tracker, &mut sb, "e2", "foo.rs", 40);
-        assert_eq!(sb.len(), 2, "a committed row never merges");
-        assert_eq!(edit_block_at(&sb, 0).hunks.len(), 1);
-        assert_eq!(edit_block_at(&sb, 1).hunks.len(), 1);
-    })
-    .join()
-    .unwrap();
-}
-#[test]
 fn untrusted_summary_edit_does_not_coalesce() {
     std::thread::spawn(|| {
         crate::appearance::cache::set_collapsed_edit_blocks(true);

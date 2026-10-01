@@ -66,7 +66,6 @@ impl AgentView {
             workflows_available: slash_controller.workflows_available(),
             saved_workflows: slash_controller.registry().saved_workflows(),
             workflow_runs: slash_controller.workflow_runs(),
-            screen_mode: slash_controller.screen_mode(),
             current_title: slash_controller.current_title(),
         };
         let Some(model_items) = cmd.suggest_args(&ctx, "") else {
@@ -726,7 +725,6 @@ impl AgentView {
                 let filtered = crate::views::modal::filter_palette_entries(
                     state.query(),
                     self.sharing_enabled,
-                    &self.prompt.slash_controller,
                 );
                 let non_sel: Vec<bool> = filtered
                     .iter()
@@ -852,10 +850,6 @@ impl AgentView {
                                 self.active_modal = None;
                                 InputOutcome::Action(Action::OpenFeedbackModal(Default::default()))
                             }
-                            PaletteCommand::EditPromptExternal => {
-                                self.active_modal = None;
-                                InputOutcome::Action(Action::EditPromptExternal)
-                            }
                             PaletteCommand::SlashCommand(text) => {
                                 let trimmed = text
                                     .trim_start_matches('/')
@@ -942,7 +936,6 @@ impl AgentView {
                             *entries = crate::views::modal::filter_palette_entries(
                                 state.query(),
                                 sharing_enabled,
-                                &self.prompt.slash_controller,
                             );
                             state.selected = state.selected.min(entries.len().saturating_sub(1));
                         }
@@ -1687,7 +1680,6 @@ impl AgentView {
     }
 
     /// Draw the active modal overlay: the per-`ActiveModal`-variant render dispatch, called from `draw` which early-returns afterwards.
-    /// `pub(crate)` so minimal mode's overlay host can reuse the exact same centered-popup rendering.
     /// Allow inherited from `draw`: covers the nested picker render helpers.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn draw_active_modal(
@@ -1731,11 +1723,7 @@ impl AgentView {
             } = active_modal
             {
                 // Command palette: ModalWindow chrome and picker content
-                let filtered = modal::filter_palette_entries(
-                    state.query(),
-                    self.sharing_enabled,
-                    &self.prompt.slash_controller,
-                );
+                let filtered = modal::filter_palette_entries(state.query(), self.sharing_enabled);
                 let non_sel: Vec<bool> = filtered
                     .iter()
                     .map(|e| matches!(e.command, modal::PaletteCommand::SectionHeader(_)))
@@ -3069,10 +3057,7 @@ mod command_palette_vim_input_tests {
     // Open the command palette exactly as the Ctrl+P handler does: type-to-find INPUT mode (`input_active`) over the full palette entries
     fn open_command_palette(agent: &mut AgentView) {
         agent.active_modal = Some(ActiveModal::CommandPalette {
-            entries: crate::views::modal::default_palette_entries(
-                agent.sharing_enabled,
-                &agent.prompt.slash_controller,
-            ),
+            entries: crate::views::modal::default_palette_entries(agent.sharing_enabled),
             state: PickerState::input_active(),
             window: crate::views::modal_window::ModalWindowState::new(),
         });
@@ -3095,16 +3080,10 @@ mod command_palette_vim_input_tests {
     }
 
     #[test]
-    fn minimal_palette_shortcuts_uses_live_configured_registry() {
+    fn palette_shortcuts_uses_live_configured_registry() {
         let mut agent = make_agent();
-        agent
-            .prompt
-            .set_screen_mode(crate::app::ScreenMode::Minimal);
         agent.active_modal = Some(ActiveModal::CommandPalette {
-            entries: crate::views::modal::default_palette_entries(
-                agent.sharing_enabled,
-                &agent.prompt.slash_controller,
-            ),
+            entries: crate::views::modal::default_palette_entries(agent.sharing_enabled),
             state: {
                 let mut state = PickerState::input_active();
                 state.set_query("keyboard shortcuts");
@@ -3113,12 +3092,8 @@ mod command_palette_vim_input_tests {
             },
             window: crate::views::modal_window::ModalWindowState::new(),
         });
-        // Start from the real minimal set, then inject the existing config-gated action in a supported context
-        // This pins that modal dispatch preserves the exact live registry rather than reconstructing any defaults
-        let mut actions =
-            crate::actions::ActionRegistry::defaults_for(crate::app::ScreenMode::Minimal)
-                .all()
-                .to_vec();
+        // Start from the real default set.
+        let mut actions = crate::actions::ActionRegistry::defaults().all().to_vec();
         let mut config_gated = crate::actions::ActionRegistry::defaults_with_config(true)
             .find(crate::actions::ActionId::ToggleMouseCapture)
             .expect("config-gated action")
@@ -3145,40 +3120,8 @@ mod command_palette_vim_input_tests {
                 _ => None,
             })
             .collect();
-        assert!(action_ids.contains(&crate::actions::ActionId::EditPromptExternal));
-        assert!(!action_ids.contains(&crate::actions::ActionId::ToggleTasks));
+        assert!(action_ids.contains(&crate::actions::ActionId::ToggleTasks));
         assert!(action_ids.contains(&crate::actions::ActionId::ToggleMouseCapture));
-        assert!(!action_ids.contains(&crate::actions::ActionId::OpenDashboard));
-    }
-
-    #[test]
-    fn minimal_edit_prompt_palette_selection_preserves_draft() {
-        let mut agent = make_agent();
-        agent
-            .prompt
-            .set_screen_mode(crate::app::ScreenMode::Minimal);
-        agent.prompt.set_text("keep this draft");
-        agent.active_modal = Some(ActiveModal::CommandPalette {
-            entries: crate::views::modal::default_palette_entries(
-                agent.sharing_enabled,
-                &agent.prompt.slash_controller,
-            ),
-            state: {
-                let mut state = PickerState::input_active();
-                // Contiguous substring of the label ("Edit Prompt in External Editor").
-                state.set_query("external editor");
-                state.selected = 1; // matching section header is row 0
-                state
-            },
-            window: crate::views::modal_window::ModalWindowState::new(),
-        });
-        let out = agent.handle_modal_key(&KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        assert!(matches!(
-            out,
-            InputOutcome::Action(crate::app::actions::Action::EditPromptExternal)
-        ));
-        assert_eq!(agent.prompt.text(), "keep this draft");
-        assert!(agent.active_modal.is_none());
     }
 
     /// Headline command-palette vim flow: a CI-runnable mirror of the ignored PTY scenario `vim_modal_command_palette.yaml`.

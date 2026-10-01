@@ -181,35 +181,6 @@
     }
 
     #[test]
-    fn recap_reprints_fresh_block_when_spinner_already_committed() {
-        let mut agent = make_agent(Some("s1"));
-        let spinner = agent
-            .scrollback
-            .push(crate::scrollback::entry::ScrollbackEntry::running(
-                recap_block(""),
-            ));
-        agent.pending_recap_entry = Some(spinner);
-        agent.scrollback.finish_running(spinner);
-        agent.scrollback.mark_committed(0);
-        agent.scrollback.set_commit_scan_cursor(1);
-        assert!(agent.scrollback.is_committed(spinner));
-
-        apply_recap_block(&mut agent, false, recap_block("THE RECAP"));
-
-        assert_eq!(
-            agent.scrollback.len(),
-            1,
-            "stale committed spinner dropped, fresh block appended"
-        );
-        let fresh = agent.scrollback.get(0).expect("fresh block");
-        assert_ne!(fresh.id, spinner, "a NEW entry, not the committed one");
-        assert!(
-            !agent.scrollback.is_committed(fresh.id),
-            "fresh block is uncommitted so the commit pass will print it"
-        );
-    }
-
-    #[test]
     fn auto_recap_appends_and_leaves_manual_spinner_pending() {
         let mut agent = make_agent(Some("s1"));
         let spinner = agent

@@ -86,10 +86,6 @@ name = "pty_e2e_scroll_selection"
 path = "tests/pty_e2e_scroll_selection.rs"
 
 [[test]]
-name = "pty_e2e_minimal"
-path = "tests/pty_e2e_minimal.rs"
-
-[[test]]
 name = "pty_e2e_config_ui"
 path = "tests/pty_e2e_config_ui.rs"
 

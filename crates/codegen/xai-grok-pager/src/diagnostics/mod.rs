@@ -231,7 +231,7 @@ pub(crate) fn collect_startup_warnings_from(
         warning.note = Some(
             "Grok also saves each copy to the backup file shown in the copy message. To copy \
              directly, run `grok wrap ssh <host>` on your local computer or use a terminal that \
-             supports OSC 52. You can also use `/copy <file>` or `/minimal`."
+             supports OSC 52. You can also use `/copy <file>`."
                 .to_owned(),
         );
         warnings.push(warning);

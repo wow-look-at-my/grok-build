@@ -36,14 +36,8 @@ pub enum SwitchModelError {
 pub enum Action {
     /// Quit the application.
     Quit,
-    /// Restart the binary to pick up a downloaded update.
-    QuitForUpdate,
     /// Resume the recent foreign session offered on the launch welcome screen.
     ResumeForeignSession,
-    /// Re-exec into the other screen mode (`true` means minimal).
-    RelaunchInScreenMode {
-        minimal: bool,
-    },
     /// Quit without double-press confirmation (e.g., from command palette or pre-login screens).
     QuitConfirmed,
     /// Create a new session from the welcome screen.
@@ -357,10 +351,6 @@ pub enum Action {
     /// The inline TUI is suspended for the duration.
     /// The dispatch handler renders and writes the file and arms `AppView::pending_pager_path`; the event loop does the suspend/restore.
     OpenTranscriptPager,
-    /// Minimal mode (`grok --minimal`): re-print the last committed folded block, fully expanded, into native scrollback below the conversation.
-    /// Folded means collapsed reasoning or truncated tool output.
-    /// Bound to `Ctrl+E` and the `/expand` command. No-op outside minimal mode or when nothing folded remains to expand.
-    MinimalExpandLast,
     /// Copy selected block's metadata (e.g., command for execute blocks).
     CopyBlockMeta,
     /// Open the selected block in the fullscreen viewer.
@@ -511,8 +501,6 @@ pub enum Action {
     SetDefaultSelectedPermission(String),
     /// Set the hunk-tracker mode. Payload is the registry canonical string.
     SetHunkTrackerMode(String),
-    /// Set default screen mode (`fullscreen` | `minimal`); restart-required.
-    SetScreenMode(String),
     /// Enable/disable the Ctrl+Space / F8 voice-dictation shortcut. SHELL-owned; persisted to `[ui].voice_keybind_enabled`.
     /// Takes effect on the next keypress; `/voice` is unaffected.
     SetVoiceKeybindEnabled(bool),
@@ -605,9 +593,6 @@ pub enum Action {
     /// Commit the `show_tips` preference. Persisted to `[cli].show_tips`.
     /// Restart-required: tips are resolved once at startup.
     SetShowTips(bool),
-    /// Commit the `auto_update` preference. Persisted to `[cli].auto_update`.
-    /// Restart-required: auto-update check fires once at startup.
-    SetAutoUpdate(bool),
     /// Commit `[ui.display_refresh].auto_cadence_enabled`. Restart-required: cadence is pinned once at startup.
     SetDisplayRefreshAutoCadence(bool),
     /// Preview a theme without persisting; updates the live display only.
@@ -704,10 +689,8 @@ pub enum Action {
     /// `/usage manage`: open consumer billing (a no-op when billing is hidden).
     ManageBilling,
     /// Commit a read-only list of the queued prompts as a system block (`/queue`).
-    /// This is what minimal mode uses in place of the `QueuePane`.
     ShowQueue,
     /// Commit a read-only list of background tasks, subagents, and scheduled tasks as a system block (`/tasks`).
-    /// This is what minimal mode uses in place of the `TasksPane`.
     ShowTasks,
     /// Show the current plan: preview popover if exists, toast if not.
     ShowPlan,
@@ -979,8 +962,6 @@ pub enum Action {
         /// Reload `/config-agents` list after the editor exits (when set).
         refresh_agents_modal: Option<crate::views::agents_modal::AgentsTab>,
     },
-    /// Edit the current minimal-mode composer draft in an external editor.
-    EditPromptExternal,
     /// Toggle the expanded goal detail overlay.
     ToggleGoalDetail,
     ToggleWorkflows,
@@ -2110,8 +2091,6 @@ pub enum Effect {
         /// Composer images. Encoded off the TUI thread. Empty keeps the text-only wire.
         images: Vec<crate::prompt_images::PastedImage>,
         cwd: std::path::PathBuf,
-        /// Correlates minimal responses; fullscreen leaves this unset.
-        minimal_request_id: Option<uuid::Uuid>,
     },
     /// Fire a /todo capture via the x.ai/todo ext method.
     SendTodo {
@@ -2939,8 +2918,6 @@ pub enum TaskResult {
         agent_id: AgentId,
         session_id: acp::SessionId,
         info: Box<xai_grok_shell::session::SessionInfoResponse>,
-        /// Plain-text block for minimal-mode scrollback.
-        text: String,
         /// Structured rows for the modal (built upstream from typed data).
         fields: Vec<crate::views::usage_modal::SessionInfoField>,
         nonce: u64,
@@ -3106,8 +3083,6 @@ pub enum TaskResult {
     BtwResponse {
         agent_id: AgentId,
         result: Result<String, String>,
-        /// Correlates minimal responses; fullscreen leaves this unset.
-        minimal_request_id: Option<uuid::Uuid>,
         /// Set when attached images were left out of the side question.
         image_notice: Option<String>,
         /// Attachments whose bytes could not be loaded; reported by display number.

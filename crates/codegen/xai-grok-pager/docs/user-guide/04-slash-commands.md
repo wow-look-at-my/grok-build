@@ -4,7 +4,7 @@ Type `/` in the prompt to open the command menu. It fuzzy-matches as you type, a
 
 Commands come from two places: **shell builtins**, handled by the agent backend (xai-grok-shell), and **pager builtins**, handled by the pager frontend (xai-grok-pager). Both show up in the same menu, and any enabled skill with `user-invocable: true` appears there too. If a skill reuses a built-in name such as `login`, the built-in keeps `/login` and the skill stays available as `/plugin-name:login` — the menu badges both so the collision is visible.
 
-Every command below lists its aliases where it has them. A few commands only appear when a feature or session state enables them; those cases are called out inline. The menu is also filtered by render mode — see [`/minimal` and `/fullscreen`](#minimal-and-fullscreen).
+Every command below lists its aliases where it has them. A few commands only appear when a feature or session state enables them; those cases are called out inline.
 
 ---
 
@@ -22,7 +22,7 @@ Open the session picker to reload a previous session from disk.
 
 Open the [Agent Dashboard](23-dashboard.md): live roster of top-level sessions in this pager (peek, reply, dispatch, pin, rename, stop, attach). Aliases: `/agents-dashboard`, `/sessions`.
 
-Not `/config-agents` (alias `/agents`), which manages agent *definitions* and personas. Hidden in minimal mode; disable with `GROK_AGENT_DASHBOARD=0` or `[dashboard].enabled = false`.
+Not `/config-agents` (alias `/agents`), which manages agent *definitions* and personas. Disable with `GROK_AGENT_DASHBOARD=0` or `[dashboard].enabled = false`.
 
 ### `/compact [context]`
 
@@ -144,20 +144,6 @@ Toggle compact display — less padding and tighter spacing for denser output.
 ### `/vim-mode`
 
 Toggle vim-style scrollback keys (`j`/`k`, `h`/`l`, `g`/`G`, `y`/`Y`, and so on). With it off (the default), a bare letter or `Shift+letter` in the scrollback just focuses the prompt and types the character. The setting persists to `[ui] vim_mode`.
-
-### `/edit-prompt`
-
-Open an external editor for the prompt, in either render mode. Grok resolves `$VISUAL`, then `$EDITOR`, then `vi`; command values may include quoted arguments. Saving replaces the draft without sending it, and saving an empty file clears it. Typing `/edit-prompt` necessarily replaces the composer's contents, so the editor starts from an empty draft; to edit an **existing** draft, choose **Edit Prompt in External Editor** from the command palette (or press `Ctrl+G` in minimal mode), which preserves the text and refuses pasted, file-reference, or image chips without flattening them.
-
-```
-/edit-prompt
-```
-
-### `/minimal` and `/fullscreen`
-
-Switch the current session to the other render mode, in place. `/minimal` (offered while you're in fullscreen) switches to the experimental scrollback-native mode; `/fullscreen` (offered while you're in minimal; alias `/full`) switches back to standard fullscreen mode. The switch happens inside the running process — nothing restarts, so a running turn keeps streaming and your composer draft, queued prompts, and permission mode all carry over; a marker (committed line in minimal, toast in fullscreen) reminds you how to switch back. Both are session-scoped — they don't touch `config.toml` — and the `--minimal` / `--fullscreen` CLI flags are session-scoped the same way. To make plain `grok` open in a given mode by default, use `/settings` → **Default screen mode** or set `[ui] screen_mode`. (If the in-place transition misbehaves in an exotic terminal, `GROK_SCREEN_MODE_SWITCH=exec` restores the old behavior of relaunching the pager onto the same session.)
-
-A handful of commands only work in one of the two modes, because the surface they drive doesn't exist in the other: `/find`, `/jump`, `/timeline`, `/theme`, `/tutorial`, and `/dashboard` are fullscreen-only, while `/expand` is minimal-only. (`/workflow runs` is different: it opens the run pane in fullscreen and degrades to a text overview in minimal rather than refusing.) Those are hidden from the command menu and the palette in the mode they can't run in. If you type one out anyway, Grok says why — and points you at whichever is actually useful. When the other mode is the only way to get it, that's the mode switch: `/theme isn't available in minimal mode (minimal renders with your terminal's own palette). Run /fullscreen to switch this session.` When this mode already does the job another way, it names that instead: `/expand isn't available in fullscreen mode: press Tab to focus the scrollback, then → on the block.` Everything else works in both. Note that `--no-alt-screen` still counts as fullscreen here, so it keeps the fullscreen-only commands.
 
 ### `/plan`
 
@@ -313,7 +299,7 @@ Type `/workflow` and a space to autocomplete saved workflow names (built-in, pro
 /workflow save review-changes
 ```
 
-`/workflow runs` opens the live **Workflow Runs** dashboard in the fullscreen TUI — active and retained runs, not a catalog of saved definitions. Each row shows the run's display name, phase, agent roster, progress, and result. Inside a run's detail view, `p` pauses, `r` resumes an ordinary pause, and `x` stops. Budget-limited runs can't bare-resume: `r` returns the shell's rejection (raise the cap with a model/tool resume that passes a higher `agent_budget`), while `x` still stops. `s` saves the run's script, but it's hidden for known built-ins and numbered duplicate handles — for those, choose a new unique `meta.name` and save the edited script explicitly. In minimal mode and non-TUI clients, `/workflow runs` prints the same text overview as bare `/workflow`.
+`/workflow runs` opens the live **Workflow Runs** dashboard in the fullscreen TUI — active and retained runs, not a catalog of saved definitions. Each row shows the run's display name, phase, agent roster, progress, and result. Inside a run's detail view, `p` pauses, `r` resumes an ordinary pause, and `x` stops. Budget-limited runs can't bare-resume: `r` returns the shell's rejection (raise the cap with a model/tool resume that passes a higher `agent_budget`), while `x` still stops. `s` saves the run's script, but it's hidden for known built-ins and numbered duplicate handles — for those, choose a new unique `meta.name` and save the edited script explicitly. In non-TUI clients, `/workflow runs` prints the same text overview as bare `/workflow`.
 
 Project workflows live in `.grok/workflows/*.rhai`; user workflows live in `~/.grok/workflows/*.rhai`. A same-process pause/resume continues the original immutable script, args, and `agent_budget` cap from committed host-call results — to iterate, edit the returned script copy and launch it as a new run.
 
@@ -333,7 +319,7 @@ Switch the color theme. Alias: `/t`.
 
 ### `/feedback [message]`
 
-Report an issue or send feedback. Bare `/feedback` opens the feedback form in every mode, including `--minimal`. Its **Write** tab is a report box: `Enter` sends, `Esc` closes. Its **Drafts** tab (`Ctrl+Tab` switches) holds reports saved for later — failed sends and feedback the agent drafted for you — and `Enter` loads one into Write so you can review, pick a type, and send it. `/feedback <message>` sends the message immediately, in any mode; if the send fails, the message is saved to Drafts.
+Report an issue or send feedback. Bare `/feedback` opens the feedback form. Its **Write** tab is a report box: `Enter` sends, `Esc` closes. Its **Drafts** tab (`Ctrl+Tab` switches) holds reports saved for later — failed sends and feedback the agent drafted for you — and `Enter` loads one into Write so you can review, pick a type, and send it. `/feedback <message>` sends the message immediately; if the send fails, the message is saved to Drafts.
 
 ```
 /feedback
@@ -342,7 +328,7 @@ Report an issue or send feedback. Bare `/feedback` opens the feedback form in ev
 
 ### `/btw`
 
-Send an aside to the agent without interrupting the current task. In minimal mode (`--minimal`), the answer shows up in a dismissible panel above the prompt: `Esc` dismisses it, a finished answer is saved into native scrollback, and a late reply to an already-dismissed panel is dropped. The side question and its answer aren't part of the main turn.
+Send an aside to the agent without interrupting the current task. The side question and its answer aren't part of the main turn.
 
 `/btw` can also appear mid-message: the whole message (minus the token) becomes the side question and nothing goes to the main turn. Only `/btw` works this way; other commands must start the message. For a multi-line side question, use `Alt+Enter` (over SSH) or `Shift+Enter`, a trailing `\`, or `/ml`. Do not rely on `Cmd+Enter`: Apple Terminal inserts a newline locally via CoreGraphics; a delivered `SUPER+Enter` (Kitty) also inserts a newline rather than sending; over SSH Cmd never arrives and the chord sends.
 

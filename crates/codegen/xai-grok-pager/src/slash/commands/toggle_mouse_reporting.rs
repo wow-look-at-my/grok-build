@@ -55,7 +55,6 @@ mod tests {
             models,
             session_id: None,
             bundle_state: bundle,
-            screen_mode: crate::app::ScreenMode::Inline,
             billing_surface_visible: true,
             usage_command_visible: true,
             pager_state: crate::settings::PagerLocalSnapshot::default(),
@@ -102,7 +101,6 @@ mod tests {
             workflows_available: true,
             saved_workflows: &[],
             workflow_runs: &[],
-            screen_mode: crate::app::ScreenMode::Fullscreen,
             current_title: None,
         };
         set_enabled(true);

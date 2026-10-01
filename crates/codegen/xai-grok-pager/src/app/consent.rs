@@ -441,8 +441,6 @@ pub struct ConsentInputs<'a> {
     pub answers: &'a BTreeMap<String, ConsentAnswer>,
     /// Whose answers count, so a second account on this machine is asked again.
     pub account: Option<&'a str>,
-    /// Minimal mode has no consent renderer, so it stays ungated.
-    pub minimal: bool,
 }
 
 /// Deliberately does not require the server ack: the local answer stops this machine re-asking.
@@ -463,10 +461,6 @@ fn already_answered(inputs: &ConsentInputs<'_>, notice: &ConsentNotice) -> bool 
 }
 
 pub fn consent_verdict(inputs: &ConsentInputs<'_>) -> ConsentState {
-    if inputs.minimal {
-        return ConsentState::Done;
-    }
-
     let Some(gate) = inputs.gate else {
         return ConsentState::Done;
     };

@@ -19,7 +19,6 @@ use super::prompt::{
     defer_to_open_reload_window, handle_compact_complete, handle_memory_command_complete,
     handle_prompt_response, handle_suggestion_debounce_expired,
 };
-use super::queue::push_and_page_flip;
 use super::rewind::{
     dispatch_rewind_success, handle_rewind_execute_failed, handle_rewind_points_loaded,
 };
@@ -1011,9 +1010,8 @@ pub(super) fn dispatch_task_result(result: TaskResult, app: &mut AppView) -> Vec
             file_urls,
         } => {
             let is_clipboard_key = ctx.source.is_clipboard_key();
-            let primary_hint_eligible = is_clipboard_key
-                && !app.screen_mode.is_minimal()
-                && crate::clipboard::x11_primary_guidance_available();
+            let primary_hint_eligible =
+                is_clipboard_key && crate::clipboard::x11_primary_guidance_available();
             let target = ctx.target.clone();
             let wrap_text = if is_clipboard_key {
                 ctx.source.text().map(str::to_owned)
@@ -1390,11 +1388,9 @@ pub(super) fn dispatch_task_result(result: TaskResult, app: &mut AppView) -> Vec
             agent_id,
             session_id,
             info,
-            text,
             fields,
             nonce,
         } => {
-            let minimal = app.screen_mode.is_minimal();
             if let Some(agent) = app.agents.get_mut(&agent_id) {
                 if agent.session.session_id.as_ref() != Some(&session_id) {
                     return vec![];
@@ -1412,11 +1408,6 @@ pub(super) fn dispatch_task_result(result: TaskResult, app: &mut AppView) -> Vec
                 if let Some(state) = usage_modal_state_mut(agent) {
                     state.session_fields = Some(fields);
                     state.session_error = None;
-                } else if minimal {
-                    push_and_page_flip(
-                        &mut agent.scrollback,
-                        crate::scrollback::block::RenderBlock::system(text),
-                    );
                 }
             }
             vec![]
@@ -1427,22 +1418,14 @@ pub(super) fn dispatch_task_result(result: TaskResult, app: &mut AppView) -> Vec
             error,
             nonce,
         } => {
-            let minimal = app.screen_mode.is_minimal();
             if let Some(agent) = app.agents.get_mut(&agent_id) {
                 if agent.session.session_id.as_ref() != Some(&session_id) {
                     return vec![];
                 }
-                if let Some(state) = usage_modal_state_mut(agent) {
-                    if state.fetch_nonce == nonce {
-                        state.session_error = Some(error);
-                    }
-                } else if minimal {
-                    push_and_page_flip(
-                        &mut agent.scrollback,
-                        crate::scrollback::block::RenderBlock::system(format!(
-                            "Couldn't load session info: {error}"
-                        )),
-                    );
+                if let Some(state) = usage_modal_state_mut(agent)
+                    && state.fetch_nonce == nonce
+                {
+                    state.session_error = Some(error);
                 }
             }
             vec![]
@@ -1646,24 +1629,16 @@ pub(super) fn dispatch_task_result(result: TaskResult, app: &mut AppView) -> Vec
             error,
             nonce,
         } => {
-            let minimal = app.screen_mode.is_minimal();
             let Some(agent) = app.agents.get_mut(&agent_id) else {
                 return vec![];
             };
             if agent.session.session_id.as_ref() != Some(&session_id) {
                 return vec![];
             }
-            if let Some(state) = usage_modal_state_mut(agent) {
-                if state.fetch_nonce == nonce {
-                    state.context_error = Some(error);
-                }
-            } else if minimal {
-                push_and_page_flip(
-                    &mut agent.scrollback,
-                    crate::scrollback::block::RenderBlock::system(format!(
-                        "Couldn't load context info: {error}"
-                    )),
-                );
+            if let Some(state) = usage_modal_state_mut(agent)
+                && state.fetch_nonce == nonce
+            {
+                state.context_error = Some(error);
             }
             vec![]
         }
@@ -2031,17 +2006,9 @@ pub(super) fn dispatch_task_result(result: TaskResult, app: &mut AppView) -> Vec
         TaskResult::BtwResponse {
             agent_id,
             result,
-            minimal_request_id,
             image_notice,
             skipped_image_numbers,
-        } => handle_btw_response(
-            app,
-            agent_id,
-            result,
-            minimal_request_id,
-            image_notice,
-            &skipped_image_numbers,
-        ),
+        } => handle_btw_response(app, agent_id, result, image_notice, &skipped_image_numbers),
         TaskResult::TodoCaptured {
             agent_id,
             request,

@@ -3661,8 +3661,6 @@ pub(crate) fn execute(
                 });
         }
         Effect::ShowSessionInfo { agent_id, session_id, show_resolved_model, nonce } => {
-            let is_api_key_auth = session_flags.is_api_key_auth;
-            let api_key_env_set = xai_grok_shell::agent::auth_method::has_xai_api_key_env();
             let tx = acp_tx.clone();
             tasks
                 .spawn(async move {
@@ -3670,13 +3668,6 @@ pub(crate) fn execute(
                         Ok(info) => {
                             let title = lookup_session_title(&session_id, &info.cwd)
                                 .await;
-                            let text = format_session_info(
-                                &info,
-                                title.as_deref(),
-                                show_resolved_model,
-                                is_api_key_auth,
-                                api_key_env_set,
-                            );
                             let fields = session_info_fields(
                                 &info,
                                 title.as_deref(),
@@ -3686,7 +3677,6 @@ pub(crate) fn execute(
                                 agent_id,
                                 session_id,
                                 info: Box::new(info),
-                                text,
                                 fields,
                                 nonce,
                             }
@@ -4483,7 +4473,6 @@ pub(crate) fn execute(
             question,
             images,
             cwd,
-            minimal_request_id,
         } => {
             let tx = acp_tx.clone();
             let is_api_key_auth = session_flags.is_api_key_auth;
@@ -4557,7 +4546,6 @@ pub(crate) fn execute(
                             TaskResult::BtwResponse {
                                 agent_id,
                                 result: Ok(answer),
-                                minimal_request_id,
                                 image_notice,
                                 skipped_image_numbers,
                             }
@@ -4566,7 +4554,6 @@ pub(crate) fn execute(
                             TaskResult::BtwResponse {
                                 agent_id,
                                 result: Err(format_acp_error(&e, is_api_key_auth)),
-                                minimal_request_id,
                                 image_notice,
                                 skipped_image_numbers,
                             }
@@ -5470,7 +5457,7 @@ fn session_info_fields(
     }
     push(
         "Shell version",
-        xai_grok_version::display_version(xai_grok_update::channel_label()),
+        xai_grok_version::version_with_commit().to_owned(),
         false,
     );
     push("Session ID", info.session_id.to_string(), false);
@@ -5506,47 +5493,6 @@ fn session_info_fields(
     );
     fields
 }
-/// The `/session-info` block as a plain string for minimal-mode scrollback.
-/// Built from [`session_info_fields`] (one `  Label: value` line each) with the auth prose spliced in after the shell version.
-/// That keeps it a single source of truth with the modal.
-fn format_session_info(
-    info: &SessionInfoResponse,
-    title: Option<&str>,
-    show_resolved_model: bool,
-    is_api_key_auth: bool,
-    api_key_env_set: bool,
-) -> String {
-    let auth_lines = format_auth_lines(is_api_key_auth, api_key_env_set);
-    let mut out = String::new();
-    for field in session_info_fields(info, title, show_resolved_model) {
-        out.push_str("  ");
-        out.push_str(field.label);
-        out.push_str(": ");
-        out.push_str(&field.value);
-        out.push('\n');
-        if field.label == "Shell version" {
-            out.push_str(&auth_lines);
-        }
-    }
-    out.truncate(out.trim_end_matches('\n').len());
-    out
-}
-/// Auth section for `/session-info`: active login method.
-///
-/// This reflects the process login / ACP auth method, not per-model sampling credentials (a model `api_key`/`env_key` can still own the turn).
-fn format_auth_lines(is_api_key_auth: bool, api_key_env_set: bool) -> String {
-    if is_api_key_auth {
-        let method = if api_key_env_set {
-            "  Auth method: API key (XAI_API_KEY)\n"
-        } else {
-            "  Auth method: API key\n"
-        };
-        return format!(
-            "{method}  Run `grok login` to use your SuperGrok subscription instead.\n"
-        );
-    }
-    String::from("  Auth method: OAuth\n")
-}
 /// Session replay then restyles the echo exactly like the composer highlighted it at submit time.
 /// This producer never combines them with a `displayText` override, and the tracker ignores them when one is present.
 /// Empty ranges keep `meta: None`, so the legacy wire shape stays byte-identical.
@@ -5571,7 +5517,7 @@ fn plain_prompt_content_block(
     acp::ContentBlock::Text(acp::TextContent::new(text).meta(meta))
 }
 /// Build the `PromptRequest._meta` payload: `promptId` for notification / response correlation, plus `screenMode`.
-/// `screenMode` is `fullscreen` | `inline` | `minimal` (headless stamps `"headless"` in its own path).
+/// `screenMode` is `fullscreen` | `inline` (headless stamps `"headless"` in its own path).
 /// `screen_mode` is `None` only under `SessionFlags::default()` (tests); the key is omitted then, keeping the legacy wire shape byte-identical.
 fn prompt_request_meta(
     prompt_id: &str,

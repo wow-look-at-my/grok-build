@@ -150,7 +150,6 @@ fn btw_response_does_not_flush_an_unrelated_queued_prompt() {
             skipped_image_numbers: Vec::new(),
             agent_id: AgentId(0),
             result: Ok("still waiting".into()),
-            minimal_request_id: None,
         },
         &mut app,
     );

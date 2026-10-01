@@ -277,14 +277,6 @@ fn retry_credit_limit_prompt_toasts_when_stash_empty() {
         .as_ref()
         .map(|(m, _)| m.as_str());
     assert_eq!(toast, Some("No prompt to retry."));
-    let has_system = (0..test_agent(&app, AgentId(0)).scrollback.len()).any(|i| {
-        matches!(
-            &test_agent(&app, AgentId(0)).scrollback.entry(i).unwrap().block,
-            crate::scrollback::block::RenderBlock::System(sys)
-                if sys.text.contains("No prompt to retry")
-        )
-    });
-    assert!(has_system, "minimal mode has no toast; need a system line");
 }
 
 #[test]
@@ -723,20 +715,6 @@ fn upsell_max_tier_idempotent_when_question_view_already_open() {
     );
 }
 
-fn is_session_usage_fetch(effects: &[Effect]) -> bool {
-    matches!(
-        effects,
-        [Effect::FetchSessionUsage { agent_id, .. }] if *agent_id == AgentId(0)
-    )
-}
-
-fn is_nonsilent_billing(effects: &[Effect]) -> bool {
-    matches!(
-        effects,
-        [Effect::FetchBilling { agent_id, silent, .. }] if *agent_id == AgentId(0) && !*silent
-    )
-}
-
 fn complete_session_usage(
     app: &mut AppView,
     session_id: &str,
@@ -763,35 +741,6 @@ fn fail_session_usage(app: &mut AppView, session_id: &str, error: &str) -> Vec<E
         }),
         app,
     )
-}
-
-#[test]
-fn show_usage_schedules_session_fetch_only() {
-    let mut app = test_app_with_agent();
-    // The scrollback usage flow only runs in Minimal screen mode
-    app.screen_mode = crate::app::ScreenMode::Minimal;
-    assert!(is_session_usage_fetch(&dispatch(
-        Action::ShowUsage,
-        &mut app
-    )));
-
-    app.usage_visible = false;
-    assert!(is_session_usage_fetch(&dispatch(
-        Action::ShowUsage,
-        &mut app
-    )));
-}
-
-#[test]
-fn show_usage_without_session_still_surfaces_credits() {
-    let mut app = test_app_with_agent();
-    app.screen_mode = crate::app::ScreenMode::Minimal;
-    app.agents.get_mut(&AgentId(0)).unwrap().session.session_id = None;
-    let before = agent_scrollback_len(&app);
-    let effects = dispatch(Action::ShowUsage, &mut app);
-    assert!(last_system_text(&app, AgentId(0)).contains("unavailable"));
-    assert_eq!(agent_scrollback_len(&app), before + 1);
-    assert!(is_nonsilent_billing(&effects));
 }
 
 #[test]
@@ -832,63 +781,6 @@ fn manage_billing_gates_on_consumer_billing_surface() {
 }
 
 #[test]
-fn session_usage_complete_pushes_block_and_chains_billing() {
-    let mut app = test_app_with_agent();
-    app.screen_mode = crate::app::ScreenMode::Minimal;
-    let before = agent_scrollback_len(&app);
-    let usage = xai_grok_shell::extensions::notification::PromptUsage {
-        totals: xai_grok_shell::extensions::notification::PromptUsageModel {
-            input_tokens: 1_000,
-            output_tokens: 100,
-            total_tokens: 1_100,
-            model_calls: 3,
-            cost_usd_ticks: Some(5_000_000_000),
-            ..Default::default()
-        },
-        ..Default::default()
-    };
-    let effects = complete_session_usage(&mut app, "test-session", usage);
-    assert_eq!(agent_scrollback_len(&app), before + 1);
-    let text = last_system_text(&app, AgentId(0));
-    assert!(
-        text.contains("Session usage") && text.contains("$0.5000"),
-        "{text}"
-    );
-    assert!(is_nonsilent_billing(&effects));
-}
-
-#[test]
-fn session_usage_complete_no_billing_when_surface_hidden() {
-    let mut app = test_app_with_agent();
-    app.screen_mode = crate::app::ScreenMode::Minimal;
-    app.usage_visible = false;
-    let before = agent_scrollback_len(&app);
-    let effects = complete_session_usage(&mut app, "test-session", Default::default());
-    assert!(effects.is_empty());
-    // Only the credit follow-up is gated; the session block itself must land.
-    assert_eq!(agent_scrollback_len(&app), before + 1);
-}
-
-#[test]
-fn session_usage_complete_redirect_after_session_block() {
-    let mut app = test_app_with_agent();
-    app.screen_mode = crate::app::ScreenMode::Minimal;
-    app.usage_billing_redirect_url = Some("https://billing.example.com/me".into());
-    // Dispatch defers the redirect until after the session block.
-    let before = agent_scrollback_len(&app);
-    assert!(is_session_usage_fetch(&dispatch(
-        Action::ShowUsage,
-        &mut app
-    )));
-    assert_eq!(agent_scrollback_len(&app), before);
-
-    let effects = complete_session_usage(&mut app, "test-session", Default::default());
-    assert!(effects.is_empty());
-    assert_eq!(agent_scrollback_len(&app), before + 2);
-    assert!(last_system_text(&app, AgentId(0)).contains("https://billing.example.com/me"));
-}
-
-#[test]
 fn session_usage_complete_drops_stale_session() {
     let mut app = test_app_with_agent();
     let before = agent_scrollback_len(&app);
@@ -906,17 +798,6 @@ fn session_usage_complete_drops_stale_session() {
     );
     assert!(effects.is_empty());
     assert_eq!(agent_scrollback_len(&app), before);
-}
-
-#[test]
-fn session_usage_failed_pushes_error_and_chains_billing() {
-    let mut app = test_app_with_agent();
-    app.screen_mode = crate::app::ScreenMode::Minimal;
-    let before = agent_scrollback_len(&app);
-    let effects = fail_session_usage(&mut app, "test-session", "boom");
-    assert_eq!(agent_scrollback_len(&app), before + 1);
-    assert!(last_system_text(&app, AgentId(0)).contains("Couldn't load session usage: boom"));
-    assert!(is_nonsilent_billing(&effects));
 }
 
 #[test]

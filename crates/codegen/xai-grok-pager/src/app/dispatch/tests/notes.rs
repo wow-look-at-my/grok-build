@@ -11,33 +11,6 @@ fn agent_ref(app: &AppView, id: AgentId) -> &AgentView {
     agent
 }
 
-fn send_minimal_btw(app: &mut AppView, question: &str) -> uuid::Uuid {
-    match dispatch(
-        Action::SendBtw {
-            question: question.into(),
-            images: Vec::new(),
-        },
-        app,
-    )
-    .as_slice()
-    {
-        [
-            Effect::SendBtw {
-                minimal_request_id: Some(id),
-                ..
-            },
-        ] => *id,
-        other => panic!("expected correlated minimal /btw effect, got {other:?}"),
-    }
-}
-
-fn esc() -> crossterm::event::Event {
-    crossterm::event::Event::Key(crossterm::event::KeyEvent::new(
-        crossterm::event::KeyCode::Esc,
-        crossterm::event::KeyModifiers::NONE,
-    ))
-}
-
 #[test]
 fn remember_save_carries_the_session_pinned_mode() {
     let mut app = test_app_with_agent();
@@ -290,196 +263,6 @@ fn recap_request_transport_failure_with_turns_uses_generic_toast() {
 }
 
 #[test]
-fn minimal_btw_response_after_esc_is_ignored() {
-    let mut app = test_app_with_agent();
-    app.screen_mode = crate::app::ScreenMode::Minimal;
-    let id = AgentId(0);
-    app.agents.get_mut(&id).unwrap().active_pane = crate::app::agent_view::AgentPane::Prompt;
-    let request_id = send_minimal_btw(&mut app, "side question");
-
-    let _ = app.handle_input(&esc());
-    assert!(agent_ref(&app, id).btw_state.is_none());
-
-    dispatch(
-        Action::TaskComplete(TaskResult::BtwResponse {
-            image_notice: None,
-            skipped_image_numbers: vec![2],
-            agent_id: id,
-            result: Ok("late".into()),
-            minimal_request_id: Some(request_id),
-        }),
-        &mut app,
-    );
-
-    assert!(agent_ref(&app, id).btw_state.is_none());
-    assert!(
-        !has_skipped_image_notice(&app, id),
-        "a dismissed side question must not report its images either"
-    );
-}
-
-/// Whether the agent shows the unreadable-image notice on either surface.
-fn has_skipped_image_notice(app: &AppView, id: AgentId) -> bool {
-    let agent = agent_ref(app, id);
-    let in_transcript = agent.scrollback.iter_entries().any(|(_, entry)| {
-        matches!(&entry.block, RenderBlock::System(block) if block.text.contains("couldn't be read"))
-    });
-    in_transcript
-        || agent
-            .toast
-            .as_ref()
-            .is_some_and(|(message, _)| message.contains("couldn't be read"))
-}
-
-#[test]
-fn minimal_done_dismisses_to_exactly_one_btw_block() {
-    let mut app = test_app_with_agent();
-    app.screen_mode = crate::app::ScreenMode::Minimal;
-    let id = AgentId(0);
-    app.agents.get_mut(&id).unwrap().active_pane = ActivePane::Prompt;
-    let request_id = send_minimal_btw(&mut app, "original question");
-    dispatch(
-        Action::TaskComplete(TaskResult::BtwResponse {
-            image_notice: None,
-            skipped_image_numbers: Vec::new(),
-            agent_id: id,
-            result: Ok("original answer".into()),
-            minimal_request_id: Some(request_id),
-        }),
-        &mut app,
-    );
-
-    let _ = app.handle_input(&esc());
-
-    let btw_blocks: Vec<_> = agent_ref(&app, id)
-        .scrollback
-        .iter_entries()
-        .filter_map(|(_, entry)| match &entry.block {
-            RenderBlock::Btw(block) => Some(block),
-            _ => None,
-        })
-        .collect();
-    let [btw] = btw_blocks.as_slice() else {
-        panic!("expected exactly one btw block, got {btw_blocks:?}");
-    };
-    assert_eq!(btw.question, "original question");
-    assert_eq!(btw.content().text(), "original answer");
-}
-
-#[test]
-fn minimal_btw_requests_stay_independent_across_two_agents() {
-    let mut app = test_app_with_agent();
-    app.screen_mode = crate::app::ScreenMode::Minimal;
-    let first = AgentId(0);
-    let second = AgentId(1);
-    insert_placeholder_agent(&mut app, second);
-
-    let first_old = send_minimal_btw(&mut app, "first old");
-    let first_current = send_minimal_btw(&mut app, "first new");
-
-    switch_to_agent(&mut app, second, SwitchCause::Picker);
-    let second_request = send_minimal_btw(&mut app, "second");
-
-    // Deliver the background first-agent responses while the second agent is active.
-    dispatch(
-        Action::TaskComplete(TaskResult::BtwResponse {
-            image_notice: None,
-            skipped_image_numbers: vec![2],
-            agent_id: first,
-            result: Ok("stale first answer".into()),
-            minimal_request_id: Some(first_old),
-        }),
-        &mut app,
-    );
-    assert!(matches!(
-        agent_ref(&app, first).btw_state,
-        Some(crate::views::btw_overlay::BtwOverlayState::Loading { ref question })
-            if question == "first new"
-    ));
-    assert!(
-        !has_skipped_image_notice(&app, first) && !has_skipped_image_notice(&app, second),
-        "a superseded side question must not report its images"
-    );
-    dispatch(
-        Action::TaskComplete(TaskResult::BtwResponse {
-            image_notice: None,
-            skipped_image_numbers: Vec::new(),
-            agent_id: first,
-            result: Ok("current first answer".into()),
-            minimal_request_id: Some(first_current),
-        }),
-        &mut app,
-    );
-    assert!(matches!(
-        agent_ref(&app, first).btw_state,
-        Some(crate::views::btw_overlay::BtwOverlayState::Done { ref question, .. })
-            if question == "first new"
-    ));
-    assert!(matches!(
-        agent_ref(&app, second).btw_state,
-        Some(crate::views::btw_overlay::BtwOverlayState::Loading { ref question })
-            if question == "second"
-    ));
-
-    // Dismiss the active second request, then its later response must be ignored.
-    app.agents.get_mut(&second).unwrap().active_pane = ActivePane::Prompt;
-    let _ = app.handle_input(&esc());
-    dispatch(
-        Action::TaskComplete(TaskResult::BtwResponse {
-            image_notice: None,
-            skipped_image_numbers: Vec::new(),
-            agent_id: second,
-            result: Ok("late second answer".into()),
-            minimal_request_id: Some(second_request),
-        }),
-        &mut app,
-    );
-    assert!(agent_ref(&app, second).btw_state.is_none());
-    assert!(agent_ref(&app, second).minimal_btw_lifecycle.is_none());
-    assert!(matches!(
-        agent_ref(&app, first).btw_state,
-        Some(crate::views::btw_overlay::BtwOverlayState::Done { ref question, .. })
-            if question == "first new"
-    ));
-
-    // Reverse delivery order on fresh requests: active second completes first, then the background first response still resolves only the first panel
-    switch_to_agent(&mut app, first, SwitchCause::Picker);
-    let first_request = send_minimal_btw(&mut app, "first reverse");
-    switch_to_agent(&mut app, second, SwitchCause::Picker);
-    let second_request = send_minimal_btw(&mut app, "second reverse");
-    dispatch(
-        Action::TaskComplete(TaskResult::BtwResponse {
-            image_notice: None,
-            skipped_image_numbers: Vec::new(),
-            agent_id: second,
-            result: Ok("second reverse answer".into()),
-            minimal_request_id: Some(second_request),
-        }),
-        &mut app,
-    );
-    dispatch(
-        Action::TaskComplete(TaskResult::BtwResponse {
-            image_notice: None,
-            skipped_image_numbers: Vec::new(),
-            agent_id: first,
-            result: Ok("first reverse answer".into()),
-            minimal_request_id: Some(first_request),
-        }),
-        &mut app,
-    );
-    assert!(matches!(
-        agent_ref(&app, second).btw_state,
-        Some(crate::views::btw_overlay::BtwOverlayState::Done { ref question, .. })
-            if question == "second reverse"
-    ));
-    assert!(matches!(
-        agent_ref(&app, first).btw_state,
-        Some(crate::views::btw_overlay::BtwOverlayState::Done { ref question, .. })
-            if question == "first reverse"
-    ));
-}
-
-#[test]
 fn fullscreen_btw_response_after_dismiss_keeps_existing_behavior() {
     let mut app = test_app_with_agent();
     let id = AgentId(0);
@@ -490,13 +273,7 @@ fn fullscreen_btw_response_after_dismiss_keeps_existing_behavior() {
         },
         &mut app,
     );
-    assert!(matches!(
-        effects.as_slice(),
-        [Effect::SendBtw {
-            minimal_request_id: None,
-            ..
-        }]
-    ));
+    assert!(matches!(effects.as_slice(), [Effect::SendBtw { .. }]));
     app.agents.get_mut(&id).unwrap().btw_state = None;
 
     dispatch(
@@ -505,7 +282,6 @@ fn fullscreen_btw_response_after_dismiss_keeps_existing_behavior() {
             skipped_image_numbers: Vec::new(),
             agent_id: id,
             result: Ok("late".into()),
-            minimal_request_id: None,
         }),
         &mut app,
     );
@@ -539,7 +315,6 @@ fn btw_response_toasts_skipped_image_numbers() {
             skipped_image_numbers: vec![2],
             agent_id: id,
             result: Ok("answer".into()),
-            minimal_request_id: None,
         }),
         &mut app,
     );
@@ -556,24 +331,8 @@ fn btw_response_toasts_skipped_image_numbers() {
 }
 
 #[test]
-fn btw_no_session_feedback_is_mode_specific() {
+fn btw_no_session_toasts() {
     let id = AgentId(0);
-
-    let mut minimal = test_app_with_agent();
-    minimal.screen_mode = crate::app::ScreenMode::Minimal;
-    minimal.agents.get_mut(&id).unwrap().session.session_id = None;
-    assert!(
-        dispatch(
-            Action::SendBtw {
-                question: "q".into(),
-                images: Vec::new(),
-            },
-            &mut minimal,
-        )
-        .is_empty()
-    );
-    assert!(test_agent(&minimal, id).toast.is_none());
-    assert!(last_system_text(&minimal, id).contains("No active session"));
 
     let mut fullscreen = test_app_with_agent();
     fullscreen.agents.get_mut(&id).unwrap().session.session_id = None;
@@ -868,67 +627,6 @@ fn refused_bare_feedback_keeps_the_composer_image_and_is_visible() {
             "{refusal:?}: the refusal must be visible"
         );
     }
-}
-
-/// Minimal cannot show a toast, so the voice refusal lands in scrollback and the modal stays closed.
-#[test]
-fn minimal_voice_refusal_is_a_scrollback_block() {
-    use crate::app::app_view::{VoiceState, VoiceTarget};
-
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-    app.screen_mode = crate::app::ScreenMode::Minimal;
-    app.voice_state = VoiceState::Recording {
-        hold: false,
-        target: VoiceTarget::Agent(id),
-        interim: Some("dictated text".to_owned()),
-    };
-    app.agents
-        .get_mut(&id)
-        .unwrap()
-        .prompt
-        .set_text("/feedback ");
-
-    let effects = dispatch(Action::SendPrompt("/feedback ".to_owned()), &mut app);
-
-    assert!(effects.is_empty(), "{effects:?}");
-    let agent = test_agent(&app, id);
-    assert!(agent.feedback_modal.is_none());
-    assert!(agent.toast.is_none(), "toasts are invisible in minimal");
-    assert!(last_system_text(&app, id).contains("Stop voice input"));
-}
-
-/// Minimal hosts the form in its live band: a typed bare `/feedback` with a bound session opens it, lists
-/// drafts like the full TUI, and the `/btw` panel yields the band while it is open.
-#[test]
-fn minimal_typed_bare_feedback_opens_the_modal_and_yields_btw() {
-    use crate::views::feedback_modal::FeedbackDraftRequest;
-
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-    app.screen_mode = crate::app::ScreenMode::Minimal;
-    assert!(crate::minimal_api::minimal_btw_surface_available(
-        test_agent(&app, id)
-    ));
-
-    let effects = dispatch(Action::SendPrompt("/feedback".to_owned()), &mut app);
-
-    assert!(
-        matches!(
-            effects.as_slice(),
-            [Effect::FeedbackDraftRequest {
-                request: FeedbackDraftRequest::List { .. },
-                ..
-            }]
-        ),
-        "opening lists the session's drafts off-thread: {effects:?}"
-    );
-    let agent = test_agent(&app, id);
-    assert!(
-        agent.feedback_modal.is_some(),
-        "the form must open in minimal"
-    );
-    assert!(!crate::minimal_api::minimal_btw_surface_available(agent));
 }
 
 /// An accepted typed `/feedback` moves composer images into the modal and clears the draft.

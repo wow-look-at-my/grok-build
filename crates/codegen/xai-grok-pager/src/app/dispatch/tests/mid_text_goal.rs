@@ -150,17 +150,3 @@ fn literal_follow_up_with_goal_is_not_toasted() {
         "{effects:?}"
     );
 }
-
-#[test]
-fn mid_text_goal_in_minimal_is_a_system_line() {
-    let mut app = test_app_with_agent();
-    app.screen_mode = crate::app::ScreenMode::Minimal;
-    let id = AgentId(0);
-    register_goal(&mut app, id);
-
-    let effects = dispatch(Action::SendPrompt(TESLA.to_owned()), &mut app);
-
-    assert!(effects.is_empty(), "{effects:?}");
-    assert!(toast_text(&app, id).is_none());
-    assert_eq!(MID_TEXT_GOAL_NOTICE, last_system_text(&app, id));
-}

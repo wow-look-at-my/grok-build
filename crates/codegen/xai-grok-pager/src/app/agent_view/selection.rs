@@ -2807,45 +2807,6 @@ mod tests {
         );
     }
 
-    /// Replacing a minimal `/btw` panel must drop the previous overlay highlight.
-    #[test]
-    fn start_minimal_btw_clears_owned_overlay_selection() {
-        let mut agent = agent_with_btw_table();
-        let geometry = btw_table_geometry(&agent);
-        agent.persistent_text_selection = Some(PersistentTextSelection {
-            entry_idx: BTW_OVERLAY_ENTRY_IDX,
-            range_id: 0,
-            anchor: SelectionEndpoint {
-                block_line_idx: 0,
-                col_within_range: 0,
-            },
-            head: SelectionEndpoint {
-                block_line_idx: 0,
-                col_within_range: 4,
-            },
-            origin: SelectionOrigin::Drag,
-            kind: SelectionKind::TableCell,
-        });
-        agent.table_selection_geometry = Some(TableSelectionGeometry {
-            entry_idx: BTW_OVERLAY_ENTRY_IDX,
-            range_id: 0,
-            geometry: geometry.clone(),
-        });
-        agent.drag_table_geometry = Some(TableSelectionGeometry {
-            entry_idx: BTW_OVERLAY_ENTRY_IDX,
-            range_id: 0,
-            geometry,
-        });
-        agent.btw_selection_wrap_width = Some(BTW_TABLE_WIDTH);
-
-        let _ = crate::minimal_api::start_minimal_btw(&mut agent, "next".into());
-
-        assert!(agent.persistent_text_selection.is_none());
-        assert!(agent.table_selection_geometry.is_none());
-        assert!(agent.drag_table_geometry.is_none());
-        assert!(agent.btw_selection_wrap_width.is_none());
-    }
-
     fn mouse_up(col: u16, row: u16) -> MouseEvent {
         MouseEvent {
             kind: MouseEventKind::Up(MouseButton::Left),

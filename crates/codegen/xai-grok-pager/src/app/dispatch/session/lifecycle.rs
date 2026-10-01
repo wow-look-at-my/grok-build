@@ -1,7 +1,7 @@
 //! New, exit, cloud, and worktree session dispatchers plus trust and startup actions.
 use super::fork::{dispatch_startup_fork_session, worktree_persist_options};
 use super::load::dispatch_load_session;
-use super::modal::{drop_other_agents_in_minimal, remove_agent_and_cleanup};
+use super::modal::remove_agent_and_cleanup;
 use crate::acp::model_state::{EffortTokenError, ModelState};
 use crate::acp::tracker::AcpUpdateTracker;
 use crate::app::actions::{
@@ -430,10 +430,6 @@ pub(in crate::app::dispatch) fn dispatch_new_session_inner_with_id(
         app.optimistic_home_husk = Some(agent_id);
     } else {
         switch_to_agent(app, agent_id, SwitchCause::New);
-        effects.extend(drop_other_agents_in_minimal(app, agent_id));
-    }
-    if app.screen_mode.is_minimal() {
-        app.minimal_state.welcome_pending = true;
     }
     let chat_kind = if stay_on_welcome {
         false
@@ -480,9 +476,8 @@ pub(in crate::app::dispatch) fn dispatch_new_session_inner_with_id(
     (agent_id, effects)
 }
 /// Exit the current session and return to the welcome screen.
-/// Minimal has no welcome chrome, so this then opens an empty session (same as startup).
 pub(in crate::app::dispatch) fn dispatch_exit_session(app: &mut AppView) -> Vec<Effect> {
-    let mut effects =
+    let effects =
         unregister_session_effect(get_active_agent(app).and_then(|a| a.session.session_id.clone()));
     show_welcome(app);
     app.welcome_prompt_focused = true;
@@ -492,9 +487,6 @@ pub(in crate::app::dispatch) fn dispatch_exit_session(app: &mut AppView) -> Vec<
     app.session_picker_content_results = None;
     app.session_picker_content_loading = false;
     app.exit_session_pending = None;
-    if app.screen_mode.is_minimal() && !app.is_zdr_blocked() {
-        effects.extend(dispatch_new_session(app));
-    }
     effects
 }
 /// Aftermath for `/delete` on the active agent: dashboard overlay returns there; standalone agent sessions go home.
@@ -780,7 +772,6 @@ fn configure_agent_composer(app: &mut AppView, agent_id: AgentId) {
     let usage_visible = app.usage_visible;
     let usage_command_visible = !app.has_external_auth_provider;
     let chat_mode = app.chat_mode;
-    let screen_mode = app.screen_mode;
     let announcements = app.active_announcements.clone();
     let restricted = app.tier_restricted_commands.clone();
     let plugins_visible = !app.appearance.disable_plugins;
@@ -798,7 +789,6 @@ fn configure_agent_composer(app: &mut AppView, agent_id: AgentId) {
         usage_visible,
         usage_command_visible,
         chat_mode,
-        screen_mode,
         &announcements,
         &restricted,
     );
@@ -1260,7 +1250,6 @@ pub(in crate::app::dispatch) fn dispatch_new_worktree_session(
             app.usage_visible,
             !app.has_external_auth_provider,
             app.chat_mode,
-            app.screen_mode,
             &app.active_announcements,
             &app.tier_restricted_commands,
         );
@@ -1300,7 +1289,6 @@ pub(in crate::app::dispatch) fn dispatch_new_worktree_session(
         agent.session.enqueue_prompt(prompt);
     }
     switch_to_agent(app, agent_id, SwitchCause::New);
-    effects.extend(drop_other_agents_in_minimal(app, agent_id));
     if from_welcome {
         take_welcome_composer_onto_agent(app, agent_id);
         if let Some(agent) = app.agents.get_mut(&agent_id) {
@@ -1377,14 +1365,11 @@ pub(in crate::app::dispatch) fn handle_session_created(
     let identity_rebind = super::super::dashboard::WorkspaceIdentityRebind::capture(app);
     crate::app::workspace_sync::allow_loaded_session(app, session_id.0.as_ref());
     let agent_count = app.agents.len();
-    let switch_hint =
-        crate::views::dashboard::session_switch_hint_command(app.screen_mode.is_minimal());
-    let has_switch_target =
-        agent_count > 1 || (app.screen_mode.is_minimal() && app.next_agent_id > 1);
+    let switch_hint = crate::views::dashboard::session_switch_hint_command();
     if let Some(agent) = app.agents.get_mut(&agent_id) {
         let session_id_clone = session_id.clone();
         if agent.session.created_via_new
-            && has_switch_target
+            && agent_count > 1
             && let Some(cmd) = switch_hint
         {
             agent.scrollback.push_block(RenderBlock::system(format!(

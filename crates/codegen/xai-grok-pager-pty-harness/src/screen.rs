@@ -28,7 +28,7 @@ impl ScreenTracker {
         self.terminal.feed(bytes);
     }
 
-    /// Must be written back or terminal probes hang. A missed startup cursor-position query downgrades `--minimal` to full-screen inline.
+    /// Must be written back or terminal probes hang, such as the inline viewport's startup cursor-position query.
     pub fn drain_responses(&mut self) -> Vec<u8> {
         let mut out = Vec::new();
         while let Ok(bytes) = self.pty_write_rx.try_recv() {
@@ -80,7 +80,6 @@ impl ScreenTracker {
     }
 
     /// Number of lines in the terminal's scrollback history: content that has scrolled *above* the visible screen.
-    /// This is where minimal mode's committed conversation blocks land (printed via `insert_before`).
     pub fn scrollback_count(&self) -> usize {
         self.terminal.scrollback_count()
     }
@@ -97,8 +96,7 @@ impl ScreenTracker {
     }
 
     /// Scrollback history plus the visible screen, joined oldest to newest: everything a user could see by scrolling up.
-    /// Minimal-mode committed content may be in either region depending on how much has accumulated.
-    /// Assertions on committed output should use this.
+    /// Output may be in either region depending on how much has accumulated.
     pub fn full_text(&self) -> String {
         let sb = self.scrollback_text();
         let screen = self.contents();
@@ -125,7 +123,6 @@ mod tests {
     use super::*;
 
     /// Lines pushed above a small screen must be readable via the scrollback helpers.
-    /// Minimal-mode e2e tests rely on this to assert that a committed block reached native scrollback.
     #[test]
     fn scrolled_off_lines_are_captured_by_scrollback_helpers() {
         // 3-row screen; print 8 numbered lines so the first ones scroll off.
@@ -144,8 +141,7 @@ mod tests {
     }
 
     /// A DSR cursor-position query (`ESC[6n`) must produce a forwardable reply (a CPR `ESC[<row>;<col>R`).
-    /// Minimal-mode tests rely on this so the inline viewport's startup cursor query completes.
-    /// Without forwarding, `--minimal` silently downgrades to full-screen inline.
+    /// Inline-viewport tests rely on this so the startup cursor query completes.
     #[test]
     fn drain_responses_answers_cursor_position_query() {
         let mut s = ScreenTracker::new(24, 80);

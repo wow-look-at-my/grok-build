@@ -7,7 +7,6 @@ use crate::leader::protocol::InternalMethod;
 use crate::util::grok_home;
 use agent_client_protocol as acp;
 use parking_lot::Mutex;
-use std::pin::Pin;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -25,95 +24,10 @@ use xai_grok_login::AuthMode;
 use xai_grok_login::{AuthManager, GrokAuth, GrokComConfig, run_auth_flow};
 const MAX_BUFFER_SIZE: usize = 8 * 1024 * 1024;
 use indexmap::IndexMap;
-/// Configuration for periodic auto-update checking in leader mode. A long-running leader periodically calls `check_fn` to check for updates.
-/// `check_fn` both detects whether a newer version is available **and** downloads/installs it.
-/// It returns `true` only when the new binary is on disk and the leader should shut down so the next `connect_or_spawn` picks it up. If the download fails, `check_fn` should return `false` so the leader stays alive and retries on the next interval.
-pub struct LeaderAutoUpdateConfig {
-    /// Interval between update checks (default: 1 hour).
-    pub check_interval: Duration,
-    /// Async function that checks for, downloads, and installs an update.
-    /// Returns `true` if the update was installed successfully and the leader should shut down.
-    /// Returns `false` to stay alive (no update, or download failed).
-    pub check_fn:
-        Box<dyn Fn() -> Pin<Box<dyn std::future::Future<Output = bool> + Send>> + Send + Sync>,
-}
-/// Timeout for a single check_fn call. The check_fn may include both a version check and a binary download, so this must cover large downloads on slow connections.
-/// Kept in sync with the artifact download timeout (20 minutes) so the leader does not abandon a transfer still within the HTTP client's budget.
-/// If the call takes longer than this, we abandon the attempt and retry on the next interval. The select! with the cancellation token keeps the loop responsive to shutdown signals even while waiting.
-const AUTO_UPDATE_CHECK_TIMEOUT: Duration = Duration::from_secs(20 * 60);
-/// How long the auto-update shutdown waits for session actors to flush before the leader exits.
-/// Aliases the shared [`crate::agent::activity::SESSION_FLUSH_GRACE`].
-/// This path and the in-process agent's `/exit` / headless-quit flush therefore cannot drift apart.
-const AUTO_UPDATE_FLUSH_GRACE: Duration = crate::agent::activity::SESSION_FLUSH_GRACE;
 const PERSISTENT_EXIT_DRAIN: Duration = Duration::from_secs(1);
-/// Consecutive busy deferrals after which an installed update proceeds anyway (with the graceful flush).
-/// Bounds how long a permanently-"busy" signal (an orphaned parked interaction, a wedged turn) can pin the leader to an old binary. The cap is ~24h at the default 1h check interval.
-/// Mirrors the bounded grace of the `RelaunchForUpdate` drain.
-const MAX_AUTO_UPDATE_BUSY_DEFERRALS: u32 = 24;
 /// Bounded wait for the leader flock when it is held but no socket is bound yet.
 /// Causes: a spawner mid-handoff, an old-flow client holding the flock across its ~10s spawn window, or a same-version sibling briefly holding it.
-/// Exceeds that old-flow window so a legitimately-spawning peer wins the race.
 const LEADER_ACQUIRE_TIMEOUT: Duration = Duration::from_secs(15);
-/// Run the auto-update checker loop. The second signal covers relay-driven (grok.com WebSocket) leaders, whose traffic bypasses the IPC server and never sets `agent_busy`.
-/// [`MAX_AUTO_UPDATE_BUSY_DEFERRALS`] bounds the deferrals; past it the update proceeds anyway (still flushing first).
-/// So a permanently-busy signal (orphaned parked interaction, wedged turn) cannot pin the leader to an old binary forever. A stalled download therefore cannot block the loop from responding to shutdown signals. Extracted as a standalone function so it can be unit-tested independently from the full leader infrastructure.
-#[tracing::instrument(level = "debug", skip_all)]
-pub(crate) async fn run_auto_update_checker(
-    config: LeaderAutoUpdateConfig,
-    agent_busy: Arc<AtomicBool>,
-    activity: crate::agent::activity::AgentActivity,
-    cancel: tokio_util::sync::CancellationToken,
-    shutdown_tx: tokio::sync::watch::Sender<crate::leader::ShutdownReason>,
-) {
-    let mut interval = tokio::time::interval(config.check_interval);
-    interval.tick().await;
-    let mut busy_deferrals: u32 = 0;
-    loop {
-        tokio::select! {
-            _ = interval.tick() => {}
-            _ = cancel.cancelled() => break,
-        }
-        info!("Leader auto-update: running update check");
-        let update_installed = tokio::select! {
-            biased;
-            _ = cancel.cancelled() => break,
-            result = tokio::time::timeout(AUTO_UPDATE_CHECK_TIMEOUT, (config.check_fn)()) => {
-                match result {
-                    Ok(installed) => installed,
-                    Err(_elapsed) => {
-                        warn!("Leader auto-update: check/download timed out, will retry next interval");
-                        continue;
-                    }
-                }
-            }
-        };
-        if update_installed {
-            let busy = agent_busy.load(Ordering::Relaxed) || activity.is_busy();
-            if busy && busy_deferrals < MAX_AUTO_UPDATE_BUSY_DEFERRALS {
-                busy_deferrals += 1;
-                info!(
-                    busy_deferrals,
-                    "Leader auto-update: update installed but agent is busy, deferring shutdown"
-                );
-                continue;
-            }
-            if busy {
-                warn!(
-                    busy_deferrals,
-                    "Leader auto-update: deferral limit reached while busy; shutting down anyway"
-                );
-            } else {
-                info!("Leader auto-update: update installed and agent is idle, shutting down");
-            }
-            activity.flush_all_sessions(AUTO_UPDATE_FLUSH_GRACE).await;
-            let _ = shutdown_tx.send(crate::leader::ShutdownReason::AutoUpdate);
-            cancel.cancel();
-            break;
-        } else {
-            info!("Leader auto-update: no update installed");
-        }
-    }
-}
 /// Holds the agent past `drop(local_set)`; see `LocalRef`. Declared before the `LocalSet` so an unwind keeps that order.
 type AgentKeepalive = Rc<std::cell::RefCell<Option<Rc<MvpAgent>>>>;
 /// Spawn the agent inside a LocalSet and return a handle to the I/O future.
@@ -672,7 +586,6 @@ pub struct LeaderRunOptions {
     pub no_exit_on_disconnect: bool,
     /// Defer the grok.com relay until the first headless client registers.
     pub relay_on_demand: bool,
-    pub auto_update_check: Option<LeaderAutoUpdateConfig>,
     pub memory_config: Option<crate::config::MemoryConfig>,
     /// Start the worker door after readiness; `None` defers to `[cursor_worker] auto_start`.
     /// Inert on a build without worker support.
@@ -706,7 +619,6 @@ pub async fn run_leader(
     let LeaderRunOptions {
         no_exit_on_disconnect,
         relay_on_demand,
-        auto_update_check,
         memory_config,
         cursor_worker: cursor_worker_boot,
     } = options;
@@ -1103,20 +1015,6 @@ pub async fn run_leader(
                 });
             }
             let update_cancel = cancel_clone.clone();
-            if let Some(update_config) = auto_update_check {
-                let agent_busy_for_update = agent_busy.clone();
-                let agent_activity_for_update = agent_activity.clone();
-                let cancel_for_update = cancel_clone.clone();
-                tokio::spawn(
-                    run_auto_update_checker(
-                        update_config,
-                        agent_busy_for_update,
-                        agent_activity_for_update,
-                        cancel_for_update,
-                        shutdown_tx,
-                    ),
-                );
-            }
             let cwd_for_watcher = std::env::current_dir().unwrap_or_default();
             let mut watch_paths = crate::config::find_project_configs(&cwd_for_watcher);
             watch_paths
@@ -1378,31 +1276,6 @@ mod tests {
     use std::sync::atomic::AtomicU32;
     use tokio::sync::watch;
     use tokio_util::sync::CancellationToken;
-    /// Create a throwaway shutdown_tx for tests that don't care about the reason.
-    fn dummy_shutdown_tx() -> watch::Sender<crate::leader::ShutdownReason> {
-        watch::channel(crate::leader::ShutdownReason::Manual).0
-    }
-    /// Helper: build a LeaderAutoUpdateConfig whose check_fn always returns the given value.
-    fn always_config(update_available: bool) -> LeaderAutoUpdateConfig {
-        LeaderAutoUpdateConfig {
-            check_interval: Duration::from_millis(10),
-            check_fn: Box::new(move || Box::pin(async move { update_available })),
-        }
-    }
-    /// Helper: build a LeaderAutoUpdateConfig that returns `false` for the first `skip` calls, then `true` for all subsequent calls.
-    fn delayed_update_config(skip: u32) -> LeaderAutoUpdateConfig {
-        let counter = Arc::new(AtomicU32::new(0));
-        LeaderAutoUpdateConfig {
-            check_interval: Duration::from_millis(10),
-            check_fn: Box::new(move || {
-                let counter = counter.clone();
-                Box::pin(async move {
-                    let n = counter.fetch_add(1, Ordering::Relaxed);
-                    n >= skip
-                })
-            }),
-        }
-    }
     fn oidc_session(key: &str, create_time: chrono::DateTime<chrono::Utc>) -> GrokAuth {
         GrokAuth {
             key: key.into(),
@@ -1815,305 +1688,6 @@ mod tests {
         assert_eq!(
             msg.get("method").and_then(|v| v.as_str()),
             Some("_x.ai/internal/auth_cleared")
-        );
-    }
-    #[tokio::test]
-    #[tracing::instrument(level = "debug", skip_all)]
-    async fn auto_update_cancels_when_update_available_and_agent_idle() {
-        let agent_busy = Arc::new(AtomicBool::new(false));
-        let cancel = CancellationToken::new();
-        let config = always_config(true);
-        tokio::time::timeout(
-            Duration::from_secs(2),
-            run_auto_update_checker(
-                config,
-                agent_busy,
-                crate::agent::activity::AgentActivity::default(),
-                cancel.clone(),
-                dummy_shutdown_tx(),
-            ),
-        )
-        .await
-        .expect("checker should complete within timeout");
-        assert!(cancel.is_cancelled(), "cancel token should be triggered");
-    }
-    #[tokio::test]
-    #[tracing::instrument(level = "debug", skip_all)]
-    async fn auto_update_defers_when_agent_busy() {
-        let agent_busy = Arc::new(AtomicBool::new(true));
-        let cancel = CancellationToken::new();
-        let config = delayed_update_config(0);
-        let cancel_clone = cancel.clone();
-        let checker = tokio::spawn(run_auto_update_checker(
-            config,
-            agent_busy,
-            crate::agent::activity::AgentActivity::default(),
-            cancel.clone(),
-            dummy_shutdown_tx(),
-        ));
-        tokio::time::sleep(Duration::from_millis(80)).await;
-        assert!(
-            !cancel_clone.is_cancelled(),
-            "cancel token should NOT be triggered when agent is busy"
-        );
-        cancel_clone.cancel();
-        let _ = checker.await;
-    }
-    #[tokio::test]
-    #[tracing::instrument(level = "debug", skip_all)]
-    async fn auto_update_no_cancel_when_no_update_available() {
-        let agent_busy = Arc::new(AtomicBool::new(false));
-        let cancel = CancellationToken::new();
-        let config = always_config(false);
-        let cancel_clone = cancel.clone();
-        let checker = tokio::spawn(run_auto_update_checker(
-            config,
-            agent_busy,
-            crate::agent::activity::AgentActivity::default(),
-            cancel.clone(),
-            dummy_shutdown_tx(),
-        ));
-        tokio::time::sleep(Duration::from_millis(80)).await;
-        assert!(
-            !cancel_clone.is_cancelled(),
-            "cancel token should NOT be triggered when no update is available"
-        );
-        cancel_clone.cancel();
-        let _ = checker.await;
-    }
-    #[tokio::test]
-    #[tracing::instrument(level = "debug", skip_all)]
-    async fn auto_update_cancels_after_agent_becomes_idle() {
-        let agent_busy = Arc::new(AtomicBool::new(true));
-        let cancel = CancellationToken::new();
-        let config = always_config(true);
-        let agent_busy_clone = agent_busy.clone();
-        let cancel_clone = cancel.clone();
-        let checker = tokio::spawn(run_auto_update_checker(
-            config,
-            agent_busy,
-            crate::agent::activity::AgentActivity::default(),
-            cancel.clone(),
-            dummy_shutdown_tx(),
-        ));
-        tokio::time::sleep(Duration::from_millis(50)).await;
-        assert!(
-            !cancel_clone.is_cancelled(),
-            "should not cancel while agent is busy"
-        );
-        agent_busy_clone.store(false, Ordering::Relaxed);
-        tokio::time::timeout(Duration::from_secs(2), checker)
-            .await
-            .expect("checker should complete within timeout")
-            .expect("checker task should not panic");
-        assert!(
-            cancel_clone.is_cancelled(),
-            "cancel token should be triggered after agent becomes idle"
-        );
-    }
-    #[tokio::test]
-    #[tracing::instrument(level = "debug", skip_all)]
-    async fn auto_update_stops_when_externally_cancelled() {
-        let agent_busy = Arc::new(AtomicBool::new(false));
-        let cancel = CancellationToken::new();
-        let config = always_config(false);
-        let cancel_clone = cancel.clone();
-        let checker = tokio::spawn(run_auto_update_checker(
-            config,
-            agent_busy,
-            crate::agent::activity::AgentActivity::default(),
-            cancel.clone(),
-            dummy_shutdown_tx(),
-        ));
-        cancel_clone.cancel();
-        tokio::time::timeout(Duration::from_secs(2), checker)
-            .await
-            .expect("checker should exit within timeout after external cancel")
-            .expect("checker task should not panic");
-    }
-    #[tokio::test]
-    #[tracing::instrument(level = "debug", skip_all)]
-    async fn auto_update_calls_check_fn_multiple_times() {
-        let call_count = Arc::new(AtomicU32::new(0));
-        let call_count_clone = call_count.clone();
-        let agent_busy = Arc::new(AtomicBool::new(true));
-        let cancel = CancellationToken::new();
-        let config = LeaderAutoUpdateConfig {
-            check_interval: Duration::from_millis(10),
-            check_fn: Box::new(move || {
-                let cc = call_count_clone.clone();
-                Box::pin(async move {
-                    cc.fetch_add(1, Ordering::Relaxed);
-                    true
-                })
-            }),
-        };
-        let cancel_clone = cancel.clone();
-        let checker = tokio::spawn(run_auto_update_checker(
-            config,
-            agent_busy,
-            crate::agent::activity::AgentActivity::default(),
-            cancel.clone(),
-            dummy_shutdown_tx(),
-        ));
-        tokio::time::sleep(Duration::from_millis(200)).await;
-        let calls = call_count.load(Ordering::Relaxed);
-        assert!(
-            calls >= 2,
-            "check_fn should have been called multiple times, got {}",
-            calls
-        );
-        cancel_clone.cancel();
-        let _ = checker.await;
-    }
-    #[tokio::test]
-    #[tracing::instrument(level = "debug", skip_all)]
-    async fn auto_update_cancels_during_hanging_check_fn() {
-        let agent_busy = Arc::new(AtomicBool::new(false));
-        let cancel = CancellationToken::new();
-        let config = LeaderAutoUpdateConfig {
-            check_interval: Duration::from_millis(10),
-            check_fn: Box::new(|| Box::pin(async { futures::future::pending::<bool>().await })),
-        };
-        let cancel_clone = cancel.clone();
-        let checker = tokio::spawn(run_auto_update_checker(
-            config,
-            agent_busy,
-            crate::agent::activity::AgentActivity::default(),
-            cancel.clone(),
-            dummy_shutdown_tx(),
-        ));
-        tokio::time::sleep(Duration::from_millis(30)).await;
-        cancel_clone.cancel();
-        tokio::time::timeout(Duration::from_secs(2), checker)
-            .await
-            .expect("checker should exit within timeout even with hanging check_fn")
-            .expect("checker task should not panic");
-    }
-    /// The IPC `agent_busy` flag never sees relay-driven traffic.
-    /// The checker must also defer on the agent-derived activity signal (running turn, pending interaction, or live subagent).
-    #[tokio::test]
-    #[tracing::instrument(level = "debug", skip_all)]
-    async fn auto_update_defers_when_agent_activity_busy() {
-        let agent_busy = Arc::new(AtomicBool::new(false));
-        let activity = crate::agent::activity::AgentActivity::default();
-        activity.subagent_gauge().store(1, Ordering::Relaxed);
-        let cancel = CancellationToken::new();
-        let config = always_config(true);
-        let cancel_clone = cancel.clone();
-        let checker = tokio::spawn(run_auto_update_checker(
-            config,
-            agent_busy,
-            activity.clone(),
-            cancel.clone(),
-            dummy_shutdown_tx(),
-        ));
-        tokio::time::sleep(Duration::from_millis(80)).await;
-        assert!(
-            !cancel_clone.is_cancelled(),
-            "must not shut down while the agent (not IPC) is busy"
-        );
-        activity.subagent_gauge().store(0, Ordering::Relaxed);
-        tokio::time::timeout(Duration::from_secs(2), checker)
-            .await
-            .expect("checker should complete within timeout")
-            .expect("checker task should not panic");
-        assert!(cancel_clone.is_cancelled());
-    }
-    /// A permanently-busy signal must not pin the leader to an old binary forever: after MAX_AUTO_UPDATE_BUSY_DEFERRALS the update proceeds.
-    #[tokio::test]
-    #[tracing::instrument(level = "debug", skip_all)]
-    async fn auto_update_forces_shutdown_after_deferral_limit() {
-        let agent_busy = Arc::new(AtomicBool::new(false));
-        let activity = crate::agent::activity::AgentActivity::default();
-        activity.subagent_gauge().store(1, Ordering::Relaxed);
-        let cancel = CancellationToken::new();
-        let config = always_config(true);
-        tokio::time::timeout(
-            Duration::from_secs(10),
-            run_auto_update_checker(
-                config,
-                agent_busy,
-                activity,
-                cancel.clone(),
-                dummy_shutdown_tx(),
-            ),
-        )
-        .await
-        .expect("checker should force shutdown after the deferral limit");
-        assert!(cancel.is_cancelled());
-    }
-    /// Cancelling drops the LocalSet and aborts session actors.
-    /// Before that, the checker must ask every registered session actor to shut down and wait for it to exit, so buffered state reaches disk.
-    #[tokio::test]
-    #[tracing::instrument(level = "debug", skip_all)]
-    async fn auto_update_flushes_sessions_before_cancel() {
-        let agent_busy = Arc::new(AtomicBool::new(false));
-        let activity = crate::agent::activity::AgentActivity::default();
-        let (mut cmd_rx, _prompt_id, _pending) = activity.register_for_test("s1");
-        let cancel = CancellationToken::new();
-        let got_shutdown = Arc::new(AtomicBool::new(false));
-        let got_shutdown_clone = got_shutdown.clone();
-        let cancel_for_actor = cancel.clone();
-        let actor = tokio::spawn(async move {
-            while let Some(cmd) = cmd_rx.recv().await {
-                if matches!(cmd, crate::session::SessionCommand::Shutdown(_)) {
-                    assert!(
-                        !cancel_for_actor.is_cancelled(),
-                        "session flush must happen BEFORE the leader is cancelled"
-                    );
-                    got_shutdown_clone.store(true, Ordering::Relaxed);
-                    return;
-                }
-            }
-        });
-        let config = always_config(true);
-        tokio::time::timeout(
-            Duration::from_secs(2),
-            run_auto_update_checker(
-                config,
-                agent_busy,
-                activity,
-                cancel.clone(),
-                dummy_shutdown_tx(),
-            ),
-        )
-        .await
-        .expect("checker should complete within timeout");
-        assert!(cancel.is_cancelled());
-        actor.await.expect("actor should exit cleanly");
-        assert!(
-            got_shutdown.load(Ordering::Relaxed),
-            "session actor must receive SessionCommand::Shutdown before leader cancel"
-        );
-    }
-    /// When an update is installed and the agent is idle, the checker sends `ShutdownReason::AutoUpdate` via `shutdown_tx` BEFORE cancelling.
-    /// The IPC server then broadcasts the correct reason.
-    #[tokio::test]
-    #[tracing::instrument(level = "debug", skip_all)]
-    async fn auto_update_sets_shutdown_reason_auto_update() {
-        let agent_busy = Arc::new(AtomicBool::new(false));
-        let cancel = CancellationToken::new();
-        let (shutdown_tx, mut shutdown_rx) = watch::channel(crate::leader::ShutdownReason::Manual);
-        let config = always_config(true);
-        tokio::time::timeout(
-            Duration::from_secs(2),
-            run_auto_update_checker(
-                config,
-                agent_busy,
-                crate::agent::activity::AgentActivity::default(),
-                cancel.clone(),
-                shutdown_tx,
-            ),
-        )
-        .await
-        .expect("checker should complete within timeout");
-        assert!(cancel.is_cancelled(), "cancel token should be triggered");
-        shutdown_rx.mark_changed();
-        assert_eq!(
-            *shutdown_rx.borrow(),
-            crate::leader::ShutdownReason::AutoUpdate,
-            "shutdown reason must be AutoUpdate for an auto-update-triggered shutdown"
         );
     }
 }

@@ -5,7 +5,6 @@
 
 use crate::app::actions::Action;
 use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand, slash_meta};
-use crate::slash::{ModeSupport, Remedy};
 
 pub struct FindCommand;
 
@@ -16,9 +15,6 @@ impl SlashCommand for FindCommand {
         usage: "/find [text]",
         takes_args: true,
         session_scoped: true,
-        mode_support: ModeSupport::FullscreenOnly(Remedy::SwitchMode {
-            why: "minimal has no scrollback pane: use your terminal's own search",
-        }),
         arg_placeholder: "[text]",
     }
 
@@ -52,7 +48,6 @@ mod tests {
             models,
             session_id: None,
             bundle_state: &DEFAULT_BUNDLE_STATE,
-            screen_mode: crate::app::ScreenMode::Inline,
             billing_surface_visible: true,
             usage_command_visible: true,
             pager_state: crate::settings::PagerLocalSnapshot::default(),

@@ -661,7 +661,7 @@ impl RetainedResources {
 /// Per-resident-session `(title, last_turn_summary)` display cache; see `resident_roster_titles`.
 type RosterDisplayCache = HashMap<String, (Option<String>, Option<String>)>;
 pub struct MvpAgent {
-    /// LEADER-SAFE(shared): `Send + Sync` mirror of per-session activity for the leader's auto-update checker, which cannot read the `!Send` maps.
+    /// LEADER-SAFE(shared): `Send + Sync` mirror of per-session activity for the leader's `tokio::spawn` tasks, which cannot read the `!Send` maps.
     /// Expires when the actor exits.
     /// See [`crate::agent::activity::AgentActivity`].
     pub(crate) activity: crate::agent::activity::AgentActivity,

@@ -78,10 +78,6 @@ impl AgentView {
 
         // A second stash discards the draft in the slot
         self.prompt_stash = Some(entry);
-
-        self.note_stash_change_in_minimal(
-            "Draft stashed. Press the stash key again to restore it.",
-        );
     }
 
     /// An explicit stash means "get this out of my way", so the composer drops its `!`/`#` mode too.
@@ -115,7 +111,6 @@ impl AgentView {
         };
 
         self.restore_stash_entry(entry);
-        self.note_stash_change_in_minimal("Stashed draft restored.");
     }
 
     /// A browse that commits the stashed draft is a pop: two live copies means the next send restores what the user just sent.
@@ -162,7 +157,6 @@ impl AgentView {
         };
 
         self.restore_stash_entry(entry);
-        self.note_stash_change_in_minimal("Stashed draft restored.");
         InputOutcome::Changed
     }
 
@@ -184,14 +178,6 @@ impl AgentView {
                 self.prompt.clear_history();
                 Some(outcome)
             }
-        }
-    }
-
-    /// Minimal mode draws no prompt border and never renders toasts, so a scrollback line is the only surface left.
-    fn note_stash_change_in_minimal(&mut self, text: &str) {
-        if self.is_minimal_mode() {
-            self.scrollback
-                .push_block(crate::scrollback::block::RenderBlock::system(text));
         }
     }
 
@@ -600,35 +586,6 @@ mod tests {
             agent.active_modal,
             Some(crate::app::agent_view::ActiveModal::SessionPicker { .. })
         ));
-    }
-
-    /// Minimal mode has no prompt border for the caption and never renders toasts, so the stash has to report itself in the scrollback.
-    #[test]
-    fn minimal_mode_reports_the_stash_in_the_scrollback() {
-        let mut agent = test_fixtures::make_agent();
-        agent
-            .prompt
-            .set_screen_mode(crate::app::ScreenMode::Minimal);
-        agent.prompt.set_text("draft");
-
-        agent.handle_prompt_key_for_test(&chords()[0]);
-        agent.handle_prompt_key_for_test(&chords()[0]);
-
-        let blocks: Vec<String> = (0..agent.scrollback.len())
-            .filter_map(|i| match agent.scrollback.entry(i).map(|e| &e.block) {
-                Some(crate::scrollback::block::RenderBlock::System(b)) => Some(b.text.clone()),
-                _ => None,
-            })
-            .collect();
-
-        assert!(
-            blocks.iter().any(|b| b.contains("Draft stashed")),
-            "stash must be announced: {blocks:?}"
-        );
-        assert!(
-            blocks.iter().any(|b| b.contains("Stashed draft restored")),
-            "restore must be announced: {blocks:?}"
-        );
     }
 
     /// A stashed draft was never sent, so the browse must not list it. The chord is how it comes back.

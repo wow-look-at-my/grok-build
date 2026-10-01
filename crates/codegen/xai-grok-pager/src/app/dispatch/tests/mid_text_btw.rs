@@ -11,7 +11,7 @@ fn assert_fullscreen_side_question(effects: &[Effect], question: &str) {
     assert!(
         matches!(
             effects,
-            [Effect::SendBtw { question: sent, minimal_request_id: None, .. }] if sent == question
+            [Effect::SendBtw { question: sent, .. }] if sent == question
         ),
         "expected exactly one fullscreen /btw send of {question:?}, got {effects:?}"
     );
@@ -82,7 +82,7 @@ fn mid_text_btw_sends_composer_images() {
     assert!(
         matches!(
             effects.as_slice(),
-            [Effect::SendBtw { question, images, minimal_request_id: None, .. }]
+            [Effect::SendBtw { question, images, .. }]
                 if question == "[Image] look q" && images.len() == 1
         ),
         "{effects:?}"
@@ -114,7 +114,7 @@ fn leading_image_chip_then_btw_is_a_side_question() {
     assert!(
         matches!(
             effects.as_slice(),
-            [Effect::SendBtw { question, images, minimal_request_id: None, .. }]
+            [Effect::SendBtw { question, images, .. }]
                 if question == "[Image] q" && images.len() == 1
         ),
         "{effects:?}"
@@ -145,7 +145,7 @@ fn leading_image_chip_then_unknown_command_then_btw_hoists_whole_line() {
     assert!(
         matches!(
             effects.as_slice(),
-            [Effect::SendBtw { question, images, minimal_request_id: None, .. }]
+            [Effect::SendBtw { question, images, .. }]
                 if question == "[Image] /nope hi q" && images.len() == 1
         ),
         "{effects:?}"

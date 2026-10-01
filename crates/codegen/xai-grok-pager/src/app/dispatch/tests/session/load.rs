@@ -1247,91 +1247,10 @@ fn resume_unknown_session_still_creates_new_agent() {
         }         if *agent_id == new_id && session_id == "sess-never-open"
     )));
 }
-/// GB-4877: resume A → /new → resume A in minimal must LoadSession.
-/// /new drops A's AgentView so `focus_if_session_already_open` cannot short-circuit.
-#[test]
-fn minimal_resume_after_new_reloads_prior_session() {
-    let mut app = test_app();
-    app.screen_mode = crate::app::ScreenMode::Minimal;
-    dispatch(Action::NewSession, &mut app);
-    let agent_a = AgentId(0);
-    dispatch(
-        Action::TaskComplete(TaskResult::SessionCreated {
-            agent_id: agent_a,
-            session_id: "sess-a".into(),
-            models: None,
-            modes: None,
-        }),
-        &mut app,
-    );
-    dispatch(Action::NewSession, &mut app);
-    let agent_b = AgentId(1);
-    dispatch(
-        Action::TaskComplete(TaskResult::SessionCreated {
-            agent_id: agent_b,
-            session_id: "sess-b".into(),
-            models: None,
-            modes: None,
-        }),
-        &mut app,
-    );
-    assert!(
-        !app.agents.contains_key(&agent_a),
-        "minimal /new must drop the prior AgentView"
-    );
-    assert_eq!(app.agents.len(), 1);
-    assert!(matches!(app.active_view, ActiveView::Agent(id) if id == agent_b));
-    let effects = dispatch(Action::LoadSession("sess-a".into(), None, false), &mut app);
-    assert!(
-        effects.iter().any(|e| matches!(
-            e,
-            Effect::LoadSession { session_id, .. } if session_id == "sess-a"
-        )),
-        "resume of A after /new must LoadSession, got {effects:?}"
-    );
-}
-/// `/resume` of B leaves A's AgentView. Minimal `/new` must unregister A, not only B.
-#[test]
-fn minimal_new_unregisters_resume_leftover() {
-    let mut app = test_app();
-    app.screen_mode = crate::app::ScreenMode::Minimal;
-    dispatch(Action::NewSession, &mut app);
-    dispatch(
-        Action::TaskComplete(TaskResult::SessionCreated {
-            agent_id: AgentId(0),
-            session_id: "sess-a".into(),
-            models: None,
-            modes: None,
-        }),
-        &mut app,
-    );
-    dispatch(Action::LoadSession("sess-b".into(), None, false), &mut app);
-    assert!(app.agents.contains_key(&AgentId(0)));
-    assert_eq!(app.agents.len(), 2);
-    let effects = dispatch(Action::NewSession, &mut app);
-    let unregistered: Vec<_> = effects
-        .iter()
-        .filter_map(|e| match e {
-            Effect::UnregisterActiveSession { session_id } => Some(session_id.0.as_ref()),
-            _ => None,
-        })
-        .collect();
-    assert!(
-        unregistered.contains(&"sess-a"),
-        "leftover resume view must UnregisterActiveSession, got {effects:?}"
-    );
-    assert!(
-        unregistered.contains(&"sess-b"),
-        "previously active session must UnregisterActiveSession, got {effects:?}"
-    );
-    assert!(!app.agents.contains_key(&AgentId(0)));
-    assert!(!app.agents.contains_key(&AgentId(1)));
-}
 /// Already-open focus still applies when /resume picks the session currently on screen.
 #[test]
-fn minimal_resume_of_current_session_still_focuses() {
+fn resume_of_current_session_still_focuses() {
     let mut app = test_app();
-    app.screen_mode = crate::app::ScreenMode::Minimal;
     dispatch(Action::NewSession, &mut app);
     let agent_a = AgentId(0);
     dispatch(
@@ -1419,66 +1338,6 @@ fn resume_conversation_does_not_focus_build_id_collision() {
         } if session_id == "shared-id"
     )));
     assert!(!expect_agent(&app, agent_0).chat_kind);
-}
-#[test]
-fn duplicate_load_unbind_invalidates_old_minimal_btw_response() {
-    let mut app = test_app();
-    app.screen_mode = crate::app::ScreenMode::Minimal;
-    dispatch(Action::NewSession, &mut app);
-    let old_owner = AgentId(0);
-    dispatch(
-        Action::TaskComplete(TaskResult::SessionCreated {
-            agent_id: old_owner,
-            session_id: "shared-id".into(),
-            models: None,
-            modes: None,
-        }),
-        &mut app,
-    );
-    let request_id = match dispatch(
-        Action::SendBtw {
-            question: "old question".into(),
-            images: Vec::new(),
-        },
-        &mut app,
-    )
-    .as_slice()
-    {
-        [
-            Effect::SendBtw {
-                minimal_request_id: Some(id),
-                ..
-            },
-        ] => *id,
-        other => panic!("expected correlated minimal /btw effect, got {other:?}"),
-    };
-    dispatch(
-        Action::LoadSession("shared-id".into(), None, true),
-        &mut app,
-    );
-    assert!(expect_agent(&app, old_owner).session.session_id.is_none());
-    assert!(expect_agent(&app, old_owner).btw_state.is_none());
-    assert!(
-        expect_agent(&app, old_owner)
-            .minimal_btw_lifecycle
-            .is_none()
-    );
-    dispatch(
-        Action::TaskComplete(TaskResult::BtwResponse {
-            image_notice: None,
-            skipped_image_numbers: Vec::new(),
-            agent_id: old_owner,
-            result: Ok("old answer".into()),
-            minimal_request_id: Some(request_id),
-        }),
-        &mut app,
-    );
-    assert!(expect_agent(&app, old_owner).btw_state.is_none());
-    assert!(
-        expect_agent(&app, old_owner)
-            .minimal_btw_lifecycle
-            .is_none()
-    );
 }
 /// Under sticky `--chat`, agents stamp `chat_kind=true` even for build loads; resume with conversation-entry false must still focus the open agent.
 #[test]
@@ -1631,26 +1490,6 @@ fn session_restored_clears_stale_session_id() {
     assert_eq!(
         expect_agent(&app, AgentId(1)).session.session_id,
         Some(acp::SessionId::new("remote-sess"))
-    );
-}
-#[test]
-fn minimal_new_session_queues_welcome_card() {
-    let mut app = test_app();
-    app.screen_mode = crate::app::ScreenMode::Minimal;
-    let _ = dispatch(Action::NewSession, &mut app);
-    assert!(
-        app.minimal_state.welcome_pending,
-        "a fresh minimal session should queue the welcome card"
-    );
-}
-#[test]
-fn non_minimal_new_session_does_not_queue_welcome_card() {
-    let mut app = test_app();
-    app.screen_mode = crate::app::ScreenMode::Inline;
-    let _ = dispatch(Action::NewSession, &mut app);
-    assert!(
-        !app.minimal_state.welcome_pending,
-        "the welcome card is minimal-only"
     );
 }
 /// Picking a conversation row dispatches a direct chat load, never local resolution or GCS restore.

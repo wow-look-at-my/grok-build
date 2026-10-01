@@ -15,11 +15,9 @@ pub mod debug_context;
 pub mod delete;
 pub mod docs;
 pub mod doctor;
-pub mod edit_prompt;
 pub mod effort;
 pub mod effort_levels;
 pub mod exit;
-pub mod expand;
 pub mod export;
 pub mod feedback;
 pub mod find;
@@ -52,7 +50,6 @@ pub mod remember;
 pub mod rename;
 pub mod resume;
 pub mod rewind;
-pub mod screen_mode_switch;
 pub mod scroll_debug;
 pub mod session_info;
 pub mod settings_cmd;
@@ -107,8 +104,6 @@ pub fn builtin_commands() -> Vec<Arc<dyn SlashCommand>> {
         Arc::new(recap::RecapCommand),
         Arc::new(rewind::RewindCommand),
         Arc::new(jump::JumpCommand),
-        Arc::new(expand::ExpandCommand),
-        Arc::new(edit_prompt::EditPromptCommand),
         Arc::new(queue::QueueCommand),
         // This session and what came out of it.
         Arc::new(session_info::SessionInfoCommand),
@@ -138,9 +133,6 @@ pub fn builtin_commands() -> Vec<Arc<dyn SlashCommand>> {
         Arc::new(compact_mode::CompactModeCommand),
         Arc::new(timestamps::TimestampsCommand),
         Arc::new(toggle_mouse_reporting::ToggleMouseReportingCommand),
-        // Screen-mode switchers: visible only in the opposite mode.
-        Arc::new(screen_mode_switch::ScreenModeSwitchCommand::minimal()),
-        Arc::new(screen_mode_switch::ScreenModeSwitchCommand::fullscreen()),
         // Reached for occasionally.
         Arc::new(timeline::TimelineCommand),
         Arc::new(cd::CdCommand),
@@ -209,7 +201,6 @@ mod tests {
             models,
             session_id: None,
             bundle_state: &DEFAULT_BUNDLE_STATE,
-            screen_mode: crate::app::ScreenMode::Inline,
             billing_surface_visible: true,
             usage_command_visible: true,
             pager_state: crate::settings::PagerLocalSnapshot {
@@ -450,7 +441,6 @@ mod tests {
             workflows_available: true,
             saved_workflows: &[],
             workflow_runs: &[],
-            screen_mode: crate::app::ScreenMode::Fullscreen,
             current_title: None,
         };
         let cmd = model::ModelCommand;
@@ -479,7 +469,6 @@ mod tests {
             workflows_available: true,
             saved_workflows: &[],
             workflow_runs: &[],
-            screen_mode: crate::app::ScreenMode::Fullscreen,
             current_title: None,
         };
         let cmd = model::ModelCommand;
@@ -570,7 +559,6 @@ mod tests {
             workflows_available: true,
             saved_workflows: &[],
             workflow_runs: &[],
-            screen_mode: crate::app::ScreenMode::Fullscreen,
             current_title: None,
         };
         let cmd = usage::UsageCommand;
@@ -590,7 +578,6 @@ mod tests {
             workflows_available: false,
             saved_workflows: &[],
             workflow_runs: &[],
-            screen_mode: crate::app::ScreenMode::Fullscreen,
             current_title: None,
         };
         let items = usage::UsageCommand.suggest_args(&ctx, "").unwrap();
@@ -621,7 +608,6 @@ mod tests {
             workflows_available: false,
             saved_workflows: &[],
             workflow_runs: &[],
-            screen_mode: crate::app::ScreenMode::Fullscreen,
             current_title: None,
         };
         assert!(!usage::UsageCommand.visible(&ctx));
@@ -683,7 +669,6 @@ mod tests {
             workflows_available: true,
             saved_workflows: &[],
             workflow_runs: &[],
-            screen_mode: crate::app::ScreenMode::Fullscreen,
             current_title: None,
         };
         assert!(
@@ -692,15 +677,11 @@ mod tests {
         );
     }
     #[test]
-    fn minimal_and_fullscreen_registered_in_builtin_commands() {
+    fn removed_screen_mode_commands_are_not_registered() {
         let reg = CommandRegistry::new(builtin_commands());
-        assert!(reg.get("minimal").is_some());
-        assert!(reg.get("fullscreen").is_some());
-        assert!(reg.get("full").is_some());
-        assert_eq!(
-            reg.get("full").unwrap().name(),
-            reg.get("fullscreen").unwrap().name()
-        );
+        for name in ["minimal", "fullscreen", "full", "expand", "edit-prompt"] {
+            assert!(reg.get(name).is_none(), "/{name} must not be registered");
+        }
     }
     #[test]
     fn recap_registered_in_builtin_commands() {

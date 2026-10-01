@@ -194,26 +194,6 @@ fn dispatch_new_session_skips_modal_in_non_git_repo() {
     );
 }
 #[test]
-fn drop_other_agents_in_minimal_unregisters_leftovers() {
-    let mut app = three_agent_app();
-    app.agents.get_mut(&AgentId(1)).unwrap().session.session_id = Some("sess-resume".into());
-    app.agents.get_mut(&AgentId(2)).unwrap().session.session_id = Some("sess-fork".into());
-    assert!(drop_other_agents_in_minimal(&mut app, AgentId(0)).is_empty());
-    assert_eq!(app.agents.len(), 3);
-    app.screen_mode = crate::app::ScreenMode::Minimal;
-    let effects = drop_other_agents_in_minimal(&mut app, AgentId(0));
-    let unregistered: Vec<_> = effects
-        .iter()
-        .filter_map(|e| match e {
-            Effect::UnregisterActiveSession { session_id } => Some(session_id.0.as_ref()),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(unregistered, ["sess-resume", "sess-fork"]);
-    assert_eq!(app.agents.len(), 1);
-    assert!(app.agents.contains_key(&AgentId(0)));
-}
-#[test]
 fn close_inactive_agent_drops_it() {
     let mut app = three_agent_app();
     app.agents

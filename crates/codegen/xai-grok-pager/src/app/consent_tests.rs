@@ -26,7 +26,6 @@ fn inputs<'a>(
         answered_this_run: None,
         answers,
         account: Some(ACCOUNT),
-        minimal: false,
     }
 }
 
@@ -289,16 +288,6 @@ fn an_accountless_answer_does_not_suppress() {
     i.account = None;
 
     assert!(matches!(consent_verdict(&i), ConsentState::Pending { .. }));
-}
-
-#[test]
-fn minimal_mode_fails_open() {
-    let gate = gate();
-    let answers = no_answers();
-    let mut i = inputs(Some(&gate), &answers);
-    i.minimal = true;
-
-    assert!(matches!(consent_verdict(&i), ConsentState::Done));
 }
 
 #[test]

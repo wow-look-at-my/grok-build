@@ -59,7 +59,6 @@ impl std::fmt::Display for Scope {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct InspectReport {
     pub grok_version: String,
-    pub channel: String,
     pub cwd: String,
     pub project_root: Option<String>,
     /// Folder-trust verdict for `cwd`: when false, repo-local project hooks, plugins, MCP/LSP, instructions, and skills are gated out of the listings below.
@@ -486,9 +485,6 @@ async fn build_report(cwd: &Path) -> InspectReport {
 
     InspectReport {
         grok_version: xai_grok_version::version().to_string(),
-        channel: crate::util::config::channel_name_from_cache()
-            .unwrap_or("unknown")
-            .to_string(),
         cwd: cwd.display().to_string(),
         project_root: git_root.map(|p| p.display().to_string()),
         project_trusted,
@@ -1507,7 +1503,7 @@ fn render_harness_compatibility(report: &ExternalCompatReport) -> String {
 fn print_human(r: &InspectReport, out: &mut impl Write) -> std::io::Result<()> {
     writeln!(out)?;
     writeln!(out, "  Environment")?;
-    writeln!(out, "  {TREE} Version: {} [{}]", r.grok_version, r.channel)?;
+    writeln!(out, "  {TREE} Version: {}", r.grok_version)?;
     writeln!(out, "  {TREE} CWD: {}", r.cwd)?;
     if let Some(ref root) = r.project_root {
         writeln!(out, "  {TREE} Git root: {}", root)?;
@@ -2802,7 +2798,6 @@ mod tests {
     fn empty_report() -> InspectReport {
         InspectReport {
             grok_version: "test".into(),
-            channel: "test".into(),
             cwd: "/tmp".into(),
             project_root: None,
             project_trusted: true,

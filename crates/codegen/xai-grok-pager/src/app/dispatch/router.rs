@@ -78,7 +78,7 @@ use super::session::modal::{dispatch_rename_session, dispatch_reset_session_titl
 use super::settings::setters::{
     clear_default_model, clear_subagent_model_inheritance, preview_auto_dark_theme,
     preview_auto_light_theme, preview_theme, set_ask_user_question_timeout_enabled,
-    set_auto_dark_theme, set_auto_light_theme, set_auto_update, set_collapsed_edit_blocks,
+    set_auto_dark_theme, set_auto_light_theme, set_collapsed_edit_blocks,
     set_combine_queued_prompts, set_compact_mode, set_confirm_before_rewind,
     set_contextual_hint_export_copy, set_contextual_hint_image_input,
     set_contextual_hint_plan_mode, set_contextual_hint_send_now, set_contextual_hint_small_screen,
@@ -89,7 +89,7 @@ use super::settings::setters::{
     set_min_output_tokens_per_sec, set_multiline_mode, set_output_rate_max_retries,
     set_output_rate_sustained_secs, set_output_rate_window_secs, set_page_flip_on_send,
     set_prompt_suggestions, set_remember_tool_approvals, set_render_mermaid,
-    set_respect_manual_folds, set_screen_mode, set_scroll_lines, set_scroll_mode, set_scroll_speed,
+    set_respect_manual_folds, set_scroll_lines, set_scroll_mode, set_scroll_speed,
     set_show_thinking_blocks, set_show_tips, set_simple_mode, set_stop_gate_ci_failing,
     set_stop_gate_unfinished_todos, set_subagent_model_inheritance, set_theme,
     set_thinking_summaries, set_timeline, set_timestamps, set_ttft_timeout_secs, set_vim_mode,
@@ -170,12 +170,6 @@ fn dispatch_inner(action: Action, app: &mut AppView) -> Vec<Effect> {
     app.reconcile_foreign_resume_launch();
     let effects = match action {
         Action::Quit | Action::QuitConfirmed => confirmed_quit(app),
-        Action::QuitForUpdate => {
-            let mut effects = unregister_all_active_sessions(app);
-            app.quit_for_update = true;
-            effects.push(Effect::Quit);
-            effects
-        }
         Action::ResumeForeignSession => {
             let Some(hint) = app.take_foreign_resume_hint() else {
                 return vec![];
@@ -193,25 +187,6 @@ fn dispatch_inner(action: Action, app: &mut AppView) -> Vec<Effect> {
                 return vec![];
             }
             super::dispatch_initial_prompt(app, prompt)
-        }
-        Action::RelaunchInScreenMode { minimal } => {
-            if !crate::app::screen_mode_relaunch::exec_switch_forced() {
-                app.pending_screen_mode_switch = Some(if minimal {
-                    crate::app::ScreenMode::Minimal
-                } else {
-                    crate::app::ScreenMode::Fullscreen
-                });
-                return vec![];
-            }
-            if let Some(session_id) = app.active_session_id().map(str::to_owned) {
-                app.relaunch = Some(crate::app::app_view::ScreenModeRelaunch {
-                    minimal,
-                    session_id,
-                });
-            }
-            let mut effects = unregister_all_active_sessions(app);
-            effects.push(Effect::Quit);
-            effects
         }
         Action::NewSession => dispatch_new_session(app),
         Action::LeaveHome => leave_welcome_for_session(app),
@@ -738,10 +713,6 @@ fn dispatch_inner(action: Action, app: &mut AppView) -> Vec<Effect> {
             dispatch_open_transcript_pager(app);
             vec![]
         }
-        Action::MinimalExpandLast => {
-            app.minimal_expand_last();
-            vec![]
-        }
         Action::CopyBlockMeta => {
             dispatch_copy_block_meta(app);
             vec![]
@@ -1161,7 +1132,6 @@ fn dispatch_inner(action: Action, app: &mut AppView) -> Vec<Effect> {
         Action::SetRespectManualFolds(v) => set_respect_manual_folds(app, v),
         Action::SetDefaultSelectedPermission(s) => set_default_selected_permission(app, s),
         Action::SetHunkTrackerMode(s) => set_hunk_tracker_mode(app, s),
-        Action::SetScreenMode(s) => set_screen_mode(app, s),
         Action::SetVoiceKeybindEnabled(v) => set_voice_keybind_enabled(app, v),
         Action::SetVoiceCaptureMode(s) => set_voice_capture_mode(app, s),
         Action::SetVoiceSttLanguage(s) => set_voice_stt_language(app, s),
@@ -1204,7 +1174,6 @@ fn dispatch_inner(action: Action, app: &mut AppView) -> Vec<Effect> {
         Action::SetOutputRateMaxRetries(v) => set_output_rate_max_retries(app, v),
         Action::SetTtftTimeoutSecs(v) => set_ttft_timeout_secs(app, v),
         Action::SetShowTips(v) => set_show_tips(app, v),
-        Action::SetAutoUpdate(v) => set_auto_update(app, v),
         Action::SetDisplayRefreshAutoCadence(v) => set_display_refresh_auto_cadence(app, v),
         Action::PreviewTheme(v) => preview_theme(app, v),
         Action::PreviewAutoDarkTheme(v) => preview_auto_dark_theme(app, v),
@@ -1488,7 +1457,6 @@ fn dispatch_inner(action: Action, app: &mut AppView) -> Vec<Effect> {
             }
             vec![]
         }
-        Action::EditPromptExternal => super::external_editor::dispatch_edit_prompt_external(app),
         Action::OpenDashboard => dispatch_open_dashboard(app),
         Action::ExitDashboard => dispatch_exit_dashboard(app),
         Action::DashboardAttach(id) => dispatch_dashboard_attach(app, id),
@@ -1653,22 +1621,8 @@ pub(crate) fn flush_image_notices(app: &mut AppView) -> bool {
     if app.pending_image_notices.is_empty() {
         return false;
     }
-    if !app.screen_mode.is_minimal() {
-        let message = join_image_notices(&mut app.pending_image_notices);
-        app.show_toast(&message);
-        return true;
-    }
-    let target = match app.active_view {
-        ActiveView::Agent(id) => app.agents.get_mut(&id),
-        _ => app.agents.values_mut().next(),
-    };
-    let Some(agent) = target else {
-        return false;
-    };
     let message = join_image_notices(&mut app.pending_image_notices);
-    agent
-        .scrollback
-        .push_block(crate::scrollback::block::RenderBlock::system(message));
+    app.show_toast(&message);
     true
 }
 /// Drain the queued notices into one `; `-joined message, dropping repeats.

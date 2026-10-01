@@ -130,8 +130,7 @@ function Install-WindowsPayload([string]$BaseUrl, [string]$Version, [string]$Pla
     # %LOCALAPPDATA%\grok\git\<mingit-version>\ (newest usable version wins, so older
     # version dirs are left alone here). Releases before the payload shipped have none
     # of these objects: a miss is a note, not a failure.
-    # Same shape as xai-grok-update's windows_payload (which cannot run before grok.exe
-    # exists): download all three hook exes or none, install them with capture/restore.
+    # Download all three hook exes or none, and install them with capture/restore.
 
     $groveExes = @('grove', 'grove-fsmonitor', 'grove-credential')
     $groveDownloads = @{}

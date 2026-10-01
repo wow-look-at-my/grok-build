@@ -13,51 +13,6 @@ fn j<'a>(v: &'a serde_json::Value, path: &str) -> &'a serde_json::Value {
     v.pointer(path).unwrap_or(&serde_json::Value::Null)
 }
 
-/// The relaunch drain must wait on the `AgentActivity` signal, because relay-driven turns never set the IPC `agent_busy` flag.
-/// It must also flush registered session actors before cancelling.
-#[tokio::test]
-async fn relaunch_drain_waits_for_agent_activity_and_flushes_sessions() {
-    let (shutdown_tx, _shutdown_rx) =
-        watch::channel(super::super::protocol::ShutdownReason::Manual);
-    let cancel = CancellationToken::new();
-    let agent_busy = Arc::new(AtomicBool::new(false)); // IPC view: idle
-    let activity = AgentActivity::default();
-    let (mut cmd_rx, prompt_id, _pending) = activity.register_for_test("s1");
-
-    // Agent view: a relay-driven turn is running.
-    *prompt_id.lock().unwrap() = Some("prompt-1".to_string());
-
-    // Simulated session actor: exits on Shutdown, asserting cancel order.
-    let cancel_for_actor = cancel.clone();
-    let actor = tokio::spawn(async move {
-        while let Some(cmd) = cmd_rx.recv().await {
-            if matches!(cmd, crate::session::SessionCommand::Shutdown(_)) {
-                assert!(
-                    !cancel_for_actor.is_cancelled(),
-                    "flush must run before the leader cancels"
-                );
-                return;
-            }
-        }
-    });
-
-    spawn_relaunch_drain(shutdown_tx, cancel.clone(), agent_busy, activity);
-
-    // Drain must hold while the turn is running.
-    tokio::time::sleep(Duration::from_millis(300)).await;
-    assert!(
-        !cancel.is_cancelled(),
-        "drain must not cancel while a relay-driven turn is running"
-    );
-
-    // The turn ends: the drain flushes the session, then cancels
-    *prompt_id.lock().unwrap() = None;
-    tokio::time::timeout(Duration::from_secs(5), cancel.cancelled())
-        .await
-        .expect("drain should cancel once the agent goes idle");
-    actor.await.expect("session actor should get Shutdown");
-}
-
 /// `ServerMessageRef::Acp` is the borrowed serialize-only mirror the client writer uses for shared payloads.
 /// It must stay byte-identical on the wire to `ServerMessage::Acp`, or clients would fail to decode ACP frames.
 #[test]
@@ -118,52 +73,6 @@ fn outbound_payload_non_json_passthrough() {
         out, original,
         "non-JSON payloads must pass through verbatim"
     );
-}
-
-#[test]
-fn decide_relaunch_is_idempotent_and_directional() {
-    let temp = TempDir::new().unwrap();
-    let sock = temp.path().join("leader.sock");
-    let control_state = LeaderServerControlState::new(LeaderServerMetadata {
-        pid: std::process::id(),
-        socket_path: sock.clone(),
-        lock_path: sock.with_extension("lock"),
-        ws_url_suffix: String::new(),
-        leader_binary_version: "0.1.100".to_string(),
-    });
-    let relaunching = AtomicBool::new(false);
-
-    // An equal version is declined, and the flag is NOT set
-    assert!(matches!(
-        decide_relaunch_for_update(&control_state, "0.1.100".to_string(), &relaunching),
-        Ok(ControlPayload::RelaunchDeclined { .. })
-    ));
-    assert!(!relaunching.load(Ordering::SeqCst));
-
-    // A strictly-older target (a downgrade) is declined; never downgrade
-    assert!(matches!(
-        decide_relaunch_for_update(&control_state, "0.1.0".to_string(), &relaunching),
-        Ok(ControlPayload::RelaunchDeclined { .. })
-    ));
-    // An unparseable target is declined (dev "unknown" builds)
-    assert!(matches!(
-        decide_relaunch_for_update(&control_state, "unknown".to_string(), &relaunching),
-        Ok(ControlPayload::RelaunchDeclined { .. })
-    ));
-    assert!(!relaunching.load(Ordering::SeqCst));
-
-    // A newer target is accepted and sets the flag
-    assert!(matches!(
-        decide_relaunch_for_update(&control_state, "0.2.0".to_string(), &relaunching),
-        Ok(ControlPayload::Relaunching { .. })
-    ));
-    assert!(relaunching.load(Ordering::SeqCst));
-
-    // A second request while the flag is set is declined (idempotent)
-    assert!(matches!(
-        decide_relaunch_for_update(&control_state, "0.3.0".to_string(), &relaunching),
-        Ok(ControlPayload::RelaunchDeclined { .. })
-    ));
 }
 
 #[derive(Debug)]

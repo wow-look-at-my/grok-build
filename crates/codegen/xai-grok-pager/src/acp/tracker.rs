@@ -1005,9 +1005,6 @@ impl AcpUpdateTracker {
         earlier: EntryId,
         later: EntryId,
     ) -> bool {
-        if scrollback.is_committed(earlier) || scrollback.is_committed(later) {
-            return false;
-        }
         let (Some(a), Some(b)) = (
             scrollback
                 .get_by_id(earlier)

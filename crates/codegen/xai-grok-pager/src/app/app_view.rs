@@ -531,14 +531,6 @@ fn is_restricted_tier(tier: Option<&str>) -> bool {
 pub(crate) fn is_api_key_label(s: &str) -> bool {
     s.trim().to_ascii_lowercase().replace([' ', '_', '-'], "") == "apikey"
 }
-/// Pending re-exec into another screen mode (see `/minimal` / `/fullscreen`).
-#[derive(Debug, Clone)]
-pub struct ScreenModeRelaunch {
-    /// `true` means `--minimal`; `false` means fullscreen (non-minimal).
-    pub minimal: bool,
-    /// Active session to reopen via `--resume`.
-    pub session_id: String,
-}
 /// The coding-data write in flight. Its reply owns the banner ack; it holds the rollback a failure reverts to.
 /// `opted_in` is independent of `coding_data_retention_opt_out`, which is optimistic and which auth-meta refreshes rewrite mid-flight.
 /// `rollback_to_opted_in` starts from that mirror when idle and is inherited when this write replaces a pending one.
@@ -754,14 +746,6 @@ pub struct AppView {
     /// Set by `Action::OpenTranscriptPager` (`/transcript`).
     /// Consumed by the event loop, which suspends the inline TUI, spawns the pager, then restores and deletes the temp file.
     pub pending_pager_path: Option<std::path::PathBuf>,
-    /// Whether [`pending_pager_path`](Self::pending_pager_path) holds an ANSI-colored file (the minimal "full view" transcript).
-    /// When true the event loop ensures the pager renders raw control codes (`less -R`) so the colors show instead of literal escapes.
-    /// Plain-text transcripts (`/export` markdown) leave this false.
-    pub pending_pager_ansi: bool,
-    /// Minimal mode only: the Ctrl+T **force-show** pin for the todo panel.
-    /// Minimal-mode-only per-session state, consolidated into a single field so the central `AppView` isn't peppered with loose minimal flags.
-    /// Default-empty and inert outside `--minimal`; the `xai-grok-pager-minimal` crate reads/mutates it through the `crate::minimal_api` accessors.
-    pub(crate) minimal_state: crate::minimal_api::MinimalState,
     /// Currently highlighted menu item on the welcome screen (arrow keys / hover).
     pub welcome_menu_index: Option<usize>,
     /// Hit-test rects for welcome menu items (populated during render).
@@ -821,7 +805,7 @@ pub struct AppView {
     pub dispatch_depth: u32,
     /// Image notices raised while one dispatch or ACP message runs (unbound placeholder, unreadable
     /// attachment, dropped by a command). App-owned so a command that removes its own session
-    /// (`/new`, `/home` in minimal) cannot take the notice down with it; the `unified_log` event is
+    /// cannot take the notice down with it; the `unified_log` event is
     /// written against the originating session when the notice is raised.
     pub pending_image_notices: Vec<String>,
     /// Sticky hover flag for the privacy banner buttons (redraw on enter/leave).
@@ -906,8 +890,6 @@ pub struct AppView {
     pub yolo_policy_block: Option<&'static str>,
     /// One-shot notice that a launch `--yolo` was pinned off; shown on the first agent view.
     pub yolo_launch_block_notice: Option<&'static str>,
-    /// One-shot switch-back toast after a screen-mode re-exec.
-    pub screen_mode_switch_hint: Option<&'static str>,
     /// Require explicit plan approval via the plan viewer UI even in always-approve (YOLO) mode.
     /// Loaded from `[ui] require_plan_approval` in config.toml at startup.
     pub require_plan_approval: bool,
@@ -1051,8 +1033,6 @@ pub struct AppView {
     pub coding_data_write_seq: u64,
     /// Persisted `[cli].show_tips` mirror. `None` means no override (default `true`).
     pub show_tips: Option<bool>,
-    /// Persisted `[cli].auto_update` mirror. `None` means no override (default `true`).
-    pub auto_update: Option<bool>,
     /// Persisted `[toolset.ask_user_question].timeout_enabled` mirror, seeded from the effective TOML merge like `show_tips`.
     /// `None` means unset in TOML (default `true`); toggles write the user layer.
     pub ask_user_question_timeout_enabled: Option<bool>,
@@ -1091,20 +1071,11 @@ pub struct AppView {
     pub startup_warnings: Vec<crate::startup::StartupWarning>,
     /// Whether the user authenticated with an API key (shown in the version badge).
     pub is_api_key_auth: bool,
-    /// Latest version string from a background update check.
-    /// Set when a newer version is detected; rendered as a notification on the welcome screen.
-    pub pending_update_version: Option<String>,
-    /// When true, the event loop should exit so the user can relaunch to pick up the downloaded update.
-    pub quit_for_update: bool,
     /// Printed to stderr after terminal restore when Welcome yes could not save trust.
     pub trust_quit_error: Option<String>,
     /// Generation and state for detecting a foreign session to resume, run once per launch.
     pub(crate) foreign_resume_launch_generation: u64,
     pub(crate) foreign_resume_launch: Option<crate::app::foreign_sessions::ForeignResumeLaunch>,
-    /// When set, the event loop should exit and the process re-exec into the other screen mode.
-    /// Driven by `/minimal` and `/fullscreen`.
-    /// Captures the session id at action time so a later teardown cannot drop `--resume`.
-    pub relaunch: Option<ScreenModeRelaunch>,
     /// Whether importable `.claude/` settings were detected at startup.
     pub has_claude_import: bool,
     /// When set, the welcome screen renders an interactive import modal instead of normal content.
@@ -1112,10 +1083,8 @@ pub struct AppView {
     /// Doc viewer overlay for the welcome screen (release notes via Ctrl+L).
     pub welcome_doc_viewer: Option<crate::views::modal::ActiveModal>,
     /// Whether the pager uses fullscreen (alt-screen) or inline mode.
-    /// Set from the resolved terminal state at startup; updated by the in-process `/minimal` / `/fullscreen` switch (`mode_switch`).
+    /// Set from the resolved terminal state at startup.
     pub(crate) screen_mode: super::ScreenMode,
-    /// Pending in-process mode-switch target, consumed by the event loop.
-    pub(crate) pending_screen_mode_switch: Option<super::ScreenMode>,
     /// Onboarding tutorial overlay, if open.
     /// Top-level (not per-agent) so it works over both the welcome screen and an agent session.
     /// Opened by `/tutorial` (also in the command palette).
@@ -1243,9 +1212,6 @@ impl AppView {
         return false;
 
         #[allow(unreachable_code)]
-        if self.screen_mode.is_minimal() {
-            return false;
-        }
         if !self.privacy_notice_rollout {
             return false;
         }
@@ -1460,8 +1426,6 @@ impl AppView {
             pending_effects: Vec::new(),
             pending_editor: None,
             pending_pager_path: None,
-            pending_pager_ansi: false,
-            minimal_state: crate::minimal_api::MinimalState::default(),
             welcome_menu_index: None,
             welcome_menu_rects: Vec::new(),
             welcome_show_changelog_action: false,
@@ -1527,7 +1491,6 @@ impl AppView {
             auto_mode_gate: xai_grok_shell::util::config::auto_permission_mode_enabled_from_disk(),
             yolo_policy_block: None,
             yolo_launch_block_notice: None,
-            screen_mode_switch_hint: None,
             require_plan_approval: false,
             plan_mode: false,
             subagents: false,
@@ -1589,7 +1552,6 @@ impl AppView {
             coding_data_pending_write: None,
             coding_data_write_seq: 0,
             show_tips: None,
-            auto_update: None,
             ask_user_question_timeout_enabled: None,
             subagent_model_inheritance: crate::settings::FeatureOverrideState::new(
                 xai_grok_shell::agent::config::Feature::SubagentModelInheritance,
@@ -1608,17 +1570,13 @@ impl AppView {
             reconnect_pending: false,
             startup_warnings: Vec::new(),
             is_api_key_auth: false,
-            pending_update_version: None,
             foreign_resume_launch_generation: 0,
             foreign_resume_launch: None,
-            quit_for_update: false,
             trust_quit_error: None,
-            relaunch: None,
             has_claude_import: false,
             import_claude_modal: None,
             welcome_doc_viewer: None,
             screen_mode: ScreenMode::Inline,
-            pending_screen_mode_switch: None,
             show_resolved_model: true,
             sharing_enabled: false,
             plugin_cta_enabled: false,
@@ -2519,7 +2477,6 @@ impl AppView {
                     welcome_doc_viewer: &mut self.welcome_doc_viewer,
                     changelog_markdown: &self.changelog_markdown,
                     show_changelog_action: self.welcome_show_changelog_action,
-                    has_pending_update: self.pending_update_version.is_some(),
                     has_foreign_resume,
                     cwd_has_git_ancestor: self.cwd_has_git_ancestor,
                     session_picker_grouped: self.session_picker_grouped,
@@ -2713,21 +2670,12 @@ impl AppView {
                 {
                     self.maybe_commit_voice_interim_before_submit_key(key);
                 }
-                if self.screen_mode.is_minimal()
-                    && let Event::Key(key) = ev
-                    && key.kind != KeyEventKind::Release
-                    && let Some(outcome) = self.minimal_key_intercept(key)
-                {
-                    return outcome;
-                }
-                let prompt_paging = !overlay_active && !self.screen_mode.is_minimal();
-                let outcome = match self.agents.get_mut(&id) {
+                let prompt_paging = !overlay_active;
+                match self.agents.get_mut(&id) {
                     Some(agent) => {
                         let transcript_before = agent.active_subagent.clone();
                         let workflows_before = agent.show_workflows;
-                        let outcome = if self.screen_mode.is_minimal() {
-                            agent.handle_minimal_input(ev, &self.registry)
-                        } else if prompt_paging {
+                        let outcome = if prompt_paging {
                             agent.handle_input_with_prompt_paging(ev, &self.registry)
                         } else {
                             agent.handle_input(ev, &self.registry)
@@ -2746,13 +2694,6 @@ impl AppView {
                         outcome
                     }
                     None => InputOutcome::Unchanged,
-                };
-                if self.pending_editor.is_some()
-                    && matches!(outcome, InputOutcome::Action(Action::EditPromptExternal))
-                {
-                    InputOutcome::Unchanged
-                } else {
-                    outcome
                 }
             }
             ActiveView::AgentDashboard => {
@@ -3181,8 +3122,6 @@ struct WelcomeInputCtx<'a> {
     changelog_markdown: &'a Option<String>,
     /// Whether the welcome menu currently includes a "Changelog" row (above Quit), so index-to-action mapping accounts for it.
     show_changelog_action: bool,
-    has_pending_update: bool,
-    /// A recent foreign session is available to resume when no update is pending.
     has_foreign_resume: bool,
     cwd_has_git_ancestor: bool,
     session_picker_grouped: bool,
@@ -3740,9 +3679,6 @@ fn handle_welcome_input(ev: &Event, ctx: &mut WelcomeInputCtx<'_>) -> InputOutco
             {
                 return InputOutcome::ActionThenForward(Action::LeaveHome);
             }
-            if ctx.has_pending_update && key!('u', CONTROL).matches(key) {
-                return InputOutcome::Action(Action::QuitForUpdate);
-            }
             if ctx.has_foreign_resume && key!('u', CONTROL).matches(key) {
                 return InputOutcome::Action(Action::ResumeForeignSession);
             }
@@ -4275,62 +4211,9 @@ impl AppView {
         }
         has_escapes.then_some(clears)
     }
-    /// Minimal mode: queue the most-recently committed folded block (collapsed reasoning / truncated tool output) to be re-printed fully expanded.
-    /// The re-print lands below the conversation on the next draw.
-    /// Returns whether something was queued. No-op when nothing folded remains to expand.
-    pub(crate) fn minimal_expand_last(&mut self) -> bool {
-        let ActiveView::Agent(id) = &self.active_view else {
-            return false;
-        };
-        let id = *id;
-        let found = match self.agents.get_mut(&id) {
-            Some(agent) => agent.scrollback.take_expandable_committed(),
-            None => None,
-        };
-        if let Some(eid) = found {
-            self.minimal_state.pending_expand.push(eid);
-            true
-        } else {
-            false
-        }
-    }
-    /// These keys carry full-TUI meanings that don't apply to the scrollback-native mode, so minimal remaps them:
-    /// The full-TUI Ctrl+T toggles the todo overlay pane, which minimal never renders.
-    /// Committed terminal text can't be mutated, so expansion is an honest re-print.
-    fn minimal_key_intercept(&mut self, key: &crossterm::event::KeyEvent) -> Option<InputOutcome> {
-        if key!('t', CONTROL).matches(key) {
-            self.minimal_state.show_todos = !self.minimal_state.show_todos;
-        } else if self
-            .registry
-            .matches_id(crate::actions::ActionId::ToggleQueue, key)
-        {
-            return Some(InputOutcome::Action(crate::app::actions::Action::ShowQueue));
-        } else if key!('e', CONTROL).matches(key) {
-            self.minimal_expand_last();
-        } else if key!('o', CONTROL).matches(key) {
-            if crate::minimal_api::minimal_ctrl_o_opens_transcript(self) {
-                return Some(InputOutcome::Action(
-                    crate::app::actions::Action::OpenTranscriptPager,
-                ));
-            }
-            if let ActiveView::Agent(id) = &self.active_view {
-                let id = *id;
-                if let Some(agent) = self.agents.get_mut(&id) {
-                    return Some(agent.handle_prompt_key(key, &self.registry, false));
-                }
-            }
-            return None;
-        } else {
-            return None;
-        }
-        Some(InputOutcome::Changed)
-    }
     /// Release capture while a native-select surface is on screen so the terminal owns drag-select.
     /// Restore only if we took the hold: a user who already had `/toggle-mouse-reporting` off must stay off.
     fn sync_native_selection_mouse(&mut self) {
-        if self.screen_mode.is_minimal() {
-            return;
-        }
         let want_off = self.auth_show_raw_url
             && matches!(self.active_view, ActiveView::Welcome)
             && matches!(self.auth_state, AuthState::Authenticating { .. });
@@ -4362,12 +4245,6 @@ impl AppView {
     }
     fn draw_inner(&mut self, terminal: &mut PagerTerminal) {
         self.resync_announcement_slash_gate_on_divergence();
-        if self.screen_mode.is_minimal() {
-            if let Some(hooks) = crate::minimal_hook::hooks() {
-                (hooks.draw)(self, terminal);
-            }
-            return;
-        }
         if self.welcome_on_auth_url
             && !matches!(
                 (&self.active_view, &self.auth_state),
@@ -4574,7 +4451,6 @@ impl AppView {
                                 compact,
                                 pending_hint,
                                 startup_warnings: &self.startup_warnings,
-                                pending_update_version: self.pending_update_version.as_deref(),
                                 foreign_resume_hint: foreign_resume_hint.as_ref(),
                                 session_picker_content_results: self
                                     .session_picker_content_results
@@ -5348,7 +5224,6 @@ impl AppView {
     /// Produces redraws when there are running entries with animated accents.
     pub fn tick(&mut self) -> bool {
         let mut needs_redraw = false;
-        needs_redraw |= self.minimal_state.needs_frames();
         needs_redraw |= self.poll_clipboard_focus_tip();
         if matches!(self.active_view, ActiveView::Welcome) {
             self.welcome_tick = self.welcome_tick.wrapping_add(1);
@@ -5636,9 +5511,6 @@ impl AppView {
         if self.gboom_active() {
             return Some(std::time::Duration::from_millis(33));
         }
-        if self.minimal_state.transcript.is_some() {
-            return Some(std::time::Duration::from_millis(16));
-        }
         None
     }
     /// Deferred image viewer load (background thread).
@@ -5707,9 +5579,6 @@ impl AppView {
     }
     fn view_tick_demand(&self) -> TickDemand {
         if self.pending_action.is_some() {
-            return TickDemand::Fast;
-        }
-        if self.minimal_state.needs_frames() {
             return TickDemand::Fast;
         }
         if self

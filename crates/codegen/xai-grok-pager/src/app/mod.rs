@@ -63,11 +63,9 @@ mod foreign_sessions;
 #[cfg(all(test, unix))]
 mod leader_cluster;
 mod modals;
-pub(crate) mod mode_switch;
 mod mouse;
 mod queue_edit;
 mod reader_thread;
-pub(crate) mod screen_mode_relaunch;
 mod session_load_barrier;
 mod startup_failure;
 use reader_thread::ReaderThread;
@@ -94,7 +92,9 @@ pub use cli::{WorkspaceMgmtArgs, WorkspaceMgmtCommand, WorkspaceStartArgs};
 use crossterm::cursor::{self, SetCursorStyle};
 use crossterm::event;
 use crossterm::execute;
-use crossterm::terminal::{self, Clear, ClearType, EnterAlternateScreen, SetTitle};
+use crossterm::terminal::{
+    self, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen, SetTitle,
+};
 pub use foreign_sessions::ForeignScanCoordinator;
 pub(crate) use foreign_sessions::{
     badge_for_picker_source, foreign_tool_display_label, is_foreign_picker_source,
@@ -138,28 +138,11 @@ fn pop_gboom_keyboard_flags_inline() {
 }
 /// Tracks whether mouse capture (the five DEC modes enabled by crossterm `EnableMouseCapture`, plus bracketed paste) is currently active.
 pub(crate) static MOUSE_CAPTURE_ENABLED: AtomicBool = AtomicBool::new(false);
-/// Whether minimal was auto-selected because the terminal leaks mouse reports as raw text (JediTerm/Windows) and the user expressed no preference.
-/// Gates the idle-hint "auto-set" note so it never misleads users who chose minimal themselves.
-static MINIMAL_AUTO_SET_FOR_MOUSE_LEAK: AtomicBool = AtomicBool::new(false);
-/// See [`MINIMAL_AUTO_SET_FOR_MOUSE_LEAK`].
-pub fn minimal_auto_set_for_mouse_leak() -> bool {
-    MINIMAL_AUTO_SET_FOR_MOUSE_LEAK.load(Ordering::Acquire)
-}
-/// Set after a `/minimal` re-exec that actually stayed minimal (idle-status cue).
-static MINIMAL_SHOW_SWITCH_BACK_TO_FULLSCREEN: AtomicBool = AtomicBool::new(false);
-pub fn minimal_show_switch_back_to_fullscreen() -> bool {
-    MINIMAL_SHOW_SWITCH_BACK_TO_FULLSCREEN.load(Ordering::Acquire)
-}
-#[cfg(any(test, feature = "test-support"))]
-pub fn set_minimal_show_switch_back_to_fullscreen_for_test(on: bool) {
-    MINIMAL_SHOW_SWITCH_BACK_TO_FULLSCREEN.store(on, Ordering::Release);
-}
 /// Whether startup actually applied a forced cursor style.
 /// Teardown (and the panic hook, which can't thread parameters) resets the style only when this is true.
 /// Under inherit, `0 q` would clobber a shell-chosen style.
 pub(crate) static CURSOR_STYLE_FORCED: AtomicBool = AtomicBool::new(false);
-/// The screen the terminal is ACTUALLY on, for teardown paths that cannot thread parameters (panic hook, signal handler, post-loop restore).
-/// It is updated eagerly at every screen flip so mid-switch failures tear down correctly.
+/// The screen the terminal is on, for teardown paths that cannot thread parameters (panic hook, signal handler, post-loop restore).
 static CURRENT_SCREEN_MODE: std::sync::atomic::AtomicU8 =
     std::sync::atomic::AtomicU8::new(ScreenMode::INITIAL_U8);
 pub(crate) fn set_current_screen_mode(mode: ScreenMode) {
@@ -168,21 +151,6 @@ pub(crate) fn set_current_screen_mode(mode: ScreenMode) {
 }
 pub(crate) fn current_screen_mode() -> ScreenMode {
     ScreenMode::from_u8(CURRENT_SCREEN_MODE.load(Ordering::Acquire))
-}
-/// Exists for code like `AgentView::handle_input` that needs minimal-mode behavior but sits below `AppView` and cannot see `AppView::screen_mode`.
-/// Do NOT gate behavior off the styling globals (`modal_window::embedded()`, `scrollbar hidden`, …): those are mode-agnostic render toggles.
-/// A future embedded host flipping them must not inherit minimal's key remaps or scrollback writes.
-static MINIMAL_MODE_ACTIVE: AtomicBool = AtomicBool::new(false);
-/// Whether the process runs in minimal (scrollback-native) mode.
-/// See [`MINIMAL_MODE_ACTIVE`]; prefer `AppView::screen_mode.is_minimal()` wherever the screen mode is already in reach.
-pub(crate) fn minimal_mode_active() -> bool {
-    MINIMAL_MODE_ACTIVE.load(Ordering::Acquire)
-}
-/// Test-only override for [`minimal_mode_active`] (unit tests exercising minimal-gated input paths without a terminal).
-/// Save/restore around use: this is process-global state.
-#[cfg(test)]
-pub(crate) fn set_minimal_mode_active_for_test(on: bool) {
-    MINIMAL_MODE_ACTIVE.store(on, Ordering::Release);
 }
 /// Whether the opt-in mouse-reporting toggle feature is enabled (`[ui] mouse_reporting_toggle` / `GROK_MOUSE_REPORTING_TOGGLE`).
 /// Seeded once at startup; gates both the `Ctrl+R` shortcut registration and the `/toggle-mouse-reporting` slash command's visibility/execution.
@@ -347,10 +315,6 @@ use crate::render::draw::{EscapeWriter, TermWriter, WriterJoin, WriterSender, Wr
 pub(crate) enum ScreenMode {
     Fullscreen,
     Inline,
-    /// Scrollback-native (experimental, `--minimal`): finalized blocks are printed into the terminal's native scrollback via `insert_before`.
-    /// This crate keeps only three hooks for it: `crate::minimal_hook`, `crate::minimal_api`, and `AppView::minimal_state`.
-    /// If you don't work on minimal, treat this variant as opaque; the fullscreen/inline paths are unaffected.
-    Minimal,
 }
 impl ScreenMode {
     const INITIAL_U8: u8 = 1;
@@ -358,22 +322,16 @@ impl ScreenMode {
         match self {
             Self::Fullscreen => 0,
             Self::Inline => 1,
-            Self::Minimal => 2,
         }
     }
     pub(crate) fn from_u8(v: u8) -> Self {
         match v {
             0 => Self::Fullscreen,
-            2 => Self::Minimal,
             _ => Self::Inline,
         }
     }
     pub(crate) fn is_fullscreen(self) -> bool {
         matches!(self, Self::Fullscreen)
-    }
-    /// Whether this is the experimental scrollback-native minimal mode.
-    pub(crate) fn is_minimal(self) -> bool {
-        matches!(self, Self::Minimal)
     }
     /// Stable wire label for the `_meta.screenMode` prompt-telemetry field (headless sends `"headless"`).
     /// Values are pinned by the telemetry allowlist (`xai-grok-telemetry`'s `KNOWN_SCREEN_MODES`).
@@ -382,51 +340,19 @@ impl ScreenMode {
         match self {
             Self::Fullscreen => "fullscreen",
             Self::Inline => "inline",
-            Self::Minimal => "minimal",
         }
     }
 }
-/// The rest of startup (and any future contributor) then never has to sprinkle `is_minimal()` checks through `run`.
-/// All of these globals do nothing outside minimal (they default to the full-TUI behavior).
-/// Calling this for every mode is therefore safe and keeps a single source of truth for the effective mode.
-fn apply_screen_mode_globals(screen_mode: ScreenMode) {
-    let minimal = screen_mode.is_minimal();
-    set_current_screen_mode(screen_mode);
-    MINIMAL_MODE_ACTIVE.store(minimal, Ordering::Release);
-    crate::terminal::image::set_inline_overlay_force_off(minimal);
-    crate::views::modal_window::set_embedded(minimal);
-    crate::render::scrollbar::set_scrollbars_hidden(minimal);
-    crate::theme::cache::set_terminal_native_lock(minimal);
-}
-/// Startup theme state for the *requested* screen mode, step 1 of the two-phase startup theme handshake (step 2: [`finish_theme_after_probe`]).
-/// Must run before `init_terminal`, whose `apply_cursor_color()` reads the state installed here.
-fn engage_startup_theme(screen_mode: ScreenMode) {
-    if screen_mode.is_minimal() {
-        crate::theme::cache::set_terminal_native_lock(true);
-    } else {
-        let initial_theme = crate::theme::cache::resolve_initial_theme();
-        crate::theme::cache::set(initial_theme);
-        mode_switch::mark_theme_resolved();
-    }
-}
-/// Step 2 of the startup theme handshake.
-/// If a `--minimal` start was downgraded to Inline by `init_terminal`'s probe, resolve the regular theme that [`engage_startup_theme`] skipped.
-/// Does nothing otherwise.
-fn finish_theme_after_probe(requested_minimal: bool, effective_mode: ScreenMode) {
-    if requested_minimal && !effective_mode.is_minimal() {
-        let late_theme = crate::theme::cache::resolve_initial_theme_no_osc11();
-        crate::theme::cache::set(late_theme);
-        crate::theme::apply_cursor_color();
-        mode_switch::mark_theme_resolved();
-        tracing::info!(?late_theme, "minimal downgrade: resolved regular theme");
-    }
+/// Resolve and install the startup theme. Must run before `init_terminal`, whose `apply_cursor_color()` reads it.
+fn engage_startup_theme() {
+    let initial_theme = crate::theme::cache::resolve_initial_theme();
+    crate::theme::cache::set(initial_theme);
 }
 /// Info about the active session at exit time, used for the resume hint.
 ///
 /// Wrapped in a struct so additional fields (e.g., cwd, model) can be added without changing the return type.
 pub(crate) struct ExitInfo {
     pub session_id: String,
-    pub minimal: bool,
     /// Session tail the user can take in at a glance; `Some` exactly when it should print.
     /// The decision whether to print lives at the sole construction site, `finish_run`.
     pub summary: Option<ExitSummary>,
@@ -591,10 +517,7 @@ async fn bounded_connect(
     let context = || startup_failure::Context {
         target,
         attempt,
-        version: xai_grok_version::display_version_with_commit(
-            xai_grok_version::version_with_commit(),
-            xai_grok_update::channel_label(),
-        ),
+        version: xai_grok_version::version_with_commit().to_owned(),
         log_path: xai_grok_telemetry::unified_log::path(),
     };
     let started = std::time::Instant::now();
@@ -665,13 +588,7 @@ async fn bounded_connect(
 /// Main entry point: connect to agent, init terminal, run event loop, restore.
 /// If a session ID is provided via `--resume` / `--load` / `--continue`, the pager skips the welcome screen and immediately loads that session.
 /// The load replays the session's history; sessions not found locally are restored from remote storage.
-pub async fn run(
-    mut args: PagerArgs,
-    bg_update_rx: Option<
-        tokio::sync::oneshot::Receiver<Option<xai_grok_update::auto_update::UpdateAvailable>>,
-    >,
-) -> anyhow::Result<bool> {
-    let screen_mode_override = screen_mode_relaunch::take_screen_mode_env_override();
+pub async fn run(mut args: PagerArgs) -> anyhow::Result<()> {
     let cancel = CancellationToken::new();
     let startup_start = std::time::Instant::now();
     let raw_config = xai_grok_shell::config::load_effective_config()
@@ -937,43 +854,18 @@ pub async fn run(
         term_ctx,
         is_control_mode,
     );
-    let config_screen_mode = raw_config
-        .get("ui")
-        .and_then(|ui| ui.get("screen_mode"))
-        .and_then(|v| v.as_str());
-    let auto_minimal_mouse_leak = term_ctx.mouse_reporting_leaks_as_raw_text();
-    let explicit_minimal = screen_mode_relaunch::effective_minimal_preference(
-        args.minimal,
-        args.fullscreen,
-        config_screen_mode,
-        config_watcher.current().minimal,
-    );
-    let screen_mode = screen_mode_relaunch::resolve_screen_mode(
-        screen_mode_override,
-        explicit_minimal.unwrap_or(auto_minimal_mouse_leak),
-        alt_screen_wants_fullscreen,
-    );
-    MINIMAL_AUTO_SET_FOR_MOUSE_LEAK.store(
-        screen_mode.is_minimal() && explicit_minimal.is_none() && screen_mode_override.is_none(),
-        Ordering::Release,
-    );
-    let minimal = screen_mode.is_minimal();
+    let screen_mode = if alt_screen_wants_fullscreen {
+        ScreenMode::Fullscreen
+    } else {
+        ScreenMode::Inline
+    };
     connect_flags.status_line = event_loop::load_initial_ui_config()
         .status_line
         .reserves_a_row();
-    let relaunched_into_minimal = screen_mode_override == Some(ScreenMode::Minimal);
-    let relaunched_into_fullscreen = screen_mode_override == Some(ScreenMode::Fullscreen);
     tracing::info!(
         use_alt_screen = screen_mode.is_fullscreen(),
-        minimal = screen_mode.is_minimal(),
-        mouse_capture = !screen_mode.is_minimal(),
-        minimal_live_rows = config_watcher.current().minimal_live_rows,
         is_control_mode,
         no_alt_screen_cli = args.no_alt_screen,
-        minimal_cli = args.minimal,
-        fullscreen_cli = args.fullscreen,
-        config_screen_mode = ?config_screen_mode,
-        auto_minimal_mouse_leak,
         config_mode = ?alt_screen_config_mode,
         multiplexer = ?term_ctx.multiplexer,
         "resolved fullscreen policy"
@@ -986,30 +878,15 @@ pub async fn run(
             .as_ref()
             .and_then(|s| s.terminal_theme_enabled),
     ));
-    engage_startup_theme(screen_mode);
-    let minimal_live_rows = config_watcher.current().minimal_live_rows;
+    engage_startup_theme();
     let (frame_tx, writer_sync, writer_event_rx, writer_thread) =
         crate::render::draw::spawn_writer_thread()
             .context("failed to spawn the term-writer thread")?;
     let cursor_blink = event_loop::load_initial_ui_config().cursor_blink;
     let TerminalInit {
         mut terminal,
-        screen_mode,
         startup_typeahead,
-    } = init_terminal(
-        screen_mode,
-        minimal_live_rows,
-        relaunched_into_minimal,
-        frame_tx,
-        writer_sync,
-        cursor_blink,
-    )?;
-    MINIMAL_SHOW_SWITCH_BACK_TO_FULLSCREEN.store(
-        relaunched_into_minimal && screen_mode.is_minimal(),
-        Ordering::Release,
-    );
-    apply_screen_mode_globals(screen_mode);
-    finish_theme_after_probe(minimal, screen_mode);
+    } = init_terminal(screen_mode, frame_tx, writer_sync, cursor_blink)?;
     if let Some(ref t) = session_title {
         set_terminal_title(t);
     }
@@ -1139,8 +1016,6 @@ pub async fn run(
     let term_state = event_loop::TerminalState {
         is_control_mode,
         screen_mode,
-        relaunched_into_minimal,
-        relaunched_into_fullscreen,
         initial_theme: crate::theme::cache::current_kind(),
         startup_typeahead,
     };
@@ -1156,21 +1031,13 @@ pub async fn run(
         remote_settings,
         term_state,
         materialized,
-        bg_update_rx,
         writer_event_rx,
         &mut reader_thread,
     )
     .await;
     signal_handler::clear_quit_notify();
-    let forced_exit_code = match &result {
-        Ok(run_result) if run_result.quit_for_update || run_result.relaunch.is_some() => None,
-        Ok(_) => Some(0),
-        Err(_) => Some(1),
-    };
-    if let Some(code) = forced_exit_code {
-        exit_timeout::arm(code);
-        exit_timeout::hold_teardown_for_test();
-    }
+    exit_timeout::arm(if result.is_ok() { 0 } else { 1 });
+    exit_timeout::hold_teardown_for_test();
     let restore_result = restore_terminal(
         terminal,
         writer_thread,
@@ -1207,40 +1074,19 @@ pub async fn run(
             {
                 let _ = writeln!(io::stderr(), "{msg}");
             }
-            if run_result.quit_for_update {
-                return Ok(true);
-            }
-            if let Some(relaunch) = run_result.relaunch.as_ref() {
-                if let Err(e) = screen_mode_relaunch::exec_screen_mode_relaunch(
-                    &relaunch.session_id,
-                    relaunch.minimal,
-                ) {
-                    tracing::error!(error = %e, "screen-mode relaunch failed");
-                    if terminal_reading {
-                        print_relaunch_failure_hint(
-                            &e,
-                            &relaunch.session_id,
-                            relaunch.minimal,
-                            &mut io::stderr(),
-                        );
-                    }
-                }
-                return Ok(false);
-            }
             if let Some(info) = run_result.exit_info
                 && terminal_reading
             {
                 let width = crossterm::terminal::size().map_or(80, |(cols, _)| cols as usize);
                 print_exit_resume_hint(&info, width, &mut io::stderr());
             }
-            Ok(false)
+            Ok(())
         }
         Err(run_error) => Err(run_error),
     }
 }
 /// Plain-quit "Resume this session with…" lines (after terminal restore).
 /// Best-effort: closed-pane EIO/BrokenPipe must not panic (`panic = "abort"`).
-/// TODO: extend beyond --minimal by rebuilding resume argv from launch flags (see screen_mode_relaunch)
 fn print_exit_resume_hint(info: &ExitInfo, max_width: usize, w: &mut impl Write) {
     use crate::render::line_utils::truncate_str;
     let _ = writeln!(w);
@@ -1259,26 +1105,7 @@ fn print_exit_resume_hint(info: &ExitInfo, max_width: usize, w: &mut impl Write)
         let _ = writeln!(w);
     }
     let _ = writeln!(w, "Resume this session with:");
-    if info.minimal {
-        let _ = writeln!(w, "  grok --minimal --resume {}", info.session_id);
-    } else {
-        let _ = writeln!(w, "  grok --resume {}", info.session_id);
-    }
-}
-/// Screen-mode relaunch failure fallback (same quit tail as plain resume).
-fn print_relaunch_failure_hint(
-    error: &impl std::fmt::Display,
-    session_id: &str,
-    want_minimal: bool,
-    w: &mut impl Write,
-) {
-    let _ = writeln!(w, "Failed to relaunch in requested mode: {error}");
-    let _ = writeln!(w, "Resume this session with:");
-    let _ = writeln!(
-        w,
-        "  {}",
-        screen_mode_relaunch::screen_mode_relaunch_resume_hint(session_id, want_minimal),
-    );
+    let _ = writeln!(w, "  grok --resume {}", info.session_id);
 }
 /// `crossterm::enable_raw_mode()` sets flags on stdin only.
 /// The pager renders to stderr (via `TermWriter`), so the stderr handle must process its ANSI sequences.
@@ -1312,8 +1139,6 @@ fn configure_windows_console() {
     }
 }
 /// crossterm's `EnableMouseCapture` is winapi-only on Windows (`is_ansi_code_supported() == false`).
-/// `SetConsoleMode` state **outlives the process** for the console window, and teardown historically reset mouse state with ANSI only.
-/// Minimal never emits those escapes, so these conhost flags are inert there and asserting them is harmless.
 #[cfg(any(windows, test))]
 pub(crate) mod win_native_selection {
     const ENABLE_WINDOW_INPUT: u32 = 0x0008;
@@ -1449,22 +1274,16 @@ fn cursor_style_policy(cursor_blink: Option<bool>) -> CursorStylePolicy {
         Some(false) => CursorStylePolicy::ForceSteady,
     }
 }
-/// Outcome of [`init_terminal`]: the live terminal, the effective screen mode, and any startup type-ahead captured after raw mode was enabled.
+/// Outcome of [`init_terminal`]: the live terminal and any startup type-ahead captured after raw mode was enabled.
 pub(crate) struct TerminalInit {
     pub terminal: PagerTerminal,
-    /// The *effective* screen mode, which may differ from the requested one (see [`init_terminal`]).
-    pub screen_mode: ScreenMode,
     /// Keystrokes the user typed while the app was still loading, captured by the post-raw-mode drains.
     /// Replayed into the composer by [`event_loop::run`].
     pub startup_typeahead: Vec<event_loop::TimedInputEvent>,
 }
 /// Initialize the terminal for `mode`.
-/// Returns the live terminal handle and the *effective* screen mode, which may differ from the requested one.
-/// Minimal's `insert_before` / `set_viewport_height` commit pipeline is a no-op on the `Viewport::Fixed` fallback, so it cannot function there.
 fn init_terminal(
     mode: ScreenMode,
-    minimal_live_rows: u16,
-    clear_main_screen: bool,
     frame_tx: WriterSender,
     writer_sync: WriterSync,
     cursor_blink: Option<bool>,
@@ -1473,38 +1292,19 @@ fn init_terminal(
     terminal::enable_raw_mode()?;
     #[cfg(windows)]
     configure_windows_console();
-    let want_minimal = mode.is_minimal();
     let mut startup_typeahead: Vec<event_loop::TimedInputEvent> = Vec::new();
-    let (terminal, screen_mode) = (|| -> io::Result<(PagerTerminal, ScreenMode)> {
+    let terminal = (|| -> io::Result<PagerTerminal> {
         startup_typeahead.extend(event_loop::capture_startup_typeahead(
             std::time::Duration::from_millis(0),
         ));
         set_terminal_title("");
-        if want_minimal && clear_main_screen {
-            xai_grok_shell::util::with_locked_stderr(|stderr| {
-                execute!(
-                    stderr,
-                    Clear(ClearType::All),
-                    Clear(ClearType::Purge),
-                    cursor::MoveTo(0, 0),
-                )
-            })?;
-        }
         if mode.is_fullscreen() {
             xai_grok_shell::util::with_locked_stderr(|stderr| {
                 execute!(stderr, EnterAlternateScreen)
             })?;
         }
-        #[cfg(windows)]
-        if want_minimal {
-            win_native_selection::enable_native_selection();
-        }
         xai_grok_shell::util::with_locked_stderr(|stderr| {
-            if !want_minimal {
-                execute!(stderr, event::EnableMouseCapture)?;
-            } else if crate::terminal::terminal_context().mouse_reporting_leaks_as_raw_text() {
-                let _ = stderr.write_all(xai_crash_handler::terminal::MOUSE_TRACKING_RESET);
-            }
+            execute!(stderr, event::EnableMouseCapture)?;
             execute!(
                 stderr,
                 event::EnableFocusChange,
@@ -1528,7 +1328,7 @@ fn init_terminal(
             CURSOR_STYLE_FORCED.store(policy != CursorStylePolicy::Inherit, Ordering::Release);
             io::Result::Ok(())
         })?;
-        MOUSE_CAPTURE_ENABLED.store(!want_minimal, Ordering::Release);
+        MOUSE_CAPTURE_ENABLED.store(true, Ordering::Release);
         set_current_screen_mode(mode);
         set_panic_hook();
         signal_handler::install(mode);
@@ -1579,58 +1379,21 @@ fn init_terminal(
             let backend = CrosstermBackend::new(
                 TermWriter::new(frame_tx, writer_sync).map_err(io::Error::other)?,
             );
-            Ok((
-                xai_ratatui_inline::Terminal::new(backend)?,
-                ScreenMode::Fullscreen,
-            ))
+            Ok(xai_ratatui_inline::Terminal::new(backend)?)
         } else {
             let (cols, rows) = crossterm::terminal::size()?;
-            let viewport_rows = if want_minimal {
-                minimal_live_rows.clamp(3, rows.saturating_sub(1).max(3))
-            } else {
-                rows
-            };
             let probe_backend = CrosstermBackend::new(
                 TermWriter::new(frame_tx.clone(), writer_sync.clone()).map_err(io::Error::other)?,
             );
             if let Ok(term) = xai_ratatui_inline::Terminal::with_options(
                 probe_backend,
                 ratatui::TerminalOptions {
-                    viewport: ratatui::Viewport::Inline(viewport_rows),
+                    viewport: ratatui::Viewport::Inline(rows),
                 },
             ) {
-                return Ok((
-                    term,
-                    if want_minimal {
-                        ScreenMode::Minimal
-                    } else {
-                        ScreenMode::Inline
-                    },
-                ));
+                return Ok(term);
             }
-            if want_minimal {
-                tracing::warn!(
-                    "minimal: inline viewport probe failed; downgrading to full-height inline"
-                );
-                xai_grok_shell::util::with_locked_stderr(|stderr| {
-                    execute!(stderr, event::EnableMouseCapture)
-                })?;
-                MOUSE_CAPTURE_ENABLED.store(true, Ordering::Release);
-                let retry_backend = CrosstermBackend::new(
-                    TermWriter::new(frame_tx.clone(), writer_sync.clone())
-                        .map_err(io::Error::other)?,
-                );
-                if let Ok(term) = xai_ratatui_inline::Terminal::with_options(
-                    retry_backend,
-                    ratatui::TerminalOptions {
-                        viewport: ratatui::Viewport::Inline(rows),
-                    },
-                ) {
-                    return Ok((term, ScreenMode::Inline));
-                }
-            } else {
-                tracing::error!("inline viewport probe failed, using Viewport::Fixed");
-            }
+            tracing::error!("inline viewport probe failed, using Viewport::Fixed");
             xai_grok_shell::util::with_locked_stderr(|stderr| {
                 execute!(
                     stderr,
@@ -1649,7 +1412,7 @@ fn init_terminal(
                     )),
                 },
             )?;
-            Ok((term, ScreenMode::Inline))
+            Ok(term)
         }
     })()
     .inspect_err(|_| {
@@ -1660,7 +1423,6 @@ fn init_terminal(
     })?;
     Ok(TerminalInit {
         terminal,
-        screen_mode,
         startup_typeahead,
     })
 }
@@ -2296,37 +2058,26 @@ mod tests {
             Err(io::Error::from_raw_os_error(5))
         }
     }
-    /// [`ExitInfo`] with no summary, as built for inline/minimal quits.
-    fn bare_exit_info(session_id: &str, minimal: bool) -> ExitInfo {
+    /// [`ExitInfo`] with no summary, as built for inline quits.
+    fn bare_exit_info(session_id: &str) -> ExitInfo {
         ExitInfo {
             session_id: session_id.to_string(),
-            minimal,
             summary: None,
         }
     }
     #[test]
     fn print_exit_resume_hint_writes_expected_lines() {
         let mut buf = Vec::new();
-        print_exit_resume_hint(&bare_exit_info("sess-abc", false), 80, &mut buf);
+        print_exit_resume_hint(&bare_exit_info("sess-abc"), 80, &mut buf);
         assert_eq!(
             String::from_utf8(buf).unwrap(),
             "\nResume this session with:\n  grok --resume sess-abc\n"
         );
     }
     #[test]
-    fn print_exit_resume_hint_includes_minimal_flag() {
-        let mut buf = Vec::new();
-        print_exit_resume_hint(&bare_exit_info("sess-abc", true), 80, &mut buf);
-        assert_eq!(
-            String::from_utf8(buf).unwrap(),
-            "\nResume this session with:\n  grok --minimal --resume sess-abc\n"
-        );
-    }
-    #[test]
     fn print_exit_resume_hint_includes_session_summary() {
         let info = ExitInfo {
             session_id: "sess-abc".to_string(),
-            minimal: false,
             summary: Some(ExitSummary {
                 title: "Fix flaky CI test".to_string(),
                 last_prompt: Some("make the suite deterministic".to_string()),
@@ -2352,7 +2103,6 @@ mod tests {
     fn print_exit_resume_hint_truncates_summary_to_width() {
         let info = ExitInfo {
             session_id: "sess-abc".to_string(),
-            minimal: false,
             summary: Some(ExitSummary {
                 title: "t".repeat(50),
                 last_prompt: Some("p".repeat(50)),
@@ -2367,19 +2117,6 @@ mod tests {
         assert!(out.contains(&format!("\n  {}…\n", "r".repeat(17))));
         assert!(out.contains("  grok --resume sess-abc\n"));
     }
-    #[test]
-    fn print_relaunch_failure_hint_writes_expected_lines() {
-        let mut buf = Vec::new();
-        print_relaunch_failure_hint(&"exec failed", "sess-xyz", false, &mut buf);
-        let hint = screen_mode_relaunch::screen_mode_relaunch_resume_hint("sess-xyz", false);
-        assert_eq!(
-            String::from_utf8(buf).unwrap(),
-            format!(
-                "Failed to relaunch in requested mode: exec failed\n\
-                 Resume this session with:\n  {hint}\n"
-            )
-        );
-    }
     /// [`ExitInfo`] with a full summary, for the failing-writer tests.
     fn full_exit_info(session_id: &str) -> ExitInfo {
         ExitInfo {
@@ -2388,16 +2125,14 @@ mod tests {
                 last_prompt: Some("prompt".to_string()),
                 last_response: Some("response".to_string()),
             }),
-            ..bare_exit_info(session_id, false)
+            ..bare_exit_info(session_id)
         }
     }
     #[test]
     fn print_hints_survive_eio() {
         let mut w = AlwaysFailWrite;
-        print_exit_resume_hint(&bare_exit_info("sess-abc", false), 80, &mut w);
-        print_exit_resume_hint(&bare_exit_info("sess-abc", true), 80, &mut w);
+        print_exit_resume_hint(&bare_exit_info("sess-abc"), 80, &mut w);
         print_exit_resume_hint(&full_exit_info("sess-abc"), 80, &mut w);
-        print_relaunch_failure_hint(&"exec failed", "sess-xyz", true, &mut w);
         print_leader_disabled_by_sandbox("strict", &mut w);
     }
     /// Close the *read* end so writes on the write end get EPIPE.
@@ -2413,10 +2148,8 @@ mod tests {
             libc::close(fds[0]);
         }
         let mut writer = unsafe { std::fs::File::from_raw_fd(fds[1]) };
-        print_exit_resume_hint(&bare_exit_info("pipe-sid", false), 80, &mut writer);
-        print_exit_resume_hint(&bare_exit_info("pipe-sid", true), 80, &mut writer);
+        print_exit_resume_hint(&bare_exit_info("pipe-sid"), 80, &mut writer);
         print_exit_resume_hint(&full_exit_info("pipe-sid"), 80, &mut writer);
-        print_relaunch_failure_hint(&"exec failed", "pipe-sid", false, &mut writer);
         print_leader_disabled_by_sandbox("strict", &mut writer);
     }
 }

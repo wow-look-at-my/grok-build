@@ -104,7 +104,6 @@ impl ViewSurface {
                     | ActionId::OpenExtensions
                     | ActionId::ToggleYolo
                     | ActionId::SendToBackground
-                    | ActionId::EditPromptExternal
                     | ActionId::CycleMode
             )
     }

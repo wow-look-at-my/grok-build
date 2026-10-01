@@ -10,7 +10,6 @@
 
 use crate::app::actions::Action;
 use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand, slash_meta};
-use crate::slash::{ModeSupport, Remedy};
 
 pub struct DashboardCommand;
 
@@ -19,13 +18,10 @@ impl SlashCommand for DashboardCommand {
         name: "dashboard",
         // `/sessions` stays as an alias after the sessions picker modal was removed, so old muscle memory redirects here
         // The dashboard replaced that modal for switching, renaming, and closing active sessions.
-        // The aliases inherit the feature gate (`set_dashboard_visible` hides by canonical name) and the minimal-mode gate below
+        // The aliases inherit the feature gate (`set_dashboard_visible` hides by canonical name)
         aliases: ["agents-dashboard", "sessions"],
         description: "Open the Agent Dashboard",
         usage: "/dashboard",
-        mode_support: ModeSupport::FullscreenOnly(Remedy::SwitchMode {
-            why: "minimal is single-session",
-        }),
     }
 
     fn run(&self, _ctx: &mut CommandExecCtx, _args: &str) -> CommandResult {
@@ -48,7 +44,6 @@ mod tests {
             models: &models,
             session_id: None,
             bundle_state: &bundle,
-            screen_mode: crate::app::ScreenMode::Inline,
             billing_surface_visible: true,
             usage_command_visible: true,
             pager_state: crate::settings::PagerLocalSnapshot {

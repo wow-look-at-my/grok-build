@@ -123,7 +123,6 @@ mod tests {
             models,
             session_id: None,
             bundle_state: &EMPTY_BUNDLE,
-            screen_mode: crate::app::ScreenMode::Inline,
             billing_surface_visible: true,
             usage_command_visible: true,
             pager_state: crate::settings::PagerLocalSnapshot {
@@ -334,7 +333,6 @@ mod tests {
             workflows_available: true,
             saved_workflows: &[],
             workflow_runs: &[],
-            screen_mode: crate::app::ScreenMode::Fullscreen,
             current_title: None,
         };
         assert!(cmd.suggest_args(&ctx, "").is_none());
@@ -352,7 +350,6 @@ mod tests {
             workflows_available: true,
             saved_workflows: &[],
             workflow_runs: &[],
-            screen_mode: crate::app::ScreenMode::Fullscreen,
             current_title: None,
         };
         assert!(cmd.suggest_args(&ctx, "").is_none());
@@ -376,7 +373,6 @@ mod tests {
             workflows_available: true,
             saved_workflows: &[],
             workflow_runs: &[],
-            screen_mode: crate::app::ScreenMode::Fullscreen,
             current_title: None,
         };
         let items = cmd.suggest_args(&ctx, "").unwrap();

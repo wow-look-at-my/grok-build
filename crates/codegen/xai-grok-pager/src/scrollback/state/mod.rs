@@ -18,7 +18,7 @@ pub use types::*;
 
 use layout::{LayoutCache, StructuralScrollAnchor};
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::HashSet;
 use std::ops::Range;
 use std::time::Instant;
 
@@ -72,23 +72,9 @@ pub struct ScrollbackState {
     /// Used for incremental layout updates: only these entries need height recomputation.
     dirty_heights: HashSet<EntryId>,
 
-    /// Minimal mode only: entry IDs already emitted into the terminal's native scrollback. Keyed by `EntryId` (not a
-    /// per-entry flag) so it survives `shift_remove` / `remove_from` reordering for free. A positional index would be
-    /// stranded by a below-cursor removal. Empty in the alt-screen / inline modes, which never commit.
-    committed: HashSet<EntryId>,
-
     /// Edits this session opened for a permission prompt. Only these refold when the prompt ends.
     permission_opened: HashSet<EntryId>,
 
-    /// Minimal mode only: lowest entry index that *might* be uncommitted (not yet printed into native scrollback). A
-    /// lower-bound perf hint so the per-frame commit pass is O(new) rather than O(history). Contract for every mutation
-    /// that shifts entry positions: the cursor must never end up *above* an uncommitted entry's index.
-    commit_scan_cursor: usize,
-
-    /// Minimal mode only: a bounded ring of entry IDs committed to native scrollback while folded (collapsed reasoning,
-    /// truncated tool output). (Committed terminal text can't be mutated, so expansion is a re-print.). Bounded so a
-    /// long session never grows it without limit.
-    commit_expand_ring: VecDeque<EntryId>,
     // Scroll. `usize` (not `u16`): a long session can render well past 65 535 rows, so the cumulative scroll position
     // must match `virtual_y` (`Vec<usize>`).
     scroll_offset: usize,
@@ -233,10 +219,7 @@ impl ScrollbackState {
             running: HashSet::new(),
             flashing: Vec::new(),
             dirty_heights: HashSet::new(),
-            committed: HashSet::new(),
             permission_opened: HashSet::new(),
-            commit_scan_cursor: 0,
-            commit_expand_ring: VecDeque::new(),
             scroll_offset: 0,
             total_height: 0,
             viewport_height: 0,
@@ -349,9 +332,6 @@ impl ScrollbackState {
         self.entries.extend(tail.entries);
         self.running.extend(tail.running);
         self.dirty_heights.extend(tail.dirty_heights);
-        // Carry the tail's committed frontier: with a per-entry flag this traveled with the entry
-        // As an id-set it must be merged explicitly so already-committed tail blocks are not re-emitted after the reload
-        self.committed.extend(tail.committed);
         self.permission_opened.extend(tail.permission_opened);
         self.expanded_groups.extend(tail.expanded_groups);
         self.next_id = self.next_id.max(tail.next_id);
@@ -583,19 +563,12 @@ impl ScrollbackState {
         self.push(ScrollbackEntry::new(block))
     }
 
-    /// Add a finalized block positioned immediately before the entry `anchor`, instead of at the end. `anchor` must not
-    /// already be committed. A terminal's native scrollback is append-only. Inserting above a block already printed
-    /// there would emit the new block below content that logically follows it.
+    /// Add a finalized block positioned immediately before the entry `anchor`, instead of at the end. Falls back to
+    /// [`Self::push_block`] when `anchor` is no longer present.
     pub fn insert_block_before(&mut self, anchor: EntryId, block: RenderBlock) -> EntryId {
         let Some(index) = self.entries.get_index_of(&anchor) else {
             return self.push_block(block);
         };
-        debug_assert!(
-            !self.committed.contains(&anchor),
-            "insert_block_before: anchor {anchor:?} is already committed — the inserted \
-             block would print out of order in native scrollback"
-        );
-
         // Anchor the viewport top before the insertion shifts indices.
         self.arm_structural_scroll_anchor();
         let id = EntryId::new(self.next_id);
@@ -613,7 +586,6 @@ impl ScrollbackState {
         {
             *selected += 1;
         }
-        self.commit_scan_cursor = self.commit_scan_cursor.min(index);
 
         if self.batch_depth == 0 {
             self.rebuild_turns();
@@ -655,7 +627,6 @@ impl ScrollbackState {
         self.migrate_structural_anchor_past_removal(id, removed_index);
         self.running.remove(&id);
         self.dirty_heights.remove(&id);
-        self.committed.remove(&id);
         self.permission_opened.remove(&id);
         self.expanded_groups.remove(&id);
         if let Some(sel) = self.selected
@@ -663,11 +634,6 @@ impl ScrollbackState {
         {
             self.selected = self.entries.len().checked_sub(1);
         }
-        // Clamping alone is not enough here; see the cursor's contract
-        if removed_index < self.commit_scan_cursor {
-            self.commit_scan_cursor -= 1;
-        }
-        self.commit_scan_cursor = self.commit_scan_cursor.min(self.entries.len());
         self.rebuild_turns();
         self.gaps_may_be_dirty = true;
         self.invalidate_layout_cache();
@@ -683,7 +649,6 @@ impl ScrollbackState {
             if let Some((id, entry)) = self.entries.pop() {
                 self.running.remove(&id);
                 self.dirty_heights.remove(&id);
-                self.committed.remove(&id);
                 self.permission_opened.remove(&id);
                 self.expanded_groups.remove(&id);
                 removed.push(entry);
@@ -696,9 +661,6 @@ impl ScrollbackState {
         {
             self.selected = self.entries.len().checked_sub(1);
         }
-        // Clamp the minimal-mode commit cursor: `remove_from` (rewind / trailing auth-error strip) pops the tail
-        // That could otherwise leave the cursor past the end and silently skip future commits
-        self.commit_scan_cursor = self.commit_scan_cursor.min(self.entries.len());
         self.rebuild_turns();
         self.gaps_may_be_dirty = true;
         self.invalidate_layout_cache();
@@ -856,7 +818,6 @@ impl ScrollbackState {
         self.running.clear();
         self.flashing.clear();
         self.dirty_heights.clear();
-        self.committed.clear();
         self.permission_opened.clear();
         self.expanded_groups.clear();
         // Note: we don't reset next_id to avoid ID reuse
@@ -869,62 +830,8 @@ impl ScrollbackState {
         self.pin_reserve_target = None;
         self.pin_reserve_prompt_id = None;
         self.pin_reserve_after_turn = false;
-        self.commit_scan_cursor = 0;
-        self.commit_expand_ring.clear();
         self.invalidate_layout_cache();
         self.bump_content_generation();
-    }
-
-    // These support `crate::minimal`'s commit pipeline (print finalized blocks into native scrollback)
-    // The authoritative state is the `committed` id-set; `commit_scan_cursor` is only a lower-bound hint to keep the per-frame scan O(new)
-    // Reached from the minimal crate via `minimal_api::{is_committed, mark_committed, commit_scan_cursor, …}`
-
-    /// Lowest entry index that may still be uncommitted (minimal-mode hint).
-    pub(crate) fn commit_scan_cursor(&self) -> usize {
-        self.commit_scan_cursor
-    }
-
-    /// Advance the commit scan cursor, clamped to the current entry count.
-    pub(crate) fn set_commit_scan_cursor(&mut self, cursor: usize) {
-        self.commit_scan_cursor = cursor.min(self.entries.len());
-    }
-
-    /// Whether the entry `id` was already emitted into native scrollback.
-    pub(crate) fn is_committed(&self, id: EntryId) -> bool {
-        self.committed.contains(&id)
-    }
-
-    /// Mark the entry at `index` as committed to native scrollback.
-    /// No-op if the index is out of range.
-    pub(crate) fn mark_committed(&mut self, index: usize) {
-        if let Some((&id, _)) = self.entries.get_index(index) {
-            self.committed.insert(id);
-        }
-    }
-
-    /// Maximum number of folded-commit IDs retained for `Ctrl+E` / `/expand`.
-    const EXPAND_RING_CAP: usize = 256;
-
-    /// Record that the entry `id` was committed to native scrollback in a folded display mode (collapsed reasoning / truncated tool output).
-    /// `Ctrl+E` / `/expand` can then re-print it in full.
-    /// Bounded: the oldest entry is dropped once the ring is full.
-    pub(crate) fn record_committed_for_expand(&mut self, id: EntryId) {
-        self.commit_expand_ring.push_back(id);
-        while self.commit_expand_ring.len() > Self::EXPAND_RING_CAP {
-            self.commit_expand_ring.pop_front();
-        }
-    }
-
-    /// Pop the most-recently committed folded entry whose entry still exists, for `Ctrl+E` / `/expand` to re-print fully.
-    /// Returns `None` when nothing folded remains to expand.
-    /// Stale IDs (entries removed by rewind / clear) are skipped.
-    pub(crate) fn take_expandable_committed(&mut self) -> Option<EntryId> {
-        while let Some(id) = self.commit_expand_ring.pop_back() {
-            if self.entries.contains_key(&id) {
-                return Some(id);
-            }
-        }
-        None
     }
 
     /// Get entry by index.
@@ -3181,40 +3088,6 @@ mod tests {
 
         assert_eq!(state.index_of_id(anchor), Some(2));
         assert_eq!(state.selected(), Some(2));
-    }
-
-    #[test]
-    fn insert_block_before_never_strands_the_entry_below_the_commit_frontier() {
-        // The shape minimal produces: a committed prefix, the cursor parked at the first uncommitted entry, and a block anchored above that entry
-        let mut state = ScrollbackState::new();
-        let a = state.push_block(stub_block("a"));
-        let b = state.push_block(stub_block("b"));
-        let anchor = state.push(ScrollbackEntry::running(stub_block("running tool")));
-        state.mark_committed(0);
-        state.mark_committed(1);
-        state.set_commit_scan_cursor(2);
-
-        let inserted = state.insert_block_before(anchor, stub_block("inserted"));
-
-        assert_eq!(state.index_of_id(inserted), Some(2));
-        assert!(
-            state.commit_scan_cursor() <= 2,
-            "cursor must be pulled back to (at most) the insertion point, got {}",
-            state.commit_scan_cursor()
-        );
-        assert!(state.is_committed(a));
-        assert!(state.is_committed(b));
-        assert!(!state.is_committed(inserted));
-        assert!(!state.is_committed(anchor));
-    }
-
-    #[test]
-    #[should_panic(expected = "already committed")]
-    fn insert_block_before_rejects_an_already_committed_anchor() {
-        let mut state = ScrollbackState::new();
-        let anchor = state.push_block(stub_block("printed"));
-        state.mark_committed(0);
-        state.insert_block_before(anchor, stub_block("too late"));
     }
 
     #[test]

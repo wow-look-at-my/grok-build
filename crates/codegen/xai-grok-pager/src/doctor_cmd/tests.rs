@@ -335,7 +335,7 @@ fn human_wayland_error_includes_detail_once() {
     report.facts.clipboard.display_server = DisplayServer::Wayland;
     report.facts.clipboard.data_control = DataControlFact::Error;
     report.facts.clipboard.delivery = ClipboardDelivery::Failed;
-    report.facts.clipboard.fix = Some("/minimal".to_owned());
+    report.facts.clipboard.fix = Some("/copy <file>".to_owned());
     report.findings.push(DiagnosticFinding {
         id: crate::diagnostics::CLIPBOARD_DELIVERY_UNAVAILABLE_ID,
         disposition: FindingDisposition::Issue,
@@ -344,8 +344,7 @@ fn human_wayland_error_includes_detail_once() {
         automatic_remediation: None,
         note: Some(
             "Each in-app copy is also written to the backup path shown by the operation. Use \
-             `/copy <file>` for an explicit file or `/minimal` for terminal-native selection, \
-             then check the native clipboard tool reported above."
+             `/copy <file>` for an explicit file, then check the native clipboard tool reported above."
                 .to_owned(),
         ),
     });
@@ -377,7 +376,7 @@ fn human_wayland_error_includes_detail_once() {
             "\n",
             "Findings\n",
             "  ! clipboard.delivery-unavailable No configured clipboard route can reach the intended clipboard\n",
-            "      Each in-app copy is also written to the backup path shown by the operation. Use `/copy <file>` for an explicit file or `/minimal` for terminal-native selection, then check the native clipboard tool reported above.\n",
+            "      Each in-app copy is also written to the backup path shown by the operation. Use `/copy <file>` for an explicit file, then check the native clipboard tool reported above.\n",
             "\n",
             "1 issue, 0 recommendations\n",
         )
@@ -1030,7 +1029,7 @@ fn clipboard_issue_count_preserves_legacy_reports_without_double_counting_named_
 fn new_named_findings_extend_json_without_schema_changes() {
     let mut report = healthy_report();
     report.facts.clipboard.delivery = ClipboardDelivery::Unverified;
-    report.facts.clipboard.fix = Some("grok wrap <ssh command> or /minimal".to_owned());
+    report.facts.clipboard.fix = Some("grok wrap <ssh command>".to_owned());
     report.findings.push(DiagnosticFinding {
         id: crate::diagnostics::CLIPBOARD_DELIVERY_UNVERIFIED_ID,
         disposition: FindingDisposition::Issue,
@@ -1056,7 +1055,7 @@ fn new_named_findings_extend_json_without_schema_changes() {
     assert_eq!(
         json.pointer("/facts/clipboard/fix")
             .and_then(serde_json::Value::as_str),
-        Some("grok wrap <ssh command> or /minimal")
+        Some("grok wrap <ssh command>")
     );
     assert_eq!(
         json.pointer("/findings/0/id")
