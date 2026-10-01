@@ -244,7 +244,7 @@ Cross-clippy links nothing, but ring and aws-lc compile C in their build scripts
 - Every non-empty thinking block gets a summary, subagents included (`acp_session_impl/thinking_summary.rs`). Thinking is drawn collapsed. As a result, the summary is the only part of a short block anyone reads.
 - It arrives after its model call ends, keyed by `stream_start_ms`. The root agent and the child-session handler both route it to `set_thinking_summary` on their own tracker.
 - A summarized thought is `RunStep::Transparent` in a verb-group run. It keeps its row rather than fold to height 0.
-- The minimal pager prints once. With `minimal_collapse_thinking` on, a fresh live thought waits at the frontier (`holds_for_summary`) until its summary lands or `SUMMARY_GRACE` runs out. A replayed block has no `finished_at`, so a reload never waits.
+- The summary is strictly async: nothing waits for it. The minimal pager prints each row once, so a thought it commits before its summary lands keeps no summary on the terminal. A redraw or a reload shows it.
 - Headless `streaming-json` emits a `thinking_summary` line. The Messages format has no field for it and drops it.
 
 ## Streaming tool-call notes

@@ -107,17 +107,8 @@ fn classify(state: &ScrollbackState, i: usize, turn_running: bool) -> Step {
         None => Step::Stop,
         Some(e) if minimal_api::is_committed(state, e) => Step::Skip,
         Some(_) if !is_committable(state, i, turn_running) => Step::Stop,
-        Some(e) if holds_for_summary(e, state.appearance()) => Step::Stop,
         Some(_) => Step::Commit,
     }
-}
-
-/// A thought committed collapsed prints its header once, and its summary is
-/// written after the model call ends. So a fresh one waits at the frontier
-/// until the summary lands or `SUMMARY_GRACE` runs out.
-pub fn holds_for_summary(entry: &ScrollbackEntry, appearance: &AppearanceConfig) -> bool {
-    appearance.minimal_collapse_thinking
-        && matches!(&entry.block, RenderBlock::Thinking(b) if b.awaiting_summary())
 }
 
 /// Read-only projection of what a commit pass would do, for the consumers that must agree with it without running it.
