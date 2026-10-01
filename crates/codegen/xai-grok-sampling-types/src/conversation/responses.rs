@@ -359,7 +359,7 @@ fn build_responses_tools(req: &ConversationRequest) -> Vec<rs::Tool> {
             rs::Tool::Function(rs::FunctionTool {
                 name: t.name.clone(),
                 description: t.description.clone(),
-                parameters: Some(t.parameters.clone()),
+                parameters: Some(req.tool_parameters(t).into_owned()),
                 strict: None,
             })
         })

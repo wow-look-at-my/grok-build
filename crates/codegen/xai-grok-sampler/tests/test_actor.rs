@@ -23,7 +23,7 @@ use xai_grok_sampler::{
 };
 use xai_grok_sampling_types::{
     ConversationItem, ConversationRequest, DoomLoopRecoveryPolicy, INVALID_IMAGE_ERROR_CODE,
-    OutputRateFloorPolicy, SyntheticReason, UserItem,
+    OutputRateFloorPolicy, SyntheticReason, ToolSpec, UserItem,
 };
 use xai_grok_test_support::{SseEvent, sse};
 
@@ -2998,4 +2998,125 @@ async fn image_input_rejection_strips_and_then_stops_resending() {
         "the placeholder must tell the model why the image is gone: {}",
         bodies[1]
     );
+}
+
+fn request_with_union_tool(text: &str) -> ConversationRequest {
+    let mut request = user_request(text);
+    request.tools = vec![
+        ToolSpec {
+            name: "read_file".into(),
+            description: None,
+            parameters: json!({ "type": "object", "properties": { "path": { "type": "string" } } }),
+        },
+        ToolSpec {
+            name: "mcp__lookup__find".into(),
+            description: None,
+            parameters: json!({
+                "anyOf": [
+                    { "type": "object", "properties": { "id": { "type": "integer" } }, "required": ["id"] },
+                    { "type": "object", "properties": { "name": { "type": "string" } }, "required": ["name"] }
+                ]
+            }),
+        },
+    ];
+    request
+}
+
+/// A tool schema with a top-level `anyOf` is valid JSON Schema, and goes out as published. Anthropic rejects it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn top_level_schema_combinator_falls_back_and_names_the_tool() {
+    let bodies = Arc::new(std::sync::Mutex::new(Vec::<serde_json::Value>::new()));
+    let bodies_handler = Arc::clone(&bodies);
+    let app = Router::new().route(
+        "/v1/messages",
+        post(move |body: String| {
+            let bodies = Arc::clone(&bodies_handler);
+            async move {
+                let body: serde_json::Value = serde_json::from_str(&body).unwrap();
+                let rejected = body["tools"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .position(|t| t["input_schema"].get("anyOf").is_some());
+                bodies.lock().unwrap().push(body);
+                if let Some(i) = rejected {
+                    return Err::<Sse<_>, (StatusCode, String)>((
+                        StatusCode::BAD_REQUEST,
+                        json!({
+                            "type": "error",
+                            "error": {
+                                "type": "invalid_request_error",
+                                "message": format!(
+                                    "tools.{i}.custom.input_schema: input_schema does not support \
+                                     oneOf, allOf, or anyOf at the top level"
+                                ),
+                            }
+                        })
+                        .to_string(),
+                    ));
+                }
+                let events =
+                    sse::messages_api_events("ok", "messages-compatible-model", "end_turn");
+                Ok(Sse::new(stream::iter(
+                    events.into_iter().map(Ok::<_, std::convert::Infallible>),
+                )))
+            }
+        }),
+    );
+    let server = MockServer::spawn(app).await;
+    let (event_tx, mut event_rx) = mpsc::unbounded_channel();
+    let handle = SamplerActor::spawn(
+        messages_config(server.base_url()),
+        RetryPolicy::default(),
+        event_tx,
+    );
+
+    for (id, text) in [("req-schema-1", "find it"), ("req-schema-2", "again")] {
+        let (response, _) = handle
+            .submit_and_collect(RequestId::from(id), request_with_union_tool(text))
+            .await
+            .expect("the schema rejection must recover through the fallback form");
+        assert_eq!(
+            response
+                .assistant()
+                .map(|a| a.content.to_string())
+                .as_deref(),
+            Some("ok")
+        );
+    }
+    server.shutdown();
+
+    let mut reason = None;
+    while let Ok(event) = event_rx.try_recv() {
+        if let SamplingEvent::Retrying { reason: r, .. } = event {
+            reason = Some(r);
+        }
+    }
+    let reason = reason.expect("the fallback announces itself as a retry");
+    assert!(
+        reason.contains("tool `mcp__lookup__find`"),
+        "the retry reason must name the tool, not only its index: {reason}"
+    );
+
+    let bodies = bodies.lock().unwrap().clone();
+    assert_eq!(
+        bodies.len(),
+        3,
+        "the native form once, its fallback retry, then a turn that starts in the fallback"
+    );
+    assert!(
+        bodies[0]["tools"][1]["input_schema"].get("anyOf").is_some(),
+        "the first attempt sends the schema as published"
+    );
+    for body in &bodies[1..] {
+        let schema = &body["tools"][1]["input_schema"];
+        assert_eq!(schema["type"], "object", "{schema}");
+        assert_eq!(schema["properties"]["id"], json!({ "type": "integer" }));
+        assert_eq!(schema["properties"]["name"], json!({ "type": "string" }));
+        assert_eq!(
+            body["tools"][0]["input_schema"],
+            json!({ "type": "object", "properties": { "path": { "type": "string" } } }),
+            "a schema the provider accepts is not touched"
+        );
+    }
 }

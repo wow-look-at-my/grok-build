@@ -415,6 +415,19 @@ impl SamplingError {
         message.contains("signature") && message.contains("thinking")
     }
 
+    /// The provider rejected a tool schema for a top-level `oneOf`, `anyOf`
+    /// or `allOf`, which the standard allows.
+    pub fn is_tool_schema_combinator_error(&self) -> bool {
+        matches!(
+            self,
+            SamplingError::Api {
+                status: StatusCode::BAD_REQUEST,
+                message,
+                ..
+            } if crate::names_top_level_schema_combinator(message)
+        )
+    }
+
     /// The provider rejected the request because the routed model/endpoint
     /// **mandates** reasoning and our body asked for it disabled or omitted,
     /// e.g. OpenRouter's
@@ -1002,6 +1015,60 @@ pub fn api_error_message_for_endpoint(status: StatusCode, bytes: &[u8], endpoint
     }
 }
 
+/// Adds the tool name after each `tools.N` or `tools[N]` path in a provider
+/// message. A provider names a rejected tool by its position in the request,
+/// and only the request knows which tool sits there.
+pub fn name_tool_indices(message: &str, tool_names: &[&str]) -> String {
+    let bytes = message.as_bytes();
+    let mut out = String::with_capacity(message.len());
+    let mut copied = 0;
+    let mut search = 0;
+    while let Some(found) = message[search..].find("tools") {
+        let start = search + found;
+        search = start + "tools".len();
+        if start > 0 && (bytes[start - 1].is_ascii_alphanumeric() || bytes[start - 1] == b'_') {
+            continue;
+        }
+        let Some(index_end) = indexed_segment_end(bytes, search) else {
+            continue;
+        };
+        let digits = message[search + 1..index_end].trim_end_matches(']');
+        let Some(name) = digits.parse::<usize>().ok().and_then(|i| tool_names.get(i)) else {
+            continue;
+        };
+        let path_end = message[index_end..]
+            .find(|c: char| c.is_whitespace() || matches!(c, ':' | ',' | ';' | '"' | '\'' | ')'))
+            .map_or(message.len(), |i| index_end + i);
+        out.push_str(&message[copied..path_end]);
+        out.push_str(&format!(" (tool `{name}`)"));
+        copied = path_end;
+        search = path_end;
+    }
+    out.push_str(&message[copied..]);
+    out
+}
+
+/// The end of a `.N` or `[N]` segment starting at `at`.
+fn indexed_segment_end(bytes: &[u8], at: usize) -> Option<usize> {
+    let open = *bytes.get(at)?;
+    if open != b'.' && open != b'[' {
+        return None;
+    }
+    let digits = bytes[at + 1..]
+        .iter()
+        .take_while(|b| b.is_ascii_digit())
+        .count();
+    if digits == 0 {
+        return None;
+    }
+    let end = at + 1 + digits;
+    match open {
+        b'[' if bytes.get(end) == Some(&b']') => Some(end + 1),
+        b'[' => None,
+        _ => Some(end),
+    }
+}
+
 pub fn try_parse_stream_error(data: &str) -> Option<SamplingError> {
     let ParsedError {
         error_type,
@@ -1462,6 +1529,36 @@ mod tests {
             rendered.contains("expected ident"),
             "serde's own reason for the failure must reach the user: {rendered}"
         );
+    }
+
+    #[test]
+    fn a_tool_index_in_a_provider_message_gains_the_tool_name() {
+        let names = ["read_file", "mcp__github__search_code"];
+        assert_eq!(
+            name_tool_indices(
+                "invalid_request_error: tools.1.custom.input_schema: input_schema does not support oneOf",
+                &names,
+            ),
+            "invalid_request_error: tools.1.custom.input_schema (tool `mcp__github__search_code`): \
+             input_schema does not support oneOf"
+        );
+        assert_eq!(
+            name_tool_indices("Invalid schema at tools[0].function.parameters", &names),
+            "Invalid schema at tools[0].function.parameters (tool `read_file`)"
+        );
+    }
+
+    #[test]
+    fn a_tool_index_past_the_request_or_inside_a_word_is_left_alone() {
+        let names = ["read_file"];
+        for message in [
+            "tools.7.custom.input_schema: bad",
+            "mytools.0: bad",
+            "tools: must be an array",
+            "tools[0 is not closed",
+        ] {
+            assert_eq!(name_tool_indices(message, &names), message);
+        }
     }
 
     #[test]

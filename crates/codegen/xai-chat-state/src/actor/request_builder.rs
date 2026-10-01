@@ -101,6 +101,7 @@ impl ChatStateActor {
             json_schema: None,
             chat_message_profile: self.state.sampling_config.chat_message_profile,
             thinking_replay: Default::default(),
+            tool_schema_form: Default::default(),
             // Execute completed tool calls on a Length-truncated turn instead
             // of failing it; text-only salvage stays behind `CompletePartial`.
             length_policy: xai_grok_sampling_types::LengthPolicy::CompleteToolCalls,
