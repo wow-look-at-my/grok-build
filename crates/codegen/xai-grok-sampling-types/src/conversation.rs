@@ -10,6 +10,7 @@ mod ollama;
 mod output_budget;
 mod responses;
 mod thinking_replay;
+mod tool_schema;
 
 pub use chat_completions::{
     conversation_item_to_chat_message, conversation_item_to_chat_message_with_profile,
@@ -25,6 +26,9 @@ pub use responses::{
 pub use thinking_replay::{
     ThinkingDisposition, ThinkingReplay, ThinkingReplayPlan, apply_thinking_replay,
     names_replayed_thinking, reasoning_origin_model, same_model, thinking_as_text,
+};
+pub use tool_schema::{
+    ToolSchemaForm, has_top_level_combinator, names_top_level_schema_combinator,
 };
 
 use std::collections::BTreeMap;
@@ -784,6 +788,8 @@ pub struct ConversationRequest {
     /// reads it. The sampler steps it down when the provider rejects a
     /// replayed block, see [`ConversationRequest::degrade_thinking_replay`].
     pub thinking_replay: ThinkingReplay,
+    /// Which form the tool schemas take on the wire.
+    pub tool_schema_form: ToolSchemaForm,
     /// What the sampler does when the response stops with `Length`.
     pub length_policy: LengthPolicy,
 }

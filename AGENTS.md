@@ -311,6 +311,14 @@ Cross-clippy links nothing, but ring and aws-lc compile C in their build scripts
 - `truncate_trailing_incomplete_tool_call` drops the reasoning ahead of the tool call it drops. A reasoning item with no assistant behind it has no origin. No origin reads as "replay it".
 - A conversation that ends mid-tool-loop on a turn whose thinking the plan leaves behind goes out with thinking off entirely (`open_tool_loop_lost_its_thinking`). A provider validates the thinking of the tool-calling turn it is continuing. A config-less thinking block is rejected in turn. Reasoning effort is untouched and the next turn pairs normally.
 
+## Tool-schema fallback notes
+
+- Every tool schema goes out as the tool published it (`ToolSchemaForm::Native`). A top-level `oneOf`/`anyOf`/`allOf` is valid JSON Schema. Anthropic's Messages API still rejects it with a 400, and MCP servers publish that shape.
+- The sampler answers that 400 with `RetryDecision::RetryWithToolSchemaFallback`: `ConversationRequest::degrade_tool_schemas` moves the request to `NoTopLevelCombinators` and sends it again. Every builder reads the form (`tool_parameters`), so the fallback covers every backend. A schema with no top-level combinator is identical in both forms.
+- The fallback merges the branches into one `type: object` (`conversation/tool_schema.rs`). `allOf` keeps every required field. `anyOf`/`oneOf` keep only the fields that every branch requires, and the description lists each branch's required set. The tool still validates its input against its own schema.
+- `ModelRejections::tool_schemas` remembers the model. Later requests start in the fallback form instead of paying the same 400 first. The fallback runs one time per request: a second rejection is the real error.
+- A provider names a bad tool by index (`tools.16.custom.input_schema`). `name_tool_indices` adds the tool's name to that path in the error text for the Messages, Chat Completions and Ollama clients. Responses is not covered, because its wire `tools` array also holds hosted tools.
+
 ## Tool-call provider-field notes
 
 - A tool call carries keys this client only relays: `extra_content` (Google's spelling) and `provider_specific_fields` (a translating gateway's). Gemini 3 rejects a replayed function call whose thought signature is missing, and that signature reaches an OpenAI-shaped client only inside one of them.

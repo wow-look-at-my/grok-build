@@ -212,12 +212,15 @@ impl SamplerActor {
                 let event_tx = self.event_tx.clone();
                 let retry_policy = self.state.retry_policy.clone();
                 let mut request_inner = *request;
-                let image_input_rejections = self.state.image_input_rejections.clone();
-                // This model already answered an image with "I take no image
-                // input". Strip up front rather than re-uploading the same
-                // blobs for the same rejection on every turn.
-                image_input_rejections
+                let rejections = self.state.rejections.clone();
+                // Skip what this model already rejected: images it cannot
+                // read, and tool schema forms it does not accept.
+                rejections
+                    .images
                     .strip_if_rejected(&effective_config.model, &mut request_inner);
+                rejections
+                    .tool_schemas
+                    .apply(&effective_config.model, &mut request_inner);
                 // The id is what the actor needs back to clear
                 // `active_requests`, so the round is spawned through
                 // `spawn_tracked_round` rather than bare.
@@ -233,7 +236,7 @@ impl SamplerActor {
                         event_tx,
                         cancel_token,
                         completion_tx,
-                        image_input_rejections,
+                        rejections,
                     ),
                 );
             }
