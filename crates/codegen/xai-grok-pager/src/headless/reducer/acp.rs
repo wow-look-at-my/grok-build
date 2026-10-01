@@ -37,6 +37,11 @@ enum AcpLine {
     Thought {
         data: String,
     },
+    ThinkingSummary {
+        #[serde(rename = "streamStartMs")]
+        stream_start_ms: i64,
+        summary: String,
+    },
     ToolCall {
         #[serde(rename = "toolCallId")]
         tool_call_id: String,
@@ -121,6 +126,13 @@ impl Reducer for AcpReducer {
         let line = match event {
             StreamEvent::AgentMessage(data) => AcpLine::Text { data },
             StreamEvent::AgentThought(data) => AcpLine::Thought { data },
+            StreamEvent::ThinkingSummary {
+                stream_start_ms,
+                summary,
+            } => AcpLine::ThinkingSummary {
+                stream_start_ms,
+                summary,
+            },
             StreamEvent::ToolCall(tc) => AcpLine::ToolCall {
                 tool_call_id: tc.tool_call_id,
                 title: tc.title,

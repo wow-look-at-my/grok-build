@@ -8,7 +8,7 @@ impl SessionActor {
         stream_start_ms: Option<i64>,
     ) {
         use crate::session::helpers::thinking_summary as helpers;
-        if !self.thinking_summaries_enabled || self.startup_hints.is_subagent {
+        if !self.thinking_summaries_enabled {
             return;
         }
         let Some(stream_start_ms) = stream_start_ms else {

@@ -34,7 +34,7 @@ pub(crate) enum RunStep {
 }
 
 /// A manually-opened member is [`RunStep::Transparent`] and keeps its own rows without splitting the run. Thinking
-/// never breaks a run: a finished collapsed thought without prompt chrome folds in as
+/// never breaks a run.
 /// [`RunStep::ThoughtMember`].
 pub(crate) fn run_step(entry: &ScrollbackEntry, show_thinking: bool) -> RunStep {
     let is_claimable_thinking =
@@ -58,7 +58,9 @@ pub(crate) fn run_step(entry: &ScrollbackEntry, show_thinking: bool) -> RunStep 
             RunStep::Break
         }
     } else if entry.block.is_thinking() {
-        if show_thinking && !entry.is_running && is_claimable_thinking {
+        // A summary is the only part of a collapsed thought the user reads.
+        let summarized = matches!(&entry.block, RenderBlock::Thinking(b) if b.summary().is_some());
+        if show_thinking && !entry.is_running && is_claimable_thinking && !summarized {
             RunStep::ThoughtMember
         } else {
             RunStep::Transparent

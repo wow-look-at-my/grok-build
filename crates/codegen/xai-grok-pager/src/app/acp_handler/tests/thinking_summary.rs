@@ -168,6 +168,34 @@ fn a_summary_lands_on_the_collapsed_thinking_row() {
 }
 
 #[test]
+fn a_subagent_summary_lands_in_the_subagent_view() {
+    let mut app = make_app_with_parent_and_child("sess-parent", "sess-child");
+    {
+        let agent = app.agents.get_mut(&AgentId(0)).unwrap();
+        let child = agent.subagent_views.get_mut("sess-child").unwrap();
+        child.session.start_turn(&mut child.scrollback);
+        child.session.current_prompt_id = Some("pid-1".into());
+    }
+    stream_call(&mut app, "sess-child", 1_000, "child reasoning");
+
+    let changed = handle_ext_notification(
+        &thinking_summary_notif("sess-child", 1_000, "CHILD SUMMARY", false),
+        &mut app,
+    );
+    assert!(changed, "the child's row gained a summary");
+
+    let agent = app.agents.get_mut(&AgentId(0)).unwrap();
+    let child = agent.subagent_views.get_mut("sess-child").unwrap();
+    let rows = collapsed_thinking_rows(child);
+    assert_eq!(rows.len(), 1, "the child call drew one thinking row: {rows:?}");
+    assert!(rows[0].contains("CHILD SUMMARY"), "child row: {rows:?}");
+    assert!(
+        collapsed_thinking_rows(agent).iter().all(|r| !r.contains("CHILD SUMMARY")),
+        "a child's summary must not land on the parent"
+    );
+}
+
+#[test]
 fn a_summary_arriving_after_its_row_finished_still_repaints_it() {
     // The summary is written by a side call, so it lands after the thinking row
     // stopped running and after the turn may have ended. A row that only

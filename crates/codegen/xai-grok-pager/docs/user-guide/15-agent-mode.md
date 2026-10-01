@@ -134,7 +134,7 @@ ACP streams structured events. Each `session/update` notification carries a `ses
 | `tool_call`           | A new tool invocation (title, kind, status, input).   |
 | `tool_call_update`    | A status or result update for an in-flight tool call. |
 | `plan`                | The agent's execution plan.                           |
-| `thinking_summary`    | A one-or-two-sentence summary of one model call's reasoning, keyed to that call's `streamStartMs` (`stream_start_ms`). It is written by a separate call that starts when the response ends, so it arrives on the `x.ai/session/update` rail after that call's own chunks, and is persisted with them. Absent when `[ui].thinking_summaries` is off, when the response carried no thinking text, or for a subagent. |
+| `thinking_summary`    | A one-or-two-sentence summary of one model call's reasoning, keyed to that call's `streamStartMs` (`stream_start_ms`). It is written by a separate call that starts when the response ends, so it arrives on the `x.ai/session/update` rail after that call's own chunks, and is persisted with them. Absent when `[ui].thinking_summaries` is off, or when the response carried no thinking text. A subagent's summary carries the subagent's session id. |
 
 Each update names its type, so a client can render distinct panels for reasoning, tool calls, and response text.
 

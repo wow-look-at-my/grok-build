@@ -35,6 +35,20 @@ fn running(text: &str) -> ScrollbackEntry {
     ScrollbackEntry::running(RenderBlock::stub(text, Color::Blue))
 }
 
+/// The summary call is async. A finished thought with no summary yet commits at once, and the rows after it follow.
+#[test]
+fn a_finished_thought_never_waits_for_its_summary() {
+    use xai_grok_pager::scrollback::blocks::ThinkingBlock;
+    let mut s = ScrollbackState::new();
+    s.set_appearance(collapsed_appearance());
+    let mut block = ThinkingBlock::streaming();
+    block.push_chunk("reasoning");
+    block.finish();
+    s.push(ScrollbackEntry::new(RenderBlock::Thinking(block)));
+    s.push(finalized("after"));
+    assert_eq!(commit_collect(&mut s), vec![0, 1]);
+}
+
 fn default_appearance() -> AppearanceConfig {
     committed_appearance(&AppearanceConfig::default())
 }

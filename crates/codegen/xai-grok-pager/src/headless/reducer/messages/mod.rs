@@ -501,6 +501,7 @@ impl Reducer for MessagesReducer {
                 | StreamEvent::ResponseStarted { .. }
                 | StreamEvent::ReasoningCompleted { .. }
                 | StreamEvent::ResponseCompleted { .. }
+                | StreamEvent::ThinkingSummary { .. }
         );
         if !is_metadata && let Some(init) = self.ensure_init() {
             out.push(init);
@@ -630,6 +631,8 @@ impl Reducer for MessagesReducer {
                     cache_creation_input_tokens,
                 });
             }
+            // The Messages wire has no field for a reasoning summary.
+            StreamEvent::ThinkingSummary { .. } => {}
             StreamEvent::ReasoningCompleted { signature } => {
                 // A pending signature belongs to a new block, so finalize the current one first.
                 if self.open_signature.is_some() {

@@ -12,6 +12,23 @@ fn acp_reducer_maps_agent_message_to_text() {
 }
 
 #[test]
+fn acp_reducer_emits_a_thinking_summary_line() {
+    let mut r = AcpReducer;
+    let out = r.reduce(StreamEvent::ThinkingSummary {
+        stream_start_ms: 1_234,
+        summary: "Fix the caller".into(),
+    });
+    assert_eq!(
+        out,
+        vec![json!({
+            "type": "thinking_summary",
+            "streamStartMs": 1_234,
+            "summary": "Fix the caller",
+        })]
+    );
+}
+
+#[test]
 fn acp_reducer_maps_tool_call_to_native_shape() {
     let mut r = AcpReducer;
     let out = r.reduce(StreamEvent::ToolCall(tool_call_ev()));
