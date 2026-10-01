@@ -9,6 +9,38 @@ const V2_DREAM_MAX_PENDING_AGE: std::time::Duration = std::time::Duration::from_
 const V2_PROMOTION_RETRY_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
 const V2_PROMOTION_MAX_RETRIES: usize = 120;
 
+// The evidence cap must equal `xai_grok_memory::v2_consolidation::MAX_EVIDENCE_PER_OPERATION`.
+const V2_DREAM_SYSTEM_PROMPT: &str = "Consolidate only the supplied claimed observations \
+    into the supplied curated topics. Topics are reference notes for a future agent that has \
+    not seen any conversation and will read them before starting related work. A topic covers \
+    one broad subject area (a system, a repository area, a tool, a person, or a workflow); its \
+    sub-areas are `##` sections, not separate topics. A workspace usually needs fewer than ten \
+    topics. Treat `topic_hint` as a section suggestion; add to the existing topic whose area \
+    covers an observation rather than creating a new one, and split only above about 16 KB. \
+    Each topic starts with a `# Title` and one sentence stating what it covers (an index shows \
+    only those two lines), then durable facts as short standalone statements under `##` \
+    headings: file paths, constants, commands, invariants, decisions, and user preferences. \
+    Put changing state under `## Recent state` or omit it. Do not narrate conversations. Drop \
+    facts that newer observations contradict or make stale. \
+    Return one JSON object with an `operations` array. \
+    Every operation must have an `op` field identifying its type: create, update, delete, \
+    rename, merge, or split. Use exactly the fields listed for each type; do not add other fields. \
+    create and update: op, path, content, evidence. delete: op, path, evidence. \
+    rename: op, from, to, content, evidence. merge: op, sources, destination, content, evidence. \
+    split: op, source, destinations, evidence. evidence and sources are arrays of path strings. \
+    destinations is an array of objects containing exactly path and content. All other fields \
+    are strings. Example: {\"operations\":[{\"op\":\"create\",\"path\":\"topics/preferences.md\",\
+    \"content\":\"# Reply preferences\\nHow the user wants answers written.\\n\\n## Style\\n\
+    - Prefer concise answers.\",\"evidence\":[\"observations/_inbox/example.md\"]}]}. \
+    The example is illustrative; use only facts and exact evidence paths supplied in the input. \
+    Every operation must cite one or more exact claimed observation paths in `evidence`, and at \
+    most 64; when more support one topic, cite the 64 most relevant. Every topic path \
+    must be exactly `topics/<slug>.md`: one markdown file directly in `topics/`, no subdirectories. A slug is \
+    lowercase letters, digits, and hyphens, for example `topics/preferences.md`. Preserve still-valid facts. \
+    Do not include `<!-- memory-v2 provenance -->` comments in content; they are stripped and not stored. \
+    Do not mention or attempt tools, shell, workspace files, MEMORY.md, databases, archive, \
+    extraction, or another Dream.";
+
 /// Content-free `MemoryDreamCompleted.result` vocabulary; the disposition is the typed form.
 pub(super) fn dream_notice(disposition: MemoryDreamDisposition) -> &'static str {
     match disposition {
@@ -703,9 +735,24 @@ impl SessionActor {
                 disposition,
                 observation_count,
                 topics_affected,
+                detail: None,
             },
             coalesced,
         }
+    }
+
+    /// `finish_v2_dream` for a pass that wrote nothing, with the cause the summary reports.
+    async fn fail_v2_dream(
+        &self,
+        disposition: MemoryDreamDisposition,
+        observation_count: usize,
+        detail: String,
+    ) -> V2DreamPass {
+        let mut pass = self
+            .finish_v2_dream(disposition, observation_count, 0, false)
+            .await;
+        pass.outcome.detail = Some(detail);
+        pass
     }
 
     /// Execute one claim. `coalesced` is set when a trigger that arrived during
@@ -813,7 +860,11 @@ impl SessionActor {
                 );
                 tracing::warn!(error = %error, "memory-v2 Dream claim failed");
                 return self
-                    .finish_v2_dream(MemoryDreamDisposition::Failed, 0, 0, false)
+                    .fail_v2_dream(
+                        MemoryDreamDisposition::Failed,
+                        0,
+                        format!("Dream claim failed: {error}"),
+                    )
                     .await;
             }
             Err(error) => {
@@ -826,7 +877,11 @@ impl SessionActor {
                 );
                 tracing::warn!(error = %error, "memory-v2 Dream claim task panicked");
                 return self
-                    .finish_v2_dream(MemoryDreamDisposition::Failed, 0, 0, false)
+                    .fail_v2_dream(
+                        MemoryDreamDisposition::Failed,
+                        0,
+                        format!("Dream claim task panicked: {error}"),
+                    )
                     .await;
             }
         };
@@ -907,11 +962,10 @@ impl SessionActor {
                 self.memory.record_dream_result(false);
                 tracing::warn!(error = %detail, "memory-v2 Dream model or plan failed");
                 return self
-                    .finish_v2_dream(
+                    .fail_v2_dream(
                         MemoryDreamDisposition::RetryRequired,
                         observation_count,
-                        0,
-                        false,
+                        detail,
                     )
                     .await;
             }
@@ -975,11 +1029,10 @@ impl SessionActor {
                         usage.clone(),
                     );
                     tracing::warn!(error = %error, "memory-v2 shadow completion failed");
-                    self.finish_v2_dream(
+                    self.fail_v2_dream(
                         MemoryDreamDisposition::RetryRequired,
                         observation_count,
-                        0,
-                        false,
+                        format!("Dream shadow completion failed: {error}"),
                     )
                     .await
                 }
@@ -995,11 +1048,10 @@ impl SessionActor {
                         usage.clone(),
                     );
                     tracing::warn!(error = %error, "memory-v2 shadow completion task panicked");
-                    self.finish_v2_dream(
+                    self.fail_v2_dream(
                         MemoryDreamDisposition::Failed,
                         observation_count,
-                        0,
-                        false,
+                        format!("Dream shadow completion task panicked: {error}"),
                     )
                     .await
                 }
@@ -1050,11 +1102,10 @@ impl SessionActor {
                 );
                 self.memory.record_dream_result(false);
                 tracing::warn!(error = %error, "memory-v2 Dream commit failed");
-                self.finish_v2_dream(
+                self.fail_v2_dream(
                     MemoryDreamDisposition::RetryRequired,
                     observation_count,
-                    0,
-                    false,
+                    format!("Dream commit failed: {error}"),
                 )
                 .await
             }
@@ -1070,8 +1121,12 @@ impl SessionActor {
                 );
                 self.memory.record_dream_result(false);
                 tracing::warn!(error = %error, "memory-v2 Dream commit task panicked");
-                self.finish_v2_dream(MemoryDreamDisposition::Failed, observation_count, 0, false)
-                    .await
+                self.fail_v2_dream(
+                    MemoryDreamDisposition::Failed,
+                    observation_count,
+                    format!("Dream commit task panicked: {error}"),
+                )
+                .await
             }
         }
     }
@@ -1087,35 +1142,6 @@ impl SessionActor {
         V2DreamModelFailure,
     > {
         use xai_grok_telemetry::memory_telemetry::MemoryV2FailureClass;
-        const V2_DREAM_SYSTEM_PROMPT: &str = "Consolidate only the supplied claimed observations \
-            into the supplied curated topics. Topics are reference notes for a future agent that has \
-            not seen any conversation and will read them before starting related work. A topic covers \
-            one broad subject area (a system, a repository area, a tool, a person, or a workflow); its \
-            sub-areas are `##` sections, not separate topics. A workspace usually needs fewer than ten \
-            topics. Treat `topic_hint` as a section suggestion; add to the existing topic whose area \
-            covers an observation rather than creating a new one, and split only above about 16 KB. \
-            Each topic starts with a `# Title` and one sentence stating what it covers (an index shows \
-            only those two lines), then durable facts as short standalone statements under `##` \
-            headings: file paths, constants, commands, invariants, decisions, and user preferences. \
-            Put changing state under `## Recent state` or omit it. Do not narrate conversations. Drop \
-            facts that newer observations contradict or make stale. \
-            Return one JSON object with an `operations` array. \
-            Every operation must have an `op` field identifying its type: create, update, delete, \
-            rename, merge, or split. Use exactly the fields listed for each type; do not add other fields. \
-            create and update: op, path, content, evidence. delete: op, path, evidence. \
-            rename: op, from, to, content, evidence. merge: op, sources, destination, content, evidence. \
-            split: op, source, destinations, evidence. evidence and sources are arrays of path strings. \
-            destinations is an array of objects containing exactly path and content. All other fields \
-            are strings. Example: {\"operations\":[{\"op\":\"create\",\"path\":\"topics/preferences.md\",\
-            \"content\":\"# Reply preferences\\nHow the user wants answers written.\\n\\n## Style\\n\
-            - Prefer concise answers.\",\"evidence\":[\"observations/_inbox/example.md\"]}]}. \
-            The example is illustrative; use only facts and exact evidence paths supplied in the input. \
-            Every operation must cite one or more exact claimed observation paths in `evidence`. Every topic path \
-            must be exactly `topics/<slug>.md`: one markdown file directly in `topics/`, no subdirectories. A slug is \
-            lowercase letters, digits, and hyphens, for example `topics/preferences.md`. Preserve still-valid facts. \
-            Do not include `<!-- memory-v2 provenance -->` comments in content; they are stripped and not stored. \
-            Do not mention or attempt tools, shell, workspace files, MEMORY.md, databases, archive, \
-            extraction, or another Dream.";
         let sampling_client =
             self.prepare_chat_completion(false)
                 .await
