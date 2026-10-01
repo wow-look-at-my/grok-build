@@ -318,7 +318,10 @@ impl From<ConversationRequest> for ChatCompletionRequest {
             Some(
                 req.tools
                     .into_iter()
-                    .map(|t| ToolDefinition::function(t.name, t.description, t.parameters))
+                    .map(|t| {
+                        let parameters = req.tool_schema_form.apply(&t.parameters).into_owned();
+                        ToolDefinition::function(t.name, t.description, parameters)
+                    })
                     .collect(),
             )
         };

@@ -21,7 +21,7 @@ use xai_grok_sampling_types::{
     SentCredential, error::Result as SamplingResult,
 };
 
-use crate::actor::state::ImageInputRejections;
+use crate::actor::state::ModelRejections;
 
 use crate::actor::request_metadata::{
     CompletionState, SamplingResultWithMetrics, merge_signal_labels,
@@ -99,7 +99,7 @@ pub(crate) async fn run_request_task(
     event_tx: mpsc::UnboundedSender<SamplingEvent>,
     cancel_token: CancellationToken,
     completion: Option<oneshot::Sender<CollectedSamplingResult>>,
-    image_input_rejections: ImageInputRejections,
+    rejections: ModelRejections,
     slots: Arc<RequestSlots>,
 ) -> RequestId {
     let mut completion = CompletionState::new(completion);
@@ -298,7 +298,7 @@ pub(crate) async fn run_request_task(
                     &config,
                     &cancel_token,
                     &mut completion,
-                    &image_input_rejections,
+                    &rejections,
                     &sampling_span,
                 )
                 .await
@@ -449,7 +449,7 @@ pub(crate) async fn run_request_task(
                     &config,
                     &cancel_token,
                     &mut completion,
-                    &image_input_rejections,
+                    &rejections,
                     &sampling_span,
                 )
                 .await
@@ -482,7 +482,7 @@ pub(crate) async fn run_request_task(
                     &config,
                     &cancel_token,
                     &mut completion,
-                    &image_input_rejections,
+                    &rejections,
                     &sampling_span,
                 )
                 .await
@@ -509,7 +509,7 @@ async fn apply_retry_decision(
     config: &SamplerConfig,
     cancel_token: &CancellationToken,
     completion: &mut CompletionState,
-    image_input_rejections: &ImageInputRejections,
+    rejections: &ModelRejections,
     parent: &tracing::Span,
 ) -> bool {
     let rate_limit_threshold = config
@@ -583,7 +583,7 @@ async fn apply_retry_decision(
                 // Remember the model, not just this request: the images live on
                 // in conversation history, and every later turn would re-upload
                 // them for the same rejection.
-                image_input_rejections.mark(&config.model);
+                rejections.images.mark(&config.model);
                 tracing::warn!(
                     model = %config.model,
                     reason = %err,
@@ -626,6 +626,30 @@ async fn apply_retry_decision(
                 model = %config.model,
                 reason = %err,
                 "model rejected replayed thinking; stepping the replay level down for this turn"
+            );
+            *retry_count += 1;
+            emit_retrying(event_tx, request_id, *retry_count, max_retries, err, None);
+            true
+        }
+        RetryDecision::RetryWithToolSchemaFallback => {
+            let affected = request
+                .tools_with_top_level_combinators()
+                .into_iter()
+                .map(str::to_owned)
+                .collect::<Vec<_>>();
+            if !request.degrade_tool_schemas() {
+                // Already in the fallback form, or no schema it would change.
+                let terminal_event_queued = emit_failed(event_tx, request_id, err);
+                send_completion(completion, Err(clone_error(err)), terminal_event_queued);
+                return false;
+            }
+            rejections.tool_schemas.mark(&config.model);
+            tracing::warn!(
+                model = %config.model,
+                tools = ?affected,
+                reason = %err,
+                "provider rejected a top-level oneOf/anyOf/allOf tool schema; \
+                 sending the merged object form for this and later requests"
             );
             *retry_count += 1;
             emit_retrying(event_tx, request_id, *retry_count, max_retries, err, None);
@@ -2429,7 +2453,7 @@ mod tests {
             &config,
             &cancel_token,
             &mut completion,
-            &ImageInputRejections::default(),
+            &ModelRejections::default(),
             &tracing::Span::none(),
         )
         .await;
