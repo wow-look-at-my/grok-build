@@ -618,8 +618,11 @@ pub(crate) async fn spawn_session_actor(
         stream_tool_calls: Some(sampling_config.stream_tool_calls),
         extra_body: Default::default(),
     };
+    // Tool-result pruning stays off whatever the config says. Each trim
+    // rewrites history the provider already cached, so the next request
+    // misses the prompt cache from that point on.
     let actor_pruning_config = xai_chat_state::PruningConfig {
-        enabled: session_pruning_config.enabled,
+        enabled: false,
         keep_last_n_turns: session_pruning_config.keep_last_n_turns,
         soft_trim_threshold: session_pruning_config.soft_trim_threshold,
         soft_trim_head: session_pruning_config.soft_trim_head,

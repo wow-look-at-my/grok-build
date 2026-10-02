@@ -5300,6 +5300,10 @@ impl AppView {
             // watching its own CI is idle by definition — nothing else on
             // screen is asking for these frames.
             needs_redraw |= crate::ci_status::ci_dot_animating(&agent.session.cwd);
+            needs_redraw |= agent
+                .session
+                .tracker
+                .tick_cache_invalidated_label(std::time::Instant::now());
             let spinner_frame_tick =
                 agent.scrollback.animation_tick() % crate::views::turn_status::SPINNER_DIVISOR == 0;
             needs_redraw |= !agent.session.state.is_idle() && spinner_frame_tick;
@@ -5706,6 +5710,15 @@ impl AppView {
                 // this cadence, and a CI run here lasts tens of minutes —
                 // 30fps for all of it would be a lot of redraws for one cell.
                 if crate::ci_status::ci_dot_animating(&agent.session.cwd) {
+                    return TickDemand::Slow;
+                }
+                // The cache label counts its seconds and must hide on its own.
+                if agent
+                    .session
+                    .tracker
+                    .cache_invalidated_label(std::time::Instant::now())
+                    .is_some()
+                {
                     return TickDemand::Slow;
                 }
                 TickDemand::None

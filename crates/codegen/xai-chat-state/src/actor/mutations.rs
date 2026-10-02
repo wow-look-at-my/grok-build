@@ -344,9 +344,8 @@ impl ChatStateActor {
             return 0;
         }
 
-        // Synthetic User items are not real turns (they do not increment `prompt_index`).
-        // Raise the clearing threshold by their count so a result is never cleared before
-        // `hard_clear_age_turns` real turns have elapsed.
+        // Synthetic User items are not real turns (they do not increment
+        // `prompt_index`).
         let total_user_items = self
             .state
             .conversation

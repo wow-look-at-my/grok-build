@@ -1389,6 +1389,14 @@ impl AgentView {
                 Line::from(Span::styled(format!("{cost_display} session"), cost_style)),
             );
         }
+        if let Some(label) = self
+            .session
+            .tracker
+            .cache_invalidated_label(std::time::Instant::now())
+        {
+            let style = Style::default().fg(theme.warning).bg(theme.bg_base);
+            status.push("cache_invalidated", Line::from(Span::styled(label, style)));
+        }
         let areas = status.render(buf, layout.status_bar);
         self.hit_bg_status.rect = areas.get("bg_tasks").copied();
         self.hit_goal_status.rect = areas.get("goal").copied();
