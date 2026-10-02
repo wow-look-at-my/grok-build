@@ -1412,6 +1412,11 @@ pub(super) fn handle_session_notification_with_origin(
                 .session
                 .tracker
                 .set_response_cache_hit(&mut agent.scrollback, usage.as_ref());
+            let cache_invalidated = !meta.is_replay
+                && agent
+                    .session
+                    .tracker
+                    .note_cache_usage(usage.as_ref(), std::time::Instant::now());
             // A REPLAYED total belongs to the run that wrote it. The agent's
             // ledger is in-memory and starts fresh on reload, so adopting the
             // old run's total would make the indicator jump BACKWARD at the
@@ -1428,7 +1433,7 @@ pub(super) fn handle_session_notification_with_origin(
             // pre-first-token wait) puts a stale number under a row that says
             // it is waiting.
             let rate_cleared = agent.session.tracker.clear_output_rate();
-            priced || cache_hit_set || total_changed || rate_cleared
+            priced || cache_hit_set || cache_invalidated || total_changed || rate_cleared
         }
         XaiSessionUpdate::OutputRate {
             tokens_per_sec,
@@ -1688,15 +1693,19 @@ pub(super) fn handle_child_session_notification(
                 .session
                 .tracker
                 .set_response_cache_hit(&mut child_view.scrollback, usage.as_ref());
+            let cache_invalidated = !is_replay
+                && child_view
+                    .session
+                    .tracker
+                    .note_cache_usage(usage.as_ref(), std::time::Instant::now());
             let total_changed = !is_replay
                 && child_view
                     .session
                     .tracker
                     .set_reported_session_cost(session_cost_usd_ticks);
-            // The child's view draws the same row as the parent's, so it needs
-            // the same end-of-call boundary.
+            // The child's view draws the same row as the parent's, so it needs the same end-of-call boundary.
             let rate_cleared = child_view.session.tracker.clear_output_rate();
-            priced || cache_hit_set || total_changed || rate_cleared
+            priced || cache_hit_set || cache_invalidated || total_changed || rate_cleared
         }
         XaiSessionUpdate::ThinkingSummary {
             stream_start_ms,

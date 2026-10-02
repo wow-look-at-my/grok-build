@@ -389,6 +389,14 @@ struct HooksRunning {
     /// sent direct, so a chunk stamped at or before this predates the gate.
     started_at_ms: Option<i64>,
 }
+/// How long the "cache invalidated" label stays in the status bar.
+pub const CACHE_INVALIDATED_LABEL_TTL: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// The cache shortfall a call may show before it counts as an invalidation.
+fn cache_shortfall_limit(expected: u64) -> u64 {
+    (expected / 10).max(1024)
+}
+
 /// Tracks in-flight streaming state for one agent's turn.
 /// Converts ACP `SessionUpdate` variants into scrollback entry mutations.
 /// Does nothing else: no UI, no networking, just data transformation.
@@ -514,6 +522,12 @@ pub struct AcpUpdateTracker {
     output_rate: Option<OutputRate>,
     /// The model request waits for a slot under the agent's request cap.
     request_queued: Option<RequestQueued>,
+    /// The total prompt tokens of the last live model call.
+    last_prompt_tokens: Option<u64>,
+    /// When the last live model call missed the cache the call before it wrote.
+    cache_invalidated_at: Option<std::time::Instant>,
+    /// The label text the last tick saw, so a tick redraws only on a change.
+    cache_label_seen: Option<String>,
 
     /// Pending agent toolset from the most recent `AvailableCommandsUpdate.meta`.
     /// Format on the wire: `{"tools": ["read_file", ...]}`.
@@ -1440,6 +1454,67 @@ impl AcpUpdateTracker {
             return false;
         }
         entry.cache_hit_percent = Some(percent);
+        true
+    }
+
+    /// Compare one live model call's cache reads with the prompt of the call
+    /// before it. A request that only appends to the last one reads that whole
+    /// prompt back from the cache. A shortfall past [`cache_shortfall_limit`]
+    /// means something earlier in the request changed.
+    /// "cache invalidated" label (re)appeared.
+    pub fn note_cache_usage(
+        &mut self,
+        usage: Option<&xai_grok_shell::extensions::notification::ResponseUsage>,
+        now: std::time::Instant,
+    ) -> bool {
+        let Some(usage) = usage else {
+            return false;
+        };
+        let total = usage
+            .input_tokens
+            .saturating_add(usage.cache_read_input_tokens)
+            .saturating_add(usage.cache_creation_input_tokens);
+        if total == 0 {
+            return false;
+        }
+        let previous = self.last_prompt_tokens.replace(total);
+        let Some(previous) = previous else {
+            return false;
+        };
+        // A prompt shorter than the last one.
+        let expected = previous.min(total);
+        let shortfall = expected.saturating_sub(usage.cache_read_input_tokens);
+        if shortfall <= cache_shortfall_limit(expected) {
+            return false;
+        }
+        tracing::info!(
+            previous_prompt_tokens = previous,
+            prompt_tokens = total,
+            cache_read_tokens = usage.cache_read_input_tokens,
+            cache_creation_tokens = usage.cache_creation_input_tokens,
+            "prompt cache invalidated"
+        );
+        self.cache_invalidated_at = Some(now);
+        true
+    }
+
+    /// The "cache invalidated Ns ago" label, while it is younger than
+    /// [`CACHE_INVALIDATED_LABEL_TTL`].
+    pub fn cache_invalidated_label(&self, now: std::time::Instant) -> Option<String> {
+        let at = self.cache_invalidated_at?;
+        let age = now.saturating_duration_since(at);
+        (age < CACHE_INVALIDATED_LABEL_TTL)
+            .then(|| format!("cache invalidated {}s ago", age.as_secs()))
+    }
+
+    /// Whether the label changed since the last call: its seconds moved, it
+    /// appeared, or it expired. The tick loop redraws on `true`.
+    pub fn tick_cache_invalidated_label(&mut self, now: std::time::Instant) -> bool {
+        let label = self.cache_invalidated_label(now);
+        if label == self.cache_label_seen {
+            return false;
+        }
+        self.cache_label_seen = label;
         true
     }
     /// Whether summing the scrollback's per-message costs would measure THIS

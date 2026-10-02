@@ -5757,3 +5757,70 @@ fn set_last_turn_cost_keyed_streaming_mismatch_skips_stream() {
         "a stale keyed notification must not attach to a newer streaming block"
     );
 }
+
+fn cache_usage(
+    input: u64,
+    read: u64,
+    created: u64,
+) -> xai_grok_shell::extensions::notification::ResponseUsage {
+    xai_grok_shell::extensions::notification::ResponseUsage {
+        input_tokens: input,
+        cache_read_input_tokens: read,
+        cache_creation_input_tokens: created,
+        ..Default::default()
+    }
+}
+
+#[test]
+fn an_appended_request_that_reads_the_prior_prompt_is_not_an_invalidation() {
+    let mut tracker = AcpUpdateTracker::new();
+    let t0 = std::time::Instant::now();
+    assert!(!tracker.note_cache_usage(Some(&cache_usage(200, 0, 50_000)), t0));
+    assert!(!tracker.note_cache_usage(Some(&cache_usage(300, 49_900, 1_000)), t0));
+    assert_eq!(tracker.cache_invalidated_label(t0), None);
+}
+
+#[test]
+fn a_request_that_misses_the_prior_prompt_shows_the_label_for_fifteen_seconds() {
+    let mut tracker = AcpUpdateTracker::new();
+    let t0 = std::time::Instant::now();
+    tracker.note_cache_usage(Some(&cache_usage(200, 40_000, 10_000)), t0);
+    // Only the system prompt came back from the cache.
+    assert!(tracker.note_cache_usage(Some(&cache_usage(300, 8_000, 43_000)), t0));
+    assert_eq!(
+        tracker.cache_invalidated_label(t0 + std::time::Duration::from_secs(3)),
+        Some("cache invalidated 3s ago".to_string())
+    );
+    assert_eq!(
+        tracker.cache_invalidated_label(t0 + CACHE_INVALIDATED_LABEL_TTL),
+        None,
+        "the label hides after its TTL"
+    );
+}
+
+#[test]
+fn the_first_call_and_a_shrunk_prompt_measure_against_what_can_be_cached() {
+    let mut tracker = AcpUpdateTracker::new();
+    let t0 = std::time::Instant::now();
+    assert!(
+        !tracker.note_cache_usage(Some(&cache_usage(50_000, 0, 0)), t0),
+        "the first call has no prior prompt to miss"
+    );
+    // A compaction shrinks the prompt; the summary is new text.
+    assert!(tracker.note_cache_usage(Some(&cache_usage(4_000, 0, 6_000)), t0));
+    // The call after the compaction reads the compacted prompt back.
+    assert!(!tracker.note_cache_usage(Some(&cache_usage(100, 10_000, 500)), t0));
+}
+
+#[test]
+fn the_label_tick_redraws_only_when_the_text_changes() {
+    let mut tracker = AcpUpdateTracker::new();
+    let t0 = std::time::Instant::now();
+    tracker.note_cache_usage(Some(&cache_usage(0, 0, 50_000)), t0);
+    tracker.note_cache_usage(Some(&cache_usage(50_000, 0, 1_000)), t0);
+    assert!(tracker.tick_cache_invalidated_label(t0));
+    assert!(!tracker.tick_cache_invalidated_label(t0 + std::time::Duration::from_millis(500)));
+    assert!(tracker.tick_cache_invalidated_label(t0 + std::time::Duration::from_secs(1)));
+    assert!(tracker.tick_cache_invalidated_label(t0 + CACHE_INVALIDATED_LABEL_TTL));
+    assert!(!tracker.tick_cache_invalidated_label(t0 + CACHE_INVALIDATED_LABEL_TTL * 2));
+}
