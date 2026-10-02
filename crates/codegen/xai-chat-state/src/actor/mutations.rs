@@ -334,7 +334,7 @@ impl ChatStateActor {
 
     /// Eagerly hard-clear tool results from very old turns in the retained conversation.
     /// Unlike API-copy pruning, this mutates `self.state.conversation` after every user turn.
-    /// `updates.jsonl` is never touched, so replay stays intact; age counts turn boundaries only.
+    /// `updates.jsonl` is never touched, so replay stays intact; synthetic User items raise the age threshold.
     pub(super) fn prune_retained_conversation(&mut self) -> usize {
         if !self.pruning_config.enabled {
             return 0;
@@ -344,8 +344,19 @@ impl ChatStateActor {
             return 0;
         }
 
-        // A mid-turn injection is not a turn boundary, so a push of one ages nothing.
-        let effective_threshold = self.pruning_config.hard_clear_age_turns;
+        // Synthetic User items are not real turns (they do not increment
+        // `prompt_index`).
+        let total_user_items = self
+            .state
+            .conversation
+            .iter()
+            .filter(|i| matches!(i, ConversationItem::User(_)))
+            .count();
+        let synthetic_count = total_user_items.saturating_sub(self.state.prompt_index);
+        let effective_threshold = self
+            .pruning_config
+            .hard_clear_age_turns
+            .saturating_add(synthetic_count);
 
         let before_bytes = self.conversation_content_bytes();
         let (cleared, _) = self.rewrite_history(HistoryRewrite::RetainedPrune, |conversation| {
@@ -354,7 +365,7 @@ impl ChatStateActor {
             let mut seen_first_user = false;
 
             for item in conversation.iter_mut().rev() {
-                if super::request_builder::is_turn_boundary(item) {
+                if matches!(item, ConversationItem::User(_)) {
                     if seen_first_user {
                         turn_from_end += 1;
                     }
