@@ -259,7 +259,7 @@ impl SessionActor {
             .as_ref()
             .map(|c| c.model.to_string())
             .unwrap_or_default();
-        let prefix_prepared = apply_turn_image_budget_and_prune(
+        let prefix_prepared = apply_turn_image_budget(
             &self.chat_state_handle,
             prepare_conversation_for_verbatim_summarization(split.prefix.to_vec(), strips),
         )
@@ -420,8 +420,8 @@ enum CompactInputStage {
     VerbatimFitted,
     Lossy,
 }
-/// Same image budget then tool-result prune a live turn request uses.
-async fn apply_turn_image_budget_and_prune(
+/// Same image budget a live turn request uses.
+async fn apply_turn_image_budget(
     chat_state: &xai_chat_state::ChatStateHandle,
     items: Vec<ConversationItem>,
 ) -> Vec<ConversationItem> {
@@ -429,10 +429,9 @@ async fn apply_turn_image_budget_and_prune(
         .get_sampling_config()
         .await
         .and_then(|config| config.max_request_bytes);
-    let items = xai_chat_state::image_budget::apply_image_budget(items, max_request_bytes).items;
-    chat_state.apply_turn_request_pruning(items).await
+    xai_chat_state::image_budget::apply_image_budget(items, max_request_bytes).items
 }
-/// Start fitted when the (already image-budgeted and pruned) estimate cannot leave room for tools + summary.
+/// Start fitted when the (already image-budgeted) estimate cannot leave room for tools + summary.
 fn start_verbatim_compact_turns(
     turns: Vec<ConversationItem>,
     tool_tokens: u64,
@@ -1165,7 +1164,7 @@ impl SessionActor {
         };
         if verbatim_input_enabled {
             simplified_messages =
-                apply_turn_image_budget_and_prune(&self.chat_state_handle, simplified_messages)
+                apply_turn_image_budget(&self.chat_state_handle, simplified_messages)
                     .await;
         }
         let pre_compaction_ms = assembly_start.elapsed().as_millis() as u64;
@@ -1389,13 +1388,13 @@ impl SessionActor {
                                         conv,
                                         summary_strips_reasoning,
                                     );
-                                    let pruned = apply_turn_image_budget_and_prune(
+                                    let budgeted = apply_turn_image_budget(
                                             &self.chat_state_handle,
                                             verbatim,
                                         )
                                         .await;
                                     xai_chat_state::compaction_utils::fit_conversation_to_budget(
-                                        pruned,
+                                        budgeted,
                                         fitted_input_budget(context_window, compaction_tool_tokens),
                                     )
                                 }

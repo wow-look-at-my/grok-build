@@ -24,7 +24,7 @@ use crate::commands::{ChatStateCommand, StrictAppendAck};
 use crate::events::ChatStateEvent;
 use crate::handle::ChatStateHandle;
 use crate::persistence::ChatPersistence;
-use crate::types::{PruningConfig, TurnCapture};
+use crate::types::TurnCapture;
 
 use state::ChatState;
 use xai_grok_sampling_types::{ConversationItem, SamplingConfig};
@@ -34,8 +34,6 @@ use xai_grok_sampling_types::{ConversationItem, SamplingConfig};
 pub struct ChatStateActor {
     /// Internal state — conversation, tokens, config, etc.
     state: ChatState,
-    /// Pruning configuration for tool-result trimming.
-    pruning_config: PruningConfig,
     /// Persistence implementation — owned exclusively, called with `&mut self`.
     persistence: Box<dyn ChatPersistence>,
     /// Channel to receive commands from handles.
@@ -77,30 +75,10 @@ impl ChatStateActor {
         event_tx: mpsc::UnboundedSender<ChatStateEvent>,
         cancellation_token: tokio_util::sync::CancellationToken,
     ) -> ChatStateHandle {
-        Self::spawn_with_pruning(
-            initial_conversation,
-            sampling_config,
-            PruningConfig::default(),
-            persistence,
-            event_tx,
-            cancellation_token,
-        )
-    }
-
-    /// Spawn the actor with a custom pruning config.
-    pub fn spawn_with_pruning(
-        initial_conversation: Vec<ConversationItem>,
-        sampling_config: SamplingConfig,
-        pruning_config: PruningConfig,
-        persistence: Box<dyn ChatPersistence>,
-        event_tx: mpsc::UnboundedSender<ChatStateEvent>,
-        cancellation_token: tokio_util::sync::CancellationToken,
-    ) -> ChatStateHandle {
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
 
         let actor = ChatStateActor {
             state: ChatState::new(initial_conversation, sampling_config),
-            pruning_config,
             persistence,
             cmd_rx,
             event_tx,
@@ -415,9 +393,6 @@ impl ChatStateActor {
             }
             ChatStateCommand::GetSamplingConfig { reply } => {
                 let _ = reply.send(self.state.sampling_config.clone());
-            }
-            ChatStateCommand::ApplyTurnRequestPruning { items, reply } => {
-                let _ = reply.send(self.prune_items_for_turn_request(items));
             }
             ChatStateCommand::GetAgentEditedPaths { reply } => {
                 let _ = reply.send(self.state.agent_edited_paths.clone());

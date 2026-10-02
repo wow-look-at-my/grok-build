@@ -567,13 +567,6 @@ pub(crate) async fn spawn_session_actor(
     drop(web_search_config_step);
     let embed_base_url = sampling_config.base_url.clone();
     let embed_api_key = sampling_config.api_key.clone();
-    let session_pruning_config: crate::config::PruningConfig = memory_config.as_ref().map_or_else(
-        || crate::config::PruningConfig {
-            enabled: false,
-            ..Default::default()
-        },
-        |mc| mc.pruning.clone(),
-    );
     let context_window_override = std::env::var("GROK_DEBUG_CONTEXT_WINDOW")
         .ok()
         .and_then(|v| v.parse::<u64>().ok())
@@ -618,19 +611,10 @@ pub(crate) async fn spawn_session_actor(
         stream_tool_calls: Some(sampling_config.stream_tool_calls),
         extra_body: Default::default(),
     };
-    let actor_pruning_config = xai_chat_state::PruningConfig {
-        enabled: session_pruning_config.enabled,
-        keep_last_n_turns: session_pruning_config.keep_last_n_turns,
-        soft_trim_threshold: session_pruning_config.soft_trim_threshold,
-        soft_trim_head: session_pruning_config.soft_trim_head,
-        soft_trim_tail: session_pruning_config.soft_trim_tail,
-        hard_clear_age_turns: session_pruning_config.hard_clear_age_turns,
-    };
     let (chat_state_event_tx, chat_state_event_rx) = mpsc::unbounded_channel();
-    let chat_state_handle = xai_chat_state::ChatStateActor::spawn_with_pruning(
+    let chat_state_handle = xai_chat_state::ChatStateActor::spawn(
         conversation.clone(),
         chat_state_sampling_config,
-        actor_pruning_config,
         Box::new(super::chat_persistence::ChannelChatPersistence::new(
             persistence.tx.clone(),
         )),
