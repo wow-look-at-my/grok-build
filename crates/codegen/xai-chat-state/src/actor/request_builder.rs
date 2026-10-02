@@ -155,8 +155,30 @@ pub(crate) fn should_prune(total_tokens: u64, context_window: std::num::NonZeroU
     total_tokens > context_window.get() / 2
 }
 
+/// Whether a `User` item opens a turn, for pruning's turn age. A mid-turn
+/// injection must not count: each one would age every earlier tool result,
+/// rewrite history behind the cached prefix, and miss the prompt cache.
+pub(crate) fn is_turn_boundary(item: &ConversationItem) -> bool {
+    use xai_grok_sampling_types::SyntheticReason as R;
+    let ConversationItem::User(user) = item else {
+        return false;
+    };
+    !matches!(
+        user.synthetic_reason,
+        R::Interjection
+            | R::SystemReminder
+            | R::LengthContinue
+            | R::StopHookFeedback
+            | R::AgentMessage
+            | R::ParentHumanMessage
+            | R::CompactionMeta
+            | R::HistoryFlattened
+            | R::WorkingDirectorySwitch
+    )
+}
+
 /// Prune old, large tool results from the conversation in place.
-/// Turn age is estimated by walking backward and counting `User` items.
+/// Turn age is estimated by walking backward and counting turn boundaries.
 pub(crate) fn prune_conversation(conversation: &mut [ConversationItem], config: &PruningConfig) {
     if !config.enabled {
         return;
@@ -166,7 +188,7 @@ pub(crate) fn prune_conversation(conversation: &mut [ConversationItem], config: 
     let mut seen_first_user = false;
 
     for item in conversation.iter_mut().rev() {
-        if matches!(item, ConversationItem::User(_)) {
+        if is_turn_boundary(item) {
             if seen_first_user {
                 turn_from_end += 1;
             }
@@ -301,6 +323,57 @@ mod tests {
             panic!("expected one tool result: {conv:?}")
         };
         assert_eq!(tr.content.len(), 10_000);
+    }
+
+    fn tool_result_contents(conv: &[ConversationItem]) -> Vec<String> {
+        conv.iter()
+            .filter_map(|item| match item {
+                ConversationItem::ToolResult(tr) => Some(tr.content.to_string()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_mid_turn_interjection_leaves_the_prior_request_untouched() {
+        let config = PruningConfig::default();
+        let mut conv = vec![
+            ConversationItem::user("turn 1"),
+            ConversationItem::tool_result("c1", "x".repeat(10_000)),
+            ConversationItem::user("turn 2"),
+            ConversationItem::user("turn 3"),
+            ConversationItem::tool_result("c2", "y".repeat(10_000)),
+        ];
+        let mut request_n = conv.clone();
+        prune_conversation(&mut request_n, &config);
+
+        conv.push(ConversationItem::interjection("steer"));
+        conv.push(ConversationItem::system_reminder("reminder"));
+        let mut request_n1 = conv.clone();
+        prune_conversation(&mut request_n1, &config);
+
+        assert_eq!(
+            tool_result_contents(&request_n),
+            tool_result_contents(&request_n1),
+            "an injection inside the turn must not re-trim history the last request sent"
+        );
+    }
+
+    #[test]
+    fn a_real_turn_still_ages_old_tool_results() {
+        let config = PruningConfig::default();
+        let mut conv = vec![
+            ConversationItem::user("turn 1"),
+            ConversationItem::tool_result("c1", "x".repeat(10_000)),
+        ];
+        for i in 2..=config.keep_last_n_turns + 2 {
+            conv.push(ConversationItem::user(format!("turn {i}")));
+        }
+        prune_conversation(&mut conv, &config);
+        assert!(
+            tool_result_contents(&conv)[0].contains(SOFT_TRIM_SEPARATOR),
+            "a result older than the kept turns is trimmed"
+        );
     }
 
     #[test]
