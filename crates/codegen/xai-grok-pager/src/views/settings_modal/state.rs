@@ -1016,6 +1016,7 @@ pub(super) fn action_for_bool(key: SettingKey, new: bool) -> Option<Action> {
         "confirm_before_rewind" => Some(Action::SetConfirmBeforeRewind(new)),
         "stop_gate_unfinished_todos" => Some(Action::SetStopGateUnfinishedTodos(new)),
         "stop_gate_ci_failing" => Some(Action::SetStopGateCiFailing(new)),
+        "split_and_tee_commands" => Some(Action::SetSplitAndTeeCommands(new)),
         "combine_queued_prompts" => Some(Action::SetCombineQueuedPrompts(new)),
 
         "invert_scroll" => Some(Action::SetInvertScroll(new)),

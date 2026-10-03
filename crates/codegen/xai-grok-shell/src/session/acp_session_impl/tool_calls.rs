@@ -334,43 +334,96 @@ impl SessionActor {
         tool_calls: Vec<crate::sampling::types::ToolCallResponse>,
         requested_model: Option<String>,
     ) -> Result<ToolLoop, acp::Error> {
+        self.execute_tool_calls_with_chains(tool_calls, Vec::new(), requested_model)
+            .await
+    }
+
+    /// Run `tool_calls`. Every member of a split chain after the first runs in
+    /// a later batch, after the member before it has finished.
+    pub(super) async fn execute_tool_calls_with_chains(
+        &self,
+        tool_calls: Vec<crate::sampling::types::ToolCallResponse>,
+        chains: Vec<super::command_split::SplitChain>,
+        requested_model: Option<String>,
+    ) -> Result<ToolLoop, acp::Error> {
+        use super::command_split::{ChainStep, chain_step};
         if let Some(model) = requested_model.as_deref() {
             tracing::Span::current().record("model_id", model);
         }
         let mut final_result: Option<ToolLoop> = None;
         let mut deferred_followups: Vec<ConversationItem> = Vec::new();
+        let mut outcomes = std::collections::HashMap::new();
+        let followers: std::collections::HashSet<&str> = chains
+            .iter()
+            .flat_map(|c| c.members.iter().skip(1).map(|m| m.id.as_str()))
+            .collect();
         let tool_calls = self.reject_excess_media_gen_calls(tool_calls).await?;
-        if !tool_calls.is_empty() {
-            if tool_calls.len() > 1 {
-                let kind_of = |name: &str| self.agent.borrow().tool_bridge().tool_kind(name);
-                let (body, tail) = split_exit_plan_tail(tool_calls, kind_of);
-                if !body.is_empty() {
-                    self.execute_tool_calls_batch(
-                        body,
-                        &mut deferred_followups,
-                        &mut final_result,
-                        requested_model.as_deref(),
-                    )
-                    .await?;
+        let (first, later): (Vec<_>, Vec<_>) = tool_calls
+            .into_iter()
+            .partition(|call| !followers.contains(call.id.as_str()));
+        let mut later: std::collections::HashMap<String, _> = later
+            .into_iter()
+            .map(|call| (call.id.clone(), call))
+            .collect();
+        self.execute_tool_call_batches(
+            first,
+            &mut deferred_followups,
+            &mut final_result,
+            &mut outcomes,
+            requested_model.as_deref(),
+        )
+        .await?;
+        let depth = chains.iter().map(|c| c.members.len()).max().unwrap_or(0);
+        for step in 1..depth {
+            let mut batch = Vec::new();
+            for chain in &chains {
+                let (Some(member), Some(previous)) =
+                    (chain.members.get(step), chain.members.get(step - 1))
+                else {
+                    continue;
+                };
+                let Some(call) = later.remove(&member.id) else {
+                    continue;
+                };
+                // A cancelled turn cancels the rest in the batch, as it
+                // cancels any other call.
+                if final_result.is_some() {
+                    batch.push(call);
+                    continue;
                 }
-                if !tail.is_empty() {
-                    self.execute_tool_calls_batch(
-                        tail,
-                        &mut deferred_followups,
-                        &mut final_result,
-                        requested_model.as_deref(),
-                    )
-                    .await?;
+                match chain_step(
+                    outcomes.get(&previous.id).copied(),
+                    member.only_if_previous_succeeded,
+                ) {
+                    ChainStep::Run => batch.push(call),
+                    ChainStep::Skip { reason, outcome } => {
+                        outcomes.insert(member.id.clone(), outcome);
+                        self.skip_chain_call(call, reason).await?;
+                    }
                 }
-            } else {
-                self.execute_tool_calls_batch(
-                    tool_calls,
+            }
+            if !batch.is_empty() {
+                self.execute_tool_call_batches(
+                    batch,
                     &mut deferred_followups,
                     &mut final_result,
+                    &mut outcomes,
                     requested_model.as_deref(),
                 )
                 .await?;
             }
+        }
+        // A call the model made must always get a result, even one that no
+        // chain step reached.
+        if !later.is_empty() {
+            self.execute_tool_call_batches(
+                later.into_values().collect(),
+                &mut deferred_followups,
+                &mut final_result,
+                &mut outcomes,
+                requested_model.as_deref(),
+            )
+            .await?;
         }
         {
             let _span = if !deferred_followups.is_empty() {
@@ -395,6 +448,51 @@ impl SessionActor {
         }
         Ok(ToolLoop::Continue)
     }
+    /// Run one batch, with its ExitPlan-kind calls held back to run after the rest.
+    async fn execute_tool_call_batches(
+        &self,
+        tool_calls: Vec<crate::sampling::types::ToolCallResponse>,
+        deferred_followups: &mut Vec<ConversationItem>,
+        final_result: &mut Option<ToolLoop>,
+        outcomes: &mut std::collections::HashMap<String, super::command_split::CallOutcome>,
+        requested_model: Option<&str>,
+    ) -> Result<(), acp::Error> {
+        if tool_calls.len() > 1 {
+            let kind_of = |name: &str| self.agent.borrow().tool_bridge().tool_kind(name);
+            let (body, tail) = split_exit_plan_tail(tool_calls, kind_of);
+            if !body.is_empty() {
+                self.execute_tool_calls_batch(
+                    body,
+                    deferred_followups,
+                    final_result,
+                    outcomes,
+                    requested_model,
+                )
+                .await?;
+            }
+            if !tail.is_empty() {
+                self.execute_tool_calls_batch(
+                    tail,
+                    deferred_followups,
+                    final_result,
+                    outcomes,
+                    requested_model,
+                )
+                .await?;
+            }
+        } else if !tool_calls.is_empty() {
+            self.execute_tool_calls_batch(
+                tool_calls,
+                deferred_followups,
+                final_result,
+                outcomes,
+                requested_model,
+            )
+            .await?;
+        }
+        Ok(())
+    }
+
     /// Per-name media-gen counts that exceed this session's cap.
     pub(super) fn media_gen_over_cap(
         &self,
@@ -483,6 +581,7 @@ impl SessionActor {
         tool_calls: Vec<crate::sampling::types::ToolCallResponse>,
         deferred_followups: &mut Vec<ConversationItem>,
         final_result: &mut Option<ToolLoop>,
+        outcomes: &mut std::collections::HashMap<String, super::command_split::CallOutcome>,
         requested_model: Option<&str>,
     ) -> Result<(), acp::Error> {
         if self.permissions.is_auto_mode() {
@@ -1073,6 +1172,21 @@ impl SessionActor {
                 }
                 Err(_) => true,
             };
+            outcomes.insert(
+                prepared.call_id.clone(),
+                match &result {
+                    Ok(r)
+                        if matches!(
+                            r.output,
+                            xai_grok_tools::types::output::ToolOutput::BackgroundTaskStarted(_)
+                        ) =>
+                    {
+                        super::command_split::CallOutcome::Backgrounded
+                    }
+                    _ if tool_failed => super::command_split::CallOutcome::Failed,
+                    _ => super::command_split::CallOutcome::Succeeded,
+                },
+            );
             let (ext_tool_output, ext_error_message) = if xai_grok_telemetry::external::is_active()
             {
                 external_tool_bodies(&result)

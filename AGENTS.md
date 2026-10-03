@@ -416,6 +416,11 @@ Pointing `build-test` at `vars.CI_RUNNER` turns ~20 tests red, because they asse
 
 Every one of those is the test doing its job. Making them pass there means weakening what they check, so the fix belongs to the runner image (an init/reaper, a real filesystem for `/tmp`) and that image is the fleet's, not this repo's. Revisit the runner once it has one. Until then this job is `runs-on: ubuntu-22.04`, like every other Linux job in the workflow, which is what `master` builds green on.
 
+## Split-and-tee notes (experimental)
+
+- `[ui].split_and_tee_commands`, default off, read at session start and only for a local terminal. A `;`/`&&` bash chain runs as one ordered tool call per command. Every pipe stage is teed to `<call log>.stageN.log`, and a trailing `| tail` becomes a view over the kept output.
+- `get_task_output` reads any saved log with `stage`/`head`/`tail`/`grep`, including a finished foreground call by its call id. Depth, and what refuses a split: `docs/split-and-tee.md`.
+
 ## Todo-stop-gate notes
 
 - The built-in todo gate is a participant in the turn-end STOP-HOOK gate, not a mechanism beside it (`acp_session_impl/turn.rs`, on `StopGateDecision::AllowStop`). It fires only after the user hooks allowed the stop. Its reminder rides the same `stop_hook_feedback` user message a hook block uses. It consumes the SAME `stop_continuations_this_turn` budget. So `MAX_STOP_HOOK_CONTINUATIONS_PER_TURN` is the stuck-release: a model that never engages its todos stops anyway.

@@ -3163,7 +3163,7 @@ impl SessionActor {
                     turn_parked,
                 )
                 .await;
-            let (response, latency) = match model_sampler_outcome {
+            let (mut response, latency) = match model_sampler_outcome {
                 Ok(SamplerTurnOutcome::Response(r, latency)) => {
                     salvage.response_arrived();
                     (r, latency)
@@ -3625,6 +3625,8 @@ impl SessionActor {
                     self.current_model_id().await,
                 ));
             }
+            // Before the assistant item is recorded: history and the pager must both see the split calls.
+            let split_chains = self.split_joined_bash_calls(&mut response.items).await;
             let mut tool_calls = response.tool_calls().to_vec();
             let over_cap = self.media_gen_over_cap(&tool_calls);
             if xai_grok_tools::media_gen_limits::should_resample_egregious(
@@ -3969,8 +3971,12 @@ impl SessionActor {
             self.reseed_context_budget_output_cap().await;
             let execute_tool_calls_result = {
                 let _tool_phase = turn_phases.begin_tool_blocking();
-                self.execute_tool_calls(tool_call_responses, requested_model)
-                    .await
+                self.execute_tool_calls_with_chains(
+                    tool_call_responses,
+                    split_chains,
+                    requested_model,
+                )
+                .await
             };
             match execute_tool_calls_result {
                 Ok(ToolLoop::PermissionReject { tool_name, reason }) => {

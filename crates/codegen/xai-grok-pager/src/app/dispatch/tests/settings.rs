@@ -1663,6 +1663,10 @@ fn move_setting_away_from_default(app: &mut AppView, key: crate::settings::Setti
             let away = !app.current_ui.stop_gate_ci_failing_enabled();
             let _ = dispatch(Action::SetStopGateCiFailing(away), app);
         }
+        "split_and_tee_commands" => {
+            let away = !app.current_ui.split_and_tee_commands_enabled();
+            let _ = dispatch(Action::SetSplitAndTeeCommands(away), app);
+        }
         "thinking_summaries" => {
             let away = !app.current_ui.thinking_summaries_enabled();
             let _ = dispatch(Action::SetThinkingSummaries(away), app);

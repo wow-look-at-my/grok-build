@@ -1100,6 +1100,30 @@ pub(in crate::app::dispatch) fn set_stop_gate_ci_failing(
     }]
 }
 
+pub(in crate::app::dispatch) fn set_split_and_tee_commands_inner(app: &mut AppView, new: bool) {
+    app.current_ui.split_and_tee_commands = Some(new);
+}
+
+/// SHARED: `[ui].split_and_tee_commands` via `Effect::PersistSetting`.
+pub(in crate::app::dispatch) fn set_split_and_tee_commands(
+    app: &mut AppView,
+    new: bool,
+) -> Vec<Effect> {
+    let prev = app.current_ui.split_and_tee_commands_enabled();
+    if prev == new {
+        return vec![];
+    }
+    set_split_and_tee_commands_inner(app, new);
+    refresh_open_settings_modals(app);
+    tracing::info!(target: "settings", key = "split_and_tee_commands", value = new, "setting changed");
+    app.show_toast(&save_success_toast("Split and tee commands", new));
+    vec![Effect::PersistSetting {
+        key: "split_and_tee_commands",
+        value: crate::settings::SettingValue::Bool(new),
+        rollback_value: crate::settings::SettingValue::Bool(prev),
+    }]
+}
+
 pub(super) fn set_combine_queued_prompts_inner(app: &mut AppView, new: bool) {
     app.current_ui.combine_queued_prompts = Some(new);
     crate::appearance::cache::set_combine_queued_prompts(new);

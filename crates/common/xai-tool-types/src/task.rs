@@ -885,6 +885,39 @@ pub struct TaskOutputToolInput {
     )]
     #[serde(default)]
     pub timeout_ms: Option<u64>,
+
+    /// Read one stage of a piped command.
+    #[schemars(
+        description = "Read the saved output of one stage of a piped command instead of its final output. Stage 1 is what the first command printed before the first |. The command's result lists the stages it kept."
+    )]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stage: Option<u32>,
+
+    #[schemars(
+        description = "Show only the first N lines of the saved output. Reads the whole saved log, not the preview."
+    )]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub head: Option<u64>,
+
+    #[schemars(
+        description = "Show only the last N lines of the saved output. Reads the whole saved log, not the preview."
+    )]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tail: Option<u64>,
+
+    #[schemars(
+        description = "Show only the lines of the saved output that match this regular expression, each with its line number. head and tail then apply to the matches."
+    )]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grep: Option<String>,
+}
+
+impl TaskOutputToolInput {
+    /// True when the call asks for a view of the saved log: a stage, a head,
+    /// a tail or a grep.
+    pub fn wants_view(&self) -> bool {
+        self.stage.is_some() || self.head.is_some() || self.tail.is_some() || self.grep.is_some()
+    }
 }
 
 impl TaskOutputToolInput {
@@ -912,6 +945,14 @@ struct TaskOutputToolInputWire {
     task_id: Option<Vec<String>>,
     #[serde(default)]
     timeout_ms: Option<u64>,
+    #[serde(default)]
+    stage: Option<u32>,
+    #[serde(default)]
+    head: Option<u64>,
+    #[serde(default)]
+    tail: Option<u64>,
+    #[serde(default)]
+    grep: Option<String>,
 }
 
 impl TryFrom<TaskOutputToolInputWire> for TaskOutputToolInput {
@@ -923,6 +964,10 @@ impl TryFrom<TaskOutputToolInputWire> for TaskOutputToolInput {
                 .fold(vec![wire.task_ids, wire.task_id])?
                 .unwrap_or_default(),
             timeout_ms: wire.timeout_ms,
+            stage: wire.stage,
+            head: wire.head,
+            tail: wire.tail,
+            grep: wire.grep.filter(|g| !g.is_empty()),
         })
     }
 }
@@ -1664,6 +1709,12 @@ pub fn build_task_output_description(naming: &TaskOutputToolNaming) -> String {
         Some(r) => format!("\n- If output is large, use {r} on the output_file path"),
         None => String::new(),
     };
+    // The views read terminal logs, which only a command tool writes.
+    let view_note = if bash_background_param.is_some() {
+        "\n- head, tail and grep read the whole saved log of one command, and stage reads one stage of a piped command. Use them to see more of an output instead of running the command again. A finished command's result names its id when its log can be read this way"
+    } else {
+        ""
+    };
     let wait_cap = MAX_WAIT_MS_PLACEHOLDER;
 
     format!(
@@ -1671,7 +1722,7 @@ pub fn build_task_output_description(naming: &TaskOutputToolNaming) -> String {
          Usage notes:\n\
          - Pass {task_ids_param} with one or more ids from {sources}{monitor_note}; for a single task use a one-element array. Multiple ids with a positive {timeout_ms_param} wait until all complete\n\
          - Omit {timeout_ms_param} or pass 0 for a non-blocking status snapshot; set a positive {timeout_ms_param} to wait up to that many milliseconds, capped at {wait_cap}\n\
-         - Returns current output, status, and exit code if completed{read_note}"
+         - Returns current output, status, and exit code if completed{read_note}{view_note}"
     )
 }
 
@@ -2084,6 +2135,7 @@ mod tests {
         let json = serde_json::to_value(TaskOutputToolInput {
             task_ids: vec!["a".into()],
             timeout_ms: None,
+            ..Default::default()
         })
         .unwrap();
         assert_eq!(json["task_ids"], serde_json::json!(["a"]));
@@ -2111,6 +2163,7 @@ mod tests {
         let json = serde_json::to_value(TaskOutputToolInput {
             task_ids: vec!["a".into()],
             timeout_ms: Some(10),
+            ..Default::default()
         })
         .unwrap();
         assert_eq!(json["task_ids"], serde_json::json!(["a"]));
@@ -2123,18 +2176,19 @@ mod tests {
 
     #[test]
     fn task_output_input_schema_does_not_advertise_the_alias() {
-        // The leniency is wire-only: the advertised schema must keep exactly
-        // the canonical properties (task_ids, timeout_ms) so tool-definition
-        // dumps and param randomization are unaffected.
+        // The leniency is wire-only.
         let schema = serde_json::to_value(schemars::schema_for!(TaskOutputToolInput)).unwrap();
         let props = schema["properties"].as_object().unwrap();
-        assert!(props.contains_key("task_ids"));
-        assert!(props.contains_key("timeout_ms"));
         assert!(
             !props.contains_key("task_id"),
             "singular alias must not leak into the schema: {props:?}"
         );
-        assert_eq!(props.len(), 2);
+        let mut keys: Vec<&str> = props.keys().map(String::as_str).collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            ["grep", "head", "stage", "tail", "task_ids", "timeout_ms"]
+        );
         // And task_ids stays a plain string array.
         assert_eq!(props["task_ids"]["type"], "array");
         assert_eq!(props["task_ids"]["items"]["type"], "string");
@@ -2511,7 +2565,8 @@ mod tests {
              - Pass task_ids with one or more ids from background=true commands or subagents (a monitor's task_id is returned by monitor); for a single task use a one-element array. Multiple ids with a positive timeout_ms wait until all complete\n\
              - Omit timeout_ms or pass 0 for a non-blocking status snapshot; set a positive timeout_ms to wait up to that many milliseconds, capped at {max_wait_ms}\n\
              - Returns current output, status, and exit code if completed\n\
-             - If output is large, use read_file on the output_file path"
+             - If output is large, use read_file on the output_file path\n\
+             - head, tail and grep read the whole saved log of one command, and stage reads one stage of a piped command. Use them to see more of an output instead of running the command again. A finished command's result names its id when its log can be read this way"
         );
     }
 

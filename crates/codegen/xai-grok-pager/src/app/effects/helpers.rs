@@ -1076,6 +1076,14 @@ pub(crate) async fn persist_setting(
                 .await
                 .map_err(|e| e.to_string())
         }
+        "split_and_tee_commands" => {
+            let SettingValue::Bool(b) = value else {
+                return Err(kind_mismatch("split_and_tee_commands", "Bool", &value));
+            };
+            xai_grok_shell::util::config::set_split_and_tee_commands(b)
+                .await
+                .map_err(|e| e.to_string())
+        }
         "thinking_summaries" => {
             let SettingValue::Bool(b) = value else {
                 return Err(kind_mismatch("thinking_summaries", "Bool", &value));

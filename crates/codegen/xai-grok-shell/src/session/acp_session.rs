@@ -111,6 +111,8 @@ mod auth_retry;
 pub(crate) use auth_retry::{
     AuthRetryDecision, AuthRetrySchedule, human_duration, pace_uncharged_resubmit,
 };
+#[path = "acp_session_impl/command_split.rs"]
+mod command_split;
 #[path = "acp_session_impl/rate_limit_waits.rs"]
 mod rate_limit_waits;
 pub(crate) use rate_limit_waits::{
@@ -1558,6 +1560,9 @@ mod model_switch_label_tests;
 #[cfg(test)]
 #[path = "acp_session_tests/replace_system_prompt_tests.rs"]
 mod replace_system_prompt_tests;
+#[cfg(test)]
+#[path = "acp_session_tests/split_chain_tests.rs"]
+mod split_chain_tests;
 #[cfg(test)]
 #[path = "acp_session_tests/support.rs"]
 mod support;

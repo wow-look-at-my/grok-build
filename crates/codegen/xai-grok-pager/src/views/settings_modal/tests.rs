@@ -795,6 +795,7 @@ fn rows_contain_categories_and_settings_through_pr_14() {
         // declares before permission_mode).
         "stop_gate_unfinished_todos",
         "stop_gate_ci_failing",
+        "split_and_tee_commands",
         // The "Slow output" group. Its four rows show only inside its sheet.
         "output_rate_floor",
         "permission_mode",

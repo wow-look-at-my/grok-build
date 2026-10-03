@@ -4,6 +4,7 @@
 //! by the legacy `wait_tasks` tool.
 
 pub mod terminal_command;
+pub(crate) mod view;
 pub mod wait_tasks;
 use std::time::Duration;
 pub use terminal_command::GetTerminalCommandOutputTool;
@@ -302,6 +303,146 @@ impl TaskOutputTool {
             };
             Ok(TaskOutputOutput::TaskNotFound(msg))
         }
+    }
+
+    /// Read part of one task's saved log: a stage, a head, a tail or a grep.
+    /// A finished foreground command is read by its tool call id.
+    async fn run_view(
+        &self,
+        task_id: &str,
+        input: &TaskOutputToolInput,
+        resources: SharedResources,
+    ) -> Result<TaskOutputOutput, xai_tool_runtime::ToolError> {
+        use crate::implementations::grok_build::bash::command_plan::stage_file;
+        use crate::types::resources::SessionFolder;
+
+        let grep = input
+            .grep
+            .as_deref()
+            .map(regex::Regex::new)
+            .transpose()
+            .map_err(|e| {
+                xai_tool_runtime::ToolError::invalid_arguments(format!(
+                    "grep is not a valid regular expression: {e}"
+                ))
+            })?;
+        if input.stage == Some(0) {
+            return Err(xai_tool_runtime::ToolError::invalid_arguments(
+                "stage counts from 1: stage 1 is the output of the first command in the pipe."
+                    .to_string(),
+            ));
+        }
+        let (terminal, session_folder, read_file_name, max_output_bytes) = {
+            let res = resources.lock().await;
+            let terminal = res.require::<Terminal>()?.0.clone();
+            let session_folder = res.get::<SessionFolder>().map(|f| f.0.clone());
+            let read_file_name = res
+                .get::<TemplateRenderer>()
+                .and_then(|r| r.tool_for_kind(ToolKind::Read).map(str::to_owned))
+                .unwrap_or_else(|| "read_file".to_owned());
+            let max_output_bytes = res
+                .get::<TruncationCfg>()
+                .map(|cfg| {
+                    cfg.0.max_output_bytes_for(
+                        "get_command_or_subagent_output",
+                        DEFAULT_TOOL_OUTPUT_BYTES,
+                    )
+                })
+                .unwrap_or(DEFAULT_TOOL_OUTPUT_BYTES);
+            (terminal, session_folder, read_file_name, max_output_bytes)
+        };
+
+        let snapshot = terminal.get_task(task_id).await;
+        let log = match &snapshot {
+            Some(s) if !s.output_file.as_os_str().is_empty() => Some(s.output_file.clone()),
+            _ => session_folder
+                .as_deref()
+                .and_then(|root| view::foreground_log(root, task_id))
+                .filter(|log| log.exists()),
+        };
+        let Some(log) = log else {
+            return Ok(TaskOutputOutput::TaskNotFound(format!(
+                "Task {task_id} has no saved output. Pass the id of a background task, or the \
+                 tool call id a command result names."
+            )));
+        };
+        let file = match input.stage {
+            Some(n) => stage_file(&log, n as usize),
+            None => log.clone(),
+        };
+        if !file.exists() {
+            let saved = view::saved_stages(&log);
+            let msg = if saved.is_empty() {
+                format!(
+                    "Task {task_id} kept no pipeline stages. Only a piped command run with \
+                     split-and-tee on saves them."
+                )
+            } else {
+                let list: Vec<String> = saved.iter().map(usize::to_string).collect();
+                format!(
+                    "Task {task_id} has no stage {}. Saved stages: {}.",
+                    input.stage.unwrap_or_default(),
+                    list.join(", ")
+                )
+            };
+            return Ok(TaskOutputOutput::TaskNotFound(msg));
+        }
+
+        let log_view = view::LogView {
+            head: input.head.map(|n| n as usize),
+            tail: input.tail.map(|n| n as usize),
+            grep,
+        };
+        let file_for_read = file.clone();
+        let reader = log_view.clone();
+        let text = tokio::task::spawn_blocking(move || reader.read(&file_for_read))
+            .await
+            .map_err(|e| xai_tool_runtime::ToolError::custom("internal_error", e.to_string()))?
+            .map_err(|e| {
+                xai_tool_runtime::ToolError::custom(
+                    "io_error",
+                    format!("could not read {}: {e}", file.display()),
+                )
+            })?;
+        let header = log_view.header(&text);
+        let (body, truncated) = view::fit_body(&text.body, max_output_bytes, log_view.keeps_end());
+        let raw_output_bytes = std::fs::metadata(&file).map_or(0, |m| m.len() as usize);
+
+        let mut result = match snapshot {
+            Some(s) => snapshot_to_result(s, &read_file_name, max_output_bytes),
+            None => xai_tool_types::TaskOutputResult {
+                task_id: task_id.to_string(),
+                command: String::new(),
+                status: "finished".to_string(),
+                exit_code: None,
+                started: String::new(),
+                ended: None,
+                duration_secs: 0.0,
+                output: String::new(),
+                output_file: String::new(),
+                truncated: false,
+                truncation_hint: String::new(),
+                raw_output_bytes: 0,
+            },
+        };
+        if let Some(n) = input.stage {
+            let codes = view::stage_exit_codes(&log);
+            result.exit_code = codes.get(n as usize - 1).copied();
+            result.command = if result.command.is_empty() {
+                format!("stage {n}")
+            } else {
+                format!("stage {n} of: {}", result.command)
+            };
+        }
+        result.output = format!("{header}\n{body}");
+        result.output_file = file.display().to_string();
+        result.truncated = truncated;
+        result.truncation_hint = format!(
+            "[the view was cut - use {read_file_name} on {} for all of it]",
+            file.display()
+        );
+        result.raw_output_bytes = raw_output_bytes;
+        Ok(TaskOutputOutput::Result(result))
     }
 
     pub(crate) async fn run_multi_tasks(
@@ -985,6 +1126,22 @@ impl TaskOutputTool {
             )));
         }
 
+        if input.wants_view() {
+            if ids.len() != 1 {
+                return Err(xai_tool_runtime::ToolError::invalid_arguments(
+                    "stage, head, tail and grep read one task at a time. Pass a single id."
+                        .to_string(),
+                ));
+            }
+            if input.waits() {
+                // Wait first, so the view reads the finished log.
+                let _ = self
+                    .run_single_task(&ids[0], input.timeout_ms, &ctx, resources.clone())
+                    .await?;
+            }
+            return self.run_view(&ids[0], &input, resources).await;
+        }
+
         if ids.len() == 1 {
             let Some(id) = ids.first() else {
                 return Err(xai_tool_runtime::ToolError::invalid_arguments(
@@ -1437,6 +1594,7 @@ mod tests {
             TaskOutputToolInput {
                 task_ids: vec!["task-1".into()],
                 timeout_ms: None,
+                ..Default::default()
             },
         )
         .await
@@ -1465,6 +1623,7 @@ mod tests {
             TaskOutputToolInput {
                 task_ids: vec!["task-2".into()],
                 timeout_ms: None,
+                ..Default::default()
             },
         )
         .await
@@ -1492,6 +1651,7 @@ mod tests {
             TaskOutputToolInput {
                 task_ids: vec!["task-3".into()],
                 timeout_ms: None,
+                ..Default::default()
             },
         )
         .await
@@ -1517,6 +1677,7 @@ mod tests {
             TaskOutputToolInput {
                 task_ids: vec!["task-x".into()],
                 timeout_ms: None,
+                ..Default::default()
             },
         )
         .await
@@ -1594,6 +1755,7 @@ mod tests {
             TaskOutputToolInput {
                 task_ids: vec!["task-unknown".into()],
                 timeout_ms: None,
+                ..Default::default()
             },
         )
         .await
@@ -1813,6 +1975,7 @@ mod tests {
             TaskOutputToolInput {
                 task_ids: vec!["nonexistent".into()],
                 timeout_ms: Some(1000),
+                ..Default::default()
             },
         )
         .await
@@ -1838,6 +2001,7 @@ mod tests {
             TaskOutputToolInput {
                 task_ids: vec!["task-x".into()],
                 timeout_ms: None,
+                ..Default::default()
             },
         )
         .await;
@@ -1871,6 +2035,7 @@ mod tests {
             TaskOutputToolInput {
                 task_ids: vec!["task-4".into()],
                 timeout_ms: None,
+                ..Default::default()
             },
         )
         .await
@@ -1901,6 +2066,7 @@ mod tests {
             TaskOutputToolInput {
                 task_ids: vec!["task-5".into()],
                 timeout_ms: Some(5000),
+                ..Default::default()
             },
         )
         .await
@@ -2195,6 +2361,7 @@ mod tests {
             TaskOutputToolInput {
                 task_ids: vec!["task-6".into()],
                 timeout_ms: None,
+                ..Default::default()
             },
         )
         .await
@@ -2232,6 +2399,7 @@ mod tests {
             TaskOutputToolInput {
                 task_ids: vec!["task-xyz".into()],
                 timeout_ms: None,
+                ..Default::default()
             },
         )
         .await
@@ -2259,6 +2427,7 @@ mod tests {
             TaskOutputToolInput {
                 task_ids: vec!["task-xyz".into()],
                 timeout_ms: None,
+                ..Default::default()
             },
         )
         .await
@@ -2490,6 +2659,7 @@ mod tests {
             TaskOutputToolInput {
                 task_ids: vec![String::new()],
                 timeout_ms: None,
+                ..Default::default()
             },
         )
         .await;
@@ -2616,6 +2786,7 @@ mod tests {
             TaskOutputToolInput {
                 task_ids: vec!["sub-done".into()],
                 timeout_ms: None,
+                ..Default::default()
             },
         )
         .await
@@ -2667,6 +2838,7 @@ mod tests {
             TaskOutputToolInput {
                 task_ids: vec!["sub-run".into()],
                 timeout_ms: None,
+                ..Default::default()
             },
         )
         .await
@@ -2700,6 +2872,7 @@ mod tests {
             TaskOutputToolInput {
                 task_ids: vec!["sub-nope".into()],
                 timeout_ms: None,
+                ..Default::default()
             },
         )
         .await

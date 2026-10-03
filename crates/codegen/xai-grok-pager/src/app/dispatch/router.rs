@@ -90,10 +90,10 @@ use super::settings::setters::{
     set_output_rate_sustained_secs, set_output_rate_window_secs, set_page_flip_on_send,
     set_prompt_suggestions, set_remember_tool_approvals, set_render_mermaid,
     set_respect_manual_folds, set_scroll_lines, set_scroll_mode, set_scroll_speed,
-    set_show_thinking_blocks, set_show_tips, set_simple_mode, set_stop_gate_ci_failing,
-    set_stop_gate_unfinished_todos, set_subagent_model_inheritance, set_theme,
-    set_thinking_summaries, set_timeline, set_timestamps, set_ttft_timeout_secs, set_vim_mode,
-    set_voice_capture_mode, set_voice_keybind_enabled, set_voice_stt_language,
+    set_show_thinking_blocks, set_show_tips, set_simple_mode, set_split_and_tee_commands,
+    set_stop_gate_ci_failing, set_stop_gate_unfinished_todos, set_subagent_model_inheritance,
+    set_theme, set_thinking_summaries, set_timeline, set_timestamps, set_ttft_timeout_secs,
+    set_vim_mode, set_voice_capture_mode, set_voice_keybind_enabled, set_voice_stt_language,
 };
 use super::settings::ui::{
     dispatch_confirm_reset_setting, dispatch_open_command_palette, dispatch_open_howto_guides,
@@ -1150,6 +1150,7 @@ fn dispatch_inner(action: Action, app: &mut AppView) -> Vec<Effect> {
         Action::SetConfirmBeforeRewind(v) => set_confirm_before_rewind(app, v),
         Action::SetStopGateUnfinishedTodos(v) => set_stop_gate_unfinished_todos(app, v),
         Action::SetStopGateCiFailing(v) => set_stop_gate_ci_failing(app, v),
+        Action::SetSplitAndTeeCommands(v) => set_split_and_tee_commands(app, v),
         Action::SetCombineQueuedPrompts(v) => set_combine_queued_prompts(app, v),
         Action::SetFollowUpBehavior(v) => set_follow_up_behavior(app, v),
         Action::SetSimpleMode(v) => set_simple_mode(app, v),

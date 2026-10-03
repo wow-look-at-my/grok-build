@@ -667,6 +667,33 @@ pub fn default_settings() -> Vec<SettingMeta> {
             },
             restart_required: false,
         },
+        SettingMeta {
+            key: "split_and_tee_commands",
+            category: SettingCategory::Agent,
+            owner: SettingOwner::Shared,
+            label: "Split and tee commands (experimental)",
+            description: "A bash call that chains commands with ; or && runs as one tool \
+                          call per command. Every stage of a piped command keeps its full \
+                          output, and a trailing | tail runs as a view over it, so the model \
+                          reads more of an output instead of running the command again. \
+                          Local terminals only. Applies to new sessions.",
+            keywords: &[
+                "split",
+                "tee",
+                "pipe",
+                "pipeline",
+                "bash",
+                "command",
+                "tail",
+                "head",
+                "experimental",
+            ],
+            kind: SettingKind::Bool {
+                default: ui_default.split_and_tee_commands_enabled(),
+            },
+            restart_required: true,
+            hidden_in_minimal: false,
+        },
         // SHARED. `[ui].min_output_tokens_per_sec`, `Option<u32>` widened to
         // `i64`. 0 is the off state.
         SettingMeta {
