@@ -61,6 +61,21 @@ fn the_catalog_document_maps_onto_the_four_billing_tiers() {
 }
 
 #[test]
+fn a_price_the_listing_stated_is_recalled_and_an_empty_one_is_not() {
+    let priced = ModelPricing {
+        input_per_token_usd: 4e-6,
+        output_per_token_usd: 20e-6,
+        ..Default::default()
+    };
+    register_listed_prices([
+        ("listed-priced-model".to_string(), priced.clone()),
+        ("listed-unpriced-model".to_string(), ModelPricing::default()),
+    ]);
+    assert_eq!(listed_price("listed-priced-model"), Some(priced));
+    assert_eq!(listed_price("listed-unpriced-model"), None);
+}
+
+#[test]
 fn a_null_cache_tier_reads_as_zero_and_leaves_the_rest_priced() {
     let document: ModelinfoDocument = serde_json::from_str(NO_CACHE_TIER_DOCUMENT).expect("parse");
     let pricing = document.to_pricing().expect("priced");
@@ -102,6 +117,46 @@ fn a_broken_catalog_is_an_error_and_not_a_cached_absence() {
     let base = serve_once("HTTP/1.1 500 Internal Server Error", "boom");
     let error = fetch_pricing_blocking(&base, "anthropic/claude-opus-4-5").expect_err("error");
     assert!(error.contains("500"), "{error}");
+}
+
+/// With no config, Anthropic models have no other price source.
+#[test]
+fn the_default_catalog_is_set_and_needs_no_allowlist_entry() {
+    let catalog = crate::agent::config::PricingConfig::default().catalog_url;
+    assert_eq!(catalog, "https://modelinfo.pazer.ai");
+    let url = format!("{catalog}/v1/models/claude-opus-5-5");
+    assert_eq!(check_catalog_url(&url, Vec::new()), Ok(()));
+}
+
+/// Live: the real default catalog prices an Anthropic model with no config.
+#[test]
+#[ignore = "reaches the network"]
+fn the_default_catalog_prices_an_anthropic_model_with_no_config() {
+    let model = "claude-opus-5-5";
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    let pricing = loop {
+        let pricing = resolve(model);
+        if !pricing.is_unusable() || std::time::Instant::now() > deadline {
+            break pricing;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    };
+    assert!(!pricing.is_unusable(), "{model} stayed unpriced");
+    let usage = xai_grok_sampling_types::TokenUsage {
+        prompt_tokens: 10_000,
+        completion_tokens: 1_000,
+        total_tokens: 11_000,
+        ..Default::default()
+    };
+    let ticks = xai_grok_sampling_types::compute_cost_ticks(Some(&usage), &pricing);
+    assert!(ticks.is_some_and(|t| t > 0), "{pricing:?} gave {ticks:?}");
+}
+
+#[test]
+fn a_catalog_the_user_did_not_list_is_still_refused() {
+    let error =
+        check_catalog_url("https://catalog.invalid/v1/models/x", Vec::new()).expect_err("refused");
+    assert!(error.contains("catalog.invalid"), "{error}");
 }
 
 #[test]

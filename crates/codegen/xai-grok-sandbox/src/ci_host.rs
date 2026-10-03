@@ -448,7 +448,7 @@ fn response_from_output(output: std::process::Output) -> GhHostResponse {
 /// reports the setup steps instead.
 fn tail_lossy(bytes: &[u8], max: usize) -> String {
     let start = bytes.len().saturating_sub(max);
-    String::from_utf8_lossy(&bytes[start..]).into_owned()
+    String::from_utf8_lossy(bytes.get(start..).unwrap_or(&[])).into_owned()
 }
 
 /// Whether an argv is a read-only `gh` invocation this worker will run.

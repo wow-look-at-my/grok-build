@@ -59,11 +59,9 @@ pub fn estimate_item_tokens(item: &ConversationItem) -> u64 {
             xai_token_estimation::estimate_tokens(&b.text_summary())
         }
         ConversationItem::Reasoning(r) => {
-            // An encrypted blob is base64 and does not tokenize 1:1, so it is
-            // estimated at len/4 like the text beside it.
             let text_bytes = reasoning_item_text(r).len();
             let enc_bytes = r.encrypted_content.as_deref().map_or(0, str::len);
-            ((text_bytes + enc_bytes) as u64) / BYTES_PER_TOKEN
+            (text_bytes.max(enc_bytes * 3 / 4) as u64) / BYTES_PER_TOKEN
         }
     }
 }

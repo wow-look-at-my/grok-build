@@ -170,7 +170,7 @@ fn facts(
 ) -> (DiagnosticFacts, ClipboardRecovery) {
     let ctx = snapshot.common.terminal;
     let available_themes = match snapshot.color_level {
-        RuntimeEvidence::Available(color_level) => crate::theme::ThemeKind::ALL
+        RuntimeEvidence::Available(color_level) => crate::theme::ThemeKind::selectable()
             .iter()
             .copied()
             .filter(|kind| color_level.has_truecolor() || !kind.requires_truecolor())
@@ -242,7 +242,7 @@ fn facts(
                     RuntimeEvidence::Unavailable => RuntimeFact::Unavailable,
                 },
                 available_themes,
-                total_themes: crate::theme::ThemeKind::ALL.len(),
+                total_themes: crate::theme::ThemeKind::selectable().len(),
             },
             keyboard,
             newline,
@@ -281,14 +281,10 @@ impl ClipboardRecovery {
     fn legacy_fix(self) -> Option<&'static str> {
         match self {
             Self::Confirmed => None,
-            Self::UnverifiedSsh | Self::UnavailableSsh => {
-                Some("grok wrap <ssh command> or /minimal")
-            }
-            Self::UnverifiedContainer | Self::UnavailableContainer => {
-                Some("grok wrap <command> or /minimal")
-            }
-            Self::UnverifiedOther => Some("grok wrap or /minimal"),
-            Self::UnavailableLocal => Some("/minimal"),
+            Self::UnverifiedSsh | Self::UnavailableSsh => Some("grok wrap <ssh command>"),
+            Self::UnverifiedContainer | Self::UnavailableContainer => Some("grok wrap <command>"),
+            Self::UnverifiedOther => Some("grok wrap"),
+            Self::UnavailableLocal => Some("/copy <file>"),
         }
     }
 }
@@ -391,7 +387,7 @@ fn clipboard_findings(
             "Grok can't verify this clipboard route across the remote boundary",
             "When you copy, Grok sends OSC 52 but can't confirm that the outer terminal accepted \
              it. Each copy is also saved to a backup file; the copy message shows the path. If \
-             paste fails, run `grok wrap ssh <host>` on your local computer or use `/minimal`. \
+             paste fails, run `grok wrap ssh <host>` on your local computer or use `/copy <file>`. \
              For repeated SSH sessions, run `grok doctor fix ssh-wrap` on your local computer.",
         )),
         ClipboardRecovery::UnverifiedContainer => findings.push(manual_finding(
@@ -401,7 +397,7 @@ fn clipboard_findings(
             "When you copy, Grok sends OSC 52 but can't confirm that the outer terminal accepted \
              it. Each copy is also saved to a backup file; the copy message shows the path. If \
              paste fails, start the container command with local `grok wrap <command>`, or use \
-             `/minimal`.",
+             `/copy <file>`.",
         )),
         ClipboardRecovery::UnverifiedOther => findings.push(manual_finding(
             crate::diagnostics::CLIPBOARD_DELIVERY_UNVERIFIED_ID,
@@ -409,7 +405,7 @@ fn clipboard_findings(
             "Grok can't verify this clipboard route",
             "Each copy is also saved to a backup file; the copy message shows the path. For a \
              remote or container command, use local `grok wrap <command>`. You can also use \
-             `/minimal` to select text in the terminal.",
+             `/copy <file>`.",
         )),
         ClipboardRecovery::UnavailableSsh => findings.push(manual_finding(
             crate::diagnostics::CLIPBOARD_DELIVERY_UNAVAILABLE_ID,
@@ -417,23 +413,21 @@ fn clipboard_findings(
             "This clipboard route can't reach the target clipboard",
             "When you copy, Grok saves the text to the backup file shown in the copy message. To \
              copy directly, run `grok wrap ssh <host>` on your local computer. For repeated SSH \
-             sessions, run `grok doctor fix ssh-wrap` there. You can also use `/copy <file>` or \
-             `/minimal`.",
+             sessions, run `grok doctor fix ssh-wrap` there. You can also use `/copy <file>`.",
         )),
         ClipboardRecovery::UnavailableContainer => findings.push(manual_finding(
             crate::diagnostics::CLIPBOARD_DELIVERY_UNAVAILABLE_ID,
             FindingDisposition::Issue,
             "This clipboard route can't reach the target clipboard",
             "When you copy, Grok saves the text to the backup file shown in the copy message. \
-             Start the container command with local `grok wrap <command>`, use `/copy <file>`, or \
-             use `/minimal`.",
+             Start the container command with local `grok wrap <command>`, or use `/copy <file>`.",
         )),
         ClipboardRecovery::UnavailableLocal => findings.push(manual_finding(
             crate::diagnostics::CLIPBOARD_DELIVERY_UNAVAILABLE_ID,
             FindingDisposition::Issue,
             "This clipboard route can't reach the target clipboard",
             "When you copy, Grok saves the text to the backup file shown in the copy message. Use \
-             `/copy <file>` or `/minimal`, then check the native clipboard tool listed above.",
+             `/copy <file>`, then check the native clipboard tool listed above.",
         )),
     }
 
@@ -446,8 +440,7 @@ fn clipboard_findings(
             crate::diagnostics::VSCODE_SSH_NON_ASCII_ID,
             FindingDisposition::Recommendation,
             "This remote editor may change non-ASCII text copied with OSC 52",
-            "If pasted non-ASCII text is incorrect, use `/minimal` and select text in the \
-             terminal. ASCII copy and the backup file shown after the copy remain available.",
+            "If pasted non-ASCII text is incorrect, use `/copy <file>`. ASCII copy and the backup file shown after the copy remain available.",
         ));
     }
 
@@ -619,9 +612,8 @@ fn tmux_option_fact(result: &TmuxProbeResult<String>) -> TmuxOptionFact {
     }
 }
 
-/// tmux marks a client `RGB` when the outer terminfo declares `RGB`/`Tc` or
-/// `terminal-features` adds it; either way the feature list is the single
-/// authoritative signal, and a missing answer is not evidence of clamping.
+/// tmux marks a client `RGB` when the outer terminfo declares `RGB`/`Tc` or `terminal-features` adds it.
+/// Either way the feature list is the single authoritative signal, and a missing answer means `Unknown`, not `Reduced`.
 fn tmux_color_passthrough(result: &TmuxProbeResult<String>) -> TmuxColorPassthrough {
     let TmuxProbeResult::Available(features) = result else {
         return TmuxColorPassthrough::Unknown;

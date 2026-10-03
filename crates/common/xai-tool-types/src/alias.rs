@@ -241,31 +241,31 @@ pub const WIRED: &[WireAlias] = &[
         aliases: &["session_id"],
     },
     WireAlias {
-        file: "crates/codegen/xai-grok-shell/src/auth/oidc/protocol.rs",
+        file: "crates/codegen/xai-grok-login/src/oidc/protocol.rs",
         ty: "MinimalClaims",
         canonical: "principal_type",
         aliases: &["principalType"],
     },
     WireAlias {
-        file: "crates/codegen/xai-grok-shell/src/auth/oidc/protocol.rs",
+        file: "crates/codegen/xai-grok-login/src/oidc/protocol.rs",
         ty: "MinimalClaims",
         canonical: "principal_id",
         aliases: &["principalId"],
     },
     WireAlias {
-        file: "crates/codegen/xai-grok-shell/src/auth/oidc/protocol.rs",
+        file: "crates/codegen/xai-grok-login/src/oidc/protocol.rs",
         ty: "PrincipalIdClaim",
         canonical: "principal_id",
         aliases: &["principalId"],
     },
     WireAlias {
-        file: "crates/codegen/xai-grok-shell/src/auth/oidc/protocol.rs",
+        file: "crates/codegen/xai-grok-login/src/oidc/protocol.rs",
         ty: "IdTokenClaims",
         canonical: "first_name",
         aliases: &["given_name"],
     },
     WireAlias {
-        file: "crates/codegen/xai-grok-shell/src/auth/oidc/protocol.rs",
+        file: "crates/codegen/xai-grok-login/src/oidc/protocol.rs",
         ty: "IdTokenClaims",
         canonical: "last_name",
         aliases: &["family_name"],
@@ -287,6 +287,43 @@ pub const WIRED: &[WireAlias] = &[
         ty: "ClientFeedbackInput",
         canonical: "turn_number",
         aliases: &["turnNumber"],
+    },
+    WireAlias {
+        file: "crates/codegen/xai-grok-shell/src/session/acp_types.rs",
+        ty: "ClientFeedbackInput",
+        canonical: "request_trace_upload_token",
+        aliases: &["requestTraceUploadToken"],
+    },
+    // A struct variant cannot take `try_from`, so a variant-level
+    // `deserialize_with` reads the variant through its own shadow.
+    WireAlias {
+        file: "crates/codegen/xai-grok-shell/src/extensions/notification.rs",
+        ty: "SessionUpdate",
+        canonical: "agentAddress",
+        aliases: &["agent_address"],
+    },
+    // Both request types share one `Aliases`. `CreateWorktreeFromWorktreeRequest`
+    // in xai-grok-workspace deserializes `from` the second one.
+    WireAlias {
+        file: "crates/codegen/xai-grok-workspace-types/src/rpc/worktree.rs",
+        ty: "CreateWorktreeRequest",
+        canonical: "groveWorktree",
+        aliases: &["nfsWorktree", "nfs_worktree"],
+    },
+    WireAlias {
+        file: "crates/codegen/xai-grok-workspace-types/src/rpc/worktree.rs",
+        ty: "CreateWorktreeFromWorktreeRequestWire",
+        canonical: "groveWorktree",
+        aliases: &["nfsWorktree", "nfs_worktree"],
+    },
+    // `RemoteSettings` has too many fields for a shadow struct. Its
+    // `Deserialize` folds the keys on the buffered object and then calls the
+    // derived reader.
+    WireAlias {
+        file: "crates/codegen/xai-grok-config-types/src/lib.rs",
+        ty: "RemoteSettings",
+        canonical: "grove_worktree",
+        aliases: &["nfs_worktree"],
     },
     WireAlias {
         file: "crates/codegen/xai-grok-pager/src/views/rewind.rs",
@@ -573,7 +610,7 @@ pub const ENUM_VARIANTS: &[EnumVariantAlias] = &[
         why: "a client type is one string key; see ToolNamespace",
     },
     EnumVariantAlias {
-        file: "crates/codegen/xai-grok-shell/src/auth/model.rs",
+        file: "crates/codegen/xai-grok-login/src/model.rs",
         ty: "AuthMode",
         aliases: &["grok", "oidc"],
         why: "an auth mode is one string key, read from the auth.json this \
@@ -599,6 +636,51 @@ pub const ENUM_VARIANTS: &[EnumVariantAlias] = &[
         aliases: &["block"],
         why: "a decision is one string key, and `#[serde(other)]` catches every \
               name this enum does not spell",
+    },
+    EnumVariantAlias {
+        file: "crates/codegen/xai-grok-config-types/src/permission.rs",
+        ty: "ToolFilter",
+        aliases: &["agentmessage"],
+        why: "a tool filter is one string key; see ToolNamespace",
+    },
+    EnumVariantAlias {
+        file: "crates/codegen/xai-grok-workspace/src/permission/types.rs",
+        ty: "ToolFilter",
+        aliases: &["agentmessage"],
+        why: "a tool filter is one string key; see ToolNamespace",
+    },
+    EnumVariantAlias {
+        file: "crates/codegen/xai-grok-feedback/src/taxonomy.rs",
+        ty: "FeedbackFailureMode",
+        aliases: &[
+            "did_too_much",
+            "gave_up_early",
+            "ignored_direction",
+            "wrong_or_made_up",
+            "broke_something",
+            "stuck_in_loop",
+        ],
+        why: "a failure mode is one string key; see ToolNamespace",
+    },
+    EnumVariantAlias {
+        file: "crates/codegen/xai-grok-sampling-types/src/conversation.rs",
+        ty: "SyntheticReason",
+        aliases: &["parent_agent_message"],
+        why: "a synthetic reason is one string key; see ToolNamespace",
+    },
+    EnumVariantAlias {
+        file: "crates/codegen/xai-grok-tools/src/types/output.rs",
+        ty: "ToolOutput",
+        aliases: &["SendAgentMessage"],
+        why: "a variant name is one key of the enum's tag, so one value names \
+              one variant; see ToolNamespace",
+    },
+    EnumVariantAlias {
+        file: "crates/codegen/xai-grok-tools/src/types/tool_io.rs",
+        ty: "ToolInput",
+        aliases: &["SendAgentMessage"],
+        why: "a variant name is one key of the enum's tag, so one value names \
+              one variant; see ToolNamespace",
     },
 ];
 

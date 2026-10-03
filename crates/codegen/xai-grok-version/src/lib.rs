@@ -1,7 +1,10 @@
-//! Installed grok CLI version, lockstepped with shipping binaries.
+//! Installed grok CLI version, kept in sync with the shipping binaries.
+
+#![deny(clippy::indexing_slicing)]
+
+use std::sync::OnceLock;
 
 use semver::Version;
-use std::sync::OnceLock;
 
 pub const TEST_VERSION_ENV: &str = "GROK_TEST_VERSION";
 
@@ -27,7 +30,11 @@ pub const STAMP_SLOT_LEN: usize = STAMP_MAGIC.len() + 1 + STAMP_PAYLOAD_LEN;
 #[used]
 pub static STAMP_SLOT: [u8; STAMP_SLOT_LEN] = build_stamp_slot();
 
-/// The magic followed by a zero length and zero payload.
+/// The magic followed by a empty length and empty payload.
+#[allow(
+    clippy::indexing_slicing,
+    reason = "const fn; i stays below STAMP_MAGIC.len()"
+)]
 const fn build_stamp_slot() -> [u8; STAMP_SLOT_LEN] {
     let mut slot = [0u8; STAMP_SLOT_LEN];
     let mut i = 0;
@@ -48,12 +55,12 @@ fn stamped() -> Option<&'static str> {
     STAMPED
         .get_or_init(|| {
             let slot = unsafe { std::ptr::read_volatile(&STAMP_SLOT) };
-            let len = usize::from(slot[STAMP_MAGIC.len()]);
+            let len = usize::from(*slot.get(STAMP_MAGIC.len())?);
             if len == 0 || len > STAMP_PAYLOAD_LEN {
                 return None;
             }
             let start = STAMP_MAGIC.len() + 1;
-            let text = std::str::from_utf8(&slot[start..start + len]).ok()?;
+            let text = std::str::from_utf8(slot.get(start..start + len)?).ok()?;
             Some(text.to_string())
         })
         .as_deref()
@@ -87,25 +94,6 @@ pub fn installed() -> String {
 
 pub fn installed_semver() -> Result<Version, semver::Error> {
     Version::parse(&installed())
-}
-
-/// Format the compiled version with a channel label for user-facing display.
-///
-/// `channel_label` is a pre-formatted suffix such as `" [alpha]"`, `" [stable]"`,
-/// or `""` (empty when no cached pointer is available). Obtain it from
-/// `xai_grok_update::channel_label()`.
-///
-/// Example: `"0.2.5 [stable]"` or `"0.2.5 [alpha]"`.
-pub fn display_version(channel_label: &str) -> String {
-    format!("{}{}", version(), channel_label)
-}
-
-/// Format a version-with-commit string with a channel label.
-///
-/// Same semantics as [`display_version`] but for the full
-/// `"0.2.5 (abc1234)"` string.
-pub fn display_version_with_commit(version_with_commit: &str, channel_label: &str) -> String {
-    format!("{}{}", version_with_commit, channel_label)
 }
 
 /// The full 40-char commit hash the binary was built from, stamped by `build.rs`
@@ -147,38 +135,10 @@ pub fn commit_github_url(hash: &str) -> Option<String> {
 mod tests {
     use super::*;
 
-    /// Display formatting invariant matrix — verifies label appending
-    /// works correctly across all label states (alpha, stable, empty).
-    #[test]
-    fn test_display_version_formatting_matrix() {
-        let cases: &[(&str, &str, &str)] = &[
-            // (version_with_commit,    label,        expected_suffix)
-            ("0.2.5 (abc1234)", " [alpha]", "0.2.5 (abc1234) [alpha]"),
-            ("0.2.5 (abc1234)", " [stable]", "0.2.5 (abc1234) [stable]"),
-            ("0.2.5 (abc1234)", "", "0.2.5 (abc1234)"),
-            (
-                "0.1.220-alpha.2 (def0)",
-                " [alpha]",
-                "0.1.220-alpha.2 (def0) [alpha]",
-            ),
-        ];
-        for (vwc, label, expected) in cases {
-            assert_eq!(
-                display_version_with_commit(vwc, label),
-                *expected,
-                "display_version_with_commit({:?}, {:?})",
-                vwc,
-                label,
-            );
-        }
-        // display_version reads the stamp — just verify the label appends
-        assert_eq!(display_version(""), version());
-        assert!(display_version(" [stable]").ends_with("[stable]"));
-    }
-
     /// The slot the stamper searches for must be in this binary, must carry the
     /// magic, and must read as unstamped until something writes a length.
     #[test]
+    #[allow(clippy::indexing_slicing, reason = "fixed-size slot, constant offsets")]
     fn an_unstamped_slot_reads_as_no_release() {
         let slot = unsafe { std::ptr::read_volatile(&STAMP_SLOT) };
         assert_eq!(&slot[..STAMP_MAGIC.len()], &STAMP_MAGIC[..]);
@@ -189,7 +149,7 @@ mod tests {
     }
 
     /// `version_with_commit` is what `--version` prints, so it must carry both
-    /// halves in the shape the update checker parses back.
+    /// halves: `"<version> (<commit>)"`.
     #[test]
     fn version_with_commit_carries_version_and_commit() {
         let combined = version_with_commit();

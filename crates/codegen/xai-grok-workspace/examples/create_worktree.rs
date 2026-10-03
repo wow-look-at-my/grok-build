@@ -52,6 +52,9 @@ async fn create(source_path: String, label: String) -> anyhow::Result<()> {
         ignored_skip_patterns: Vec::new(),
         worktree_type: None,
         label: Some(label),
+        grove_worktree: None,
+        grove_gate_source: None,
+        resolved_source_git_root: None,
     };
 
     let prepared = prepare_worktree_creation(&req).await;

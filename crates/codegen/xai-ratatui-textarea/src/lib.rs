@@ -4,6 +4,7 @@
 #![allow(clippy::cast_sign_loss)] // 2 hits predate the gate
 #![allow(clippy::unwrap_used)] // 3 hits predate the gate
 #![allow(clippy::new_without_default)]
+#![deny(clippy::indexing_slicing)]
 
 pub mod editor;
 pub mod render;

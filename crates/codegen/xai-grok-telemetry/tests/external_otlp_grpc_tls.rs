@@ -12,6 +12,7 @@
 mod otlp_collector;
 
 use otlp_collector as col;
+use xai_grok_test_support::OtelRecorder;
 
 #[test]
 fn external_stream_grpc_over_tls_end_to_end() {
@@ -20,9 +21,9 @@ fn external_stream_grpc_over_tls_end_to_end() {
     std::fs::write(ca_file.path(), &tls.ca_cert_pem).expect("write CA pem");
     let ca_path = ca_file.path().to_str().expect("utf-8 CA path").to_string();
 
-    let collected = col::Collected::default();
+    let recorder = OtelRecorder::new();
     let endpoint = col::start_grpc_tls_collector(
-        collected.clone(),
+        recorder.clone(),
         tls.server_cert_pem.clone(),
         tls.server_key_pem.clone(),
     );
@@ -78,6 +79,7 @@ fn external_stream_grpc_over_tls_end_to_end() {
         hook_names: vec![],
         agents_md_dir_names: vec![],
         memory_enabled: false,
+        memory_retrieval_mode: xai_grok_telemetry::events::MemoryRetrievalMode::Disabled,
         is_git_repo: true,
         auto_update: None,
     });
@@ -88,12 +90,12 @@ fn external_stream_grpc_over_tls_end_to_end() {
     // phone home; the metric interval above is 200ms.
     std::thread::sleep(std::time::Duration::from_millis(600));
     assert_eq!(
-        collected.logs_len(),
+        recorder.log_records().len(),
         0,
         "disabled external stream must export no logs over TLS"
     );
     assert_eq!(
-        collected.metrics_len(),
+        recorder.metric_points().len(),
         0,
         "disabled external stream must export no metrics over TLS"
     );

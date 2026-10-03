@@ -143,7 +143,11 @@ fn mixed_report() -> DiagnosticReport {
     report.facts.ssh = true;
     report.facts.color = ColorFacts {
         level: RuntimeFact::Available(ColorLevel::Ansi256),
-        available_themes: vec![ThemeKind::GrokNight, ThemeKind::GrokDay],
+        available_themes: vec![
+            ThemeKind::GrokNight,
+            ThemeKind::GrokDay,
+            ThemeKind::Terminal,
+        ],
         total_themes: ThemeKind::ALL.len(),
     };
     report.facts.keyboard = Some(KeyboardFact {
@@ -331,7 +335,7 @@ fn human_wayland_error_includes_detail_once() {
     report.facts.clipboard.display_server = DisplayServer::Wayland;
     report.facts.clipboard.data_control = DataControlFact::Error;
     report.facts.clipboard.delivery = ClipboardDelivery::Failed;
-    report.facts.clipboard.fix = Some("/minimal".to_owned());
+    report.facts.clipboard.fix = Some("/copy <file>".to_owned());
     report.findings.push(DiagnosticFinding {
         id: crate::diagnostics::CLIPBOARD_DELIVERY_UNAVAILABLE_ID,
         disposition: FindingDisposition::Issue,
@@ -340,8 +344,7 @@ fn human_wayland_error_includes_detail_once() {
         automatic_remediation: None,
         note: Some(
             "Each in-app copy is also written to the backup path shown by the operation. Use \
-             `/copy <file>` for an explicit file or `/minimal` for terminal-native selection, \
-             then check the native clipboard tool reported above."
+             `/copy <file>` for an explicit file, then check the native clipboard tool reported above."
                 .to_owned(),
         ),
     });
@@ -373,7 +376,7 @@ fn human_wayland_error_includes_detail_once() {
             "\n",
             "Findings\n",
             "  ! clipboard.delivery-unavailable No configured clipboard route can reach the intended clipboard\n",
-            "      Each in-app copy is also written to the backup path shown by the operation. Use `/copy <file>` for an explicit file or `/minimal` for terminal-native selection, then check the native clipboard tool reported above.\n",
+            "      Each in-app copy is also written to the backup path shown by the operation. Use `/copy <file>` for an explicit file, then check the native clipboard tool reported above.\n",
             "\n",
             "1 issue, 0 recommendations\n",
         )
@@ -498,7 +501,7 @@ fn human_mixed_fixture_is_exact() {
             "  · byobu                        tmux\n",
             "  · ssh                          yes\n",
             "  · color                        256\n",
-            "  · themes                       2/5: groknight, grokday\n",
+            "  · themes                       3/6: groknight, grokday, terminal\n",
             "  · keyboard                     cmd=dropped, opt=native (OS rescue active)\n",
             "  · newline                      Alt+Enter (Cursor: xterm.js cannot distinguish Shift+Enter)\n",
             "\n",
@@ -698,7 +701,7 @@ fn json_empty_fixture_pins_null_policy() {
                 "color": {
                     "level": {"status": "unavailable", "value": null},
                     "availableThemes": [],
-                    "totalThemes": 5
+                    "totalThemes": 6
                 },
                 "keyboard": null,
                 "newline": null,
@@ -745,8 +748,8 @@ fn json_contract_is_structural_stable_ordered_and_ansi_free() {
                 "ssh": true,
                 "color": {
                     "level": {"status": "available", "value": "256"},
-                    "availableThemes": ["groknight", "grokday"],
-                    "totalThemes": 5
+                    "availableThemes": ["groknight", "grokday", "terminal"],
+                    "totalThemes": 6
                 },
                 "keyboard": {"cmd": "dropped", "opt": "native", "os": "macos"},
                 "newline": {"kind": "xterm_js", "terminalName": "cursor"},
@@ -984,8 +987,16 @@ fn newline_variant_and_field_mappings_are_stable() {
         let mut output = Vec::new();
         write_report(&report, true, &mut output).unwrap();
         let json: serde_json::Value = serde_json::from_slice(&output).unwrap();
-        assert_eq!(json["facts"]["newline"]["kind"], kind);
-        assert_eq!(json["facts"]["newline"][field], value);
+        assert_eq!(
+            json.pointer("/facts/newline/kind")
+                .and_then(serde_json::Value::as_str),
+            Some(kind)
+        );
+        let field_ptr = format!("/facts/newline/{field}");
+        assert_eq!(
+            json.pointer(&field_ptr).and_then(serde_json::Value::as_str),
+            Some(value)
+        );
     }
     let mut report = healthy_report();
     report.facts.newline = Some(NewlineFact::NoKittyKeyboardProtocol);
@@ -993,8 +1004,8 @@ fn newline_variant_and_field_mappings_are_stable() {
     write_report(&report, true, &mut output).unwrap();
     let json: serde_json::Value = serde_json::from_slice(&output).unwrap();
     assert_eq!(
-        json["facts"]["newline"],
-        serde_json::json!({"kind": "no_kitty_keyboard_protocol"})
+        json.pointer("/facts/newline"),
+        Some(&serde_json::json!({"kind": "no_kitty_keyboard_protocol"}))
     );
 }
 
@@ -1018,7 +1029,7 @@ fn clipboard_issue_count_preserves_legacy_reports_without_double_counting_named_
 fn new_named_findings_extend_json_without_schema_changes() {
     let mut report = healthy_report();
     report.facts.clipboard.delivery = ClipboardDelivery::Unverified;
-    report.facts.clipboard.fix = Some("grok wrap <ssh command> or /minimal".to_owned());
+    report.facts.clipboard.fix = Some("grok wrap <ssh command>".to_owned());
     report.findings.push(DiagnosticFinding {
         id: crate::diagnostics::CLIPBOARD_DELIVERY_UNVERIFIED_ID,
         disposition: FindingDisposition::Issue,
@@ -1031,14 +1042,27 @@ fn new_named_findings_extend_json_without_schema_changes() {
     let mut output = Vec::new();
     write_report(&report, true, &mut output).unwrap();
     let json: serde_json::Value = serde_json::from_slice(&output).unwrap();
-    assert_eq!(json["schemaVersion"], "1");
-    assert_eq!(json["facts"]["clipboard"]["delivery"], "unverified");
     assert_eq!(
-        json["facts"]["clipboard"]["fix"],
-        "grok wrap <ssh command> or /minimal"
+        json.pointer("/schemaVersion")
+            .and_then(serde_json::Value::as_str),
+        Some("1")
     );
-    assert_eq!(json["findings"][0]["id"], "clipboard.delivery-unverified");
-    assert_eq!(json["counts"]["issues"], 1);
+    assert_eq!(
+        json.pointer("/facts/clipboard/delivery")
+            .and_then(serde_json::Value::as_str),
+        Some("unverified")
+    );
+    assert_eq!(
+        json.pointer("/facts/clipboard/fix")
+            .and_then(serde_json::Value::as_str),
+        Some("grok wrap <ssh command>")
+    );
+    assert_eq!(
+        json.pointer("/findings/0/id")
+            .and_then(serde_json::Value::as_str),
+        Some("clipboard.delivery-unverified")
+    );
+    assert_eq!(json.pointer("/counts/issues"), Some(&serde_json::json!(1)));
 }
 
 #[test]

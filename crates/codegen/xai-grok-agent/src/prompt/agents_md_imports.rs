@@ -68,7 +68,7 @@ fn imports_in_line(line: &str) -> Vec<String> {
         // An `@` that follows a word character is an email address or a Rust
         // pattern binding, never an import.
         if at > 0 {
-            let previous = bytes[at - 1] as char;
+            let previous = bytes.get(at - 1).map_or(' ', |&b| char::from(b));
             if !previous.is_whitespace() && previous != '(' && previous != '[' {
                 continue;
             }

@@ -1,36 +1,21 @@
-//! `/transcript` -- view the full conversation transcript in `$PAGER`.
+//! `/transcript`: view the full conversation transcript in `$PAGER`.
 //!
-//! Renders the current session's transcript to a temp Markdown file and opens
-//! it in the user's pager (default `less`), suspending the inline TUI until the
-//! pager exits. Primarily for minimal mode, where there is no interactive
-//! scrollback pane and older blocks have scrolled into native history — but it
-//! works in every render mode.
+//! Renders the current session's transcript to a temp Markdown file and opens it in the user's pager (default `less`).
+//! The TUI is suspended until the pager exits.
 
 use crate::app::actions::Action;
-use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand};
+use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand, slash_meta};
 
 /// View the full conversation transcript in `$PAGER`.
 pub struct TranscriptCommand;
 
 impl SlashCommand for TranscriptCommand {
-    fn name(&self) -> &str {
-        "transcript"
-    }
-
-    fn aliases(&self) -> &[&str] {
-        &["log"]
-    }
-
-    fn description(&self) -> &str {
-        "View the full conversation transcript in your pager ($PAGER)"
-    }
-
-    fn session_scoped(&self) -> bool {
-        true
-    }
-
-    fn usage(&self) -> &str {
-        "/transcript"
+    slash_meta! {
+        name: "transcript",
+        aliases: ["log"],
+        description: "View the conversation transcript in your pager ($PAGER)",
+        usage: "/transcript",
+        session_scoped: true,
     }
 
     fn run(&self, ctx: &mut CommandExecCtx, _args: &str) -> CommandResult {
@@ -66,7 +51,6 @@ mod tests {
             models: &models,
             session_id: None,
             bundle_state: &DEFAULT_BUNDLE_STATE,
-            screen_mode: crate::app::ScreenMode::Minimal,
             billing_surface_visible: true,
             usage_command_visible: true,
             pager_state: PagerLocalSnapshot::default(),
@@ -85,7 +69,6 @@ mod tests {
             models: &models,
             session_id: Some(&sid),
             bundle_state: &DEFAULT_BUNDLE_STATE,
-            screen_mode: crate::app::ScreenMode::Minimal,
             billing_surface_visible: true,
             usage_command_visible: true,
             pager_state: PagerLocalSnapshot::default(),
@@ -94,7 +77,7 @@ mod tests {
             TranscriptCommand.run(&mut ctx, ""),
             CommandResult::Action(Action::OpenTranscriptPager)
         ));
-        // Args are ignored — same dispatch.
+        // Args are ignored; same dispatch
         assert!(matches!(
             TranscriptCommand.run(&mut ctx, "anything"),
             CommandResult::Action(Action::OpenTranscriptPager)

@@ -234,10 +234,10 @@ fn run_gh_via_ci_host(repo_root: &Path, args: &[&str], fd: i32) -> Option<std::p
     #[cfg(unix)]
     {
         let _ = repo_root;
-        let branch = args
-            .windows(2)
-            .find(|pair| pair[0] == "--branch")
-            .map(|pair| pair[1]);
+        let branch = args.windows(2).find_map(|pair| match pair {
+            [flag, value] if *flag == "--branch" => Some(*value),
+            _ => None,
+        });
         let Some(branch) = branch else {
             return None;
         };

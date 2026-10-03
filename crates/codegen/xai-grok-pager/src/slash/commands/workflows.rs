@@ -1,37 +1,25 @@
-use crate::app::actions::Action;
-use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand};
-use crate::slash::{ModeSupport, Remedy};
+//! `/workflows`: browse the workflow catalog in the extensions modal.
 
+use crate::app::actions::Action;
+use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand, slash_meta};
+use crate::views::extensions_modal::ExtensionsTab;
+use xai_grok_telemetry::events::ExtensionsModalTrigger;
+
+/// Open the extensions modal on the Workflows catalog tab.
 pub struct WorkflowsCommand;
 
 impl SlashCommand for WorkflowsCommand {
-    fn name(&self) -> &str {
-        "workflows"
-    }
-
-    fn description(&self) -> &str {
-        "Show workflow runs (phases, agents, progress)"
-    }
-
-    fn usage(&self) -> &str {
-        "/workflows"
-    }
-
-    fn visible(&self, _ctx: &crate::slash::command::AppCtx) -> bool {
-        true
-    }
-
-    /// The run pane is drawn from `AgentView::show_workflows` on the full-TUI
-    /// path only; minimal never reads it, so the toggle would flip a flag
-    /// nothing renders.
-    fn mode_support(&self) -> ModeSupport {
-        ModeSupport::FullscreenOnly(Remedy::SwitchMode {
-            why: "the workflow run pane needs fullscreen",
-        })
+    slash_meta! {
+        name: "workflows",
+        description: "Browse installed workflows",
+        usage: "/workflows",
     }
 
     fn run(&self, _ctx: &mut CommandExecCtx, _args: &str) -> CommandResult {
-        CommandResult::Action(Action::ToggleWorkflows)
+        CommandResult::Action(Action::OpenExtensionsModal {
+            tab: ExtensionsTab::Workflows,
+            trigger: ExtensionsModalTrigger::SlashCommand,
+        })
     }
 }
 
@@ -64,27 +52,31 @@ mod tests {
                 billing_surface_visible: true,
                 usage_command_visible: true,
                 workflows_available: available,
-                screen_mode: crate::app::ScreenMode::Fullscreen,
+                saved_workflows: &[],
+                workflow_runs: &[],
+                current_title: None,
             };
             assert!(WorkflowsCommand.visible(&ctx));
         }
     }
 
     #[test]
-    fn dispatches_toggle_workflows() {
+    fn workflows_opens_catalog_tab() {
         let models = ModelState::default();
         let mut ctx = CommandExecCtx {
             models: &models,
             session_id: None,
             bundle_state: &DEFAULT_BUNDLE_STATE,
-            screen_mode: crate::app::ScreenMode::Minimal,
             billing_surface_visible: true,
             usage_command_visible: true,
             pager_state: PagerLocalSnapshot::default(),
         };
         assert!(matches!(
             WorkflowsCommand.run(&mut ctx, ""),
-            CommandResult::Action(Action::ToggleWorkflows)
+            CommandResult::Action(Action::OpenExtensionsModal {
+                tab: ExtensionsTab::Workflows,
+                trigger: ExtensionsModalTrigger::SlashCommand,
+            })
         ));
     }
 }
