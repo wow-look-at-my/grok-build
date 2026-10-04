@@ -9,6 +9,8 @@ const PLAN: &str = "# Plan: ship the exporter\n\n1. Write it.\n";
 /// spell one out: the running binary refuses a call whose text names a record.
 const RECORD_TRANSCRIPT: &str = concat!("chat_", "history.jsonl");
 const RECORD_UPDATES: &str = concat!("updates", ".jsonl");
+const RECORD_CLASSIFIER: &str = concat!("goal-", "classifier-");
+const RECORD_RUNLOG: &str = concat!(".run", "log.md");
 
 fn read_call(id: &str, path: &str) -> crate::sampling::types::ToolCallResponse {
     crate::sampling::types::ToolCallResponse {
@@ -148,6 +150,29 @@ async fn a_goal_verifier_cannot_read_the_main_session_record() {
                     "the verifier must not read the main session's record: {refused}"
                 );
             }
+
+            // A record spelled without the session directory around it is caught by name.
+            let bare_dir = tempfile::tempdir().unwrap();
+            let bare_record = bare_dir.path().join(RECORD_TRANSCRIPT);
+            std::fs::write(&bare_record, "the main session's own words").unwrap();
+            let bare = read_once(&actor, "bare", bare_record.to_str().unwrap()).await;
+            assert!(
+                bare.contains("Refused: this call touches"),
+                "a bare record name must be refused: {bare}"
+            );
+
+            // The harness's own artifacts in the goal scratch root stay readable.
+            let scratch_id = format!("{:012x}", std::process::id());
+            let scratch = crate::session::goal_tracker::goal_scratch_root(&scratch_id);
+            std::fs::create_dir_all(&scratch).unwrap();
+            let run_log = scratch.join(format!("{RECORD_CLASSIFIER}{scratch_id}-1{RECORD_RUNLOG}"));
+            std::fs::write(&run_log, "RUN LOG BODY").unwrap();
+            let log = read_once(&actor, "runlog", run_log.to_str().unwrap()).await;
+            assert!(
+                log.contains("RUN LOG BODY"),
+                "the verifier reads the run log it audits: {log}"
+            );
+            let _ = std::fs::remove_dir_all(&scratch);
         })
         .await;
 }

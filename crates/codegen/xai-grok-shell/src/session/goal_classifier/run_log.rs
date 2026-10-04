@@ -322,8 +322,11 @@ pub(crate) struct BookkeepingReader {
     pub main_session_dir: Option<String>,
     /// Paths the reader may read even though they sit in a session directory.
     pub allowed_paths: Vec<PathBuf>,
-    /// Whether the record file names are refused on their own. A verifier reads
-    /// its own run log, so only the main session refuses them.
+    /// A verifier reads the run log, patch and verdict the harness wrote into
+    /// the goal's scratch root, so paths under it stay readable.
+    pub allow_goal_scratch: bool,
+    /// Whether the record file names are refused on their own, which catches a
+    /// record spelled without the session directory around it.
     pub refuse_record_filenames: bool,
 }
 
@@ -331,7 +334,13 @@ pub(crate) struct BookkeepingReader {
 /// anything. A goal's implementer that reads its transcript is building
 /// evidence the verifier reads for itself, so the harness refuses the call.
 pub(crate) fn bookkeeping_refusal(reader: &BookkeepingReader, args: &str) -> Option<String> {
-    let remainder = strip_allowed_paths(args, &reader.allowed_paths);
+    let mut remainder = strip_allowed_paths(args, &reader.allowed_paths);
+    if reader.allow_goal_scratch {
+        remainder = strip_paths_containing(
+            &remainder,
+            crate::session::goal_tracker::GOAL_SCRATCH_DIR_PREFIX,
+        );
+    }
     for dir in std::iter::once(Some(reader.session_dir.as_str()))
         .chain(reader.main_session_dir.as_deref().map(Some))
         .flatten()
@@ -378,6 +387,35 @@ fn remove_whole_path(haystack: &str, needle: &str) -> String {
             out.push_str(&rest[..start]);
         }
         rest = &rest[end..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// `args` with every whole path that runs through `marker` blanked, so a
+/// read of the goal's own scratch root is not also read as a record read.
+#[allow(clippy::string_slice)] // every index moves by `len_utf8` or lands on a `find` match
+fn strip_paths_containing(args: &str, marker: &str) -> String {
+    let mut out = String::with_capacity(args.len());
+    let mut rest = args;
+    while let Some(start) = rest.find(marker) {
+        let mut token_start = start;
+        while let Some(c) = rest[..token_start].chars().next_back() {
+            if !is_path_char(c) {
+                break;
+            }
+            token_start -= c.len_utf8();
+        }
+        let mut token_end = start + marker.len();
+        while let Some(c) = rest[token_end..].chars().next() {
+            if !is_path_char(c) {
+                break;
+            }
+            token_end += c.len_utf8();
+        }
+        out.push_str(&rest[..token_start]);
+        out.push(' ');
+        rest = &rest[token_end..];
     }
     out.push_str(rest);
     out
@@ -782,7 +820,8 @@ mod tests {
                 PathBuf::from(format!("{plan_root}/goal/plan.md")),
                 PathBuf::from(format!("{plan_root}/goal/plan.baseline.md")),
             ],
-            refuse_record_filenames: main_session_dir.is_none(),
+            allow_goal_scratch: main_session_dir.is_some(),
+            refuse_record_filenames: true,
         }
     }
 
@@ -795,6 +834,8 @@ mod tests {
     const RECORD_CLASSIFIER: &str = concat!("goal-", "classifier-");
     const RECORD_VERDICT: &str = concat!("goal-", "verdict-");
     const RECORD_VERIFIER_DETAILS: &str = concat!("goal-", "verifier-", "details-");
+    /// The goal scratch root's directory prefix, as `goal_scratch_root` builds it.
+    const PREFIX: &str = crate::session::goal_tracker::GOAL_SCRATCH_DIR_PREFIX;
 
     #[test]
     fn the_goal_plan_stays_readable_while_the_record_does_not() {
@@ -852,15 +893,29 @@ mod tests {
             bookkeeping_refusal(&r, &format!(r#"{{"path":"{plan}"}}"#)),
             None
         );
-        let runlog = format!("/tmp/grok-goal-v/{RECORD_CLASSIFIER}v-1{RECORD_RUNLOG}");
+        let scratch = format!("/tmp/{PREFIX}v/{RECORD_CLASSIFIER}v-1{RECORD_RUNLOG}");
         assert_eq!(
-            bookkeeping_refusal(&r, &format!(r#"{{"path":"{runlog}"}}"#)),
-            None
+            bookkeeping_refusal(&r, &format!(r#"{{"path":"{scratch}"}}"#)),
+            None,
+            "the harness wrote the run log into the goal's scratch root"
         );
         let own_record = format!("{child}/{RECORD_TRANSCRIPT}");
         assert_eq!(
             bookkeeping_refusal(&r, &format!(r#"{{"path":"{own_record}"}}"#)).as_deref(),
             Some(child)
+        );
+        // A record spelled without the session directory around it is still refused.
+        assert_eq!(
+            bookkeeping_refusal(
+                &r,
+                &format!(r#"{{"command":"jq . ~/x/{RECORD_TRANSCRIPT}"}}"#)
+            )
+            .as_deref(),
+            Some(RECORD_TRANSCRIPT)
+        );
+        assert_eq!(
+            bookkeeping_refusal(&r, &format!(r#"{{"path":"{RECORD_UPDATES}"}}"#)).as_deref(),
+            Some(RECORD_UPDATES)
         );
     }
 
