@@ -454,12 +454,9 @@ pub enum Action {
     /// Set how ` ```mermaid ` code blocks are rendered (auto/on/off).
     /// SHELL-owned: updates the process-wide cache mirror and persists to `[ui].render_mermaid` in config.toml via `Effect::PersistSetting`.
     SetRenderMermaid(crate::appearance::RenderMermaid),
-    /// Toggle vim-style scrollback keybindings (j/k, h/l, g/G, y/Y, etc.).
     /// Delegates to `set_vim_mode` so the new value is persisted to `[ui].vim_mode` in config.toml, the same path as the settings modal.
-    ToggleVimMode,
     /// Set vim-style scrollback keybindings. SHELL-owned: persisted to `[ui].vim_mode` in config.toml via `Effect::PersistSetting`.
     /// Used by the settings modal; the `ToggleVimMode` variant covers the `/vim-mode` slash-command path.
-    SetVimMode(bool),
     /// Toggle the per-tool "Always allow …" prompt options. SHELL-owned; persisted to `[ui].remember_tool_approvals`. Applies to new sessions.
     SetRememberToolApprovals(bool),
     /// Toggle the ask_user_question timeout. SHELL-owned; persisted to `[toolset.ask_user_question].timeout_enabled`. Applies to new sessions.
@@ -542,7 +539,6 @@ pub enum Action {
     /// SHARED-owned: `[ui].follow_up_behavior`.
     SetFollowUpBehavior(crate::appearance::FollowUpBehavior),
     /// Set simple mode (ASCII / minimal glyphs). Persists via `Effect::PersistSetting`.
-    SetSimpleMode(bool),
     /// Set the per-tip contextual-hint user config (`[ui.contextual_hints]`).
     /// Each persists via `Effect::PersistSetting`.
     /// Each also immediately re-resolves and re-propagates the gates to every agent's prompt (runtime live-apply).

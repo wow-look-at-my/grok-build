@@ -583,7 +583,6 @@ impl AgentView {
             disable_search: false,
             compact_bottom_bar: false,
             search_only_on_slash: false,
-            vim_normal_first: crate::appearance::cache::load_vim_mode(),
         };
 
         let step = {
@@ -752,7 +751,6 @@ impl AgentView {
                     disable_search: false,
                     compact_bottom_bar: false,
                     search_only_on_slash: false,
-                    vim_normal_first: crate::appearance::cache::load_vim_mode(),
                 };
 
                 match handle_picker_input(ev, state, entry_count, &config) {
@@ -809,11 +807,7 @@ impl AgentView {
                                 if self.in_dashboard_overlay {
                                     contexts.push(crate::actions::When::DashboardOverlay);
                                 }
-                                let entries = shortcuts_help::build_entries(
-                                    &contexts,
-                                    registry,
-                                    self.vim_mode,
-                                );
+                                let entries = shortcuts_help::build_entries(&contexts, registry);
                                 let state = shortcuts_help::build_initial_picker_state(&entries);
                                 self.active_modal = Some(ActiveModal::ShortcutsHelp {
                                     entries,
@@ -907,7 +901,7 @@ impl AgentView {
                                             args_query: String::new(),
                                             items,
                                             original_items: searchable,
-                                            // Type-to-find: open in input mode (vim: Esc drops to nav, i re-enters input)
+                                            // Type-to-find: open in input mode
                                             state: crate::views::picker::PickerState::input_active(
                                             ),
                                             previous_palette: prev,
@@ -1020,7 +1014,6 @@ impl AgentView {
                     disable_search: false,
                     compact_bottom_bar: false,
                     search_only_on_slash: false,
-                    vim_normal_first: crate::appearance::cache::load_vim_mode(),
                 };
 
                 match crate::views::session_picker::handle_pending_delete_key(pending_delete, ev) {
@@ -1304,7 +1297,6 @@ impl AgentView {
                 disable_search: false,
                 compact_bottom_bar: false,
                 search_only_on_slash: false,
-                vim_normal_first: crate::appearance::cache::load_vim_mode(),
             };
             // Handle input
             match handle_picker_input(ev, state, entry_count, &config) {
@@ -1696,7 +1688,7 @@ impl AgentView {
             use crate::views::picker::{self, PickerEntry, PickerRow};
 
             // Standard footer shortcuts for picker-style modals.
-            let mut picker_shortcuts: Vec<Shortcut> = vec![
+            let picker_shortcuts: Vec<Shortcut> = vec![
                 Shortcut {
                     label: "\u{2191}/\u{2193} nav",
                     clickable: false,
@@ -1755,8 +1747,6 @@ impl AgentView {
                     })
                     .collect();
                 let compact = self.scrollback.appearance().prompt.compact;
-                // Surface `i search` in the footer when vim nav mode is active.
-                mw::push_vim_nav_search_hint(&mut picker_shortcuts, state.search_active);
                 let modal_config = ModalWindowConfig {
                     title: "Commands",
                     tabs: None,
@@ -1826,8 +1816,6 @@ impl AgentView {
                     })
                     .collect();
                 let compact = self.scrollback.appearance().prompt.compact;
-                // Surface `i search` in the footer when vim nav mode is active.
-                mw::push_vim_nav_search_hint(&mut picker_shortcuts, state.search_active);
                 let modal_config = ModalWindowConfig {
                     title,
                     tabs: None,
@@ -2466,75 +2454,58 @@ mod session_picker_delete_tests {
 
     #[test]
     fn esc_leaves_search_before_closing() {
-        for vim in [false, true] {
-            crate::appearance::cache::set_vim_mode(vim);
-            let mut agent = make_agent();
-            open_picker(&mut agent, vec![entry("s0")]);
-            if let Some(ActiveModal::SessionPicker { state, .. }) = agent.active_modal.as_mut() {
-                state.search_active = true;
-                state.set_query("find");
-            }
-            let first = agent.handle_palette_or_arg_input(&Event::Key(KeyEvent::new(
-                KeyCode::Esc,
-                KeyModifiers::NONE,
-            )));
-            assert!(
-                matches!(
-                    first,
-                    InputOutcome::Changed | InputOutcome::Action(Action::TriggerDeepSearch)
-                ),
-                "vim={vim}: first Esc must leave search without closing, got {first:?}"
-            );
-            match agent.active_modal.as_ref() {
-                Some(ActiveModal::SessionPicker { state, .. }) => {
-                    assert!(!state.search_active, "vim={vim}");
-                    if vim {
-                        assert!(state.query().is_empty());
-                    } else {
-                        assert_eq!(state.query(), "find");
-                    }
-                }
-                Some(_) => panic!("vim={vim}: first Esc replaced the session picker"),
-                None => panic!("vim={vim}: picker closed on first Esc"),
-            }
-            let second = agent.handle_palette_or_arg_input(&Event::Key(KeyEvent::new(
-                KeyCode::Esc,
-                KeyModifiers::NONE,
-            )));
-            if vim {
-                assert!(
-                    matches!(second, InputOutcome::Action(Action::SessionPickerClosed)),
-                    "vim={vim}: Esc after a cleared query must close, got {second:?}"
-                );
-                assert!(agent.active_modal.is_none(), "vim={vim}");
-            } else {
-                assert!(
-                    !matches!(second, InputOutcome::Action(Action::SessionPickerClosed)),
-                    "a filtered list must clear the query before closing, got {second:?}"
-                );
-                match agent.active_modal.as_ref() {
-                    Some(ActiveModal::SessionPicker { state, .. }) => {
-                        assert!(state.query().is_empty());
-                        assert!(!state.search_active);
-                    }
-                    _ => panic!("picker should stay open"),
-                }
-                let third = agent.handle_palette_or_arg_input(&Event::Key(KeyEvent::new(
-                    KeyCode::Esc,
-                    KeyModifiers::NONE,
-                )));
-                assert!(
-                    matches!(third, InputOutcome::Action(Action::SessionPickerClosed)),
-                    "Esc with no query must close, got {third:?}"
-                );
-            }
+        let mut agent = make_agent();
+        open_picker(&mut agent, vec![entry("s0")]);
+        if let Some(ActiveModal::SessionPicker { state, .. }) = agent.active_modal.as_mut() {
+            state.search_active = true;
+            state.set_query("find");
         }
-        crate::appearance::cache::set_vim_mode(false);
+        let first = agent.handle_palette_or_arg_input(&Event::Key(KeyEvent::new(
+            KeyCode::Esc,
+            KeyModifiers::NONE,
+        )));
+        assert!(
+            matches!(
+                first,
+                InputOutcome::Changed | InputOutcome::Action(Action::TriggerDeepSearch)
+            ),
+            "first Esc must leave search without closing, got {first:?}"
+        );
+        match agent.active_modal.as_ref() {
+            Some(ActiveModal::SessionPicker { state, .. }) => {
+                assert!(!state.search_active);
+                assert_eq!(state.query(), "find");
+            }
+            Some(_) => panic!("first Esc replaced the session picker"),
+            None => panic!("picker closed on first Esc"),
+        }
+        let second = agent.handle_palette_or_arg_input(&Event::Key(KeyEvent::new(
+            KeyCode::Esc,
+            KeyModifiers::NONE,
+        )));
+        assert!(
+            !matches!(second, InputOutcome::Action(Action::SessionPickerClosed)),
+            "a filtered list must clear the query before closing, got {second:?}"
+        );
+        match agent.active_modal.as_ref() {
+            Some(ActiveModal::SessionPicker { state, .. }) => {
+                assert!(state.query().is_empty());
+                assert!(!state.search_active);
+            }
+            _ => panic!("picker should stay open"),
+        }
+        let third = agent.handle_palette_or_arg_input(&Event::Key(KeyEvent::new(
+            KeyCode::Esc,
+            KeyModifiers::NONE,
+        )));
+        assert!(
+            matches!(third, InputOutcome::Action(Action::SessionPickerClosed)),
+            "Esc with no query must close, got {third:?}"
+        );
     }
 
     #[test]
     fn esc_from_searched_list_clears_the_query_before_closing() {
-        crate::appearance::cache::set_vim_mode(false);
         let mut agent = make_agent();
         open_picker(&mut agent, vec![entry("s0")]);
         if let Some(ActiveModal::SessionPicker { state, .. }) = agent.active_modal.as_mut() {
@@ -2564,7 +2535,6 @@ mod session_picker_delete_tests {
             second,
             InputOutcome::Action(Action::SessionPickerClosed)
         ));
-        crate::appearance::cache::set_vim_mode(false);
     }
 
     #[test]
@@ -2595,7 +2565,6 @@ mod session_picker_delete_tests {
             "agent /resume must keep the search label, got: {content:?}"
         );
         assert!(!content.contains(">search:"));
-        crate::appearance::cache::set_vim_mode(true);
         if let Some(ActiveModal::SessionPicker { state, .. }) = agent.active_modal.as_mut() {
             state.search_active = false;
         }
@@ -2615,7 +2584,6 @@ mod session_picker_delete_tests {
             !listed_text.contains("i search"),
             "leaving search must not change the hint bar, got: {listed_text:?}"
         );
-        crate::appearance::cache::set_vim_mode(false);
         assert!(
             content.contains("/ search"),
             "agent /resume footer must keep / search, got: {content:?}"
@@ -2654,55 +2622,50 @@ mod session_picker_delete_tests {
     fn external_picker_keeps_search_hint_while_editing() {
         let _theme = crate::theme::cache::pin_theme();
         let theme = crate::theme::Theme::current();
-        for vim in [false, true] {
-            crate::appearance::cache::set_vim_mode(vim);
-            for width in [80, 120] {
-                let mut agent = make_agent();
-                let mut session = entry("external-session");
-                session.source = "cursor".to_owned();
-                open_picker(&mut agent, vec![session]);
-                if let Some(ActiveModal::SessionPicker { source_filter, .. }) =
-                    agent.active_modal.as_mut()
-                {
-                    *source_filter = crate::views::session_picker::SourceFilter::External;
+        for width in [80, 120] {
+            let mut agent = make_agent();
+            let mut session = entry("external-session");
+            session.source = "cursor".to_owned();
+            open_picker(&mut agent, vec![session]);
+            if let Some(ActiveModal::SessionPicker { source_filter, .. }) =
+                agent.active_modal.as_mut()
+            {
+                *source_filter = crate::views::session_picker::SourceFilter::External;
+            }
+
+            for editing in [false, true] {
+                if editing {
+                    agent.handle_palette_or_arg_input(&key('/'));
+                    agent.handle_palette_or_arg_input(&key('s'));
                 }
+                let Some(ActiveModal::SessionPicker { state, .. }) = agent.active_modal.as_ref()
+                else {
+                    panic!("search must keep the External picker open");
+                };
+                assert_eq!(editing, state.search_active);
+                assert_eq!(if editing { "s" } else { "" }, state.query());
 
-                for editing in [false, true] {
-                    if editing {
-                        agent.handle_palette_or_arg_input(&key('/'));
-                        agent.handle_palette_or_arg_input(&key('s'));
-                    }
-                    let Some(ActiveModal::SessionPicker { state, .. }) =
-                        agent.active_modal.as_ref()
-                    else {
-                        panic!("search must keep the External picker open");
-                    };
-                    assert_eq!(editing, state.search_active);
-                    assert_eq!(if editing { "s" } else { "" }, state.query());
-
-                    let area = ratatui::layout::Rect::new(0, 0, width, 28);
-                    let mut buf = ratatui::buffer::Buffer::empty(area);
-                    agent.draw_active_modal(area, &mut buf, theme, false);
-                    let content = (0..area.height).fold(String::new(), |mut text, y| {
-                        for x in 0..area.width {
-                            if let Some(cell) = buf.cell((x, y)) {
-                                text.push_str(cell.symbol());
-                            }
+                let area = ratatui::layout::Rect::new(0, 0, width, 28);
+                let mut buf = ratatui::buffer::Buffer::empty(area);
+                agent.draw_active_modal(area, &mut buf, theme, false);
+                let content = (0..area.height).fold(String::new(), |mut text, y| {
+                    for x in 0..area.width {
+                        if let Some(cell) = buf.cell((x, y)) {
+                            text.push_str(cell.symbol());
                         }
-                        text.push('\n');
-                        text
-                    });
-                    assert!(
-                        content.contains("/ search"),
-                        "vim={vim}, width={width}, editing={editing}: {content}"
-                    );
-                    assert!(content.contains("f filter"));
-                    assert!(!content.contains("e expand"));
-                    assert!(!content.contains("d delete"));
-                }
+                    }
+                    text.push('\n');
+                    text
+                });
+                assert!(
+                    content.contains("/ search"),
+                    "width={width}, editing={editing}: {content}"
+                );
+                assert!(content.contains("f filter"));
+                assert!(!content.contains("e expand"));
+                assert!(!content.contains("d delete"));
             }
         }
-        crate::appearance::cache::set_vim_mode(false);
     }
 
     #[test]
@@ -2952,8 +2915,6 @@ mod session_picker_delete_tests {
 
     #[test]
     fn up_at_top_focuses_search_and_clears_selection() {
-        // Pin vim-mode off; this test asserts the non-vim picker path.
-        crate::appearance::cache::set_vim_mode(false);
         let mut agent = make_agent();
         open_picker(&mut agent, vec![entry("s0"), entry("s1")]);
 
@@ -2972,8 +2933,6 @@ mod session_picker_delete_tests {
 
     #[test]
     fn down_at_bottom_focuses_search_and_clears_selection() {
-        // Pin vim-mode off; this test asserts the non-vim picker path.
-        crate::appearance::cache::set_vim_mode(false);
         let mut agent = make_agent();
         open_picker(&mut agent, vec![entry("s0"), entry("s1")]);
 
@@ -2987,8 +2946,6 @@ mod session_picker_delete_tests {
 
     #[test]
     fn typing_a_query_restores_selection() {
-        // Pin vim-mode off; this test asserts the non-vim picker path.
-        crate::appearance::cache::set_vim_mode(false);
         let mut agent = make_agent();
         open_picker(&mut agent, vec![entry("s0"), entry("s1")]);
 
@@ -3045,7 +3002,7 @@ mod session_picker_delete_tests {
 }
 
 #[cfg(test)]
-mod command_palette_vim_input_tests {
+mod command_palette_input_tests {
     use crate::actions::ActionRegistry;
     use crate::app::agent_view::AgentView;
     use crate::app::agent_view::test_fixtures::make_agent;
@@ -3127,77 +3084,10 @@ mod command_palette_vim_input_tests {
     /// Headline command-palette vim flow: a CI-runnable mirror of the ignored PTY scenario `vim_modal_command_palette.yaml`.
     /// Drives the real modal entry point (`handle_modal_key`).
     /// Both the chrome Esc handling and the picker's `vim_normal_first: load_vim_mode()` wiring are exercised end to end.
-    #[test]
-    fn vim_command_palette_input_then_esc_to_nav_then_i_reenters() {
-        // CI defaults vim off and this dev machine's config sets it on, so pin it
-        crate::appearance::cache::set_vim_mode(true);
-        let mut agent = make_agent();
-        open_command_palette(&mut agent);
-
-        // Opens in INPUT mode: a letter types/filters immediately.
-        assert!(palette_state(&agent).search_active, "opens in input mode");
-        agent.handle_modal_key(&key('a'));
-        let st = palette_state(&agent);
-        assert_eq!(st.query(), "a", "input mode: a letter filters");
-        assert!(st.search_active);
-
-        // First Esc clears the query via the modal chrome but stays in input.
-        agent.handle_modal_key(&esc());
-        let st = palette_state(&agent);
-        assert!(st.query().is_empty(), "Esc clears the query");
-        assert!(st.search_active, "still input after the first Esc");
-
-        // Second Esc (empty query) drops to NAV via the picker's vim Esc.
-        agent.handle_modal_key(&esc());
-        let st = palette_state(&agent);
-        assert!(!st.search_active, "second Esc drops to nav");
-        assert!(st.query().is_empty());
-
-        // NAV: a bare printable key must NOT type.
-        let out = agent.handle_modal_key(&key('b'));
-        let st = palette_state(&agent);
-        assert!(st.query().is_empty(), "nav: a bare letter does not filter");
-        assert!(!st.search_active);
-        assert!(
-            matches!(out, InputOutcome::Unchanged),
-            "nav letter is inert"
-        );
-
-        // `i` re-enters INPUT without typing; a letter then filters again.
-        agent.handle_modal_key(&key('i'));
-        assert!(palette_state(&agent).search_active, "i re-enters search");
-        assert!(palette_state(&agent).query().is_empty(), "i does not type");
-        agent.handle_modal_key(&key('c'));
-        assert_eq!(palette_state(&agent).query(), "c", "typing filters again");
-        // Reset the global vim pin so it can't leak to later tests (libtest reuses threads).
-        crate::appearance::cache::set_vim_mode(false);
-    }
-
-    /// `/` is the other vim search-entry key: from NAV it re-enters INPUT.
-    #[test]
-    fn vim_command_palette_slash_reenters_search_from_nav() {
-        crate::appearance::cache::set_vim_mode(true);
-        let mut agent = make_agent();
-        open_command_palette(&mut agent);
-
-        // Drop to nav: type, then two Escs (clear query, then nav).
-        agent.handle_modal_key(&key('a'));
-        agent.handle_modal_key(&esc());
-        agent.handle_modal_key(&esc());
-        assert!(!palette_state(&agent).search_active, "in nav mode");
-
-        agent.handle_modal_key(&key('/'));
-        assert!(palette_state(&agent).search_active, "/ re-enters search");
-        assert!(palette_state(&agent).query().is_empty(), "/ does not type");
-        // Reset the global vim pin so it can't leak to later tests (libtest reuses threads).
-        crate::appearance::cache::set_vim_mode(false);
-    }
-
-    /// Vim OFF: the command palette stays type-to-filter.
+    // Drop to nav: type, then two Escs (clear query, then nav).
     /// There is no nav mode, so a letter keeps filtering even after Esc clears the query.
     #[test]
-    fn non_vim_command_palette_stays_type_to_filter() {
-        crate::appearance::cache::set_vim_mode(false);
+    fn command_palette_stays_type_to_filter() {
         let mut agent = make_agent();
         open_command_palette(&mut agent);
 
@@ -3213,7 +3103,6 @@ mod command_palette_vim_input_tests {
             "Esc clears the query"
         );
 
-        // A bare letter still types; no vim nav-mode suppression
         agent.handle_modal_key(&key('b'));
         let st = palette_state(&agent);
         assert_eq!(st.query(), "b", "still type-to-filter (no nav mode)");
@@ -3222,7 +3111,6 @@ mod command_palette_vim_input_tests {
 
     #[test]
     fn command_palette_bracketed_paste_targets_only_active_query() {
-        crate::appearance::cache::set_vim_mode(false);
         let mut agent = make_agent();
         agent.prompt.set_text("hidden prompt");
         open_command_palette(&mut agent);
@@ -3238,17 +3126,6 @@ mod command_palette_vim_input_tests {
         assert!(matches!(outcome, InputOutcome::Changed));
         assert_eq!(palette_state(&agent).query(), "a中b");
         assert_eq!(agent.prompt.text(), "hidden prompt");
-
-        if let Some(ActiveModal::CommandPalette { state, .. }) = agent.active_modal.as_mut() {
-            state.set_query("");
-            state.search_active = false;
-        }
-        crate::appearance::cache::set_vim_mode(true);
-        let outcome = agent.handle_input(&Event::Paste("ignored".to_owned()), &registry);
-        assert!(matches!(outcome, InputOutcome::Unchanged));
-        assert!(palette_state(&agent).query().is_empty());
-        assert_eq!(agent.prompt.text(), "hidden prompt");
-        crate::appearance::cache::set_vim_mode(false);
     }
 
     // Drives the REAL command-palette render path: draw_active_modal, then picker::render_picker_in_modal, then render_search_bar

@@ -28,9 +28,6 @@ pub struct UiConfig {
     /// Read by pager, declared here for `serde_ignored`.
     #[serde(default)]
     pub compact_mode: bool,
-    /// Read by pager, declared here for `serde_ignored`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub simple_mode: Option<bool>,
     /// Read by `load_permission_mode()`. Declared for `serde_ignored`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub permission_mode: Option<String>,
@@ -131,9 +128,6 @@ pub struct UiConfig {
     /// Unset keeps the per-terminal scroll profile's values.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scroll_lines: Option<u8>,
-    /// Vim-style scrollback navigation (hjkl, gg/G, /).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub vim_mode: Option<bool>,
     /// How ` ```mermaid ` code blocks are rendered (`auto` | `on` | `off`).
     /// Written by the pager's settings modal.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -314,7 +308,6 @@ impl Default for UiConfig {
             yolo: false,
             ui_theme: None,
             compact_mode: false,
-            simple_mode: None,
             permission_mode: None,
             approval_mode: None,
             default_selected_permission: None,
@@ -337,7 +330,6 @@ impl Default for UiConfig {
             scroll_mode: None,
             invert_scroll: None,
             scroll_lines: None,
-            vim_mode: None,
             render_mermaid: None,
             hunk_tracker_mode: None,
             voice_capture_mode: None,

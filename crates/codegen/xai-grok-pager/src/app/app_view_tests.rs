@@ -2533,7 +2533,6 @@ fn welcome_session_entry(id: &str) -> SessionPickerEntry {
     }
 }
 fn open_welcome_session_picker(app: &mut AppView) {
-    crate::appearance::cache::set_vim_mode(false);
     app.session_picker_entries = Some(vec![welcome_session_entry("session-0")]);
     app.session_picker_state.search_active = true;
 }
@@ -3259,16 +3258,15 @@ fn ctrl_q_double_press_quits() {
 }
 #[test]
 fn different_key_clears_pending() {
-    crate::appearance::cache::set_simple_mode(false);
     let mut app = test_app_with_agent();
     if let ActiveView::Agent(id) = app.active_view
         && let Some(agent) = app.agents.get_mut(&id)
     {
-        agent.vim_mode = true;
+        agent.active_pane = crate::views::agent::ActivePane::Scrollback;
     }
     let _ = app.handle_input(&ctrl_q());
     assert!(app.pending_action.is_some());
-    let outcome = app.handle_input(&key_event(KeyCode::Char('j'), KeyModifiers::NONE));
+    let outcome = app.handle_input(&key_event(KeyCode::Down, KeyModifiers::NONE));
     assert!(app.pending_action.is_none());
     assert!(matches!(outcome, InputOutcome::Action(Action::SelectNext)));
 }
@@ -3365,7 +3363,6 @@ fn assert_pending_quit(app: &AppView) {
 }
 #[test]
 fn ctrl_c_idle_empty_prompt_sets_pending_quit() {
-    crate::appearance::cache::set_simple_mode(true);
     let mut app = test_app_with_agent();
     let outcome = app.handle_input(&ctrl_c());
     assert!(matches!(outcome, InputOutcome::Changed));
@@ -3373,7 +3370,6 @@ fn ctrl_c_idle_empty_prompt_sets_pending_quit() {
 }
 #[test]
 fn ctrl_c_idle_empty_prompt_focused_sets_pending_quit() {
-    crate::appearance::cache::set_simple_mode(true);
     let mut app = test_app_with_agent();
     let id = super::super::agent::AgentId(0);
     app.agents.get_mut(&id).unwrap().active_pane = crate::views::agent::ActivePane::Prompt;
@@ -3383,7 +3379,6 @@ fn ctrl_c_idle_empty_prompt_focused_sets_pending_quit() {
 }
 #[test]
 fn ctrl_c_double_press_idle_quits() {
-    crate::appearance::cache::set_simple_mode(true);
     let mut app = test_app_with_agent();
     let _ = app.handle_input(&ctrl_c());
     assert!(app.pending_action.is_some());
@@ -3413,7 +3408,6 @@ fn ctrl_c_consumed_by_text_clear_does_not_set_pending() {
 }
 #[test]
 fn ctrl_c_then_other_key_resets_pending() {
-    crate::appearance::cache::set_simple_mode(true);
     let mut app = test_app_with_agent();
     let _ = app.handle_input(&ctrl_c());
     assert!(app.pending_action.is_some());
@@ -3498,21 +3492,18 @@ fn ctrl_c_running_prompt_with_text_clears_text_and_preserves_turn() {
 /// Covers both panes, vim on and off.
 #[test]
 fn esc_mid_turn_cancels_the_turn() {
-    for (vim_mode, pane) in [
-        (false, crate::views::agent::ActivePane::Prompt),
-        (true, crate::views::agent::ActivePane::Prompt),
-        (false, crate::views::agent::ActivePane::Scrollback),
-        (true, crate::views::agent::ActivePane::Scrollback),
+    for pane in [
+        crate::views::agent::ActivePane::Prompt,
+        crate::views::agent::ActivePane::Scrollback,
     ] {
         let mut app = test_app_with_agent();
         let id = super::super::agent::AgentId(0);
         let agent = app.agents.get_mut(&id).unwrap();
         agent.session.state = AgentState::TurnRunning;
         agent.active_pane = pane;
-        agent.vim_mode = vim_mode;
         agent.prompt.textarea.set_text("draft while streaming");
         let outcome = app.handle_input(&key_event(KeyCode::Esc, KeyModifiers::NONE));
-        let ctx = format!("vim={vim_mode} pane={pane:?}");
+        let ctx = format!("pane={pane:?}");
         assert!(
             matches!(outcome, InputOutcome::Action(Action::CancelTurn)),
             "{ctx}: mid-turn Esc must cancel, got {outcome:?}"
@@ -3632,7 +3623,6 @@ fn esc_cancel_grace_holds_rewind_arm_then_expires() {
     let agent = app.agents.get_mut(&id).unwrap();
     agent.session.state = AgentState::TurnRunning;
     agent.active_pane = crate::views::agent::ActivePane::Prompt;
-    agent.vim_mode = false;
     agent
         .scrollback
         .push_block(crate::scrollback::block::RenderBlock::user_prompt(
@@ -3777,7 +3767,6 @@ fn mouse_send_retires_armed_clear_so_next_esc_cancels() {
         let agent = app.agents.get_mut(&id).unwrap();
         agent.active_pane = crate::views::agent::ActivePane::Prompt;
         agent.prompt.textarea.set_text("draft to clear");
-        agent.vim_mode = true;
     }
     let outcome = app.handle_input(&key_event(KeyCode::Esc, KeyModifiers::NONE));
     assert!(matches!(outcome, InputOutcome::Changed));
@@ -3805,7 +3794,6 @@ fn assert_submit_path_retires_clear_arm(action: Action) {
         let agent = app.agents.get_mut(&id).unwrap();
         agent.active_pane = crate::views::agent::ActivePane::Prompt;
         agent.prompt.textarea.set_text("draft to clear");
-        agent.vim_mode = true;
     }
     let outcome = app.handle_input(&key_event(KeyCode::Esc, KeyModifiers::NONE));
     assert!(matches!(outcome, InputOutcome::Changed));
@@ -3848,7 +3836,6 @@ fn stale_idle_clear_arm_never_fires_on_busy_agent() {
         let agent = app.agents.get_mut(&id).unwrap();
         agent.active_pane = crate::views::agent::ActivePane::Prompt;
         agent.prompt.textarea.set_text("draft to clear");
-        agent.vim_mode = true;
     }
     let outcome = app.handle_input(&key_event(KeyCode::Esc, KeyModifiers::NONE));
     assert!(matches!(outcome, InputOutcome::Changed));
@@ -3874,7 +3861,6 @@ fn stale_idle_rewind_arm_never_fires_on_busy_agent() {
     {
         let agent = app.agents.get_mut(&id).unwrap();
         agent.active_pane = crate::views::agent::ActivePane::Prompt;
-        agent.vim_mode = true;
         agent
             .scrollback
             .push_block(crate::scrollback::block::RenderBlock::user_prompt(
@@ -3906,7 +3892,6 @@ fn stale_idle_clear_arm_never_fires_on_wake_turn() {
         let agent = app.agents.get_mut(&id).unwrap();
         agent.active_pane = crate::views::agent::ActivePane::Prompt;
         agent.prompt.textarea.set_text("draft to clear");
-        agent.vim_mode = true;
     }
     let outcome = app.handle_input(&key_event(KeyCode::Esc, KeyModifiers::NONE));
     assert!(matches!(outcome, InputOutcome::Changed));
@@ -3953,7 +3938,6 @@ fn esc_consumed_by_policy_disarms_esc_d_combo() {
         let agent = app.agents.get_mut(&id).unwrap();
         agent.session.state = AgentState::TurnRunning;
         agent.active_pane = crate::views::agent::ActivePane::Prompt;
-        agent.vim_mode = true;
     }
     let outcome = app.handle_input(&key_event(KeyCode::Esc, KeyModifiers::NONE));
     assert!(matches!(outcome, InputOutcome::Action(Action::CancelTurn)));
@@ -4039,16 +4023,10 @@ fn idle_images_only_double_esc_arms_clear() {
 /// Scrollback-pane double-Esc, idle, empty prompt, and messages: first Esc arms `RewindShowPicker` silently, second within the TTL opens the picker.
 /// Driven per scrollback nav mode because the routing differs and neither mode may consume Esc.
 /// Vim resolves through `lookup_with_mode(vim=true)`; non-vim adds the bare-letter forward-to-prompt fallback.
-fn assert_scrollback_double_esc_opens_rewind(vim: bool) {
+fn assert_scrollback_double_esc_opens_rewind() {
     let mut app = test_app_with_agent();
     let id = super::super::agent::AgentId(0);
     let agent = app.agents.get_mut(&id).unwrap();
-    agent.vim_mode = vim;
-    agent.set_input_mode(if vim {
-        crate::views::agent::InputMode::Vim
-    } else {
-        crate::views::agent::InputMode::Simple
-    });
     agent.active_pane = crate::views::agent::ActivePane::Scrollback;
     agent
         .scrollback
@@ -4059,7 +4037,7 @@ fn assert_scrollback_double_esc_opens_rewind(vim: bool) {
     let outcome = app.handle_input(&key_event(KeyCode::Esc, KeyModifiers::NONE));
     assert!(
         matches!(outcome, InputOutcome::Changed),
-        "vim={vim}: first scrollback Esc must arm silently, got {outcome:?}"
+        "first scrollback Esc must arm silently, got {outcome:?}"
     );
     let pending = app
         .pending_action
@@ -4067,25 +4045,20 @@ fn assert_scrollback_double_esc_opens_rewind(vim: bool) {
         .expect("scrollback-pane idle Esc must arm rewind");
     assert!(
         pending.label.is_none(),
-        "vim={vim}: first Esc for rewind must be silent"
+        "first Esc for rewind must be silent"
     );
     assert!(matches!(pending.action, Action::RewindShowPicker));
     let outcome = app.handle_input(&key_event(KeyCode::Esc, KeyModifiers::NONE));
     assert!(
         matches!(outcome, InputOutcome::Action(Action::RewindShowPicker)),
-        "vim={vim}: second Esc from scrollback must open the rewind picker, got {outcome:?}"
+        "second Esc from scrollback must open the rewind picker, got {outcome:?}"
     );
     assert!(app.pending_action.is_none());
 }
-/// Non-vim (simple) scrollback nav: double-Esc from scrollback opens rewind.
+/// Double-Esc from scrollback opens rewind.
 #[test]
 fn idle_scrollback_pane_double_esc_opens_rewind() {
-    assert_scrollback_double_esc_opens_rewind(false);
-}
-/// Vim scrollback nav consumes no plain Esc, so the same flow must work.
-#[test]
-fn idle_scrollback_pane_double_esc_opens_rewind_vim_mode() {
-    assert_scrollback_double_esc_opens_rewind(true);
+    assert_scrollback_double_esc_opens_rewind();
 }
 /// From the SCROLLBACK pane an idle Esc with a draft in the (unfocused) composer arms NOTHING and leaves the draft intact.
 /// Clear is skipped by the prompt-pane gate, and rewind is skipped by the global empty-composer gate even with turns present.
@@ -5568,65 +5541,45 @@ fn dashboard_picker_selection_uses_dashboard_cwd() {
 #[test]
 fn dashboard_picker_esc_leaves_search_before_closing() {
     use crate::views::session_picker_surface::SessionPickerSurface;
-    for vim in [false, true] {
-        crate::appearance::cache::set_vim_mode(vim);
-        let mut app = test_app();
-        app.active_view = ActiveView::AgentDashboard;
-        app.dashboard = Some(crate::views::dashboard::DashboardState::new());
-        let mut surface = SessionPickerSurface::new(1);
-        surface.state.search_active = true;
-        surface.state.set_query("find");
-        app.dashboard_session_picker = Some(surface);
-        let first =
-            app.handle_dashboard_session_picker_input(&key_event(KeyCode::Esc, KeyModifiers::NONE));
-        assert!(
-            matches!(first, Some(InputOutcome::Changed)),
-            "vim={vim}: first Esc must leave search, got {first:?}"
-        );
-        let surface = app
-            .dashboard_session_picker
-            .as_ref()
-            .expect("picker stays open");
-        assert!(!surface.state.search_active, "vim={vim}");
-        if vim {
-            assert!(surface.state.query().is_empty(), "vim Esc clears the query");
-        } else {
-            assert_eq!(surface.state.query(), "find");
-        }
-        let second =
-            app.handle_dashboard_session_picker_input(&key_event(KeyCode::Esc, KeyModifiers::NONE));
-        if vim {
-            assert!(
-                matches!(
-                    second,
-                    Some(InputOutcome::Action(Action::DashboardCloseSessionPicker))
-                ),
-                "vim={vim}: Esc after a cleared query must close, got {second:?}"
-            );
-        } else {
-            assert!(
-                !matches!(
-                    second,
-                    Some(InputOutcome::Action(Action::DashboardCloseSessionPicker))
-                ),
-                "a filtered list must clear the query before closing, got {second:?}"
-            );
-            let surface = app
-                .dashboard_session_picker
-                .as_ref()
-                .expect("picker stays open");
-            assert!(surface.state.query().is_empty());
-            let third = app.handle_dashboard_session_picker_input(&key_event(
-                KeyCode::Esc,
-                KeyModifiers::NONE,
-            ));
-            assert!(matches!(
-                third,
-                Some(InputOutcome::Action(Action::DashboardCloseSessionPicker))
-            ));
-        }
-    }
-    crate::appearance::cache::set_vim_mode(false);
+    let mut app = test_app();
+    app.active_view = ActiveView::AgentDashboard;
+    app.dashboard = Some(crate::views::dashboard::DashboardState::new());
+    let mut surface = SessionPickerSurface::new(1);
+    surface.state.search_active = true;
+    surface.state.set_query("find");
+    app.dashboard_session_picker = Some(surface);
+    let first =
+        app.handle_dashboard_session_picker_input(&key_event(KeyCode::Esc, KeyModifiers::NONE));
+    assert!(
+        matches!(first, Some(InputOutcome::Changed)),
+        "first Esc must leave search, got {first:?}"
+    );
+    let surface = app
+        .dashboard_session_picker
+        .as_ref()
+        .expect("picker stays open");
+    assert!(!surface.state.search_active);
+    assert_eq!(surface.state.query(), "find");
+    let second =
+        app.handle_dashboard_session_picker_input(&key_event(KeyCode::Esc, KeyModifiers::NONE));
+    assert!(
+        !matches!(
+            second,
+            Some(InputOutcome::Action(Action::DashboardCloseSessionPicker))
+        ),
+        "a filtered list must clear the query before closing, got {second:?}"
+    );
+    let surface = app
+        .dashboard_session_picker
+        .as_ref()
+        .expect("picker stays open");
+    assert!(surface.state.query().is_empty());
+    let third =
+        app.handle_dashboard_session_picker_input(&key_event(KeyCode::Esc, KeyModifiers::NONE));
+    assert!(matches!(
+        third,
+        Some(InputOutcome::Action(Action::DashboardCloseSessionPicker))
+    ));
 }
 #[test]
 fn dashboard_picker_click_on_search_focuses_the_field() {
@@ -5664,7 +5617,6 @@ fn dashboard_picker_esc_after_search_click_restores_the_selection() {
     use crate::views::picker::PickerHitAreas;
     use crate::views::session_picker_surface::SessionPickerSurface;
     use ratatui::layout::Rect;
-    crate::appearance::cache::set_vim_mode(false);
     let _theme = crate::theme::cache::pin_theme();
     let theme = crate::theme::Theme::current();
     let mut app = test_app();
@@ -6066,7 +6018,6 @@ fn overlay_esc_running_turn_empty_prompt_cancels_not_backout() {
     let agent = app.agents.get_mut(&id).unwrap();
     agent.active_pane = crate::app::agent_view::AgentPane::Prompt;
     agent.session.state = AgentState::TurnRunning;
-    agent.vim_mode = true;
     assert!(agent.prompt.text().is_empty());
     let outcome = app.handle_input(&key_event(KeyCode::Esc, KeyModifiers::NONE));
     assert!(
@@ -6097,40 +6048,12 @@ fn overlay_esc_running_turn_scrollback_cancels_not_backout() {
     let agent = app.agents.get_mut(&id).unwrap();
     agent.active_pane = crate::app::agent_view::AgentPane::Scrollback;
     agent.session.state = AgentState::TurnRunning;
-    agent.vim_mode = true;
     assert!(agent.is_bare_scrollback() && agent.no_input_overlay_pending());
     assert!(agent.no_esc_consumer_pending());
     let outcome = app.handle_input(&key_event(KeyCode::Esc, KeyModifiers::NONE));
     assert!(
         matches!(outcome, InputOutcome::Action(Action::CancelTurn)),
         "running-turn overlay Esc (scrollback) must cancel, not detach, got {outcome:?}",
-    );
-    assert_eq!(
-        Some(crate::app::actions::CancelTrigger::Esc),
-        app.agents
-            .get(&id)
-            .unwrap_or_else(|| panic!("missing map entry"))
-            .cancel_trigger_hint
-    );
-}
-/// Overlay in non-vim mode: mid-turn Esc cancels (matching full-screen), and still must not detach to the dashboard.
-#[test]
-fn overlay_esc_running_turn_non_vim_cancels_not_backout() {
-    let mut app = test_app_with_agent();
-    let id = super::super::agent::AgentId(0);
-    app.active_view = ActiveView::Agent(id);
-    app.dashboard = Some(crate::views::dashboard::DashboardState::new());
-    if let Some(d) = app.dashboard.as_mut() {
-        d.attached_agent = Some(id);
-    }
-    let agent = app.agents.get_mut(&id).unwrap();
-    agent.active_pane = crate::app::agent_view::AgentPane::Prompt;
-    agent.session.state = AgentState::TurnRunning;
-    agent.vim_mode = false;
-    let outcome = app.handle_input(&key_event(KeyCode::Esc, KeyModifiers::NONE));
-    assert!(
-        matches!(outcome, InputOutcome::Action(Action::CancelTurn)),
-        "running-turn overlay Esc must cancel, not detach, got {outcome:?}",
     );
     assert_eq!(
         Some(crate::app::actions::CancelTrigger::Esc),
@@ -6151,7 +6074,6 @@ fn overlay_esc_wake_turn_scrollback_does_not_backout() {
     }
     let agent = app.agents.get_mut(&id).unwrap();
     agent.active_pane = crate::app::agent_view::AgentPane::Scrollback;
-    agent.vim_mode = true;
     agent.note_streaming_wake_turn("p-wake");
     assert!(agent.session.state.is_idle());
     assert!(agent.wake_turn_active());
@@ -6159,7 +6081,7 @@ fn overlay_esc_wake_turn_scrollback_does_not_backout() {
     let outcome = app.handle_input(&key_event(KeyCode::Esc, KeyModifiers::NONE));
     assert!(
         matches!(outcome, InputOutcome::Action(Action::CancelTurn)),
-        "vim-mode wake Esc must cancel, not detach, got {outcome:?}",
+        "wake Esc must cancel, not detach, got {outcome:?}",
     );
 }
 /// Overlay while TurnCancelling: Esc is swallowed (neither re-sends the cancel nor detaches).
@@ -7510,7 +7432,6 @@ fn welcome_picker_f_cycle_disabled_under_chat_mode() {
         card_detail: None,
     };
     let f_key = Event::Key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::NONE));
-    crate::appearance::cache::set_vim_mode(false);
     let mut app = test_app();
     app.session_picker_entries = Some(vec![conversation_entry]);
     app.chat_mode = true;

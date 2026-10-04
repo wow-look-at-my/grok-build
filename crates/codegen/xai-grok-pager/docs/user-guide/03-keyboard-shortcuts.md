@@ -4,23 +4,9 @@ Reference for key bindings in the Grok Build TUI. Bindings are built in and cann
 
 ---
 
-## Input Modes
+## Scrollback keys
 
-Grok has input modes that control how you navigate the scrollback:
-
-- **Simple mode** (default): Arrow keys for navigation, `Shift+Arrow` for turn navigation, `Space` to focus the prompt, and any letter key auto-focuses the prompt.
-- **Vim mode** (opt-in): `j`/`k` for navigation, `H`/`L` for selected-turn navigation, `J`/`K` for viewport-top turn jumps (same as the timeline arrows), `h`/`l` for fold. This is `e`/`E` for expand/collapse, and `i`/`Tab`/`Space` to focus the prompt.
-
-Simple mode is active by default. To switch to Vim mode, set `vim_mode = true` under `[ui]` in `~/.grok/config.toml`, or toggle it at runtime with `/vim-mode`. See [Configuration](05-configuration.md) for details.
-
-The tables below document bindings for both modes. The "Key" column shows the Vim-mode binding, and the "Alt Key" column shows the equivalent in simple mode (arrow keys, etc.).
-
-> **Vim-mode required**: Single-letter and `Shift+letter` bindings in the
-> **Scrollback** context (`j/k`, `h/l`, `g/G`, `L/H`, `y/Y`, `o/O`, `r`,
-> `x`, `e/E`, and the `i` insert-mode alt) require `[ui].vim_mode = true`
-> in `~/.grok/config.toml` (or `/vim-mode` to toggle). Arrow keys, `Tab`,
-> `Esc`, `Space`, `PageUp/Down`, and every `Ctrl+letter` shortcut work in
-> both modes.
+With the scrollback focused, arrow keys navigate, `Shift+Arrow` jumps between turns, and `Space` or `Tab` focuses the prompt. A bare letter or `Shift+letter` focuses the prompt and types the character.
 
 ---
 
@@ -28,22 +14,18 @@ The tables below document bindings for both modes. The "Key" column shows the Vi
 
 Move through conversation entries in the scrollback pane.
 
-| Key | Alt Key | Action |
-|-----|---------|--------|
-| `j` | `Down` | Select next entry |
-| `k` | `Up` | Select previous entry |
-| `⇧L` | `Shift+Right` | Jump to next turn (user prompt) |
-| `⇧H` | `Shift+Left` | Jump to previous turn (user prompt) |
-| `⇧J` | | Jump to next turn at viewport top |
-| `⇧K` | | Jump to previous turn at viewport top |
-| `g` | | Go to top of scrollback |
-| `⇧G` | | Go to bottom of scrollback |
-| `Ctrl+K` | | Scroll up one line (without changing selection) |
-| `Ctrl+J` | | Scroll down one line (without changing selection) |
-| `PageUp` | | Scroll up one page (selection moves to the top of the viewport) |
-| `PageDown` | | Scroll down one page (selection moves to the bottom of the viewport) |
-| `Ctrl+U` | | Scroll up half page |
-| `Ctrl+D` (`Shift+D` in VSCode) | | Scroll down half page |
+| Key | Action |
+|-----|--------|
+| `Down` | Select next entry |
+| `Up` | Select previous entry |
+| `Shift+Right` | Jump to next turn (user prompt) |
+| `Shift+Left` | Jump to previous turn (user prompt) |
+| `Ctrl+K` | Scroll up one line (without changing selection) |
+| `Ctrl+J` | Scroll down one line (without changing selection) |
+| `PageUp` | Scroll up one page (selection moves to the top of the viewport) |
+| `PageDown` | Scroll down one page (selection moves to the bottom of the viewport) |
+| `Ctrl+U` | Scroll up half page |
+| `Ctrl+D` | Scroll down half page (not bound in VS Code family terminals) |
 
 `PageUp` and `PageDown` also scroll the conversation while the ordinary prompt is focused, without moving focus or changing the draft. An active prompt history, `@` file search, slash menu, or completion dropdown keeps the keys for its own navigation.
 
@@ -53,23 +35,18 @@ Move through conversation entries in the scrollback pane.
 
 Control how entries are displayed in the scrollback.
 
-| Key | Alt Key | Action |
-|-----|---------|--------|
-| `h` | `Left` | Collapse selected entry |
-| `l` | `Right` | Expand selected entry |
-| `e` | | Toggle fold on selected entry |
-| `⇧E` | | Expand all / collapse all entries |
-| `Ctrl+E` | | Expand/collapse all thinking blocks |
-| `r` | | Toggle raw markdown on selected entry |
+| Key | Action |
+|-----|--------|
+| `Left` | Collapse selected entry |
+| `Right` | Expand selected entry |
+| `Ctrl+E` | Expand/collapse all thinking blocks |
 
-Setting `respect_manual_folds = true` under `[scrollback.scroll]` in `pager.toml` (opt-in, off by default — see [Configuration](05-configuration.md)) makes a hand-folded block pinned: streaming updates. Finish events (for example a thinking block ending) leave it alone instead of resetting it, and expanding a block while auto-scroll is following the tail stops following. As a result, you can read. Resume with `⇧G`, `j` at the last entry, scrolling past the bottom, or sending a new prompt. `⇧E` clears all pins, and `Ctrl+E` clears pins on thinking blocks.
+Setting `respect_manual_folds = true` under `[scrollback.scroll]` in `pager.toml` (opt-in, off by default — see [Configuration](05-configuration.md)) makes a hand-folded block pinned: streaming updates. Finish events (for example a thinking block ending) leave it alone instead of resetting it, and expanding a block while auto-scroll is following the tail stops following. As a result, you can read. Resume with `Down` at the last entry, scrolling past the bottom, or sending a new prompt. `Ctrl+E` clears pins on thinking blocks.
 
 ### Block Content
 
 | Key | Action |
 |-----|--------|
-| `y` | Copy block content to clipboard |
-| `⇧Y` | Copy block metadata (e.g., the shell command) to clipboard |
 | `Enter` | Open block content in fullscreen viewer |
 | `Ctrl+F` | Open block content in fullscreen viewer (alt binding) |
 
@@ -81,13 +58,13 @@ Switch between the prompt input and scrollback pane.
 
 | Key | Alt Key | Context | Action |
 |-----|---------|---------|--------|
-| `Tab` | `Space` (and `i` in vim mode) | Scrollback focused | Focus the prompt input |
-| `Tab` | | Prompt focused | Focus the scrollback (both simple and vim scrollback modes) |
+| `Tab` | `Space` | Scrollback focused | Focus the prompt input |
+| `Tab` | | Prompt focused | Focus the scrollback |
 | `Tab` | `Shift+Tab` (backwards) | A blocking card is focused (question, permission prompt, cancel-turn panel) | Walk that card's rows, wrapping round at the ends. Focus stays in the card |
-| `Tab` | `Space` (and `i` in vim mode) | Scrollback focused with a card parked | Hand the keyboard back to the card (the bar's focus hint names it) |
+| `Tab` | `Space` | Scrollback focused with a card parked | Hand the keyboard back to the card (the bar's focus hint names it) |
 | `Enter` | | Prompt focused | Send the current prompt |
 
-**Esc is not a focus key.** Mid-turn it cancels the running turn. Idle, it follows the clear / rewind semantics below. Nothing about Esc depends on `[ui].vim_mode` (scrollback nav) or `[ui].simple_mode` (prompt editor). Overlays, modals, slash/file dropdowns, voice, search, and selection still steal Esc first.
+**Esc is not a focus key.** Mid-turn it cancels the running turn. Idle, it follows the clear / rewind semantics below. Overlays, modals, slash/file dropdowns, voice, search, and selection still steal Esc first.
 
 ## Blocking cards
 
@@ -388,23 +365,14 @@ The TUI supports mouse interaction:
 
 ## Quick Reference Card
 
-### When scrollback is focused (Simple mode — default)
+### When scrollback is focused
 
 ```
 Navigation:       Up/Down (prev/next entry)  Shift+Left/Right (prev/next turn)
 Scrolling:        Ctrl+J/K (line)  PgUp/PgDn (page)  Ctrl+U/D (half page)
-Focus prompt:     Space or any letter key (auto-focuses and types)
-```
-
-### When scrollback is focused (Vim mode)
-
-```
-Navigation:       j/k (up/down)  H/L (prev/next turn)  K/J (viewport-top turn)  g/G (top/bottom)
-Scrolling:        Ctrl+J/K (line)  Ctrl+U/D (half page; D=Shift+D in VSCode)  PgUp/PgDn (page)
-Folding:          h/l (collapse/expand)  e (toggle)  E (all)
-Content:          y (copy)  Y (copy cmd)  Enter (fullscreen)
-View:             r (raw markdown)  Ctrl+E (thinking)
-Focus prompt:     i, Tab, or Space
+Folding:          Left/Right (collapse/expand)  Ctrl+E (thinking)
+Content:          Enter (fullscreen)
+Focus prompt:     Tab, Space, or any letter key (auto-focuses and types)
 ```
 
 ### When prompt is focused

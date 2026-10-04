@@ -1681,11 +1681,10 @@ pub struct PickerConfig<'a> {
     pub compact_bottom_bar: bool,
     /// If true (and `show_search_hint` is also true), only `/` or a click on the search bar activates
     /// search mode. Typing arbitrary printable characters is ignored instead of auto-starting a query.
-    pub search_only_on_slash: bool,
     /// When true, the picker opens and stays in nav mode (vim) whenever search is not active: j/k
     /// navigate and printable chars don't type. `i`/`/` enter search, unless search is disabled or the
     /// char is bound as an action key on the picker (which takes precedence).
-    pub vim_normal_first: bool,
+    pub search_only_on_slash: bool,
 }
 
 /// Standard picker shortcuts: navigate, select, close.
@@ -2384,10 +2383,6 @@ pub fn render_picker(
         if let Some(shortcuts) = config.shortcuts {
             all_hints.extend_from_slice(shortcuts);
         }
-        // Show `i` in vim nav mode so users discover how to start typing
-        if config.vim_normal_first && !state.search_active {
-            all_hints.push(HintItem::new(crate::key!('i'), "search"));
-        }
         // Expandable: add the e (expand) and y (copy) hints
         if config.expandable && !config.compact_bottom_bar {
             all_hints.push(HintItem {
@@ -2659,10 +2654,6 @@ pub fn handle_picker_input(
         text: impl AsRef<str>,
         config: &PickerConfig<'_>,
     ) -> PickerOutcome {
-        // vim_normal_first: printables don't type until search is entered, so a paste while in nav mode is ignored
-        if config.vim_normal_first && !state.search_active {
-            return PickerOutcome::Unchanged;
-        }
         let outcome = state.paste_query(text.as_ref());
         if outcome == LineEditOutcome::TextChanged && config.show_search_hint {
             state.search_active = true;
@@ -2688,20 +2679,11 @@ pub fn handle_picker_input(
 
         // Search mode (currently active)
         // Also reachable for vim_normal_first pickers without a search hint, so typing/Esc/Backspace work once search is entered via `i`/`/`
-        if (config.show_search_hint || config.vim_normal_first) && state.search_active {
+        if config.show_search_hint && state.search_active {
             if key.code == KeyCode::Esc {
-                let query_changed = config.vim_normal_first && !state.query().is_empty();
                 state.search_active = false;
                 state.selection_hidden = false;
-                // vim_normal_first: Esc leaves search for nav mode and clears the query in one step (mirrors scrollback vim-mode)
-                if config.vim_normal_first {
-                    state.clear_query();
-                }
-                return if query_changed {
-                    PickerOutcome::QueryChanged
-                } else {
-                    PickerOutcome::Changed
-                };
+                return PickerOutcome::Changed;
             }
             if let Some(tabs) = config.tabs {
                 let tab_count = tabs.len();
@@ -2761,8 +2743,8 @@ pub fn handle_picker_input(
             }
         }
 
-        // j/k alias to Down/Up for nav when a search hint is shown (hint mode) or under vim_normal_first (always-active pickers included)
-        let jk_navigates = config.show_search_hint || config.vim_normal_first;
+        // j/k alias to Down/Up for nav when a search hint is shown (hint mode)
+        let jk_navigates = config.show_search_hint;
 
         // When the tabs region is focused (reached by Up from search or the bottom of the list when tabs
         // are configured), boundary Down/Up and Enter move focus back into search/content here.
@@ -2776,7 +2758,7 @@ pub fn handle_picker_input(
                 state.tabs_focused = false;
                 // Down from the tabs region goes to search, completing the arrow cycle (list bottom, tabs, search, list top)
                 // Under vim_normal_first nav never opens search, so j/Down from the tabs region moves into the list instead
-                if config.show_search_hint && !config.vim_normal_first {
+                if config.show_search_hint {
                     state.search_active = true;
                     state.selection_hidden = true;
                 } else if entry_count > 0 {
@@ -2844,7 +2826,7 @@ pub fn handle_picker_input(
             return PickerOutcome::Changed;
         }
 
-        // Navigation: Down (and j in hint or vim_normal_first mode)
+        // Navigation: Down (and j in hint mode)
         let is_down_j = jk_navigates
             && !state.search_active
             && key.code == KeyCode::Char('j')
@@ -2853,8 +2835,7 @@ pub fn handle_picker_input(
         if is_down {
             let at_bottom = entry_count == 0 || state.selected == last_selectable;
 
-            // Under vim_normal_first, j/Down clamp at the list bottom (the field doc promises only `i`/`/` open search; never auto-jump to tabs)
-            if at_bottom && !state.search_active && !config.vim_normal_first {
+            if at_bottom && !state.search_active {
                 // With a tab bar, Down from the last list item moves focus to the tabs region instead of the search bar
                 // There Left/Right can cycle tabs
                 if config.tabs.is_some() {
@@ -2891,7 +2872,7 @@ pub fn handle_picker_input(
             return PickerOutcome::Changed;
         }
 
-        // Navigation: Up (and k in hint or vim_normal_first mode)
+        // Navigation: Up (and k in hint mode)
         let is_up_k = jk_navigates
             && !state.search_active
             && key.code == KeyCode::Char('k')
@@ -2900,9 +2881,7 @@ pub fn handle_picker_input(
         if is_up {
             let at_top = entry_count == 0 || state.selected == first_selectable;
 
-            // Under vim_normal_first, k/Up clamp at the list top (only `i`/`/` open search)
-            if at_top && config.show_search_hint && !state.search_active && !config.vim_normal_first
-            {
+            if at_top && config.show_search_hint && !state.search_active {
                 state.search_active = true;
                 state.selection_hidden = true;
                 state.hovered = None;
@@ -3007,20 +2986,7 @@ pub fn handle_picker_input(
         {
             return PickerOutcome::FilterCycled;
         }
-        // vim_normal_first opens the picker in nav mode; `/` or `i` is the only way into search (printable chars don't type until then)
-        // Mirrors scrollback vim-mode
-        // This intentionally shadows the hint `/` handler below under vim and also covers always-active pickers (no search hint)
-        if config.vim_normal_first
-            && !state.search_active
-            && !config.disable_search
-            && key.modifiers.is_empty()
-            && matches!(key.code, KeyCode::Char('i') | KeyCode::Char('/'))
-        {
-            state.search_active = true;
-            state.tabs_focused = false;
-            return PickerOutcome::Changed;
-        }
-        if !config.show_search_hint && !config.disable_search && !config.vim_normal_first {
+        if !config.show_search_hint && !config.disable_search {
             if key.code == KeyCode::Char('/')
                 && key.modifiers.is_empty()
                 && state.query().is_empty()
@@ -3042,16 +3008,10 @@ pub fn handle_picker_input(
                 state.tabs_focused = false;
                 return PickerOutcome::Changed;
             }
-            if !config.search_only_on_slash
-                && !config.vim_normal_first
-                && is_legacy_alt_word_key(key)
-            {
+            if !config.search_only_on_slash && is_legacy_alt_word_key(key) {
                 return PickerOutcome::Changed;
             }
-            if !config.search_only_on_slash
-                && !config.vim_normal_first
-                && is_plain_query_character(key)
-            {
+            if !config.search_only_on_slash && is_plain_query_character(key) {
                 let outcome = state.edit_query(key);
                 if outcome == LineEditOutcome::TextChanged {
                     state.search_active = true;
@@ -3083,8 +3043,7 @@ mod tests {
     use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 
     // Minimal picker config for input tests
-    // Flip `vim_normal_first` per-test to exercise the dormant nav mode; everything else mirrors a basic picker
-    fn cfg(show_search_hint: bool, vim_normal_first: bool) -> PickerConfig<'static> {
+    fn cfg(show_search_hint: bool) -> PickerConfig<'static> {
         PickerConfig {
             title: None,
             show_search_hint,
@@ -3105,7 +3064,6 @@ mod tests {
             disable_search: false,
             compact_bottom_bar: false,
             search_only_on_slash: false,
-            vim_normal_first,
         }
     }
 
@@ -3124,7 +3082,7 @@ mod tests {
     #[test]
     fn flag_off_always_active_char_types() {
         // show_search_hint=false: always-active search types immediately
-        let config = cfg(false, false);
+        let config = cfg(false);
         let mut state = PickerState::default();
         let outcome = handle_picker_input(&press('a'), &mut state, 3, &config);
         assert!(matches!(outcome, PickerOutcome::QueryChanged));
@@ -3134,7 +3092,7 @@ mod tests {
     #[test]
     fn flag_off_hint_char_auto_activates_search() {
         // show_search_hint=true: a non-jk char auto-activates search
-        let config = cfg(true, false);
+        let config = cfg(true);
         let mut state = PickerState::default();
         let outcome = handle_picker_input(&press('a'), &mut state, 3, &config);
         assert!(matches!(outcome, PickerOutcome::QueryChanged));
@@ -3146,7 +3104,7 @@ mod tests {
     fn always_active_slash_on_empty_query_focuses_search_without_typing() {
         // A show_search_hint=false picker (e.g. the `/docs` how-to picker) shows the "/ to search" placeholder while unfocused.
         // Pressing the advertised `/` must focus search, not type a literal `/`
-        let config = cfg(false, false);
+        let config = cfg(false);
         let mut state = PickerState::default();
         let outcome = handle_picker_input(&press('/'), &mut state, 3, &config);
         assert!(matches!(outcome, PickerOutcome::Changed));
@@ -3161,7 +3119,7 @@ mod tests {
     #[test]
     fn always_active_slash_mid_query_inserts_literal_slash() {
         // A `/` typed into a non-empty query is plausible query text (path-like searches) and must keep inserting
-        let config = cfg(false, false);
+        let config = cfg(false);
         let mut state = PickerState::default();
         handle_picker_input(&press('a'), &mut state, 3, &config);
         handle_picker_input(&press('b'), &mut state, 3, &config);
@@ -3177,7 +3135,7 @@ mod tests {
         // Pickers that open input-focused never show the "/ to search" placeholder
         // `input_active()` covers the command palette, the arg picker, and the dashboard location picker
         // A leading `/` there is query text (e.g. an absolute path) and must insert even on an empty query.
-        let config = cfg(false, false);
+        let config = cfg(false);
         let mut state = PickerState::input_active();
         let outcome = handle_picker_input(&press('/'), &mut state, 3, &config);
         assert!(matches!(outcome, PickerOutcome::QueryChanged));
@@ -3187,7 +3145,7 @@ mod tests {
     #[test]
     fn hint_slash_still_activates_search_without_typing() {
         // show_search_hint=true pickers keep the `/` focus-search handling
-        let config = cfg(true, false);
+        let config = cfg(true);
         let mut state = PickerState::default();
         let outcome = handle_picker_input(&press('/'), &mut state, 3, &config);
         assert!(matches!(outcome, PickerOutcome::Changed));
@@ -3208,7 +3166,7 @@ mod tests {
         // false-positives on the terminal theme, where text_primary is Reset (every cell matches).
         let _guard = crate::theme::cache::pin_theme();
         let theme = Theme::current();
-        let config = cfg(false, false);
+        let config = cfg(false);
         let area = Rect::new(0, 0, 60, 16);
 
         // Render the picker; report whether the search row drew a cursor (an inverse-video cell whose bg == text_primary) plus its visible text
@@ -3472,30 +3430,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn vim_not_searching_char_does_not_type() {
-        for hint in [true, false] {
-            let config = cfg(hint, true);
-            let mut state = PickerState::default();
-            let outcome = handle_picker_input(&press('a'), &mut state, 3, &config);
-            assert!(state.query().is_empty(), "hint={hint}");
-            assert!(!state.search_active, "hint={hint}");
-            assert!(matches!(outcome, PickerOutcome::Unchanged), "hint={hint}");
-        }
-    }
-
-    #[test]
-    fn vim_i_enters_search_without_typing() {
-        for hint in [true, false] {
-            let config = cfg(hint, true);
-            let mut state = PickerState::default();
-            let outcome = handle_picker_input(&press('i'), &mut state, 3, &config);
-            assert!(matches!(outcome, PickerOutcome::Changed), "hint={hint}");
-            assert!(state.search_active, "hint={hint}");
-            assert!(state.query().is_empty(), "hint={hint}");
-        }
-    }
-
     /// `input_active()` opens directly in input mode; `default()` does not.
     /// Type-to-find pickers (command palette, the `/model` and `/theme` arg picker) use it so typing filters immediately on open.
     #[test]
@@ -3506,7 +3440,7 @@ mod tests {
 
     #[test]
     fn expandable_picker_routes_arrows_by_focus() {
-        let mut config = cfg(true, false);
+        let mut config = cfg(true);
         config.expandable = true;
 
         let mut search = PickerState::input_active();
@@ -3537,7 +3471,7 @@ mod tests {
 
     #[test]
     fn first_hint_search_edit_leaves_expansion_to_the_host() {
-        let mut config = cfg(true, false);
+        let mut config = cfg(true);
         config.expandable = true;
         let mut state = PickerState::default();
 
@@ -3568,114 +3502,6 @@ mod tests {
     }
 
     #[test]
-    fn vim_char_types_after_entering_search() {
-        for hint in [true, false] {
-            let config = cfg(hint, true);
-            let mut state = PickerState::default();
-            handle_picker_input(&press('i'), &mut state, 3, &config);
-            let outcome = handle_picker_input(&press('a'), &mut state, 3, &config);
-            assert!(
-                matches!(outcome, PickerOutcome::QueryChanged),
-                "hint={hint}"
-            );
-            assert_eq!(state.query(), "a", "hint={hint}");
-        }
-    }
-
-    #[test]
-    fn vim_esc_while_searching_exits_search_and_clears_query() {
-        for hint in [true, false] {
-            let config = cfg(hint, true);
-            let mut state = PickerState::default();
-            handle_picker_input(&press('i'), &mut state, 3, &config);
-            handle_picker_input(&press('a'), &mut state, 3, &config);
-            assert_eq!(state.query(), "a", "hint={hint}");
-            let outcome = handle_picker_input(&press_esc(), &mut state, 3, &config);
-            assert!(
-                matches!(outcome, PickerOutcome::QueryChanged),
-                "hint={hint}"
-            );
-            assert!(!state.search_active, "hint={hint}");
-            assert!(state.query().is_empty(), "hint={hint}");
-        }
-    }
-
-    #[test]
-    fn vim_esc_while_not_searching_closes() {
-        for hint in [true, false] {
-            let config = cfg(hint, true);
-            let mut state = PickerState::default();
-            let outcome = handle_picker_input(&press_esc(), &mut state, 3, &config);
-            assert!(matches!(outcome, PickerOutcome::Closed), "hint={hint}");
-        }
-    }
-
-    #[test]
-    fn vim_j_k_navigate_when_not_searching() {
-        // Works for both hint and always-active (show_search_hint=false) pickers.
-        for hint in [true, false] {
-            let config = cfg(hint, true);
-            let mut state = PickerState::default();
-            handle_picker_input(&press('j'), &mut state, 3, &config);
-            assert_eq!(state.selected, 1, "hint={hint} after j");
-            handle_picker_input(&press('k'), &mut state, 3, &config);
-            assert_eq!(state.selected, 0, "hint={hint} after k");
-        }
-    }
-
-    #[test]
-    fn vim_j_at_bottom_clamps_without_opening_search() {
-        // Edge-cycle is disabled under vim: j at the last item stays put and never opens search or jumps to the tabs region
-        for hint in [true, false] {
-            let config = cfg(hint, true);
-            let mut state = PickerState {
-                selected: 2,
-                ..PickerState::default()
-            };
-            let outcome = handle_picker_input(&press('j'), &mut state, 3, &config);
-            assert_eq!(state.selected, 2, "hint={hint}");
-            assert!(!state.search_active, "hint={hint}");
-            assert!(!state.tabs_focused, "hint={hint}");
-            assert!(matches!(outcome, PickerOutcome::Changed), "hint={hint}");
-        }
-    }
-
-    #[test]
-    fn vim_k_at_top_clamps_without_opening_search() {
-        for hint in [true, false] {
-            let config = cfg(hint, true);
-            let mut state = PickerState::default(); // selected = 0 (top)
-            let outcome = handle_picker_input(&press('k'), &mut state, 3, &config);
-            assert_eq!(state.selected, 0, "hint={hint}");
-            assert!(!state.search_active, "hint={hint}");
-            assert!(matches!(outcome, PickerOutcome::Changed), "hint={hint}");
-        }
-    }
-
-    #[test]
-    fn vim_slash_enters_search_without_typing() {
-        for hint in [true, false] {
-            let config = cfg(hint, true);
-            let mut state = PickerState::default();
-            let outcome = handle_picker_input(&press('/'), &mut state, 3, &config);
-            assert!(matches!(outcome, PickerOutcome::Changed), "hint={hint}");
-            assert!(state.search_active, "hint={hint}");
-            assert!(state.query().is_empty(), "hint={hint}");
-        }
-    }
-
-    #[test]
-    fn vim_action_key_takes_precedence_over_i_entry() {
-        // A picker binding `i` as an action key (e.g. extensions install/auth) triggers the action; the vim `i` search-entry does not shadow it.
-        let mut config = cfg(true, true);
-        config.action_keys = &[('i', "x")];
-        let mut state = PickerState::default();
-        let outcome = handle_picker_input(&press('i'), &mut state, 3, &config);
-        assert!(matches!(outcome, PickerOutcome::Action('i')));
-        assert!(!state.search_active);
-    }
-
-    #[test]
     fn tabs_focused_keys_reach_the_shared_handlers() {
         // The tab bar holding focus only claims Up/Down/Enter: action keys (Space included) and the advertised `f`
         // filter key act on the still-selected row, h/l cycle tabs, `/` and any other printable char start a query.
@@ -3683,43 +3509,41 @@ mod tests {
             tabs_focused: true,
             ..PickerState::default()
         };
-        for vim in [false, true] {
-            let mut config = cfg(true, vim);
-            config.tabs = Some(&["a", "b", "c"]);
-            config.action_keys = &[('u', "update"), (' ', "toggle")];
-            config.filter_label = Some("All");
+        let mut config = cfg(true);
+        config.tabs = Some(&["a", "b", "c"]);
+        config.action_keys = &[('u', "update"), (' ', "toggle")];
+        config.filter_label = Some("All");
 
-            for c in ['u', ' '] {
-                let mut state = focused();
-                let outcome = handle_picker_input(&press(c), &mut state, 3, &config);
-                assert!(
-                    matches!(outcome, PickerOutcome::Action(ch) if ch == c),
-                    "vim={vim} c={c:?}"
-                );
-                assert!(state.query().is_empty(), "vim={vim} c={c:?}");
-                assert!(!state.search_active, "vim={vim} c={c:?}");
-            }
-
+        for c in ['u', ' '] {
             let mut state = focused();
-            let outcome = handle_picker_input(&press('f'), &mut state, 3, &config);
-            assert!(matches!(outcome, PickerOutcome::FilterCycled), "vim={vim}");
-            assert!(!state.search_active, "vim={vim}");
-
-            let mut state = focused();
-            let outcome = handle_picker_input(&press('l'), &mut state, 3, &config);
-            assert!(matches!(outcome, PickerOutcome::TabChanged(1)), "vim={vim}");
-            let outcome = handle_picker_input(&press('h'), &mut state, 3, &config);
-            assert!(matches!(outcome, PickerOutcome::TabChanged(2)), "vim={vim}");
-            assert!(state.query().is_empty(), "vim={vim}");
-
-            let mut state = focused();
-            let outcome = handle_picker_input(&press('/'), &mut state, 3, &config);
-            assert!(matches!(outcome, PickerOutcome::Changed), "vim={vim}");
-            assert!(state.search_active, "vim={vim}");
-            assert!(!state.tabs_focused, "vim={vim}");
+            let outcome = handle_picker_input(&press(c), &mut state, 3, &config);
+            assert!(
+                matches!(outcome, PickerOutcome::Action(ch) if ch == c),
+                "c={c:?}"
+            );
+            assert!(state.query().is_empty(), "c={c:?}");
+            assert!(!state.search_active, "c={c:?}");
         }
 
-        let mut config = cfg(true, false);
+        let mut state = focused();
+        let outcome = handle_picker_input(&press('f'), &mut state, 3, &config);
+        assert!(matches!(outcome, PickerOutcome::FilterCycled));
+        assert!(!state.search_active);
+
+        let mut state = focused();
+        let outcome = handle_picker_input(&press('l'), &mut state, 3, &config);
+        assert!(matches!(outcome, PickerOutcome::TabChanged(1)));
+        let outcome = handle_picker_input(&press('h'), &mut state, 3, &config);
+        assert!(matches!(outcome, PickerOutcome::TabChanged(2)));
+        assert!(state.query().is_empty());
+
+        let mut state = focused();
+        let outcome = handle_picker_input(&press('/'), &mut state, 3, &config);
+        assert!(matches!(outcome, PickerOutcome::Changed));
+        assert!(state.search_active);
+        assert!(!state.tabs_focused);
+
+        let mut config = cfg(true);
         config.tabs = Some(&["a", "b"]);
         let mut state = focused();
         let outcome = handle_picker_input(&press('a'), &mut state, 3, &config);
@@ -3731,7 +3555,7 @@ mod tests {
 
     #[test]
     fn paste_search_leaves_expansion_to_the_host() {
-        let mut config = cfg(true, false);
+        let mut config = cfg(true);
         config.expandable = true;
         let mut state = PickerState::default();
 
@@ -3741,79 +3565,11 @@ mod tests {
         assert!(state.expanded.is_empty());
     }
 
-    #[test]
-    fn vim_paste_suppressed_when_not_searching() {
-        for hint in [true, false] {
-            let config = cfg(hint, true);
-            let mut state = PickerState::default();
-            let outcome =
-                handle_picker_input(&Event::Paste("hello".to_string()), &mut state, 3, &config);
-            assert!(state.query().is_empty(), "hint={hint}");
-            assert!(matches!(outcome, PickerOutcome::Unchanged), "hint={hint}");
-        }
-    }
-
-    #[test]
-    fn vim_paste_types_after_entering_search() {
-        // Paste is only suppressed in nav mode; once search is entered it pastes.
-        let config = cfg(true, true);
-        let mut state = PickerState::default();
-        handle_picker_input(&press('i'), &mut state, 3, &config);
-        let outcome = handle_picker_input(&Event::Paste("hi".to_string()), &mut state, 3, &config);
-        assert!(matches!(outcome, PickerOutcome::QueryChanged));
-        assert_eq!(state.query(), "hi");
-    }
-
-    #[test]
-    fn vim_disable_search_makes_i_and_slash_inert() {
-        // disable_search pickers (read-only cheatsheets) use no search hint; under vim, `i` and `/` must not enter search
-        let mut config = cfg(false, true);
-        config.disable_search = true;
-        for c in ['i', '/'] {
-            let mut state = PickerState::default();
-            let outcome = handle_picker_input(&press(c), &mut state, 3, &config);
-            assert!(!state.search_active, "c={c}");
-            assert!(state.query().is_empty(), "c={c}");
-            assert!(matches!(outcome, PickerOutcome::Unchanged), "c={c}");
-        }
-    }
-
-    #[test]
-    fn vim_with_tabs_jk_navigate_and_char_does_not_type() {
-        let mut config = cfg(true, true);
-        config.tabs = Some(&["a", "b"]);
-        let mut state = PickerState::default();
-        // j navigates the list without opening search or jumping to the tab bar.
-        handle_picker_input(&press('j'), &mut state, 3, &config);
-        assert_eq!(state.selected, 1);
-        assert!(!state.search_active);
-        assert!(!state.tabs_focused);
-        // A bare printable char does not type while in nav mode.
-        let outcome = handle_picker_input(&press('a'), &mut state, 3, &config);
-        assert!(state.query().is_empty());
-        assert!(matches!(outcome, PickerOutcome::Unchanged));
-    }
-
-    #[test]
-    fn vim_i_up_j_does_not_reopen_search_with_tabs() {
-        // After i (enter search) then Up (exit into the tabs region), j must move into the list
-        // It must not reopen search (only `i`/`/` start search under vim)
-        let mut config = cfg(true, true);
-        config.tabs = Some(&["a", "b"]);
-        let mut state = PickerState::default();
-        handle_picker_input(&press('i'), &mut state, 3, &config);
-        assert!(state.search_active);
-        handle_picker_input(&press_up(), &mut state, 3, &config);
-        assert!(state.tabs_focused);
-        assert!(!state.search_active);
-        handle_picker_input(&press('j'), &mut state, 3, &config);
-        assert!(!state.search_active);
-        assert!(!state.tabs_focused);
-    }
-
+    // After i (enter search) then Up (exit into the tabs region), j must move into the list
+    // It must not reopen search (only `i`/`/` start search under vim)
     #[test]
     fn query_cursor_edits_do_not_reset_list_state() {
-        let config = cfg(false, false);
+        let config = cfg(false);
         let mut state = PickerState::default();
         state.set_query("alpha-beta");
         state.selected = 2;
@@ -3845,7 +3601,7 @@ mod tests {
 
     #[test]
     fn query_text_edits_reset_list_state_once() {
-        let config = cfg(false, false);
+        let config = cfg(false);
         let mut state = PickerState::default();
         state.set_query("alpha-beta");
         state.selected = 2;
@@ -3866,10 +3622,10 @@ mod tests {
     }
 
     #[test]
-    fn canonical_alt_words_work_in_normal_and_vim_input() {
+    fn canonical_alt_words_work_in_normal_and_search_input() {
         let mut state = PickerState::default();
         state.set_query("alpha-beta");
-        let config = cfg(false, false);
+        let config = cfg(false);
         for (character, cursor) in [('b', "alpha-".len()), ('f', "alpha-beta".len())] {
             let outcome = handle_picker_input(
                 &Event::Key(KeyEvent::new(KeyCode::Char(character), KeyModifiers::ALT)),
@@ -3881,21 +3637,20 @@ mod tests {
             assert_eq!(state.query_cursor(), cursor);
         }
 
-        let config = cfg(true, true);
-        let mut vim_state = PickerState::default();
-        handle_picker_input(&press('i'), &mut vim_state, 3, &config);
-        vim_state.set_query("alpha-beta");
+        let config = cfg(true);
+        let mut search_state = PickerState::input_active();
+        search_state.set_query("alpha-beta");
         let outcome = handle_picker_input(
             &Event::Key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::ALT)),
-            &mut vim_state,
+            &mut search_state,
             3,
             &config,
         );
         assert!(matches!(outcome, PickerOutcome::QueryChanged));
-        assert_eq!(vim_state.query(), "alpha-");
+        assert_eq!(search_state.query(), "alpha-");
 
         let mut hinted = PickerState::default();
-        let hinted_config = cfg(true, false);
+        let hinted_config = cfg(true);
         let outcome = handle_picker_input(
             &Event::Key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::ALT)),
             &mut hinted,
@@ -3924,7 +3679,7 @@ mod tests {
         use ratatui::buffer::Buffer;
         use ratatui::layout::Rect;
 
-        let config = cfg(false, false);
+        let config = cfg(false);
         let grapheme = "👩🏽\u{200d}💻";
         let mut state = PickerState::default();
         state.set_query(format!("a{grapheme}b"));

@@ -961,7 +961,6 @@ fn location_picker_config<'a>() -> crate::views::picker::PickerConfig<'a> {
         disable_search: false,
         compact_bottom_bar: false,
         search_only_on_slash: false,
-        vim_normal_first: crate::appearance::cache::load_vim_mode(),
     }
 }
 
@@ -2590,7 +2589,6 @@ impl DashboardState {
         }
 
         // When a permission / ask-tool question is showing and the panel is focused it's an option picker.
-        let vim_mode = crate::appearance::cache::load_vim_mode();
         let question_mode = self
             .peek
             .as_ref()
@@ -2617,11 +2615,8 @@ impl DashboardState {
                             .unwrap_or(InputOutcome::Unchanged),
                     );
                 }
-                // Right (and vim `l`) open detail on the nav surface; without this the modal catch-all below swallows them
-                (KeyCode::Right | KeyCode::Char('l'), None)
-                    if key.modifiers.is_empty()
-                        && (matches!(key.code, KeyCode::Right) || vim_mode) =>
-                {
+                // Right opens detail on the nav surface; without this the modal catch-all below swallows it
+                (KeyCode::Right, None) if key.modifiers.is_empty() => {
                     let row = self.peek.as_ref().map(|p| p.row.clone());
                     return Some(
                         row.map(|r| InputOutcome::Action(Action::DashboardAttach(r)))
@@ -2721,7 +2716,6 @@ impl DashboardState {
         let open_detail = key.modifiers.is_empty()
             && match key.code {
                 KeyCode::Right => !focused || self.peek_reply.text().is_empty(),
-                KeyCode::Char('l') if vim_mode => !focused,
                 _ => false,
             };
         if open_detail {
@@ -2749,12 +2743,6 @@ impl DashboardState {
                 let Some(row) = self.peek.as_ref().map(|p| p.row.clone()) else {
                     return Some(InputOutcome::Unchanged);
                 };
-                if !focused && vim_mode {
-                    if let Some(p) = self.peek.as_mut() {
-                        p.focused = true;
-                    }
-                    return Some(InputOutcome::Changed);
-                }
                 let reply_text = self.peek_reply.text().to_string();
                 if !focused || reply_text.trim().is_empty() {
                     return Some(InputOutcome::Action(Action::DashboardAttach(row)));
@@ -2785,30 +2773,8 @@ impl DashboardState {
             });
         }
 
-        // Vim unfocused: j/k select rows; i focuses reply without typing `i`.
-        if vim_mode && key.modifiers.is_empty() {
-            match key.code {
-                KeyCode::Char('j') => {
-                    return Some(InputOutcome::Action(Action::DashboardSelectNext));
-                }
-                KeyCode::Char('k') => {
-                    return Some(InputOutcome::Action(Action::DashboardSelectPrev));
-                }
-                KeyCode::Char('i') => {
-                    if let Some(p) = self.peek.as_mut() {
-                        p.focused = true;
-                    }
-                    return Some(InputOutcome::Changed);
-                }
-                _ => {}
-            }
-        }
-
-        // Unfocused: non-vim printable focuses+types; vim swallows (focus via Enter/i/Tab).
+        // Unfocused: a printable focuses the reply and types.
         if is_typing_char {
-            if vim_mode {
-                return Some(InputOutcome::Unchanged);
-            }
             if let Some(p) = self.peek.as_mut() {
                 p.focused = true;
             }
@@ -2942,9 +2908,7 @@ impl DashboardState {
         // Resolve the registry binding up-front; the toast / delete-confirm clear below needs to know
         // whether this key IS the stop key, and it must run before the peek intercept (the lookup itself
         // is a pure read; the action is honoured further down). Arrows / Ctrl combos always resolve.
-        let vim_mode = crate::appearance::cache::load_vim_mode();
-        let from_registry =
-            registry.lookup_with_mode(key, crate::actions::When::DashboardFocused, vim_mode);
+        let from_registry = registry.lookup(key, crate::actions::When::DashboardFocused);
 
         // Clear `error_toast` on any keypress so it never lingers; kept for `Ctrl+X` so the arm path's own messaging survives its first press
         let is_stop_key = matches!(from_registry, Some(crate::actions::ActionId::DashboardStop));
@@ -3004,13 +2968,10 @@ impl DashboardState {
         }
 
         let list_keys_active = self.list_keys_active();
-        let vim_nav = vim_mode && self.list_focused && !self.search_mode;
         let step = match key.code {
             _ if !key.modifiers.is_empty() => None,
             KeyCode::Left if list_keys_active => Some(Step::Left),
             KeyCode::Right if list_keys_active => Some(Step::Right),
-            KeyCode::Char('h') if vim_nav => Some(Step::Left),
-            KeyCode::Char('l') if vim_nav => Some(Step::Right),
             _ => None,
         };
 
@@ -3279,13 +3240,6 @@ impl DashboardState {
             if matches!(key.code, KeyCode::Char(_))
                 && (key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT)
             {
-                if vim_mode {
-                    if key.code == KeyCode::Char('i') && key.modifiers.is_empty() {
-                        self.set_list_focused(false);
-                        return InputOutcome::Changed;
-                    }
-                    return InputOutcome::Unchanged;
-                }
                 self.set_list_focused(false);
                 // fall through to the widget so the char is typed.
             } else {
@@ -4107,20 +4061,13 @@ fn dashboard_action_for_id(
         | ActionId::PageDown
         | ActionId::HalfPageUp
         | ActionId::HalfPageDown
-        | ActionId::GotoTop
-        | ActionId::GotoBottom
         | ActionId::SelectNext
         | ActionId::SelectPrev
         | ActionId::NextTurn
         | ActionId::PrevTurn
-        | ActionId::NextResponse
-        | ActionId::PrevResponse
         | ActionId::Collapse
         | ActionId::Expand
-        | ActionId::ToggleFold
-        | ActionId::ToggleExpandAll
         | ActionId::ExpandAllThinking
-        | ActionId::ToggleRaw
         | ActionId::ToggleMouseCapture
         | ActionId::NextModel
         | ActionId::CancelTurn
@@ -4128,11 +4075,7 @@ fn dashboard_action_for_id(
         | ActionId::ToggleMultiline
         | ActionId::FocusPrompt
         | ActionId::FocusScrollback
-        | ActionId::CopyBlockContent
-        | ActionId::CopyBlockMeta
         | ActionId::OpenBlockViewer
-        | ActionId::OpenNextLink
-        | ActionId::OpenPrevLink
         | ActionId::ToggleTodos
         | ActionId::ToggleTasks
         | ActionId::ToggleQueue
@@ -4142,7 +4085,6 @@ fn dashboard_action_for_id(
         | ActionId::CycleMode
         | ActionId::BashMode
         | ActionId::Rewind
-        | ActionId::KillBgTask
         | ActionId::DumpInputLog
         | ActionId::Quit
         | ActionId::NewSession

@@ -348,7 +348,7 @@ impl AgentView {
             .scrollback
             .selected()
             .is_some_and(|idx| self.scrollback.entry_content_hidden_by_group(idx));
-        let (selected_supports_copy, selected_meta_label, selected_supports_fullscreen) =
+        let (selected_supports_copy, selected_supports_fullscreen) =
             if self.active_pane == ActivePane::Tasks {
                 let has_selected = self.tasks.selected_task_id().is_some_and(|tid| {
                     self.session
@@ -357,7 +357,7 @@ impl AgentView {
                         .is_some_and(|t| !t.stdout.is_empty())
                 });
                 let has_any_selected = self.tasks.selected_task_id().is_some();
-                (has_selected, None, has_any_selected)
+                (has_selected, has_any_selected)
             } else if self.active_pane == ActivePane::Scrollback {
                 let is_bg_task = selected_entry.is_some_and(|e| {
                     matches!(e.block, crate::scrollback::block::RenderBlock::BgTask(_))
@@ -377,7 +377,7 @@ impl AgentView {
                                 .get(tid)
                                 .is_some_and(|t| !t.stdout.is_empty())
                         });
-                    (has_stdout, None, true)
+                    (has_stdout, true)
                 } else {
                     let is_viewable_subagent = selected_entry.is_some_and(|e| {
                         if let crate::scrollback::block::RenderBlock::Subagent(ref sb) = e.block {
@@ -389,9 +389,6 @@ impl AgentView {
                     (
                         !selected_is_group_header
                             && selected_entry.is_some_and(|e| e.block.supports_copy()),
-                        selected_entry
-                            .and_then(|e| e.block.copy_meta_label())
-                            .filter(|_| !selected_is_group_header),
                         selected_entry.is_some_and(|e| e.block.supports_fullscreen())
                             || is_viewable_subagent,
                     )
@@ -400,9 +397,6 @@ impl AgentView {
                 (
                     !selected_is_group_header
                         && selected_entry.is_some_and(|e| e.block.supports_copy()),
-                    selected_entry
-                        .and_then(|e| e.block.copy_meta_label())
-                        .filter(|_| !selected_is_group_header),
                     selected_entry.is_some_and(|e| e.block.supports_fullscreen()),
                 )
             };
@@ -467,12 +461,10 @@ impl AgentView {
                 self.todo.show_done()
             },
             selected_supports_copy,
-            selected_meta_label,
             selected_supports_fullscreen,
             can_demote,
             selected_can_kill,
             self.multiline_mode,
-            self.vim_mode,
             self.surface(),
             (self.session.state.is_turn_running() || self.wake_turn_active())
                 && !self.renders_parked(),
@@ -3420,9 +3412,6 @@ impl AgentView {
                     h.push(HintItem::new(key!('a'), "approve"));
                 }
                 h.push(HintItem::new(key!('q'), "quit plan"));
-                if self.vim_mode {
-                    h.push(HintItem::paired(key!('j'), key!('k'), "nav"));
-                }
                 h.push(HintItem::new(key!('v'), "select"));
                 h.push(HintItem::new(key!(Tab), "prompt"));
                 h
@@ -3450,9 +3439,6 @@ impl AgentView {
                 if has_plan_comments {
                     h.push(HintItem::new(key!('s'), "send"));
                 }
-                if self.vim_mode {
-                    h.push(HintItem::paired(key!('j'), key!('k'), "nav"));
-                }
                 h.push(HintItem::new(key!('v'), "select"));
                 h.push(HintItem::new(key!('f', CONTROL), "fullscreen"));
                 h.push(HintItem::new(key!('/'), "search"));
@@ -3460,15 +3446,8 @@ impl AgentView {
                 h
             } else {
                 let mut h = vec![HintItem::new(key!(Enter), "confirm")];
-                if self.vim_mode {
-                    h.push(HintItem::paired(key!('j'), key!('k'), "nav"));
-                }
                 h.push(HintItem::new(key!('v'), "select"));
                 h.push(HintItem::new(key!('x'), "clear"));
-                if self.vim_mode {
-                    h.push(HintItem::new(key!('y'), "copy"));
-                    h.push(HintItem::new(key!('Y'), "filename"));
-                }
                 h.push(HintItem::new(key!(':'), "goto"));
                 h.push(HintItem::new(key!('/'), "search"));
                 h.push(HintItem::new(key!(Esc), "cancel"));

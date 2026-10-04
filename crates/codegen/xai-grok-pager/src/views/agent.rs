@@ -29,12 +29,6 @@ pub enum ActivePane {
     /// Consolidated panel dock above the prompt (remote `dock_enabled`).
     Dock,
 }
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
-pub enum InputMode {
-    #[default]
-    Vim,
-    Simple,
-}
 /// Cached pane areas from the last render, used for mouse hit-testing.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct PaneAreas {
@@ -656,12 +650,10 @@ pub(crate) fn build_hints(
     thinking_label: &'static str,
     show_done: bool,
     selected_supports_copy: bool,
-    selected_meta_label: Option<&'static str>,
     selected_supports_fullscreen: bool,
     can_demote: bool,
     selected_can_kill: bool,
     multiline_mode: bool,
-    vim_mode: bool,
     surface: ViewSurface,
     is_turn_running: bool,
     has_queued_follow_up: bool,
@@ -811,25 +803,11 @@ pub(crate) fn build_hints(
         }
         ActivePane::Scrollback if scrollback_search.is_some() => {
             let mut hints = Vec::new();
-            if vim_mode {
-                if scrollback_search.is_some_and(|s| s.is_composing()) {
-                    hints.push(HintItem::new(crate::key!(Enter), "go"));
-                } else {
-                    hints.push(HintItem::paired(
-                        crate::key!('n'),
-                        crate::key!('N'),
-                        "next/prev",
-                    ));
-                }
-            } else {
-                use crate::input::key::KeyShortcut;
-                use crossterm::event::KeyCode;
-                hints.push(HintItem::paired(
-                    KeyShortcut::key(KeyCode::Down),
-                    KeyShortcut::key(KeyCode::Up),
-                    "next/prev",
-                ));
-            }
+            hints.push(HintItem::paired(
+                crate::key!(Down),
+                crate::key!(Up),
+                "next/prev",
+            ));
             hints.push(HintItem::new(crate::key!(Esc), "cancel"));
             hints
         }
@@ -856,21 +834,12 @@ pub(crate) fn build_hints(
                 offer_focus_hint(&mut hints);
             }
             if selected_is_agent_message {
-                if vim_mode
-                    && selected_supports_copy
-                    && let Some(key) = registry.key_for(ActionId::CopyBlockContent)
-                {
-                    hints.push(HintItem::new(key, "copy"));
-                }
                 offer_focus_hint(&mut hints);
             }
             if selected_is_user_prompt {
                 let user_collapsed = fold_label == Some("expand");
                 if user_collapsed {
-                    let key = registry
-                        .key_for_mode(ActionId::ToggleFold, vim_mode)
-                        .or_else(|| registry.key_for_mode(ActionId::Expand, vim_mode));
-                    if let Some(key) = key {
+                    if let Some(key) = registry.key_for(ActionId::Expand) {
                         hints.push(HintItem::new(key, "expand"));
                     }
                 }
@@ -893,10 +862,7 @@ pub(crate) fn build_hints(
                 } else {
                     ActionId::Collapse
                 };
-                let key = registry
-                    .key_for_mode(ActionId::ToggleFold, vim_mode)
-                    .or_else(|| registry.key_for_mode(directional, vim_mode));
-                if let Some(key) = key {
+                if let Some(key) = registry.key_for(directional) {
                     hints.push(HintItem::new(key, label));
                 }
             }
@@ -906,47 +872,10 @@ pub(crate) fn build_hints(
             {
                 hints.push(HintItem::new(key, "open"));
             }
-            if vim_mode
-                && let (Some(j), Some(k)) = (
-                    registry.key_for(ActionId::SelectNext),
-                    registry.key_for(ActionId::SelectPrev),
-                )
-            {
-                hints.push(HintItem::paired(j, k, "nav").pinned());
-            }
-            if vim_mode
-                && let (Some(h), Some(l)) = (
-                    registry.key_for(ActionId::PrevTurn),
-                    registry.key_for(ActionId::NextTurn),
-                )
-            {
-                hints.push(HintItem::paired(l, h, "turn").pinned());
-            }
             if !selected_is_user_prompt
                 && let Some(key) = registry.key_for(ActionId::ExpandAllThinking)
             {
                 hints.push(HintItem::new(key, thinking_label));
-            }
-            if vim_mode
-                && let (Some(g), Some(bg)) = (
-                    registry.key_for(ActionId::GotoTop),
-                    registry.key_for(ActionId::GotoBottom),
-                )
-            {
-                hints.push(HintItem::paired(g, bg, "top/btm"));
-            }
-            if vim_mode
-                && !selected_is_agent_message
-                && selected_supports_copy
-                && let Some(key) = registry.key_for(ActionId::CopyBlockContent)
-            {
-                hints.push(HintItem::new(key, "copy"));
-            }
-            if vim_mode
-                && let Some(label) = selected_meta_label
-                && let Some(key) = registry.key_for(ActionId::CopyBlockMeta)
-            {
-                hints.push(HintItem::new(key, label));
             }
             if selected_can_kill {
                 hints.push(HintItem::new(crate::key!('x'), "kill"));
@@ -987,25 +916,6 @@ mod tests {
         selected_is_user_prompt: bool,
         selected_is_agent_message: bool,
     ) -> Vec<HintItem> {
-        scrollback_hints_with_vim_mode(
-            registry,
-            fold_label,
-            selected_supports_copy,
-            selected_supports_fullscreen,
-            selected_is_user_prompt,
-            selected_is_agent_message,
-            true,
-        )
-    }
-    fn scrollback_hints_with_vim_mode(
-        registry: &ActionRegistry,
-        fold_label: Option<&'static str>,
-        selected_supports_copy: bool,
-        selected_supports_fullscreen: bool,
-        selected_is_user_prompt: bool,
-        selected_is_agent_message: bool,
-        vim_mode: bool,
-    ) -> Vec<HintItem> {
         build_hints(
             ActivePane::Scrollback,
             prompt_focus_hint(),
@@ -1018,12 +928,10 @@ mod tests {
             "expand thinking",
             false,
             selected_supports_copy,
-            None,
             selected_supports_fullscreen,
             false,
             false,
             false,
-            vim_mode,
             ViewSurface::Root,
             false,
             false,
@@ -1052,12 +960,10 @@ mod tests {
             "expand thinking",
             false,
             false,
-            None,
             false,
             true,
             false,
             false,
-            true,
             ViewSurface::Root,
             false,
             false,
@@ -1086,8 +992,6 @@ mod tests {
             "prompt",
             "expand thinking",
             false,
-            false,
-            None,
             false,
             false,
             false,
@@ -1154,10 +1058,8 @@ mod tests {
             "expand thinking",
             false,
             false,
-            None,
             false,
             true,
-            false,
             false,
             false,
             surface,
@@ -1217,12 +1119,10 @@ mod tests {
             "expand thinking",
             false,
             false,
-            None,
             true,
             false,
             false,
             false,
-            true,
             ViewSurface::Root,
             false,
             false,
@@ -1273,23 +1173,10 @@ mod tests {
         assert_eq!(first_two_labels(&hints), vec!["expand thinking", "prompt"]);
     }
     #[test]
-    fn scrollback_agent_message_hoists_copy_then_space() {
-        let registry = ActionRegistry::defaults();
-        let hints = scrollback_hints(&registry, None, true, false, false, true);
-        assert_eq!(first_two_labels(&hints), vec!["copy", "prompt"]);
-    }
-    #[test]
-    fn scrollback_agent_message_no_duplicate_y_copy_in_full_list() {
-        let registry = ActionRegistry::defaults();
-        let hints = scrollback_hints(&registry, None, true, false, false, true);
-        let copy_count = hints.iter().filter(|h| h.label == "copy").count();
-        assert_eq!(copy_count, 1, "copy should appear exactly once");
-    }
-    #[test]
     fn scrollback_default_block_shows_prompt_first() {
         let registry = ActionRegistry::defaults();
         let hints = scrollback_hints(&registry, None, false, false, false, false);
-        assert_eq!(first_two_labels(&hints), vec!["prompt", "nav"]);
+        assert_eq!(first_two_labels(&hints), vec!["prompt", "expand thinking"]);
     }
     #[test]
     fn scrollback_foldable_non_user_block_hoists_fold_then_open() {
@@ -1298,78 +1185,31 @@ mod tests {
         assert_eq!(first_two_labels(&hints), vec!["fold", "open"]);
     }
     #[test]
-    fn scrollback_vim_mode_on_shows_nav_and_turn_hints() {
+    fn scrollback_hides_nav_turn_and_topbtm() {
         let registry = ActionRegistry::defaults();
-        let hints =
-            scrollback_hints_with_vim_mode(&registry, None, false, false, false, false, true);
+        let hints = scrollback_hints(&registry, None, false, false, false, false);
         let labels: Vec<&str> = hints.iter().map(|h| h.label.as_ref()).collect();
-        assert!(
-            labels.contains(&"nav"),
-            "vim mode should show j/k nav hint; got {labels:?}"
-        );
-        assert!(
-            labels.contains(&"turn"),
-            "vim mode should show Shift+l/h turn hint; got {labels:?}"
-        );
-        assert!(
-            labels.contains(&"top/btm"),
-            "vim mode should show g/G top/btm hint; got {labels:?}"
-        );
+        assert!(!labels.contains(&"nav"), "got {labels:?}");
+        assert!(!labels.contains(&"turn"), "got {labels:?}");
+        assert!(!labels.contains(&"top/btm"), "got {labels:?}");
     }
     #[test]
-    fn scrollback_vim_mode_off_hides_nav_turn_and_topbtm() {
+    fn scrollback_hides_copy_on_agent_message() {
         let registry = ActionRegistry::defaults();
-        let hints =
-            scrollback_hints_with_vim_mode(&registry, None, false, false, false, false, false);
-        let labels: Vec<&str> = hints.iter().map(|h| h.label.as_ref()).collect();
-        assert!(
-            !labels.contains(&"nav"),
-            "vim-off must hide j/k nav hint; got {labels:?}"
-        );
-        assert!(
-            !labels.contains(&"turn"),
-            "vim-off must hide Shift+l/h turn hint; got {labels:?}"
-        );
-        assert!(
-            !labels.contains(&"top/btm"),
-            "vim-off must hide g/G top/btm hint; got {labels:?}"
-        );
-    }
-    #[test]
-    fn scrollback_vim_mode_off_hides_y_copy_on_agent_message() {
-        let registry = ActionRegistry::defaults();
-        let hints =
-            scrollback_hints_with_vim_mode(&registry, None, true, false, false, true, false);
-        assert!(
-            !hints.iter().any(|h| h.label == "copy"),
-            "vim-off must hide y:copy hint on agent message"
-        );
+        let hints = scrollback_hints(&registry, None, true, false, false, true);
+        assert!(!hints.iter().any(|h| h.label == "copy"));
     }
     #[test]
     fn scrollback_never_shows_rewind_hint_on_user_prompt() {
         let registry = ActionRegistry::defaults();
-        for vim_mode in [true, false] {
-            let hints = scrollback_hints_with_vim_mode(
-                &registry,
-                Some("expand"),
-                false,
-                false,
-                true,
-                false,
-                vim_mode,
-            );
-            assert!(
-                !hints.iter().any(|h| h.label == "rewind"),
-                "rewind is slash-command only (vim_mode={vim_mode})"
-            );
-        }
+        let hints = scrollback_hints(&registry, Some("expand"), false, false, true, false);
+        assert!(
+            !hints.iter().any(|h| h.label == "rewind"),
+            "rewind is slash-command only"
+        );
     }
     /// Build scrollback hints with an open search session in the given phase.
-    fn scrollback_search_hints(
-        registry: &ActionRegistry,
-        vim_mode: bool,
-        composing: bool,
-    ) -> Vec<HintItem> {
+    fn scrollback_search_hints(registry: &ActionRegistry, composing: bool) -> Vec<HintItem> {
         let mut search = ScrollbackSearchState::open();
         if !composing {
             search.accept();
@@ -1386,12 +1226,10 @@ mod tests {
             "expand thinking",
             false,
             false,
-            None,
             false,
             false,
             false,
             false,
-            vim_mode,
             ViewSurface::Root,
             false,
             false,
@@ -1405,74 +1243,43 @@ mod tests {
     #[test]
     fn scrollback_search_hint_not_in_bottom_bar() {
         let registry = ActionRegistry::defaults();
-        for vim_mode in [true, false] {
-            let hints = scrollback_hints_with_vim_mode(
-                &registry, None, false, false, false, false, vim_mode,
-            );
-            assert!(
-                !hints.iter().any(|h| h.label == "search"),
-                "bottom bar must not advertise / search (vim_mode={vim_mode})"
-            );
+        let hints = scrollback_hints(&registry, None, false, false, false, false);
+        assert!(
+            !hints.iter().any(|h| h.label == "search"),
+            "bottom bar must not advertise / search"
+        );
+    }
+    #[test]
+    fn scrollback_search_shows_next_prev_and_cancel_in_both_phases() {
+        let registry = ActionRegistry::defaults();
+        for composing in [true, false] {
+            let labels: Vec<String> = scrollback_search_hints(&registry, composing)
+                .iter()
+                .map(|h| h.label.to_string())
+                .collect();
+            assert!(labels.contains(&"next/prev".to_string()), "got {labels:?}");
+            assert!(labels.contains(&"cancel".to_string()), "got {labels:?}");
+            assert!(!labels.contains(&"go".to_string()), "got {labels:?}");
+            assert!(!labels.contains(&"nav".to_string()), "got {labels:?}");
         }
     }
     #[test]
-    fn scrollback_search_composing_shows_go_and_cancel_only() {
-        let registry = ActionRegistry::defaults();
-        let labels: Vec<String> = scrollback_search_hints(&registry, true, true)
-            .iter()
-            .map(|h| h.label.to_string())
-            .collect();
-        assert!(labels.contains(&"go".to_string()), "got {labels:?}");
-        assert!(labels.contains(&"cancel".to_string()), "got {labels:?}");
-        assert!(!labels.contains(&"next/prev".to_string()), "got {labels:?}");
-        assert!(!labels.contains(&"nav".to_string()), "got {labels:?}");
-        assert!(!labels.contains(&"search".to_string()), "got {labels:?}");
-    }
-    #[test]
-    fn scrollback_search_browsing_shows_next_prev_and_cancel() {
-        let registry = ActionRegistry::defaults();
-        let labels: Vec<String> = scrollback_search_hints(&registry, true, false)
-            .iter()
-            .map(|h| h.label.to_string())
-            .collect();
-        assert!(labels.contains(&"next/prev".to_string()), "got {labels:?}");
-        assert!(labels.contains(&"cancel".to_string()), "got {labels:?}");
-        assert!(!labels.contains(&"go".to_string()), "got {labels:?}");
-        assert!(!labels.contains(&"nav".to_string()), "got {labels:?}");
-    }
-    /// The keys behind the `next/prev` hint for a search in the given phase.
-    fn next_prev_keys(
-        registry: &ActionRegistry,
-        vim_mode: bool,
-        composing: bool,
-    ) -> Vec<crate::input::key::KeyShortcut> {
-        scrollback_search_hints(registry, vim_mode, composing)
-            .into_iter()
-            .find(|h| h.label == "next/prev")
-            .map(|h| h.keys)
-            .unwrap_or_default()
-    }
-    #[test]
-    fn scrollback_search_vim_browsing_uses_n_keys() {
-        use crossterm::event::KeyCode;
-        let registry = ActionRegistry::defaults();
-        let keys = next_prev_keys(&registry, true, false);
-        let codes: Vec<KeyCode> = keys.iter().map(|k| k.code).collect();
-        assert_eq!(codes, vec![KeyCode::Char('n'), KeyCode::Char('N')]);
-    }
-    #[test]
-    fn scrollback_search_simple_mode_uses_arrow_keys_in_both_phases() {
+    fn scrollback_search_uses_arrow_keys_in_both_phases() {
         use crossterm::event::KeyCode;
         let registry = ActionRegistry::defaults();
         for composing in [true, false] {
-            let codes: Vec<KeyCode> = next_prev_keys(&registry, false, composing)
+            let codes: Vec<KeyCode> = scrollback_search_hints(&registry, composing)
+                .into_iter()
+                .find(|h| h.label == "next/prev")
+                .map(|h| h.keys)
+                .unwrap_or_default()
                 .iter()
                 .map(|k| k.code)
                 .collect();
             assert_eq!(
                 codes,
                 vec![KeyCode::Down, KeyCode::Up],
-                "simple mode next/prev should be arrows (composing={composing})"
+                "next/prev should be arrows (composing={composing})"
             );
         }
     }
@@ -1491,12 +1298,10 @@ mod tests {
             "expand thinking",
             false,
             false,
-            None,
             false,
             false,
             false,
             false,
-            true,
             ViewSurface::Root,
             false,
             false,
@@ -1538,12 +1343,10 @@ mod tests {
             "expand thinking",
             false,
             false,
-            None,
             false,
             false,
             false,
             multiline_mode,
-            true,
             ViewSurface::Root,
             is_turn_running,
             false,
@@ -1600,12 +1403,10 @@ mod tests {
                 "expand thinking",
                 false,
                 false,
-                None,
                 false,
                 false,
                 false,
                 multiline,
-                true,
                 ViewSurface::Root,
                 true,
                 true,
@@ -1628,11 +1429,7 @@ mod tests {
     fn running_turn_cancel_hint_is_always_ctrl_c() {
         let prompt = PromptWidget::default();
         let registry = ActionRegistry::defaults();
-        for (vim_mode, pane) in [
-            (false, ActivePane::Prompt),
-            (true, ActivePane::Prompt),
-            (false, ActivePane::Scrollback),
-        ] {
+        for pane in [ActivePane::Prompt, ActivePane::Scrollback] {
             let hints = build_hints(
                 pane,
                 prompt_focus_hint(),
@@ -1645,12 +1442,10 @@ mod tests {
                 "expand thinking",
                 false,
                 false,
-                None,
                 false,
                 false,
                 false,
                 false,
-                vim_mode,
                 ViewSurface::Root,
                 true,
                 false,
@@ -1667,13 +1462,13 @@ mod tests {
             assert_eq!(
                 vec![crate::key!('c', CONTROL)],
                 cancel.keys,
-                "cancel hint key for vim_mode={vim_mode} pane={pane:?}"
+                "cancel hint key for pane={pane:?}"
             );
             assert!(
                 !hints
                     .iter()
                     .any(|h| h.label == "cancel" && h.keys == vec![crate::key!(Esc)]),
-                "no hint may advertise Esc as the turn cancel (vim_mode={vim_mode} pane={pane:?})"
+                "no hint may advertise Esc as the turn cancel (pane={pane:?})"
             );
         }
     }
@@ -1694,8 +1489,6 @@ mod tests {
             "prompt",
             "expand thinking",
             false,
-            false,
-            None,
             false,
             false,
             false,
@@ -1744,8 +1537,6 @@ mod tests {
             "prompt",
             "expand thinking",
             false,
-            false,
-            None,
             false,
             false,
             false,

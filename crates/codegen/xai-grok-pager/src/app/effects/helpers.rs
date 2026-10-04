@@ -1108,14 +1108,6 @@ pub(crate) async fn persist_setting(
                 .await
                 .map_err(|e| e.to_string())
         }
-        "simple_mode" => {
-            let SettingValue::Bool(b) = value else {
-                return Err(kind_mismatch("simple_mode", "Bool", &value));
-            };
-            xai_grok_shell::util::config::set_simple_mode(b)
-                .await
-                .map_err(|e| e.to_string())
-        }
         "contextual_hints.undo" => {
             let SettingValue::Bool(b) = value else {
                 return Err(kind_mismatch("contextual_hints.undo", "Bool", &value));
@@ -1279,14 +1271,6 @@ pub(crate) async fn persist_setting(
             xai_grok_shell::util::config::set_cancel_subagents_on_turn_cancel(
                     s.to_string(),
                 )
-                .await
-                .map_err(|e| e.to_string())
-        }
-        "vim_mode" => {
-            let SettingValue::Bool(b) = value else {
-                return Err(kind_mismatch("vim_mode", "Bool", &value));
-            };
-            xai_grok_shell::util::config::set_vim_mode(b)
                 .await
                 .map_err(|e| e.to_string())
         }

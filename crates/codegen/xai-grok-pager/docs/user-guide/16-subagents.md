@@ -1,6 +1,6 @@
 # Subagents and Personas
 
-Subagents are independent child sessions that handle tasks in parallel. Each subagent has its own context window, so the main agent can delegate work (research, implementation, testing, and code review) without consuming its own context. A subagent reports a summary back to the parent when it finishes.
+Subagents are independent child sessions that handle tasks in parallel. Each subagent has its own context window. As a result, the main agent can delegate work (research, implementation, testing, and code review) without consuming its own context. A subagent reports a summary back to the parent when it finishes.
 
 Subagents are enabled by default.
 
@@ -21,7 +21,7 @@ Agents and personas both customize behavior, but they operate at different level
 
 An agent defines the session itself. A persona shapes how a subagent behaves within a session. A subagent always runs as an agent type (for example, `general-purpose`), and resolution can layer a persona on top.
 
-Manage both in the agents modal. Open it with `/config-agents` (alias `/agents`), or open the Personas tab directly with `/personas`. The modal has two tabs: **Agents** and **Personas**.
+Manage both in the agents modal. Open it with `/config-agents` (alias `/agents`), or open the Personas tab directly with `/personas`. The modal has tabs: **Agents** and **Personas**.
 
 ---
 
@@ -46,7 +46,7 @@ Only an explicit `enabled = false` turns subagents off. A `[subagents]` table th
 
 ## Usage Frequency
 
-`usage_frequency` doesn't enable or disable subagents -- it tunes how strongly the system prompt and the `spawn_subagent` tool description nudge the model toward using them. Six levels, from most to least eager to delegate:
+`usage_frequency` does not enable or disable subagents -- it tunes how strongly the system prompt and the `spawn_subagent` tool description nudge the model toward using them. Six levels, from most to least eager to delegate:
 
 | Level | Effect |
 | ----- | ------ |
@@ -99,7 +99,7 @@ Project- or user-defined agents can add new types or shadow these built-ins by n
 
 ## Personas
 
-A persona is a named behavioral overlay. Its instructions are injected into the subagent's conversation as a `<system-reminder>`, which shapes tone, output format, and task focus without changing the subagent's agent type, model, or tools.
+A persona is a named behavioral overlay. Its instructions are injected into the subagent's conversation as a `<system-reminder>`, which shapes tone, output format, and task focus without changing the subagent's agent type. This is model, or tools.
 
 Define personas in `config.toml` or in `.toml` files:
 
@@ -117,7 +117,7 @@ Grok Build discovers file-based personas from these locations, in priority order
 
 Each file defines one persona, and the file name (without the extension) becomes the persona name. Inline `config.toml` personas take precedence over files. Only `.toml` files are discovered.
 
-Manage personas in the Personas tab of the agents modal (`/personas`). Bundled personas are read-only; personas you define are editable.
+Manage personas in the Personas tab of the agents modal (`/personas`). Bundled personas are read-only. Personas you define are editable.
 
 > **Note:** Grok Build applies personas through subagent resolution and roles, not through a `spawn_subagent` parameter. The main agent does not pass a persona name when it spawns a child.
 
@@ -162,7 +162,7 @@ When a persona applies, Grok Build resolves the effective model and reasoning ef
 3. Persona default
 4. Parent session
 
-Isolation follows the same order for the first three steps but defaults to `none` (no worktree) rather than inheriting from the parent session.
+Isolation follows the same order for the first steps but defaults to `none` (no worktree) rather than inheriting from the parent session.
 
 If a persona is requested but cannot be resolved -- it is not found, has no instructions, or its `instructions_file` is unreadable -- the spawn fails.
 
@@ -194,25 +194,25 @@ The root session can send a follow-up to a subagent it owns. When the flag is on
 
 A child whose parent is the root session cannot message the root. Curated harness toolsets never receive the tool. A capability mode that excludes this kind also removes it.
 
-Child senders are bounded: 4 in-flight messages per sender-target pair, and 32 outbound messages per sender attempt. A send over the limit returns `QuotaExceeded`.
+Child senders are bounded: in-flight messages per sender-target pair, and outbound messages per sender attempt. A send over the limit returns `QuotaExceeded`.
 
 An inactive subagent always wakes with the message as its next turn. For an active subagent, the optional `delivery` parameter controls how the message lands:
 
 - `steer` (the default) joins the current turn at its next safe point.
 - `queue` waits as a protected later turn instead of entering the active turn.
-- `interject` is urgent: it is delivered ahead of pending steers at the earliest safe point, and it interrupts a subagent that is blocked waiting on background work so the subagent reads the message at once. Only the wait call ends early. The background work keeps running.
+- `interject` is urgent: it is delivered ahead of pending steers at the earliest safe point. It interrupts a subagent that is blocked waiting on background work so the subagent reads the message at once. Only the wait call ends early. The background work keeps running.
 
 If the subagent is active but between turns, `steer` and `interject` each become one protected queued turn and the subagent starts on it. The legacy `queue: true` flag is still accepted and means `delivery: "queue"`. `delivery` wins when both are present.
 
-The transcript shows each send as a one-line `Message` row: a verb for the outcome, then the subagent's label (its persona, role, tag, or Subagent fallback) and its description in curly quotes, as its `Subagent …: “…”` scrollback row quotes it, clamped to the first line and 40 characters. The verb carries the delivery, so a steer stays unmarked:
+The transcript shows each send as a one-line `Message` row. A verb for the outcome, then the subagent's label (its persona, role, tag, or Subagent fallback) and its description in curly quotes. This is as its `Subagent …: “…”` scrollback row quotes it, clamped to the first line and many characters. The verb carries the delivery. As a result, a steer stays unmarked:
 
 - `Message sent to Subagent “find callers”` (steer)
 - `Message queued for Subagent “find callers”` / `Message interjected to Subagent “find callers”`
 - `Message sending to …` with an animated bullet while the send is in flight
-- `Message rejected · Subagent “find callers”` for a refused send, `Message unconfirmed · Subagent “find callers”` for one the shell could not confirm
+- `Message rejected · Subagent “find callers”` for a refused send, `Message unconfirmed · Subagent “find callers”` for one the shell can not confirm
 - `Message sent to parent` when a child messages its parent
 
-The collapsed row never shows the message or the reason. **Right** (or `l`/`e` in vim mode) expands the row to show the requested delivery, the full message text, and the reason of a rejected or unconfirmed send; **Left** (or `h`) collapses it again. **Enter**, **Ctrl+F**, or a double-click on the row opens that subagent's view, exactly as on its `Subagent` row (Right/Left still fold it). If the subagent was never spawned in this session (a headless `grok export`, or an id from another session), the row names it `subagent …xxxxxxxx` from the last 8 characters of its id, shows the raw `Subagent ID:` when expanded, and cannot open it.
+The collapsed row never shows the message or the reason. **Right** expands the row to show the requested delivery, the full message text, and the reason of a rejected or unconfirmed send. **Left** collapses it again. **Enter**, **Ctrl+F**, or a double-click on the row opens that subagent's view, exactly as on its `Subagent` row (Right/Left still fold it). If the subagent was never spawned in this session (a headless `grok export`, or an id from another session). The row names it `subagent …xxxxxxxx` from the last several characters of its id, shows the raw `Subagent ID:` when expanded, and cannot open it.
 
 ---
 
@@ -238,7 +238,7 @@ The `resume_from` parameter lets a new subagent continue where a completed subag
 1. Spawn a research subagent to investigate a problem.
 2. Spawn a second subagent with `resume_from` set to the first subagent's ID, so it picks up with the full research context.
 
-The new subagent inherits the source's transcript, tool state, and model; its system prompt and tools are re-rendered from the current agent definition. The source must be completed (not running), belong to the current session, and use the same agent type.
+The new subagent inherits the source's transcript, tool state, and model. Its system prompt and tools are re-rendered from the current agent definition. The source must be completed (not running), belong to the current session, and use the same agent type.
 
 ### MCP inheritance
 
@@ -309,15 +309,15 @@ Per-type model overrides apply for any parent. Without an override, a subagent i
 
 ### Model Selection by the Agent
 
-The `spawn_subagent` tool offers the agent a `model` argument, and its description lists the models you can pick, for when you explicitly ask for a subagent on a different model. With `[features] subagent_model_inheritance = true` (or `GROK_SUBAGENT_MODEL_INHERITANCE=1`), both are hidden whenever every model in your picker is an xAI model: subagents then always inherit the parent's model, and a spawn that still names one fails with a message asking the agent to retry without it. Catalogs with a third-party model, a model with no declared family, or a catalog still loading keep the argument. `[subagents.models]` pins, roles, and personas are unaffected. Read when a session starts; changing it requires a restart. Precedence: a `requirements.toml`/MDM pin, then the environment variable, then `config.toml`, then remote settings, then the default (off).
+The `spawn_subagent` tool offers the agent a `model` argument. Its description lists the models you can pick, for when you explicitly ask for a subagent on a different model. With `[features] subagent_model_inheritance = true` (or `GROK_SUBAGENT_MODEL_INHERITANCE=1`), both are hidden whenever every model in your picker is an xAI model. Subagents then always inherit the parent's model, and a spawn that still names one fails with a message asking the agent to retry without it. Catalogs with a third-party model, a model with no declared family, or a catalog still loading keep the argument. `[subagents.models]` pins, roles, and personas are unaffected. Read when a session starts. Changing it requires a restart. Precedence: a `requirements.toml`/MDM pin, then the environment variable, then `config.toml`, then remote settings, then the default (off).
 
 You can also toggle it from `/settings` → Models → **Subagent model inheritance**:
 
 - On: Grok cannot set models for subagents
 - Off: Grok may choose a different model for a subagent. Takes effect after restart.
-- NOTE: This setting only applies when all models are xAI "model_family". You likely don't need to configure this setting.
+- NOTE: This setting only applies when all models are xAI "model_family". You likely do not need to configure this setting.
 
-The row shows the value that applies after restart. Toggling writes `[features] subagent_model_inheritance = true` or `= false` (an explicit `false` overrides a remote `true`); `d` (reset) deletes the key so `managed_config.toml`, remote settings, or the default apply again. Agents already running keep the mode they started with. When a layer your `config.toml` cannot override decides the value — a `requirements.toml`/MDM pin, the environment variable, the `GROK_CONFIG` overlay, or an active campaign — both the toggle and the reset are refused with a toast that names that layer.
+The row shows the value that applies after restart. Toggling writes `[features] subagent_model_inheritance = true` or `= false` (an explicit `false` overrides a remote `true`). `d` (reset) deletes the key so `managed_config.toml`, remote settings, or the default apply again. Agents already running keep the mode they started with. When a layer your `config.toml` cannot override decides the value — a `requirements.toml`/MDM pin, the environment variable, the `GROK_CONFIG` overlay, or an active campaign. This is both the toggle and the reset are refused with a toast that names that layer.
 
 ### Custom Roles and Personas
 
@@ -401,7 +401,7 @@ This view is observational. The composer is hidden (zero rows). You cannot focus
 
 **What does nothing (fail closed)**
 
-Root-only chords never start on this surface. They do not open a modal on the child, and they do not leak to the parent:
+Root-only chords never start on this surface. They do not open a modal on the child. They do not leak to the parent:
 
 - Command palette (`Ctrl+P`), model picker (`Ctrl+M`), session picker (`Ctrl+R`)
 - Settings, extensions, always-approve (`Ctrl+O`), send-to-background (`Ctrl+B`)
@@ -439,5 +439,5 @@ Only the top-level session spawns subagents. A subagent cannot spawn its own sub
 **When not to use:**
 
 - Simple tasks that the parent can handle directly
-- Tasks that require tight back-and-forth with the user, since a subagent runs autonomously and isn't suited to interactive exchanges
+- Tasks that require tight back-and-forth with the user, since a subagent runs autonomously and is not suited to interactive exchanges
 - Tasks where the context setup cost exceeds the parallelism benefit

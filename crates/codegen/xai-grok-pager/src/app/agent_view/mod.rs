@@ -60,7 +60,7 @@ use crate::scrollback::text_selection::{
     TableSelectionGeometry,
 };
 use crate::theme::Theme;
-pub use crate::views::agent::{ActivePane, AgentViewLayout, InputMode, PaneAreas};
+pub use crate::views::agent::{ActivePane, AgentViewLayout, PaneAreas};
 use crate::views::block_viewer::{BlockViewerPane, ViewerKind};
 use crate::views::elicitation_view::ElicitationViewState;
 use crate::views::extensions_modal::ExtensionsModalState;
@@ -734,10 +734,6 @@ pub struct AgentView {
     pub prompt_input_mode: PromptInputMode,
     /// Multiline input mode: swap Enter (insert newline) and Shift+Enter (send). Toggled by `Ctrl+M` or `/multiline`.
     pub multiline_mode: bool,
-    /// Vim-mode scrollback keybindings.
-    pub vim_mode: bool,
-    /// Runtime InputMode synced from the persisted `simple_mode` bool (`false` is Vim).
-    pub input_mode: InputMode,
     /// Whether the current/last turn was a bash-mode command.
     pub bash_turn: bool,
     /// The task ID of the running cron turn, if any. Set when a cron prompt is drained, cleared on turn completion.
@@ -1609,10 +1605,6 @@ fn resolve_action(action_id: Option<ActionId>) -> Option<InputOutcome> {
         ActionId::SelectPrev => Action::SelectPrev,
         ActionId::NextTurn => Action::NextTurn,
         ActionId::PrevTurn => Action::PrevTurn,
-        ActionId::NextResponse => Action::NextResponse,
-        ActionId::PrevResponse => Action::PrevResponse,
-        ActionId::GotoTop => Action::GotoTop,
-        ActionId::GotoBottom => Action::GotoBottom,
         ActionId::ScrollUp => Action::ScrollUp(1),
         ActionId::ScrollDown => Action::ScrollDown(1),
         ActionId::HalfPageUp => Action::HalfPageUp,
@@ -1621,16 +1613,9 @@ fn resolve_action(action_id: Option<ActionId>) -> Option<InputOutcome> {
         ActionId::PageDown => Action::PageDown,
         ActionId::Collapse => Action::Collapse,
         ActionId::Expand => Action::Expand,
-        ActionId::ToggleFold => Action::ToggleFold,
-        ActionId::ToggleExpandAll => Action::ToggleExpandAll,
         ActionId::ExpandAllThinking => Action::ExpandAllThinking,
-        ActionId::ToggleRaw => Action::ToggleRaw,
         ActionId::ToggleMouseCapture => Action::ToggleMouseCapture,
-        ActionId::CopyBlockContent => Action::CopyBlockContent,
-        ActionId::CopyBlockMeta => Action::CopyBlockMeta,
         ActionId::OpenBlockViewer => Action::OpenBlockViewer,
-        ActionId::OpenNextLink => Action::OpenNextLink,
-        ActionId::OpenPrevLink => Action::OpenPrevLink,
         ActionId::FocusPrompt => Action::FocusPrompt,
         ActionId::FocusScrollback => Action::FocusScrollback,
         ActionId::NextModel => Action::NextModel,
@@ -1664,7 +1649,6 @@ fn resolve_action(action_id: Option<ActionId>) -> Option<InputOutcome> {
         | ActionId::SendToBackground
         | ActionId::BashMode
         | ActionId::Rewind
-        | ActionId::KillBgTask
         | ActionId::OpenDashboard
         | ActionId::DashboardSelectNext
         | ActionId::DashboardSelectPrev

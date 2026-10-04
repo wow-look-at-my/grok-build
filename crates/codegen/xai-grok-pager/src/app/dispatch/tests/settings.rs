@@ -8,161 +8,14 @@ fn expect_agent(app: &AppView, id: AgentId) -> &AgentView {
 }
 /// `Action::ToggleVimMode` flips the active agent's `vim_mode` field and the in-process pager cache (`load_vim_mode`) that seeds future agents.
 /// It emits `Effect::PersistSetting` so the new value lands in `[ui].vim_mode` in config.toml, and a second toggle restores the original.
-#[test]
-fn toggle_vim_mode_flips_state_and_persistence_cache() {
-    crate::appearance::cache::set_vim_mode(false);
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-    if let Some(agent) = app.agents.get_mut(&id) {
-        agent.vim_mode = false;
-    }
-    let effects = dispatch(Action::ToggleVimMode, &mut app);
-    assert_eq!(
-        effects.len(),
-        1,
-        "toggle must emit exactly one Effect::PersistSetting so the \
-             new value lands in config.toml, got {effects:?}",
-    );
-    assert!(
-        matches!(
-            effects.first(),
-            Some(Effect::PersistSetting {
-                key: "vim_mode",
-                value: crate::settings::SettingValue::Bool(true),
-                rollback_value: crate::settings::SettingValue::Bool(false),
-            })
-        ),
-        "unexpected effect: {:?}",
-        effects.first(),
-    );
-    assert!(
-        expect_agent(&app, id).vim_mode,
-        "active agent should be in vim mode after toggle"
-    );
-    assert!(
-        crate::appearance::cache::load_vim_mode(),
-        "pager cache must reflect new value so future agents pick it up"
-    );
-    let effects = dispatch(Action::ToggleVimMode, &mut app);
-    assert!(
-        matches!(
-            effects.as_slice(),
-            [Effect::PersistSetting {
-                key: "vim_mode",
-                value: crate::settings::SettingValue::Bool(false),
-                rollback_value: crate::settings::SettingValue::Bool(true),
-            }]
-        ),
-        "second toggle must also persist, got {effects:?}",
-    );
-    assert!(
-        !expect_agent(&app, id).vim_mode,
-        "toggling again flips it back"
-    );
-    assert!(
-        !crate::appearance::cache::load_vim_mode(),
-        "cache must follow the second toggle"
-    );
-}
 /// End-to-end: in vim mode, Tab from the prompt focuses scrollback, and `j` then navigates the scrollback instead of bouncing back to the prompt.
 /// Drives the real loop from handle_input through dispatch.
-#[test]
-fn agent_vim_tab_focuses_scrollback_then_j_navigates() {
-    use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
-    crate::appearance::cache::set_vim_mode(true);
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-    app.active_view = ActiveView::Agent(id);
-    {
-        let agent = app.agents.get_mut(&id).unwrap();
-        agent.vim_mode = true;
-        agent.active_pane = ActivePane::Prompt;
-    }
-    let tab = Event::Key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
-    if let crate::app::app_view::InputOutcome::Action(a) = app.handle_input(&tab) {
-        let _ = dispatch(a, &mut app);
-    }
-    assert_eq!(
-        expect_agent(&app, id).active_pane,
-        ActivePane::Scrollback,
-        "Tab in the prompt must focus scrollback",
-    );
-    let j = Event::Key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
-    let outcome = app.handle_input(&j);
-    assert!(
-        matches!(
-            outcome,
-            crate::app::app_view::InputOutcome::Action(Action::SelectNext)
-        ),
-        "vim j in scrollback must navigate, got {outcome:?}",
-    );
-    assert_eq!(
-        expect_agent(&app, id).active_pane,
-        ActivePane::Scrollback,
-        "j must keep focus on scrollback, not bounce to the prompt",
-    );
-    crate::appearance::cache::set_vim_mode(false);
-}
 /// `/vim-mode` (ToggleVimMode) must propagate to OPEN subagent views, not just top-level agents.
 /// Otherwise a user inside a subagent view toggles vim, presses Tab then j, and the keystroke forwards to the prompt (vim-OFF fallback).
 /// The subagent view kept its stale `vim_mode = false`.
-#[test]
-fn toggle_vim_mode_propagates_to_open_subagent_views() {
-    crate::appearance::cache::set_vim_mode(false);
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-    let child_session = make_test_agent_session(&app, AgentId(0), "child-session");
-    let mut child = AgentView::new(child_session, ScrollbackState::new());
-    child.vim_mode = false;
-    {
-        let parent = app.agents.get_mut(&id).unwrap();
-        parent.vim_mode = false;
-        parent.insert_test_child("child-1".to_string(), Box::new(child));
-    }
-    let _ = dispatch(Action::ToggleVimMode, &mut app);
-    assert!(
-        expect_agent(&app, id).vim_mode,
-        "parent picks up the toggle"
-    );
-    assert!(
-        expect_agent(&app, id)
-            .subagent_views
-            .get("child-1")
-            .is_some_and(|v| v.vim_mode),
-        "an open subagent view must also pick up the vim toggle",
-    );
-}
 /// `/vim-mode` must toggle vim from the DASHBOARD too, not just an agent view.
 /// It used to early-return unless an agent was active, a silent no-op that left the overview's j/k off.
 /// Turning vim ON also focuses the overview so j/k navigate immediately; turning it OFF returns focus to the input.
-#[serial_test::serial(GROK_AGENT_DASHBOARD)]
-#[test]
-fn toggle_vim_mode_works_on_dashboard_and_focuses_overview() {
-    crate::appearance::cache::set_vim_mode(false);
-    let mut app = test_app_with_agent();
-    open_dashboard(&mut app);
-    assert!(matches!(app.active_view, ActiveView::AgentDashboard));
-    app.dashboard.as_mut().unwrap().list_focused = false;
-    let _ = dispatch(Action::ToggleVimMode, &mut app);
-    assert!(
-        crate::appearance::cache::load_vim_mode(),
-        "/vim-mode must toggle vim ON from the dashboard",
-    );
-    assert!(
-        app.dashboard.as_ref().unwrap().list_focused,
-        "turning vim on focuses the overview so j/k navigate immediately",
-    );
-    let _ = dispatch(Action::ToggleVimMode, &mut app);
-    assert!(
-        !crate::appearance::cache::load_vim_mode(),
-        "second /vim-mode must toggle vim OFF",
-    );
-    assert!(
-        !app.dashboard.as_ref().unwrap().list_focused,
-        "turning vim off returns focus to the input",
-    );
-    crate::appearance::cache::set_vim_mode(false);
-}
 #[test]
 fn plugin_cta_catalog_reload_empty_candidates_resets_matched_phase() {
     use crate::app::agent_view::CtaPhase;
@@ -656,21 +509,6 @@ fn set_page_flip_on_send_emits_persist_setting_with_correct_payload() {
         crate::appearance::cache::load_page_flip_on_send(),
         !default_on
     );
-}
-#[test]
-fn set_simple_mode_emits_persist_setting_with_correct_payload() {
-    use crate::settings::SettingValue;
-    let mut app = test_app_with_agent();
-    let effects = dispatch(Action::SetSimpleMode(false), &mut app);
-    assert_eq!(effects.len(), 1);
-    match effects.first() {
-        Some(Effect::PersistSetting { key, value, .. }) => {
-            assert_eq!(*key, "simple_mode");
-            assert_eq!(value, &SettingValue::Bool(false));
-        }
-        other => panic!("expected PersistSetting, got {other:?}"),
-    }
-    assert_eq!(app.current_ui.simple_mode, Some(false));
 }
 /// `dispatch_open_settings` runs once: the modal opens on the active agent.
 /// A second dispatch (only structurally reachable if input routing breaks) closes the modal defensively; debug_assert guards this in dev builds.
@@ -1682,9 +1520,6 @@ fn move_setting_away_from_default(app: &mut AppView, key: crate::settings::Setti
             };
             let _ = dispatch(Action::SetFollowUpBehavior(away), app);
         }
-        "simple_mode" => {
-            let _ = dispatch(Action::SetSimpleMode(false), app);
-        }
         "contextual_hints.undo" => {
             let _ = dispatch(Action::SetContextualHintUndo(false), app);
         }
@@ -1756,9 +1591,6 @@ fn move_setting_away_from_default(app: &mut AppView, key: crate::settings::Setti
         }
         "show_tips" => {
             let _ = dispatch(Action::SetShowTips(false), app);
-        }
-        "vim_mode" => {
-            let _ = dispatch(Action::SetVimMode(true), app);
         }
         "remember_tool_approvals" => {
             let _ = dispatch(Action::SetRememberToolApprovals(false), app);
@@ -1887,98 +1719,10 @@ fn set_compact_mode_toast_format() {
 }
 /// `set_simple_mode_inner` propagates to the active agent's `input_mode`.
 /// Without the propagation, the toast says "Simple mode: on" but the current session keeps Vim input.
-#[test]
-fn set_simple_mode_propagates_to_active_agent() {
-    let mut app = test_app_with_agent();
-    let agent = app.agents.get_mut(&AgentId(0)).unwrap();
-    agent.input_mode = crate::views::agent::InputMode::Vim;
-    let _ = dispatch(Action::SetSimpleMode(true), &mut app);
-    let agent = app.agents.get(&AgentId(0)).unwrap();
-    assert_eq!(
-        agent.input_mode,
-        crate::views::agent::InputMode::Simple,
-        "set_simple_mode(true) must switch the active agent into Simple input mode"
-    );
-    let _ = dispatch(Action::SetSimpleMode(false), &mut app);
-    let agent = app.agents.get(&AgentId(0)).unwrap();
-    assert_eq!(
-        agent.input_mode,
-        crate::views::agent::InputMode::Vim,
-        "set_simple_mode(false) must switch back to Vim input mode"
-    );
-}
 /// `set_simple_mode_inner` is a no-op on the agent-propagation path when there's no active agent.
 /// The persist effect still fires (the setting is global, not agent-local).
-#[test]
-fn set_simple_mode_no_op_when_no_active_agent() {
-    let mut app = test_app();
-    let effects = dispatch(Action::SetSimpleMode(true), &mut app);
-    assert_eq!(effects.len(), 1);
-    match effects.first() {
-        Some(Effect::PersistSetting { key, .. }) => assert_eq!(*key, "simple_mode"),
-        other => panic!("expected PersistSetting, got {other:?}"),
-    }
-    assert_eq!(app.current_ui.simple_mode, Some(true));
-}
 /// `set_simple_mode_inner` propagates to **every** agent, not just the active one.
 /// Without iterating over `app.agents.values_mut()`, agent B's input_mode stays stale when the user toggles simple-mode while agent A is active.
-#[test]
-fn set_simple_mode_propagates_to_every_agent() {
-    let mut app = test_app_with_agent();
-    let id_b = AgentId(1);
-    let mut agent_b = AgentView::new(
-        AgentSession {
-            id: id_b,
-            acp_tx: app.acp_tx.clone(),
-            session_id: Some("test-session-b".into()),
-            models: ModelState::default(),
-            state: AgentState::Idle,
-            tracker: AcpUpdateTracker::new(),
-            cwd: PathBuf::from("/tmp"),
-            is_worktree: false,
-            forked_from: None,
-            pending_prompts: std::collections::VecDeque::new(),
-            next_queue_id: 0,
-            yolo_mode: false,
-            auto_mode: false,
-            prompt_history: Vec::new(),
-            prompt_history_loading: false,
-            loading_replay: false,
-            restore_degree: None,
-            rate_limited: false,
-            model_incompatible: false,
-            credit_limit_blocked: false,
-            free_usage_blocked: false,
-            available_commands: Vec::new(),
-            available_commands_generation: 0,
-            available_tools: None,
-            model_switch_pending: false,
-            hook_block_hold: false,
-            blocked_prompt: None,
-            user_model_preference: None,
-            deferred_model_switch: None,
-            bg_tasks: std::collections::BTreeMap::new(),
-            bg_tool_call_to_task: std::collections::HashMap::new(),
-            scheduled_tasks: std::collections::HashMap::new(),
-            in_flight_prompt: None,
-            compact_held_prompt: None,
-            current_prompt_id: None,
-            created_via_new: false,
-        },
-        ScrollbackState::new(),
-    );
-    agent_b.input_mode = crate::views::agent::InputMode::Vim;
-    app.agents.insert(id_b, agent_b);
-    app.next_agent_id = 2;
-    let _ = dispatch(Action::SetSimpleMode(true), &mut app);
-    for (id, agent) in &app.agents {
-        assert_eq!(
-            agent.input_mode,
-            crate::views::agent::InputMode::Simple,
-            "agent {id:?} input_mode did not propagate to Simple"
-        );
-    }
-}
 /// Setters must update BOTH `app.current_ui` AND `crate::appearance::cache`.
 /// If a refactor drops the `cache::set(new)` call, `app.current_ui` would still show the new value but the renderer would revert on the next frame.
 /// Runs in a fresh thread because the thread-locals are sticky.
@@ -2000,11 +1744,6 @@ fn set_x_propagates_to_thread_local_cache() {
         assert!(
             !crate::appearance::cache::load_timestamps(),
             "set_timestamps must update the cache"
-        );
-        let _ = dispatch(Action::SetSimpleMode(false), &mut app);
-        assert!(
-            !crate::appearance::cache::load_simple_mode(),
-            "set_simple_mode must update the cache"
         );
     })
     .join()
@@ -2097,7 +1836,6 @@ fn set_multiline_mode_no_op_when_no_active_agent() {
     let mut app = test_app();
     let compact_before = app.current_ui.compact_mode;
     let timestamps_before = app.current_ui.show_timestamps;
-    let simple_before = app.current_ui.simple_mode;
     let effects = dispatch(Action::SetMultilineMode(true), &mut app);
     assert!(
         effects.is_empty(),
@@ -2105,7 +1843,6 @@ fn set_multiline_mode_no_op_when_no_active_agent() {
     );
     assert_eq!(app.current_ui.compact_mode, compact_before);
     assert_eq!(app.current_ui.show_timestamps, timestamps_before);
-    assert_eq!(app.current_ui.simple_mode, simple_before);
     assert!(
         matches!(app.active_view, ActiveView::Welcome),
         "active_view must not flip on no-agent dispatch",
@@ -2223,58 +1960,6 @@ fn set_compact_mode_refreshes_open_modal_ui_snapshot() {
              stale-snapshot bug (Round-2 Issue 1) would leave it false",
     );
 }
-/// `Action::SetVimMode(true)` flips the cache and every agent's field, emits `Effect::PersistSetting`, and writes a toast.
-#[test]
-fn set_vim_mode_mutates_all_agents_and_cache_no_effect() {
-    crate::appearance::cache::set_vim_mode(false);
-    let mut app = test_app_with_agent();
-    insert_placeholder_agent(&mut app, AgentId(1));
-    assert!(!expect_agent(&app, AgentId(0)).vim_mode);
-    assert!(!expect_agent(&app, AgentId(1)).vim_mode);
-    let effects = dispatch(Action::SetVimMode(true), &mut app);
-    assert_eq!(
-        effects.len(),
-        1,
-        "SHELL-owned setter must emit exactly one Effect::PersistSetting, got {effects:?}",
-    );
-    assert!(
-        matches!(
-            effects.first(),
-            Some(Effect::PersistSetting {
-                key: "vim_mode",
-                value: crate::settings::SettingValue::Bool(true),
-                rollback_value: crate::settings::SettingValue::Bool(false),
-            })
-        ),
-        "unexpected effect: {:?}",
-        effects.first(),
-    );
-    assert!(
-        crate::appearance::cache::load_vim_mode(),
-        "cache must mirror the new value so newly-created agents pick it up",
-    );
-    assert!(
-        expect_agent(&app, AgentId(0)).vim_mode && expect_agent(&app, AgentId(1)).vim_mode,
-        "vim_mode must fan out to EVERY agent (background subagents \
-             + side panes pick up the change without restart)",
-    );
-}
-/// Re-dispatching the same value is a no-op (no toast, no fan-out).
-#[test]
-fn set_vim_mode_idempotent_no_toast() {
-    crate::appearance::cache::set_vim_mode(false);
-    let mut app = test_app_with_agent();
-    let _ = dispatch(Action::SetVimMode(true), &mut app);
-    let agent = app.agents.get_mut(&AgentId(0)).unwrap();
-    assert!(agent.toast.is_some(), "first set must toast");
-    agent.toast = None;
-    let effects = dispatch(Action::SetVimMode(true), &mut app);
-    assert!(effects.is_empty());
-    assert!(
-        expect_agent(&app, AgentId(0)).toast.is_none(),
-        "redundant set must not re-toast",
-    );
-}
 #[test]
 fn set_keep_text_selection_emits_persist_and_updates_cache() {
     use crate::appearance::TextSelection;
@@ -2316,28 +2001,6 @@ fn set_keep_text_selection_rollback_restores_state() {
         crate::appearance::cache::load_keep_text_selection(),
         TextSelection::Flash,
         "rollback must restore cache"
-    );
-}
-/// `Action::SetVimMode` rollback restores the cache and agents.
-#[test]
-fn set_vim_mode_rollback_restores_state() {
-    crate::appearance::cache::set_vim_mode(false);
-    let mut app = test_app_with_agent();
-    let _ = dispatch(Action::SetVimMode(true), &mut app);
-    assert!(crate::appearance::cache::load_vim_mode());
-    assert!(expect_agent(&app, AgentId(0)).vim_mode);
-    let _ = apply_setting_rollback(
-        &mut app,
-        "vim_mode",
-        &crate::settings::SettingValue::Bool(false),
-    );
-    assert!(
-        !crate::appearance::cache::load_vim_mode(),
-        "rollback must restore cache",
-    );
-    assert!(
-        !expect_agent(&app, AgentId(0)).vim_mode,
-        "rollback must restore agent field",
     );
 }
 #[test]

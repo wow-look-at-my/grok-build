@@ -116,12 +116,10 @@ live-populates the composer so you can edit and resend.\n\
 With prompts queued, Up moves focus into the queue pane on the last row instead.\n\
 Run /history to open a searchable history panel and filter by text.";
 
-// Scrollback search has no ActionRegistry entry: it's the vim `/` inline handler, or the /find slash command in simple mode
-// List both triggers here
+// Scrollback search has no ActionRegistry entry: the /find slash command opens it
 const SCROLLBACK_SEARCH_LONG_HELP: &str = "\
 Searches the conversation scrollback for text and jumps between matches.\n\
-In the prompt input, run /find to search. In vim mode, you can also press / \
-while the scrollback is focused.\n\
+In the prompt input, run /find to search.\n\
 Type a query, then use n and N (or the arrow keys) to step through matches. \
 Press Enter to jump to a match and Esc to dismiss.";
 
@@ -131,7 +129,6 @@ Press Enter to jump to a match and Esc to dismiss.";
 pub fn build_entries(
     active_contexts: &[When],
     registry: &ActionRegistry,
-    vim_mode: bool,
 ) -> Vec<ShortcutsHelpEntry> {
     let mut entries: Vec<ShortcutsHelpEntry> = Vec::new();
 
@@ -197,17 +194,8 @@ pub fn build_entries(
             // In non-vim mode, suppress bare-letter / Shift+letter keys from any scrollback-context binding
             // If the row has at least one non-vim key left (e.g. an arrow alt), show only those; they still work, so don't dim.
             // If every key was a vim key, hide the row entirely (the binding is genuinely inert when vim mode is off)
-            if !vim_mode && def.context == When::ScrollbackFocused {
-                let has_non_vim = item.keys.iter().any(|k| !k.is_letter_or_shift_letter());
-                if has_non_vim {
-                    item.keys.retain(|k| !k.is_letter_or_shift_letter());
-                    // When we strip the default_key but keep an alt, the custom_display string (e.g. "Shift+l/h") no longer matches what's shown.
-                    // Drop it so the keys render verbatim
-                    item.custom_display = None;
-                } else {
-                    continue;
-                }
-            }
+            // When we strip the default_key but keep an alt, the custom_display string (e.g. "Shift+l/h") no longer matches what's shown.
+            // Drop it so the keys render verbatim
             let dimmed = !active_contexts.contains(&def.context);
             // Strip overlay-claimed keys from lit rows of other contexts (the overlay intercept shadows them)
             // Dimmed rows already say "not applicable here", so they keep their keys for discoverability
@@ -247,21 +235,9 @@ pub fn build_entries(
                 }
             }
         }
-        // Scrollback search (`/`) has no registered ActionDef yet (vim-only, handled inline); list it here for discoverability
-        if vim_mode && cat == Category::ConversationNav {
-            let mut item = HintItem::new(crate::key!('/'), "search");
-            item.description = Some("Search scrollback".into());
-            let dimmed = !active_contexts.contains(&When::ScrollbackFocused);
-            entries.push(ShortcutsHelpEntry::Hint {
-                item,
-                dimmed,
-                action_id: None,
-                long_help: Some(SCROLLBACK_SEARCH_LONG_HELP),
-            });
-        }
-        // Simple mode reaches scrollback search via the `/find` slash command, not a keystroke
+        // Scrollback search is the `/find` slash command, not a keystroke
         // Use a null key and a custom display so the raw key list stays empty of `/`
-        if !vim_mode && cat == Category::ConversationNav {
+        if cat == Category::ConversationNav {
             let mut item = HintItem::new(crate::key!(Null), "search");
             item.custom_display = Some("/find");
             item.description = Some("Search scrollback".into());
@@ -322,7 +298,7 @@ pub fn build_entries(
         }
         let count = entries.len() - header_idx - 1;
         if count == 0 {
-            // Every action in this category got filtered out (e.g. all scrollback vim-only bindings in non-vim mode).
+            // Every action in this category got filtered out.
             // Drop the empty header rather than render a dead section
             entries.pop();
         } else if let Some(ShortcutsHelpEntry::SectionHeader { entry_count, .. }) =
@@ -498,7 +474,6 @@ fn picker_config(non_sel: &[bool]) -> PickerConfig<'_> {
         disable_search: false,
         compact_bottom_bar: false,
         search_only_on_slash: false,
-        vim_normal_first: crate::appearance::cache::load_vim_mode(),
     }
 }
 
@@ -830,10 +805,8 @@ pub fn handle_input(
     }
 
     let searching = state.search_active || !state.query().is_empty();
-    let vim_mode = crate::appearance::cache::load_vim_mode();
 
     if !searching {
-        // `i` mirrors the vim-nav pickers' "press i to search" shortcut
         if key.code == KeyCode::Char('/')
             || (key.code == KeyCode::Char('i') && key.modifiers.is_empty())
         {
@@ -851,9 +824,7 @@ pub fn handle_input(
             let toggle = match key.code {
                 KeyCode::Char('e') | KeyCode::Char(' ') | KeyCode::Enter => true,
                 KeyCode::Right => is_collapsed,
-                KeyCode::Char('l') if vim_mode && key.modifiers.is_empty() => is_collapsed,
                 KeyCode::Char('E') | KeyCode::Left => !is_collapsed,
-                KeyCode::Char('h') if vim_mode && key.modifiers.is_empty() => !is_collapsed,
                 _ => false,
             };
             if toggle {
@@ -865,9 +836,7 @@ pub fn handle_input(
             let is_expanded = expanded_ids.contains(&key_id);
             let toggle = match key.code {
                 KeyCode::Char('e') | KeyCode::Char(' ') | KeyCode::Right => true,
-                KeyCode::Char('l') if vim_mode && key.modifiers.is_empty() => true,
                 KeyCode::Char('E') | KeyCode::Left => is_expanded,
-                KeyCode::Char('h') if vim_mode && key.modifiers.is_empty() => is_expanded,
                 _ => false,
             };
             if toggle {
@@ -1014,7 +983,7 @@ pub fn handle_mouse(
 /// The agent view and the dashboard show the same hints so muscle memory carries over.
 pub fn modal_footer(filter_active: bool) -> Vec<crate::views::modal_window::Shortcut<'static>> {
     use crate::views::modal_window::Shortcut;
-    let mut shortcuts = vec![
+    vec![
         Shortcut {
             label: "\u{2191}/\u{2193} nav",
             clickable: false,
@@ -1054,10 +1023,7 @@ pub fn modal_footer(filter_active: bool) -> Vec<crate::views::modal_window::Shor
             clickable: false,
             id: 0,
         },
-    ];
-    // Append the `i search` alias last for vim users (matching the other pickers).
-    crate::views::modal_window::push_vim_nav_search_hint(&mut shortcuts, false);
-    shortcuts
+    ]
 }
 
 /// Modal-window sizing for the cheatsheet.
