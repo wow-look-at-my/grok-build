@@ -396,6 +396,9 @@ fn remove_whole_path(haystack: &str, needle: &str) -> String {
 /// read of the goal's own scratch root is not also read as a record read.
 #[allow(clippy::string_slice)] // every index moves by `len_utf8` or lands on a `find` match
 fn strip_paths_containing(args: &str, marker: &str) -> String {
+    if marker.is_empty() {
+        return args.to_string();
+    }
     let mut out = String::with_capacity(args.len());
     let mut rest = args;
     while let Some(start) = rest.find(marker) {
