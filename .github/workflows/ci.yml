@@ -33,11 +33,30 @@ env:
     {"name": "windows/arm64", "runs-on": "windows-latest", "target": "aarch64-pc-windows-msvc", "darwin": false}]
 
 jobs:
+  # Its own job, like Rustfmt, so it answers in a minute instead of behind the cold build: a prose, YAML or workflow violation is named before anything expensive starts.
+  slopfix:
+    name: Slopfix
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: write # fail-fast cancels this run
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: wow-look-at-my/slopfix@master
+
+      - uses: wow-look-at-my/actions@fail-fast#latest
+        if: failure()
+
   fmt:
     name: Rustfmt
     runs-on: ubuntu-22.04
     # Its own job, not a step of build-test: rustfmt parses and never compiles, so it answers in seconds rather than waiting on the cold build it would otherwise sit behind.
     timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: write # fail-fast cancels this run
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
@@ -48,10 +67,16 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all --check
 
+      - uses: wow-look-at-my/actions@fail-fast#latest
+        if: failure()
+
   build-test:
     name: Build & test
     # Hosted deliberately: this suite asserts host semantics the org's lean self-hosted image lacks. See AGENTS.md.
     runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      actions: write # fail-fast cancels this run
     # A ceiling, not a target. The compile is cold every run (measured 31 min at -j3) and a hung test is failed by nextest in 60s, so a job past this is broken, not slow.
     timeout-minutes: 75
     env:
@@ -63,8 +88,6 @@ jobs:
 
       - name: Report disk before build
         run: df -h /
-
-      # - uses: wow-look-at-my/actions@yaml-comment-block#latest  (off until slopfix runs on ubuntu-22.04: its APE trips the runner's Mono binfmt handler on the MZ magic)
 
       - uses: ./.github/actions/setup-protoc
 
@@ -145,9 +168,15 @@ jobs:
         with:
           name: cargo-timings-build-test
 
+      - uses: wow-look-at-my/actions@fail-fast#latest
+        if: failure()
+
   build-release:
     name: Build release (${{ matrix.name }})
     runs-on: ${{ matrix.runs-on }}
+    permissions:
+      contents: read
+      actions: write # fail-fast cancels this run
     timeout-minutes: 45
     strategy:
       # One target's failure leaves the others' results worth reading.
@@ -303,6 +332,9 @@ jobs:
           name: grok-linux-amd64
           path: dist/grok-linux-amd64
 
+      - uses: wow-look-at-my/actions@fail-fast#latest
+        if: failure()
+
   # buildhost assigns the number here, after every build and test passed, so a number only ever names a tree that already built and passed.
   release:
     name: Create buildhost release
@@ -312,6 +344,7 @@ jobs:
     permissions:
       contents: read
       id-token: write # GitHub OIDC -> buildhost
+      actions: write # fail-fast cancels this run
     outputs:
       version: ${{ steps.rel.outputs.version }}
     steps:
@@ -324,11 +357,17 @@ jobs:
           server: ${{ env.BUILDHOST_SERVER }}
           project: ${{ env.BUILDHOST_PROJECT }}
 
+      - uses: wow-look-at-my/actions@fail-fast#latest
+        if: failure()
+
   # One cc, and the only step in the workflow that needs a Mac. It waits on the tests as well as its bundle: it takes seconds, so starting it early buys nothing and spends a macOS runner on a tree that may not pass.
   link-darwin:
     name: Link darwin/arm64 (macOS)
     needs: [build-release, build-test]
     runs-on: macos-14
+    permissions:
+      contents: read
+      actions: write # fail-fast cancels this run
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -349,10 +388,16 @@ jobs:
           name: grok-darwin-arm64
           path: dist/grok-darwin-arm64
 
+      - uses: wow-look-at-my/actions@fail-fast#latest
+        if: failure()
+
   # The jail and the CI host worker have a macOS half (Seatbelt, sandbox-exec) that a Linux runner cannot execute. This crate is small enough to compile natively here.
   test-darwin-sandbox:
     name: Test sandbox crate (macOS)
     runs-on: macos-14
+    permissions:
+      contents: read
+      actions: write # fail-fast cancels this run
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -362,6 +407,9 @@ jobs:
 
       - name: Test xai-grok-sandbox on macOS
         run: cargo test --locked -p xai-grok-sandbox
+
+      - uses: wow-look-at-my/actions@fail-fast#latest
+        if: failure()
 
   publish:
     # Both binaries are stamped here. Patching bytes needs no Mac, and no signature is restored afterwards: a Homebrew install clears the quarantine that would otherwise make one matter.
@@ -453,3 +501,6 @@ jobs:
       - name: Clean up binary hand-offs
         if: always()
         uses: wow-look-at-my/actions@cache-cleanup#latest
+
+      - uses: wow-look-at-my/actions@fail-fast#latest
+        if: failure()
